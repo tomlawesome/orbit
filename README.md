@@ -47,7 +47,8 @@ container locally:
   Container Registry instead.
 
 It then starts `orbit-app` and the official PostgreSQL `orbit-db` service in the
-background and displays their status.
+background and displays their status. The published Orbit image supports both
+64-bit x86 (`linux/amd64`) and 64-bit ARM (`linux/arm64`) hosts.
 
 ## Your home has an orbit
 
