@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+.pnpm-store
+tmp
+.env
+.env.*
+!.env.example
+coverage
+docs
+**/*.test.ts
+**/*.test.tsx
+*.tsbuildinfo
+*.log
+.DS_Store
