@@ -89,8 +89,8 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value={{date 'YYYY.MM.DD' tz='Europe/London'}}-build.${{ github.run_number }},enable={{is_default_branch}}
             type=ref,event=tag
-            type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.title=Orbit
             org.opencontainers.image.description=Everything in your orbit, on track.
