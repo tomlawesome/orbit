@@ -152,8 +152,14 @@ delivery.
 docker compose --env-file .env-orbit up --build
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The health endpoint is
-available at `/api/health`.
+Open `http://<docker-host-ip>:3000` from another device, or
+[http://127.0.0.1:3000](http://127.0.0.1:3000) on the Docker host. The health
+endpoint is available at `/api/health`.
+
+Orbit listens on all host interfaces by default. Set
+`ORBIT_BIND_ADDRESS=127.0.0.1` in `.env-orbit` when access should be restricted
+to the Docker host or an HTTPS reverse proxy. Do not expose port `3000` directly
+to the public internet.
 
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
@@ -260,7 +266,7 @@ both forms for the same setting.
 
 | Area | Variables |
 | --- | --- |
-| Application | `APP_URL`, `SESSION_SECRET[_FILE]`, `SESSION_TTL_SECONDS` |
+| Application | `APP_URL`, `ORBIT_BIND_ADDRESS`, `ORBIT_PORT`, `SESSION_SECRET[_FILE]`, `SESSION_TTL_SECONDS` |
 | Database | `DATABASE_URL[_FILE]`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD[_FILE]` |
 | Identity | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET[_FILE]`, `OIDC_CALLBACK_URL` |
 | Email | `SMTP_URL[_FILE]`, `SMTP_FROM` |
