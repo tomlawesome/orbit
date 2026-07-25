@@ -2,6 +2,7 @@ name: orbit
 
 services:
   orbit-db:
+    container_name: orbit-postgres
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
@@ -18,6 +19,7 @@ services:
       timeout: 3s
       retries: 10
   orbit-app:
+    container_name: orbit
     image: ${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}
     build: .
     restart: unless-stopped

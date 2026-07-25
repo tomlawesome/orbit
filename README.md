@@ -43,12 +43,13 @@ Orbit-specific `.env-orbit` configuration when needed, generates independent
 application container locally:
 
 - answer **Y/Yes** (or press Enter) to pull current base images and build
-  `orbit-app` from source;
+  the `orbit-app` service from source;
 - answer **N/No** to pull `ghcr.io/tomlawesome/orbit:latest` from GitHub
   Container Registry instead.
 
-It then starts `orbit-app` and the official PostgreSQL `orbit-db` service in the
-background and displays their status. The published Orbit image supports both
+It then starts the `orbit` application container and the official
+`orbit-postgres` PostgreSQL container in the background and displays their
+status. The published Orbit image supports both
 64-bit x86 (`linux/amd64`) and 64-bit ARM (`linux/arm64`) hosts.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
@@ -106,8 +107,8 @@ Orbit deliberately keeps the operational footprint small:
 ```mermaid
 flowchart LR
     Browser["Orbit PWA<br/>desktop · tablet · mobile"]
-    App["orbit-app<br/>UI · API · migrations · scheduler"]
-    Database[("orbit-db<br/>PostgreSQL 17")]
+    App["orbit<br/>UI · API · migrations · scheduler"]
+    Database[("orbit-postgres<br/>PostgreSQL 17")]
     Identity["OIDC provider"]
     Delivery["SMTP · Web Push"]
 
@@ -124,10 +125,10 @@ flowchart LR
     class Identity,Delivery pink;
 ```
 
-- `orbit-app` is the complete Orbit application: interface, authenticated
+- `orbit` is the complete Orbit application: interface, authenticated
   APIs, versioned migrations, and notification scheduler. It can be built from
   source or pulled as `ghcr.io/tomlawesome/orbit:latest`.
-- `orbit-db` is the unmodified official `postgres:17-alpine` image with a
+- `orbit-postgres` is the unmodified official `postgres:17-alpine` image with a
   persistent volume.
 
 There is no custom PostgreSQL image and no separate backend container to
@@ -178,9 +179,10 @@ Once the host has a configured `.env-orbit`, update and start Orbit with:
 ```
 
 The script fast-forwards the current Git branch, pulls the official PostgreSQL
-image, refreshes the application build layers, rebuilds `orbit-app`, starts the
-stack in the background, and prints the resulting service status. It stops
-immediately if Git, Docker Compose v2, or `.env-orbit` is unavailable.
+image, refreshes the application build layers, rebuilds the `orbit-app`
+service, starts the stack in the background, and prints the resulting service
+status. It stops immediately if Git, Docker Compose v2, or `.env-orbit` is
+unavailable.
 
 ## Explore without infrastructure
 
