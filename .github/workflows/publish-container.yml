@@ -52,6 +52,10 @@ jobs:
         run: |
           docker compose ps
           docker compose logs --no-color
+          app_container="$(docker compose ps --quiet orbit-app)"
+          if [[ -n "${app_container}" ]]; then
+            docker inspect --format='{{json .State.Health}}' "${app_container}"
+          fi
 
       - name: Stop smoke-test services
         if: always()
