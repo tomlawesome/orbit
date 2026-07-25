@@ -18,6 +18,9 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
+LABEL org.opencontainers.image.title="Orbit"
+LABEL org.opencontainers.image.description="Everything in your orbit, on track."
+LABEL org.opencontainers.image.source="https://github.com/tomlawesome/orbit"
 WORKDIR /opt/orbit
 RUN addgroup --system --gid 1001 orbit && adduser --system --uid 1001 --ingroup orbit orbit
 COPY --from=builder --chown=orbit:orbit /opt/orbit/public ./public

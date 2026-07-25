@@ -16,6 +16,7 @@ services:
       timeout: 3s
       retries: 10
   orbit-app:
+    image: ${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}
     build: .
     restart: unless-stopped
     env_file: .env

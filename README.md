@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> **Development disclosure:** Orbit was coded by OpenAI Codex under human
+> direction.
+
 <p align="center">
   <img src="public/orbit-mark.svg" alt="Orbit logo" width="132" />
 </p>
@@ -24,6 +28,26 @@
 <p align="center">
   <img src="public/og.png" alt="Orbit — Everything in your orbit, on track" width="100%" />
 </p>
+
+## Quick start
+
+From an empty directory on a Linux host with Git and Docker Compose v2:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh)
+```
+
+The installer downloads Orbit into the current directory, creates `.env` from
+the supplied example when needed, and asks whether to build the application
+container locally:
+
+- answer **Y/Yes** (or press Enter) to pull current base images and build
+  `orbit-app` from source;
+- answer **N/No** to pull `ghcr.io/tomlawesome/orbit:latest` from GitHub
+  Container Registry instead.
+
+It then starts `orbit-app` and the official PostgreSQL `orbit-db` service in the
+background and displays their status.
 
 ## Your home has an orbit
 
@@ -93,7 +117,8 @@ flowchart LR
 ```
 
 - `orbit-app` is the complete Orbit application: interface, authenticated
-  APIs, versioned migrations, and notification scheduler.
+  APIs, versioned migrations, and notification scheduler. It can be built from
+  source or pulled as `ghcr.io/tomlawesome/orbit:latest`.
 - `orbit-db` is the unmodified official `postgres:17-alpine` image with a
   persistent volume.
 

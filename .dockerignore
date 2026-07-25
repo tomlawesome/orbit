@@ -1,4 +1,5 @@
 .git
+.github
 .next
 node_modules
 .pnpm-store
@@ -8,6 +9,9 @@ tmp
 !.env.example
 coverage
 docs
+README.md
+scripts/install.sh
+scripts/update-and-start.sh
 **/*.test.ts
 **/*.test.tsx
 *.tsbuildinfo
