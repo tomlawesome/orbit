@@ -2,11 +2,11 @@ import type { NextResponse } from "next/server";
 import type { AuthConfig } from "@/lib/env";
 
 export function sessionCookieName(config: AuthConfig): string {
-  return config.secureCookies ? "__Host-homesee-session" : "homesee-session";
+  return config.secureCookies ? "__Host-orbit-session" : "orbit-session";
 }
 
 export function transactionCookieName(config: AuthConfig): string {
-  return config.secureCookies ? "__Secure-homesee-oidc" : "homesee-oidc";
+  return config.secureCookies ? "__Secure-orbit-oidc" : "orbit-oidc";
 }
 
 export function setSessionCookie(response: NextResponse, token: string, config: AuthConfig): void {

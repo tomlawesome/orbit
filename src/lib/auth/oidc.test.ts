@@ -10,13 +10,13 @@ import {
 } from "./oidc";
 
 const config: AuthConfig = {
-  appUrl: new URL("https://homesee.example"),
+  appUrl: new URL("https://orbit.example"),
   sessionSecret: "test-secret-that-is-at-least-thirty-two-characters",
   sessionTtlSeconds: 3600,
-  issuer: "https://auth.example/application/o/homesee/",
-  clientId: "homesee",
+  issuer: "https://auth.example/application/o/orbit/",
+  clientId: "orbit",
   clientSecret: "secret",
-  callbackUrl: "https://homesee.example/api/auth/callback",
+  callbackUrl: "https://orbit.example/api/auth/callback",
   scopes: "openid profile email",
   claims: { email: "email", emailVerified: "email_verified", name: "name", avatar: "picture" },
   secureCookies: true,
@@ -44,8 +44,8 @@ describe("OIDC validation", () => {
   });
 
   it("rejects an invalid nonce or authorized party", () => {
-    expect(() => validateIdTokenClaims({ sub: "subject", aud: "homesee", nonce: "wrong" }, "expected", "homesee")).toThrow();
-    expect(() => validateIdTokenClaims({ sub: "subject", aud: ["homesee", "other"], nonce: "expected", azp: "other" }, "expected", "homesee")).toThrow();
+    expect(() => validateIdTokenClaims({ sub: "subject", aud: "orbit", nonce: "wrong" }, "expected", "orbit")).toThrow();
+    expect(() => validateIdTokenClaims({ sub: "subject", aud: ["orbit", "other"], nonce: "expected", azp: "other" }, "expected", "orbit")).toThrow();
   });
 
   it("rejects invalid issuer, audience, signature, and expiry", async () => {

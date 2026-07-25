@@ -22,8 +22,8 @@ import { colourways, themeModes, themePreferenceSchema, type ThemeMode } from "@
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createHousehold, type ItemActivity } from "@/lib/workspace";
 
-const THEME_STORAGE_KEY = "homesee:theme:v1";
-const PREFERENCE_EVENT = "homesee:preference-change";
+const THEME_STORAGE_KEY = "orbit:theme:v1";
+const PREFERENCE_EVENT = "orbit:preference-change";
 const DEFAULT_THEME_JSON = JSON.stringify({ mode: "system", colourway: "after-dark" });
 
 type SettingsView = "appearance" | "sections" | "members";

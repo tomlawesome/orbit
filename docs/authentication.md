@@ -10,7 +10,7 @@ In the Authentik Admin interface:
 2. Set **Client type** to **Confidential** and enable the **Authorization code** grant.
 3. Add the Orbit callback as a **Strict** redirect URI. For local development this is `http://127.0.0.1:3000/api/auth/callback`; for production it is `https://your-orbit-host/api/auth/callback`.
 4. Include the standard `openid`, `profile`, and `email` scope mappings.
-5. Keep the recommended per-provider issuer mode. With an application slug of `homesee`, the issuer is normally `https://auth.example.com/application/o/homesee/`.
+5. Keep the recommended per-provider issuer mode. With an application slug of `orbit`, the issuer is normally `https://auth.example.com/application/o/orbit/`.
 6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit intentionally accepts asymmetric ID-token algorithms only and validates them against the provider's JWKS.
 7. Select a stable, non-email subject mode, such as a hashed user ID or user UUID. Changing this setting later creates a new Orbit identity from the application's perspective.
 
@@ -19,7 +19,7 @@ Copy the provider's client ID and secret into the Orbit environment:
 ```env
 APP_URL=http://127.0.0.1:3000
 SESSION_SECRET=replace-with-a-unique-random-value-of-at-least-32-characters
-OIDC_ISSUER=https://auth.example.com/application/o/homesee/
+OIDC_ISSUER=https://auth.example.com/application/o/orbit/
 OIDC_CLIENT_ID=your-authentik-client-id
 OIDC_CLIENT_SECRET=your-authentik-client-secret
 OIDC_CALLBACK_URL=http://127.0.0.1:3000/api/auth/callback

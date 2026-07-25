@@ -15,7 +15,7 @@ if [[ ! -f .env ]]; then
 fi
 
 git pull --ff-only
-docker compose pull homesee-db
-docker compose build --pull homesee-fe
+docker compose pull orbit-db
+docker compose build --pull orbit-app
 docker compose up -d --remove-orphans
 docker compose ps

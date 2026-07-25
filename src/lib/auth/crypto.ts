@@ -3,7 +3,7 @@ import { EncryptJWT, base64url, jwtDecrypt } from "jose";
 import type { AuthConfig } from "@/lib/env";
 import { AuthError } from "@/lib/auth/errors";
 
-const TRANSACTION_ISSUER = "homesee";
+const TRANSACTION_ISSUER = "orbit";
 const TRANSACTION_AUDIENCE = "oidc-login-transaction";
 
 export interface LoginTransaction {

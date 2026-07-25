@@ -74,8 +74,8 @@ Orbit deliberately keeps the operational footprint small:
 ```mermaid
 flowchart LR
     Browser["Orbit PWA<br/>desktop · tablet · mobile"]
-    App["homesee-fe<br/>UI · API · migrations · scheduler"]
-    Database[("homesee-db<br/>PostgreSQL 17")]
+    App["orbit-app<br/>UI · API · migrations · scheduler"]
+    Database[("orbit-db<br/>PostgreSQL 17")]
     Identity["OIDC provider"]
     Delivery["SMTP · Web Push"]
 
@@ -92,9 +92,9 @@ flowchart LR
     class Identity,Delivery pink;
 ```
 
-- `homesee-fe` is the complete Orbit application: interface, authenticated
+- `orbit-app` is the complete Orbit application: interface, authenticated
   APIs, versioned migrations, and notification scheduler.
-- `homesee-db` is the unmodified official `postgres:17-alpine` image with a
+- `orbit-db` is the unmodified official `postgres:17-alpine` image with a
   persistent volume.
 
 There is no custom PostgreSQL image and no separate backend container to
@@ -140,7 +140,7 @@ Once the host has a configured `.env`, update and start Orbit with:
 ```
 
 The script fast-forwards the current Git branch, pulls the official PostgreSQL
-image, refreshes the application build layers, rebuilds `homesee-fe`, starts the
+image, refreshes the application build layers, rebuilds `orbit-app`, starts the
 stack in the background, and prints the resulting service status. It stops
 immediately if Git, Docker Compose v2, or `.env` is unavailable.
 
@@ -200,7 +200,7 @@ pnpm dev
 To run only PostgreSQL in Docker:
 
 ```sh
-docker compose up -d homesee-db
+docker compose up -d orbit-db
 ```
 
 The default `DATABASE_URL` in `.env.example` connects to that database from the

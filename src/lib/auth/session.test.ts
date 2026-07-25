@@ -5,13 +5,13 @@ import { createCsrfToken } from "./crypto";
 import { assertCsrf, assertSameOrigin, type AuthenticatedSession } from "./session";
 
 const config: AuthConfig = {
-  appUrl: new URL("https://homesee.example"),
+  appUrl: new URL("https://orbit.example"),
   sessionSecret: "test-secret-that-is-at-least-thirty-two-characters",
   sessionTtlSeconds: 3600,
-  issuer: "https://auth.example/application/o/homesee/",
-  clientId: "homesee",
+  issuer: "https://auth.example/application/o/orbit/",
+  clientId: "orbit",
   clientSecret: "secret",
-  callbackUrl: "https://homesee.example/api/auth/callback",
+  callbackUrl: "https://orbit.example/api/auth/callback",
   scopes: "openid profile email",
   claims: { email: "email", emailVerified: "email_verified", name: "name", avatar: "picture" },
   secureCookies: true,
@@ -34,7 +34,7 @@ const session: AuthenticatedSession = {
 };
 
 function postRequest(headers: Record<string, string>): NextRequest {
-  return new NextRequest("https://homesee.example/api/auth/session/refresh", {
+  return new NextRequest("https://orbit.example/api/auth/session/refresh", {
     method: "POST",
     headers,
   });

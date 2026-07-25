@@ -5,8 +5,8 @@ const validEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
   APP_URL: "http://127.0.0.1:3000",
   SESSION_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
-  OIDC_ISSUER: "https://auth.example/application/o/homesee/",
-  OIDC_CLIENT_ID: "homesee",
+  OIDC_ISSUER: "https://auth.example/application/o/orbit/",
+  OIDC_CLIENT_ID: "orbit",
   OIDC_CLIENT_SECRET: "client-secret",
 };
 
@@ -19,13 +19,13 @@ describe("authentication configuration", () => {
   });
 
   it("uses secure cookies for an HTTPS deployment", () => {
-    const config = getAuthConfig({ ...validEnvironment, APP_URL: "https://homesee.example" });
+    const config = getAuthConfig({ ...validEnvironment, APP_URL: "https://orbit.example" });
     expect(config.secureCookies).toBe(true);
   });
 
   it.each([
-    [{ ...validEnvironment, APP_URL: "http://homesee.example" }, "APP_URL"],
-    [{ ...validEnvironment, OIDC_ISSUER: "http://auth.example/application/o/homesee/" }, "OIDC_ISSUER"],
+    [{ ...validEnvironment, APP_URL: "http://orbit.example" }, "APP_URL"],
+    [{ ...validEnvironment, OIDC_ISSUER: "http://auth.example/application/o/orbit/" }, "OIDC_ISSUER"],
     [{ ...validEnvironment, OIDC_SCOPES: "profile email" }, "openid"],
     [{ ...validEnvironment, SESSION_SECRET: "too-short" }, "SESSION_SECRET"],
   ])("rejects unsafe or incomplete configuration", (environment, message) => {

@@ -17,8 +17,8 @@ import {
   writeWorkspaceSnapshot,
 } from "@/lib/workspace-cache";
 
-const WORKSPACE_STORAGE_KEY = "homesee:workspace:v1";
-const LEGACY_SECTION_STORAGE_KEY = "homesee:sections:v1";
+const WORKSPACE_STORAGE_KEY = "orbit:workspace:v1";
+const LEGACY_SECTION_STORAGE_KEY = "orbit:sections:v1";
 
 export type WorkspaceSyncStatus = "loading" | "preview" | "synced" | "saving" | "offline" | "error";
 

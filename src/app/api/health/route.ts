@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 export function GET() {
   return NextResponse.json(
-    { status: "ok", service: "homesee", timestamp: new Date().toISOString() },
+    { status: "ok", service: "orbit", timestamp: new Date().toISOString() },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
