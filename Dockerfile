@@ -16,6 +16,7 @@ RUN pnpm build
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 LABEL org.opencontainers.image.title="Orbit"
@@ -29,5 +30,5 @@ COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/static ./.next/static
 COPY --from=builder --chown=orbit:orbit /opt/orbit/drizzle ./drizzle
 USER orbit
 EXPOSE 3000
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"
 CMD ["node", "server.js"]
