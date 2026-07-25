@@ -37,9 +37,10 @@ From an empty directory on a Linux host with Git and Docker Compose v2:
 bash <(curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh)
 ```
 
-The installer downloads Orbit into the current directory, creates `.env` from
-the supplied example when needed, and asks whether to build the application
-container locally:
+The installer downloads Orbit into the current directory, creates the
+Orbit-specific `.env-orbit` configuration when needed, generates independent
+256-bit session and PostgreSQL secrets, and asks whether to build the
+application container locally:
 
 - answer **Y/Yes** (or press Enter) to pull current base images and build
   `orbit-app` from source;
@@ -49,6 +50,12 @@ container locally:
 It then starts `orbit-app` and the official PostgreSQL `orbit-db` service in the
 background and displays their status. The published Orbit image supports both
 64-bit x86 (`linux/amd64`) and 64-bit ARM (`linux/arm64`) hosts.
+
+The generated secrets live under `.orbit-secrets`, which is accessible only to
+the installing host user. Compose mounts only the required files into each
+container under `/run/secrets`; the values are not injected into container
+environment variables. Existing secrets are preserved on subsequent runs, and
+the installer never reads or modifies a generic `.env` file.
 
 ## Your home has an orbit
 
@@ -131,19 +138,18 @@ maintain.
 ### 1. Create the runtime configuration
 
 ```sh
-cp .env.example .env
+bash scripts/configure.sh
 ```
 
-On PowerShell, use `Copy-Item .env.example .env`.
-
-At minimum, replace the example session secret and configure your OIDC
-provider. SMTP and VAPID values are required when you are ready to exercise
-email and browser-push delivery.
+This creates `.env-orbit` plus the private `.orbit-secrets` directory without
+starting containers. Configure your OIDC provider in `.env-orbit`. SMTP and
+VAPID values are required when you are ready to exercise email and browser-push
+delivery.
 
 ### 2. Start Orbit
 
 ```sh
-docker compose up --build
+docker compose --env-file .env-orbit up --build
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The health endpoint is
@@ -159,7 +165,7 @@ notification scheduler, and then serves the full-stack application.
 
 ### Update and launch an existing checkout
 
-Once the host has a configured `.env`, update and start Orbit with:
+Once the host has a configured `.env-orbit`, update and start Orbit with:
 
 ```sh
 ./scripts/update-and-start.sh
@@ -168,7 +174,7 @@ Once the host has a configured `.env`, update and start Orbit with:
 The script fast-forwards the current Git branch, pulls the official PostgreSQL
 image, refreshes the application build layers, rebuilds `orbit-app`, starts the
 stack in the background, and prints the resulting service status. It stops
-immediately if Git, Docker Compose v2, or `.env` is unavailable.
+immediately if Git, Docker Compose v2, or `.env-orbit` is unavailable.
 
 ## Explore without infrastructure
 
@@ -218,7 +224,7 @@ IndexedDB snapshot, and synchronises queued offline changes.
 
 ```sh
 pnpm install
-cp .env.example .env
+bash scripts/configure.sh
 pnpm db:migrate
 pnpm dev
 ```
@@ -226,11 +232,11 @@ pnpm dev
 To run only PostgreSQL in Docker:
 
 ```sh
-docker compose up -d orbit-db
+docker compose --env-file .env-orbit up -d orbit-db
 ```
 
-The default `DATABASE_URL` in `.env.example` connects to that database from the
-host.
+The default host and database settings in `.env-orbit.example` use the same
+generated PostgreSQL password file as the container.
 
 ### Quality checks
 
@@ -241,28 +247,30 @@ pnpm test
 pnpm build
 ```
 
-The current suite contains 33 unit tests across authentication, environment
-validation, recurrence, preferences, notifications, workspace commands, and
-the notification worker.
+The current suite contains 39 unit tests across authentication, environment
+and secret validation, database configuration, recurrence, preferences,
+notifications, workspace commands, and the notification worker.
 
 ## Configuration
 
 All supported runtime variables are documented in
-[`.env.example`](.env.example). The main groups are:
+[`.env-orbit.example`](.env-orbit.example). Sensitive settings accept either
+their direct variable or the corresponding `_FILE` variable. Do not configure
+both forms for the same setting.
 
 | Area | Variables |
 | --- | --- |
-| Application | `APP_URL`, `SESSION_SECRET`, `SESSION_TTL_SECONDS` |
-| Database | `DATABASE_URL`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` |
-| Identity | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_CALLBACK_URL` |
-| Email | `SMTP_URL`, `SMTP_FROM` |
-| Browser push | `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` |
+| Application | `APP_URL`, `SESSION_SECRET[_FILE]`, `SESSION_TTL_SECONDS` |
+| Database | `DATABASE_URL[_FILE]`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD[_FILE]` |
+| Identity | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET[_FILE]`, `OIDC_CALLBACK_URL` |
+| Email | `SMTP_URL[_FILE]`, `SMTP_FROM` |
+| Browser push | `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY[_FILE]` |
 | Worker | `WORKER_ENABLED`, `WORKER_POLL_SECONDS`, `NOTIFICATION_MAX_ATTEMPTS` |
 | Migrations | `MIGRATE_ON_START`, `DRIZZLE_MIGRATIONS_PATH` |
 
-For production, use HTTPS, strong unique secrets, a private PostgreSQL
-connection, and valid OIDC, SMTP, and VAPID credentials. Back up the PostgreSQL
-volume before storing real household data.
+For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
+and valid OIDC, SMTP, and VAPID credentials. Back up the PostgreSQL volume and
+the `.orbit-secrets` directory before storing real household data.
 
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.

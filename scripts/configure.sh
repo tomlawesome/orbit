@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_dir"
+
+readonly environment_file=".env-orbit"
+readonly environment_example=".env-orbit.example"
+readonly secrets_directory=".orbit-secrets"
+temporary_file=""
+
+fail() {
+  printf 'Orbit configuration: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
+}
+
+trap cleanup EXIT
+
+generate_hex_secret() {
+  local secret
+
+  if command -v openssl >/dev/null 2>&1; then
+    secret="$(openssl rand -hex 32)"
+  elif [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+    secret="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
+  else
+    fail "OpenSSL or a readable /dev/urandom with od is required to generate secrets."
+  fi
+
+  [[ "$secret" =~ ^[0-9a-fA-F]{64}$ ]] || fail "Secure secret generation failed."
+  printf '%s\n' "${secret,,}"
+}
+
+ensure_environment_file() {
+  [[ -f "$environment_example" ]] ||
+    fail "${environment_example} is missing."
+
+  if [[ -e "$environment_file" ]]; then
+    [[ -f "$environment_file" && ! -L "$environment_file" ]] ||
+      fail "Refusing to use ${environment_file} because it is not a regular file."
+    chmod 600 "$environment_file" ||
+      fail "Could not restrict ${environment_file} permissions."
+    return
+  fi
+
+  temporary_file="$(mktemp "$PWD/.env-orbit.installing.XXXXXX")" ||
+    fail "Could not create a temporary Orbit environment file."
+  chmod 600 "$temporary_file" ||
+    fail "Could not secure the temporary Orbit environment file."
+  cp -- "$environment_example" "$temporary_file"
+  mv -- "$temporary_file" "$environment_file"
+  temporary_file=""
+  printf 'Created %s from %s.\n' "$environment_file" "$environment_example"
+}
+
+ensure_secrets_directory() {
+  if [[ -e "$secrets_directory" ]]; then
+    [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] ||
+      fail "Refusing to use ${secrets_directory} because it is not a regular directory."
+  else
+    mkdir -- "$secrets_directory"
+  fi
+  chmod 700 "$secrets_directory" ||
+    fail "Could not restrict ${secrets_directory} permissions."
+}
+
+ensure_secret_file() {
+  local path="$1" existing_value secret
+
+  if [[ -e "$path" ]]; then
+    [[ -f "$path" && ! -L "$path" ]] ||
+      fail "Refusing to use ${path} because it is not a regular file."
+    existing_value="$(tr -d '\r\n' < "$path")"
+    [[ "$existing_value" =~ ^[0-9a-fA-F]{64}$ ]] ||
+      fail "${path} does not contain a valid 256-bit hexadecimal secret."
+    chmod 644 "$path" ||
+      fail "Could not set container-readable permissions on ${path}."
+    unset existing_value
+    return
+  fi
+
+  secret="$(generate_hex_secret)"
+  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
+    fail "Could not create a temporary Orbit secret file."
+  printf '%s\n' "$secret" > "$temporary_file"
+  chmod 644 "$temporary_file" ||
+    fail "Could not set container-readable permissions on the Orbit secret."
+  mv -- "$temporary_file" "$path"
+  temporary_file=""
+  unset secret
+  printf 'Generated %s.\n' "$path"
+}
+
+ensure_environment_file
+ensure_secrets_directory
+ensure_secret_file "$secrets_directory/session-secret"
+ensure_secret_file "$secrets_directory/postgres-password"
+
+printf 'Orbit configuration is ready. Existing values were preserved.\n'

@@ -13,6 +13,7 @@ import {
   reminderRules,
   users,
 } from "@/db/schema";
+import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const notificationEnvironmentSchema = z.object({
   SMTP_URL: z.string().optional().default(""),
@@ -35,7 +36,11 @@ export interface NotificationWorkerConfig {
 }
 
 export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
-  const parsed = notificationEnvironmentSchema.parse(environment);
+  const parsed = notificationEnvironmentSchema.parse({
+    ...environment,
+    SMTP_URL: readRuntimeSecret(environment, "SMTP_URL"),
+    VAPID_PRIVATE_KEY: readRuntimeSecret(environment, "VAPID_PRIVATE_KEY"),
+  });
   return {
     smtpUrl: parsed.SMTP_URL,
     smtpFrom: parsed.SMTP_FROM,

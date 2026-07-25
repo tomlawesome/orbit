@@ -7,9 +7,11 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
       POSTGRES_USER: ${POSTGRES_USER:-orbit}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbit}
+      POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
     volumes:
       - orbit-db-data:/var/lib/postgresql/data
+    secrets:
+      - orbit-postgres-password
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orbit} -d ${POSTGRES_DB:-orbit}"]
       interval: 5s
@@ -19,11 +21,16 @@ services:
     image: ${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}
     build: .
     restart: unless-stopped
-    env_file: .env
+    env_file: .env-orbit
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-orbit}:${POSTGRES_PASSWORD:-orbit}@orbit-db:5432/${POSTGRES_DB:-orbit}
+      POSTGRES_HOST: orbit-db
+      POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
+      SESSION_SECRET_FILE: /run/secrets/orbit-session-secret
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
+    secrets:
+      - orbit-postgres-password
+      - orbit-session-secret
     ports: ["127.0.0.1:3000:3000"]
     depends_on:
       orbit-db:
@@ -31,3 +38,9 @@ services:
 
 volumes:
   orbit-db-data:
+
+secrets:
+  orbit-postgres-password:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/postgres-password
+  orbit-session-secret:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret

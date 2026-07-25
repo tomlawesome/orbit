@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const authEnvironmentSchema = z.object({
   APP_URL: z.url(),
@@ -39,7 +40,11 @@ let cachedAuthConfig: AuthConfig | undefined;
 export function getAuthConfig(environment: NodeJS.ProcessEnv = process.env): AuthConfig {
   if (environment === process.env && cachedAuthConfig) return cachedAuthConfig;
 
-  const parsed = authEnvironmentSchema.parse(environment);
+  const parsed = authEnvironmentSchema.parse({
+    ...environment,
+    SESSION_SECRET: readRuntimeSecret(environment, "SESSION_SECRET"),
+    OIDC_CLIENT_SECRET: readRuntimeSecret(environment, "OIDC_CLIENT_SECRET"),
+  });
   const appUrl = new URL(parsed.APP_URL);
   const issuerUrl = new URL(parsed.OIDC_ISSUER);
   const localApp = ["localhost", "127.0.0.1", "[::1]"].includes(appUrl.hostname);

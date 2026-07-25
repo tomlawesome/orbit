@@ -6,7 +6,9 @@ node_modules
 tmp
 .env
 .env.*
-!.env.example
+.env-orbit
+.env-orbit.*
+.orbit-secrets
 coverage
 docs
 README.md

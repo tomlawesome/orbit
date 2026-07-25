@@ -2,11 +2,16 @@
 set -Eeuo pipefail
 
 readonly repository_url="${ORBIT_REPOSITORY_URL:-https://github.com/tomlawesome/orbit.git}"
+readonly environment_file=".env-orbit"
 export ORBIT_IMAGE="${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}"
 
 fail() {
   printf 'Orbit installer: %s\n' "$*" >&2
   exit 1
+}
+
+compose() {
+  docker compose --env-file "$environment_file" "$@"
 }
 
 command -v git >/dev/null 2>&1 || fail "Git is required."
@@ -25,10 +30,7 @@ else
   git clone "$repository_url" .
 fi
 
-if [[ ! -f .env ]]; then
-  cp .env.example .env
-  printf 'Created .env from .env.example. Review it before exposing Orbit beyond this host.\n'
-fi
+bash scripts/configure.sh
 
 while true; do
   read -r -p "Build the Orbit application container locally? [Y/n] " build_choice </dev/tty ||
@@ -36,14 +38,14 @@ while true; do
 
   case "${build_choice,,}" in
     "" | y | yes)
-      docker compose pull orbit-db
-      docker compose build --pull orbit-app
+      compose pull orbit-db
+      compose build --pull orbit-app
       break
       ;;
     n | no)
       printf 'Pulling %s from GitHub Container Registry...\n' "$ORBIT_IMAGE"
-      docker compose pull orbit-db
-      docker compose pull orbit-app ||
+      compose pull orbit-db
+      compose pull orbit-app ||
         fail "Could not pull $ORBIT_IMAGE. If it is private, authenticate with: docker login ghcr.io"
       break
       ;;
@@ -53,5 +55,5 @@ while true; do
   esac
 done
 
-docker compose up -d --no-build --remove-orphans
-docker compose ps
+compose up -d --no-build --remove-orphans
+compose ps
