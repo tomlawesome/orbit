@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
 import type { HomeItem, HouseholdSection, ScheduleKind } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
@@ -11,8 +11,10 @@ interface ItemEditorProps {
   item?: HomeItem;
   sections: HouseholdSection[];
   currency: string;
+  householdId: string;
+  csrfToken: string;
   onClose(): void;
-  onSave(item: HomeItem): void;
+  onSave(item: HomeItem, document?: File): Promise<void> | void;
   onArchive?(item: HomeItem): void;
 }
 
@@ -21,16 +23,43 @@ function optionalValue(value: FormDataEntryValue | null): string | undefined {
   return trimmed || undefined;
 }
 
-export function ItemEditor({ item, sections, currency, onClose, onSave, onArchive }: ItemEditorProps) {
+export function ItemEditor({ item, sections, currency, householdId, csrfToken, onClose, onSave, onArchive }: ItemEditorProps) {
   const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(item?.scheduleKind ?? "renewal");
   const [errors, setErrors] = useState<ItemFieldErrors>({});
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [document, setDocument] = useState<File>();
+  const [inspectionMessage, setInspectionMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const visibleSections = sections.filter((section) => section.visible);
   const availableSections = visibleSections.length
     ? sections.filter((section) => section.visible || section.id === item?.sectionId)
     : sections;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function inspectDocument(file: File) {
+    setInspectionMessage("Inspecting document securely…");
+    try {
+      const response = await fetch(`/api/households/${householdId}/item-document-inspection`, {
+        method: "POST", credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken, "X-Orbit-Filename": encodeURIComponent(file.name), "X-Orbit-Declared-Bytes": String(file.size) },
+        body: file,
+      });
+      const payload = await response.json() as { proposal?: { title?: string; provider?: string; reference?: string; dates?: string[] }; error?: { message?: string } };
+      if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not inspect that document");
+      const form = formRef.current;
+      if (!form || !payload.proposal) return;
+      for (const [name, value] of Object.entries({ title: payload.proposal.title, provider: payload.proposal.provider, reference: payload.proposal.reference, dueDate: payload.proposal.dates?.[0] })) {
+        const control = form.elements.namedItem(name) as HTMLInputElement | null;
+        if (control && !control.value && value) control.value = value;
+      }
+      setInspectionMessage("Document inspected. Review or change the suggested fields, then add the item.");
+    } catch (error) {
+      setDocument(undefined);
+      setInspectionMessage(error instanceof Error ? error.message : "Orbit could not inspect that document");
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const rawCost = optionalValue(formData.get("cost"));
@@ -67,7 +96,8 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
       });
       return;
     }
-    onSave(parsed.data);
+    setSubmitting(true);
+    try { await onSave(parsed.data, document); } catch (error) { setInspectionMessage(error instanceof Error ? error.message : "Orbit could not add this item"); } finally { setSubmitting(false); }
   }
 
   return (
@@ -82,7 +112,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
           <button type="button" aria-label="Close item editor" onClick={onClose}>×</button>
         </header>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form ref={formRef} onSubmit={handleSubmit} noValidate>
           <div className="editor-body">
             <section className="form-section form-section-lead">
               <label className="field field-wide">
@@ -105,9 +135,14 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
               </div>
             </section>
 
+            {!item && <section className="form-section">
+              <div className="form-section-heading"><span>01</span><div><h3>Optional document</h3><p>Upload a document to inspect it and suggest editable fields. It is only stored with the item after you submit.</p></div></div>
+              <label className="field field-wide"><span>Document</span><input type="file" onChange={(event) => { const file = event.currentTarget.files?.[0]; setDocument(file); if (file) void inspectDocument(file); }} />{inspectionMessage && <small role="status">{inspectionMessage}</small>}</label>
+            </section>}
+
             <section className="form-section">
               <div className="form-section-heading">
-                <span>01</span>
+                <span>02</span>
                 <div><h3>The essentials</h3><p>Useful details for finding and identifying this record.</p></div>
               </div>
               <div className="field-grid">
@@ -133,7 +168,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
 
             <section className="form-section">
               <div className="form-section-heading">
-                <span>02</span>
+                <span>03</span>
                 <div><h3>What happens next?</h3><p>Schedule a renewal or service and choose when Orbit should remind you.</p></div>
               </div>
               <div className="schedule-picker">
@@ -179,7 +214,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
 
             <section className="form-section">
               <div className="form-section-heading">
-                <span>03</span>
+                <span>04</span>
                 <div><h3>Notes</h3><p>Add the details you will want when the date comes around.</p></div>
               </div>
               <label className="field field-wide">
@@ -206,7 +241,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
             <span>{item ? "Changes are saved automatically." : "You can add more details later."}</span>
             <div>
               <button type="button" onClick={onClose}>Cancel</button>
-              <button type="submit">{item ? "Save changes" : "Add item"}</button>
+              <button type="submit" disabled={submitting}>{submitting ? "Adding item…" : item ? "Save changes" : "Add item"}</button>
             </div>
           </footer>
         </form>

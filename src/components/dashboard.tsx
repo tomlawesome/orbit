@@ -46,6 +46,7 @@ const DEFAULT_THEME: ThemePreference = {
   pushNotifications: true,
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
+const NOTICE_DURATION_MS = 10_000;
 
 type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
@@ -186,6 +187,12 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     });
   }, [session]);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
     storePreference(THEME_STORAGE_KEY, preference);
@@ -281,14 +288,32 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     };
   }
 
-  function saveItem(item: HomeItem) {
+  async function saveItem(item: HomeItem, document?: File) {
     const kind = editingItem ? "updated" : "created";
-    dispatch({
+    const command = {
       type: "item.upsert",
       householdId: household.id,
       item,
       activity: activity(item, kind, { nextDate: item.dueDate }),
-    });
+    } as const;
+    // A document-assisted item must exist before its permanent upload can be
+    // encrypted and bound to it. Plain manual item creation keeps its normal
+    // offline-capable command path.
+    if (document && !editingItem) {
+      await executeCommand(command);
+      const response = await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+        method: "POST", credentials: "same-origin",
+        headers: {
+          "X-CSRF-Token": session.csrfToken,
+          "X-Orbit-Filename": encodeURIComponent(document.name),
+        },
+        body: document,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+        throw new Error(payload?.error?.message ?? "Item saved, but its document could not be attached");
+      }
+    } else dispatch(command);
     setItemEditorOpen(false);
     setNotice({ message: editingItem ? `${item.title} updated` : `${item.title} added` });
   }
@@ -701,6 +726,8 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
           item={editingItem}
           sections={sections}
           currency={household.currency}
+          householdId={household.id}
+          csrfToken={session.csrfToken}
           onClose={() => setItemEditorOpen(false)}
           onSave={saveItem}
           onArchive={editingItem ? archiveItem : undefined}
