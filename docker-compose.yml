@@ -26,19 +26,22 @@ services:
     env_file: .env-orbit
     environment:
       POSTGRES_HOST: orbit-db
-      POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
-      SESSION_SECRET_FILE: /run/secrets/orbit-session-secret
-      DOCUMENT_KEK_FILE: /run/secrets/orbit-document-kek
+      POSTGRES_PASSWORD_FILE: /run/orbit-secrets/orbit-postgres-password
+      SESSION_SECRET_FILE: /run/orbit-secrets/orbit-session-secret
+      DOCUMENT_KEK_FILE: /run/orbit-secrets/orbit-document-kek
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
     volumes:
       - orbit-documents-data:/var/lib/orbit/documents
     tmpfs:
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
+      - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
       - orbit-postgres-password
       - orbit-session-secret
       - orbit-document-kek
+    security_opt:
+      - no-new-privileges:true
     ports: ["${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000"]
     depends_on:
       orbit-db:
