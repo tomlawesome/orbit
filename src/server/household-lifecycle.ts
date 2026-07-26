@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, households, memberships, portableArchives, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
@@ -65,6 +65,26 @@ export async function restoreHousehold(userId: string, householdId: string) {
       householdId, actorUserId: userId, entityType: "household", entityId: householdId,
       action: "household_deletion_cancelled", changes: {},
     });
+  });
+}
+
+/** Permanently removes a recoverable household. This bypasses retention and is restricted to instance administrators. */
+export async function hardDeleteHousehold(userId: string, householdId: string, confirmation: string): Promise<void> {
+  const record = await requireDeletionAuthority(userId, householdId);
+  if (!record.administrator) throw new AppError("administrator_required", "Only an instance administrator can permanently delete a household", 403);
+  if (!record.deletionRequestedAt || confirmation.trim() !== record.name) throw new AppError("household_hard_delete_confirmation_failed", "Type the household name exactly to permanently delete it", 422);
+  const [documentRows, archiveRows] = await Promise.all([
+    getDb().select({ storageKey: documentCrypto.storageKey }).from(documents).innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(eq(documents.householdId, householdId)),
+    getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives).where(eq(portableArchives.householdId, householdId)),
+  ]);
+  const config = getDocumentConfig();
+  const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
+  for (const document of documentRows) await documentStorage.deleteCiphertext(document.storageKey);
+  for (const archive of archiveRows) await archiveStorage.delete(archive.storageKey);
+  await getDb().transaction(async (transaction) => {
+    const [deleted] = await transaction.delete(households).where(and(eq(households.id, householdId), isNotNull(households.deletionRequestedAt))).returning({ id: households.id });
+    if (!deleted) throw new AppError("household_not_recoverable", "This household can no longer be permanently deleted", 409);
   });
 }
 

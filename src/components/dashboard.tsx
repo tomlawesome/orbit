@@ -780,7 +780,7 @@ export function Dashboard() {
 
       {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
 
-      {!hasActiveHousehold && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} onCreate={() => setOnboardingOpen(true)} />}
+      {!hasActiveHousehold && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
 
       {!household.onboardingComplete && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
