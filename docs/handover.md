@@ -74,8 +74,9 @@ numbers and update statuses in place; do not renumber it.
 1. Release integration and acceptance — in progress.
 2. Reviewed Tika extraction — in progress; profile, adapter and reviewed draft
    flow exist; representative-document acceptance remains.
-3. Data portability — in progress; exports and non-mutating import preview
-   exist; duplicate-safe import commit remains.
+3. Data portability — in progress; exports, conflict-aware import preview and
+   transactional metadata import exist. Imported document files remain excluded
+   until they can enter through the normal scan/encryption lifecycle.
 4. Household lifecycle deletion/recovery/purge — in progress; typed
    confirmation, a 30-day recovery window and worker purge are implemented.
 5. Mobile document capture — in progress; review, rotation, progress and retry

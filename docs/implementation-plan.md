@@ -230,8 +230,9 @@ is visible without renumbering work already completed.
 3. **Data portability** — In progress: household-scoped, passphrase-encrypted
    JSON exports with optional bounded original-document bytes, 24-hour private
    storage, audited request/download and maintenance purge are implemented.
-   Import parsing/preview is implemented; duplicate-safe transactional commit
-   remains.
+   Conflict-aware import preview and transactionally committed metadata import
+   are implemented. Original document bytes are excluded from import pending
+   normal scan/encryption.
 4. **Household lifecycle** — In progress: typed-confirmation soft deletion,
    30-day recovery and worker-driven purge are implemented; add integration
    coverage before acceptance.
