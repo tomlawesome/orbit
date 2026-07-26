@@ -96,16 +96,21 @@ ensure_secret_file() {
 }
 
 ensure_vapid_keys() {
-  local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key
+  local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key orbit_image
   if [[ -s "$private_key_file" ]]; then
     chmod 600 "$private_key_file"
     return
   fi
-  command -v node >/dev/null 2>&1 || fail "Node.js is required to generate VAPID keys."
-  [[ -d node_modules/web-push ]] || fail "Run pnpm install before first deployment so Orbit can generate VAPID keys."
-  generated="$(node -e 'const push=require("web-push"); console.log(JSON.stringify(push.generateVAPIDKeys()))')" || fail "Could not generate VAPID keys."
-  public_key="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.publicKey)' "$generated")"
-  private_key="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.privateKey)' "$generated")"
+  command -v docker >/dev/null 2>&1 || fail "Docker is required to generate VAPID keys."
+  orbit_image="${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}"
+  docker image inspect "$orbit_image" >/dev/null 2>&1 || docker pull "$orbit_image" >/dev/null || fail "Could not pull ${orbit_image} to generate VAPID keys."
+  if ! generated="$(docker run --rm --entrypoint node "$orbit_image" /opt/orbit/scripts/generate-vapid.mjs 2>/dev/null)"; then
+    printf 'Building the Orbit bootstrap image to generate VAPID keys.\n'
+    docker build --target runner --tag orbit-vapid-bootstrap . >/dev/null || fail "Could not build the Orbit bootstrap image."
+    generated="$(docker run --rm --entrypoint node orbit-vapid-bootstrap /opt/orbit/scripts/generate-vapid.mjs)" || fail "Could not generate VAPID keys."
+  fi
+  public_key="$(printf '%s\n' "$generated" | sed -n 's/^public=//p')"
+  private_key="$(printf '%s\n' "$generated" | sed -n 's/^private=//p')"
   [[ -n "$public_key" && -n "$private_key" ]] || fail "VAPID key generation returned invalid values."
   temporary_file="$(mktemp "$secrets_directory/.vapid.installing.XXXXXX")"
   printf '%s\n' "$private_key" > "$temporary_file"
