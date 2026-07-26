@@ -244,8 +244,10 @@ is visible without renumbering work already completed.
    provider/title and date-overlap candidates with create, merge and attach-only
    choices are implemented; browser acceptance coverage remains.
 8. **IMAP and SMTP workflow** — In progress: pnpm 11 and maintained ImapFlow
-   are now in use. Dedicated-mailbox configuration is TLS-only, secret-backed
-   and requires SMTP; idempotent message processing and review receipts remain.
+   are now in use. Dedicated-mailbox configuration is TLS-only, secret-backed,
+   requires SMTP, and uses opaque per-user aliases verified against a
+   provider-injected recipient header; idempotent message processing and
+   review receipts remain.
 9. **Optional local Ollama extraction** — Optional: reconsider only after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,
