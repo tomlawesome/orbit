@@ -24,6 +24,7 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { isInstanceAdministrator } from "@/server/authorization";
+import { planOwnershipTransfer } from "@/server/household-ownership";
 
 const uuidSchema = z.uuid();
 
@@ -598,28 +599,116 @@ export async function listRegisteredUserCandidates(userId: string, householdId: 
 
 export async function addHouseholdMember(userId: string, householdId: string, memberUserId: string): Promise<HouseholdMember[]> {
   await requireHouseholdAccess(userId, householdId, true);
+  const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
-  const [registered] = await getDb().select({ id: users.id }).from(users)
-    .where(eq(users.id, targetUserId)).limit(1);
-  if (!registered) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
-  await getDb().insert(memberships).values({
-    householdId,
-    userId: targetUserId,
-    role: "member",
-  }).onConflictDoNothing();
+  await getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
+    );
+    const [actor] = await transaction.select({
+      role: memberships.role,
+      administrator: users.isInstanceAdmin,
+    }).from(users).leftJoin(
+      memberships,
+      and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
+    ).where(eq(users.id, userId)).limit(1);
+    if (!actor?.administrator && actor?.role !== "owner") {
+      throw new AppError("owner_required", "Only the current household owner can add members", 403);
+    }
+    const [registered] = await transaction.select({ id: users.id }).from(users)
+      .where(eq(users.id, targetUserId)).limit(1);
+    if (!registered) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+    await transaction.insert(memberships).values({
+      householdId: validHouseholdId,
+      userId: targetUserId,
+      role: "member",
+    }).onConflictDoNothing();
+  });
   return listHouseholdMembers(userId, householdId);
 }
 
 export async function removeHouseholdMember(userId: string, householdId: string, memberUserId: string): Promise<HouseholdMember[]> {
   await requireHouseholdAccess(userId, householdId, true);
-  const [target] = await getDb().select({ role: memberships.role }).from(memberships)
-    .where(and(eq(memberships.householdId, householdId), eq(memberships.userId, requireUuid(memberUserId, "Member"))))
-    .limit(1);
-  if (!target) throw new AppError("member_not_found", "That member is not part of this household", 404);
-  if (target.role === "owner") throw new AppError("owner_protected", "The household owner cannot be removed", 409);
-  await getDb().delete(memberships).where(and(
-    eq(memberships.householdId, householdId),
-    eq(memberships.userId, memberUserId),
-  ));
+  const validHouseholdId = requireUuid(householdId, "Household");
+  const targetUserId = requireUuid(memberUserId, "Member");
+  await getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
+    );
+    const [actor] = await transaction.select({
+      role: memberships.role,
+      administrator: users.isInstanceAdmin,
+    }).from(users).leftJoin(
+      memberships,
+      and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
+    ).where(eq(users.id, userId)).limit(1);
+    if (!actor?.administrator && actor?.role !== "owner") {
+      throw new AppError("owner_required", "Only the current household owner can remove members", 403);
+    }
+    const [target] = await transaction.select({ role: memberships.role }).from(memberships)
+      .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.userId, targetUserId)))
+      .limit(1);
+    if (!target) throw new AppError("member_not_found", "That member is not part of this household", 404);
+    if (target.role === "owner") throw new AppError("owner_protected", "The household owner cannot be removed", 409);
+    await transaction.delete(memberships).where(and(
+      eq(memberships.householdId, validHouseholdId),
+      eq(memberships.userId, targetUserId),
+    ));
+  });
+  return listHouseholdMembers(userId, householdId);
+}
+
+/**
+ * Atomically hands household ownership to an existing member. Serialising on
+ * the household prevents concurrent requests from leaving multiple owners.
+ */
+export async function transferHouseholdOwnership(
+  userId: string,
+  householdId: string,
+  nextOwnerUserId: string,
+): Promise<HouseholdMember[]> {
+  await requireHouseholdAccess(userId, householdId, true);
+  const validHouseholdId = requireUuid(householdId, "Household");
+  const validNextOwnerId = requireUuid(nextOwnerUserId, "Member");
+
+  await getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
+    );
+    const householdMembers = await transaction.select({
+      userId: memberships.userId,
+      role: memberships.role,
+    }).from(memberships).where(eq(memberships.householdId, validHouseholdId));
+    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin })
+      .from(users).where(eq(users.id, userId)).limit(1);
+    const plan = planOwnershipTransfer(
+      householdMembers,
+      userId,
+      validNextOwnerId,
+      actor?.administrator ?? false,
+    );
+    if (!plan.changed) return;
+
+    await transaction.update(memberships).set({ role: "member" })
+      .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.role, "owner")));
+    const [promoted] = await transaction.update(memberships).set({ role: "owner" })
+      .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.userId, validNextOwnerId)))
+      .returning({ userId: memberships.userId });
+    if (!promoted) {
+      throw new AppError("member_not_found", "The selected member is no longer available", 409);
+    }
+    await transaction.insert(auditLog).values({
+      householdId: validHouseholdId,
+      actorUserId: userId,
+      entityType: "household",
+      entityId: validHouseholdId,
+      action: "ownership_transferred",
+      changes: {
+        previousOwnerUserId: plan.previousOwnerUserId,
+        nextOwnerUserId: plan.nextOwnerUserId,
+      },
+    });
+  });
+
   return listHouseholdMembers(userId, householdId);
 }

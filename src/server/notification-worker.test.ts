@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { getNotificationWorkerConfig, householdReminderTime, reminderIsSnoozed } from "./notification-worker";
+import {
+  enabledDeliveryChannels,
+  getNotificationWorkerConfig,
+  householdReminderTime,
+  reminderIsSnoozed,
+} from "./notification-worker";
 
 describe("notification worker scheduling", () => {
+  it("honours both reminder rules and the recipient's selected channels", () => {
+    expect(enabledDeliveryChannels({
+      emailEnabled: true,
+      pushEnabled: true,
+      userEmailEnabled: false,
+      userPushEnabled: true,
+    })).toEqual(["web_push"]);
+    expect(enabledDeliveryChannels({
+      emailEnabled: true,
+      pushEnabled: false,
+      userEmailEnabled: true,
+      userPushEnabled: true,
+    })).toEqual(["email"]);
+  });
+
   it("schedules at 09:00 in the household timezone across daylight saving time", () => {
     expect(householdReminderTime("2026-01-15", 0, "Europe/London").toISOString()).toBe("2026-01-15T09:00:00.000Z");
     expect(householdReminderTime("2026-07-15", 0, "Europe/London").toISOString()).toBe("2026-07-15T08:00:00.000Z");

@@ -22,6 +22,8 @@ export interface AuthenticatedSession {
     themeId: string;
     textSize: TextSize;
     urgencyPalette: UrgencyPalette;
+    emailNotifications: boolean;
+    pushNotifications: boolean;
   };
   activeHouseholdId: string | null;
   expiresAt: Date;
@@ -62,6 +64,8 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
       urgencyPalette: userPreferences.urgencyPalette,
+      emailNotifications: userPreferences.emailNotifications,
+      pushNotifications: userPreferences.pushNotifications,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -91,6 +95,8 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
         ? record.textSize
         : "comfortable",
       urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
+      emailNotifications: record.emailNotifications ?? true,
+      pushNotifications: record.pushNotifications ?? true,
     },
   };
 }

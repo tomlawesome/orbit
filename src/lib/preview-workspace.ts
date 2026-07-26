@@ -31,6 +31,8 @@ export interface WorkspaceSession {
     themeId: string;
     textSize: "standard" | "comfortable" | "large";
     urgencyPalette: "classic" | "themed";
+    emailNotifications: boolean;
+    pushNotifications: boolean;
   };
 }
 

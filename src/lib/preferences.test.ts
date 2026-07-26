@@ -25,6 +25,8 @@ describe("personalisation preferences", () => {
               mode,
               textSize,
               urgencyPalette,
+              emailNotifications: true,
+              pushNotifications: true,
             }).success).toBe(true);
           }
         }
@@ -36,6 +38,8 @@ describe("personalisation preferences", () => {
     expect(themePreferenceSchema.parse({ colourway: "after-dark", mode: "system" })).toMatchObject({
       textSize: "comfortable",
       urgencyPalette: "themed",
+      emailNotifications: true,
+      pushNotifications: true,
     });
   });
 

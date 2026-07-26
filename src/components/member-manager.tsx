@@ -101,6 +101,30 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
     }
   }
 
+  async function transferOwnership(member: Member) {
+    if (!window.confirm(`Transfer ownership of this household to ${member.displayName}? You will remain a member.`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/households/${householdId}/members`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
+        body: JSON.stringify({ userId: member.id }),
+      });
+      const payload = await response.json() as { members?: Member[]; candidates?: Candidate[]; error?: { message?: string } };
+      if (!response.ok || !payload.members) throw new Error(payload.error?.message || "Ownership could not be transferred");
+      setMembers(payload.members);
+      setCandidates(payload.candidates ?? []);
+      setMessage(`${member.displayName} is now the household owner.`);
+      window.location.reload();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ownership could not be transferred");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const currentUser = members.find((member) => member.id === session.user.id);
   const isOwner = session.user.isInstanceAdmin || currentUser?.role === "owner";
 
@@ -118,7 +142,10 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
               <span><strong>{member.displayName}</strong><small>{member.role === "owner" ? "Household owner" : "Household member"}</small></span>
               <b>{member.role}</b>
               {isOwner && member.role !== "owner" && (
-                <button type="button" disabled={busy} onClick={() => remove(member)}>Remove</button>
+                <span className="member-actions">
+                  <button type="button" disabled={busy} onClick={() => transferOwnership(member)}>Make owner</button>
+                  <button type="button" disabled={busy} onClick={() => remove(member)}>Remove</button>
+                </span>
               )}
             </article>
           ))}

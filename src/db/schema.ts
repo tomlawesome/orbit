@@ -28,6 +28,8 @@ export const userPreferences = pgTable("user_preferences", {
   themeId: text("theme_id").notNull().default("after-dark"),
   textSize: text("text_size").notNull().default("comfortable"),
   urgencyPalette: text("urgency_palette").notNull().default("themed"),
+  emailNotifications: boolean("email_notifications").notNull().default(true),
+  pushNotifications: boolean("push_notifications").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

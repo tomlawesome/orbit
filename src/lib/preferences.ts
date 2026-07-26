@@ -21,6 +21,8 @@ export const themePreferenceSchema = z.object({
   colourway: z.enum(colourways.map((theme) => theme.id) as [string, ...string[]]),
   textSize: z.enum(textSizes).default("comfortable"),
   urgencyPalette: z.enum(urgencyPalettes).default("themed"),
+  emailNotifications: z.boolean().default(true),
+  pushNotifications: z.boolean().default(true),
 });
 
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;

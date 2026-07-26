@@ -40,6 +40,8 @@ const DEFAULT_THEME: ThemePreference = {
   colourway: "after-dark",
   textSize: "comfortable",
   urgencyPalette: "themed",
+  emailNotifications: true,
+  pushNotifications: true,
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 
@@ -174,6 +176,8 @@ export function Dashboard() {
   const colourway = themePreference.colourway;
   const textSize = themePreference.textSize;
   const urgencyPalette = themePreference.urgencyPalette;
+  const emailNotifications = themePreference.emailNotifications;
+  const pushNotifications = themePreference.pushNotifications;
   const activeItems = household.items.filter((item) => item.status === "active");
   const inactiveItems = household.items.filter((item) => ["archived", "cancelled"].includes(item.status));
   const archiveMode = activeSection === "archive";
@@ -210,6 +214,8 @@ export function Dashboard() {
       colourway: session.user.themeId,
       textSize: session.user.textSize,
       urgencyPalette: session.user.urgencyPalette,
+      emailNotifications: session.user.emailNotifications,
+      pushNotifications: session.user.pushNotifications,
     });
   }, [session]);
 
@@ -648,6 +654,29 @@ export function Dashboard() {
                         <b>{urgencyPalette === palette ? "✓" : ""}</b>
                       </button>
                     ))}
+                  </div>
+                </section>
+                <section>
+                  <div className="setting-heading"><h3>Reminder delivery</h3><p>Choose how Orbit contacts you. These choices only affect your account.</p></div>
+                  <div className="preference-card-picker">
+                    <button
+                      aria-pressed={emailNotifications}
+                      className={emailNotifications ? "active" : ""}
+                      onClick={() => updateAppearance({ emailNotifications: !emailNotifications })}
+                    >
+                      <span className="text-size-preview">Email</span>
+                      <span><strong>Email reminders</strong><small>Send scheduled reminders to your registered address</small></span>
+                      <b>{emailNotifications ? "On" : "Off"}</b>
+                    </button>
+                    <button
+                      aria-pressed={pushNotifications}
+                      className={pushNotifications ? "active" : ""}
+                      onClick={() => updateAppearance({ pushNotifications: !pushNotifications })}
+                    >
+                      <span className="text-size-preview">Push</span>
+                      <span><strong>Browser push</strong><small>Notify browsers where you have enabled Orbit notifications</small></span>
+                      <b>{pushNotifications ? "On" : "Off"}</b>
+                    </button>
                   </div>
                 </section>
               </div>

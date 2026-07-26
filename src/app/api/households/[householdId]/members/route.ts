@@ -8,6 +8,7 @@ import {
   listHouseholdMembers,
   listRegisteredUserCandidates,
   removeHouseholdMember,
+  transferHouseholdOwnership,
 } from "@/server/workspace-repository";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ householdId: string }> };
 const addMemberSchema = z.object({ userId: z.uuid() });
 const removeMemberSchema = z.object({ userId: z.uuid() });
+const transferOwnerSchema = z.object({ userId: z.uuid() });
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -55,6 +57,24 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const { userId } = removeMemberSchema.parse(await request.json());
     const members = await removeHouseholdMember(session.user.id, householdId, userId);
     const candidates = await listRegisteredUserCandidates(session.user.id, householdId);
+    return NextResponse.json({ members, candidates }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return appErrorResponse(error);
+  }
+}
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const config = getAuthConfig();
+    const session = await requireSession(request, config);
+    assertCsrf(request, session, config);
+    const { householdId } = await context.params;
+    const { userId } = transferOwnerSchema.parse(await request.json());
+    const members = await transferHouseholdOwnership(session.user.id, householdId, userId);
+    const actor = members.find((member) => member.id === session.user.id);
+    const candidates = session.user.isInstanceAdmin || actor?.role === "owner"
+      ? await listRegisteredUserCandidates(session.user.id, householdId)
+      : [];
     return NextResponse.json({ members, candidates }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return appErrorResponse(error);

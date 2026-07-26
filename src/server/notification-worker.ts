@@ -11,6 +11,7 @@ import {
   notificationDeliveries,
   pushSubscriptions,
   reminderRules,
+  userPreferences,
   users,
 } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
@@ -86,6 +87,19 @@ export function reminderIsSnoozed(
   );
 }
 
+/** Applies both the item reminder rule and the recipient's personal channels. */
+export function enabledDeliveryChannels(input: {
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+  userEmailEnabled: boolean;
+  userPushEnabled: boolean;
+}): Array<"email" | "web_push"> {
+  const channels: Array<"email" | "web_push"> = [];
+  if (input.emailEnabled && input.userEmailEnabled) channels.push("email");
+  if (input.pushEnabled && input.userPushEnabled) channels.push("web_push");
+  return channels;
+}
+
 async function materializeDueDeliveries(now: Date): Promise<void> {
   const candidates = await getDb()
     .select({
@@ -97,6 +111,8 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
       daysBefore: reminderRules.daysBefore,
       emailEnabled: reminderRules.emailEnabled,
       pushEnabled: reminderRules.pushEnabled,
+      userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
+      userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
       snoozedUntil: items.snoozedUntil,
     })
     .from(dueEvents)
@@ -104,6 +120,7 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
     .innerJoin(households, eq(households.id, dueEvents.householdId))
     .innerJoin(reminderRules, eq(reminderRules.itemId, dueEvents.itemId))
     .innerJoin(memberships, eq(memberships.householdId, dueEvents.householdId))
+    .leftJoin(userPreferences, eq(userPreferences.userId, memberships.userId))
     .where(and(
       isNull(dueEvents.completedAt),
       eq(items.status, "active"),
@@ -114,9 +131,7 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
     const scheduledFor = householdReminderTime(candidate.dueDate, candidate.daysBefore, candidate.timezone);
     if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
     if (reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)) return [];
-    const channels: Array<"email" | "web_push"> = [];
-    if (candidate.emailEnabled) channels.push("email");
-    if (candidate.pushEnabled) channels.push("web_push");
+    const channels = enabledDeliveryChannels(candidate);
     return channels.map((channel) => ({
       householdId: candidate.householdId,
       eventId: candidate.eventId,
@@ -169,12 +184,15 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
       dueDate: dueEvents.dueDate,
       kind: dueEvents.kind,
       householdName: households.name,
+      userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
+      userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
     })
     .from(notificationDeliveries)
     .innerJoin(users, eq(users.id, notificationDeliveries.userId))
     .innerJoin(dueEvents, eq(dueEvents.id, notificationDeliveries.eventId))
     .innerJoin(items, eq(items.id, dueEvents.itemId))
     .innerJoin(households, eq(households.id, notificationDeliveries.householdId))
+    .leftJoin(userPreferences, eq(userPreferences.userId, notificationDeliveries.userId))
     .where(inArray(notificationDeliveries.id, ids));
 
   const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl) : undefined;
@@ -184,6 +202,18 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
 
   for (const delivery of deliveries) {
     try {
+      const channelStillEnabled = delivery.channel === "email"
+        ? delivery.userEmailEnabled
+        : delivery.userPushEnabled;
+      if (!channelStillEnabled) {
+        await getDb().update(notificationDeliveries).set({
+          status: "cancelled",
+          lockedAt: null,
+          lastError: "Disabled in recipient preferences",
+          updatedAt: new Date(),
+        }).where(eq(notificationDeliveries.id, delivery.id));
+        continue;
+      }
       const message = `${delivery.title} is due on ${delivery.dueDate}.`;
       if (delivery.channel === "email") {
         if (!transporter) throw new Error("SMTP is not configured");

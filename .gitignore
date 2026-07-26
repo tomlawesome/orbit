@@ -6,7 +6,10 @@ tmp
 .env.*
 .env-orbit
 .orbit-secrets/
+backups/
 coverage
+playwright-report/
+test-results/
 *.tsbuildinfo
 *.log
 .DS_Store

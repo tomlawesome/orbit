@@ -33,6 +33,8 @@ const session: AuthenticatedSession = {
     themeId: "verdant",
     textSize: "comfortable",
     urgencyPalette: "themed",
+    emailNotifications: true,
+    pushNotifications: true,
   },
 };
 

@@ -198,6 +198,8 @@ Orbit already includes:
 - create, edit, schedule, remind, archive, undo, and restore workflows;
 - recurrence suggestions and household-local calendar-date rules;
 - a schedule-aware notification centre with read, dismiss, and snooze state;
+- per-user email and browser-push delivery preferences;
+- atomic, audited household ownership transfer;
 - PostgreSQL/Drizzle models for users, sessions, households, memberships,
   items, events, reminders, push devices, delivery state, and audit history;
 - provider-neutral OpenID Connect discovery and Authorization Code flow with
@@ -242,15 +244,29 @@ generated PostgreSQL password file as the container.
 ### Quality checks
 
 ```sh
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
+bash scripts/test-backend.sh
+bash scripts/test-frontend.sh
+bash scripts/test-all.sh
 ```
 
-The current suite contains 46 unit tests across authentication, environment
+The frontend script targets `http://127.0.0.1:3000` by default; set
+`PLAYWRIGHT_BASE_URL` to test another non-production deployment. Use
+`ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
+suite when no browser target is running.
+
+Install Playwright's local Chromium build once, then repeat browser tests
+without using an AI service:
+
+```sh
+bash scripts/install-test-browser.sh
+bash scripts/test-frontend.sh
+```
+
+The current suite contains 51 unit tests across authentication, environment
 and secret validation, database configuration, recurrence, preferences,
-notifications, workspace commands, and the notification worker.
+notifications, workspace commands, and the notification worker. Playwright
+also verifies the signed-out privacy boundary in desktop and mobile Chromium
+and runs automated WCAG A/AA checks.
 
 Product directions intentionally deferred until after the initial completion
 pass are recorded in the [feature register](docs/feature-register.md).
@@ -313,6 +329,31 @@ For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
 and valid OIDC, SMTP, and VAPID credentials. Back up the PostgreSQL volume and
 the `.orbit-secrets` directory before storing real household data.
 
+Create a validated, private PostgreSQL backup with:
+
+```sh
+bash scripts/backup.sh
+```
+
+Restore one transactionally while Orbit is stopped with:
+
+```sh
+bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.dump
+```
+
+Portable exports and future attached document files are separate from this
+database disaster-recovery backup.
+
+Build or deploy the Compose application through the same guarded scripts used
+by CI:
+
+```sh
+bash scripts/build-container.sh
+bash scripts/deploy-container.sh --pull
+# Or build locally before deployment:
+bash scripts/deploy-container.sh --build
+```
+
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.
 
@@ -322,9 +363,9 @@ configuration, endpoint behaviour, security details, and troubleshooting.
    sign-in with the intended provider.
 2. Verify one SMTP delivery and one browser-push delivery with production-like
    credentials.
-3. Run browser end-to-end and accessibility checks against the production
-   build.
-4. Configure automated PostgreSQL backups and a tested restore procedure.
+3. Run the browser and accessibility checks against the production build.
+4. Schedule `scripts/backup.sh`, retain copies outside the Docker host, and
+   perform a test restore.
 
 ---
 
