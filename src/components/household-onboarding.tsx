@@ -12,9 +12,10 @@ export interface HouseholdInput {
 interface HouseholdOnboardingProps {
   onClose(): void;
   onCreate(input: HouseholdInput): Promise<void>;
+  onRecoverableNameConflict(): void;
 }
 
-export function HouseholdOnboarding({ onClose, onCreate }: HouseholdOnboardingProps) {
+export function HouseholdOnboarding({ onClose, onCreate, onRecoverableNameConflict }: HouseholdOnboardingProps) {
   const [nameError, setNameError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -30,6 +31,10 @@ export function HouseholdOnboarding({ onClose, onCreate }: HouseholdOnboardingPr
     try {
       await onCreate({ name, timezone: String(formData.get("timezone") ?? "Europe/London"), currency: String(formData.get("currency") ?? "GBP") });
     } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "household_name_recoverable") {
+        onRecoverableNameConflict();
+        return;
+      }
       setNameError(error instanceof Error ? error.message : "Orbit could not create this household");
     } finally { setBusy(false); }
   }

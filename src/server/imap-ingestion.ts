@@ -144,7 +144,9 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           contentSha256, recipientAliasSha256: aliasSha256, userId: userId ?? null, householdId: destination?.householdId ?? null,
           status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : "recipient_unverified",
-          receiptStatus: "processing",
+          // A receipt is only meaningful once a verified recipient's attachments
+          // have been held successfully. All other outcomes are terminal here.
+          receiptStatus: userId && !oversized ? "processing" : "cancelled",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         }).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
         if (receipt && userId && !oversized) {

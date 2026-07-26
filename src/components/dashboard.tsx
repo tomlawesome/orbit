@@ -442,6 +442,11 @@ export function Dashboard() {
     setNotice({ message: `${input.name} is ready` });
   }
 
+  function returnToHouseholdRecovery() {
+    setOnboardingOpen(false);
+    setNotice({ message: "That name belongs to a removed household. Restore it, permanently delete it if you are an instance administrator, or choose a different name." });
+  }
+
   function updateHousehold(input: HouseholdSettingsInput) {
     dispatch({ type: "household.update", householdId: household.id, ...input });
     setNotice({ message: `${input.name} was updated` });
@@ -694,7 +699,7 @@ export function Dashboard() {
             ) : settingsView === "inbox" ? (
               <ImapInbox csrfToken={session.csrfToken} />
             ) : settingsView === "recovery" ? (
-              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} />
+              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />
             ) : settingsView === "household" && household.canManage ? (
               <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
             ) : settingsView === "sections" && household.canManage ? (
@@ -783,7 +788,7 @@ export function Dashboard() {
         />
       )}
 
-      {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
+      {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} onRecoverableNameConflict={returnToHouseholdRecovery} />}
 
       {householdChoiceRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
 

@@ -233,7 +233,11 @@ export async function applyWorkspaceCommand(
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
       const [recoverableName] = await transaction.select({ id: households.id }).from(households)
-        .where(and(isNotNull(households.deletionRequestedAt), sql`lower(${households.name}) = lower(${command.household.name.trim()})`)).limit(1);
+        .where(and(
+          isNotNull(households.deletionRequestedAt),
+          sql`${households.deleteAfter} > now()`,
+          sql`lower(${households.name}) = lower(${command.household.name.trim()})`,
+        )).limit(1);
       if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
       await transaction.insert(households).values({
         id: householdId,
