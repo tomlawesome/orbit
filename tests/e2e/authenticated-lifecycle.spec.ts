@@ -13,7 +13,8 @@ async function signIn(page: Page, identity: string) {
 async function readWorkspace(page: Page) {
   return page.evaluate(async () => {
     const response = await fetch("/api/workspace", { credentials: "same-origin" });
-    return { ok: response.ok, workspace: await response.json() };
+    const payload = (await response.json()) as { workspace?: unknown };
+    return { ok: response.ok, workspace: payload.workspace ?? payload };
   });
 }
 
