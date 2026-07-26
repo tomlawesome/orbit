@@ -10,6 +10,10 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "on-first-retry",
+    // The acceptance-only OIDC sidecar rotates a self-signed loopback
+    // certificate on every run. Orbit itself remains served over the normal
+    // configured application URL.
+    ignoreHTTPSErrors: process.env.ORBIT_ACCEPTANCE_OIDC === "true",
   },
   projects: [
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },

@@ -94,6 +94,7 @@ jobs:
       - name: Validate Compose configuration
         run: |
           docker compose --env-file .env-orbit config --quiet
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
           docker compose --env-file .env-orbit \
             -f docker-compose.yml -f docker-compose.full.yml \
             --profile processing --profile ai config --quiet
@@ -101,8 +102,11 @@ jobs:
       - name: Build application image
         run: bash scripts/build-container.sh
 
+      - name: Build disposable OIDC acceptance provider
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc
+
       - name: Start application and database
-        run: docker compose --env-file .env-orbit up --detach --no-build --wait --wait-timeout 180
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --detach --no-build --wait --wait-timeout 180
 
       - name: Verify health endpoint
         run: |
@@ -138,6 +142,7 @@ jobs:
       - name: Run browser and accessibility checks
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+          ORBIT_ACCEPTANCE_OIDC: "true"
         run: |
           pnpm exec playwright install --with-deps --only-shell chromium
           bash scripts/test-frontend.sh
@@ -153,16 +158,16 @@ jobs:
       - name: Show service diagnostics
         if: failure()
         run: |
-          docker compose --env-file .env-orbit ps
-          docker compose --env-file .env-orbit logs --no-color
-          app_container="$(docker compose --env-file .env-orbit ps --quiet orbit-app)"
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml ps
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml logs --no-color
+          app_container="$(docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml ps --quiet orbit-app)"
           if [[ -n "${app_container}" ]]; then
             docker inspect --format='{{json .State.Health}}' "${app_container}"
           fi
 
       - name: Stop smoke-test services
         if: always()
-        run: docker compose --env-file .env-orbit down --volumes --remove-orphans
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 
   candidate:
     name: Publish release candidate

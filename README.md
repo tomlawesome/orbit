@@ -308,6 +308,17 @@ The frontend script targets `http://127.0.0.1:3000` by default; set
 `ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
 suite when no browser target is running.
 
+The authenticated acceptance checks use a separate Compose overlay with a
+disposable local OIDC provider. It performs discovery, PKCE, code exchange and
+signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
+against disposable data:
+
+```sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
 
@@ -316,12 +327,12 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current suite contains 69 unit tests across authentication, environment
+The current suite contains 81 unit tests across authentication, environment
 and secret validation, database configuration, recurrence, preferences,
 notifications, workspace commands, document encryption/storage/scanning, and
 background workers. Playwright
-also verifies the signed-out privacy boundary in desktop and mobile Chromium
-and runs automated WCAG A/AA checks.
+also verifies signed-out privacy in desktop and mobile Chromium, and uses the
+disposable OIDC profile for authenticated household-lifecycle acceptance.
 
 Product directions intentionally deferred until after the initial completion
 pass are recorded in the [feature register](docs/feature-register.md). The
