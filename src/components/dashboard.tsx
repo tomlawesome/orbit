@@ -14,6 +14,7 @@ import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import { PortableArchiveManager } from "@/components/portable-archive-manager";
 import { ImapInbox } from "@/components/imap-inbox";
+import { calendarDateInTimeZone, dueCopy as dashboardDueCopy, formatCost, formatHeadingDate, formatLongDate, householdInitials, PREFERENCE_EVENT, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
 import {
   daysUntil,
   getDueBand,
@@ -36,8 +37,6 @@ import {
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createEmptyWorkspace, createHousehold, type ItemActivity } from "@/lib/workspace";
 
-const THEME_STORAGE_KEY = "orbit:theme:v1";
-const PREFERENCE_EVENT = "orbit:preference-change";
 const DEFAULT_THEME: ThemePreference = {
   mode: "system",
   colourway: "after-dark",
@@ -97,57 +96,6 @@ function useLocalStorageValue(key: string, fallback: string): string {
   const getSnapshot = useCallback(() => window.localStorage.getItem(key) ?? fallback, [fallback, key]);
   const getServerSnapshot = useCallback(() => fallback, [fallback]);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-}
-
-function storePreference(key: string, value: unknown) {
-  window.localStorage.setItem(key, JSON.stringify(value));
-  window.dispatchEvent(new CustomEvent(PREFERENCE_EVENT, { detail: key }));
-}
-
-function calendarDateInTimeZone(timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone,
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
-}
-
-function formatLongDate(value: string, timeZone = "UTC") {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone,
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function formatHeadingDate(value: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function formatCost(item: HomeItem) {
-  if (item.costMinor == null) return "No cost recorded";
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency: item.currency }).format(item.costMinor / 100);
-}
-
-function dueCopy(item: HomeItem, today: string) {
-  if (!item.dueDate) return "No due date";
-  const days = daysUntil(item.dueDate, today);
-  if (days < 0) return `${Math.abs(days)} days overdue`;
-  if (days === 0) return "Due today";
-  return `Due in ${days} days`;
-}
-
-function householdInitials(name: string) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
 
 type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
@@ -586,7 +534,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
                     <span className="row-number">{String(index + 1).padStart(2, "0")}</span>
                     <span className={`category-icon type-icon-${itemSection?.icon ?? "calendar"} accent-${itemSection?.accent ?? "sage"}`}><Icon name={itemSection?.icon ?? "calendar"} /></span>
                     <button className="item-main" onClick={() => openItem(item)}>
-                      <div className="item-title-row"><h3>{item.title}</h3><span className={`status status-${displayState}`}>{archiveMode ? displayState : dueCopy(item, today)}</span></div>
+                      <div className="item-title-row"><h3>{item.title}</h3><span className={`status status-${displayState}`}>{archiveMode ? displayState : dashboardDueCopy(item, today, daysUntil)}</span></div>
                       <p><b>{item.subtype ?? itemSection?.name ?? "Household item"}</b><span>{item.provider ?? "No provider"}{item.reference ? ` · ${item.reference}` : ""}{item.recurrenceMonths ? ` · every ${item.recurrenceMonths === 12 ? "year" : `${item.recurrenceMonths} months`}` : ""}</span></p>
                     </button>
                     <div className="item-meta"><strong>{formatCost(item)}</strong><small>{item.dueDate ? formatLongDate(item.dueDate) : "Add a schedule"}</small></div>
