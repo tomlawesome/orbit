@@ -224,24 +224,28 @@ is visible without renumbering work already completed.
 
 1. **Release integration and acceptance** — In progress: CI-gate and manually
    accept the current mobile, lifecycle and optional-Tika candidate.
-2. **Reviewed Tika extraction** — In progress: optional private Tika profile
-   and bounded adapter are implemented; add administrator verification and a
-   user-visible reviewed extraction result.
+2. **Reviewed Tika extraction** — In progress: optional private Tika profile,
+   bounded adapter and a user-visible review draft are implemented. A
+   representative-document trial and administrator acceptance remain.
 3. **Data portability** — In progress: household-scoped, passphrase-encrypted
    JSON exports with optional bounded original-document bytes, 24-hour private
    storage, audited request/download and maintenance purge are implemented.
-   Import parsing/preview and duplicate-safe transactional commit remain.
+   Import parsing/preview is implemented; duplicate-safe transactional commit
+   remains.
 4. **Household lifecycle** — In progress: typed-confirmation soft deletion,
    30-day recovery and worker-driven purge are implemented; add integration
    coverage before acceptance.
-5. **Mobile document capture** — Planned: resilient camera/file capture,
-   progress and compact review.
-6. **Document draft creation** — Planned: turn reviewed extraction evidence
-   into a user-approved item draft.
-7. **Duplicate comparison** — Planned: hash/reference/provider/date comparison
-   with explicit create, merge or attach-only choices.
-8. **IMAP and SMTP workflow** — Planned: secure per-user alias ingestion,
-   idempotency, receipts and review notifications.
+5. **Mobile document capture** — In progress: direct camera/file capture,
+   visual review/rotation, progress and retry are implemented; browser
+   acceptance coverage remains.
+6. **Document draft creation** — In progress: bounded evidence and a
+   user-approved create-item path are implemented; acceptance coverage remains.
+7. **Duplicate comparison** — In progress: household-scoped hash, reference
+   and provider/title candidates with create, merge and attach-only choices are
+   implemented; date comparison and acceptance coverage remain.
+8. **IMAP and SMTP workflow** — In progress: safest first-release design is
+   selected, but implementation awaits a maintained IMAP dependency after the
+   local pnpm store/version conflict is resolved.
 9. **Optional local Ollama extraction** — Optional: reconsider only after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,
