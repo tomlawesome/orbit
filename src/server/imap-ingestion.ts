@@ -1,6 +1,9 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { ImapFlow } from "imapflow";
+import { isNull } from "drizzle-orm";
 import { z } from "zod";
+import { getDb } from "@/db";
+import { imapIngestionMessages, users } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const ingestionEnvironmentSchema = z.object({
@@ -80,6 +83,100 @@ export function matchesImapRecipientAlias(value: string, userId: string, config 
   const received = Buffer.from(value.trim().toLowerCase());
   const expected = Buffer.from(imapRecipientAlias(userId, config).toLowerCase());
   return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+/** Reads one provider-injected recipient header without retaining raw mail headers. */
+export function trustedRecipientFromHeaders(headers: Buffer | undefined, headerName: string): string | undefined {
+  if (!headers) return undefined;
+  const lines = headers.toString("utf8").replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/);
+  const prefix = `${headerName.toLowerCase()}:`;
+  const value = lines.find((line) => line.toLowerCase().startsWith(prefix))?.slice(prefix.length).trim();
+  return value?.slice(0, 512) || undefined;
+}
+
+async function userForRecipientAlias(recipient: string, config: ImapIngestionConfig): Promise<string | undefined> {
+  const candidates = await getDb().select({ id: users.id }).from(users).where(isNull(users.disabledAt));
+  return candidates.find((candidate) => matchesImapRecipientAlias(recipient, candidate.id, config))?.id;
+}
+
+/**
+ * Polls the dedicated mailbox and records only an idempotent receipt. It does
+ * not parse, retain, attach, create, or merge household data; later review
+ * work must explicitly choose a household and approve a document draft.
+ */
+export async function runImapIngestionCycle(config = getImapIngestionConfig()): Promise<void> {
+  if (!config.enabled) return;
+  const client = new ImapFlow({
+    host: config.host, port: config.port, secure: true,
+    auth: { user: config.user, pass: config.password },
+    tls: { rejectUnauthorized: true, servername: config.tlsServerName || config.host },
+    logger: false, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000,
+    maxLiteralSize: 32 * 1024 * 1024,
+  });
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
+    try {
+      if (!client.mailbox) throw new Error("IMAP mailbox could not be opened");
+      const uidValidity = client.mailbox.uidValidity.toString();
+      for await (const message of client.fetch({ seen: false }, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true }, { uid: true })) {
+        const source = message.source;
+        const oversized = !source || (message.size ?? 0) > 25 * 1024 * 1024 || source.length > 25 * 1024 * 1024;
+        const recipient = trustedRecipientFromHeaders(message.headers, config.trustedRecipientHeader);
+        const userId = recipient ? await userForRecipientAlias(recipient, config) : undefined;
+        const contentSha256 = oversized
+          ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
+          : createHash("sha256").update(source!).digest("hex");
+        const aliasSha256 = createHash("sha256").update(recipient ?? "").digest("hex");
+        await getDb().insert(imapIngestionMessages).values({
+          mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
+          contentSha256, recipientAliasSha256: aliasSha256, userId: userId ?? null,
+          status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
+          failureCode: oversized ? "message_too_large" : userId ? null : "recipient_unverified",
+          receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
+        }).onConflictDoNothing();
+        message.source?.fill(0);
+      }
+    } finally { lock.release(); }
+  } finally {
+    try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
+  }
+}
+
+const workerState = globalThis as typeof globalThis & {
+  __orbitImapWorkerStarted?: boolean;
+  __orbitImapWorkerRunning?: boolean;
+  __orbitImapWorkerLastSuccessAt?: string;
+  __orbitImapWorkerLastErrorAt?: string;
+};
+
+export function getImapIngestionWorkerHealth() {
+  return {
+    started: workerState.__orbitImapWorkerStarted ?? false,
+    running: workerState.__orbitImapWorkerRunning ?? false,
+    lastSuccessAt: workerState.__orbitImapWorkerLastSuccessAt ?? null,
+    lastErrorAt: workerState.__orbitImapWorkerLastErrorAt ?? null,
+  };
+}
+
+/** Starts one polling loop per process; receipt uniqueness protects replica workers. */
+export function startImapIngestionWorker(config = getImapIngestionConfig()): void {
+  if (workerState.__orbitImapWorkerStarted || !config.enabled) return;
+  workerState.__orbitImapWorkerStarted = true;
+  const poll = async () => {
+    workerState.__orbitImapWorkerRunning = true;
+    try {
+      await runImapIngestionCycle(config);
+      workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
+    } catch {
+      workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
+      console.error("Orbit IMAP ingestion cycle failed");
+    } finally {
+      workerState.__orbitImapWorkerRunning = false;
+      setTimeout(poll, config.pollMilliseconds).unref();
+    }
+  };
+  void poll();
 }
 
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */

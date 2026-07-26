@@ -28,6 +28,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
+export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "quarantined", "failed"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -303,4 +304,25 @@ export const portableArchives = pgTable("portable_archives", {
 }, (table) => [
   index("portable_archive_expiry_idx").on(table.expiresAt),
   index("portable_archive_household_created_idx").on(table.householdId, table.createdAt),
+]);
+
+/** Durable, content-free receipts for messages observed in the dedicated IMAP mailbox. */
+export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  mailbox: text("mailbox").notNull(),
+  mailboxUidValidity: text("mailbox_uid_validity").notNull(),
+  mailboxUid: integer("mailbox_uid").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  recipientAliasSha256: text("recipient_alias_sha256").notNull(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  status: imapIngestionStatus("status").notNull(),
+  attempts: integer("attempts").notNull().default(1),
+  failureCode: text("failure_code"),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
+  uniqueIndex("imap_message_content_unique").on(table.contentSha256),
+  index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
 ]);
