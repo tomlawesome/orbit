@@ -46,6 +46,7 @@ const DEFAULT_THEME: ThemePreference = {
   pushNotifications: true,
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
+const NOTICE_DURATION_MS = 10_000;
 
 type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
@@ -185,6 +186,12 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       pushNotifications: session.user.pushNotifications,
     });
   }, [session]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
