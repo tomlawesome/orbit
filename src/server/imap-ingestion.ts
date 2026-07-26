@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/schema";
@@ -129,7 +129,16 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
     try {
       if (!client.mailbox) throw new Error("IMAP mailbox could not be opened");
       const uidValidity = client.mailbox.uidValidity.toString();
-      for await (const message of client.fetch({ seen: false }, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true, bodyStructure: true }, { uid: true })) {
+      const [checkpoint] = await getDb().select({ lastUid: sql<number | null>`max(${imapIngestionMessages.mailboxUid})` })
+        .from(imapIngestionMessages)
+        .where(and(
+          eq(imapIngestionMessages.mailbox, config.mailbox),
+          eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+        ));
+      // IMAP UIDs are monotonic within UIDVALIDITY. This keeps a dedicated
+      // mailbox read-only while avoiding a full rescan of all unseen mail.
+      const uidRange = `${(checkpoint?.lastUid ?? 0) + 1}:*`;
+      for await (const message of client.fetch(uidRange, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true, bodyStructure: true }, { uid: true })) {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > 25 * 1024 * 1024 || source.length > 25 * 1024 * 1024;
         const recipient = trustedRecipientFromHeaders(message.headers, config.trustedRecipientHeader);

@@ -8,6 +8,24 @@ import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 
 const RECOVERY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 
+interface HouseholdStorageKeys {
+  documents: string[];
+  archives: string[];
+}
+
+async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<void> {
+  const config = getDocumentConfig();
+  const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
+  // Database access has already been removed. A failed local cleanup leaves
+  // only encrypted orphan data, which reconciliation can safely remove later;
+  // it must not make the completed deletion appear to have failed to the user.
+  await Promise.allSettled([
+    ...keys.documents.map((storageKey) => documentStorage.deleteCiphertext(storageKey)),
+    ...keys.archives.map((storageKey) => archiveStorage.delete(storageKey)),
+  ]);
+}
+
 async function requireDeletionAuthority(userId: string, householdId: string) {
   const [record] = await getDb().select({
     id: households.id,
@@ -78,15 +96,13 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
     getDb().select({ storageKey: documentCrypto.storageKey }).from(documents).innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(eq(documents.householdId, householdId)),
     getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives).where(eq(portableArchives.householdId, householdId)),
   ]);
-  const config = getDocumentConfig();
-  const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-  const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
-  for (const document of documentRows) await documentStorage.deleteCiphertext(document.storageKey);
-  for (const archive of archiveRows) await archiveStorage.delete(archive.storageKey);
   await getDb().transaction(async (transaction) => {
     const [deleted] = await transaction.delete(households).where(and(eq(households.id, householdId), isNotNull(households.deletionRequestedAt))).returning({ id: households.id });
     if (!deleted) throw new AppError("household_not_recoverable", "This household can no longer be permanently deleted", 409);
   });
+  // The database has made the data inaccessible before any external side effect.
+  // Reconciliation later removes an orphan if a local storage delete is interrupted.
+  await deleteHouseholdStorage({ documents: documentRows.map((row) => row.storageKey), archives: archiveRows.map((row) => row.storageKey) });
 }
 
 /** Purges expired household records and private encrypted blobs. PostgreSQL locks serialize replica workers. */
@@ -94,25 +110,22 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
   const candidates = await getDb().select({ id: households.id }).from(households)
     .where(lte(households.deleteAfter, new Date())).limit(limit);
   for (const candidate of candidates) {
-    await getDb().transaction(async (transaction) => {
+    const storageKeys = await getDb().transaction(async (transaction): Promise<HouseholdStorageKeys | undefined> => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-delete:${candidate.id}`}, 0))`);
       const [household] = await transaction.select({ id: households.id }).from(households)
         .where(and(eq(households.id, candidate.id), lte(households.deleteAfter, new Date()))).limit(1);
-      if (!household) return;
+      if (!household) return undefined;
       const documentRows = await transaction.select({ storageKey: documentCrypto.storageKey }).from(documents)
         .innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
       const archiveRows = await transaction.select({ storageKey: portableArchives.storageKey }).from(portableArchives)
         .where(eq(portableArchives.householdId, candidate.id));
-      const config = getDocumentConfig();
-      const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-      const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
-      for (const document of documentRows) await documentStorage.deleteCiphertext(document.storageKey);
-      for (const archive of archiveRows) await archiveStorage.delete(archive.storageKey);
       await transaction.insert(auditLog).values({
         householdId: candidate.id, actorUserId: null, entityType: "household", entityId: candidate.id,
         action: "household_purged", changes: { reason: "retention_expired" },
       });
       await transaction.delete(households).where(eq(households.id, candidate.id));
+      return { documents: documentRows.map((row) => row.storageKey), archives: archiveRows.map((row) => row.storageKey) };
     });
+    if (storageKeys) await deleteHouseholdStorage(storageKeys);
   }
 }
