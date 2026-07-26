@@ -6,6 +6,7 @@ import { AdminManager } from "@/components/admin-manager";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
+import { HouseholdRecovery } from "@/components/household-recovery";
 import { Icon } from "@/components/icons";
 import { ItemDetail, type CompletionInput } from "@/components/item-detail";
 import { ItemEditor } from "@/components/item-editor";
@@ -33,7 +34,7 @@ import {
   type ThemePreference,
 } from "@/lib/preferences";
 import { useWorkspace } from "@/lib/preview-workspace";
-import { activeHousehold, cloneSections, createHousehold, type ItemActivity } from "@/lib/workspace";
+import { activeHousehold, cloneSections, createEmptyWorkspace, createHousehold, type ItemActivity } from "@/lib/workspace";
 
 const THEME_STORAGE_KEY = "orbit:theme:v1";
 const PREFERENCE_EVENT = "orbit:preference-change";
@@ -47,7 +48,7 @@ const DEFAULT_THEME: ThemePreference = {
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 
-type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "administration";
+type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
@@ -151,7 +152,8 @@ function householdInitials(name: string) {
 
 export function Dashboard() {
   const { workspace, dispatch, session, syncStatus, syncMessage } = useWorkspace();
-  const household = activeHousehold(workspace);
+  const hasActiveHousehold = workspace.households.length > 0;
+  const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
@@ -223,6 +225,7 @@ export function Dashboard() {
   }, [session]);
 
   if (!session) return <AuthenticationGate loading={syncStatus === "loading"} />;
+  if (!hasActiveHousehold) return <main className="authentication-gate"><section><p className="eyebrow">Your households</p><h1>No active households</h1><p>Removed households are hidden from everyone immediately. Only an owner or instance administrator can restore one before its retention period ends.</p><HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} /></section></main>;
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
@@ -602,6 +605,7 @@ export function Dashboard() {
               <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
               <button role="tab" aria-selected={settingsView === "data"} className={settingsView === "data" ? "active" : ""} onClick={() => setSettingsView("data")}>Your data</button>
               <button role="tab" aria-selected={settingsView === "inbox"} className={settingsView === "inbox" ? "active" : ""} onClick={() => setSettingsView("inbox")}>Inbox</button>
+              {workspace.recoverableHouseholds.length > 0 && <button role="tab" aria-selected={settingsView === "recovery"} className={settingsView === "recovery" ? "active" : ""} onClick={() => setSettingsView("recovery")}>Removed</button>}
               {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
               {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
@@ -685,6 +689,8 @@ export function Dashboard() {
               <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
             ) : settingsView === "inbox" ? (
               <ImapInbox csrfToken={session.csrfToken} />
+            ) : settingsView === "recovery" ? (
+              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} />
             ) : settingsView === "household" && household.canManage ? (
               <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
             ) : settingsView === "sections" && household.canManage ? (

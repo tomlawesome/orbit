@@ -89,10 +89,17 @@ export const householdWorkspaceSchema = z.object({
   dismissedNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
 });
 
+export const recoverableHouseholdSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().trim().min(1).max(60),
+  deleteAfter: z.iso.datetime(),
+});
+
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
-  activeHouseholdId: z.string().min(1),
-  households: z.array(householdWorkspaceSchema).min(1).max(500),
+  activeHouseholdId: z.string().min(1).nullable(),
+  households: z.array(householdWorkspaceSchema).max(500),
+  recoverableHouseholds: z.array(recoverableHouseholdSchema).max(500).default([]),
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
@@ -243,6 +250,7 @@ export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState
   return workspaceSchema.parse({
     version: WORKSPACE_VERSION,
     activeHouseholdId: "local-home",
+    recoverableHouseholds: [],
     households: [{
       id: "local-home",
       name: "My home",
