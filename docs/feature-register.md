@@ -195,7 +195,7 @@ desktop presentation.
 
 ## ORB-FUT-003 — Secure document-management foundation
 
-**Status:** Deferred
+**Status:** Complete
 **Priority:** Critical foundation
 **Phase:** 1
 **Dependencies:** Backup/restore hardening
@@ -268,13 +268,16 @@ foundation, not a deferred enhancement.
 
 ## ORB-FUT-004 — Administrator operations and job visibility
 
-**Status:** Deferred
+**Status:** In progress on `feature/admin-operations`
 **Priority:** High
 **Phase:** 1
 **Dependencies:** Existing administrator authorization
 **Decision status:** Product direction agreed
 **Objective:** Make background work diagnosable without exposing secrets or
 document contents in logs.
+
+The binding implementation and security contract is recorded in
+[administrator operations](administrator-operations.md).
 
 ### Scope
 
