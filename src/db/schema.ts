@@ -267,3 +267,21 @@ export const auditLog = pgTable("audit_log", {
   changes: jsonb("changes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId)]);
+
+/** A private, passphrase-encrypted household portability export. */
+export const portableArchives = pgTable("portable_archives", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull().unique(),
+  contentSha256: text("content_sha256").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  includesDocuments: boolean("includes_documents").notNull().default(false),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  downloadedAt: timestamp("downloaded_at", { withTimezone: true }),
+  purgedAt: timestamp("purged_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("portable_archive_expiry_idx").on(table.expiresAt),
+  index("portable_archive_household_created_idx").on(table.householdId, table.createdAt),
+]);
