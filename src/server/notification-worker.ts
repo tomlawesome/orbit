@@ -121,11 +121,12 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
     SMTP_PASSWORD: readRuntimeSecret(environment, "SMTP_PASSWORD"),
     VAPID_PRIVATE_KEY: readRuntimeSecret(environment, "VAPID_PRIVATE_KEY"),
   });
-  const smtpFieldCount = [parsed.SMTP_HOST, parsed.SMTP_PORT, parsed.SMTP_USER, parsed.SMTP_PASSWORD].filter((value) => value !== "" && value !== undefined).length;
-  if (smtpFieldCount !== 0 && smtpFieldCount !== 4) throw new Error("SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD must be configured together");
-  if (parsed.SMTP_URL && smtpFieldCount) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
-  const smtpUrl = smtpFieldCount === 4
-    ? `${parsed.SMTP_SECURITY === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${parsed.SMTP_PORT}`
+  const smtpRequested = Boolean(parsed.SMTP_HOST || parsed.SMTP_USER || parsed.SMTP_PASSWORD);
+  if (smtpRequested && !(parsed.SMTP_HOST && parsed.SMTP_USER && parsed.SMTP_PASSWORD)) throw new Error("SMTP_HOST, SMTP_USER, and SMTP_PASSWORD must be configured together");
+  if (parsed.SMTP_URL && smtpRequested) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
+  const smtpPort = parsed.SMTP_PORT ?? (parsed.SMTP_SECURITY === "implicit_tls" ? 465 : 587);
+  const smtpUrl = smtpRequested
+    ? `${parsed.SMTP_SECURITY === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${smtpPort}`
     : parsed.SMTP_URL;
   return {
     smtpUrl,
