@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/schema";
 import { categorizeProviderError, getNotificationWorkerConfig } from "@/server/notification-worker";
@@ -7,12 +7,13 @@ import { categorizeProviderError, getNotificationWorkerConfig } from "@/server/n
 /** Sends content-free IMAP receipts from durable records; retry state never stores provider text. */
 export async function runImapReceiptCycle(): Promise<void> {
   const config = getNotificationWorkerConfig();
+  const staleBefore = new Date(Date.now() - Math.max(config.pollMilliseconds * 3, 60_000));
   const candidates = await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-    .where(inArray(imapIngestionMessages.receiptStatus, ["pending", "retry"])).limit(25);
+    .where(or(inArray(imapIngestionMessages.receiptStatus, ["pending", "retry"]), and(eq(imapIngestionMessages.receiptStatus, "processing"), lt(imapIngestionMessages.updatedAt, staleBefore)))).limit(25);
   if (!candidates.length) return;
   const ids = candidates.map((row) => row.id);
   await getDb().update(imapIngestionMessages).set({ receiptStatus: "processing", updatedAt: new Date() })
-    .where(and(inArray(imapIngestionMessages.id, ids), inArray(imapIngestionMessages.receiptStatus, ["pending", "retry"])));
+    .where(and(inArray(imapIngestionMessages.id, ids), or(inArray(imapIngestionMessages.receiptStatus, ["pending", "retry"]), and(eq(imapIngestionMessages.receiptStatus, "processing"), lt(imapIngestionMessages.updatedAt, staleBefore)))));
   const deliveries = await getDb().select({ id: imapIngestionMessages.id, attempts: imapIngestionMessages.receiptAttempts, email: users.email, displayName: users.displayName, count: sql<number>`count(${imapIngestionAttachments.id})::int` })
     .from(imapIngestionMessages).innerJoin(users, eq(users.id, imapIngestionMessages.userId))
     .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
