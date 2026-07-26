@@ -56,7 +56,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken }: D
   const [error, setError] = useState("");
   const [failedUploads, setFailedUploads] = useState<File[]>([]);
   const [captureReview, setCaptureReview] = useState<CaptureReview | null>(null);
-  const [draft, setDraft] = useState<{ id: string; proposal: { title: string; provider?: string; reference?: string }; evidence: { excerpt: string } } | null>(null);
+  const [draft, setDraft] = useState<{ id: string; proposal: { title: string; provider?: string; reference?: string }; evidence: { excerpt: string }; duplicates?: Array<{ itemId: string; title: string; reason: string }> } | null>(null);
   const listUrl = `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`;
 
   const refresh = useCallback(async () => {
@@ -171,7 +171,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken }: D
     setBusyDocumentId(document.id); setError("");
     try { const response = await fetch(`/api/documents/${document.id}/draft`, { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrfToken } }); if (!response.ok) throw new Error(await responseMessage(response)); const payload = await response.json() as { draft: typeof draft }; setDraft(payload.draft); } catch (caught) { setError(caught instanceof Error ? caught.message : "Orbit could not prepare a draft."); } finally { setBusyDocumentId(null); }
   }
-  async function approveDraft() { if (!draft) return; const title = window.prompt("Review the item title before creating it", draft.proposal.title); if (!title) return; const response = await fetch(`/api/document-drafts/${draft.id}/approve`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ sectionId, title }) }); if (!response.ok) { setError(await responseMessage(response)); return; } setMessage("Draft approved and item created."); setDraft(null); }
+  async function approveDraft(mode: "create" | "merge" | "attach", targetItemId?: string) { if (!draft) return; const title = window.prompt("Review the item title before creating it", draft.proposal.title); if (!title) return; const response = await fetch(`/api/document-drafts/${draft.id}/approve`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ sectionId, title, mode, targetItemId }) }); if (!response.ok) { setError(await responseMessage(response)); return; } setMessage(mode === "create" ? "Draft approved and item created." : "Document attached to the selected item."); setDraft(null); }
 
   return (
     <section className="detail-section documents-section" aria-labelledby="documents-heading">
@@ -213,7 +213,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken }: D
           </li>)}
         </ul>
       )}
-      {draft && <section className="detail-action-panel"><h3>Review extracted draft</h3><p><strong>{draft.proposal.title}</strong>{draft.proposal.provider ? ` · ${draft.proposal.provider}` : ""}{draft.proposal.reference ? ` · ${draft.proposal.reference}` : ""}</p><p>{draft.evidence.excerpt.slice(0, 500)}</p><footer><button type="button" onClick={() => setDraft(null)}>Discard</button><button type="button" onClick={() => void approveDraft()}>Approve and create item</button></footer></section>}
+      {draft && <section className="detail-action-panel"><h3>Review extracted draft</h3><p><strong>{draft.proposal.title}</strong>{draft.proposal.provider ? ` · ${draft.proposal.provider}` : ""}{draft.proposal.reference ? ` · ${draft.proposal.reference}` : ""}</p><p>{draft.evidence.excerpt.slice(0, 500)}</p>{draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}<footer><button type="button" onClick={() => setDraft(null)}>Discard</button><button type="button" onClick={() => void approveDraft("create")}>Create separate item</button></footer></section>}
       {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo"><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
     </section>
   );
