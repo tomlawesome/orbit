@@ -351,6 +351,32 @@ phone quick and readable.
 - A compact review screen that works with the on-screen keyboard and safe-area
   insets.
 
+## ORB-FUT-008 — CI and release-host portability
+
+**Status:** Deferred fallback
+**Priority:** Low
+**Phase:** Operational, if GitHub-hosted validation becomes constrained
+**Dependencies:** Portable test scripts and container build
+**Decision status:** Direction agreed; no migration currently required
+**Objective:** Keep routine validation independent of one hosted CI provider
+while retaining GitHub as Orbit's public source and release channel.
+
+### Intended fallback
+
+- Run branch and merge-request validation on the self-hosted GitLab instance.
+- Keep the same fast-check-before-container-build ordering and required quality
+  gates used by GitHub Actions.
+- Push only approved releases, tags, source mirrors, and public container images
+  to GitHub and GHCR.
+- Keep provider-specific YAML thin: test, build, and deployment behaviour must
+  remain in the versioned `scripts/` entry points wherever practical.
+- Use short-lived, narrowly scoped credentials for any GitLab-to-GitHub release
+  publication, with no general GitHub account access.
+
+This option should only be activated if GitHub availability, policy, storage,
+or runner constraints provide a material reason. Standard GitHub-hosted runners
+for the public repository remain the simpler default.
+
 ## Recently delivered hardening foundations
 
 - Per-user email and browser-push reminder preferences.

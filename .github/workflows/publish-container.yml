@@ -1,6 +1,8 @@
 name: Publish Orbit container
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
     tags: ["v*.*.*"]
@@ -21,10 +23,10 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  smoke:
-    name: Compose smoke test
+  fast:
+    name: Static and unit checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -50,6 +52,34 @@ jobs:
 
       - name: Run static and unit checks
         run: bash scripts/test-backend.sh
+
+  smoke:
+    name: Compose smoke test
+    needs: fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.16.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install browser test dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Create isolated test configuration
         run: |
@@ -110,6 +140,7 @@ jobs:
   publish:
     name: Build and publish
     needs: smoke
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
