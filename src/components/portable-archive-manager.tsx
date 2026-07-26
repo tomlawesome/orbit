@@ -10,6 +10,8 @@ export function PortableArchiveManager({ householdId, csrfToken }: { householdId
   const [busy, setBusy] = useState(false);
   const [importPassphrase, setImportPassphrase] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
+  const [importArchive, setImportArchive] = useState<unknown>(null);
+  const [conflicts, setConflicts] = useState<Array<{ id: string; title: string }>>([]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,12 +47,17 @@ export function PortableArchiveManager({ householdId, csrfToken }: { householdId
     setBusy(true); setPreview(null);
     try {
       const archive = JSON.parse(await file.text()) as unknown;
-      const response = await fetch("/api/portable-archives/preview", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ archive, passphrase: importPassphrase }) });
-      const payload = await response.json() as { preview?: { householdName: string; sections: number; items: number; documents: number }; error?: { message: string } };
+      const response = await fetch("/api/portable-archives/preview", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ householdId, archive, passphrase: importPassphrase }) });
+      const payload = await response.json() as { preview?: { householdName: string; sections: number; items: number; documents: number; conflicts: Array<{ id: string; title: string }>; documentsExcluded: boolean }; error?: { message: string } };
       if (!response.ok || !payload.preview) throw new Error(payload.error?.message ?? "Orbit could not read that export");
-      setImportPassphrase("");
-      setPreview(`Ready to import: ${payload.preview.householdName} — ${payload.preview.sections} sections, ${payload.preview.items} items and ${payload.preview.documents} documents. Importing is not available until you review duplicate choices.`);
+      setImportArchive(archive); setConflicts(payload.preview.conflicts);
+      setPreview(`Ready to import: ${payload.preview.householdName} — ${payload.preview.sections} sections and ${payload.preview.items} items.${payload.preview.documentsExcluded ? " Document files will not be imported until they pass Orbit's normal scan and encryption process." : ""}`);
     } catch (error) { setPreview(error instanceof Error ? error.message : "Orbit could not read that export"); } finally { setBusy(false); }
+  }
+
+  async function commitImport() {
+    if (!importArchive) return; setBusy(true);
+    try { const response = await fetch("/api/portable-archives/import", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ householdId, archive: importArchive, passphrase: importPassphrase, conflictItemIds: conflicts.map((conflict) => conflict.id) }) }); const payload = await response.json() as { importedItems?: number; error?: { message: string } }; if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not import that export"); setPreview(`Imported ${payload.importedItems ?? 0} items. Duplicate items were skipped.`); setImportArchive(null); setConflicts([]); setImportPassphrase(""); } catch (error) { setPreview(error instanceof Error ? error.message : "Orbit could not import that export"); } finally { setBusy(false); }
   }
 
   return <section className="settings-section">
@@ -75,6 +82,7 @@ export function PortableArchiveManager({ householdId, csrfToken }: { householdId
       <label>Export passphrase<input type="password" autoComplete="off" minLength={12} maxLength={256} required value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
       <button type="submit" disabled={busy}>{busy ? "Checking export…" : "Preview import"}</button>
       {preview && <p role="status">{preview}</p>}
+      {!!importArchive && <button type="button" disabled={busy} onClick={() => void commitImport}>{conflicts.length ? `Import and skip ${conflicts.length} duplicate${conflicts.length === 1 ? "" : "s"}` : "Import reviewed items"}</button>}
     </form>
   </section>;
 }
