@@ -43,9 +43,10 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
   isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
+  imapRecipientAliasSha256: text("imap_recipient_alias_sha256"),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
-}, (table) => [index("user_email_lookup_idx").on(table.email)]);
+}, (table) => [index("user_email_lookup_idx").on(table.email), index("user_imap_alias_lookup_idx").on(table.imapRecipientAliasSha256)]);
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
