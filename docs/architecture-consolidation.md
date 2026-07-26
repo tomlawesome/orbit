@@ -16,11 +16,14 @@ leaves a releasable, tested application.
   and recovery/create/permanent-delete choices share one UI and API contract.
 - IMAP receipt delivery now uses database leases, so concurrent replicas cannot
   send a duplicate receipt. A migration adds the receipt lease fields and claim
-  index.
+  index. IMAP polling now advances from its durable UID/UIDVALIDITY checkpoint
+  rather than rescanning every unseen message.
+- Household deletion removes database access before encrypted-file cleanup, so
+  external filesystem work never runs while a database transaction is open.
 
-The remaining work in this programme is intentionally still open: IMAP
-checkpoint/index work, the broader worker side-effect boundary, dashboard and
-repository extraction, and authenticated browser coverage.
+The remaining work in this programme is intentionally still open: indexed
+opaque-recipient lookup, the broader worker side-effect boundary, dashboard
+and repository extraction, and authenticated browser coverage.
 
 ## Outcomes
 
