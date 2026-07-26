@@ -154,6 +154,7 @@ export function Dashboard() {
   const { workspace, dispatch, session, syncStatus, syncMessage } = useWorkspace();
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
+  const recoveryRequired = workspace.recoverableHouseholds.length > 0 && (!hasActiveHousehold || !household.onboardingComplete);
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
@@ -780,9 +781,9 @@ export function Dashboard() {
 
       {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
 
-      {!hasActiveHousehold && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
+      {recoveryRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
 
-      {!household.onboardingComplete && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
+      {!household.onboardingComplete && !recoveryRequired && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
       {notice && (
         <div className="action-toast" role="status">
