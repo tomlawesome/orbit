@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -116,7 +116,13 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
 
   const recoverableHouseholds = administrator
     ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
-    : await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId)).where(and(eq(memberships.userId, userId), eq(memberships.role, "owner"), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter));
+    : await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households)
+      .leftJoin(memberships, and(eq(memberships.householdId, households.id), eq(memberships.userId, userId)))
+      .where(and(
+        isNotNull(households.deletionRequestedAt),
+        sql`${households.deleteAfter} > now()`,
+        or(eq(memberships.role, "owner"), eq(households.deletionRequestedByUserId, userId)),
+      )).orderBy(asc(households.deleteAfter));
 
   if (!householdRows.length) {
     if (recoverableHouseholds.length) return workspaceSchema.parse({ version: 1, activeHouseholdId: null, households: [], recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })) });
