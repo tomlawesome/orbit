@@ -60,29 +60,24 @@ export function PortableArchiveManager({ householdId, csrfToken }: { householdId
     try { const response = await fetch("/api/portable-archives/import", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ householdId, archive: importArchive, passphrase: importPassphrase, conflictItemIds: conflicts.map((conflict) => conflict.id) }) }); const payload = await response.json() as { importedItems?: number; error?: { message: string } }; if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not import that export"); setPreview(`Imported ${payload.importedItems ?? 0} items. Duplicate items were skipped.`); setImportArchive(null); setConflicts([]); setImportPassphrase(""); } catch (error) { setPreview(error instanceof Error ? error.message : "Orbit could not import that export"); } finally { setBusy(false); }
   }
 
-  return <section className="settings-section">
-    <p className="eyebrow">Your data</p>
-    <h3>Portable household export</h3>
-    <p>Download a passphrase-encrypted archive of this household. Orbit never retains the passphrase. The encrypted file expires after 24 hours.</p>
-    <form className="settings-form" onSubmit={submit}>
-      <label>Export passphrase
-        <input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
-      </label>
-      <label>Confirm passphrase
-        <input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
-      </label>
-      <label className="toggle-row"><input type="checkbox" checked={includeDocuments} onChange={(event) => setIncludeDocuments(event.target.checked)} /> Include original document bytes (up to 128 MiB)</label>
+  return <section className="settings-section portable-archive">
+    <div className="portable-archive-intro"><p className="eyebrow">Your data</p><h3>Move your household data safely</h3><p>Create a private, passphrase-encrypted archive, or bring an existing Orbit archive into this household.</p></div>
+    <form className="portable-archive-card" onSubmit={submit}>
+      <div><p className="portable-archive-kicker">Export</p><h4>Portable household export</h4><p>Orbit never retains the passphrase. Your encrypted download expires after 24 hours.</p></div>
+      <div className="portable-archive-fields">
+        <label className="field"><span>Export passphrase</span><input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={passphrase} onChange={(event) => setPassphrase(event.target.value)} /></label>
+        <label className="field"><span>Confirm passphrase</span><input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      </div>
+      <label className="portable-archive-toggle"><input type="checkbox" checked={includeDocuments} onChange={(event) => setIncludeDocuments(event.target.checked)} /><span><strong>Include original document files</strong><small>Include files up to a combined 128 MiB.</small></span></label>
       <button className="wizard-primary" type="submit" disabled={busy}>{busy ? "Preparing encrypted export…" : "Create encrypted export"}</button>
-      {status && <p role="status">{status}</p>}
+      {status && <p className="portable-archive-message" role="status">{status}</p>}
     </form>
-    <h3>Preview an import</h3>
-    <p>Orbit checks the encrypted archive before making any changes. No records are imported from this screen.</p>
-    <form className="settings-form" onSubmit={previewImport}>
-      <label>Encrypted export file<input name="archive" type="file" accept="application/json,.json" required /></label>
-      <label>Export passphrase<input type="password" autoComplete="off" minLength={12} maxLength={256} required value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
-      <button type="submit" disabled={busy}>{busy ? "Checking export…" : "Preview import"}</button>
-      {preview && <p role="status">{preview}</p>}
-      {!!importArchive && <button type="button" disabled={busy} onClick={() => void commitImport}>{conflicts.length ? `Import and skip ${conflicts.length} duplicate${conflicts.length === 1 ? "" : "s"}` : "Import reviewed items"}</button>}
+    <form className="portable-archive-card portable-archive-import" onSubmit={previewImport}>
+      <div><p className="portable-archive-kicker">Import</p><h4>Preview an import</h4><p>Orbit checks an archive before making any changes. You review duplicate items before import.</p></div>
+      <label className="field"><span>Encrypted export file</span><input name="archive" type="file" accept="application/json,.json" required /></label>
+      <label className="field"><span>Export passphrase</span><input type="password" autoComplete="off" minLength={12} maxLength={256} required value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
+      <div className="portable-archive-actions"><button className="portable-archive-secondary" type="submit" disabled={busy}>{busy ? "Checking export…" : "Preview import"}</button>{!!importArchive && <button className="wizard-primary" type="button" disabled={busy} onClick={() => void commitImport}>{conflicts.length ? `Import and skip ${conflicts.length} duplicate${conflicts.length === 1 ? "" : "s"}` : "Import reviewed items"}</button>}</div>
+      {preview && <p className="portable-archive-message" role="status">{preview}</p>}
     </form>
   </section>;
 }
