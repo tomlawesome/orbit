@@ -99,6 +99,13 @@
       "when": 1785082000000,
       "tag": "0013_imap_review_completion",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785083000000,
+      "tag": "0014_imap_review_discard",
+      "breakpoints": true
     }
   ]
 }
