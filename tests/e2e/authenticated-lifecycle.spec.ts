@@ -98,6 +98,9 @@ test.describe("authenticated household lifecycle", () => {
     // the typed permanent-delete path while a household is recoverable.
     await expect(page.getByRole("button", { name: "Permanently delete" })).toBeVisible();
     await page.getByRole("button", { name: "Restore" }).click();
+    // Restore triggers a full reload. The recovery list already contains the
+    // household name, so waiting for that text alone can observe the old page.
+    await expect(page.getByRole("button", { name: "Restore" })).toHaveCount(0);
     await expect(page.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
     const restoredWorkspace = await readWorkspace(page);
