@@ -19,6 +19,7 @@ interface UploadingDocument {
   name: string;
   progress: number;
 }
+interface CaptureReview { file: File; previewUrl: string; rotation: number }
 
 interface DocumentManagerProps {
   householdId: string;
@@ -51,6 +52,8 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [failedUploads, setFailedUploads] = useState<File[]>([]);
+  const [captureReview, setCaptureReview] = useState<CaptureReview | null>(null);
   const listUrl = `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`;
 
   const refresh = useCallback(async () => {
@@ -72,6 +75,8 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
     const task = window.setTimeout(() => void refresh(), 0);
     return () => window.clearTimeout(task);
   }, [refresh]);
+
+  useEffect(() => () => { if (captureReview) URL.revokeObjectURL(captureReview.previewUrl); }, [captureReview]);
 
   function updateUpload(id: string, patch: Partial<UploadingDocument>) {
     setUploading((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
@@ -95,6 +100,7 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
       request.onerror = () => {
         setError(`Could not upload ${file.name}. Check your connection and try again.`);
         setUploading((current) => current.filter((entry) => entry.id !== uploadId));
+        setFailedUploads((current) => [...current, file]);
         resolve();
       };
       request.onload = () => {
@@ -106,6 +112,7 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
             uploadError = body.message ?? body.error?.message ?? uploadError;
           } catch { /* Use the safe generic upload error. */ }
           setError(uploadError);
+          setFailedUploads((current) => [...current, file]);
           resolve();
           return;
         }
@@ -120,6 +127,19 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     for (const file of files) await upload(file);
+  }
+
+  function selectCamera(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { setError("Choose a photo from your camera."); return; }
+    setCaptureReview({ file, previewUrl: URL.createObjectURL(file), rotation: 0 });
+  }
+
+  function closeCaptureReview() {
+    if (captureReview) URL.revokeObjectURL(captureReview.previewUrl);
+    setCaptureReview(null);
   }
 
   async function mutate(document: ItemDocument, action: "delete" | "restore") {
@@ -152,10 +172,11 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
         <label className="document-upload" htmlFor={inputId}>Add files</label>
         <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/*" multiple onChange={selectFiles} />
         <label className="document-upload document-camera" htmlFor={cameraInputId}>Take photo</label>
-        <input id={cameraInputId} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={selectFiles} />
+        <input id={cameraInputId} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={selectCamera} />
       </div>
       <p className="document-live" aria-live="polite">{message}</p>
       {error && <p className="document-error" role="alert">{error}</p>}
+      {failedUploads.length > 0 && <ul className="document-list" aria-label="Uploads ready to retry">{failedUploads.map((file, index) => <li className="document-row" key={`${file.name}-${file.lastModified}-${index}`}><div><strong>{file.name}</strong><span>Upload did not finish</span></div><button type="button" onClick={() => { setFailedUploads((current) => current.filter((_, itemIndex) => itemIndex !== index)); void upload(file); }}>Retry</button></li>)}</ul>}
 
       {uploading.length > 0 && <ul className="document-list" aria-label="Uploading documents">
         {uploading.map((entry) => <li key={entry.id} className="document-row uploading">
@@ -182,6 +203,7 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
           </li>)}
         </ul>
       )}
+      {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo">{/* Blob URLs cannot use Next's image optimizer. */}{/* eslint-disable-next-line @next/next/no-img-element */}<img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
     </section>
   );
 }
