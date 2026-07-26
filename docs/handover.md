@@ -95,9 +95,9 @@ and configuration tests remain in place.
 - Replace the per-poll IMAP alias backfill with an explicit, resumable,
   rate-bounded maintenance job if user counts grow materially. Preserve the
   temporary null-index fallback until all legacy accounts are indexed.
-- Review all external storage cleanup paths for durable state-before-side-effect
-  ordering. `document-worker.ts` and portable archive reconciliation are the
-  current reference pattern.
+- Document purge, household purge, and portable-archive reconciliation now
+  commit durable state before encrypted-file cleanup. A failed cleanup is an
+  orphan reconciled later, never a reason to hold database state open.
 - Consider a dedicated worker service only if deployment needs multiple web
   replicas; current `WORKER_ENABLED=true` remains the supported simple
   one-app-container deployment and DB leases make receipt delivery safe.

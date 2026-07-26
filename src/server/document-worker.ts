@@ -74,7 +74,7 @@ async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> 
 }
 
 async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
-  await getDb().transaction(async (transaction) => {
+  const storageKey = await getDb().transaction(async (transaction): Promise<string | undefined> => {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`,
     );
@@ -87,7 +87,7 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
         and lease_token = ${job.leaseToken}::uuid
       for update
     `);
-    if (activeClaims.length === 0) return;
+    if (activeClaims.length === 0) return undefined;
 
     const [record] = await transaction
       .select({
@@ -114,14 +114,9 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
         eq(documentJobs.status, "processing"),
         eq(documentJobs.leaseToken, job.leaseToken),
       ));
-      return;
+      return undefined;
     }
 
-    if (record.storageKey) {
-      const config = getDocumentConfig();
-      await new LocalDocumentStorage(config.storageRoot, config.quarantineRoot)
-        .deleteCiphertext(record.storageKey);
-    }
     await transaction.delete(documentCrypto).where(eq(documentCrypto.documentId, job.documentId));
     await transaction.update(documents).set({
       lifecycle: "deleted",
@@ -150,7 +145,16 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
       action: "document_purged",
       changes: { itemId: record.itemId, reason: "retention_expired" },
     });
+    return record.storageKey ?? undefined;
   });
+
+  if (!storageKey) return;
+  const config = getDocumentConfig();
+  // The durable record is already gone. If local cleanup is interrupted,
+  // reconciliation safely removes the encrypted orphan on a later cycle.
+  await new LocalDocumentStorage(config.storageRoot, config.quarantineRoot)
+    .deleteCiphertext(storageKey)
+    .catch(() => undefined);
 }
 
 async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
