@@ -29,6 +29,13 @@
       "when": 1785063703417,
       "tag": "0003_ambitious_kronos",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785069719591,
+      "tag": "0004_admin_operations",
+      "breakpoints": true
     }
   ]
 }
