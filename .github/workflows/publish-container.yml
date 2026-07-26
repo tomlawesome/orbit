@@ -172,9 +172,7 @@ jobs:
   candidate:
     name: Publish release candidate
     needs: smoke
-    if: >-
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-      && startsWith(github.ref, 'refs/heads/release/')
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref_name, 'release/') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
