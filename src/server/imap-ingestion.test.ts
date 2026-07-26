@@ -9,7 +9,7 @@ describe("IMAP ingestion configuration", () => {
     expect(() => getImapIngestionConfig(environment({ IMAP_HOST: "imap.example.test" })))
       .toThrow("must be configured together");
     expect(() => getImapIngestionConfig(environment({ IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password" })))
-      .toThrow("SMTP_URL must be configured");
+      .toThrow("SMTP must be configured");
   });
 
   it("uses verified implicit TLS and a bounded poll interval", () => {
@@ -24,6 +24,14 @@ describe("IMAP ingestion configuration", () => {
       IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
       SMTP_URL: "smtps://smtp.example.test",
     }))).toMatchObject({ enabled: true, port: 993, pollMilliseconds: 30_000, mailbox: "INBOX" });
+  });
+
+  it("accepts individual SMTP configuration", () => {
+    expect(getImapIngestionConfig(environment({
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_SECRET: "test-alias-secret-that-is-long-enough",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test",
+    }))).toMatchObject({ enabled: true });
   });
 
   it("derives opaque aliases and rejects non-matching provider recipients", () => {
