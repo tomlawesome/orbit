@@ -52,7 +52,14 @@ actual_hash="$(compose exec -T orbit-app sha256sum "$storage_path" | awk '{print
 marker="$(compose exec -T orbit-db sh -c \
   'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select value from orbit_ci_backup_marker;"')"
 [[ "$marker" == "preserved" ]] || fail "Restored database marker is missing."
-curl --fail --silent --show-error --max-time 20 http://127.0.0.1:3000/api/health >/dev/null ||
-  fail "Orbit did not become healthy after restoration."
+
+# A restored container has a fresh startup path. Poll its endpoint rather than
+# racing the first TCP accept, which can briefly reset while Node initializes.
+health_deadline=$((SECONDS + 30))
+until curl --fail --silent --max-time 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1; do
+  (( SECONDS < health_deadline )) ||
+    fail "Orbit did not become healthy after restoration."
+  sleep 1
+done
 
 printf 'Orbit backup test: database and encrypted document bytes round-tripped successfully.\n'
