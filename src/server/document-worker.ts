@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { purgeExpiredPortableArchives } from "@/server/portable-archive-repository";
+import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 
 interface ClaimedDocumentJob {
@@ -247,6 +247,7 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
     : 0;
   if (!Number.isFinite(lastReconciliation) || Date.now() - lastReconciliation >= 15 * 60 * 1_000) {
     await reconcileDocumentStorage();
+    await reconcilePortableArchiveStorage();
   }
   const jobs = await claimExpiredPurgeJobs();
   for (const job of jobs) {

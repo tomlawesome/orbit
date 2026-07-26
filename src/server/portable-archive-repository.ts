@@ -156,6 +156,19 @@ export async function purgeExpiredPortableArchives(): Promise<void> {
   }
 }
 
+/** Removes abandoned encrypted export files after a failed write or household purge. */
+export async function reconcilePortableArchiveStorage(): Promise<void> {
+  const records = await getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives)
+    .where(isNull(portableArchives.purgedAt));
+  const referenced = new Set(records.map((record) => record.storageKey));
+  const orphanBoundary = Date.now() - 24 * 60 * 60 * 1_000;
+  for (const object of await storage().list()) {
+    if (!referenced.has(object.storageKey) && object.modifiedAt.getTime() < orphanBoundary) {
+      await storage().delete(object.storageKey);
+    }
+  }
+}
+
 /** Decrypts and validates an archive in memory only; it never writes household data. */
 export function previewPortableArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
