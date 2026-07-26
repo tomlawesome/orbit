@@ -148,7 +148,8 @@ bash scripts/configure.sh
 ```
 
 This creates `.env-orbit` plus the private `.orbit-secrets` directory without
-starting containers. It also generates and persists Orbit's VAPID Web Push key
+starting containers. It also runs the selected Orbit image once, with only a
+key-generation command, to generate and persist Orbit's VAPID Web Push key
 pair on first setup: the private key stays in `.orbit-secrets` and only the
 public key is written to `.env-orbit`. Configure your OIDC provider in
 `.env-orbit`. SMTP is required when you are ready to exercise email delivery.

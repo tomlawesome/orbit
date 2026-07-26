@@ -36,6 +36,7 @@ COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/standalone ./
 COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/static ./.next/static
 COPY --from=builder --chown=orbit:orbit /opt/orbit/drizzle ./drizzle
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
+COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
 RUN chmod 0755 ./scripts/container-entrypoint.sh
 USER root
