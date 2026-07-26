@@ -97,6 +97,8 @@ export const recoverableHouseholdSchema = z.object({
 
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
+  /** The server decides whether the user may enter a household or must choose one. */
+  householdLanding: z.enum(["active", "choose"]).default("active"),
   activeHouseholdId: z.string().min(1).nullable(),
   households: z.array(householdWorkspaceSchema).max(500),
   recoverableHouseholds: z.array(recoverableHouseholdSchema).max(500).default([]),
@@ -249,6 +251,7 @@ export function createHousehold(input: {
 export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState {
   return workspaceSchema.parse({
     version: WORKSPACE_VERSION,
+    householdLanding: "choose",
     activeHouseholdId: "local-home",
     recoverableHouseholds: [],
     households: [{
@@ -298,6 +301,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       if (state.households.some((household) => household.id === command.household.id)) return state;
       return workspaceSchema.parse({
         ...state,
+        householdLanding: "active",
         activeHouseholdId: command.household.id,
         households: [...state.households, command.household],
       });

@@ -15,7 +15,6 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { defaultSections } from "@/lib/domain";
 import {
   itemActivitySchema,
   workspaceSchema,
@@ -65,32 +64,6 @@ async function requireHouseholdAccess(userId: string, householdId: string, owner
   }
 }
 
-async function createInitialHousehold(userId: string, sessionId: string): Promise<string> {
-  const householdId = randomUUID();
-  await getDb().transaction(async (transaction) => {
-    await transaction.insert(households).values({
-      id: householdId,
-      name: "My home",
-      timezone: "Europe/London",
-      defaultCurrency: "GBP",
-      setupCompleted: false,
-    });
-    await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
-    await transaction.insert(sections).values(defaultSections.map((section, position) => ({
-      id: randomUUID(),
-      householdId,
-      slug: section.id,
-      name: section.name,
-      icon: section.icon,
-      accent: section.accent,
-      position,
-      visible: section.visible,
-    })));
-    await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
-  });
-  return householdId;
-}
-
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
  * contract. The browser therefore stays independent from database structure.
@@ -125,9 +98,13 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       )).orderBy(asc(households.deleteAfter));
 
   if (!householdRows.length) {
-    if (recoverableHouseholds.length) return workspaceSchema.parse({ version: 1, activeHouseholdId: null, households: [], recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })) });
-    const initialId = await createInitialHousehold(userId, sessionId);
-    return readWorkspace(userId, sessionId, initialId);
+    return workspaceSchema.parse({
+      version: 1,
+      householdLanding: "choose",
+      activeHouseholdId: null,
+      households: [],
+      recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
+    });
   }
 
   const householdIds = householdRows.map((household) => household.id);
@@ -179,6 +156,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
 
   return workspaceSchema.parse({
     version: 1,
+    householdLanding: "active",
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
