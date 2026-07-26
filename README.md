@@ -233,7 +233,7 @@ sample household items or seeded fake records.
 ### Requirements
 
 - Node.js 22 or later
-- pnpm 10
+- pnpm 11
 - PostgreSQL 17, or Docker for the database only
 
 ### Start the development stack
