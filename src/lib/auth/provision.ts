@@ -17,7 +17,8 @@ export interface ProvisionedUser {
  */
 export async function provisionIdentity(identity: VerifiedIdentity): Promise<ProvisionedUser> {
   return getDb().transaction(async (transaction) => {
-    const lockKey = `${identity.issuer}\u0000${identity.subject}`;
+    // JSON preserves the issuer/subject boundary without PostgreSQL-forbidden NUL bytes.
+    const lockKey = JSON.stringify([identity.issuer, identity.subject]);
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
 
     const [existing] = await transaction
