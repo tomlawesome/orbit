@@ -160,7 +160,7 @@ the reviewed draft.
 
 ## ORB-FUT-002 — Mobile and installed-PWA information density
 
-**Status:** Deferred
+**Status:** In progress
 **Priority:** High
 **Phase:** 2 — independent mobile polish
 **Dependencies:** Browser test coverage
@@ -299,7 +299,7 @@ The binding implementation and security contract is recorded in
 
 ## ORB-FUT-005 — Account and household lifecycle
 
-**Status:** Partially delivered
+**Status:** In progress
 **Priority:** Medium
 **Phase:** 2
 **Dependencies:** Export and backup tooling
@@ -311,7 +311,9 @@ Ownership transfer to an existing household member is delivered. Remaining
 scope includes:
 
 - administrator account disable/enable with immediate session revocation;
-- user departure from households they do not own;
+- user departure from households they do not own; **delivered** — members can
+  leave their own household, while owners remain protected from leaving it
+  ownerless;
 - protection against leaving any household without an owner;
 - protected household deletion with typed confirmation and a retention window;
 - rules for identities removed or renamed by the OIDC provider;

@@ -55,6 +55,7 @@ const textSizeLabels = {
   standard: { name: "Standard", detail: "Original compact sizing" },
   comfortable: { name: "Comfortable", detail: "Larger and easier to scan" },
   large: { name: "Large", detail: "Maximum in-app text size" },
+  "extra-large": { name: "Extra large", detail: "Maximum readability without browser zoom" },
 } as const;
 const urgencyPaletteLabels = {
   classic: { name: "Traditional", detail: "Red, orange, yellow and green" },

@@ -80,6 +80,8 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
   }
 
   async function remove(member: Member) {
+    const leaving = member.id === session.user.id;
+    if (leaving && !window.confirm("Leave this household? You will no longer be able to see its items.")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -93,7 +95,8 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
       if (!response.ok || !payload.members) throw new Error(payload.error?.message || "Member could not be removed");
       setMembers(payload.members);
       setCandidates(payload.candidates ?? []);
-      setMessage(`${member.displayName} was removed from this household.`);
+      setMessage(leaving ? "You left this household." : `${member.displayName} was removed from this household.`);
+      if (leaving) window.location.reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Member could not be removed");
     } finally {
@@ -145,6 +148,11 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
                 <span className="member-actions">
                   <button type="button" disabled={busy} onClick={() => transferOwnership(member)}>Make owner</button>
                   <button type="button" disabled={busy} onClick={() => remove(member)}>Remove</button>
+                </span>
+              )}
+              {!isOwner && member.id === session.user.id && member.role !== "owner" && (
+                <span className="member-actions">
+                  <button type="button" disabled={busy} onClick={() => remove(member)}>Leave household</button>
                 </span>
               )}
             </article>
