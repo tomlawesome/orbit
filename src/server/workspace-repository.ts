@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
-import { z } from "zod";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -22,47 +21,9 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
-import { isInstanceAdministrator } from "@/server/authorization";
 import { planOwnershipTransfer } from "@/server/household-ownership";
-
-const uuidSchema = z.uuid();
-
-function validUuid(value: string): boolean {
-  return uuidSchema.safeParse(value).success;
-}
-
-function requireUuid(value: string, field: string): string {
-  if (!validUuid(value)) throw new AppError("invalid_identifier", `${field} is not a valid identifier`, 422);
-  return value;
-}
-
-function sectionSlug(name: string, id: string): string {
-  const normalized = name.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_-]+/g, "-");
-  return `${normalized || "section"}-${id.slice(0, 8)}`;
-}
-
-async function membershipRole(userId: string, householdId: string): Promise<"owner" | "member"> {
-  const [membership] = await getDb()
-    .select({ role: memberships.role })
-    .from(memberships)
-    .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId)))
-    .limit(1);
-  if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
-  return membership.role;
-}
-
-async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false): Promise<void> {
-  requireUuid(householdId, "Household");
-  const [lifecycle] = await getDb().select({ deletionRequestedAt: households.deletionRequestedAt })
-    .from(households).where(eq(households.id, householdId)).limit(1);
-  if (!lifecycle) throw new AppError("household_not_found", "That household is not available", 404);
-  if (lifecycle.deletionRequestedAt) throw new AppError("household_pending_deletion", "This household is scheduled for deletion and cannot be changed", 409);
-  if (await isInstanceAdministrator(userId)) return;
-  const role = await membershipRole(userId, householdId);
-  if (ownerOnly && role !== "owner") {
-    throw new AppError("owner_required", "Only a household owner can make this change", 403);
-  }
-}
+import { requireHouseholdAccess, requireUuid, sectionSlug, validUuid } from "@/server/workspace-access";
+import { isInstanceAdministrator } from "@/server/authorization";
 
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
