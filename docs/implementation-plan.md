@@ -240,9 +240,9 @@ is visible without renumbering work already completed.
    acceptance coverage remains.
 6. **Document draft creation** — In progress: bounded evidence and a
    user-approved create-item path are implemented; acceptance coverage remains.
-7. **Duplicate comparison** — In progress: household-scoped hash, reference
-   and provider/title candidates with create, merge and attach-only choices are
-   implemented; date comparison and acceptance coverage remain.
+7. **Duplicate comparison** — In progress: household-scoped hash, reference,
+   provider/title and date-overlap candidates with create, merge and attach-only
+   choices are implemented; browser acceptance coverage remains.
 8. **IMAP and SMTP workflow** — In progress: safest first-release design is
    selected, but implementation awaits a maintained IMAP dependency after the
    local pnpm store/version conflict is resolved.

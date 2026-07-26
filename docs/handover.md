@@ -81,8 +81,8 @@ numbers and update statuses in place; do not renumber it.
 5. Mobile document capture — in progress; review, rotation, progress and retry
    exist; browser acceptance remains.
 6. User-approved document draft creation — in progress; review/approval exists.
-7. Duplicate comparison — in progress; explicit choices exist; date comparison
-   remains.
+7. Duplicate comparison — in progress; hash/reference/provider/title/date
+   comparisons and explicit choices exist; browser acceptance remains.
 8. IMAP ingestion and SMTP review/receipt workflow — in progress; blocked on a
    maintained IMAP dependency because local pnpm metadata and store versions
    conflict.
