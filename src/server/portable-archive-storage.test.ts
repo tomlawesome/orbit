@@ -29,4 +29,13 @@ describe("portable archive storage", () => {
     const storage = new PortableArchiveStorage(root);
     await expect(storage.write("../outside", Buffer.from("x"))).rejects.toThrow("Invalid portable archive storage key");
   });
+
+  it("lists only valid archive ciphertext objects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "orbit-portable-archive-"));
+    roots.push(root);
+    const storage = new PortableArchiveStorage(root);
+    const key = storage.createStorageKey();
+    await storage.write(key, Buffer.from("encrypted-content"));
+    await expect(storage.list()).resolves.toEqual([expect.objectContaining({ storageKey: key })]);
+  });
 });
