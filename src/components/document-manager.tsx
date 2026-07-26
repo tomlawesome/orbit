@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- camera previews use local blob URLs. */
 
 import { useCallback, useEffect, useId, useState, type ChangeEvent } from "react";
 
@@ -203,7 +204,7 @@ export function DocumentManager({ householdId, itemId, csrfToken }: DocumentMana
           </li>)}
         </ul>
       )}
-      {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo">{/* Blob URLs cannot use Next's image optimizer. */}{/* eslint-disable-next-line @next/next/no-img-element */}<img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
+      {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo"><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
     </section>
   );
 }
