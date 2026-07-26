@@ -42,3 +42,11 @@ export function decryptPortableArchive(archive: EncryptedPortableArchive, passph
     return Buffer.concat([decipher.update(Buffer.from(archive.ciphertext, "base64url")), decipher.final()]);
   } finally { key.fill(0); }
 }
+
+/** Validates the outer wire shape before deriving a passphrase key. */
+export function isEncryptedPortableArchive(value: unknown): value is EncryptedPortableArchive {
+  if (!value || typeof value !== "object") return false;
+  const archive = value as Record<string, unknown>;
+  return archive.version === 1 && archive.algorithm === "aes-256-gcm" && archive.kdf === "scrypt"
+    && ["salt", "iv", "authTag", "ciphertext"].every((field) => typeof archive[field] === "string" && archive[field].length > 0);
+}
