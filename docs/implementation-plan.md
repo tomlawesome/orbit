@@ -37,6 +37,20 @@ Static analysis and unit tests run before container, browser, accessibility,
 and privacy checks. Pull-request runs never publish images. ARM64 publishing is
 reserved for versioned releases or an explicit manual request.
 
+## Current release-candidate focus
+
+The architecture-consolidation candidate is validated by CI run 80 on pull
+request [#7](https://github.com/tomlawesome/orbit/pull/7): static analysis,
+unit tests, production image build/startup, non-root secret handling, ClamAV,
+backup/restore, signed-out privacy, authenticated OIDC browser coverage and
+accessibility all passed. Publish and manually test this candidate before
+merging it into `main`.
+
+The remaining dashboard/workspace source-file splits and an IMAP review browser
+fixture are maintainability/coverage follow-ups. They are not a reason to hold
+the candidate back: current unit tests cover IMAP configuration and alias
+privacy, while live provider acceptance remains an operator-owned test.
+
 ## Release promotion policy
 
 `release/secure-documents` is Orbit's integration branch for accepted release
@@ -233,10 +247,11 @@ is visible without renumbering work already completed.
    Conflict-aware import preview and transactionally committed metadata import
    are implemented. Original document bytes are excluded from import pending
    normal scan/encryption.
-4. **Household lifecycle** — In progress: typed-confirmation removal hides a
-   household from every member immediately, while an owner or instance
+4. **Household lifecycle** — Candidate validated: typed-confirmation removal
+   hides a household from every member immediately, while an owner or instance
    administrator can restore its minimal recovery record for 30 days before
-   worker-driven purge; add integration coverage before acceptance.
+   worker-driven purge. Authenticated OIDC browser coverage passed in CI run
+   80; real-world candidate acceptance remains.
 5. **Mobile document capture** — In progress: direct camera/file capture,
    visual review/rotation, progress and retry are implemented; browser
    acceptance coverage remains.
