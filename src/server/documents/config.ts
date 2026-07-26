@@ -17,6 +17,8 @@ const documentEnvironmentSchema = z.object({
   CLAMAV_HOST: z.string().min(1).default("orbit-clamav"),
   CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
   CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+  TIKA_URL: z.preprocess((value) => value === "" ? undefined : value, z.url().optional()),
+  TIKA_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(45_000),
   DOCUMENT_KEK: z.string().regex(/^[a-fA-F0-9]{64}$/, "DOCUMENT_KEK must be exactly 32 bytes encoded as hexadecimal"),
 });
 
@@ -31,6 +33,10 @@ export interface DocumentConfig {
   clamAv: {
     host: string;
     port: number;
+    timeoutMs: number;
+  };
+  tika: {
+    url: URL | null;
     timeoutMs: number;
   };
   keyEncryptionKey: Buffer;
@@ -67,6 +73,10 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
       host: parsed.CLAMAV_HOST,
       port: parsed.CLAMAV_PORT,
       timeoutMs: parsed.CLAMAV_TIMEOUT_MS,
+    },
+    tika: {
+      url: parsed.TIKA_URL ? new URL(parsed.TIKA_URL) : null,
+      timeoutMs: parsed.TIKA_TIMEOUT_MS,
     },
     keyEncryptionKey,
     keyId: createHash("sha256").update("orbit-document-kek-v1\0").update(keyEncryptionKey).digest("hex").slice(0, 24),
