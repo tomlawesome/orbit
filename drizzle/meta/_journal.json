@@ -71,6 +71,13 @@
       "when": 1785078000000,
       "tag": "0009_imap_ingestion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785079000000,
+      "tag": "0010_imap_attachment_holding",
+      "breakpoints": true
     }
   ]
 }
