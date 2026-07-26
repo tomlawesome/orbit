@@ -523,6 +523,11 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .heat-preview-classic i:nth-child(2) { background: #f97316; }
 .heat-preview-classic i:nth-child(3) { background: #eab308; }
 .heat-preview-classic i:nth-child(4) { background: #22c55e; }
+/* The themed sample must show the active colourway, not the selected live
+   heat-map variables (which classic deliberately overrides on app-frame). */
+.heat-preview-themed i:nth-child(1) { background: var(--coral); }
+.heat-preview-themed i:nth-child(2) { background: var(--sun); }
+.heat-preview-themed i:nth-child(3), .heat-preview-themed i:nth-child(4) { background: var(--forest); }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
 .section-heading > button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 9px; color: white; background: var(--forest); display: flex; align-items: center; gap: 5px; font-size: calc(9px + var(--text-bump)); font-weight: 750; cursor: pointer; }
 .section-heading > button:disabled { opacity: .45; cursor: not-allowed; }
