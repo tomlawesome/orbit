@@ -1,8 +1,11 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { households, imapIngestionAttachments, imapIngestionMessages, items, memberships, sections } from "@/db/schema";
+import { documents, households, imapIngestionAttachments, imapIngestionMessages, items, memberships, sections } from "@/db/schema";
 import { materializeImapReviewItem } from "@/server/imap-review-items";
+import { requestDocumentDeletion } from "@/server/document-repository";
+import { getDocumentConfig } from "@/server/documents/config";
+import { LocalDocumentStorage } from "@/server/documents/storage";
 
 /** Returns the sole destination or indicates that the user must choose one. */
 export async function imapReceiptDestination(userId: string): Promise<{ householdId?: string; requiresSelection: boolean }> {
@@ -48,6 +51,22 @@ export async function activateImapReviewItem(userId: string, receiptId: string, 
     await transaction.update(imapIngestionMessages).set({ status: "completed", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
   });
   return { itemId: receipt.reviewItemId };
+}
+
+/** Discards a hidden review item and sends its documents through normal retention deletion. */
+export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
+  const [receipt] = await getDb().select().from(imapIngestionMessages).where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "pending_review"))).limit(1);
+  if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  if (receipt.reviewItemId) {
+    const documentRows = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
+    for (const document of documentRows) await requestDocumentDeletion(userId, document.id);
+    await getDb().delete(items).where(eq(items.id, receipt.reviewItemId));
+  } else {
+    const held = await getDb().select({ storageKey: imapIngestionAttachments.storageKey }).from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receipt.id), eq(imapIngestionAttachments.status, "stored")));
+    const config = getDocumentConfig(); const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+    for (const attachment of held) await storage.deleteCiphertext(attachment.storageKey).catch(() => undefined);
+  }
+  await getDb().update(imapIngestionMessages).set({ status: "discarded", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
 }
 
 export async function assignImapReceiptHousehold(userId: string, receiptId: string, householdId: string): Promise<{ reviewItemId?: string }> {

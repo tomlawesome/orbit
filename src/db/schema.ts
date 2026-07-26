@@ -28,7 +28,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
-export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "completed", "quarantined", "failed"]);
+export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "completed", "discarded", "quarantined", "failed"]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 
 const auditColumns = {
