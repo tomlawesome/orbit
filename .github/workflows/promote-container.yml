@@ -87,6 +87,10 @@ jobs:
             printf 'Candidate revision %s has not been merged into main.\n' "${revision}" >&2
             exit 1
           }
+          git diff --quiet "${revision}^{tree}" "origin/main^{tree}" || {
+            printf 'Main no longer has the exact source tree used by this candidate; create and test a new candidate.\n' >&2
+            exit 1
+          }
           printf 'digest=%s\n' "${CANDIDATE_DIGEST}" >> "${GITHUB_OUTPUT}"
           printf 'revision=%s\n' "${revision}" >> "${GITHUB_OUTPUT}"
 
