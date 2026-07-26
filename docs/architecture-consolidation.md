@@ -7,6 +7,21 @@ fixes for household recovery and addresses the architectural findings recorded
 in the July 2026 codebase audit. It is intentionally sequenced so each phase
 leaves a releasable, tested application.
 
+### Delivered in the current consolidation branch
+
+- Production dependency advisories have been remediated and the production
+  audit is clean.
+- Workspace reads no longer create a `My home` household. Household creation
+  is server-first, recovery names are reserved only during the recovery window,
+  and recovery/create/permanent-delete choices share one UI and API contract.
+- IMAP receipt delivery now uses database leases, so concurrent replicas cannot
+  send a duplicate receipt. A migration adds the receipt lease fields and claim
+  index.
+
+The remaining work in this programme is intentionally still open: IMAP
+checkpoint/index work, the broader worker side-effect boundary, dashboard and
+repository extraction, and authenticated browser coverage.
+
 ## Outcomes
 
 1. Resolve production dependency advisories without loosening the lockfile or

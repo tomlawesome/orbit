@@ -325,6 +325,8 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   failureCode: text("failure_code"),
   receiptStatus: deliveryStatus("receipt_status").notNull().default("processing"),
   receiptAttempts: integer("receipt_attempts").notNull().default(0),
+  receiptLockedAt: timestamp("receipt_locked_at", { withTimezone: true }),
+  receiptLeaseToken: uuid("receipt_lease_token"),
   receiptSentAt: timestamp("receipt_sent_at", { withTimezone: true }),
   receiptFailureCode: text("receipt_failure_code"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
@@ -335,6 +337,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   uniqueIndex("imap_message_content_unique").on(table.contentSha256),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
   index("imap_message_household_status_idx").on(table.householdId, table.status, table.receivedAt),
+  index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
 ]);
 
 /** Encrypted attachment bytes held until the recipient chooses a household, if needed. */

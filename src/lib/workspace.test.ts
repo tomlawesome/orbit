@@ -7,6 +7,7 @@ describe("household workspace", () => {
     const initial = createEmptyWorkspace();
     const household = activeHousehold(initial);
 
+    expect(initial.householdLanding).toBe("choose");
     expect(household.items).toEqual([]);
     expect(household.activities).toEqual([]);
     expect(household.onboardingComplete).toBe(false);
@@ -63,6 +64,7 @@ describe("household workspace", () => {
     const next = reduceWorkspace(initial, { type: "household.create", household });
 
     expect(next.activeHouseholdId).toBe("the-cottage");
+    expect(next.householdLanding).toBe("active");
     expect(activeHousehold(next).sections.map((section) => section.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
     expect(activeHousehold(next).items).toEqual([]);
   });
