@@ -227,9 +227,10 @@ is visible without renumbering work already completed.
 2. **Reviewed Tika extraction** — In progress: optional private Tika profile
    and bounded adapter are implemented; add administrator verification and a
    user-visible reviewed extraction result.
-3. **Data portability** — In progress: deliver passphrase-encrypted,
-   household-scoped export archives, expiry/purge, audit records, then import
-   preview and duplicate-safe commit.
+3. **Data portability** — In progress: household-scoped, passphrase-encrypted
+   JSON exports with optional bounded original-document bytes, 24-hour private
+   storage, audited request/download and maintenance purge are implemented.
+   Import parsing/preview and duplicate-safe transactional commit remain.
 4. **Household lifecycle** — Planned: typed-confirmation soft deletion,
    30-day recovery and final purge.
 5. **Mobile document capture** — Planned: resilient camera/file capture,

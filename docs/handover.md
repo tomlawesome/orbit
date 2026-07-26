@@ -55,8 +55,16 @@ accepted, CI-gated candidates.
      with scrypt-derived keys and a user-supplied passphrase that is never
      persisted.
    - Focused test: `src/server/portable-archive.test.ts`.
-   - This is groundwork only: household archive generation, temporary storage,
-     expiry/purge, audited download and import preview are still required.
+   - This cryptographic foundation now supports the private household-export
+     flow below. Import preview remains required.
+
+4. **Portable household exports**
+   - Household-scoped normalized JSON archives can now be created from
+     Personalise → Your data with a passphrase confirmation.
+   - The passphrase is never stored; the encrypted archive is private,
+     checksum-verified, audited on request/download and purged after 24 hours.
+   - Original document bytes are opt-in and bounded to 128 MiB. Import preview
+     and its transactional commit are still required.
 
 ## Stable completion checklist
 
@@ -98,15 +106,9 @@ numbers and update statuses in place; do not renumber it.
 
 Continue item 3 before starting new feature areas:
 
-1. Build a household-scoped export service from normalized database records.
-2. Include a versioned JSON manifest, hashes and optionally decrypted original
-   document bytes in the portable payload.
-3. Encrypt the payload with `portable-archive.ts`; store it in a private,
-   short-lived location with a 24-hour expiry and cleanup job.
-4. Add authenticated, audited request/download endpoints and a small Personalise
-   UI flow that asks for a passphrase twice without retaining it.
-5. Add import parsing/preview and transactionally validate all records before a
+1. Add import parsing/preview and transactionally validate all records before a
    later commit action.
+2. Add duplicate-safe import commit only after the user reviews the preview.
 
 Do not run the full local suite repeatedly. Use targeted type/lint/unit checks
 at meaningful milestones, then rely on GitHub Actions for the authoritative
