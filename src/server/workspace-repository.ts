@@ -130,7 +130,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .where(inArray(auditLog.householdId, householdIds))
       .orderBy(desc(auditLog.createdAt))
       .limit(5_000),
-    getDb().select({ householdId: memberships.householdId, userId: memberships.userId })
+    getDb().select({ householdId: memberships.householdId, userId: memberships.userId, role: memberships.role })
       .from(memberships)
       .where(inArray(memberships.householdId, householdIds)),
     getDb().select().from(notificationStates)
@@ -193,6 +193,11 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         timezone: household.timezone,
         currency: household.currency,
         memberCount: memberRows.filter((member) => member.householdId === household.id).length,
+        canManage: administrator || memberRows.some((member) => (
+          member.householdId === household.id
+          && member.userId === userId
+          && member.role === "owner"
+        )),
         onboardingComplete: household.onboardingComplete,
         sections: sectionRows.filter((section) => section.householdId === household.id).map((section) => ({
           id: section.id,
@@ -255,7 +260,9 @@ export async function applyWorkspaceCommand(
   await requireHouseholdAccess(
     userId,
     command.householdId,
-    command.type === "sections.replace" || command.type === "household.setup",
+    command.type === "sections.replace"
+      || command.type === "household.setup"
+      || command.type === "household.update",
   );
   const householdId = command.householdId;
 
@@ -316,11 +323,23 @@ export async function applyWorkspaceCommand(
       return;
     }
 
+    if (command.type === "household.update") {
+      await transaction.update(households).set({
+        name: command.name,
+        timezone: command.timezone,
+        defaultCurrency: command.currency,
+        updatedAt: new Date(),
+      }).where(eq(households.id, householdId));
+      return;
+    }
+
     if (command.type === "sections.replace") {
       const existing = await transaction.select({ id: sections.id }).from(sections).where(eq(sections.householdId, householdId));
       const existingIds = new Set(existing.map((section) => section.id));
+      const retainedSectionIds: string[] = [];
       for (const [position, section] of command.sections.entries()) {
         if (existingIds.has(section.id)) {
+          retainedSectionIds.push(section.id);
           await transaction.update(sections).set({
             name: section.name,
             icon: section.icon,
@@ -331,6 +350,7 @@ export async function applyWorkspaceCommand(
           }).where(and(eq(sections.id, section.id), eq(sections.householdId, householdId)));
         } else {
           const sectionId = validUuid(section.id) ? section.id : randomUUID();
+          retainedSectionIds.push(sectionId);
           await transaction.insert(sections).values({
             id: sectionId,
             householdId,
@@ -343,6 +363,17 @@ export async function applyWorkspaceCommand(
           });
         }
       }
+      const fallbackSectionId = retainedSectionIds[0];
+      await transaction.update(items)
+        .set({ sectionId: fallbackSectionId })
+        .where(and(
+          eq(items.householdId, householdId),
+          notInArray(items.sectionId, retainedSectionIds),
+        ));
+      await transaction.delete(sections).where(and(
+        eq(sections.householdId, householdId),
+        notInArray(sections.id, retainedSectionIds),
+      ));
       return;
     }
 

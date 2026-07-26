@@ -74,6 +74,18 @@ export function householdReminderTime(dueDate: string, daysBefore: number, timeZ
   return new Date(target.getTime() - (representedAsUtc - target.getTime()));
 }
 
+/** Returns true when a scheduled reminder falls before the household-local resume date. */
+export function reminderIsSnoozed(
+  scheduledFor: Date,
+  snoozedUntil: string | null,
+  timeZone: string,
+): boolean {
+  return Boolean(
+    snoozedUntil
+    && scheduledFor < householdReminderTime(snoozedUntil, 0, timeZone),
+  );
+}
+
 async function materializeDueDeliveries(now: Date): Promise<void> {
   const candidates = await getDb()
     .select({
@@ -101,7 +113,7 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
   const deliveries = candidates.flatMap((candidate) => {
     const scheduledFor = householdReminderTime(candidate.dueDate, candidate.daysBefore, candidate.timezone);
     if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
-    if (candidate.snoozedUntil && candidate.snoozedUntil > candidate.dueDate) return [];
+    if (reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)) return [];
     const channels: Array<"email" | "web_push"> = [];
     if (candidate.emailEnabled) channels.push("email");
     if (candidate.pushEnabled) channels.push("web_push");

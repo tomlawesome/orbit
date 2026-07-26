@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { AdminManager } from "@/components/admin-manager";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
+import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
 import { Icon } from "@/components/icons";
 import { ItemDetail, type CompletionInput } from "@/components/item-detail";
 import { ItemEditor } from "@/components/item-editor";
@@ -42,7 +43,7 @@ const DEFAULT_THEME: ThemePreference = {
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 
-type SettingsView = "appearance" | "sections" | "members" | "administration";
+type SettingsView = "appearance" | "household" | "sections" | "members" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
@@ -266,6 +267,22 @@ export function Dashboard() {
     }));
   }
 
+  function restoreDefaultSections() {
+    const restored = cloneSections().map((section, index) => ({
+      ...section,
+      id: sections[index]?.id ?? crypto.randomUUID(),
+    }));
+    const retainedIds = new Set(restored.map((section) => section.id));
+    const movedItems = household.items.filter((item) => !retainedIds.has(item.sectionId)).length;
+    if (
+      movedItems > 0
+      && !window.confirm(
+        `${movedItems} ${movedItems === 1 ? "item is" : "items are"} in additional sections. Restore the defaults and move ${movedItems === 1 ? "it" : "them"} to Home?`,
+      )
+    ) return;
+    updateSections(restored);
+  }
+
   function openNewItem() {
     setEditingItem(undefined);
     setDetailItemId(null);
@@ -393,6 +410,7 @@ export function Dashboard() {
     setItemFilter("all");
     setDetailItemId(null);
     setNotificationsOpen(false);
+    setSettingsView(null);
     setHouseholdMenuOpen(false);
     setMenuOpen(false);
   }
@@ -406,6 +424,11 @@ export function Dashboard() {
     setOnboardingOpen(false);
     setHouseholdMenuOpen(false);
     setNotice({ message: `${input.name} is ready` });
+  }
+
+  function updateHousehold(input: HouseholdSettingsInput) {
+    dispatch({ type: "household.update", householdId: household.id, ...input });
+    setNotice({ message: `${input.name} was updated` });
   }
 
   function completeFirstRun(input: HouseholdSetupInput) {
@@ -570,9 +593,10 @@ export function Dashboard() {
               <div><p>Make it yours</p><h2 id="personalise-title">Personalise Orbit</h2></div>
               <button aria-label="Close personalisation" onClick={() => setSettingsView(null)}>×</button>
             </header>
-            <div className={`settings-tabs ${session.user.isInstanceAdmin ? "settings-tabs-admin" : ""}`} role="tablist" aria-label="Personalisation settings">
+            <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
               <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
-              <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>
+              {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
+              {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
               {session.user.isInstanceAdmin && <button role="tab" aria-selected={settingsView === "administration"} className={settingsView === "administration" ? "active" : ""} onClick={() => setSettingsView("administration")}>Admin</button>}
             </div>
@@ -627,7 +651,9 @@ export function Dashboard() {
                   </div>
                 </section>
               </div>
-            ) : settingsView === "sections" ? (
+            ) : settingsView === "household" && household.canManage ? (
+              <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} />
+            ) : settingsView === "sections" && household.canManage ? (
               <div className="settings-content">
                 <section>
                   <div className="setting-heading section-heading"><div><h3>{household.name}&apos;s sections</h3><p>Rename, reorder or hide the areas this household uses.</p></div><button onClick={addSection} disabled={sections.length >= 12}><Icon name="plus" /> Add</button></div>
@@ -653,10 +679,7 @@ export function Dashboard() {
                       );
                     })}
                   </div>
-                  <button className="reset-sections" onClick={() => updateSections(cloneSections().map((section, index) => ({
-                    ...section,
-                    id: sections[index]?.id ?? crypto.randomUUID(),
-                  })))}>Restore default sections</button>
+                  <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
                 </section>
               </div>
             ) : settingsView === "members" ? (

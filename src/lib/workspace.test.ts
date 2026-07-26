@@ -39,6 +39,24 @@ describe("household workspace", () => {
     });
   });
 
+  it("updates household details after first-run setup", () => {
+    const initial = createTestWorkspace();
+    const household = activeHousehold(initial);
+    const updated = reduceWorkspace(initial, {
+      type: "household.update",
+      householdId: household.id,
+      name: "The cottage",
+      timezone: "Europe/Dublin",
+      currency: "EUR",
+    });
+
+    expect(activeHousehold(updated)).toMatchObject({
+      name: "The cottage",
+      timezone: "Europe/Dublin",
+      currency: "EUR",
+    });
+  });
+
   it("creates a household with the default sections and makes it active", () => {
     const initial = createEmptyWorkspace();
     const household = createHousehold({ id: "the-cottage", name: "The cottage" });
@@ -47,6 +65,20 @@ describe("household workspace", () => {
     expect(next.activeHouseholdId).toBe("the-cottage");
     expect(activeHousehold(next).sections.map((section) => section.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
     expect(activeHousehold(next).items).toEqual([]);
+  });
+
+  it("moves items from removed sections into the first retained section", () => {
+    const initial = createTestWorkspace();
+    const household = activeHousehold(initial);
+    const retained = household.sections.filter((section) => section.id !== "vehicle");
+    const next = reduceWorkspace(initial, {
+      type: "sections.replace",
+      householdId: household.id,
+      sections: retained,
+    });
+
+    expect(activeHousehold(next).sections).toEqual(retained);
+    expect(activeHousehold(next).items.find((item) => item.id === "car-insurance")?.sectionId).toBe(retained[0].id);
   });
 
   it("upserts and archives an item without deleting its history", () => {

@@ -248,9 +248,12 @@ pnpm test
 pnpm build
 ```
 
-The current suite contains 43 unit tests across authentication, environment
+The current suite contains 46 unit tests across authentication, environment
 and secret validation, database configuration, recurrence, preferences,
 notifications, workspace commands, and the notification worker.
+
+Product directions intentionally deferred until after the initial completion
+pass are recorded in the [feature register](docs/feature-register.md).
 
 ## Configuration
 

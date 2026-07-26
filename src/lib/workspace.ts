@@ -78,6 +78,7 @@ export const householdWorkspaceSchema = z.object({
   timezone: z.string().min(1).max(80),
   currency: z.string().length(3),
   memberCount: z.number().int().positive(),
+  canManage: z.boolean().default(false),
   onboardingComplete: z.boolean().default(true),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(workspaceItemSchema).max(500),
@@ -106,6 +107,7 @@ export type WorkspaceCommand =
       currency: string;
       sections: HouseholdSection[];
     }
+  | { type: "household.update"; householdId: string; name: string; timezone: string; currency: string }
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
   | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
@@ -137,6 +139,13 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     timezone: z.string().min(1).max(80),
     currency: z.string().length(3),
     sections: z.array(workspaceSectionSchema).min(1).max(12),
+  }),
+  z.object({
+    type: z.literal("household.update"),
+    householdId: z.string().min(1).max(100),
+    name: z.string().trim().min(1).max(60),
+    timezone: z.string().min(1).max(80),
+    currency: z.string().length(3),
   }),
   z.object({ type: z.literal("household.activate"), householdId: z.string().min(1).max(100) }),
   z.object({
@@ -220,6 +229,7 @@ export function createHousehold(input: {
     timezone: input.timezone ?? "Europe/London",
     currency: input.currency ?? "GBP",
     memberCount: 1,
+    canManage: true,
     onboardingComplete: true,
     sections: cloneSections().map((section) => ({ ...section, id: crypto.randomUUID() })),
     items: [],
@@ -237,6 +247,7 @@ export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState
       timezone: "Europe/London",
       currency: "GBP",
       memberCount: 1,
+      canManage: true,
       onboardingComplete: false,
       sections,
       items: [],
@@ -291,12 +302,28 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         sections: command.sections,
       }));
     }
+    case "household.update": {
+      return updateHousehold(state, command.householdId, (household) => ({
+        ...household,
+        name: command.name,
+        timezone: command.timezone,
+        currency: command.currency,
+      }));
+    }
     case "household.activate": {
       if (!state.households.some((household) => household.id === command.householdId)) return state;
       return { ...state, activeHouseholdId: command.householdId };
     }
     case "sections.replace": {
-      return updateHousehold(state, command.householdId, (household) => ({ ...household, sections: command.sections }));
+      const retainedSectionIds = new Set(command.sections.map((section) => section.id));
+      const fallbackSectionId = command.sections[0].id;
+      return updateHousehold(state, command.householdId, (household) => ({
+        ...household,
+        sections: command.sections,
+        items: household.items.map((item) => retainedSectionIds.has(item.sectionId)
+          ? item
+          : { ...item, sectionId: fallbackSectionId }),
+      }));
     }
     case "item.upsert": {
       const item = workspaceItemSchema.parse(command.item);

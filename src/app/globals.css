@@ -429,8 +429,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .settings-drawer > header p { margin: 0 0 6px; color: var(--coral-dark); font-size: calc(8px + var(--text-bump)); font-weight: 850; letter-spacing: 1.4px; text-transform: uppercase; }
 .settings-drawer > header h2 { margin: 0; font-size: calc(23px + var(--text-bump)); letter-spacing: -.9px; }
 .settings-drawer > header button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: transparent; font-size: calc(22px + var(--text-bump)); line-height: 1; cursor: pointer; }
-.settings-tabs { margin: 27px 0 8px; padding: 4px; border-radius: 12px; background: var(--canvas); display: grid; grid-template-columns: repeat(3, 1fr); }
-.settings-tabs-admin { grid-template-columns: repeat(4, 1fr); }
+.settings-tabs { margin: 27px 0 8px; padding: 4px; border-radius: 12px; background: var(--canvas); display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); }
 .settings-tabs button { min-height: 37px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: calc(10px + var(--text-bump)); font-weight: 750; cursor: pointer; }
 .settings-tabs button.active { color: var(--ink); background: var(--paper); box-shadow: 0 5px 15px rgb(0 0 0 / 7%); }
 .settings-content > section { padding: 25px 0; border-bottom: 1px solid var(--line); }
@@ -930,7 +929,6 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
   .first-run-card h1 { font-size: calc(39px + var(--text-bump)); }
   .category-mode-picker, .custom-categories { grid-template-columns: 1fr; }
   .suggested-categories { grid-template-columns: 1fr 1fr; }
-  .settings-tabs-admin { grid-template-columns: repeat(2, 1fr); }
   .admin-list article { grid-template-columns: 36px minmax(0, 1fr) auto; }
   .admin-list article > button { grid-column: 2 / -1; }
 }
