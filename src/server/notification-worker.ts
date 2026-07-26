@@ -17,6 +17,12 @@ import {
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const notificationEnvironmentSchema = z.object({
+  SMTP_HOST: z.string().trim().max(253).optional().default(""),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  SMTP_SECURITY: z.enum(["starttls", "implicit_tls"]).optional().default("starttls"),
+  SMTP_USER: z.string().trim().max(320).optional().default(""),
+  SMTP_PASSWORD: z.string().optional().default(""),
+  // Deprecated compatibility input. New deployments should use the fields above.
   SMTP_URL: z.string().optional().default(""),
   SMTP_FROM: z.string().min(1).default("Orbit <orbit@localhost>"),
   VAPID_SUBJECT: z.string().optional().default(""),
@@ -28,6 +34,7 @@ const notificationEnvironmentSchema = z.object({
 
 export interface NotificationWorkerConfig {
   smtpUrl: string;
+  smtpSecurity: "starttls" | "implicit_tls";
   smtpFrom: string;
   vapidSubject: string;
   vapidPublicKey: string;
@@ -111,10 +118,18 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
   const parsed = notificationEnvironmentSchema.parse({
     ...environment,
     SMTP_URL: readRuntimeSecret(environment, "SMTP_URL"),
+    SMTP_PASSWORD: readRuntimeSecret(environment, "SMTP_PASSWORD"),
     VAPID_PRIVATE_KEY: readRuntimeSecret(environment, "VAPID_PRIVATE_KEY"),
   });
+  const smtpFieldCount = [parsed.SMTP_HOST, parsed.SMTP_PORT, parsed.SMTP_USER, parsed.SMTP_PASSWORD].filter((value) => value !== "" && value !== undefined).length;
+  if (smtpFieldCount !== 0 && smtpFieldCount !== 4) throw new Error("SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD must be configured together");
+  if (parsed.SMTP_URL && smtpFieldCount) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
+  const smtpUrl = smtpFieldCount === 4
+    ? `${parsed.SMTP_SECURITY === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${parsed.SMTP_PORT}`
+    : parsed.SMTP_URL;
   return {
-    smtpUrl: parsed.SMTP_URL,
+    smtpUrl,
+    smtpSecurity: parsed.SMTP_SECURITY,
     smtpFrom: parsed.SMTP_FROM,
     vapidSubject: parsed.VAPID_SUBJECT,
     vapidPublicKey: parsed.VAPID_PUBLIC_KEY,
@@ -275,7 +290,7 @@ async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWo
     .leftJoin(userPreferences, eq(userPreferences.userId, notificationDeliveries.userId))
     .where(inArray(notificationDeliveries.id, claimed.map((delivery) => delivery.id)));
 
-  const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl) : undefined;
+  const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl, { requireTLS: config.smtpSecurity === "starttls", tls: { minVersion: "TLSv1.2" } }) : undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
     webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
   }

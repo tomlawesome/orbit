@@ -288,6 +288,8 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
   const config = getNotificationWorkerConfig();
   if (!config.smtpUrl) return { result: "smtp_unconfigured" };
   const transporter = nodemailer.createTransport(config.smtpUrl, {
+    requireTLS: config.smtpSecurity === "starttls",
+    tls: { minVersion: "TLSv1.2" },
     connectionTimeout: 5_000,
     greetingTimeout: 5_000,
     socketTimeout: 5_000,
