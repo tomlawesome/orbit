@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const body = bodySchema.parse(await request.json());
     if (body.action === "delete") return NextResponse.json(await requestHouseholdDeletion(session.user.id, householdId, body.confirmation), { headers: { "Cache-Control": "no-store" } });
     if (body.action === "hard_delete") { await hardDeleteHousehold(session.user.id, householdId, body.confirmation); return NextResponse.json({ deleted: true }, { headers: { "Cache-Control": "no-store" } }); }
-    await restoreHousehold(session.user.id, householdId);
+    await restoreHousehold(session.user.id, householdId, session.id);
     return NextResponse.json({ restored: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return appErrorResponse(error); }
 }

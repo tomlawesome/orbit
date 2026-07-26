@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, households, memberships, portableArchives, users } from "@/db/schema";
+import { auditLog, documentCrypto, documents, households, memberships, portableArchives, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -50,7 +50,7 @@ export async function requestHouseholdDeletion(userId: string, householdId: stri
 }
 
 /** Cancels a scheduled deletion before the retention window expires. */
-export async function restoreHousehold(userId: string, householdId: string) {
+export async function restoreHousehold(userId: string, householdId: string, sessionId?: string) {
   const record = await requireDeletionAuthority(userId, householdId);
   if (!record.deletionRequestedAt || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("household_not_recoverable", "This household can no longer be restored", 409);
@@ -61,6 +61,7 @@ export async function restoreHousehold(userId: string, householdId: string) {
       deletionRequestedAt: null, deleteAfter: null, deletionRequestedByUserId: null, updatedAt: new Date(),
     }).where(and(eq(households.id, householdId), eq(households.deletionRequestedAt, requestedAt))).returning({ id: households.id });
     if (!changed) throw new AppError("household_not_recoverable", "This household changed and can no longer be restored", 409);
+    if (sessionId) await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
     await transaction.insert(auditLog).values({
       householdId, actorUserId: userId, entityType: "household", entityId: householdId,
       action: "household_deletion_cancelled", changes: {},
