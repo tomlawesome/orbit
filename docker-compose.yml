@@ -65,6 +65,22 @@ services:
     cpus: "1.0"
     mem_limit: ${CLAMAV_MEMORY_LIMIT:-4g}
     pids_limit: 256
+  # Optional local-only document parser/OCR. Enable explicitly with:
+  # docker compose --profile processing up -d
+  orbit-tika:
+    container_name: orbit-tika
+    image: apache/tika:3.2.2.0-full
+    profiles: ["processing"]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    cpus: "1.0"
+    mem_limit: ${TIKA_MEMORY_LIMIT:-1g}
+    pids_limit: 256
 
 volumes:
   orbit-db-data:
