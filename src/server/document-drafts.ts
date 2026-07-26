@@ -6,7 +6,7 @@ import { AppError } from "@/lib/app-error";
 import { extractTextWithTika } from "@/server/documents/tika";
 import { readDocumentDownload } from "@/server/document-repository";
 
-function proposalFromText(text: string, filename: string) {
+export function proposalFromText(text: string, filename: string) {
   const reference = text.match(/(?:policy|account|reference)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9-]{5,})/i)?.[1];
   const provider = text.match(/(?:provider|insurer|supplier)\s*[:\-]\s*([^\n]{2,80})/i)?.[1]?.trim();
   const dates = [...text.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((match) => match[1]).slice(0, 12);
