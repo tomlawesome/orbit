@@ -95,11 +95,34 @@ ensure_secret_file() {
   printf 'Generated %s.\n' "$path"
 }
 
+ensure_vapid_keys() {
+  local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key
+  if [[ -s "$private_key_file" ]]; then
+    chmod 600 "$private_key_file"
+    return
+  fi
+  command -v node >/dev/null 2>&1 || fail "Node.js is required to generate VAPID keys."
+  [[ -d node_modules/web-push ]] || fail "Run pnpm install before first deployment so Orbit can generate VAPID keys."
+  generated="$(node -e 'const push=require("web-push"); console.log(JSON.stringify(push.generateVAPIDKeys()))')" || fail "Could not generate VAPID keys."
+  public_key="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.publicKey)' "$generated")"
+  private_key="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.privateKey)' "$generated")"
+  [[ -n "$public_key" && -n "$private_key" ]] || fail "VAPID key generation returned invalid values."
+  temporary_file="$(mktemp "$secrets_directory/.vapid.installing.XXXXXX")"
+  printf '%s\n' "$private_key" > "$temporary_file"
+  chmod 600 "$temporary_file"
+  mv -- "$temporary_file" "$private_key_file"
+  temporary_file=""
+  sed -i "s|^VAPID_PUBLIC_KEY=.*|VAPID_PUBLIC_KEY=$public_key|" "$environment_file"
+  sed -i "s|^VAPID_PRIVATE_KEY_FILE=.*|VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key|" "$environment_file"
+  printf 'Generated VAPID push keys.\n'
+}
+
 ensure_environment_file
 ensure_secrets_directory
 ensure_secret_file "$secrets_directory/session-secret"
 ensure_secret_file "$secrets_directory/postgres-password"
 # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
 ensure_secret_file "$secrets_directory/document-kek"
+ensure_vapid_keys
 
 printf 'Orbit configuration is ready. Existing values were preserved.\n'
