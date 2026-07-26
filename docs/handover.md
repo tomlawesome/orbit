@@ -9,11 +9,15 @@ previous chat history.
 
 - **Implementation branch:** `codex/oidc-browser-acceptance`; draft pull
   request [#7](https://github.com/tomlawesome/orbit/pull/7) targets `develop`.
-- **Validated revision:** `5b28c058971c586f5bb753a25b345c3b96b5ee25`.
-- **CI:** workflow run 80 passed static/unit checks plus the full Compose
+- **Validated implementation revision:** `63a19aa89974929c7e908c8f0e72dcfa51f150ae`.
+- **CI:** workflow run 86 passed static/unit checks plus the full Compose
   smoke gate: image build/startup, private secret permissions, ClamAV,
   backup/restore, signed-out privacy, authenticated OIDC browser tests and
   accessibility.
+- **Release-candidate branch:** `release/architecture-consolidation-rc` at
+  `40e8429a94251650454c3f920947dc233fe685fb`, containing the same worker
+  safety fix. Its replacement image publication is a Docker/CI-only external
+  gate; record the resulting immutable digest before a manual deployment.
 - **Local validation:** `pnpm lint`, `pnpm typecheck`, `pnpm test` (81 tests),
   `pnpm build`, and `git diff --check` all pass.
 - **Next delivery action:** publish a `release/` candidate from this exact
@@ -43,6 +47,9 @@ previous chat history.
    - Recipient alias hashes are indexed (`0017`) with bounded migration
      backfill; unindexed rows retain a safe temporary fallback.
    - Household database access is removed before filesystem cleanup.
+   - Document-purge state is committed before ciphertext cleanup; failed
+     cleanup is reconciled as an orphan rather than holding a database
+     transaction open.
    - Portable-archive reconciliation removes encrypted orphan files after a
      grace period.
 
