@@ -19,6 +19,11 @@ async function readWorkspace(page: Page) {
 }
 
 test.describe("authenticated household lifecycle", () => {
+  // This test intentionally mutates the one disposable acceptance database.
+  // Retrying it would start from a different household state and hide the
+  // original failure with a misleading first-sign-in assertion.
+  test.describe.configure({ retries: 0 });
+
   test("a first sign-in creates no household until the user chooses one", async ({ page, browser, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.skip(isMobile, "The disposable identities are shared by the single acceptance stack.");
@@ -57,7 +62,7 @@ test.describe("authenticated household lifecycle", () => {
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
       await page.getByLabel("Registered user").selectOption({ label: member });
       await page.getByRole("button", { name: "Add member" }).click();
-      await expect(page.getByRole("status")).toContainText("can now access this household");
+      await expect(page.getByText(`${member} can now access this household.`, { exact: true })).toBeVisible();
 
       await memberPage.reload();
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
