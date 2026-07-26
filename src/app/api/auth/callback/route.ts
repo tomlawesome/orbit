@@ -68,6 +68,9 @@ export async function GET(request: NextRequest) {
     const metadata = await discoverProvider(config);
     const identity = await completeAuthorization(config, metadata, code, transaction);
     const user = await provisionIdentity(identity);
+    if (user.disabledAt) {
+      throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+    }
 
     // A successful login always replaces the browser's previous session.
     await deleteSessionToken(request.cookies.get(sessionCookieName(config))?.value);

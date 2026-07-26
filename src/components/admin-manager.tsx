@@ -8,6 +8,7 @@ interface InstanceUser {
   displayName: string;
   email: string;
   isInstanceAdmin: boolean;
+  disabledAt: string | null;
 }
 
 interface AdminManagerProps {
@@ -145,6 +146,24 @@ export function AdminManager({ session }: AdminManagerProps) {
     finally { setBusyUserId(null); }
   }
 
+  async function updateAccountStatus(user: InstanceUser) {
+    const disabling = !user.disabledAt;
+    const confirmation = disabling
+      ? `Disable ${user.displayName}'s Orbit account? All of their active Orbit sessions will be revoked immediately.`
+      : `Enable ${user.displayName}'s Orbit account? They will be able to sign in again.`;
+    if (!window.confirm(confirmation)) return;
+    setBusyUserId(user.id); setMessage("");
+    try {
+      const response = await fetch("/api/admin/users", { method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken }, body: JSON.stringify({ userId: user.id, disabled: disabling }) });
+      if (!response.ok) throw await responseError(response, "Account status could not be updated");
+      const payload = await response.json() as { users?: InstanceUser[] };
+      if (!payload.users) throw new Error("Account status could not be updated");
+      setUsers(payload.users);
+      setMessage(`${user.displayName}'s account is now ${disabling ? "disabled" : "enabled"}.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Account status could not be updated"); }
+    finally { setBusyUserId(null); }
+  }
+
   async function mutateJob(
     kind: "deliveries" | "document-jobs",
     id: string,
@@ -214,7 +233,7 @@ export function AdminManager({ session }: AdminManagerProps) {
 
     <section>
       <div className="setting-heading"><h3>Instance administrators</h3><p>Administrators can manage every user, household, section, and item in this Orbit instance.</p></div>
-      <div className="admin-list">{users.map((user) => <article key={user.id}><span className="member-avatar">{initials(user.displayName)}</span><span><strong>{user.displayName}</strong><small>{user.email}{user.id === session.user.id ? " · You" : ""}</small></span><b>{user.isInstanceAdmin ? "Administrator" : "User"}</b><button type="button" disabled={busyUserId !== null || (user.id === session.user.id && user.isInstanceAdmin)} title={user.id === session.user.id && user.isInstanceAdmin ? "Another administrator must remove your access" : undefined} onClick={() => void updateAdministrator(user)}>{busyUserId === user.id ? "Saving…" : user.id === session.user.id && user.isInstanceAdmin ? "Current admin" : user.isInstanceAdmin ? "Remove admin" : "Make admin"}</button></article>)}</div>
+      <div className="admin-list">{users.map((user) => <article key={user.id}><span className="member-avatar">{initials(user.displayName)}</span><span><strong>{user.displayName}</strong><small>{user.email}{user.id === session.user.id ? " · You" : ""}{user.disabledAt ? " · Account disabled" : ""}</small></span><b>{user.disabledAt ? "Disabled" : user.isInstanceAdmin ? "Administrator" : "User"}</b><span className="admin-user-actions"><button type="button" disabled={busyUserId !== null || Boolean(user.disabledAt) || (user.id === session.user.id && user.isInstanceAdmin)} title={user.disabledAt ? "Enable this account before changing administrator access" : user.id === session.user.id && user.isInstanceAdmin ? "Another administrator must remove your access" : undefined} onClick={() => void updateAdministrator(user)}>{busyUserId === user.id ? "Saving…" : user.id === session.user.id && user.isInstanceAdmin ? "Current admin" : user.isInstanceAdmin ? "Remove admin" : "Make admin"}</button><button type="button" disabled={busyUserId !== null || (user.id === session.user.id && !user.disabledAt)} title={user.id === session.user.id && !user.disabledAt ? "Another administrator must disable your account" : undefined} onClick={() => void updateAccountStatus(user)}>{busyUserId === user.id ? "Saving…" : user.disabledAt ? "Enable account" : "Disable account"}</button></span></article>)}</div>
       {message && <p className="member-message" role="status" aria-live="polite">{message}</p>}
     </section>
   </div>;

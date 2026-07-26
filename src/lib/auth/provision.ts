@@ -9,6 +9,7 @@ export interface ProvisionedUser {
   emailVerified: boolean;
   displayName: string;
   avatarUrl: string | null;
+  disabledAt: Date | null;
 }
 
 /**
@@ -28,6 +29,7 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
         emailVerified: users.emailVerified,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
+        disabledAt: users.disabledAt,
       })
       .from(externalIdentities)
       .innerJoin(users, eq(users.id, externalIdentities.userId))
@@ -54,6 +56,7 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
           emailVerified: users.emailVerified,
           displayName: users.displayName,
           avatarUrl: users.avatarUrl,
+          disabledAt: users.disabledAt,
         });
       await transaction
         .update(externalIdentities)
@@ -86,6 +89,7 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
         emailVerified: users.emailVerified,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
+        disabledAt: users.disabledAt,
       });
 
     await transaction.insert(externalIdentities).values({

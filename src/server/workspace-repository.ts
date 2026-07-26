@@ -594,7 +594,10 @@ export async function listRegisteredUserCandidates(userId: string, householdId: 
     displayName: users.displayName,
     avatarUrl: users.avatarUrl,
   }).from(users)
-    .where(memberIds.length ? notInArray(users.id, memberIds) : sql`true`)
+    .where(and(
+      isNull(users.disabledAt),
+      memberIds.length ? notInArray(users.id, memberIds) : sql`true`,
+    ))
     .orderBy(asc(users.displayName))
     .limit(500);
 }
@@ -617,9 +620,10 @@ export async function addHouseholdMember(userId: string, householdId: string, me
     if (!actor?.administrator && actor?.role !== "owner") {
       throw new AppError("owner_required", "Only the current household owner can add members", 403);
     }
-    const [registered] = await transaction.select({ id: users.id }).from(users)
+    const [registered] = await transaction.select({ id: users.id, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
     if (!registered) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+    if (registered.disabledAt) throw new AppError("account_disabled", "That Orbit account is disabled", 409);
     await transaction.insert(memberships).values({
       householdId: validHouseholdId,
       userId: targetUserId,

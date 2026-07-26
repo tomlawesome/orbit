@@ -7,6 +7,7 @@ export type AuthErrorCode =
   | "token_exchange_failed"
   | "invalid_id_token"
   | "missing_email"
+  | "account_disabled"
   | "session_required"
   | "csrf_failed";
 
