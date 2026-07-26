@@ -21,6 +21,7 @@ const ingestionEnvironmentSchema = z.object({
   IMAP_TRUSTED_RECIPIENT_HEADER: z.string().trim().regex(/^[A-Za-z0-9-]{1,80}$/).optional().default(""),
   IMAP_POLL_SECONDS: z.coerce.number().int().min(30).max(3_600).default(300),
   SMTP_URL: z.string().optional().default(""),
+  SMTP_HOST: z.string().optional().default(""),
 });
 
 export interface ImapIngestionConfig {
@@ -53,8 +54,8 @@ export function getImapIngestionConfig(environment: NodeJS.ProcessEnv = process.
   if (configuredValues !== 0 && configuredValues !== 3) {
     throw new Error("IMAP_HOST, IMAP_USER, and IMAP_PASSWORD must be configured together");
   }
-  if (configuredValues === 3 && !parsed.SMTP_URL) {
-    throw new Error("SMTP_URL must be configured before IMAP ingestion is enabled");
+  if (configuredValues === 3 && !parsed.SMTP_URL && !parsed.SMTP_HOST) {
+    throw new Error("SMTP must be configured before IMAP ingestion is enabled");
   }
   if (configuredValues === 3 && (!parsed.IMAP_RECIPIENT_DOMAIN || !parsed.IMAP_ALIAS_SECRET || !parsed.IMAP_TRUSTED_RECIPIENT_HEADER)) {
     throw new Error("IMAP_RECIPIENT_DOMAIN, IMAP_ALIAS_SECRET, and IMAP_TRUSTED_RECIPIENT_HEADER are required for verified recipient aliases");

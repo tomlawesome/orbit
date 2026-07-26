@@ -18,7 +18,7 @@ export async function runImapReceiptCycle(): Promise<void> {
     .from(imapIngestionMessages).innerJoin(users, eq(users.id, imapIngestionMessages.userId))
     .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
     .where(and(inArray(imapIngestionMessages.id, ids), eq(imapIngestionMessages.receiptStatus, "processing"))).groupBy(imapIngestionMessages.id, users.email, users.displayName);
-  const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl) : undefined;
+  const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl, { requireTLS: config.smtpSecurity === "starttls", tls: { minVersion: "TLSv1.2" } }) : undefined;
   for (const delivery of deliveries) {
     const attempts = delivery.attempts + 1;
     try {
