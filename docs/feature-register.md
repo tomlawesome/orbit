@@ -252,14 +252,20 @@ foundation, not a deferred enhancement.
 
 ### Processing-service direction
 
-- **Baseline parser:** Apache Tika Server's official full container is the
-  conservative option for broad text/metadata extraction and Tesseract OCR.
-- **Advanced parser:** Docling Serve is an optional administrator-selected
-  adapter for richer layout and structured document conversion. Its CPU image
-  is materially larger, so it is not part of Orbit's default stack.
-- **Local semantic extraction:** Ollama is a possible optional provider because
-  its HTTP API supports schema-constrained structured outputs. Orbit also
-  supports a remote provider through the same narrow extraction interface.
+- **Default stack:** no parser, OCR, or model service is required. Orbit stays
+  as one application container plus PostgreSQL and its existing document
+  protection profile.
+- **First real-document trial:** an administrator may opt into one Apache Tika
+  full container. It supplies broad text/metadata extraction and Tesseract OCR
+  in one service; its output remains review evidence, never an automatic write.
+- **Advanced parser:** Docling Serve is a replacement parser, not a companion
+  to Tika. It is considered only if representative documents prove that Tika's
+  layout or table handling is insufficient; its large image excludes it from
+  the default stack.
+- **Local semantic extraction:** Ollama remains an optional later provider for
+  schema-constrained draft fields after text extraction. It is neither OCR nor
+  a default container, and Orbit should use an existing local deployment where
+  available.
 - All images are pinned to reviewed release tags, isolated on an internal
   egress-denied network, configured with request/page/size limits, CPU/memory
   quotas and timeouts, and updated independently of Orbit. Supported releases
