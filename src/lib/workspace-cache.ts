@@ -6,10 +6,10 @@ const DATABASE_NAME = "orbit-workspace";
 const DATABASE_VERSION = 1;
 const SNAPSHOT_STORE = "snapshots";
 const QUEUE_STORE = "commands";
-const CURRENT_SNAPSHOT_KEY = "current";
 
 interface QueuedCommand {
   id?: number;
+  userId: string;
   command: WorkspaceCommand;
   createdAt: string;
 }
@@ -38,11 +38,11 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-export async function readWorkspaceSnapshot(): Promise<WorkspaceState | undefined> {
+export async function readWorkspaceSnapshot(userId: string): Promise<WorkspaceState | undefined> {
   if (typeof indexedDB === "undefined") return undefined;
   const database = await openCache();
   try {
-    const value = await requestResult(database.transaction(SNAPSHOT_STORE).objectStore(SNAPSHOT_STORE).get(CURRENT_SNAPSHOT_KEY));
+    const value = await requestResult(database.transaction(SNAPSHOT_STORE).objectStore(SNAPSHOT_STORE).get(`user:${userId}`));
     const parsed = workspaceSchema.safeParse(value);
     return parsed.success ? parsed.data : undefined;
   } finally {
@@ -50,23 +50,24 @@ export async function readWorkspaceSnapshot(): Promise<WorkspaceState | undefine
   }
 }
 
-export async function writeWorkspaceSnapshot(workspace: WorkspaceState): Promise<void> {
+export async function writeWorkspaceSnapshot(userId: string, workspace: WorkspaceState): Promise<void> {
   if (typeof indexedDB === "undefined") return;
   const database = await openCache();
   try {
     await requestResult(database.transaction(SNAPSHOT_STORE, "readwrite").objectStore(SNAPSHOT_STORE).put(
       workspaceSchema.parse(workspace),
-      CURRENT_SNAPSHOT_KEY,
+      `user:${userId}`,
     ));
   } finally {
     database.close();
   }
 }
 
-export async function enqueueWorkspaceCommand(command: WorkspaceCommand): Promise<number> {
+export async function enqueueWorkspaceCommand(userId: string, command: WorkspaceCommand): Promise<number> {
   const database = await openCache();
   try {
     const id = await requestResult(database.transaction(QUEUE_STORE, "readwrite").objectStore(QUEUE_STORE).add({
+      userId,
       command: workspaceCommandSchema.parse(command),
       createdAt: new Date().toISOString(),
     } satisfies QueuedCommand));
@@ -76,15 +77,17 @@ export async function enqueueWorkspaceCommand(command: WorkspaceCommand): Promis
   }
 }
 
-export async function readQueuedWorkspaceCommands(): Promise<Array<Required<Pick<QueuedCommand, "id">> & QueuedCommand>> {
+export async function readQueuedWorkspaceCommands(
+  userId: string,
+): Promise<Array<Required<Pick<QueuedCommand, "id">> & QueuedCommand>> {
   if (typeof indexedDB === "undefined") return [];
   const database = await openCache();
   try {
     const rows = await requestResult(database.transaction(QUEUE_STORE).objectStore(QUEUE_STORE).getAll()) as QueuedCommand[];
     return rows.flatMap((row) => {
       const parsed = workspaceCommandSchema.safeParse(row.command);
-      return row.id != null && parsed.success
-        ? [{ id: row.id, command: parsed.data, createdAt: row.createdAt }]
+      return row.id != null && row.userId === userId && parsed.success
+        ? [{ id: row.id, userId: row.userId, command: parsed.data, createdAt: row.createdAt }]
         : [];
     });
   } finally {

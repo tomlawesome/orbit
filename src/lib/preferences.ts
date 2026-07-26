@@ -3,6 +3,10 @@ import { sectionAccents, sectionIcons } from "./domain";
 
 export const themeModes = ["system", "light", "dark"] as const;
 export type ThemeMode = (typeof themeModes)[number];
+export const textSizes = ["standard", "comfortable", "large"] as const;
+export type TextSize = (typeof textSizes)[number];
+export const urgencyPalettes = ["classic", "themed"] as const;
+export type UrgencyPalette = (typeof urgencyPalettes)[number];
 
 export const colourways = [
   { id: "after-dark", name: "After Dark", description: "Orbit ink, electric cyan and hot pink", swatches: ["#15162b", "#22e7d3", "#ff4fa3"] },
@@ -15,7 +19,11 @@ export const colourways = [
 export const themePreferenceSchema = z.object({
   mode: z.enum(themeModes),
   colourway: z.enum(colourways.map((theme) => theme.id) as [string, ...string[]]),
+  textSize: z.enum(textSizes).default("comfortable"),
+  urgencyPalette: z.enum(urgencyPalettes).default("themed"),
 });
+
+export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
 export const sectionPreferenceSchema = z.array(z.object({
   id: z.string().min(1).max(80),

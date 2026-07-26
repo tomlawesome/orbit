@@ -18,7 +18,7 @@ interface Candidate {
 
 interface MemberManagerProps {
   householdId: string;
-  session: WorkspaceSession | null;
+  session: WorkspaceSession;
 }
 
 function initials(name: string): string {
@@ -32,7 +32,6 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!session) return;
     let cancelled = false;
     fetch(`/api/households/${householdId}/members`, { credentials: "same-origin", cache: "no-store" })
       .then(async (response) => {
@@ -55,7 +54,6 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session) return;
     setBusy(true);
     setMessage("");
     const form = event.currentTarget;
@@ -82,7 +80,6 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
   }
 
   async function remove(member: Member) {
-    if (!session) return;
     setBusy(true);
     setMessage("");
     try {
@@ -104,27 +101,15 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
     }
   }
 
-  if (!session) {
-    return (
-      <div className="settings-content">
-        <section className="member-empty">
-          <span>Preview</span>
-          <h3>Members become available after sign-in</h3>
-          <p>Connect Orbit to your identity provider and database to add registered users to this household.</p>
-        </section>
-      </div>
-    );
-  }
-
   const currentUser = members.find((member) => member.id === session.user.id);
-  const isOwner = currentUser?.role === "owner";
+  const isOwner = session.user.isInstanceAdmin || currentUser?.role === "owner";
 
   return (
     <div className="settings-content">
       <section>
         <div className="setting-heading">
           <h3>Household access</h3>
-          <p>Owners can add people who already have an Orbit account.</p>
+          <p>Household owners and Orbit administrators can add people who already have an account.</p>
         </div>
         <div className="member-list">
           {members.map((member) => (

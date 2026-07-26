@@ -90,7 +90,8 @@ become urgent.
   restore sections, with Home, Vehicles, Devices, and Services included by
   default.
 - **Appearance with personality** — independent light, dark, and system modes
-  across Orbit After Dark, Verdant, Coast, Berry, and Ember colourways.
+  across Orbit After Dark, Verdant, Coast, Berry, and Ember colourways, three
+  in-app text sizes, and traditional or theme-matched due-date heat maps.
 - **A complete record of care** — item details, schedule history, activity
   timelines, archived records, reminders, and notification state.
 - **Useful even when disconnected** — an installable PWA with IndexedDB
@@ -106,23 +107,16 @@ Orbit deliberately keeps the operational footprint small:
 
 ```mermaid
 flowchart LR
-    Browser["Orbit PWA<br/>desktop · tablet · mobile"]
-    App["orbit<br/>UI · API · migrations · scheduler"]
-    Database[("orbit-postgres<br/>PostgreSQL 17")]
-    Identity["OIDC provider"]
-    Delivery["SMTP · Web Push"]
+    browser["Browser or installed PWA"]
+    orbit["orbit application container"]
+    postgres[("orbit-postgres")]
+    identity["OIDC identity provider"]
+    delivery["SMTP and Web Push providers"]
 
-    Browser <--> App
-    Identity --> App
-    App <--> Database
-    App --> Delivery
-
-    classDef orbit fill:#15162b,stroke:#715cff,color:#f7f4ff,stroke-width:2px;
-    classDef cyan fill:#0b2530,stroke:#22e7d3,color:#f7f4ff,stroke-width:2px;
-    classDef pink fill:#30142d,stroke:#ff4fa3,color:#f7f4ff,stroke-width:2px;
-    class Browser,App orbit;
-    class Database cyan;
-    class Identity,Delivery pink;
+    browser <-->|HTTPS| orbit
+    orbit <-->|PostgreSQL| postgres
+    orbit <-->|OpenID Connect| identity
+    orbit -->|Notifications| delivery
 ```
 
 - `orbit` is the complete Orbit application: interface, authenticated
@@ -170,6 +164,16 @@ notification scheduler, and then serves the full-stack application.
 > identical. Do not switch between `localhost` and `127.0.0.1` during a sign-in
 > attempt.
 
+Orbit never exposes a household workspace to an unauthenticated visitor. After
+the first successful registration, that user becomes the initial instance
+administrator and completes a guided setup for the household name, timezone,
+currency, and sections. The wizard offers Home, Vehicles, Devices, and Services
+as sensible defaults or accepts a fully custom section list.
+
+Instance administrators can manage every household and grant or remove
+administrator access for other registered users. Orbit prevents removal of the
+last administrator.
+
 ### Update and launch an existing checkout
 
 Once the host has a configured `.env-orbit`, update and start Orbit with:
@@ -184,26 +188,12 @@ service, starts the stack in the background, and prints the resulting service
 status. It stops immediately if Git, Docker Compose v2, or `.env-orbit` is
 unavailable.
 
-## Explore without infrastructure
-
-Orbit remains interactive when PostgreSQL and OIDC are unavailable. The preview
-adapter provides representative household records, persists changes on the
-device, and exercises the same service boundary as the authenticated
-application.
-
-```sh
-pnpm install
-pnpm dev
-```
-
-This makes it possible to evaluate the interface and workflows before
-configuring production services.
-
 ## Production foundation
 
 Orbit already includes:
 
-- guided household setup and owner-controlled membership;
+- a clean first-run wizard, instance administrators, and owner-controlled
+  household membership;
 - create, edit, schedule, remind, archive, undo, and restore workflows;
 - recurrence suggestions and household-local calendar-date rules;
 - a schedule-aware notification centre with read, dismiss, and snooze state;
@@ -213,12 +203,14 @@ Orbit already includes:
   S256 PKCE;
 - just-in-time user provisioning and immutable issuer/subject identities;
 - SMTP and Web Push delivery through an atomic PostgreSQL-backed scheduler;
-- production health checks, standalone Next.js output, and version-controlled
-  migrations.
+- an authentication gate that reveals no workspace or cached household data to
+  signed-out visitors;
+- production health checks, standalone Next.js output, a purpose-built browser
+  favicon, and version-controlled migrations.
 
-When an authenticated session and PostgreSQL are present, Orbit automatically
-upgrades from the local preview adapter to validated server APIs, retains an
-IndexedDB snapshot, and synchronises queued offline changes.
+For authenticated users, Orbit retains a user-scoped IndexedDB snapshot and
+synchronises user-scoped queued offline changes. Production images contain no
+sample household items or seeded fake records.
 
 ## Local development
 
@@ -255,7 +247,7 @@ pnpm test
 pnpm build
 ```
 
-The current suite contains 39 unit tests across authentication, environment
+The current suite contains 43 unit tests across authentication, environment
 and secret validation, database configuration, recurrence, preferences,
 notifications, workspace commands, and the notification worker.
 
@@ -266,15 +258,52 @@ All supported runtime variables are documented in
 their direct variable or the corresponding `_FILE` variable. Do not configure
 both forms for the same setting.
 
-| Area | Variables |
-| --- | --- |
-| Application | `APP_URL`, `ORBIT_BIND_ADDRESS`, `ORBIT_PORT`, `SESSION_SECRET[_FILE]`, `SESSION_TTL_SECONDS` |
-| Database | `DATABASE_URL[_FILE]`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD[_FILE]` |
-| Identity | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET[_FILE]`, `OIDC_CALLBACK_URL` |
-| Email | `SMTP_URL[_FILE]`, `SMTP_FROM` |
-| Browser push | `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY[_FILE]` |
-| Worker | `WORKER_ENABLED`, `WORKER_POLL_SECONDS`, `NOTIFICATION_MAX_ATTEMPTS` |
-| Migrations | `MIGRATE_ON_START`, `DRIZZLE_MIGRATIONS_PATH` |
+Examples below demonstrate the expected shape. Generate real secrets; do not
+copy placeholder secret values into a public deployment.
+
+The installer creates and mounts the PostgreSQL password and Orbit session
+secret files. If you choose another `_FILE` setting, create that file yourself
+and add a matching read-only secret mount to the Compose service.
+
+| Variable | Used by | Purpose | Example value |
+| --- | --- | --- | --- |
+| `APP_URL` | Orbit | Canonical browser origin used for cookies and request validation. Use HTTPS except on loopback. | `https://orbit.example.com` |
+| `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
+| `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
+| `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
+| `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack overrides this to `/run/secrets/...`. | `.orbit-secrets/session-secret` |
+| `SESSION_TTL_SECONDS` | Orbit | Login-session lifetime in seconds. | `604800` |
+| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
+| `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
+| `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
+| `POSTGRES_PORT` | Orbit | PostgreSQL TCP port. | `5432` |
+| `POSTGRES_DB` | Orbit and PostgreSQL | Database created and used by Orbit. | `orbit` |
+| `POSTGRES_USER` | Orbit and PostgreSQL | PostgreSQL role created and used by Orbit. | `orbit` |
+| `POSTGRES_PASSWORD` | Orbit and PostgreSQL | Direct database password. Leave empty when the password file is used. | `<generated-random-password>` |
+| `POSTGRES_PASSWORD_FILE` | Orbit and PostgreSQL | File containing the generated PostgreSQL password. | `.orbit-secrets/postgres-password` |
+| `OIDC_ISSUER` | Orbit | HTTPS issuer/discovery URL for the OpenID Connect provider. | `https://auth.example.com/application/o/orbit/` |
+| `OIDC_CLIENT_ID` | Orbit | Client identifier registered with the identity provider. | `orbit` |
+| `OIDC_CLIENT_SECRET` | Orbit | Direct OIDC client secret. Leave empty when the file form is used. | `<provider-generated-secret>` |
+| `OIDC_CLIENT_SECRET_FILE` | Orbit | File containing the OIDC client secret. | `/run/secrets/orbit-oidc-client-secret` |
+| `OIDC_CALLBACK_URL` | Orbit | Exact callback URI registered with the identity provider. | `https://orbit.example.com/api/auth/callback` |
+| `OIDC_SCOPES` | Orbit | Space-separated scopes requested during sign-in; must contain `openid`. | `openid profile email` |
+| `OIDC_EMAIL_CLAIM` | Orbit | ID-token claim containing the user email address. | `email` |
+| `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | ID-token claim indicating whether the email is verified. | `email_verified` |
+| `OIDC_NAME_CLAIM` | Orbit | ID-token claim used as the registered user’s display name. | `name` |
+| `OIDC_AVATAR_CLAIM` | Orbit | Optional ID-token claim containing the avatar URL. | `picture` |
+| `SMTP_URL` | Worker | SMTP or SMTPS connection URL for email reminders. Leave empty when using `SMTP_URL_FILE`. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
+| `SMTP_URL_FILE` | Worker | File containing the SMTP connection URL. | `/run/secrets/orbit-smtp-url` |
+| `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. | `mailto:admin@example.com` |
+| `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
+| `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
+| `VAPID_PRIVATE_KEY_FILE` | Worker | File containing the private VAPID key. | `/run/secrets/orbit-vapid-private-key` |
+| `WORKER_POLL_SECONDS` | Worker | Interval between notification queue scans. | `60` |
+| `NOTIFICATION_MAX_ATTEMPTS` | Worker | Delivery attempts before a notification is marked failed. | `5` |
+| `MIGRATE_ON_START` | Orbit | Applies pending Drizzle migrations during application startup. Compose sets this to `true`. | `false` |
+| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
+| `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
+| `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
 For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
 and valid OIDC, SMTP, and VAPID credentials. Back up the PostgreSQL volume and

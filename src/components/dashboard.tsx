@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { AdminManager } from "@/components/admin-manager";
+import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { Icon } from "@/components/icons";
 import { ItemDetail, type CompletionInput } from "@/components/item-detail";
@@ -10,6 +12,7 @@ import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import {
   daysUntil,
+  getDueBand,
   getDueState,
   sortByDueDate,
   type HomeItem,
@@ -18,20 +21,56 @@ import {
   type SectionIcon,
 } from "@/lib/domain";
 import { householdNotifications, type HouseholdNotification } from "@/lib/notifications";
-import { colourways, themeModes, themePreferenceSchema, type ThemeMode } from "@/lib/preferences";
+import {
+  colourways,
+  textSizes,
+  themeModes,
+  themePreferenceSchema,
+  urgencyPalettes,
+  type ThemePreference,
+} from "@/lib/preferences";
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createHousehold, type ItemActivity } from "@/lib/workspace";
 
 const THEME_STORAGE_KEY = "orbit:theme:v1";
 const PREFERENCE_EVENT = "orbit:preference-change";
-const DEFAULT_THEME_JSON = JSON.stringify({ mode: "system", colourway: "after-dark" });
+const DEFAULT_THEME: ThemePreference = {
+  mode: "system",
+  colourway: "after-dark",
+  textSize: "comfortable",
+  urgencyPalette: "themed",
+};
+const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 
-type SettingsView = "appearance" | "sections" | "members";
+type SettingsView = "appearance" | "sections" | "members" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
 const customSectionAccents: SectionAccent[] = ["coral", "sage", "blue", "sand", "plum"];
 const customSectionIcons: SectionIcon[] = ["home", "vehicle", "device", "service", "calendar"];
+const textSizeLabels = {
+  standard: { name: "Standard", detail: "Original compact sizing" },
+  comfortable: { name: "Comfortable", detail: "Larger and easier to scan" },
+  large: { name: "Large", detail: "Maximum in-app text size" },
+} as const;
+const urgencyPaletteLabels = {
+  classic: { name: "Traditional", detail: "Red, orange, yellow and green" },
+  themed: { name: "Theme matched", detail: "Urgency colours adapt to your colourway" },
+} as const;
+
+function AuthenticationGate({ loading }: { loading: boolean }) {
+  return (
+    <main className="authentication-gate">
+      <section>
+        <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
+        <p className="eyebrow">Everything in your orbit, on track</p>
+        <h1>{loading ? "Checking access…" : "Sign in to Orbit."}</h1>
+        <p>{loading ? "Orbit is confirming your session." : "Your household information is private and is only available after authentication."}</p>
+        {!loading && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
+      </section>
+    </main>
+  );
+}
 
 function useLocalStorageValue(key: string, fallback: string): string {
   const subscribe = useCallback((onStoreChange: () => void) => {
@@ -125,13 +164,15 @@ export function Dashboard() {
   const themePreference = useMemo(() => {
     try {
       const parsed = themePreferenceSchema.safeParse(JSON.parse(storedTheme));
-      return parsed.success ? parsed.data : { mode: "system" as ThemeMode, colourway: "after-dark" };
+      return parsed.success ? parsed.data : DEFAULT_THEME;
     } catch {
-      return { mode: "system" as ThemeMode, colourway: "after-dark" };
+      return DEFAULT_THEME;
     }
   }, [storedTheme]);
   const themeMode = themePreference.mode;
   const colourway = themePreference.colourway;
+  const textSize = themePreference.textSize;
+  const urgencyPalette = themePreference.urgencyPalette;
   const activeItems = household.items.filter((item) => item.status === "active");
   const inactiveItems = household.items.filter((item) => ["archived", "cancelled"].includes(item.status));
   const archiveMode = activeSection === "archive";
@@ -166,17 +207,22 @@ export function Dashboard() {
     storePreference(THEME_STORAGE_KEY, {
       mode: session.user.themeMode,
       colourway: session.user.themeId,
+      textSize: session.user.textSize,
+      urgencyPalette: session.user.urgencyPalette,
     });
   }, [session]);
 
-  function updateTheme(mode: ThemeMode, nextColourway = colourway) {
-    storePreference(THEME_STORAGE_KEY, { mode, colourway: nextColourway });
+  if (!session) return <AuthenticationGate loading={syncStatus === "loading"} />;
+
+  function updateAppearance(changes: Partial<ThemePreference>) {
+    const preference = { ...themePreference, ...changes };
+    storePreference(THEME_STORAGE_KEY, preference);
     if (session) {
       void fetch("/api/preferences", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
-        body: JSON.stringify({ mode, colourway: nextColourway }),
+        body: JSON.stringify(preference),
       });
     }
   }
@@ -362,8 +408,23 @@ export function Dashboard() {
     setNotice({ message: `${input.name} is ready` });
   }
 
+  function completeFirstRun(input: HouseholdSetupInput) {
+    dispatch({
+      type: "household.setup",
+      householdId: household.id,
+      ...input,
+    });
+    setNotice({ message: `${input.name} is ready` });
+  }
+
   return (
-    <div className="app-frame" data-theme={colourway} data-mode={themeMode}>
+    <div
+      className="app-frame"
+      data-theme={colourway}
+      data-mode={themeMode}
+      data-text-size={textSize}
+      data-urgency-palette={urgencyPalette}
+    >
       <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <span className="brand-mark"><Image src="/orbit-mark.svg" alt="" width={56} height={56} priority /></span>
@@ -406,8 +467,8 @@ export function Dashboard() {
           <button className="nav-item" onClick={() => { setSettingsView("appearance"); setMenuOpen(false); }}><Icon name="settings" /><span>Personalise</span></button>
         </nav>
         <button className="profile" onClick={() => setSettingsView("appearance")}>
-          <span className="profile-avatar">{householdInitials(session?.user.displayName ?? "Preview owner")}</span>
-          <span><strong>{session?.user.displayName ?? "Preview owner"}</strong><small>{session ? session.user.email : "Local demonstration"}</small></span>
+          <span className="profile-avatar">{householdInitials(session.user.displayName)}</span>
+          <span><strong>{session.user.displayName}</strong><small>{session.user.isInstanceAdmin ? "Orbit administrator" : session.user.email}</small></span>
           <Icon name="more" />
         </button>
       </aside>
@@ -417,7 +478,7 @@ export function Dashboard() {
           <button className="mobile-menu" aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /><span /></button>
           <label className="search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${household.name.toLowerCase()}…`} /></label>
           <span className={`sync-state sync-${syncStatus}`} title={syncMessage || undefined}>
-            <i />{syncStatus === "preview" ? "Preview" : syncStatus === "saving" ? "Saving" : syncStatus === "offline" ? "Offline" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
+            <i />{syncStatus === "saving" ? "Saving" : syncStatus === "offline" ? "Offline" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
@@ -470,11 +531,11 @@ export function Dashboard() {
             </div>
             <div className="item-list">
               {visibleItems.map((item, index) => {
-                const dueState = getDueState(item.dueDate, today);
-                const displayState = archiveMode ? item.status : dueState;
+                const dueBand = getDueBand(item.dueDate, today);
+                const displayState = archiveMode ? item.status : dueBand;
                 const itemSection = sections.find((section) => section.id === item.sectionId);
                 return (
-                  <article className="item-card" key={item.id}>
+                  <article className={`item-card ${archiveMode ? "" : `due-band-${dueBand}`}`} key={item.id}>
                     <span className="row-number">{String(index + 1).padStart(2, "0")}</span>
                     <span className={`category-icon type-icon-${itemSection?.icon ?? "calendar"} accent-${itemSection?.accent ?? "sage"}`}><Icon name={itemSection?.icon ?? "calendar"} /></span>
                     <button className="item-main" onClick={() => openItem(item)}>
@@ -509,10 +570,11 @@ export function Dashboard() {
               <div><p>Make it yours</p><h2 id="personalise-title">Personalise Orbit</h2></div>
               <button aria-label="Close personalisation" onClick={() => setSettingsView(null)}>×</button>
             </header>
-            <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
+            <div className={`settings-tabs ${session.user.isInstanceAdmin ? "settings-tabs-admin" : ""}`} role="tablist" aria-label="Personalisation settings">
               <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
               <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
+              {session.user.isInstanceAdmin && <button role="tab" aria-selected={settingsView === "administration"} className={settingsView === "administration" ? "active" : ""} onClick={() => setSettingsView("administration")}>Admin</button>}
             </div>
 
             {settingsView === "appearance" ? (
@@ -521,7 +583,7 @@ export function Dashboard() {
                   <div className="setting-heading"><h3>Display mode</h3><p>Use your device setting or choose a consistent mode.</p></div>
                   <div className="mode-picker">
                     {themeModes.map((mode) => (
-                      <button className={themeMode === mode ? "active" : ""} key={mode} onClick={() => updateTheme(mode)}>
+                      <button className={themeMode === mode ? "active" : ""} key={mode} onClick={() => updateAppearance({ mode })}>
                         <span className={`mode-preview mode-${mode}`}><i /><b /></span>
                         {mode[0].toUpperCase() + mode.slice(1)}
                       </button>
@@ -532,10 +594,34 @@ export function Dashboard() {
                   <div className="setting-heading"><h3>Colourway</h3><p>Each palette has a carefully tuned light and dark expression.</p></div>
                   <div className="colourway-list">
                     {colourways.map((theme) => (
-                      <button className={colourway === theme.id ? "active" : ""} key={theme.id} onClick={() => updateTheme(themeMode, theme.id)}>
+                      <button className={colourway === theme.id ? "active" : ""} key={theme.id} onClick={() => updateAppearance({ colourway: theme.id })}>
                         <span className="theme-swatches">{theme.swatches.map((swatch) => <i key={swatch} style={{ backgroundColor: swatch }} />)}</span>
                         <span><strong>{theme.name}</strong><small>{theme.description}</small></span>
                         <b>{colourway === theme.id ? "✓" : ""}</b>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section>
+                  <div className="setting-heading"><h3>Text size</h3><p>Increase Orbit&apos;s typography without scaling the rest of the interface.</p></div>
+                  <div className="preference-card-picker">
+                    {textSizes.map((size) => (
+                      <button className={textSize === size ? "active" : ""} key={size} onClick={() => updateAppearance({ textSize: size })}>
+                        <span className={`text-size-preview text-size-${size}`}>Aa</span>
+                        <span><strong>{textSizeLabels[size].name}</strong><small>{textSizeLabels[size].detail}</small></span>
+                        <b>{textSize === size ? "✓" : ""}</b>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section>
+                  <div className="setting-heading"><h3>Due-date heat map</h3><p>Choose traditional urgency colours or a palette tuned to the active theme.</p></div>
+                  <div className="preference-card-picker">
+                    {urgencyPalettes.map((palette) => (
+                      <button className={urgencyPalette === palette ? "active" : ""} key={palette} onClick={() => updateAppearance({ urgencyPalette: palette })}>
+                        <span className={`heat-preview heat-preview-${palette}`}><i /><i /><i /><i /></span>
+                        <span><strong>{urgencyPaletteLabels[palette].name}</strong><small>{urgencyPaletteLabels[palette].detail}</small></span>
+                        <b>{urgencyPalette === palette ? "✓" : ""}</b>
                       </button>
                     ))}
                   </div>
@@ -573,8 +659,10 @@ export function Dashboard() {
                   })))}>Restore default sections</button>
                 </section>
               </div>
-            ) : (
+            ) : settingsView === "members" ? (
               <MemberManager householdId={household.id} session={session} />
+            ) : (
+              <AdminManager session={session} />
             )}
           </aside>
         </>
@@ -627,6 +715,8 @@ export function Dashboard() {
       )}
 
       {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
+
+      {!household.onboardingComplete && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
       {notice && (
         <div className="action-toast" role="status">

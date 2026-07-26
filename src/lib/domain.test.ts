@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getDueState, sortByDueDate, suggestNextDate, type HomeItem } from "./domain";
+import { getDueBand, getDueState, sortByDueDate, suggestNextDate, type HomeItem } from "./domain";
 
 describe("due date rules", () => {
   it("classifies calendar dates without timezone drift", () => {
@@ -7,6 +7,17 @@ describe("due date rules", () => {
     expect(getDueState("2026-08-24", "2026-07-25")).toBe("due-soon");
     expect(getDueState("2026-08-25", "2026-07-25")).toBe("upcoming");
     expect(getDueState(undefined, "2026-07-25")).toBe("unscheduled");
+  });
+
+  it("maps due dates to the requested heat-map boundaries", () => {
+    const today = "2026-07-25";
+    expect(getDueBand("2026-07-24", today)).toBe("overdue");
+    expect(getDueBand(today, today)).toBe("week");
+    expect(getDueBand("2026-07-31", today)).toBe("week");
+    expect(getDueBand("2026-08-01", today)).toBe("quarter");
+    expect(getDueBand("2026-10-23", today)).toBe("quarter");
+    expect(getDueBand("2026-10-24", today)).toBe("later");
+    expect(getDueBand(undefined, today)).toBe("unscheduled");
   });
 
   it("orders overdue first and unscheduled last", () => {

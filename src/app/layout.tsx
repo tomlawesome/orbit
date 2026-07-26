@@ -8,6 +8,10 @@ export const metadata: Metadata = {
   description: "Everything in your orbit, on track. Manage household maintenance, services, renewals and schedules.",
   applicationName: "Orbit",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: ["/icon.svg"],
+  },
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Orbit" },
   openGraph: {
     type: "website",

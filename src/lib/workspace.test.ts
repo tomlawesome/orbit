@@ -1,9 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { activeHousehold, createDemoWorkspace, createHousehold, reduceWorkspace, workspaceItemSchema } from "./workspace";
+import { createTestWorkspace } from "./test-workspace";
+import { activeHousehold, createEmptyWorkspace, createHousehold, reduceWorkspace, workspaceItemSchema } from "./workspace";
 
 describe("household workspace", () => {
+  it("starts with no sample records and requires first-run setup", () => {
+    const initial = createEmptyWorkspace();
+    const household = activeHousehold(initial);
+
+    expect(household.items).toEqual([]);
+    expect(household.activities).toEqual([]);
+    expect(household.onboardingComplete).toBe(false);
+  });
+
+  it("completes first-run setup with the selected categories", () => {
+    const initial = createEmptyWorkspace();
+    const sections = [{
+      id: "property",
+      name: "Property",
+      icon: "home" as const,
+      accent: "sage" as const,
+      visible: true,
+    }];
+    const configured = reduceWorkspace(initial, {
+      type: "household.setup",
+      householdId: "local-home",
+      name: "The cottage",
+      timezone: "Europe/Dublin",
+      currency: "EUR",
+      sections,
+    });
+
+    expect(activeHousehold(configured)).toMatchObject({
+      name: "The cottage",
+      timezone: "Europe/Dublin",
+      currency: "EUR",
+      onboardingComplete: true,
+      sections,
+    });
+  });
+
   it("creates a household with the default sections and makes it active", () => {
-    const initial = createDemoWorkspace();
+    const initial = createEmptyWorkspace();
     const household = createHousehold({ id: "the-cottage", name: "The cottage" });
     const next = reduceWorkspace(initial, { type: "household.create", household });
 
@@ -13,7 +50,7 @@ describe("household workspace", () => {
   });
 
   it("upserts and archives an item without deleting its history", () => {
-    const initial = createDemoWorkspace();
+    const initial = createEmptyWorkspace();
     const item = {
       id: "roof-cover",
       sectionId: "home",
@@ -23,10 +60,10 @@ describe("household workspace", () => {
       dueDate: "2026-12-01",
       scheduleKind: "renewal" as const,
     };
-    const created = reduceWorkspace(initial, { type: "item.upsert", householdId: "our-home", item });
+    const created = reduceWorkspace(initial, { type: "item.upsert", householdId: "local-home", item });
     const archived = reduceWorkspace(created, {
       type: "item.archive",
-      householdId: "our-home",
+      householdId: "local-home",
       itemId: item.id,
       activity: {
         id: "activity-archive",
@@ -45,7 +82,7 @@ describe("household workspace", () => {
   });
 
   it("completes a recurring event, advances its date, and preserves the activity", () => {
-    const initial = createDemoWorkspace();
+    const initial = createTestWorkspace();
     const activity = {
       id: "activity-renewal",
       itemId: "car-insurance",

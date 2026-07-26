@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sectionPreferenceSchema } from "@/lib/preferences";
 import {
-  createDemoWorkspace,
+  createEmptyWorkspace,
   reduceWorkspace,
   workspaceSchema,
   type WorkspaceCommand,
@@ -17,10 +16,7 @@ import {
   writeWorkspaceSnapshot,
 } from "@/lib/workspace-cache";
 
-const WORKSPACE_STORAGE_KEY = "orbit:workspace:v1";
-const LEGACY_SECTION_STORAGE_KEY = "orbit:sections:v1";
-
-export type WorkspaceSyncStatus = "loading" | "preview" | "synced" | "saving" | "offline" | "error";
+export type WorkspaceSyncStatus = "loading" | "signed-out" | "synced" | "saving" | "offline" | "error";
 
 export interface WorkspaceSession {
   authenticated: true;
@@ -30,24 +26,12 @@ export interface WorkspaceSession {
     email: string;
     displayName: string;
     avatarUrl: string | null;
+    isInstanceAdmin: boolean;
     themeMode: "system" | "light" | "dark";
     themeId: string;
+    textSize: "standard" | "comfortable" | "large";
+    urgencyPalette: "classic" | "themed";
   };
-}
-
-function parseStoredPreview(): WorkspaceState {
-  try {
-    const current = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
-    const parsed = current ? workspaceSchema.safeParse(JSON.parse(current)) : undefined;
-    if (parsed?.success) return parsed.data;
-
-    const legacySections = window.localStorage.getItem(LEGACY_SECTION_STORAGE_KEY);
-    const legacy = legacySections ? sectionPreferenceSchema.safeParse(JSON.parse(legacySections)) : undefined;
-    if (legacy?.success) return createDemoWorkspace(legacy.data);
-  } catch {
-    // Invalid legacy browser data safely falls back to the demonstration workspace.
-  }
-  return createDemoWorkspace();
 }
 
 async function fetchSession(): Promise<WorkspaceSession | null> {
@@ -65,11 +49,11 @@ async function fetchWorkspace(): Promise<WorkspaceState> {
 }
 
 /**
- * Provides a preview workspace without infrastructure, then transparently
- * upgrades to authenticated API persistence when a valid session is present.
+ * Loads authenticated workspace state and keeps its offline cache isolated by
+ * user. Signed-out visitors never receive a cached or server workspace.
  */
 export function useWorkspace() {
-  const [workspace, setWorkspace] = useState<WorkspaceState>(() => createDemoWorkspace());
+  const [workspace, setWorkspace] = useState<WorkspaceState>(() => createEmptyWorkspace());
   const [session, setSession] = useState<WorkspaceSession | null>(null);
   const [syncStatus, setSyncStatus] = useState<WorkspaceSyncStatus>("loading");
   const [syncMessage, setSyncMessage] = useState("");
@@ -80,7 +64,7 @@ export function useWorkspace() {
     if (flushingRef.current) return;
     flushingRef.current = true;
     try {
-      const queued = await readQueuedWorkspaceCommands();
+      const queued = await readQueuedWorkspaceCommands(activeSession.user.id);
       for (const entry of queued) {
         const response = await fetch("/api/workspace/commands", {
           method: "POST",
@@ -96,7 +80,7 @@ export function useWorkspace() {
             await removeQueuedWorkspaceCommand(entry.id);
             const canonical = await fetchWorkspace();
             setWorkspace(canonical);
-            await writeWorkspaceSnapshot(canonical);
+            await writeWorkspaceSnapshot(activeSession.user.id, canonical);
             setSyncStatus("error");
             setSyncMessage(response.status === 409
               ? "A newer version was found; Orbit refreshed this workspace."
@@ -109,7 +93,7 @@ export function useWorkspace() {
         const canonical = workspaceSchema.parse(payload.workspace);
         await removeQueuedWorkspaceCommand(entry.id);
         setWorkspace(canonical);
-        await writeWorkspaceSnapshot(canonical);
+        await writeWorkspaceSnapshot(activeSession.user.id, canonical);
       }
       setSyncStatus("synced");
       setSyncMessage("");
@@ -124,36 +108,60 @@ export function useWorkspace() {
   useEffect(() => {
     let cancelled = false;
     async function initialize() {
-      const cached = await readWorkspaceSnapshot().catch(() => undefined);
-      if (!cancelled && cached) setWorkspace(cached);
       try {
         const activeSession = await fetchSession();
         if (cancelled) return;
         sessionRef.current = activeSession;
         setSession(activeSession);
         if (!activeSession) {
-          const preview = cached ?? parseStoredPreview();
-          setWorkspace(preview);
-          await writeWorkspaceSnapshot(preview).catch(() => undefined);
-          setSyncStatus("preview");
+          setWorkspace(createEmptyWorkspace());
+          setSyncStatus("signed-out");
           return;
         }
-        const canonical = await fetchWorkspace();
-        if (cancelled) return;
-        setWorkspace(canonical);
-        await writeWorkspaceSnapshot(canonical);
-        setSyncStatus("synced");
-        void flushQueue(activeSession);
+        const cached = await readWorkspaceSnapshot(activeSession.user.id).catch(() => undefined);
+        if (!cancelled && cached) setWorkspace(cached);
+        try {
+          const canonical = await fetchWorkspace();
+          if (cancelled) return;
+          setWorkspace(canonical);
+          await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+          setSyncStatus("synced");
+          void flushQueue(activeSession);
+        } catch {
+          if (cancelled) return;
+          if (cached) {
+            setSyncStatus("offline");
+            setSyncMessage("Showing your saved workspace while Orbit reconnects.");
+            return;
+          }
+          throw new Error("No authenticated workspace is available");
+        }
       } catch {
         if (cancelled) return;
-        setWorkspace(cached ?? parseStoredPreview());
-        setSyncStatus(cached ? "offline" : "preview");
-        setSyncMessage(cached ? "Showing the latest saved device snapshot." : "");
+        sessionRef.current = null;
+        setSession(null);
+        setWorkspace(createEmptyWorkspace());
+        setSyncStatus("signed-out");
+        setSyncMessage("");
       }
     }
     void initialize();
-    const synchronize = () => {
-      if (sessionRef.current) void flushQueue(sessionRef.current);
+    const synchronize = async () => {
+      const activeSession = sessionRef.current;
+      if (!activeSession) return;
+      await flushQueue(activeSession);
+      try {
+        const canonical = await fetchWorkspace();
+        if (cancelled) return;
+        setWorkspace(canonical);
+        await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+        setSyncStatus("synced");
+        setSyncMessage("");
+      } catch {
+        if (cancelled) return;
+        setSyncStatus("offline");
+        setSyncMessage("Showing your saved workspace while Orbit reconnects.");
+      }
     };
     window.addEventListener("online", synchronize);
     return () => {
@@ -165,17 +173,15 @@ export function useWorkspace() {
   const dispatch = useCallback((command: WorkspaceCommand) => {
     setWorkspace((current) => {
       const next = reduceWorkspace(current, command);
-      void writeWorkspaceSnapshot(next);
-      if (!sessionRef.current) {
-        window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(next));
-      }
+      const activeSession = sessionRef.current;
+      if (activeSession) void writeWorkspaceSnapshot(activeSession.user.id, next);
       return next;
     });
 
     const activeSession = sessionRef.current;
     if (!activeSession) return;
     setSyncStatus("saving");
-    void enqueueWorkspaceCommand(command)
+    void enqueueWorkspaceCommand(activeSession.user.id, command)
       .then(() => flushQueue(activeSession))
       .catch(() => {
         setSyncStatus("offline");

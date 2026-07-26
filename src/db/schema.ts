@@ -18,6 +18,7 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").notNull().default(false),
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
+  isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
   ...auditColumns,
 }, (table) => [index("user_email_lookup_idx").on(table.email)]);
 
@@ -25,6 +26,8 @@ export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   themeMode: themeMode("theme_mode").notNull().default("system"),
   themeId: text("theme_id").notNull().default("after-dark"),
+  textSize: text("text_size").notNull().default("comfortable"),
+  urgencyPalette: text("urgency_palette").notNull().default("themed"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -52,6 +55,7 @@ export const households = pgTable("households", {
   name: text("name").notNull(),
   timezone: text("timezone").notNull().default("Europe/London"),
   defaultCurrency: text("default_currency").notNull().default("GBP"),
+  setupCompleted: boolean("setup_completed").notNull().default(false),
   ...auditColumns,
 });
 

@@ -6,6 +6,7 @@ import type { AuthConfig } from "@/lib/env";
 import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
+import type { TextSize, UrgencyPalette } from "@/lib/preferences";
 
 export interface AuthenticatedSession {
   id: string;
@@ -16,8 +17,11 @@ export interface AuthenticatedSession {
     emailVerified: boolean;
     displayName: string;
     avatarUrl: string | null;
+    isInstanceAdmin: boolean;
     themeMode: "system" | "light" | "dark";
     themeId: string;
+    textSize: TextSize;
+    urgencyPalette: UrgencyPalette;
   };
   activeHouseholdId: string | null;
   expiresAt: Date;
@@ -53,8 +57,11 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
       emailVerified: users.emailVerified,
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
+      isInstanceAdmin: users.isInstanceAdmin,
       themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
+      textSize: userPreferences.textSize,
+      urgencyPalette: userPreferences.urgencyPalette,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
@@ -77,8 +84,13 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
       emailVerified: record.emailVerified,
       displayName: record.displayName,
       avatarUrl: record.avatarUrl,
+      isInstanceAdmin: record.isInstanceAdmin,
       themeMode: record.themeMode ?? "system",
       themeId: record.themeId ?? "after-dark",
+      textSize: record.textSize === "standard" || record.textSize === "large"
+        ? record.textSize
+        : "comfortable",
+      urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",
     },
   };
 }

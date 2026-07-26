@@ -28,8 +28,11 @@ const session: AuthenticatedSession = {
     emailVerified: true,
     displayName: "Orbit User",
     avatarUrl: null,
+    isInstanceAdmin: true,
     themeMode: "system",
     themeId: "verdant",
+    textSize: "comfortable",
+    urgencyPalette: "themed",
   },
 };
 

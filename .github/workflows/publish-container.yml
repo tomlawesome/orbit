@@ -43,6 +43,13 @@ jobs:
           response="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
           jq --exit-status '.status == "ok" and .service == "orbit"' <<< "${response}"
 
+      - name: Verify signed-out privacy boundary and favicon
+        run: |
+          status="$(curl --silent --output /tmp/orbit-workspace.json --write-out '%{http_code}' http://127.0.0.1:3000/api/workspace)"
+          test "${status}" = "401"
+          curl --fail --silent --show-error http://127.0.0.1:3000/icon.svg |
+            grep --quiet '<svg'
+
       - name: Show service diagnostics
         if: failure()
         run: |

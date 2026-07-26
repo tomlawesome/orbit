@@ -8,6 +8,13 @@
       "when": 1785013968168,
       "tag": "0000_initial_orbit",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785023560901,
+      "tag": "0001_instance_setup_and_preferences",
+      "breakpoints": true
     }
   ]
 }

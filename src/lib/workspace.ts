@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { demoItems } from "@/lib/demo-data";
 import {
   defaultSections,
   itemStatuses,
@@ -79,6 +78,7 @@ export const householdWorkspaceSchema = z.object({
   timezone: z.string().min(1).max(80),
   currency: z.string().length(3),
   memberCount: z.number().int().positive(),
+  onboardingComplete: z.boolean().default(true),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(workspaceItemSchema).max(500),
   activities: z.array(itemActivitySchema).max(5_000).default([]),
@@ -89,7 +89,7 @@ export const householdWorkspaceSchema = z.object({
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
   activeHouseholdId: z.string().min(1),
-  households: z.array(householdWorkspaceSchema).min(1).max(20),
+  households: z.array(householdWorkspaceSchema).min(1).max(500),
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
@@ -98,6 +98,14 @@ export type WorkspaceState = z.infer<typeof workspaceSchema>;
 
 export type WorkspaceCommand =
   | { type: "household.create"; household: HouseholdWorkspace }
+  | {
+      type: "household.setup";
+      householdId: string;
+      name: string;
+      timezone: string;
+      currency: string;
+      sections: HouseholdSection[];
+    }
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
   | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
@@ -122,6 +130,14 @@ export type WorkspaceCommand =
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
 export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("household.create"), household: householdWorkspaceSchema }),
+  z.object({
+    type: z.literal("household.setup"),
+    householdId: z.string().min(1).max(100),
+    name: z.string().trim().min(1).max(60),
+    timezone: z.string().min(1).max(80),
+    currency: z.string().length(3),
+    sections: z.array(workspaceSectionSchema).min(1).max(12),
+  }),
   z.object({ type: z.literal("household.activate"), householdId: z.string().min(1).max(100) }),
   z.object({
     type: z.literal("sections.replace"),
@@ -204,32 +220,27 @@ export function createHousehold(input: {
     timezone: input.timezone ?? "Europe/London",
     currency: input.currency ?? "GBP",
     memberCount: 1,
+    onboardingComplete: true,
     sections: cloneSections().map((section) => ({ ...section, id: crypto.randomUUID() })),
     items: [],
   });
 }
 
-const demoActivities: ItemActivity[] = [
-  { id: "activity-car-created", itemId: "car-insurance", kind: "created", occurredAt: "2025-07-22T10:00:00.000Z", nextDate: "2026-07-22" },
-  { id: "activity-boiler-created", itemId: "boiler-service", kind: "created", occurredAt: "2025-08-02T09:30:00.000Z", nextDate: "2026-08-02" },
-  { id: "activity-broadband-created", itemId: "broadband", kind: "created", occurredAt: "2025-03-14T14:00:00.000Z", nextDate: "2026-09-14" },
-  { id: "activity-washer-created", itemId: "washing-machine", kind: "created", occurredAt: "2025-11-05T11:15:00.000Z", nextDate: "2026-11-05" },
-  { id: "activity-inventory-created", itemId: "home-inventory", kind: "created", occurredAt: "2026-01-10T16:00:00.000Z" },
-];
-
-export function createDemoWorkspace(sections = cloneSections()): WorkspaceState {
+/** Creates the clean browser-local workspace used before authentication. */
+export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState {
   return workspaceSchema.parse({
     version: WORKSPACE_VERSION,
-    activeHouseholdId: "our-home",
+    activeHouseholdId: "local-home",
     households: [{
-      id: "our-home",
-      name: "Our home",
+      id: "local-home",
+      name: "My home",
       timezone: "Europe/London",
       currency: "GBP",
-      memberCount: 2,
+      memberCount: 1,
+      onboardingComplete: false,
       sections,
-      items: demoItems,
-      activities: demoActivities,
+      items: [],
+      activities: [],
     }],
   });
 }
@@ -269,6 +280,16 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         activeHouseholdId: command.household.id,
         households: [...state.households, command.household],
       });
+    }
+    case "household.setup": {
+      return updateHousehold(state, command.householdId, (household) => ({
+        ...household,
+        name: command.name,
+        timezone: command.timezone,
+        currency: command.currency,
+        onboardingComplete: true,
+        sections: command.sections,
+      }));
     }
     case "household.activate": {
       if (!state.households.some((household) => household.id === command.householdId)) return state;

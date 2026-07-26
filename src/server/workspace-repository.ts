@@ -23,6 +23,7 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
+import { isInstanceAdministrator } from "@/server/authorization";
 
 const uuidSchema = z.uuid();
 
@@ -52,6 +53,7 @@ async function membershipRole(userId: string, householdId: string): Promise<"own
 
 async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false): Promise<void> {
   requireUuid(householdId, "Household");
+  if (await isInstanceAdministrator(userId)) return;
   const role = await membershipRole(userId, householdId);
   if (ownerOnly && role !== "owner") {
     throw new AppError("owner_required", "Only a household owner can make this change", 403);
@@ -66,6 +68,7 @@ async function createInitialHousehold(userId: string, sessionId: string): Promis
       name: "My home",
       timezone: "Europe/London",
       defaultCurrency: "GBP",
+      setupCompleted: false,
     });
     await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
     await transaction.insert(sections).values(defaultSections.map((section, position) => ({
@@ -88,32 +91,25 @@ async function createInitialHousehold(userId: string, sessionId: string): Promis
  * contract. The browser therefore stays independent from database structure.
  */
 export async function readWorkspace(userId: string, sessionId: string, preferredHouseholdId?: string | null): Promise<WorkspaceState> {
-  let householdRows = await getDb()
-    .select({
-      id: households.id,
-      name: households.name,
-      timezone: households.timezone,
-      currency: households.defaultCurrency,
-      role: memberships.role,
-    })
-    .from(memberships)
-    .innerJoin(households, eq(households.id, memberships.householdId))
-    .where(eq(memberships.userId, userId))
-    .orderBy(asc(households.createdAt));
+  const administrator = await isInstanceAdministrator(userId);
+  const householdSelection = {
+    id: households.id,
+    name: households.name,
+    timezone: households.timezone,
+    currency: households.defaultCurrency,
+    onboardingComplete: households.setupCompleted,
+  };
+  const householdRows = administrator
+    ? await getDb().select(householdSelection).from(households).orderBy(asc(households.createdAt))
+    : await getDb().select(householdSelection)
+      .from(memberships)
+      .innerJoin(households, eq(households.id, memberships.householdId))
+      .where(eq(memberships.userId, userId))
+      .orderBy(asc(households.createdAt));
 
   if (!householdRows.length) {
     const initialId = await createInitialHousehold(userId, sessionId);
-    householdRows = await getDb()
-      .select({
-        id: households.id,
-        name: households.name,
-        timezone: households.timezone,
-        currency: households.defaultCurrency,
-        role: memberships.role,
-      })
-      .from(memberships)
-      .innerJoin(households, eq(households.id, memberships.householdId))
-      .where(and(eq(memberships.userId, userId), eq(households.id, initialId)));
+    return readWorkspace(userId, sessionId, initialId);
   }
 
   const householdIds = householdRows.map((household) => household.id);
@@ -197,6 +193,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         timezone: household.timezone,
         currency: household.currency,
         memberCount: memberRows.filter((member) => member.householdId === household.id).length,
+        onboardingComplete: household.onboardingComplete,
         sections: sectionRows.filter((section) => section.householdId === household.id).map((section) => ({
           id: section.id,
           name: section.name,
@@ -234,6 +231,7 @@ export async function applyWorkspaceCommand(
         name: command.household.name,
         timezone: command.household.timezone,
         defaultCurrency: command.household.currency,
+        setupCompleted: command.household.onboardingComplete,
       });
       await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
       await transaction.insert(sections).values(command.household.sections.map((section, position) => {
@@ -257,7 +255,7 @@ export async function applyWorkspaceCommand(
   await requireHouseholdAccess(
     userId,
     command.householdId,
-    command.type === "sections.replace",
+    command.type === "sections.replace" || command.type === "household.setup",
   );
   const householdId = command.householdId;
 
@@ -278,6 +276,43 @@ export async function applyWorkspaceCommand(
 
     if (command.type === "household.activate") {
       await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
+      return;
+    }
+
+    if (command.type === "household.setup") {
+      await transaction.update(households).set({
+        name: command.name,
+        timezone: command.timezone,
+        defaultCurrency: command.currency,
+        setupCompleted: true,
+        updatedAt: new Date(),
+      }).where(eq(households.id, householdId));
+
+      const retainedSectionIds: string[] = [];
+      for (const [position, section] of command.sections.entries()) {
+        const sectionId = validUuid(section.id) ? section.id : randomUUID();
+        retainedSectionIds.push(sectionId);
+        const values = {
+          slug: sectionSlug(section.name, sectionId),
+          name: section.name,
+          icon: section.icon,
+          accent: section.accent,
+          position,
+          visible: section.visible,
+          updatedAt: new Date(),
+        };
+        const [existing] = await transaction.select({ id: sections.id }).from(sections)
+          .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
+        if (existing) {
+          await transaction.update(sections).set(values).where(eq(sections.id, sectionId));
+        } else {
+          await transaction.insert(sections).values({ id: sectionId, householdId, ...values });
+        }
+      }
+      await transaction.delete(sections).where(and(
+        eq(sections.householdId, householdId),
+        notInArray(sections.id, retainedSectionIds),
+      ));
       return;
     }
 

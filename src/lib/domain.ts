@@ -24,6 +24,7 @@ export const scheduleKinds = ["renewal", "service"] as const;
 export type ScheduleKind = (typeof scheduleKinds)[number];
 
 export type DueState = "overdue" | "due-soon" | "upcoming" | "unscheduled";
+export type DueBand = "overdue" | "week" | "quarter" | "later" | "unscheduled";
 
 export interface HomeItem {
   id: string;
@@ -64,6 +65,16 @@ export function getDueState(dueDate: string | undefined, today: string): DueStat
   if (days < 0) return "overdue";
   if (days <= 30) return "due-soon";
   return "upcoming";
+}
+
+/** Maps scheduled dates to the four heat-map bands used by item rows. */
+export function getDueBand(dueDate: string | undefined, today: string): DueBand {
+  if (!dueDate) return "unscheduled";
+  const days = daysUntil(dueDate, today);
+  if (days < 0) return "overdue";
+  if (days < 7) return "week";
+  if (days <= 90) return "quarter";
+  return "later";
 }
 
 export function sortByDueDate(items: HomeItem[], today: string): HomeItem[] {

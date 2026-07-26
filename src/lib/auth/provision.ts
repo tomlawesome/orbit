@@ -64,6 +64,12 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
       return updated;
     }
 
+    // Serialize first-user creation across different identity providers/subjects.
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended('orbit:first-administrator', 0))`);
+    const [registrationState] = await transaction
+      .select({ registeredUsers: sql<number>`count(*)::int` })
+      .from(users);
+
     const [created] = await transaction
       .insert(users)
       .values({
@@ -71,6 +77,7 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
         emailVerified: identity.emailVerified,
         displayName: identity.displayName,
         avatarUrl: identity.avatarUrl,
+        isInstanceAdmin: registrationState.registeredUsers === 0,
       })
       .returning({
         id: users.id,

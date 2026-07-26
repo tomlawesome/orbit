@@ -1,5 +1,5 @@
-const CACHE = "orbit-shell-v5";
-const SHELL = ["/", "/manifest.webmanifest", "/orbit-mark.svg"];
+const CACHE = "orbit-shell-v6";
+const SHELL = ["/", "/manifest.webmanifest", "/orbit-mark.svg", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

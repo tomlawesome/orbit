@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { householdNotifications } from "./notifications";
-import { activeHousehold, createDemoWorkspace, reduceWorkspace } from "./workspace";
+import { createTestWorkspace } from "./test-workspace";
+import { activeHousehold, reduceWorkspace } from "./workspace";
 
 describe("household notifications", () => {
   it("derives overdue and reminder-window notifications from active schedules", () => {
-    const household = activeHousehold(createDemoWorkspace());
+    const household = activeHousehold(createTestWorkspace());
     const notifications = householdNotifications(household, "2026-07-25");
 
     expect(notifications.map((notification) => notification.itemId)).toEqual(["car-insurance", "boiler-service"]);
@@ -12,7 +13,7 @@ describe("household notifications", () => {
   });
 
   it("persists read and dismissed notification state independently", () => {
-    const initial = createDemoWorkspace();
+    const initial = createTestWorkspace();
     const notification = householdNotifications(activeHousehold(initial), "2026-07-25")[0];
     const read = reduceWorkspace(initial, {
       type: "notification.read",
@@ -30,7 +31,7 @@ describe("household notifications", () => {
   });
 
   it("suppresses notifications until a snooze date is reached", () => {
-    const initial = createDemoWorkspace();
+    const initial = createTestWorkspace();
     const activity = {
       id: "activity-snooze",
       itemId: "car-insurance",

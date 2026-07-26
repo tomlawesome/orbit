@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { householdId } = await context.params;
     const members = await listHouseholdMembers(session.user.id, householdId);
     const currentUser = members.find((member) => member.id === session.user.id);
-    const candidates = currentUser?.role === "owner"
+    const candidates = session.user.isInstanceAdmin || currentUser?.role === "owner"
       ? await listRegisteredUserCandidates(session.user.id, householdId)
       : [];
     return NextResponse.json({ members, candidates }, { headers: { "Cache-Control": "no-store" } });
