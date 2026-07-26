@@ -316,6 +316,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   contentSha256: text("content_sha256").notNull(),
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
   status: imapIngestionStatus("status").notNull(),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
@@ -326,6 +327,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
   uniqueIndex("imap_message_content_unique").on(table.contentSha256),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
+  index("imap_message_household_status_idx").on(table.householdId, table.status, table.receivedAt),
 ]);
 
 /** Encrypted attachment bytes held until the recipient chooses a household, if needed. */
