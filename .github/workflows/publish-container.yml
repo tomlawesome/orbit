@@ -27,7 +27,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Create isolated test configuration
-        run: bash scripts/configure.sh
+        run: |
+          bash scripts/configure.sh
+          sed --in-place 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=orbit-smoke/' .env-orbit
+          sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
 
       - name: Validate Compose configuration
         run: docker compose --env-file .env-orbit config --quiet
@@ -47,8 +50,8 @@ jobs:
         run: |
           status="$(curl --silent --output /tmp/orbit-workspace.json --write-out '%{http_code}' http://127.0.0.1:3000/api/workspace)"
           test "${status}" = "401"
-          curl --fail --silent --show-error http://127.0.0.1:3000/icon.svg |
-            grep --quiet '<svg'
+          curl --fail --silent --show-error --output /tmp/orbit-icon.svg http://127.0.0.1:3000/icon.svg
+          grep --quiet '<svg' /tmp/orbit-icon.svg
 
       - name: Show service diagnostics
         if: failure()
