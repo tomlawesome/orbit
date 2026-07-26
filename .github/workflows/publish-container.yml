@@ -92,7 +92,11 @@ jobs:
           sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
 
       - name: Validate Compose configuration
-        run: docker compose --env-file .env-orbit config --quiet
+        run: |
+          docker compose --env-file .env-orbit config --quiet
+          docker compose --env-file .env-orbit \
+            -f docker-compose.yml -f docker-compose.full.yml \
+            --profile processing --profile ai config --quiet
 
       - name: Build application image
         run: bash scripts/build-container.sh

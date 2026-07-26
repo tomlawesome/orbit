@@ -254,7 +254,10 @@ is visible without renumbering work already completed.
    Users can discard review items safely and a durable SMTP receipt worker
    records retries/failures without retaining provider details. Live provider
    acceptance remains.
-9. **Optional local Ollama extraction** — Optional: reconsider only after the
+9. **Optional local Ollama extraction** — Optional infrastructure is available
+   through the private `docker-compose.full.yml` overlay, with bounded local
+   Ollama and no cloud-model fallback. Application-level, schema-constrained
+   reviewed draft extraction remains a separate product decision after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,
     documentation, acceptance testing and promotion to `main`/`latest`.
