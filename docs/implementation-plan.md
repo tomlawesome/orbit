@@ -246,8 +246,8 @@ is visible without renumbering work already completed.
 8. **IMAP and SMTP workflow** — In progress: pnpm 11 and maintained ImapFlow
    are now in use. Dedicated-mailbox configuration is TLS-only, secret-backed,
    requires SMTP, and uses opaque per-user aliases verified against a
-   provider-injected recipient header; idempotent message processing and
-   review receipts remain.
+   provider-injected recipient header. A worker records bounded, content-free,
+   idempotent mailbox receipts; user review/attachment and SMTP receipts remain.
 9. **Optional local Ollama extraction** — Optional: reconsider only after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,

@@ -86,8 +86,9 @@ numbers and update statuses in place; do not renumber it.
 8. IMAP ingestion and SMTP review/receipt workflow — in progress; pnpm 11 and
    maintained ImapFlow are now in use. Dedicated-mailbox configuration is
    fail-closed and TLS-only. Each forwarding address is an opaque per-user
-   HMAC alias verified against a configured provider-injected recipient header;
-   idempotent message processing and review receipts remain.
+   HMAC alias verified against a configured provider-injected recipient header.
+   A TLS-only worker records bounded, content-free, idempotent mailbox receipts;
+   user review/attachment and SMTP receipts remain.
 9. Local Ollama extraction — optional; requires a fresh product decision.
 10. Final operational/release polish — planned.
 

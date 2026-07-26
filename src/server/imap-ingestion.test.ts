@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapRecipientAlias, matchesImapRecipientAlias } from "./imap-ingestion";
+import { getImapIngestionConfig, imapRecipientAlias, matchesImapRecipientAlias, trustedRecipientFromHeaders } from "./imap-ingestion";
 
 describe("IMAP ingestion configuration", () => {
   const environment = (values: Record<string, string | undefined>): NodeJS.ProcessEnv => ({ ...values, NODE_ENV: "test" } as NodeJS.ProcessEnv);
@@ -36,5 +36,11 @@ describe("IMAP ingestion configuration", () => {
     expect(alias).toMatch(/^orbit\+[A-Za-z0-9_-]+@ingest\.example\.test$/);
     expect(matchesImapRecipientAlias(alias.toUpperCase(), "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a", config)).toBe(true);
     expect(matchesImapRecipientAlias("orbit+other@ingest.example.test", "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a", config)).toBe(false);
+  });
+
+  it("reads only the configured folded provider header", () => {
+    const headers = Buffer.from("X-Original-To: orbit+token@ingest.example.test\r\n\tcontinued\r\nTo: attacker@example.test\r\n");
+    expect(trustedRecipientFromHeaders(headers, "X-Original-To")).toBe("orbit+token@ingest.example.test continued");
+    expect(trustedRecipientFromHeaders(headers, "Delivered-To")).toBeUndefined();
   });
 });
