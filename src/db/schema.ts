@@ -29,6 +29,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "quarantined", "failed"]);
+export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -325,4 +326,30 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
   uniqueIndex("imap_message_content_unique").on(table.contentSha256),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
+]);
+
+/** Encrypted attachment bytes held until the recipient chooses a household, if needed. */
+export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => imapIngestionMessages.id, { onDelete: "cascade" }),
+  displayName: text("display_name").notNull(),
+  mediaType: text("media_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  ciphertextSize: integer("ciphertext_size").notNull(),
+  envelopeVersion: integer("envelope_version").notNull(),
+  contentIv: text("content_iv").notNull(),
+  contentAuthTag: text("content_auth_tag").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  status: imapAttachmentStatus("status").notNull().default("stored"),
+  assignedDocumentId: uuid("assigned_document_id").references(() => documents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("imap_attachment_message_hash_unique").on(table.messageId, table.contentSha256),
+  index("imap_attachment_message_status_idx").on(table.messageId, table.status),
 ]);
