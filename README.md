@@ -49,8 +49,9 @@ application container locally:
 
 It then starts the `orbit` application container and the official
 `orbit-postgres` PostgreSQL container in the background and displays their
-status. The published Orbit image supports both
-64-bit x86 (`linux/amd64`) and 64-bit ARM (`linux/arm64`) hosts.
+status. Development images target 64-bit x86 (`linux/amd64`) for faster
+iteration. Versioned releases support both `linux/amd64` and `linux/arm64`;
+ARM64 images can also be published with the manual workflow when required.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
