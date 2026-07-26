@@ -27,6 +27,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "failed",
   "cancelled",
 ]);
+export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -228,6 +229,21 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Parser evidence and proposed item fields; never applied without approval. */
+export const documentDrafts = pgTable("document_drafts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: documentDraftStatus("status").notNull().default("pending_review"),
+  extractedTextSha256: text("extracted_text_sha256").notNull(),
+  evidence: jsonb("evidence").notNull(),
+  proposal: jsonb("proposal").notNull(),
+  approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("document_draft_document_unique").on(table.documentId), index("document_draft_household_status_idx").on(table.householdId, table.status)]);
 
 export const notificationStates = pgTable("notification_states", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
