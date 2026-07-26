@@ -29,6 +29,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/orbit-secrets/orbit-postgres-password
       SESSION_SECRET_FILE: /run/orbit-secrets/orbit-session-secret
       DOCUMENT_KEK_FILE: /run/orbit-secrets/orbit-document-kek
+      VAPID_PRIVATE_KEY_FILE: /run/orbit-secrets/orbit-vapid-private-key
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
     volumes:
@@ -40,6 +41,7 @@ services:
       - orbit-postgres-password
       - orbit-session-secret
       - orbit-document-kek
+      - orbit-vapid-private-key
     security_opt:
       - no-new-privileges:true
     ports: ["${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000"]
@@ -94,3 +96,5 @@ secrets:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret
   orbit-document-kek:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
+  orbit-vapid-private-key:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key
