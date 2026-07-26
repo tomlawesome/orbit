@@ -19,7 +19,14 @@ export const documentLifecycle = pgEnum("document_lifecycle", [
 ]);
 export const documentScanStatus = pgEnum("document_scan_status", ["pending", "clean", "infected", "error", "skipped"]);
 export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap"]);
-export const documentJobStatus = pgEnum("document_job_status", ["pending", "processing", "retry", "completed", "failed"]);
+export const documentJobStatus = pgEnum("document_job_status", [
+  "pending",
+  "processing",
+  "retry",
+  "completed",
+  "failed",
+  "cancelled",
+]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -172,6 +179,7 @@ export const documentJobs = pgTable("document_jobs", {
   attempts: integer("attempts").notNull().default(0),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  leaseToken: uuid("lease_token"),
   lastError: text("last_error"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   ...auditColumns,
@@ -239,6 +247,7 @@ export const notificationDeliveries = pgTable("notification_deliveries", {
   status: deliveryStatus("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
+  leaseToken: uuid("lease_token"),
   lastError: text("last_error"),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   ...auditColumns,
@@ -249,7 +258,7 @@ export const notificationDeliveries = pgTable("notification_deliveries", {
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
-  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
   actorUserId: uuid("actor_user_id").references(() => users.id),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id").notNull(),
