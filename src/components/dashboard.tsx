@@ -498,11 +498,6 @@ export function Dashboard() {
           <button className={archiveMode ? "nav-item active" : "nav-item"} onClick={() => { setActiveSection("archive"); setItemFilter("all"); setMenuOpen(false); }}><Icon name="archive" /><span>Archive</span><b>{inactiveItems.length}</b></button>
           <button className="nav-item" onClick={() => { setSettingsView("appearance"); setMenuOpen(false); }}><Icon name="settings" /><span>Personalise</span></button>
         </nav>
-        <button className="profile" onClick={() => setSettingsView("appearance")}>
-          <span className="profile-avatar">{householdInitials(session.user.displayName)}</span>
-          <span><strong>{session.user.displayName}</strong><small>{session.user.isInstanceAdmin ? "Orbit administrator" : session.user.email}</small></span>
-          <Icon name="more" />
-        </button>
       </aside>
 
       <main className="main-shell">
@@ -513,6 +508,7 @@ export function Dashboard() {
             <i />{syncStatus === "saving" ? "Saving" : syncStatus === "offline" ? "Offline" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
+          <button className="topbar-profile" onClick={() => setSettingsView("appearance")} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
         </header>
 
