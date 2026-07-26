@@ -50,9 +50,12 @@ quota never bypasses per-request limits.
 6. **Persistent storage:** the document volume contains ciphertext only.
    PostgreSQL contains metadata and wrapped per-document keys, not plaintext
    document keys or document bytes.
-7. **Secrets:** the KEK is supplied through a dedicated Compose secret file and
-   is not stored in Git, `.env-orbit`, PostgreSQL, the document volume, logs, or
-   ordinary backups.
+7. **Secrets:** the KEK is supplied through a dedicated Compose secret file.
+   Because file-backed Compose secrets retain host ownership, a root-only
+   bootstrap copies mounted secrets into a private in-memory filesystem,
+   assigns them to UID/GID 1001 with mode `0400`, and immediately drops to that
+   identity before starting Orbit. Secrets are not stored in Git,
+   `.env-orbit`, PostgreSQL, the document volume, logs, or ordinary backups.
 8. **Download:** Orbit re-authorizes each request, streams decryption through
    the application, and returns restrictive attachment headers.
 
@@ -185,6 +188,9 @@ recoverable state.
   random source and writes it under `.orbit-secrets/document-kek` with
   user-only permissions.
 - Compose mounts it only into Orbit at `/run/secrets/orbit-document-kek`.
+  The startup bootstrap copies it to `/run/orbit-secrets/orbit-document-kek`
+  on a private `tmpfs`, restricts it to Orbit's UID 1001, and then permanently
+  drops root privileges before application code executes.
 - An explicit recovery command creates a versioned encrypted recovery bundle.
   It reads a recovery passphrase twice from an interactive terminal, derives a
   wrapping key with a memory-hard KDF, and writes only encrypted key material.
