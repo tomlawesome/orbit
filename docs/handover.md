@@ -6,16 +6,17 @@ of truth; do not rely on a previous chat's memory.
 
 ## Current Git state
 
-- **Working branch:** `feature/mobile-lifecycle`
-- **Target branch:** `release/secure-documents`
-- **Draft pull request:** [#6](https://github.com/tomlawesome/orbit/pull/6)
-- **Latest committed implementation:** `87edbc7 fix: use valid Buildx action pin for development`
+- **Working branch:** `develop`
+- **Target branch:** `main`
+- **Draft pull request:** none; the repository has the intended `develop` →
+  `main` topology.
+- **Latest committed implementation:** `6b5dc40 style: widen personalise drawer and move profile action`
 - The working tree was clean when this handover was written.
 
 Do not promote to `main`, update `latest`, or publish a stable public release
 until the stable completion checklist in the implementation plan is complete
-through item 10. `release/secure-documents` is the integration branch for
-accepted, CI-gated candidates.
+through item 10. `develop` is the integration branch for accepted, CI-gated
+candidates.
 
 ## Completed foundations
 
@@ -96,7 +97,9 @@ numbers and update statuses in place; do not renumber it.
    The user then selects a section to make the reviewed item visible or
    discards it safely. Durable, retrying SMTP receipts are implemented. Live
    IMAP/SMTP provider acceptance remains.
-9. Local Ollama extraction — optional; requires a fresh product decision.
+9. Local Ollama extraction — `docker-compose.full.yml` provides a private,
+   bounded evaluation service only. Application extraction and reviewed-draft
+   semantics remain optional and require a separate product decision.
 10. Final operational/release polish — planned.
 
 ## Agreed architecture decisions
@@ -129,6 +132,9 @@ feature area:
    acceptance checks in a disposable environment.
 2. Add document-byte import only when it can reuse the normal scanned and
    encrypted upload lifecycle without partial commits.
+3. If #9 is approved after Tika acceptance, define the exact draft schema,
+   model, prompt-injection boundaries, timeout/failure handling and mandatory
+   user review before adding an Orbit-to-Ollama client.
 
 Do not run the full local suite repeatedly. Use targeted type/lint/unit checks
 at meaningful milestones, then rely on GitHub Actions for the authoritative

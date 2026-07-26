@@ -170,6 +170,45 @@ to the public internet.
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
 
+### Optional local processing stack
+
+The standard stack includes private ClamAV scanning. Tika OCR/text extraction
+and Ollama are deliberately separate because they increase host memory and are
+never needed for normal operation. To start both optional services, add this to
+`.env-orbit` before starting them:
+
+```sh
+TIKA_URL=http://orbit-tika:9998
+# Choose a local model only after checking its size, licence and host capacity.
+OLLAMA_MODEL=<a-local-model-name>
+```
+
+Then launch the full local stack:
+
+```sh
+docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.full.yml \
+  --profile processing --profile ai up -d
+```
+
+The services have no published host ports: Tika and Ollama are reachable only
+on the private Compose network. The Ollama volume is persistent, local-only,
+uses no cloud models, and is bounded to 2 CPUs and 6 GiB by default. It does
+not download a model automatically. After the server reports healthy, pull the
+model selected above explicitly:
+
+```sh
+docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.full.yml \
+  exec orbit-ollama sh -ec 'test -n "$ORBIT_OLLAMA_MODEL"; ollama pull "$ORBIT_OLLAMA_MODEL"'
+```
+
+This prepares the optional infrastructure only. Current Orbit releases use
+Tika for bounded review evidence; they do not send document text to Ollama or
+permit it to create or update household data. Stop and remove the optional
+containers with the same Compose arguments followed by `down`; omit `--volumes`
+to retain downloaded models.
+
 > [!IMPORTANT]
 > Keep `APP_URL`, the address used in the browser, and the OIDC callback host
 > identical. Do not switch between `localhost` and `127.0.0.1` during a sign-in

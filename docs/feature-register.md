@@ -264,8 +264,9 @@ foundation, not a deferred enhancement.
   the default stack.
 - **Local semantic extraction:** Ollama remains an optional later provider for
   schema-constrained draft fields after text extraction. It is neither OCR nor
-  a default container, and Orbit should use an existing local deployment where
-  available.
+  a default container. `docker-compose.full.yml` now supplies an opt-in,
+  private local service for evaluation, but Orbit has no Ollama client yet and
+  must not infer or write household data from a model response.
 - All images are pinned to reviewed release tags, isolated on an internal
   egress-denied network, configured with request/page/size limits, CPU/memory
   quotas and timeouts, and updated independently of Orbit. Supported releases
