@@ -11,13 +11,14 @@ export interface HouseholdInput {
 
 interface HouseholdOnboardingProps {
   onClose(): void;
-  onCreate(input: HouseholdInput): void;
+  onCreate(input: HouseholdInput): Promise<void>;
 }
 
 export function HouseholdOnboarding({ onClose, onCreate }: HouseholdOnboardingProps) {
   const [nameError, setNameError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const name = String(formData.get("name") ?? "").trim();
@@ -25,11 +26,12 @@ export function HouseholdOnboarding({ onClose, onCreate }: HouseholdOnboardingPr
       setNameError(name ? "Use 60 characters or fewer" : "Give this household a name");
       return;
     }
-    onCreate({
-      name,
-      timezone: String(formData.get("timezone") ?? "Europe/London"),
-      currency: String(formData.get("currency") ?? "GBP"),
-    });
+    setBusy(true);
+    try {
+      await onCreate({ name, timezone: String(formData.get("timezone") ?? "Europe/London"), currency: String(formData.get("currency") ?? "GBP") });
+    } catch (error) {
+      setNameError(error instanceof Error ? error.message : "Orbit could not create this household");
+    } finally { setBusy(false); }
   }
 
   return (
@@ -77,7 +79,7 @@ export function HouseholdOnboarding({ onClose, onCreate }: HouseholdOnboardingPr
             </div>
             <footer>
               <button type="button" onClick={onClose}>Cancel</button>
-              <button type="submit">Create household</button>
+              <button type="submit" disabled={busy}>{busy ? "Creating…" : "Create household"}</button>
             </footer>
           </form>
         </div>

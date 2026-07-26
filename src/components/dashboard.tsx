@@ -151,10 +151,14 @@ function householdInitials(name: string) {
 }
 
 export function Dashboard() {
-  const { workspace, dispatch, session, syncStatus, syncMessage } = useWorkspace();
+  const { workspace, dispatch, executeCommand, session, syncStatus, syncMessage } = useWorkspace();
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
-  const recoveryRequired = workspace.recoverableHouseholds.length > 0 && (!hasActiveHousehold || !household.onboardingComplete);
+  // Legacy placeholder households may already exist from releases that created
+  // one during a workspace read. Give recovery choices precedence over that
+  // unfinished setup, but never create another household from this view.
+  const householdChoiceRequired = workspace.householdLanding === "choose"
+    || (workspace.recoverableHouseholds.length > 0 && (!hasActiveHousehold || !household.onboardingComplete));
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
@@ -427,8 +431,8 @@ export function Dashboard() {
     setMenuOpen(false);
   }
 
-  function addHousehold(input: HouseholdInput) {
-    dispatch({
+  async function addHousehold(input: HouseholdInput) {
+    await executeCommand({
       type: "household.create",
       household: createHousehold({ id: crypto.randomUUID(), ...input }),
     });
@@ -781,9 +785,9 @@ export function Dashboard() {
 
       {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
 
-      {recoveryRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
+      {householdChoiceRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
 
-      {!household.onboardingComplete && !recoveryRequired && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
+      {!household.onboardingComplete && !householdChoiceRequired && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
       {notice && (
         <div className="action-toast" role="status">

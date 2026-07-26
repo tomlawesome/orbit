@@ -191,5 +191,23 @@ export function useWorkspace() {
       });
   }, [flushQueue]);
 
-  return { workspace, dispatch, session, syncStatus, syncMessage };
+  const executeCommand = useCallback(async (command: WorkspaceCommand): Promise<WorkspaceState> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) throw new Error("A valid session is required");
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": activeSession.csrfToken },
+      body: JSON.stringify(command),
+    });
+    const payload = await response.json() as { workspace?: unknown; error?: { message?: string } };
+    if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not save this change");
+    const canonical = workspaceSchema.parse(payload.workspace);
+    setWorkspace(canonical);
+    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+    setSyncStatus("synced");
+    setSyncMessage("");
+    return canonical;
+  }, []);
+
+  return { workspace, dispatch, executeCommand, session, syncStatus, syncMessage };
 }
