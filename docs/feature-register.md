@@ -203,6 +203,11 @@ desktop presentation.
 **Objective:** Give household items durable, private documents before adding
 mailbox automation or AI extraction.
 
+The active delivery architecture and sequence are maintained in the
+[implementation plan](implementation-plan.md). Application-level envelope
+encryption is required from the first production document and is part of this
+foundation, not a deferred enhancement.
+
 ### Scope
 
 - Manual upload from desktop and mobile file pickers, including camera capture

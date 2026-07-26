@@ -269,7 +269,10 @@ also verifies the signed-out privacy boundary in desktop and mobile Chromium
 and runs automated WCAG A/AA checks.
 
 Product directions intentionally deferred until after the initial completion
-pass are recorded in the [feature register](docs/feature-register.md).
+pass are recorded in the [feature register](docs/feature-register.md). The
+current delivery phase, agreed architecture, unresolved decisions, test gates,
+and implementation order are maintained in the version-controlled
+[implementation plan](docs/implementation-plan.md).
 
 ## Configuration
 
