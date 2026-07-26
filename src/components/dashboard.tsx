@@ -6,7 +6,7 @@ import { AdminManager } from "@/components/admin-manager";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
-import { HouseholdRecovery } from "@/components/household-recovery";
+import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
 import { Icon } from "@/components/icons";
 import { ItemDetail, type CompletionInput } from "@/components/item-detail";
 import { ItemEditor } from "@/components/item-editor";
@@ -225,7 +225,6 @@ export function Dashboard() {
   }, [session]);
 
   if (!session) return <AuthenticationGate loading={syncStatus === "loading"} />;
-  if (!hasActiveHousehold) return <main className="authentication-gate"><section><p className="eyebrow">Your households</p><h1>No active households</h1><p>Removed households are hidden from everyone immediately. Only an owner or instance administrator can restore one before its retention period ends.</p><HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} /></section></main>;
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
@@ -780,6 +779,8 @@ export function Dashboard() {
       )}
 
       {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
+
+      {!hasActiveHousehold && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} onCreate={() => setOnboardingOpen(true)} />}
 
       {!household.onboardingComplete && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
