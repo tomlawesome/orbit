@@ -686,7 +686,7 @@ export function Dashboard() {
             ) : settingsView === "data" ? (
               <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
             ) : settingsView === "household" && household.canManage ? (
-              <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} />
+              <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
             ) : settingsView === "sections" && household.canManage ? (
               <div className="settings-content">
                 <section>

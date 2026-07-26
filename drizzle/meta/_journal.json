@@ -50,6 +50,13 @@
       "when": 1785072000000,
       "tag": "0006_portable_archives",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785076000000,
+      "tag": "0007_household_lifecycle",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,10 @@ async function membershipRole(userId: string, householdId: string): Promise<"own
 
 async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false): Promise<void> {
   requireUuid(householdId, "Household");
+  const [lifecycle] = await getDb().select({ deletionRequestedAt: households.deletionRequestedAt })
+    .from(households).where(eq(households.id, householdId)).limit(1);
+  if (!lifecycle) throw new AppError("household_not_found", "That household is not available", 404);
+  if (lifecycle.deletionRequestedAt) throw new AppError("household_pending_deletion", "This household is scheduled for deletion and cannot be changed", 409);
   if (await isInstanceAdministrator(userId)) return;
   const role = await membershipRole(userId, householdId);
   if (ownerOnly && role !== "owner") {
@@ -99,6 +103,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     timezone: households.timezone,
     currency: households.defaultCurrency,
     onboardingComplete: households.setupCompleted,
+    deletionRequestedAt: households.deletionRequestedAt,
+    deleteAfter: households.deleteAfter,
   };
   const householdRows = administrator
     ? await getDb().select(householdSelection).from(households).orderBy(asc(households.createdAt))
@@ -202,6 +208,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           && member.role === "owner"
         )),
         onboardingComplete: household.onboardingComplete,
+        deletionRequestedAt: household.deletionRequestedAt?.toISOString(),
+        deleteAfter: household.deleteAfter?.toISOString(),
         sections: sectionRows.filter((section) => section.householdId === household.id).map((section) => ({
           id: section.id,
           name: section.name,
