@@ -81,6 +81,11 @@ test.describe("authenticated household lifecycle", () => {
       await memberContext.close();
     }
 
+    await page.getByRole("button", { name: "Create a new household" }).click();
+    await page.getByRole("dialog", { name: "Set up your space" }).getByLabel("Household name").fill("Acceptance household");
+    await page.getByRole("button", { name: "Create household" }).click();
+    await expect(page.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
+
     // The first authenticated user is the instance administrator and can use
     // the typed permanent-delete path while a household is recoverable.
     await expect(page.getByRole("button", { name: "Permanently delete" })).toBeVisible();
