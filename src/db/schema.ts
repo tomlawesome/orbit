@@ -80,6 +80,9 @@ export const households = pgTable("households", {
   timezone: text("timezone").notNull().default("Europe/London"),
   defaultCurrency: text("default_currency").notNull().default("GBP"),
   setupCompleted: boolean("setup_completed").notNull().default(false),
+  deletionRequestedAt: timestamp("deletion_requested_at", { withTimezone: true }),
+  deleteAfter: timestamp("delete_after", { withTimezone: true }),
+  deletionRequestedByUserId: uuid("deletion_requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
   ...auditColumns,
 });
 

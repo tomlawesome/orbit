@@ -231,8 +231,9 @@ is visible without renumbering work already completed.
    JSON exports with optional bounded original-document bytes, 24-hour private
    storage, audited request/download and maintenance purge are implemented.
    Import parsing/preview and duplicate-safe transactional commit remain.
-4. **Household lifecycle** — Planned: typed-confirmation soft deletion,
-   30-day recovery and final purge.
+4. **Household lifecycle** — In progress: typed-confirmation soft deletion,
+   30-day recovery and worker-driven purge are implemented; add integration
+   coverage before acceptance.
 5. **Mobile document capture** — Planned: resilient camera/file capture,
    progress and compact review.
 6. **Document draft creation** — Planned: turn reviewed extraction evidence

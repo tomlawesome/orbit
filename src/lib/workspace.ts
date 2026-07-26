@@ -80,6 +80,8 @@ export const householdWorkspaceSchema = z.object({
   memberCount: z.number().int().positive(),
   canManage: z.boolean().default(false),
   onboardingComplete: z.boolean().default(true),
+  deletionRequestedAt: z.iso.datetime().optional(),
+  deleteAfter: z.iso.datetime().optional(),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(workspaceItemSchema).max(500),
   activities: z.array(itemActivitySchema).max(5_000).default([]),

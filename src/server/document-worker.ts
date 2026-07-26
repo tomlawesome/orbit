@@ -4,6 +4,7 @@ import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { purgeExpiredPortableArchives } from "@/server/portable-archive-repository";
+import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 
 interface ClaimedDocumentJob {
   id: string;
@@ -240,6 +241,7 @@ async function reconcileDocumentStorage(): Promise<void> {
 export async function runDocumentMaintenanceCycle(): Promise<void> {
   await rejectInterruptedDocuments();
   await purgeExpiredPortableArchives();
+  await purgeExpiredHouseholds();
   const lastReconciliation = workerState.__orbitDocumentWorkerLastReconciliationAt
     ? Date.parse(workerState.__orbitDocumentWorkerLastReconciliationAt)
     : 0;
