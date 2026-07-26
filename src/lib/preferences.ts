@@ -3,7 +3,7 @@ import { sectionAccents, sectionIcons } from "./domain";
 
 export const themeModes = ["system", "light", "dark"] as const;
 export type ThemeMode = (typeof themeModes)[number];
-export const textSizes = ["standard", "comfortable", "large"] as const;
+export const textSizes = ["standard", "comfortable", "large", "extra-large"] as const;
 export type TextSize = (typeof textSizes)[number];
 export const urgencyPalettes = ["classic", "themed"] as const;
 export type UrgencyPalette = (typeof urgencyPalettes)[number];

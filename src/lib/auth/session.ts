@@ -91,7 +91,7 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
       isInstanceAdmin: record.isInstanceAdmin,
       themeMode: record.themeMode ?? "system",
       themeId: record.themeId ?? "after-dark",
-      textSize: record.textSize === "standard" || record.textSize === "large"
+      textSize: record.textSize === "standard" || record.textSize === "large" || record.textSize === "extra-large"
         ? record.textSize
         : "comfortable",
       urgencyPalette: record.urgencyPalette === "classic" ? "classic" : "themed",

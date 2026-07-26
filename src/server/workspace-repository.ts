@@ -630,7 +630,7 @@ export async function addHouseholdMember(userId: string, householdId: string, me
 }
 
 export async function removeHouseholdMember(userId: string, householdId: string, memberUserId: string): Promise<HouseholdMember[]> {
-  await requireHouseholdAccess(userId, householdId, true);
+  await requireHouseholdAccess(userId, householdId);
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
   await getDb().transaction(async (transaction) => {
@@ -644,18 +644,26 @@ export async function removeHouseholdMember(userId: string, householdId: string,
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
     ).where(eq(users.id, userId)).limit(1);
-    if (!actor?.administrator && actor?.role !== "owner") {
-      throw new AppError("owner_required", "Only the current household owner can remove members", 403);
-    }
     const [target] = await transaction.select({ role: memberships.role }).from(memberships)
       .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.userId, targetUserId)))
       .limit(1);
     if (!target) throw new AppError("member_not_found", "That member is not part of this household", 404);
     if (target.role === "owner") throw new AppError("owner_protected", "The household owner cannot be removed", 409);
+    if (!actor?.administrator && actor?.role !== "owner" && targetUserId !== userId) {
+      throw new AppError("owner_required", "Only the current household owner can remove other members", 403);
+    }
     await transaction.delete(memberships).where(and(
       eq(memberships.householdId, validHouseholdId),
       eq(memberships.userId, targetUserId),
     ));
+    await transaction.insert(auditLog).values({
+      householdId: validHouseholdId,
+      actorUserId: userId,
+      entityType: "membership",
+      entityId: validHouseholdId,
+      action: targetUserId === userId ? "member_left" : "member_removed",
+      changes: { targetUserId },
+    });
   });
   return listHouseholdMembers(userId, householdId);
 }

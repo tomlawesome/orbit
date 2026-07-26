@@ -29,7 +29,7 @@ export interface WorkspaceSession {
     isInstanceAdmin: boolean;
     themeMode: "system" | "light" | "dark";
     themeId: string;
-    textSize: "standard" | "comfortable" | "large";
+    textSize: "standard" | "comfortable" | "large" | "extra-large";
     urgencyPalette: "classic" | "themed";
     emailNotifications: boolean;
     pushNotifications: boolean;
