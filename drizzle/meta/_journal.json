@@ -36,6 +36,13 @@
       "when": 1785069719591,
       "tag": "0004_admin_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785071000000,
+      "tag": "0005_account_lifecycle",
+      "breakpoints": true
     }
   ]
 }

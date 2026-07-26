@@ -40,6 +40,7 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
   isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
+  disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
 }, (table) => [index("user_email_lookup_idx").on(table.email)]);
 

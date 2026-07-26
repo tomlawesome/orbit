@@ -976,7 +976,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
   .category-mode-picker, .custom-categories { grid-template-columns: 1fr; }
   .suggested-categories { grid-template-columns: 1fr 1fr; }
   .admin-list article { grid-template-columns: 36px minmax(0, 1fr) auto; }
-  .admin-list article > button { grid-column: 2 / -1; }
+  .admin-list article > button, .admin-list .admin-user-actions { grid-column: 2 / -1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -993,6 +993,10 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .admin-health-warning { margin: 0 0 13px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--coral) 32%, transparent); border-radius: 10px; color: var(--coral-dark); background: color-mix(in srgb, var(--coral) 8%, var(--paper)); font-size: calc(9px + var(--text-bump)); font-weight: 750; line-height: 1.45; }
 .admin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .admin-refresh, .admin-operation-actions button, .admin-job-actions button { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--forest); background: transparent; font-size: calc(8px + var(--text-bump)); font-weight: 750; cursor: pointer; }
+.admin-user-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.admin-user-actions button { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--forest); background: transparent; font-size: calc(8px + var(--text-bump)); font-weight: 750; cursor: pointer; }
+.admin-user-actions button:last-child { color: var(--coral-dark); border-color: color-mix(in srgb, var(--coral) 38%, var(--line)); }
+.admin-user-actions button:disabled, .admin-refresh:disabled, .admin-operation-actions button:disabled, .admin-job-actions button:disabled { cursor: not-allowed; opacity: .55; }
 .admin-refresh:disabled, .admin-operation-actions button:disabled, .admin-job-actions button:disabled { opacity: .5; cursor: wait; }
 .admin-operation-detail { margin: 10px 0 0; color: var(--coral-dark); font-size: calc(8px + var(--text-bump)); line-height: 1.45; }
 .admin-operation-actions { margin-top: 12px; display: flex; align-items: center; gap: 9px; }

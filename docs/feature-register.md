@@ -311,6 +311,9 @@ Ownership transfer to an existing household member is delivered. Remaining
 scope includes:
 
 - administrator account disable/enable with immediate session revocation;
+  **delivered** — disabled accounts cannot sign in or retain an Orbit session,
+  remain available to administrators for safe re-enablement, and cannot be used
+  to leave the instance without an active administrator;
 - user departure from households they do not own; **delivered** — members can
   leave their own household, while owners remain protected from leaving it
   ownerless;

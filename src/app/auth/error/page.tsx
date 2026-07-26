@@ -7,6 +7,7 @@ const messages: Record<string, string> = {
   token_exchange_failed: "Orbit could not complete the secure token exchange.",
   invalid_id_token: "The identity response could not be verified.",
   missing_email: "Your identity provider must supply a usable email address.",
+  account_disabled: "This Orbit account has been disabled by an administrator.",
 };
 
 export default async function AuthErrorPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {

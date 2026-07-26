@@ -60,6 +60,7 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
       displayName: users.displayName,
       avatarUrl: users.avatarUrl,
       isInstanceAdmin: users.isInstanceAdmin,
+      disabledAt: users.disabledAt,
       themeMode: userPreferences.themeMode,
       themeId: userPreferences.themeId,
       textSize: userPreferences.textSize,
@@ -73,7 +74,7 @@ export async function readSession(request: NextRequest, config: AuthConfig): Pro
     .where(and(eq(sessions.tokenHash, tokenHash), gt(sessions.expiresAt, new Date())))
     .limit(1);
 
-  if (!record) {
+  if (!record || record.disabledAt) {
     await getDb().delete(sessions).where(eq(sessions.tokenHash, tokenHash));
     return null;
   }
