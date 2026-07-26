@@ -9,12 +9,13 @@ import { readDocumentDownload } from "@/server/document-repository";
 function proposalFromText(text: string, filename: string) {
   const reference = text.match(/(?:policy|account|reference)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9-]{5,})/i)?.[1];
   const provider = text.match(/(?:provider|insurer|supplier)\s*[:\-]\s*([^\n]{2,80})/i)?.[1]?.trim();
-  return { title: filename.replace(/\.[^.]+$/, "").slice(0, 100), provider: provider?.slice(0, 100), reference };
+  const dates = [...text.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map((match) => match[1]).slice(0, 12);
+  return { title: filename.replace(/\.[^.]+$/, "").slice(0, 100), provider: provider?.slice(0, 100), reference, dates };
 }
 
-export interface DuplicateCandidate { itemId: string; title: string; reason: "document_hash" | "reference" | "provider_title" }
+export interface DuplicateCandidate { itemId: string; title: string; reason: "document_hash" | "reference" | "provider_title" | "date_overlap" }
 
-async function findDuplicates(householdId: string, documentId: string, proposal: { title: string; provider?: string; reference?: string }): Promise<DuplicateCandidate[]> {
+async function findDuplicates(householdId: string, documentId: string, proposal: { title: string; provider?: string; reference?: string; dates?: string[] }): Promise<DuplicateCandidate[]> {
   const [document] = await getDb().select({ hash: documents.contentSha256 }).from(documents).where(eq(documents.id, documentId)).limit(1);
   const householdItems = await getDb().select().from(items).where(eq(items.householdId, householdId));
   const seen = new Map<string, DuplicateCandidate>();
@@ -23,6 +24,7 @@ async function findDuplicates(householdId: string, documentId: string, proposal:
   for (const item of householdItems) {
     if (proposal.reference && item.reference?.toLowerCase() === proposal.reference.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "reference" });
     else if (proposal.provider && item.provider?.toLowerCase() === proposal.provider.toLowerCase() && item.title.toLowerCase() === proposal.title.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "provider_title" });
+    else if (proposal.dates?.some((date) => [item.startDate, item.expiryDate, item.renewalDate, item.serviceDate].includes(date))) seen.set(item.id, { itemId: item.id, title: item.title, reason: "date_overlap" });
   }
   return [...seen.values()].slice(0, 10);
 }
@@ -38,7 +40,7 @@ async function requireDocumentMember(userId: string, documentId: string) {
 export async function createDocumentDraft(userId: string, documentId: string) {
   const record = await requireDocumentMember(userId, documentId);
   const existing = await getDb().select().from(documentDrafts).where(eq(documentDrafts.documentId, documentId)).limit(1);
-  if (existing[0]) return { ...existing[0], duplicates: await findDuplicates(record.householdId, documentId, existing[0].proposal as { title: string; provider?: string; reference?: string }) };
+  if (existing[0]) return { ...existing[0], duplicates: await findDuplicates(record.householdId, documentId, existing[0].proposal as { title: string; provider?: string; reference?: string; dates?: string[] }) };
   const download = await readDocumentDownload(userId, documentId);
   let text: string;
   try { text = await extractTextWithTika(download.bytes, record.mediaType); } finally { download.bytes.fill(0); }
