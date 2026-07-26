@@ -150,8 +150,17 @@ function householdInitials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
 }
 
+type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
+
+/** Keeps signed-out/loading state outside the authenticated dashboard tree. */
 export function Dashboard() {
-  const { workspace, dispatch, executeCommand, session, syncStatus, syncMessage } = useWorkspace();
+  const { session, ...workspaceState } = useWorkspace();
+  if (!session) return <AuthenticationGate loading={workspaceState.syncStatus === "loading"} />;
+  return <AuthenticatedDashboard session={session} workspaceState={workspaceState} />;
+}
+
+function AuthenticatedDashboard({ session, workspaceState }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace }) {
+  const { workspace, dispatch, executeCommand, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
   // Legacy placeholder households may already exist from releases that created
@@ -228,8 +237,6 @@ export function Dashboard() {
       pushNotifications: session.user.pushNotifications,
     });
   }, [session]);
-
-  if (!session) return <AuthenticationGate loading={syncStatus === "loading"} />;
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
