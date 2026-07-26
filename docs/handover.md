@@ -91,8 +91,9 @@ numbers and update statuses in place; do not renumber it.
    A TLS-only worker downloads, scans and encrypts verified attachments
    immediately. A one-household recipient receives a hidden archived review
    item automatically; a multi-household recipient selects the household once.
-   The user then selects a section to make the reviewed item visible. SMTP
-   receipts, deletion/discard UX and end-to-end provider acceptance remain.
+   The user then selects a section to make the reviewed item visible or
+   discards it safely. Durable, retrying SMTP receipts are implemented. Live
+   IMAP/SMTP provider acceptance remains.
 9. Local Ollama extraction — optional; requires a fresh product decision.
 10. Final operational/release polish — planned.
 
@@ -119,11 +120,14 @@ numbers and update statuses in place; do not renumber it.
 
 ## Immediate next implementation steps
 
-Continue item 3 before starting new feature areas:
+The remaining work is acceptance and verification rather than an unimplemented
+feature area:
 
-1. Add import parsing/preview and transactionally validate all records before a
-   later commit action.
-2. Add duplicate-safe import commit only after the user reviews the preview.
+1. Run the protected CI workflow for the current head and resolve any failures.
+2. Run representative Tika, browser, lifecycle recovery/purge, IMAP/SMTP and
+   accessibility acceptance checks in a disposable environment.
+3. Add document-byte import only when it can reuse the normal scanned and
+   encrypted upload lifecycle without partial commits.
 
 Do not run the full local suite repeatedly. Use targeted type/lint/unit checks
 at meaningful milestones, then rely on GitHub Actions for the authoritative

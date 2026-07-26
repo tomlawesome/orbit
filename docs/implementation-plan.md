@@ -251,7 +251,9 @@ is visible without renumbering work already completed.
    verified attachments, then creates a hidden archived review item as soon as a
    household is known (automatically for a sole membership, explicitly for a
    multi-household user). The recipient selects a section to make it visible.
-   SMTP receipts, discard UX and provider acceptance remain.
+   Users can discard review items safely and a durable SMTP receipt worker
+   records retries/failures without retaining provider details. Live provider
+   acceptance remains.
 9. **Optional local Ollama extraction** — Optional: reconsider only after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,
