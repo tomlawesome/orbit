@@ -14,6 +14,9 @@ export default defineConfig({
     // certificate on every run. Orbit itself remains served over the normal
     // configured application URL.
     ignoreHTTPSErrors: process.env.ORBIT_ACCEPTANCE_OIDC === "true",
+    launchOptions: process.env.ORBIT_ACCEPTANCE_OIDC === "true"
+      ? { args: ["--host-resolver-rules=MAP orbit-oidc 127.0.0.1"] }
+      : undefined,
   },
   projects: [
     { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },

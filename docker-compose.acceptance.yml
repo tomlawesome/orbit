@@ -3,11 +3,9 @@
 # loopback HTTPS issuer. Production deployments must not include this file.
 services:
   orbit-app:
-    ports:
-      - "127.0.0.1:4443:4443"
     environment:
       APP_URL: http://127.0.0.1:3000
-      OIDC_ISSUER: https://127.0.0.1:4443/
+      OIDC_ISSUER: https://orbit-oidc:4443/
       OIDC_CLIENT_ID: orbit-browser-tests
       OIDC_CLIENT_SECRET: orbit-browser-tests-only-secret
       OIDC_CALLBACK_URL: http://127.0.0.1:3000/api/auth/callback
@@ -17,7 +15,7 @@ services:
   orbit-oidc:
     build:
       context: ./tests/oidc
-    network_mode: service:orbit-app
-    depends_on:
-      orbit-app:
-        condition: service_started
+    environment:
+      TEST_OIDC_ISSUER: https://orbit-oidc:4443/
+    ports:
+      - "127.0.0.1:4443:4443"

@@ -2,7 +2,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign, timingSafeEqual } f
 import { readFileSync } from "node:fs";
 import { createServer } from "node:https";
 
-const issuer = "https://127.0.0.1:4443/";
+const issuer = process.env.TEST_OIDC_ISSUER ?? "https://orbit-oidc:4443/";
 const clientId = "orbit-browser-tests";
 const clientSecret = "orbit-browser-tests-only-secret";
 const [keyPath, certificatePath] = process.argv.slice(2);
