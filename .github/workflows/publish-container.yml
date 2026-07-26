@@ -103,6 +103,19 @@ jobs:
           response="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
           jq --exit-status '.status == "ok" and .service == "orbit"' <<< "${response}"
 
+      - name: Verify non-root runtime and private secrets
+        run: |
+          runtime_uid="$(docker compose --env-file .env-orbit exec -T orbit-app \
+            sh -c "awk '/^Uid:/{print \$2}' /proc/1/status")"
+          test "${runtime_uid}" = "1001"
+          docker compose --env-file .env-orbit exec -T orbit-app sh -c '
+            for secret in /run/orbit-secrets/*; do
+              test -f "${secret}"
+              test "$(stat -c %u "${secret}")" = "1001"
+              test "$(stat -c %a "${secret}")" = "400"
+            done
+          '
+
       - name: Verify malware scanner detection
         run: bash scripts/test-malware-scanner.sh
 
