@@ -20,10 +20,19 @@ leaves a releasable, tested application.
   rather than rescanning every unseen message.
 - Household deletion removes database access before encrypted-file cleanup, so
   external filesystem work never runs while a database transaction is open.
+- A disposable OIDC provider now runs only in the acceptance Compose overlay.
+  The authenticated browser suite covers first sign-in without an implicit
+  household, creation, member isolation, removal, recovery, administrator-only
+  permanent deletion, restoration, and recoverable-name conflicts. CI run 80
+  passed its full container, backup/restore, privacy, accessibility, and
+  browser gate for this suite.
 
-The remaining work in this programme is intentionally still open: indexed
-opaque-recipient lookup, the broader worker side-effect boundary, dashboard
-and repository extraction, and authenticated browser coverage.
+The remaining work is deliberately non-blocking for the current release
+candidate: IMAP review browser fixtures, a resumable alias-backfill job for
+large legacy installations, and behaviour-neutral dashboard/repository file
+splits. These should not delay real-world container testing because the core
+topology, worker leases, backup/restore, privacy boundary, and authenticated
+lifecycle are validated.
 
 ## Outcomes
 

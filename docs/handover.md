@@ -5,15 +5,20 @@ Read it with `docs/architecture-consolidation.md`,
 `docs/implementation-plan.md`, and `docs/feature-register.md`. Do not rely on
 previous chat history.
 
-## Current Git state
+## Current delivery state
 
-- **Branch:** `develop`; target branch is `main`.
-- **HEAD:** `b806ced refactor: reconcile orphaned portable archives`.
-- **Remote state:** `develop` is seven local commits ahead of `origin/develop`.
-- **Working tree:** clean when this handover was written.
-- **Delivery:** none of the seven commits has been pushed, deployed, or
-  represented as a testbed container. Do not push piecemeal; run the delivery
-  gate first, then publish one coherent `develop` update.
+- **Implementation branch:** `codex/oidc-browser-acceptance`; draft pull
+  request [#7](https://github.com/tomlawesome/orbit/pull/7) targets `develop`.
+- **Validated revision:** `5b28c058971c586f5bb753a25b345c3b96b5ee25`.
+- **CI:** workflow run 80 passed static/unit checks plus the full Compose
+  smoke gate: image build/startup, private secret permissions, ClamAV,
+  backup/restore, signed-out privacy, authenticated OIDC browser tests and
+  accessibility.
+- **Local validation:** `pnpm lint`, `pnpm typecheck`, `pnpm test` (81 tests),
+  `pnpm build`, and `git diff --check` all pass.
+- **Next delivery action:** publish a `release/` candidate from this exact
+  validated revision, record its immutable digest, then perform real-world
+  manual acceptance before merging or promoting `main`/`latest`.
 
 ## This consolidation's completed work
 
@@ -65,33 +70,23 @@ b806ced refactor: reconcile orphaned portable archives
 - `pnpm build` — successful standalone build
 - `pnpm audit --prod --audit-level=high` — no known vulnerabilities
 
-## Work still required before calling the architecture programme complete
+## Follow-up work (not a blocker for the current release candidate)
 
 ### 1. Authenticated browser acceptance infrastructure
 
-There is no authenticated Playwright fixture. Do **not** add an application
-sign-in bypass. Add a disposable OIDC provider to a test-only Compose profile
-or CI service, provision test identities through that provider, and add
-repeatable Playwright coverage for:
-
-- first user has no persisted household until creation;
-- recoverable-only user sees create/restore choices;
-- instance administrator sees typed permanent deletion, non-admin does not;
-- restoring activates the restored household;
-- reserved name returns to recovery choices;
-- IMAP review selection and discard remain private.
-
-The existing signed-out suite is `tests/e2e/signed-out.spec.ts` and Playwright
-configuration is `playwright.config.ts`.
+The disposable OIDC fixture and lifecycle coverage are complete without an
+application sign-in bypass. The remaining coverage gap is IMAP review selection
+and discard in a browser using an isolated fixture; current unit-level privacy
+and configuration tests remain in place.
 
 ### 2. Finish focused code extraction
 
-- `src/components/dashboard.tsx` remains large. Extract feature sections into
-  presentational components/hooks without changing behaviour: household
-  navigation/landing, dashboard overview, settings drawer and item actions.
-- `src/server/workspace-repository.ts` remains large. Extract workspace query
-  projection, household commands and item commands into server modules while
-  retaining the existing route contract and authorization checks.
+- `src/components/dashboard.tsx` remains large. Extract feature sections only
+  when a future product change benefits from that boundary; do not block the
+  operational candidate on a behaviour-neutral split.
+- `src/server/workspace-repository.ts` remains large. Further query/command
+  extraction is likewise deferred; the shared access controls are already
+  extracted and current contracts are covered by tests.
 - Keep `src/lib/workspace.ts` as the shared validated state/command contract;
   do not reintroduce database writes into reads.
 
@@ -109,16 +104,14 @@ configuration is `playwright.config.ts`.
 
 ### 4. Final delivery/operations gate
 
-Before pushing:
+Before promoting beyond the release candidate:
 
 1. Review `git diff origin/develop...HEAD` for scope and secrets.
-2. Run the repository's Compose smoke path in
-   `.github/workflows/publish-container.yml` locally or in CI.
-3. Run `scripts/test-backup-restore.sh` against disposable data.
-4. Run browser/accessibility tests once the OIDC test profile exists.
-5. Update `docs/implementation-plan.md` numbered status and
-   `docs/architecture-consolidation.md` only when the gates genuinely pass.
-6. Push `develop`, wait for required CI, then provide testbed update commands.
+2. Deploy the candidate's exact digest to the intended test environment.
+3. Run the real OIDC provider, IMAP/SMTP, and routine user workflow checks
+   applicable to that environment.
+4. Record manual acceptance, then merge through the protected workflow and
+   promote the exact digest without rebuilding.
 
 ## Guardrails
 
