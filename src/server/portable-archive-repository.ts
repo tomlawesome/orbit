@@ -5,7 +5,7 @@ import { auditLog, documents, dueEvents, households, items, memberships, portabl
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
 import { readDocumentDownload } from "@/server/document-repository";
-import { encryptPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
+import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -149,4 +149,17 @@ export async function purgeExpiredPortableArchives(): Promise<void> {
       if (changed) await transaction.insert(auditLog).values({ householdId: archive.householdId, actorUserId: null, entityType: "portable_archive", entityId: archive.id, action: "portable_archive_expired", changes: {} });
     });
   }
+}
+
+/** Decrypts and validates an archive in memory only; it never writes household data. */
+export function previewPortableArchive(serialized: unknown, passphrase: string) {
+  if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
+  let plaintext: Buffer;
+  try { plaintext = decryptPortableArchive(serialized, passphrase); } catch { throw new AppError("archive_passphrase_invalid", "The passphrase or archive is invalid", 422); }
+  try {
+    if (plaintext.length > MAX_ARCHIVE_BYTES) throw new AppError("archive_too_large", "That export is too large", 413);
+    const payload = JSON.parse(plaintext.toString("utf8")) as { format?: string; version?: number; household?: { name?: unknown }; sections?: unknown[]; items?: unknown[]; documents?: unknown[] };
+    if (payload.format !== "orbit-portable-archive" || payload.version !== 1 || !payload.household || typeof payload.household.name !== "string" || !Array.isArray(payload.sections) || !Array.isArray(payload.items) || !Array.isArray(payload.documents)) throw new AppError("archive_invalid", "That export is not a supported Orbit archive", 422);
+    return { householdName: payload.household.name, sections: payload.sections.length, items: payload.items.length, documents: payload.documents.length };
+  } finally { plaintext.fill(0); }
 }
