@@ -1,10 +1,11 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { ImapFlow } from "imapflow";
-import { isNull } from "drizzle-orm";
+import { ImapFlow, type MessageStructureObject } from "imapflow";
+import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { imapIngestionMessages, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
+import { scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
 
 const ingestionEnvironmentSchema = z.object({
   IMAP_HOST: z.string().trim().max(253).optional().default(""),
@@ -99,6 +100,12 @@ async function userForRecipientAlias(recipient: string, config: ImapIngestionCon
   return candidates.find((candidate) => matchesImapRecipientAlias(recipient, candidate.id, config))?.id;
 }
 
+function attachmentParts(structure: MessageStructureObject | undefined): string[] {
+  if (!structure) return [];
+  const children = structure.childNodes?.flatMap(attachmentParts) ?? [];
+  return structure.part && structure.disposition?.toLowerCase() === "attachment" ? [structure.part, ...children] : children;
+}
+
 /**
  * Polls the dedicated mailbox and records only an idempotent receipt. It does
  * not parse, retain, attach, create, or merge household data; later review
@@ -119,7 +126,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
     try {
       if (!client.mailbox) throw new Error("IMAP mailbox could not be opened");
       const uidValidity = client.mailbox.uidValidity.toString();
-      for await (const message of client.fetch({ seen: false }, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true }, { uid: true })) {
+      for await (const message of client.fetch({ seen: false }, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true, bodyStructure: true }, { uid: true })) {
         const source = message.source;
         const oversized = !source || (message.size ?? 0) > 25 * 1024 * 1024 || source.length > 25 * 1024 * 1024;
         const recipient = trustedRecipientFromHeaders(message.headers, config.trustedRecipientHeader);
@@ -128,13 +135,31 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
         const aliasSha256 = createHash("sha256").update(recipient ?? "").digest("hex");
-        await getDb().insert(imapIngestionMessages).values({
+        const [receipt] = await getDb().insert(imapIngestionMessages).values({
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, userId: userId ?? null,
           status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : "recipient_unverified",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
-        }).onConflictDoNothing();
+        }).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
+        if (receipt && userId && !oversized) {
+          try {
+            const parts = attachmentParts(message.bodyStructure);
+            const downloads = parts.length ? await client.downloadMany(message.uid, parts, { uid: true }) : {};
+            for (const download of Object.values(downloads)) {
+              if (!download.content) continue;
+              const held = await scanAndHoldImapAttachment({ bytes: download.content, filename: download.meta.filename, declaredMediaType: download.meta.contentType });
+              await getDb().insert(imapIngestionAttachments).values({
+                id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType,
+                sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+                ciphertextSize: held.ciphertextSize, ...held.envelope,
+              }).onConflictDoNothing();
+              download.content.fill(0);
+            }
+          } catch {
+            await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+          }
+        }
         message.source?.fill(0);
       }
     } finally { lock.release(); }
