@@ -9,7 +9,7 @@ of truth; do not rely on a previous chat's memory.
 - **Working branch:** `feature/mobile-lifecycle`
 - **Target branch:** `release/secure-documents`
 - **Draft pull request:** [#6](https://github.com/tomlawesome/orbit/pull/6)
-- **Latest committed implementation:** `5fb3d8a feat: add encrypted portable archive foundation`
+- **Latest committed implementation:** `87edbc7 fix: use valid Buildx action pin for development`
 - The working tree was clean when this handover was written.
 
 Do not promote to `main`, update `latest`, or publish a stable public release
@@ -64,14 +64,16 @@ accepted, CI-gated candidates.
    - The passphrase is never stored; the encrypted archive is private,
      checksum-verified, audited on request/download and purged after 24 hours.
    - Original document bytes are opt-in and bounded to 128 MiB. Import preview
-     and its transactional commit are still required.
+     and transactional metadata commit now exist; document-byte import remains
+     intentionally deferred until it can use normal scan/encryption.
 
 ## Stable completion checklist
 
 The canonical numbered list is in `docs/implementation-plan.md`. Keep the same
 numbers and update statuses in place; do not renumber it.
 
-1. Release integration and acceptance — in progress.
+1. Release integration and acceptance — in progress; the current `develop`
+   CI/container run is green, but manual release acceptance remains.
 2. Reviewed Tika extraction — in progress; profile, adapter and reviewed draft
    flow exist; representative-document acceptance remains.
 3. Data portability — in progress; exports, conflict-aware import preview and
@@ -123,10 +125,9 @@ numbers and update statuses in place; do not renumber it.
 The remaining work is acceptance and verification rather than an unimplemented
 feature area:
 
-1. Run the protected CI workflow for the current head and resolve any failures.
-2. Run representative Tika, browser, lifecycle recovery/purge, IMAP/SMTP and
-   accessibility acceptance checks in a disposable environment.
-3. Add document-byte import only when it can reuse the normal scanned and
+1. Run representative Tika, lifecycle recovery/purge, and live IMAP/SMTP
+   acceptance checks in a disposable environment.
+2. Add document-byte import only when it can reuse the normal scanned and
    encrypted upload lifecycle without partial commits.
 
 Do not run the full local suite repeatedly. Use targeted type/lint/unit checks
