@@ -99,8 +99,26 @@ export function trustedRecipientFromHeaders(headers: Buffer | undefined, headerN
 }
 
 async function userForRecipientAlias(recipient: string, config: ImapIngestionConfig): Promise<string | undefined> {
-  const candidates = await getDb().select({ id: users.id }).from(users).where(isNull(users.disabledAt));
+  const aliasHash = createHash("sha256").update(recipient.trim().toLowerCase()).digest("hex");
+  const [indexed] = await getDb().select({ id: users.id }).from(users)
+    .where(and(isNull(users.disabledAt), eq(users.imapRecipientAliasSha256, aliasHash))).limit(1);
+  if (indexed && matchesImapRecipientAlias(recipient, indexed.id, config)) return indexed.id;
+
+  // Existing rows remain usable while the one-time migration backfill catches up.
+  const candidates = await getDb().select({ id: users.id }).from(users).where(and(
+    isNull(users.disabledAt),
+    isNull(users.imapRecipientAliasSha256),
+  ));
   return candidates.find((candidate) => matchesImapRecipientAlias(recipient, candidate.id, config))?.id;
+}
+
+async function backfillRecipientAliasIndex(config: ImapIngestionConfig, limit = 100): Promise<void> {
+  const candidates = await getDb().select({ id: users.id }).from(users)
+    .where(and(isNull(users.disabledAt), isNull(users.imapRecipientAliasSha256))).limit(limit);
+  await Promise.all(candidates.map((candidate) => getDb().update(users).set({
+    imapRecipientAliasSha256: createHash("sha256").update(imapRecipientAlias(candidate.id, config).toLowerCase()).digest("hex"),
+    updatedAt: new Date(),
+  }).where(eq(users.id, candidate.id))));
 }
 
 function attachmentParts(structure: MessageStructureObject | undefined): string[] {
@@ -116,6 +134,7 @@ function attachmentParts(structure: MessageStructureObject | undefined): string[
  */
 export async function runImapIngestionCycle(config = getImapIngestionConfig()): Promise<void> {
   if (!config.enabled) return;
+  await backfillRecipientAliasIndex(config);
   const client = new ImapFlow({
     host: config.host, port: config.port, secure: true,
     auth: { user: config.user, pass: config.password },
