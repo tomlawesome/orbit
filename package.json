@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.44.0",
+    "imapflow": "1.5.0",
     "jose": "^6.0.0",
     "next": "^16.0.0",
     "nodemailer": "^7.0.0",
@@ -40,12 +41,5 @@
     "typescript": "^5.9.0",
     "vitest": "^4.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "sharp",
-      "unrs-resolver"
-    ]
-  },
-  "packageManager": "pnpm@10.16.1"
+  "packageManager": "pnpm@11.9.0"
 }

@@ -83,9 +83,10 @@ numbers and update statuses in place; do not renumber it.
 6. User-approved document draft creation — in progress; review/approval exists.
 7. Duplicate comparison — in progress; hash/reference/provider/title/date
    comparisons and explicit choices exist; browser acceptance remains.
-8. IMAP ingestion and SMTP review/receipt workflow — in progress; blocked on a
-   maintained IMAP dependency because local pnpm metadata and store versions
-   conflict.
+8. IMAP ingestion and SMTP review/receipt workflow — in progress; pnpm 11 and
+   maintained ImapFlow are now in use. Dedicated-mailbox configuration is
+   fail-closed and TLS-only; idempotent message processing and review receipts
+   remain.
 9. Local Ollama extraction — optional; requires a fresh product decision.
 10. Final operational/release polish — planned.
 

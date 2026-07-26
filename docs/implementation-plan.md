@@ -243,9 +243,9 @@ is visible without renumbering work already completed.
 7. **Duplicate comparison** — In progress: household-scoped hash, reference,
    provider/title and date-overlap candidates with create, merge and attach-only
    choices are implemented; browser acceptance coverage remains.
-8. **IMAP and SMTP workflow** — In progress: safest first-release design is
-   selected, but implementation awaits a maintained IMAP dependency after the
-   local pnpm store/version conflict is resolved.
+8. **IMAP and SMTP workflow** — In progress: pnpm 11 and maintained ImapFlow
+   are now in use. Dedicated-mailbox configuration is TLS-only, secret-backed
+   and requires SMTP; idempotent message processing and review receipts remain.
 9. **Optional local Ollama extraction** — Optional: reconsider only after the
    Tika-based workflow has been tested on representative documents.
 10. **Final operational and release polish** — Planned: provider diagnostics,
