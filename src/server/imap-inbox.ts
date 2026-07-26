@@ -1,4 +1,5 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
 import { households, imapIngestionAttachments, imapIngestionMessages, memberships } from "@/db/schema";
 
@@ -30,4 +31,13 @@ export async function listImapInbox(userId: string) {
       .where(eq(memberships.userId, userId)).orderBy(asc(households.name)),
   ]);
   return { receipts, households: choices };
+}
+
+export async function assignImapReceiptHousehold(userId: string, receiptId: string, householdId: string): Promise<void> {
+  const [membership] = await getDb().select({ householdId: memberships.householdId }).from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId))).limit(1);
+  if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
+  const [changed] = await getDb().update(imapIngestionMessages).set({ householdId, updatedAt: new Date() })
+    .where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "pending_review"))).returning({ id: imapIngestionMessages.id });
+  if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
 }

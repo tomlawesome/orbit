@@ -12,6 +12,7 @@ import { ItemEditor } from "@/components/item-editor";
 import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import { PortableArchiveManager } from "@/components/portable-archive-manager";
+import { ImapInbox } from "@/components/imap-inbox";
 import {
   daysUntil,
   getDueBand,
@@ -46,7 +47,7 @@ const DEFAULT_THEME: ThemePreference = {
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 
-type SettingsView = "appearance" | "data" | "household" | "sections" | "members" | "administration";
+type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
@@ -604,6 +605,7 @@ export function Dashboard() {
             <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
               <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
               <button role="tab" aria-selected={settingsView === "data"} className={settingsView === "data" ? "active" : ""} onClick={() => setSettingsView("data")}>Your data</button>
+              <button role="tab" aria-selected={settingsView === "inbox"} className={settingsView === "inbox" ? "active" : ""} onClick={() => setSettingsView("inbox")}>Inbox</button>
               {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
               {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
@@ -685,6 +687,8 @@ export function Dashboard() {
               </div>
             ) : settingsView === "data" ? (
               <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
+            ) : settingsView === "inbox" ? (
+              <ImapInbox csrfToken={session.csrfToken} />
             ) : settingsView === "household" && household.canManage ? (
               <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
             ) : settingsView === "sections" && household.canManage ? (
