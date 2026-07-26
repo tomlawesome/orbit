@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
+import { DocumentManager } from "@/components/document-manager";
 import { suggestNextDate, type HomeItem, type HouseholdSection } from "@/lib/domain";
 import type { ItemActivity } from "@/lib/workspace";
 
@@ -17,6 +18,8 @@ interface ItemDetailProps {
   section?: HouseholdSection;
   activities: ItemActivity[];
   today: string;
+  householdId: string;
+  csrfToken: string;
   onClose(): void;
   onEdit(): void;
   onComplete(input: CompletionInput): void;
@@ -87,6 +90,8 @@ export function ItemDetail({
   section,
   activities,
   today,
+  householdId,
+  csrfToken,
   onClose,
   onEdit,
   onComplete,
@@ -224,8 +229,10 @@ export function ItemDetail({
             </section>
           )}
 
+          <DocumentManager householdId={householdId} itemId={item.id} csrfToken={csrfToken} />
+
           <section className="detail-section">
-            <div className="detail-section-title"><span>{item.notes ? "03" : "02"}</span><h3>Activity</h3></div>
+            <div className="detail-section-title"><span>{item.notes ? "04" : "03"}</span><h3>Activity</h3></div>
             <div className="activity-timeline">
               {itemActivities.map((activity) => (
                 <article key={activity.id}>

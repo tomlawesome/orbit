@@ -39,8 +39,8 @@ reserved for versioned releases or an explicit manual request.
 
 ## Active phase: secure document management
 
-**Register entry:** `ORB-FUT-003`  
-**Status:** Planned; implementation not started  
+**Register entry:** `ORB-FUT-003`
+**Status:** Implementation complete; release-candidate validation pending
 **Goal:** Attach durable, private, malware-scanned and encrypted documents to
 household items before adding email ingestion or automated extraction.
 
@@ -54,6 +54,9 @@ household items before adding email ingestion or automated extraction.
 5. Use established ClamAV as a separate default scanner service; do not build
    antivirus into the Orbit image.
 6. Keep parsing, OCR, and semantic extraction out of this phase.
+
+The binding security analysis is maintained in the
+[secure document threat model](document-threat-model.md).
 
 ### Document lifecycle
 
@@ -171,22 +174,20 @@ to protect plaintext from a fully compromised running Orbit instance.
 9. Complete security, integration, browser, and accessibility testing.
 10. Deliver through a focused PR and the protected GitHub workflow.
 
-### Decisions required before implementation
+### Confirmed implementation decisions
 
-The owner should confirm these values before migrations or public APIs make
-them expensive to change:
-
-- initial maximum file size;
-- initial instance/household quotas;
-- exact supported file formats;
-- default soft-delete retention period;
-- whether administrators may explicitly disable malware scanning;
-- key backup/recovery UX and the behaviour when the key is unavailable;
-- document-volume location and container ownership model.
-
-Recommended starting points are 25 MiB per file, PDF/JPEG/PNG/WebP, 30-day
-soft deletion, ClamAV enabled by default with fail-closed quarantine, and
-administrator-visible recovery guidance rather than automatic key export.
+- 25 MiB maximum file size.
+- 5 GiB default household quota and 20 GiB default instance quota.
+- PDF, JPEG, PNG, and WebP identified from content signatures.
+- 30-day soft deletion.
+- ClamAV enabled by default and fail-closed. Administrators may explicitly
+  disable scanning with persistent warnings and unscanned status.
+- Missing encryption keys lock document operations without preventing the rest
+  of Orbit from starting. A replacement key is never generated automatically.
+- Recovery uses an explicit passphrase-encrypted bundle stored separately from
+  ordinary backups.
+- A named volume is mounted at `/var/lib/orbit/documents` and accessed only by
+  Orbit's non-root runtime UID/GID 1001.
 
 ## Following phases
 

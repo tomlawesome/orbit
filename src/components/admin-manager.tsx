@@ -14,14 +14,38 @@ interface AdminManagerProps {
   session: WorkspaceSession;
 }
 
+interface DocumentHealth {
+  overall: "healthy" | "degraded";
+  encryption: { status: "ready" | "unavailable"; keyId: string | null };
+  storage: { status: "ready" | "unavailable" };
+  scanner: { status: "ready" | "disabled" | "unavailable"; mode: "required" | "disabled" | "unknown" };
+  quota: { usedBytes: number; limitBytes: number };
+  worker: {
+    started: boolean;
+    running: boolean;
+    lastSuccessAt: string | null;
+    lastErrorAt: string | null;
+    lastErrorCode: string | null;
+    lastReconciliationAt: string | null;
+  };
+}
+
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`;
+  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
 }
 
 export function AdminManager({ session }: AdminManagerProps) {
   const [users, setUsers] = useState<InstanceUser[]>([]);
   const [message, setMessage] = useState("");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [documentHealth, setDocumentHealth] = useState<DocumentHealth | null>(null);
+  const [healthError, setHealthError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +57,22 @@ export function AdminManager({ session }: AdminManagerProps) {
       })
       .catch((error) => {
         if (!cancelled) setMessage(error instanceof Error ? error.message : "Users could not be loaded");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/documents/health", { credentials: "same-origin", cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as { health?: DocumentHealth };
+        if (!response.ok || !payload.health) throw new Error("Document health could not be loaded");
+        if (!cancelled) setDocumentHealth(payload.health);
+      })
+      .catch(() => {
+        if (!cancelled) setHealthError("Document health could not be loaded.");
       });
     return () => {
       cancelled = true;
@@ -64,6 +104,34 @@ export function AdminManager({ session }: AdminManagerProps) {
 
   return (
     <div className="settings-content">
+      <section>
+        <div className="setting-heading">
+          <h3>Document protection</h3>
+          <p>Encryption, storage, malware scanning and retention-worker status.</p>
+        </div>
+        {documentHealth ? (
+          <>
+            {documentHealth.scanner.status === "disabled" && (
+              <p className="admin-health-warning" role="alert">
+                Malware scanning is disabled. New files are accepted without a virus scan.
+              </p>
+            )}
+            {documentHealth.overall === "degraded" && documentHealth.scanner.status !== "disabled" && (
+              <p className="admin-health-warning" role="alert">
+                Document protection needs attention. Uploads fail closed while required protection is unavailable.
+              </p>
+            )}
+            <div className="admin-health-grid">
+              <article><span>Encryption key</span><strong data-status={documentHealth.encryption.status}>{documentHealth.encryption.status}</strong></article>
+              <article><span>Encrypted storage</span><strong data-status={documentHealth.storage.status}>{documentHealth.storage.status}</strong></article>
+              <article><span>Malware scanner</span><strong data-status={documentHealth.scanner.status}>{documentHealth.scanner.status}</strong></article>
+              <article><span>Retention worker</span><strong data-status={documentHealth.worker.started ? "ready" : "unavailable"}>{documentHealth.worker.started ? "ready" : "unavailable"}</strong></article>
+              <article><span>Storage quota</span><strong>{formatBytes(documentHealth.quota.usedBytes)} / {formatBytes(documentHealth.quota.limitBytes)}</strong></article>
+              <article><span>Reconciliation</span><strong data-status={documentHealth.worker.lastReconciliationAt ? "ready" : "unavailable"}>{documentHealth.worker.lastReconciliationAt ? "complete" : "waiting"}</strong></article>
+            </div>
+          </>
+        ) : <p className="member-message" role={healthError ? "alert" : "status"}>{healthError || "Checking document protection…"}</p>}
+      </section>
       <section>
         <div className="setting-heading">
           <h3>Instance administrators</h3>

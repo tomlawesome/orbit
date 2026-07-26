@@ -4,6 +4,20 @@ import { expect, test } from "@playwright/test";
 test("signed-out visitors see only the authentication boundary", async ({ page, request }) => {
   const workspaceResponse = await request.get("/api/workspace");
   expect(workspaceResponse.status()).toBe(401);
+  const documentId = "00000000-0000-4000-8000-000000000001";
+  const householdId = "00000000-0000-4000-8000-000000000002";
+  const itemId = "00000000-0000-4000-8000-000000000003";
+  const documentListPath = `/api/households/${householdId}/items/${itemId}/documents`;
+  for (const response of await Promise.all([
+    request.get(documentListPath),
+    request.post(documentListPath, { data: "%PDF-1.7" }),
+    request.get(`/api/documents/${documentId}/download`),
+    request.delete(`/api/documents/${documentId}`),
+    request.post(`/api/documents/${documentId}/restore`),
+    request.get("/api/admin/documents/health"),
+  ])) {
+    expect(response.status()).toBe(401);
+  }
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
