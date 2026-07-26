@@ -7,6 +7,7 @@ import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/sch
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
 import { imapReceiptDestination } from "@/server/imap-inbox";
+import { materializeImapReviewItem } from "@/server/imap-review-items";
 
 const ingestionEnvironmentSchema = z.object({
   IMAP_HOST: z.string().trim().max(253).optional().default(""),
@@ -158,6 +159,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
               }).onConflictDoNothing();
               download.content.fill(0);
             }
+            if (destination?.householdId) await materializeImapReviewItem(userId, receipt.id);
           } catch {
             await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
           }
