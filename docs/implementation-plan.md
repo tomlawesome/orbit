@@ -37,6 +37,18 @@ Static analysis and unit tests run before container, browser, accessibility,
 and privacy checks. Pull-request runs never publish images. ARM64 publishing is
 reserved for versioned releases or an explicit manual request.
 
+## Release promotion policy
+
+`release/secure-documents` is Orbit's integration branch for accepted release
+candidates. It may receive focused, CI-gated pull requests while the agreed
+feature set is being completed. Do not promote changes to `main`, update the
+public `latest` image, or declare a stable public release until the required
+roadmap is complete through: reviewed Tika extraction, data portability,
+household lifecycle/deletion, mobile capture, reviewed document drafts and
+duplicate handling, IMAP ingestion with SMTP notifications, and final
+operational polish. Local Ollama-assisted extraction is explicitly optional and
+requires a fresh product decision at that stage.
+
 ## Completed phase: secure document management
 
 **Register entry:** `ORB-FUT-003`
@@ -204,6 +216,34 @@ After secure documents are complete:
 
 Email ingestion must not precede secure storage, malware scanning, review,
 duplicate handling, and administrative job visibility.
+
+## Completion checklist
+
+Keep this ordered list stable and update its status in place so release progress
+is visible without renumbering work already completed.
+
+1. **Release integration and acceptance** — In progress: CI-gate and manually
+   accept the current mobile, lifecycle and optional-Tika candidate.
+2. **Reviewed Tika extraction** — In progress: optional private Tika profile
+   and bounded adapter are implemented; add administrator verification and a
+   user-visible reviewed extraction result.
+3. **Data portability** — In progress: deliver passphrase-encrypted,
+   household-scoped export archives, expiry/purge, audit records, then import
+   preview and duplicate-safe commit.
+4. **Household lifecycle** — Planned: typed-confirmation soft deletion,
+   30-day recovery and final purge.
+5. **Mobile document capture** — Planned: resilient camera/file capture,
+   progress and compact review.
+6. **Document draft creation** — Planned: turn reviewed extraction evidence
+   into a user-approved item draft.
+7. **Duplicate comparison** — Planned: hash/reference/provider/date comparison
+   with explicit create, merge or attach-only choices.
+8. **IMAP and SMTP workflow** — Planned: secure per-user alias ingestion,
+   idempotency, receipts and review notifications.
+9. **Optional local Ollama extraction** — Optional: reconsider only after the
+   Tika-based workflow has been tested on representative documents.
+10. **Final operational and release polish** — Planned: provider diagnostics,
+    documentation, acceptance testing and promotion to `main`/`latest`.
 
 ## Active phase: administrator operations
 
