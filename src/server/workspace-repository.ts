@@ -151,6 +151,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
 
   const activitiesByHousehold = new Map<string, ItemActivity[]>();
   for (const entry of activityRows) {
+    // Instance-wide audit records have no household and never appear here.
+    if (!entry.householdId) continue;
     const candidate = itemActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
     if (!candidate.success) continue;
     const current = activitiesByHousehold.get(entry.householdId) ?? [];

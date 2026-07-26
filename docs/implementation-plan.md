@@ -37,10 +37,12 @@ Static analysis and unit tests run before container, browser, accessibility,
 and privacy checks. Pull-request runs never publish images. ARM64 publishing is
 reserved for versioned releases or an explicit manual request.
 
-## Active phase: secure document management
+## Completed phase: secure document management
 
 **Register entry:** `ORB-FUT-003`
-**Status:** Implementation complete; release-candidate validation pending
+**Status:** Implementation complete and manually accepted as
+`rc-2026.07.26.27` (digest
+`sha256:16696e706eb7bee9aa07443d619ee1193e100e7475fdf1997cb9d46685ff8594`)
 **Goal:** Attach durable, private, malware-scanned and encrypted documents to
 household items before adding email ingestion or automated extraction.
 
@@ -202,3 +204,15 @@ After secure documents are complete:
 
 Email ingestion must not precede secure storage, malware scanning, review,
 duplicate handling, and administrative job visibility.
+
+## Active phase: administrator operations
+
+`ORB-FUT-004` is being developed on the stacked
+`feature/admin-operations` branch, based on the accepted secure-document
+release.
+
+The phase adds bounded worker/provider health, safe queue summaries,
+state-checked retry/discard actions, SMTP connection verification, and
+cursor-paginated audit history. Its binding information-disclosure and
+state-transition rules are in
+[administrator operations](administrator-operations.md).

@@ -7,6 +7,7 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 interface ClaimedDocumentJob {
   id: string;
   documentId: string;
+  leaseToken: string;
 }
 
 export interface DocumentWorkerHealth {
@@ -45,7 +46,10 @@ async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> 
       from document_jobs job
       inner join documents document on document.id = job.document_id
       where job.kind = 'purge'
-        and job.status in ('pending', 'retry')
+        and (
+          job.status in ('pending', 'retry')
+          or (job.status = 'processing' and job.lease_expires_at < now())
+        )
         and document.lifecycle = 'pending_deletion'
         and document.delete_after <= now()
         and (job.lease_expires_at is null or job.lease_expires_at < now())
@@ -58,10 +62,11 @@ async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> 
         attempts = job.attempts + 1,
         locked_at = now(),
         lease_expires_at = now() + interval '10 minutes',
+        lease_token = gen_random_uuid(),
         updated_at = now()
     from claimable
     where job.id = claimable.id
-    returning job.id, job.document_id as "documentId"
+    returning job.id, job.document_id as "documentId", job.lease_token as "leaseToken"
   `);
   return rows as unknown as ClaimedDocumentJob[];
 }
@@ -71,6 +76,17 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`,
     );
+    // Lock and verify ownership before any irreversible storage operation.
+    const activeClaims = await transaction.execute(sql<{ id: string }>`
+      select id
+      from document_jobs
+      where id = ${job.id}
+        and status = 'processing'
+        and lease_token = ${job.leaseToken}::uuid
+      for update
+    `);
+    if (activeClaims.length === 0) return;
+
     const [record] = await transaction
       .select({
         householdId: documents.householdId,
@@ -88,9 +104,14 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
         completedAt: new Date(),
         lockedAt: null,
         leaseExpiresAt: null,
+        leaseToken: null,
         lastError: null,
         updatedAt: new Date(),
-      }).where(eq(documentJobs.id, job.id));
+      }).where(and(
+        eq(documentJobs.id, job.id),
+        eq(documentJobs.status, "processing"),
+        eq(documentJobs.leaseToken, job.leaseToken),
+      ));
       return;
     }
 
@@ -111,9 +132,14 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
       completedAt: new Date(),
       lockedAt: null,
       leaseExpiresAt: null,
+      leaseToken: null,
       lastError: null,
       updatedAt: new Date(),
-    }).where(eq(documentJobs.id, job.id));
+    }).where(and(
+      eq(documentJobs.id, job.id),
+      eq(documentJobs.status, "processing"),
+      eq(documentJobs.leaseToken, job.leaseToken),
+    ));
     await transaction.insert(auditLog).values({
       householdId: record.householdId,
       actorUserId: null,
@@ -127,17 +153,29 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
 
 async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
   const [current] = await getDb().select({ attempts: documentJobs.attempts })
-    .from(documentJobs).where(eq(documentJobs.id, job.id)).limit(1);
+    .from(documentJobs)
+    .where(and(
+      eq(documentJobs.id, job.id),
+      eq(documentJobs.status, "processing"),
+      eq(documentJobs.leaseToken, job.leaseToken),
+    ))
+    .limit(1);
+  if (!current) return;
   const safeCode = error instanceof Error && /key|secret/i.test(error.message)
     ? "key_unavailable"
     : "purge_failed";
   await getDb().update(documentJobs).set({
-    status: (current?.attempts ?? 1) >= 5 ? "failed" : "retry",
+    status: current.attempts >= 5 ? "failed" : "retry",
     lockedAt: null,
     leaseExpiresAt: null,
+    leaseToken: null,
     lastError: safeCode,
     updatedAt: new Date(),
-  }).where(eq(documentJobs.id, job.id));
+  }).where(and(
+    eq(documentJobs.id, job.id),
+    eq(documentJobs.status, "processing"),
+    eq(documentJobs.leaseToken, job.leaseToken),
+  ));
 }
 
 async function rejectInterruptedDocuments(): Promise<void> {

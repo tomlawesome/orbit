@@ -36,6 +36,77 @@ export interface NotificationWorkerConfig {
   maxAttempts: number;
 }
 
+export const notificationFailureCategories = [
+  "smtp_unconfigured",
+  "smtp_unavailable",
+  "smtp_rejected",
+  "push_unconfigured",
+  "push_unsubscribed",
+  "push_unavailable",
+  "recipient_preferences_disabled",
+  "unknown",
+] as const;
+
+export type NotificationFailureCategory = typeof notificationFailureCategories[number];
+
+export interface NotificationWorkerHealth {
+  started: boolean;
+  running: boolean;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  lastErrorCategory: NotificationFailureCategory | null;
+}
+
+type ProviderErrorDetails = {
+  code?: unknown;
+  responseCode?: unknown;
+  statusCode?: unknown;
+};
+
+/**
+ * Maps provider failures to the administrator-safe vocabulary before they are
+ * persisted. Provider messages can contain addresses, hosts, or credentials.
+ */
+export function categorizeProviderError(channel: "email" | "web_push", error: unknown): NotificationFailureCategory {
+  const details = error as ProviderErrorDetails | undefined;
+  const code = typeof details?.code === "string" ? details.code : "";
+  const responseCode = typeof details?.responseCode === "number" ? details.responseCode : undefined;
+  const statusCode = typeof details?.statusCode === "number" ? details.statusCode : undefined;
+
+  if (channel === "email") {
+    if (["EAUTH", "EENVELOPE", "EMESSAGE"].includes(code)
+      || (responseCode !== undefined && responseCode >= 500 && responseCode < 600)) return "smtp_rejected";
+    if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)) {
+      return "smtp_unavailable";
+    }
+    if (responseCode !== undefined && responseCode >= 400 && responseCode < 500) return "smtp_unavailable";
+    return "unknown";
+  }
+
+  if (statusCode === 404 || statusCode === 410) return "push_unsubscribed";
+  if (["ECONNREFUSED", "ECONNRESET", "ENETUNREACH", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH"].includes(code)
+    || (statusCode !== undefined && statusCode >= 500)) {
+    return "push_unavailable";
+  }
+  return "unknown";
+}
+
+/** Returns the terminal or retry state without exposing provider error details. */
+export function deliveryFailureState(
+  category: NotificationFailureCategory,
+  attempts: number,
+  maxAttempts: number,
+): "cancelled" | "failed" | "retry" {
+  if ([
+    "smtp_unconfigured",
+    "smtp_rejected",
+    "push_unconfigured",
+    "push_unsubscribed",
+    "recipient_preferences_disabled",
+  ].includes(category)) return "cancelled";
+  return attempts >= maxAttempts ? "failed" : "retry";
+}
+
 export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
   const parsed = notificationEnvironmentSchema.parse({
     ...environment,
@@ -146,35 +217,44 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
   }
 }
 
-async function claimDeliveries(limit = 25): Promise<string[]> {
-  const rows = await getDb().execute(sql<{ id: string }>`
+interface ClaimedDelivery {
+  id: string;
+  leaseToken: string;
+}
+
+async function claimDeliveries(limit = 25): Promise<ClaimedDelivery[]> {
+  const rows = await getDb().execute(sql<ClaimedDelivery>`
     with claimable as (
       select id
       from notification_deliveries
-      where status in ('pending', 'retry')
-        and scheduled_for <= now()
-        and (locked_at is null or locked_at < now() - interval '10 minutes')
+      where (
+          (status in ('pending', 'retry') and scheduled_for <= now())
+          or (status = 'processing' and locked_at < now() - interval '10 minutes')
+        )
       order by scheduled_for
       for update skip locked
       limit ${limit}
     )
     update notification_deliveries as delivery
-    set status = 'processing',
+        set status = 'processing',
         locked_at = now(),
+        lease_token = gen_random_uuid(),
         attempts = delivery.attempts + 1,
         updated_at = now()
     from claimable
     where delivery.id = claimable.id
-    returning delivery.id
+    returning delivery.id, delivery.lease_token as "leaseToken"
   `);
-  return (rows as unknown as Array<{ id: string }>).map((row) => row.id);
+  return rows as unknown as ClaimedDelivery[];
 }
 
-async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): Promise<void> {
-  if (!ids.length) return;
+async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWorkerConfig): Promise<void> {
+  if (!claimed.length) return;
+  const leaseTokens = new Map(claimed.map((delivery) => [delivery.id, delivery.leaseToken]));
   const deliveries = await getDb()
     .select({
       id: notificationDeliveries.id,
+      leaseToken: notificationDeliveries.leaseToken,
       channel: notificationDeliveries.channel,
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
@@ -193,7 +273,7 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
     .innerJoin(items, eq(items.id, dueEvents.itemId))
     .innerJoin(households, eq(households.id, notificationDeliveries.householdId))
     .leftJoin(userPreferences, eq(userPreferences.userId, notificationDeliveries.userId))
-    .where(inArray(notificationDeliveries.id, ids));
+    .where(inArray(notificationDeliveries.id, claimed.map((delivery) => delivery.id)));
 
   const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl) : undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
@@ -201,6 +281,8 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
   }
 
   for (const delivery of deliveries) {
+    const leaseToken = leaseTokens.get(delivery.id);
+    if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
       const channelStillEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
@@ -209,14 +291,22 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
         await getDb().update(notificationDeliveries).set({
           status: "cancelled",
           lockedAt: null,
-          lastError: "Disabled in recipient preferences",
+          leaseToken: null,
+          lastError: "recipient_preferences_disabled",
           updatedAt: new Date(),
-        }).where(eq(notificationDeliveries.id, delivery.id));
+        }).where(and(
+          eq(notificationDeliveries.id, delivery.id),
+          eq(notificationDeliveries.status, "processing"),
+          eq(notificationDeliveries.leaseToken, leaseToken),
+        ));
         continue;
       }
       const message = `${delivery.title} is due on ${delivery.dueDate}.`;
       if (delivery.channel === "email") {
-        if (!transporter) throw new Error("SMTP is not configured");
+        if (!transporter) {
+          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured");
+          continue;
+        }
         await transporter.sendMail({
           from: config.smtpFrom,
           to: delivery.email,
@@ -225,14 +315,18 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
         });
       } else {
         if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) {
-          throw new Error("Web Push is not configured");
+          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unconfigured");
+          continue;
         }
         const subscriptions = await getDb().select().from(pushSubscriptions).where(and(
           eq(pushSubscriptions.userId, delivery.userId),
           isNull(pushSubscriptions.revokedAt),
           or(isNull(pushSubscriptions.expiresAt), gte(pushSubscriptions.expiresAt, new Date())),
         ));
-        if (!subscriptions.length) throw new Error("No active push subscription");
+        if (!subscriptions.length) {
+          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unsubscribed");
+          continue;
+        }
         await Promise.all(subscriptions.map(async (subscription) => {
           try {
             await webPush.sendNotification({
@@ -258,20 +352,45 @@ async function deliverClaimed(ids: string[], config: NotificationWorkerConfig): 
         status: "sent",
         sentAt: new Date(),
         lockedAt: null,
+        leaseToken: null,
         lastError: null,
         updatedAt: new Date(),
-      }).where(eq(notificationDeliveries.id, delivery.id));
+      }).where(and(
+        eq(notificationDeliveries.id, delivery.id),
+        eq(notificationDeliveries.status, "processing"),
+        eq(notificationDeliveries.leaseToken, leaseToken),
+      ));
     } catch (error) {
-      const lastError = error instanceof Error ? error.message.slice(0, 500) : "Unknown delivery error";
-      const providerUnavailable = /not configured|No active push subscription/.test(lastError);
-      await getDb().update(notificationDeliveries).set({
-        status: providerUnavailable ? "cancelled" : delivery.attempts >= config.maxAttempts ? "failed" : "retry",
-        lockedAt: null,
-        lastError,
-        updatedAt: new Date(),
-      }).where(eq(notificationDeliveries.id, delivery.id));
+      await failDelivery(
+        delivery.id,
+        leaseToken,
+        delivery.attempts,
+        config.maxAttempts,
+        categorizeProviderError(delivery.channel, error),
+      );
     }
   }
+}
+
+/** Persists only a bounded failure code, never an untrusted provider message. */
+async function failDelivery(
+  id: string,
+  leaseToken: string,
+  attempts: number,
+  maxAttempts: number,
+  category: NotificationFailureCategory,
+): Promise<void> {
+  await getDb().update(notificationDeliveries).set({
+    status: deliveryFailureState(category, attempts, maxAttempts),
+    lockedAt: null,
+    leaseToken: null,
+    lastError: category,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(notificationDeliveries.id, id),
+    eq(notificationDeliveries.status, "processing"),
+    eq(notificationDeliveries.leaseToken, leaseToken),
+  ));
 }
 
 export async function runNotificationCycle(config = getNotificationWorkerConfig()): Promise<void> {
@@ -281,7 +400,24 @@ export async function runNotificationCycle(config = getNotificationWorkerConfig(
   await deliverClaimed(claimed, config);
 }
 
-const workerState = globalThis as typeof globalThis & { __orbitWorkerStarted?: boolean };
+const workerState = globalThis as typeof globalThis & {
+  __orbitWorkerStarted?: boolean;
+  __orbitWorkerRunning?: boolean;
+  __orbitWorkerLastSuccessAt?: string;
+  __orbitWorkerLastErrorAt?: string;
+  __orbitWorkerLastErrorCategory?: NotificationFailureCategory;
+};
+
+/** Returns only bounded, process-local notification worker diagnostics. */
+export function getNotificationWorkerHealth(): NotificationWorkerHealth {
+  return {
+    started: workerState.__orbitWorkerStarted ?? false,
+    running: workerState.__orbitWorkerRunning ?? false,
+    lastSuccessAt: workerState.__orbitWorkerLastSuccessAt ?? null,
+    lastErrorAt: workerState.__orbitWorkerLastErrorAt ?? null,
+    lastErrorCategory: workerState.__orbitWorkerLastErrorCategory ?? null,
+  };
+}
 
 /** Starts one resilient scheduler per application process. PostgreSQL locking prevents duplicate sends. */
 export function startNotificationWorker(config = getNotificationWorkerConfig()): void {
@@ -289,11 +425,17 @@ export function startNotificationWorker(config = getNotificationWorkerConfig()):
   workerState.__orbitWorkerStarted = true;
 
   const poll = async () => {
+    workerState.__orbitWorkerRunning = true;
     try {
       await runNotificationCycle(config);
-    } catch (error) {
-      console.error("Orbit notification cycle failed", error);
+      workerState.__orbitWorkerLastSuccessAt = new Date().toISOString();
+      workerState.__orbitWorkerLastErrorCategory = undefined;
+    } catch {
+      workerState.__orbitWorkerLastErrorAt = new Date().toISOString();
+      workerState.__orbitWorkerLastErrorCategory = "unknown";
+      console.error("Orbit notification cycle failed");
     } finally {
+      workerState.__orbitWorkerRunning = false;
       setTimeout(poll, config.pollMilliseconds).unref();
     }
   };

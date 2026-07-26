@@ -972,7 +972,35 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .admin-health-grid strong[data-status="disabled"],
 .admin-health-grid strong[data-status="unavailable"] { color: var(--coral-dark); }
 .admin-health-warning { margin: 0 0 13px; padding: 11px 13px; border: 1px solid color-mix(in srgb, var(--coral) 32%, transparent); border-radius: 10px; color: var(--coral-dark); background: color-mix(in srgb, var(--coral) 8%, var(--paper)); font-size: calc(9px + var(--text-bump)); font-weight: 750; line-height: 1.45; }
+.admin-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.admin-refresh, .admin-operation-actions button, .admin-job-actions button { min-height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--forest); background: transparent; font-size: calc(8px + var(--text-bump)); font-weight: 750; cursor: pointer; }
+.admin-refresh:disabled, .admin-operation-actions button:disabled, .admin-job-actions button:disabled { opacity: .5; cursor: wait; }
+.admin-operation-detail { margin: 10px 0 0; color: var(--coral-dark); font-size: calc(8px + var(--text-bump)); line-height: 1.45; }
+.admin-operation-actions { margin-top: 12px; display: flex; align-items: center; gap: 9px; }
+.admin-operation-actions span { color: var(--forest); font-size: calc(8px + var(--text-bump)); font-weight: 750; }
+.admin-counts { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.admin-counts article { padding: 11px; border: 1px solid var(--line); border-radius: 11px; display: flex; flex-wrap: wrap; gap: 5px 9px; }
+.admin-counts strong { width: 100%; font-size: calc(9px + var(--text-bump)); }
+.admin-counts span { color: var(--muted); font-size: calc(8px + var(--text-bump)); }
+.admin-job-group { margin-top: 18px; }
+.admin-job-group h4 { margin: 0; font-size: calc(10px + var(--text-bump)); }
+.admin-job-list, .admin-audit-list { margin: 9px 0 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.admin-job-list li { padding: 9px 10px; border: 1px solid var(--line); border-radius: 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.admin-job-list li > span:first-child { min-width: 0; display: grid; gap: 3px; }
+.admin-job-list strong, .admin-job-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-job-list strong { font-size: calc(8px + var(--text-bump)); text-transform: capitalize; }
+.admin-job-list small { color: var(--muted); font-size: calc(7px + var(--text-bump)); }
+.admin-job-actions { flex: none; display: flex; gap: 5px; }
+.admin-job-actions button:last-child { color: var(--coral-dark); }
+.admin-audit-list li { padding: 10px; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 3px; }
+.admin-audit-list strong { font-size: calc(9px + var(--text-bump)); }
+.admin-audit-list span, .admin-audit-list time { color: var(--muted); font-size: calc(8px + var(--text-bump)); }
+.admin-audit-list time { font-variant-numeric: tabular-nums; }
 
 @media (max-width: 560px) {
   .admin-health-grid { grid-template-columns: 1fr; }
+  .admin-counts { grid-template-columns: 1fr; }
+  .admin-job-list li { align-items: flex-start; flex-direction: column; }
+  .admin-job-actions { width: 100%; }
+  .admin-job-actions button { flex: 1; min-height: 36px; }
 }
