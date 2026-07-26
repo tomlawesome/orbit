@@ -11,11 +11,19 @@ async function signIn(page: Page, identity: string) {
 }
 
 async function readWorkspace(page: Page) {
-  return page.evaluate(async () => {
-    const response = await fetch("/api/workspace", { credentials: "same-origin" });
-    const payload = (await response.json()) as { workspace?: unknown };
-    return { ok: response.ok, workspace: payload.workspace ?? payload };
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.waitForLoadState("domcontentloaded");
+      return await page.evaluate(async () => {
+        const response = await fetch("/api/workspace", { credentials: "same-origin" });
+        const payload = (await response.json()) as { workspace?: unknown };
+        return { ok: response.ok, workspace: payload.workspace ?? payload };
+      });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("Execution context was destroyed") || attempt === 2) throw error;
+    }
+  }
+  throw new Error("Workspace read did not run");
 }
 
 test.describe("authenticated household lifecycle", () => {
