@@ -85,6 +85,20 @@
       "when": 1785080000000,
       "tag": "0011_imap_receipt_household",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785081000000,
+      "tag": "0012_imap_review_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785082000000,
+      "tag": "0013_imap_review_completion",
+      "breakpoints": true
     }
   ]
 }

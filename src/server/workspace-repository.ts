@@ -128,7 +128,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(sections)
       .where(and(inArray(sections.householdId, householdIds), isNull(sections.archivedAt)))
       .orderBy(asc(sections.position)),
-    getDb().select().from(items).where(inArray(items.householdId, householdIds)).orderBy(desc(items.updatedAt)),
+    getDb().select().from(items).where(and(inArray(items.householdId, householdIds), eq(items.requiresReview, false))).orderBy(desc(items.updatedAt)),
     getDb().select().from(dueEvents)
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),

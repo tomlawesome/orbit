@@ -28,7 +28,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
-export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "quarantined", "failed"]);
+export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "completed", "quarantined", "failed"]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 
 const auditColumns = {
@@ -131,6 +131,8 @@ export const items = pgTable("items", {
   notes: text("notes"),
   externalDocumentUrl: text("external_document_url"),
   status: itemStatus("status").notNull().default("active"),
+  /** Inbound documents are deliberately invisible until a member reviews them. */
+  requiresReview: boolean("requires_review").notNull().default(false),
   version: integer("version").notNull().default(1),
   ...auditColumns,
 }, (table) => [
@@ -317,6 +319,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
+  reviewItemId: uuid("review_item_id").references(() => items.id, { onDelete: "set null" }),
   status: imapIngestionStatus("status").notNull(),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),

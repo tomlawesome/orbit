@@ -87,8 +87,11 @@ numbers and update statuses in place; do not renumber it.
    maintained ImapFlow are now in use. Dedicated-mailbox configuration is
    fail-closed and TLS-only. Each forwarding address is an opaque per-user
    HMAC alias verified against a configured provider-injected recipient header.
-   A TLS-only worker records bounded, content-free, idempotent mailbox receipts;
-   user review/attachment and SMTP receipts remain.
+   A TLS-only worker downloads, scans and encrypts verified attachments
+   immediately. A one-household recipient receives a hidden archived review
+   item automatically; a multi-household recipient selects the household once.
+   The user then selects a section to make the reviewed item visible. SMTP
+   receipts, deletion/discard UX and end-to-end provider acceptance remain.
 9. Local Ollama extraction — optional; requires a fresh product decision.
 10. Final operational/release polish — planned.
 
@@ -109,8 +112,9 @@ numbers and update statuses in place; do not renumber it.
   history. Never disable the final active instance administrator.
 - Household deletion requires typed confirmation and a 30-day recovery period.
 - Email ingestion uses IMAP for receipt and SMTP for outbound mail. It must use
-  verified TLS, a dedicated mailbox/per-user aliases, idempotency and explicit
-  user review before any item creation.
+  verified TLS, a dedicated mailbox/per-user aliases and idempotency. Verified
+  attachments are stored immediately, but an item is hidden until its household
+  (when ambiguous) and section are reviewed by the recipient.
 
 ## Immediate next implementation steps
 
