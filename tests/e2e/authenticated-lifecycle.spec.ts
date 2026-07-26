@@ -10,16 +10,23 @@ async function signIn(page: Page, identity: string) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+async function readWorkspace(page: Page) {
+  return page.evaluate(async () => {
+    const response = await fetch("/api/workspace", { credentials: "same-origin" });
+    return { ok: response.ok, workspace: await response.json() };
+  });
+}
+
 test.describe("authenticated household lifecycle", () => {
-  test("a first sign-in creates no household until the user chooses one", async ({ page, request, browser, isMobile }) => {
+  test("a first sign-in creates no household until the user chooses one", async ({ page, browser, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.skip(isMobile, "The disposable identities are shared by the single acceptance stack.");
 
     await signIn(page, administrator);
 
-    const workspaceBeforeCreation = await request.get("/api/workspace");
-    expect(workspaceBeforeCreation.ok()).toBeTruthy();
-    await expect(workspaceBeforeCreation.json()).resolves.toMatchObject({
+    const workspaceBeforeCreation = await readWorkspace(page);
+    expect(workspaceBeforeCreation.ok).toBeTruthy();
+    expect(workspaceBeforeCreation.workspace).toMatchObject({
       householdLanding: "choose",
       activeHouseholdId: null,
       households: [],
@@ -31,8 +38,8 @@ test.describe("authenticated household lifecycle", () => {
     await page.getByRole("button", { name: "Create household" }).click();
     await expect(page.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
-    const workspaceAfterCreation = await request.get("/api/workspace");
-    const createdWorkspace = await workspaceAfterCreation.json() as { activeHouseholdId: string | null; households: Array<{ id: string; name: string }> };
+    const workspaceAfterCreation = await readWorkspace(page);
+    const createdWorkspace = workspaceAfterCreation.workspace as { activeHouseholdId: string | null; households: Array<{ id: string; name: string }> };
     expect(createdWorkspace).toMatchObject({
       householdLanding: "active",
       households: [{ name: "Acceptance household" }],
@@ -74,8 +81,8 @@ test.describe("authenticated household lifecycle", () => {
     await page.getByRole("button", { name: "Restore" }).click();
     await expect(page.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
-    const restoredWorkspace = await request.get("/api/workspace");
-    await expect(restoredWorkspace.json()).resolves.toMatchObject({
+    const restoredWorkspace = await readWorkspace(page);
+    expect(restoredWorkspace.workspace).toMatchObject({
       householdLanding: "active",
       activeHouseholdId: createdWorkspace.activeHouseholdId,
       households: [{ name: "Acceptance household" }],
