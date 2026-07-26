@@ -229,7 +229,7 @@ export function ItemDetail({
             </section>
           )}
 
-          <DocumentManager householdId={householdId} itemId={item.id} csrfToken={csrfToken} />
+          <DocumentManager householdId={householdId} itemId={item.id} sectionId={item.sectionId} csrfToken={csrfToken} />
 
           <section className="detail-section">
             <div className="detail-section-title"><span>{item.notes ? "04" : "03"}</span><h3>Activity</h3></div>
