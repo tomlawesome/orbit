@@ -93,11 +93,11 @@ export function HouseholdSettings({ household, onSave, csrfToken }: HouseholdSet
           <h3>Household lifecycle</h3>
           {household.deleteAfter
             ? <p>This household is scheduled for deletion on {new Intl.DateTimeFormat("en-GB", { dateStyle: "long" }).format(new Date(household.deleteAfter))}. Restore it before then to keep its records.</p>
-            : <p>Deleting a household is reversible for 30 days. Members, items, documents and encrypted exports are permanently purged afterwards.</p>}
+            : <p>Removing a household hides it from every member immediately. An owner or instance administrator can restore it for 30 days; records are permanently purged afterwards.</p>}
         </div>
         {household.deleteAfter ? <button type="button" onClick={() => void changeLifecycle("restore")} disabled={lifecycleBusy}>{lifecycleBusy ? "Restoring…" : "Restore household"}</button> : <div className="member-form">
-          <label className="field"><span>Type “{household.name}” to schedule deletion</span><input value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} maxLength={60} /></label>
-          <button type="button" onClick={() => void changeLifecycle("delete")} disabled={lifecycleBusy || deletionConfirmation !== household.name}>{lifecycleBusy ? "Scheduling…" : "Schedule household deletion"}</button>
+          <label className="field"><span>Type “{household.name}” to remove this household</span><input value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} maxLength={60} /></label>
+          <button type="button" onClick={() => void changeLifecycle("delete")} disabled={lifecycleBusy || deletionConfirmation !== household.name}>{lifecycleBusy ? "Removing…" : "Remove household"}</button>
         </div>}
       </section>
     </div>

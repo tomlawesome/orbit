@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -107,14 +107,19 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     deleteAfter: households.deleteAfter,
   };
   const householdRows = administrator
-    ? await getDb().select(householdSelection).from(households).orderBy(asc(households.createdAt))
+    ? await getDb().select(householdSelection).from(households).where(isNull(households.deletionRequestedAt)).orderBy(asc(households.createdAt))
     : await getDb().select(householdSelection)
       .from(memberships)
       .innerJoin(households, eq(households.id, memberships.householdId))
-      .where(eq(memberships.userId, userId))
+      .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt)))
       .orderBy(asc(households.createdAt));
 
+  const recoverableHouseholds = administrator
+    ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
+    : await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId)).where(and(eq(memberships.userId, userId), eq(memberships.role, "owner"), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter));
+
   if (!householdRows.length) {
+    if (recoverableHouseholds.length) return workspaceSchema.parse({ version: 1, activeHouseholdId: null, households: [], recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })) });
     const initialId = await createInitialHousehold(userId, sessionId);
     return readWorkspace(userId, sessionId, initialId);
   }
@@ -169,6 +174,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
   return workspaceSchema.parse({
     version: 1,
     activeHouseholdId,
+    recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);

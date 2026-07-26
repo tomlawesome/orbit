@@ -233,9 +233,10 @@ is visible without renumbering work already completed.
    Conflict-aware import preview and transactionally committed metadata import
    are implemented. Original document bytes are excluded from import pending
    normal scan/encryption.
-4. **Household lifecycle** — In progress: typed-confirmation soft deletion,
-   30-day recovery and worker-driven purge are implemented; add integration
-   coverage before acceptance.
+4. **Household lifecycle** — In progress: typed-confirmation removal hides a
+   household from every member immediately, while an owner or instance
+   administrator can restore its minimal recovery record for 30 days before
+   worker-driven purge; add integration coverage before acceptance.
 5. **Mobile document capture** — In progress: direct camera/file capture,
    visual review/rotation, progress and retry are implemented; browser
    acceptance coverage remains.

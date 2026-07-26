@@ -80,8 +80,9 @@ numbers and update statuses in place; do not renumber it.
 3. Data portability — in progress; exports, conflict-aware import preview and
    transactional metadata import exist. Imported document files remain excluded
    until they can enter through the normal scan/encryption lifecycle.
-4. Household lifecycle deletion/recovery/purge — in progress; typed
-   confirmation, a 30-day recovery window and worker purge are implemented.
+4. Household lifecycle deletion/recovery/purge — in progress; removal hides
+   the household immediately, while owners and instance administrators retain
+   a 30-day recovery action before worker purge.
 5. Mobile document capture — in progress; review, rotation, progress and retry
    exist; browser acceptance remains.
 6. User-approved document draft creation — in progress; review/approval exists.
