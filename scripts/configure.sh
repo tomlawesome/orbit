@@ -77,8 +77,8 @@ ensure_secret_file() {
     existing_value="$(tr -d '\r\n' < "$path")"
     [[ "$existing_value" =~ ^[0-9a-fA-F]{64}$ ]] ||
       fail "${path} does not contain a valid 256-bit hexadecimal secret."
-    chmod 644 "$path" ||
-      fail "Could not set container-readable permissions on ${path}."
+    chmod 600 "$path" ||
+      fail "Could not restrict permissions on ${path}."
     unset existing_value
     return
   fi
@@ -87,8 +87,8 @@ ensure_secret_file() {
   temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit secret file."
   printf '%s\n' "$secret" > "$temporary_file"
-  chmod 644 "$temporary_file" ||
-    fail "Could not set container-readable permissions on the Orbit secret."
+  chmod 600 "$temporary_file" ||
+    fail "Could not restrict permissions on the Orbit secret."
   mv -- "$temporary_file" "$path"
   temporary_file=""
   unset secret
@@ -99,5 +99,7 @@ ensure_environment_file
 ensure_secrets_directory
 ensure_secret_file "$secrets_directory/session-secret"
 ensure_secret_file "$secrets_directory/postgres-password"
+# A 32-byte hexadecimal KEK is generated only when absent and is never printed.
+ensure_secret_file "$secrets_directory/document-kek"
 
 printf 'Orbit configuration is ready. Existing values were preserved.\n'

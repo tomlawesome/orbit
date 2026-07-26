@@ -6,6 +6,20 @@ export const eventKind = pgEnum("event_kind", ["renewal", "service"]);
 export const deliveryChannel = pgEnum("delivery_channel", ["email", "web_push"]);
 export const deliveryStatus = pgEnum("delivery_status", ["pending", "processing", "sent", "retry", "failed", "cancelled"]);
 export const themeMode = pgEnum("theme_mode", ["system", "light", "dark"]);
+export const documentLifecycle = pgEnum("document_lifecycle", [
+  "receiving",
+  "validating",
+  "quarantined",
+  "scanning",
+  "encrypting",
+  "available",
+  "pending_deletion",
+  "deleted",
+  "rejected",
+]);
+export const documentScanStatus = pgEnum("document_scan_status", ["pending", "clean", "infected", "error", "skipped"]);
+export const documentJobKind = pgEnum("document_job_kind", ["scan", "encrypt", "purge", "reconcile", "rewrap"]);
+export const documentJobStatus = pgEnum("document_job_status", ["pending", "processing", "retry", "completed", "failed"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -108,6 +122,63 @@ export const items = pgTable("items", {
 }, (table) => [
   index("item_household_status_idx").on(table.householdId, table.status),
   index("item_household_section_idx").on(table.householdId, table.sectionId),
+]);
+
+/** Metadata for an encrypted document; ciphertext and key material live in documentCrypto. */
+export const documents = pgTable("documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  itemId: uuid("item_id").references(() => items.id, { onDelete: "set null" }),
+  uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  displayName: text("display_name").notNull(),
+  mediaType: text("media_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  lifecycle: documentLifecycle("lifecycle").notNull().default("receiving"),
+  scanStatus: documentScanStatus("scan_status").notNull().default("pending"),
+  failureCode: text("failure_code"),
+  deleteAfter: timestamp("delete_after", { withTimezone: true }),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  availableAt: timestamp("available_at", { withTimezone: true }),
+  version: integer("version").notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  index("document_household_item_created_idx").on(table.householdId, table.itemId, table.createdAt),
+  index("document_household_lifecycle_created_idx").on(table.householdId, table.lifecycle, table.createdAt),
+]);
+
+/** Envelope-encryption metadata for one document; no plaintext key is persisted. */
+export const documentCrypto = pgTable("document_crypto", {
+  documentId: uuid("document_id").primaryKey().references(() => documents.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull(),
+  ciphertextSize: integer("ciphertext_size").notNull(),
+  envelopeVersion: integer("envelope_version").notNull(),
+  contentIv: text("content_iv").notNull(),
+  contentAuthTag: text("content_auth_tag").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  ...auditColumns,
+}, (table) => [uniqueIndex("document_crypto_storage_key_unique").on(table.storageKey)]);
+
+/** Durable, idempotent worker jobs for document lifecycle operations. */
+export const documentJobs = pgTable("document_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id").notNull().references(() => documents.id, { onDelete: "cascade" }),
+  kind: documentJobKind("kind").notNull(),
+  generation: integer("generation").notNull().default(1),
+  status: documentJobStatus("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("document_job_once").on(table.documentId, table.kind, table.generation),
+  index("document_job_claim_idx").on(table.status, table.createdAt),
+  index("document_job_lease_idx").on(table.status, table.leaseExpiresAt),
 ]);
 
 export const dueEvents = pgTable("due_events", {

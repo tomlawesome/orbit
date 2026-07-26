@@ -20,12 +20,15 @@ fail() {
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 
+bash scripts/configure.sh
+
 compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
 # Prepare the candidate image before touching a running deployment.
 compose pull orbit-db
+compose pull orbit-clamav
 if [[ "$mode" == "--build" ]]; then
   bash scripts/build-container.sh
 else

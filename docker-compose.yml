@@ -28,21 +28,50 @@ services:
       POSTGRES_HOST: orbit-db
       POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
       SESSION_SECRET_FILE: /run/secrets/orbit-session-secret
+      DOCUMENT_KEK_FILE: /run/secrets/orbit-document-kek
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
+    volumes:
+      - orbit-documents-data:/var/lib/orbit/documents
+    tmpfs:
+      - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
     secrets:
       - orbit-postgres-password
       - orbit-session-secret
+      - orbit-document-kek
     ports: ["${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000"]
     depends_on:
       orbit-db:
         condition: service_healthy
+  # ClamAV remains independent of Orbit startup: document operations must fail
+  # closed when it is unavailable, while the rest of the application stays up.
+  orbit-clamav:
+    container_name: orbit-clamav
+    image: clamav/clamav:1.4.5-debian
+    restart: unless-stopped
+    volumes:
+      - orbit-clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
+    # Keep malware scanning bounded on small hosts. Raise these limits only
+    # alongside documented upload-size and scanner-capacity requirements.
+    cpus: "1.0"
+    mem_limit: ${CLAMAV_MEMORY_LIMIT:-4g}
+    pids_limit: 256
 
 volumes:
   orbit-db-data:
+  orbit-documents-data:
+  orbit-clamav-data:
 
 secrets:
   orbit-postgres-password:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/postgres-password
   orbit-session-secret:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret
+  orbit-document-kek:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek

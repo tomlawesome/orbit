@@ -739,6 +739,8 @@ export function Dashboard() {
           section={sections.find((section) => section.id === detailItem.sectionId)}
           activities={household.activities}
           today={today}
+          householdId={household.id}
+          csrfToken={session.csrfToken}
           onClose={() => setDetailItemId(null)}
           onEdit={() => editItem(detailItem)}
           onComplete={(input) => completeItem(detailItem, input)}
