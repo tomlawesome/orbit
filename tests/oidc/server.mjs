@@ -130,4 +130,4 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
   return responseJson(response, 404, { error: "not_found" });
 });
 
-server.listen(4443, "127.0.0.1", () => console.log("Orbit disposable OIDC provider listening on 127.0.0.1:4443"));
+server.listen(4443, "0.0.0.0", () => console.log(`Orbit disposable OIDC provider listening on ${issuer}`));
