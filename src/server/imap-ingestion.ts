@@ -143,6 +143,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           contentSha256, recipientAliasSha256: aliasSha256, userId: userId ?? null, householdId: destination?.householdId ?? null,
           status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : "recipient_unverified",
+          receiptStatus: "processing",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         }).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
         if (receipt && userId && !oversized) {
@@ -160,8 +161,9 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
               download.content.fill(0);
             }
             if (destination?.householdId) await materializeImapReviewItem(userId, receipt.id);
+            await getDb().update(imapIngestionMessages).set({ receiptStatus: "pending", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
           } catch {
-            await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
+            await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", receiptStatus: "cancelled", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
           }
         }
         message.source?.fill(0);
