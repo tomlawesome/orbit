@@ -78,6 +78,36 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage.getByRole("tab", { name: "Admin" })).toHaveCount(0);
       await expect(memberPage.getByRole("tab", { name: "Household" })).toHaveCount(0);
 
+      await page.getByRole("tab", { name: "Admin" }).click();
+      await expect(page.getByRole("heading", { name: "Instance administrators" })).toBeVisible();
+      const memberAdminRow = page.locator(".admin-list article").filter({ hasText: member });
+      await expect(memberAdminRow).toHaveCount(1);
+      page.once("dialog", (dialog) => dialog.accept());
+      await memberAdminRow.getByRole("button", { name: "Disable account" }).click();
+      await expect(page.getByText(`${member}'s account is now disabled.`, { exact: true })).toBeVisible();
+
+      await memberPage.reload();
+      await expect(memberPage.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
+      await expect(memberPage.getByText("Your household information is private")).toBeVisible();
+      await expect(memberPage.getByText("Acceptance household", { exact: true })).toHaveCount(0);
+      await memberPage.getByRole("link", { name: "Sign in securely" }).click();
+      await memberPage.getByRole("link", { name: member }).click();
+      await expect(memberPage).toHaveURL(/\/auth\/error\?code=account_disabled/);
+      await expect(memberPage.getByText("This Orbit account has been disabled by an administrator.")).toBeVisible();
+
+      await page.getByRole("tab", { name: "Admin" }).click();
+      const disabledMemberRow = page.locator(".admin-list article").filter({ hasText: member });
+      await expect(disabledMemberRow.getByRole("button", { name: "Enable account" })).toBeVisible();
+      page.once("dialog", (dialog) => dialog.accept());
+      await disabledMemberRow.getByRole("button", { name: "Enable account" }).click();
+      await expect(page.getByText(`${member}'s account is now enabled.`, { exact: true })).toBeVisible();
+
+      await memberPage.goto("/");
+      await expect(memberPage.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
+      await expect(memberPage.getByText("Acceptance household", { exact: true })).toHaveCount(0);
+      await signIn(memberPage, member);
+      await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
+
       await page.getByRole("tab", { name: "Household" }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();

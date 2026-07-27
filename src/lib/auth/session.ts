@@ -1,8 +1,9 @@
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import type { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
 import { constantTimeEqual, createCsrfToken, hashSessionToken, randomUrlSafe } from "@/lib/auth/crypto";
 import { AuthError } from "@/lib/auth/errors";
@@ -32,10 +33,18 @@ export interface AuthenticatedSession {
 export async function createSession(userId: string, config: AuthConfig): Promise<{ token: string; expiresAt: Date }> {
   const token = randomUrlSafe(32);
   const expiresAt = new Date(Date.now() + config.sessionTtlSeconds * 1000);
-  await getDb().insert(sessions).values({
-    userId,
-    tokenHash: hashSessionToken(token),
-    expiresAt,
+  await getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+    const [user] = await transaction.select({ disabledAt: users.disabledAt }).from(users)
+      .where(eq(users.id, userId)).limit(1);
+    if (!user || user.disabledAt) {
+      throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+    }
+    await transaction.insert(sessions).values({
+      userId,
+      tokenHash: hashSessionToken(token),
+      expiresAt,
+    });
   });
   return { token, expiresAt };
 }
