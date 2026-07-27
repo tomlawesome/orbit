@@ -202,7 +202,7 @@ describe("workspace, household and lifecycle authorization", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.outsider.id }),
     }), context);
-    await expectError(memberMutation, 403, "owner_required", "Only the current household owner can add members");
+    await expectError(memberMutation, 403, "owner_required", "Only a household owner can make this change");
     expect(await fixture.auditCount(fixture.household.id)).toBe(beforeAudit);
 
     const ownerVisible = await listMembers(requestForSession(owner, "http://127.0.0.1:3000/api/households/members"), context);
