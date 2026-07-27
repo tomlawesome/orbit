@@ -97,8 +97,9 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   documents, detect corruption or mismatched key material, and document the
   separate recovery-key requirement.
 - **V1-REL-01:** CI tests the exact production image that may be published.
-  Release candidates and stable versions are identified and deployed by
-  immutable digest; promotion never rebuilds the image.
+  Engineering previews, feature-complete release candidates, and stable
+  versions are identified and deployed by immutable digest. Stable promotion
+  accepts only the matching release-candidate digest and never rebuilds it.
 
 ## Quality attributes
 
@@ -126,7 +127,7 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   merging as a release blocker before the manual workflow is proven.
 - A numerical test-count target or an arbitrary coverage percentage.
 
-Optional candidate features may ship disabled or explicitly experimental only
+Optional preview features may ship disabled or explicitly experimental only
 when they cannot weaken the supported core.
 
 ## Release acceptance
