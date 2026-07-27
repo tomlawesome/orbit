@@ -14,6 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY, householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import {
   itemActivitySchema,
   workspaceSchema,
@@ -653,14 +654,22 @@ export async function transferHouseholdOwnership(
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
+      sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`,
+    );
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(validHouseholdId)}, 0))`,
     );
     const householdMembers = await transaction.select({
       userId: memberships.userId,
       role: memberships.role,
-    }).from(memberships).where(eq(memberships.householdId, validHouseholdId));
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin })
+      disabledAt: users.disabledAt,
+    }).from(memberships).innerJoin(users, eq(users.id, memberships.userId))
+      .where(eq(memberships.householdId, validHouseholdId));
+    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
       .from(users).where(eq(users.id, userId)).limit(1);
+    if (actor?.disabledAt) {
+      throw new AppError("owner_required", "Only an active household owner can transfer ownership", 403);
+    }
     const plan = planOwnershipTransfer(
       householdMembers,
       userId,

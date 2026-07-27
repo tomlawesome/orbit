@@ -1,6 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
 import { externalIdentities, userPreferences, users } from "@/db/schema";
 import { getDb } from "@/db";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
+import { AuthError } from "@/lib/auth/errors";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 
 export interface ProvisionedUser {
@@ -40,6 +42,15 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
       .limit(1);
 
     if (existing) {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
+      const [current] = await transaction
+        .select({ disabledAt: users.disabledAt })
+        .from(users)
+        .where(eq(users.id, existing.id))
+        .limit(1);
+      if (!current || current.disabledAt) {
+        throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+      }
       const [updated] = await transaction
         .update(users)
         .set({

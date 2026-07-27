@@ -3,6 +3,7 @@ import { AppError } from "@/lib/app-error";
 export interface HouseholdRole {
   userId: string;
   role: "owner" | "member";
+  disabledAt?: Date | null;
 }
 
 export interface OwnershipTransferPlan {
@@ -29,6 +30,9 @@ export function planOwnershipTransfer(
   }
   if (!nextOwner) {
     throw new AppError("member_not_found", "Ownership can only be transferred to an existing household member", 409);
+  }
+  if (nextOwner.disabledAt) {
+    throw new AppError("account_disabled", "That Orbit account is disabled", 409);
   }
 
   return {
