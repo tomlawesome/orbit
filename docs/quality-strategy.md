@@ -8,8 +8,9 @@ requirement in the [v1 charter](v1-charter.md) to the cheapest reliable tests,
 then adds higher-level evidence only where boundaries or real integrations
 require it.
 
-The delivery decision is recorded in
-[ADR-0002](adr/0002-evidence-driven-delivery.md).
+The delivery decisions are recorded in
+[ADR-0002](adr/0002-evidence-driven-delivery.md) and
+[ADR-0003](adr/0003-preview-and-release-candidate-channels.md).
 
 ## Test-first policy
 
@@ -41,7 +42,7 @@ remove the boundary the test claims to prove.
 | Adapter contract | Prove bounded behaviour at replaceable external boundaries | OIDC, ClamAV, Tika, SMTP, IMAP, Web Push, local storage | before enabling that adapter |
 | Browser/accessibility | Prove critical user journeys and rendered privacy | OIDC sign-in, households, items, documents, admin, mobile, keyboard, axe | exact production image |
 | Container/operational | Prove runtime identity, migrations, health, secrets, restart, backup/restore and degraded dependencies | Compose topology and scripts | exact production image |
-| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, candidate deployment and restore | candidate acceptance |
+| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, preview field testing, release-candidate deployment and restore | preview feedback or release acceptance |
 
 Unit tests may mock I/O. Integration tests use real PostgreSQL and isolated
 temporary storage. Contract tests may use disposable protocol implementations,
@@ -56,7 +57,8 @@ non-v1 maintenance. The pull request links the issue and records:
 - negative and failure paths;
 - migrations and upgrade evidence;
 - documentation and operator impact;
-- the CI run and, when applicable, candidate digest and manual result.
+- the CI run and, when applicable, preview or release-candidate digest and
+  manual result.
 
 The [engineering baseline](engineering-baseline.md) is a dated audit. GitHub
 issues are the live status; durable requirements remain in version control.
@@ -87,12 +89,23 @@ flowchart LR
     build["Build one production image"]
     system["Compose + browser + security + recovery against that image"]
     supply["SBOM + dependency/image scan + provenance"]
-    candidate["Publish candidate digest"]
-    manual["Representative manual acceptance"]
+    preview["Publish preview digest"]
+    feedback["Engineering field feedback"]
+    ready{"Release scope complete?"}
+    candidate["Publish semantic RC digest"]
+    manual["Representative release acceptance"]
     promote["Promote exact digest"]
 
-    fast --> integration --> build --> system --> supply --> candidate --> manual --> promote
+    fast --> integration --> build --> system
+    system --> preview --> feedback
+    system --> supply --> ready
+    ready -->|"yes"| candidate --> manual --> promote
 ```
+
+Engineering previews may be published after the currently implemented
+automated gates while supply-chain evidence is being established. A semantic
+release candidate cannot be enabled until the complete target path, including
+the supply-chain gate, is implemented and passing.
 
 ### Required behaviour
 
@@ -104,11 +117,12 @@ flowchart LR
 - Secrets are unavailable to untrusted pull-request code.
 - Build output is identified once, loaded into Compose for system tests, and
   published only if that exact identity passes.
-- AMD64 is the routine candidate architecture; ARM64 is deliberate release
-  validation rather than an every-commit cost.
+- AMD64 is the routine preview architecture; ARM64 is deliberate preview or
+  release validation rather than an every-commit cost.
 - Reports required for diagnosis are retained for a bounded period.
-- Stable promotion validates source ancestry and tree identity and never
-  replaces an existing version.
+- Stable promotion accepts only a semantically versioned, feature-complete
+  release-candidate digest, validates source ancestry and tree identity, and
+  never replaces an existing version.
 
 ## Required test scenarios by risk
 
@@ -165,8 +179,10 @@ An issue is complete only when:
 - the final diff is reviewed for unrelated files, secrets, personal data,
   debug output and dependency surprises;
 - required CI passes;
-- manual candidate evidence is linked when the issue changes a real provider,
-  deployment, upgrade, recovery, browser, or hardware-dependent boundary.
+- manual preview evidence is linked when the issue changes a real provider,
+  deployment, upgrade, recovery, browser, or hardware-dependent boundary;
+- release-candidate evidence is required only at the feature-complete release
+  gate.
 
 Issue closure records the pull request and evidence. Passing unit tests alone is
 not sufficient evidence for a cross-boundary change.

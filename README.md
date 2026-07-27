@@ -49,9 +49,9 @@ application container locally:
 
 It then starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
-in the background and displays their status. Development and routine release
-candidates target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is
-added to a candidate only through an explicit release workflow request.
+in the background and displays their status. Development and routine preview
+images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
+only through an explicit preview or release workflow request.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
@@ -453,8 +453,8 @@ bash scripts/deploy-container.sh --build
 
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.
-See [Release candidates and stable promotion](docs/releasing.md) for the
-protected branch, test, manual-validation, and digest-promotion workflow.
+See [Previews, release candidates and stable promotion](docs/releasing.md) for
+the protected branch, test, manual-validation, and digest-promotion workflow.
 
 ## Before the first real launch
 

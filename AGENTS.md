@@ -39,8 +39,10 @@ are local coordination state and are not committed.
   characterization tests before refactors.
 - Run fast checks before container and browser checks.
 - Do not close an issue until its acceptance evidence is linked.
-- Publish candidates only after required checks pass. Test and promote the
-  immutable image digest without rebuilding it.
+- Publish previews or release candidates only after required checks pass.
+  Reserve release-candidate status for a feature-complete release scope. Test
+  immutable image digests and promote only an accepted release-candidate digest
+  without rebuilding it.
 - Never commit credentials, secrets, private keys, tokens, private documents,
   or real personal data.
 

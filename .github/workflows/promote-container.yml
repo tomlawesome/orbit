@@ -1,10 +1,10 @@
-name: Promote tested Orbit candidate
+name: Promote tested Orbit release candidate
 
 on:
   workflow_dispatch:
     inputs:
-      candidate_digest:
-        description: "Tested candidate digest, beginning sha256:"
+      release_candidate_digest:
+        description: "Feature-complete release-candidate digest, beginning sha256:"
         required: true
         type: string
       version:
@@ -43,11 +43,11 @@ jobs:
 
       - name: Validate promotion request
         env:
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+          RELEASE_CANDIDATE_DIGEST: ${{ inputs.release_candidate_digest }}
           VERSION: ${{ inputs.version }}
         run: |
-          [[ "${CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-            printf 'Candidate digest must be sha256 followed by 64 lowercase hexadecimal characters.\n' >&2
+          [[ "${RELEASE_CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'Release-candidate digest must be sha256 followed by 64 lowercase hexadecimal characters.\n' >&2
             exit 1
           }
           [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -65,38 +65,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve and verify tested candidate
-        id: candidate
+      - name: Resolve and verify tested release candidate
+        id: release_candidate
         env:
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+          RELEASE_CANDIDATE_DIGEST: ${{ inputs.release_candidate_digest }}
           VERSION: ${{ inputs.version }}
         run: |
           image="${REGISTRY}/${IMAGE_NAME,,}"
-          docker buildx imagetools inspect "${image}@${CANDIDATE_DIGEST}" >/dev/null
+          docker buildx imagetools inspect "${image}@${RELEASE_CANDIDATE_DIGEST}" >/dev/null
           if docker buildx imagetools inspect "${image}:${VERSION}" >/dev/null 2>&1; then
             printf 'Stable tag %s already exists and will not be overwritten.\n' "${VERSION}" >&2
             exit 1
           fi
-          docker pull "${image}@${CANDIDATE_DIGEST}"
-          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${CANDIDATE_DIGEST}")"
+          docker pull "${image}@${RELEASE_CANDIDATE_DIGEST}"
+          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${RELEASE_CANDIDATE_DIGEST}")"
+          release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image}@${RELEASE_CANDIDATE_DIGEST}")"
+          release_candidate_version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image}@${RELEASE_CANDIDATE_DIGEST}")"
+          [[ "${release_stage}" == "release-candidate" ]] || {
+            printf 'Only an image labelled as a release candidate can be promoted; received stage %s.\n' "${release_stage:-<missing>}" >&2
+            exit 1
+          }
+          [[ "${release_candidate_version}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)-rc\.[0-9]+$ ]] || {
+            printf 'Image version %s is not a semantic release-candidate version.\n' "${release_candidate_version:-<missing>}" >&2
+            exit 1
+          }
+          expected_version="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          [[ "${VERSION}" == "${expected_version}" ]] || {
+            printf 'Stable version %s does not match release candidate %s; expected %s.\n' \
+              "${VERSION}" "${release_candidate_version}" "${expected_version}" >&2
+            exit 1
+          }
           [[ "${revision}" =~ ^[0-9a-f]{40}$ ]] || {
-            printf 'Candidate has no valid source-revision label.\n' >&2
+            printf 'Release candidate has no valid source-revision label.\n' >&2
             exit 1
           }
           git merge-base --is-ancestor "${revision}" origin/main || {
-            printf 'Candidate revision %s has not been merged into main.\n' "${revision}" >&2
+            printf 'Release-candidate revision %s has not been merged into main.\n' "${revision}" >&2
             exit 1
           }
           git diff --quiet "${revision}^{tree}" "origin/main^{tree}" || {
-            printf 'Main no longer has the exact source tree used by this candidate; create and test a new candidate.\n' >&2
+            printf 'Main no longer has the exact source tree used by this release candidate; create and test a new release candidate.\n' >&2
             exit 1
           }
-          printf 'digest=%s\n' "${CANDIDATE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          printf 'digest=%s\n' "${RELEASE_CANDIDATE_DIGEST}" >> "${GITHUB_OUTPUT}"
           printf 'revision=%s\n' "${revision}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${release_candidate_version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Promote exact candidate digest
+      - name: Promote exact release-candidate digest
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
+          DIGEST: ${{ steps.release_candidate.outputs.digest }}
           VERSION: ${{ inputs.version }}
           UPDATE_LATEST: ${{ inputs.update_latest }}
         run: |
@@ -116,14 +133,16 @@ jobs:
 
       - name: Record stable promotion
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
-          REVISION: ${{ steps.candidate.outputs.revision }}
+          DIGEST: ${{ steps.release_candidate.outputs.digest }}
+          RELEASE_CANDIDATE_VERSION: ${{ steps.release_candidate.outputs.version }}
+          REVISION: ${{ steps.release_candidate.outputs.revision }}
           VERSION: ${{ inputs.version }}
           UPDATE_LATEST: ${{ inputs.update_latest }}
         run: |
           {
             printf '## Orbit stable image promoted\n\n'
             printf -- '- Version: `%s`\n' "${VERSION}"
+            printf -- '- Release candidate: `%s`\n' "${RELEASE_CANDIDATE_VERSION}"
             printf -- '- Digest: `%s`\n' "${DIGEST}"
             printf -- '- Source revision: `%s`\n' "${REVISION}"
             printf -- '- Updated `latest`: `%s`\n' "${UPDATE_LATEST}"
