@@ -98,7 +98,13 @@ test.describe("authenticated household lifecycle", () => {
     // the typed permanent-delete path while a household is recoverable.
     await expect(page.getByRole("button", { name: "Permanently delete" })).toBeVisible();
     await page.getByRole("button", { name: "Restore" }).click();
-    await expect(page.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
+    // Restore reloads the browser asynchronously. The recovery list contains
+    // the household name before that reload, so wait for the server's durable
+    // active-household state rather than merely seeing stale page text.
+    await expect.poll(async () => {
+      const workspace = (await readWorkspace(page)).workspace as { activeHouseholdId?: string | null };
+      return workspace.activeHouseholdId;
+    }, { timeout: 10_000 }).toBe(createdWorkspace.activeHouseholdId);
 
     const restoredWorkspace = await readWorkspace(page);
     expect(restoredWorkspace.workspace).toMatchObject({
