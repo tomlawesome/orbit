@@ -103,6 +103,7 @@ export async function cleanupIntegrationEnvironment(): Promise<void> {
 export async function createIntegrationFixture(label: string): Promise<IntegrationFixture> {
   const db = getDb();
   const namespace = `${label}-${randomUUID()}`;
+  const householdSuffix = randomUUID().slice(0, 8);
   const issuer = "https://oidc.invalid.example";
 
   async function createUser(role: string, isInstanceAdmin = false): Promise<FixtureUser> {
@@ -131,13 +132,13 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
   } satisfies Record<FixtureRole | "secondOwner", FixtureUser>;
 
   const [household] = await db.insert(households).values({
-    name: `Integration household ${namespace}`,
+    name: `Integration ${label}-${householdSuffix}`,
     timezone: "Europe/London",
     defaultCurrency: "GBP",
     setupCompleted: true,
   }).returning({ id: households.id, name: households.name });
   const [secondHousehold] = await db.insert(households).values({
-    name: `Second integration household ${namespace}`,
+    name: `Second ${label}-${householdSuffix}`,
     timezone: "Europe/London",
     defaultCurrency: "GBP",
     setupCompleted: true,
