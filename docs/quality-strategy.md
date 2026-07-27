@@ -117,8 +117,9 @@ the supply-chain gate, is implemented and passing.
 - Secrets are unavailable to untrusted pull-request code.
 - Build output is identified once, loaded into Compose for system tests, and
   published only if that exact identity passes.
-- AMD64 is the routine preview architecture; ARM64 is deliberate preview or
-  release validation rather than an every-commit cost.
+- AMD64 is the supported preview architecture. ARM64 publication requires a
+  dedicated exact-image validation path before it can be enabled for a preview
+  or release.
 - Reports required for diagnosis are retained for a bounded period.
 - Stable promotion accepts only a semantically versioned, feature-complete
   release-candidate digest, validates source ancestry and tree identity, and
