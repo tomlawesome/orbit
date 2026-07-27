@@ -92,7 +92,7 @@ validate_document_archive() {
     fail 'preflight/archive failed; the document archive is invalid.'
   fi
   while IFS= read -r entry; do
-    if [[ "$entry" == '.' || "$entry" == './objects' || "$entry" == './objects/' ||
+    if [[ "$entry" == '.' || "$entry" == './' || "$entry" == './objects' || "$entry" == './objects/' ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}$ || "$entry" =~ ^\./objects/[a-f0-9]{2}/$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}/$ ]]; then
