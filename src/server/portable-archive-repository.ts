@@ -129,7 +129,14 @@ export async function readPortableArchive(userId: string, archiveId: string): Pr
   const [archive] = await getDb().select().from(portableArchives)
     .where(and(eq(portableArchives.id, archiveId), gt(portableArchives.expiresAt, new Date()), isNull(portableArchives.purgedAt))).limit(1);
   if (!archive) throw new AppError("archive_not_found", "That export is not available", 404);
-  await requireHouseholdAccess(userId, archive.householdId);
+  try {
+    await requireHouseholdAccess(userId, archive.householdId);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "household_not_found") {
+      throw new AppError("archive_not_found", "That export is not available", 404);
+    }
+    throw error;
+  }
   const bytes = await storage().read(archive.storageKey, archive.sizeBytes);
   if (createHash("sha256").update(bytes).digest("hex") !== archive.contentSha256) {
     bytes.fill(0);
