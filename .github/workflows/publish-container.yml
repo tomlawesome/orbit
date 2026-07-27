@@ -1,4 +1,4 @@
-name: Validate Orbit and publish candidates
+name: Validate Orbit and publish previews
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       include_arm64:
-        description: Include ARM64 in this release candidate
+        description: Include ARM64 in this preview
         required: false
         default: false
         type: boolean
@@ -234,10 +234,10 @@ jobs:
         if: always()
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 
-  candidate:
-    name: Publish release candidate
+  publish:
+    name: Publish preview image
     needs: smoke
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref_name, 'release/') }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'release/architecture-consolidation-rc' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -267,12 +267,13 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=rc-{{date 'YYYY.MM.DD' tz='Europe/London'}}.${{ github.run_number }}
+            type=raw,value=preview-{{date 'YYYY.MM.DD' tz='Europe/London'}}.${{ github.run_number }}
           labels: |
             org.opencontainers.image.title=Orbit
             org.opencontainers.image.description=Everything in your orbit, on track.
+            io.github.tomlawesome.orbit.release-stage=preview
 
-      - name: Build and publish immutable candidate
+      - name: Build and publish immutable image
         id: build
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
@@ -285,17 +286,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Record candidate
+      - name: Record published image
         env:
-          CANDIDATE_TAGS: ${{ steps.meta.outputs.tags }}
-          CANDIDATE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
-            printf '## Orbit release candidate\n\n'
-            printf -- '- Tag: `%s`\n' "${CANDIDATE_TAGS}"
-            printf -- '- Digest: `%s`\n' "${CANDIDATE_DIGEST}"
+            printf '## Orbit preview image\n\n'
+            printf -- '- Tag: `%s`\n' "${IMAGE_TAGS}"
+            printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
-            printf '\nDeploy and test this immutable digest before merging the release branch into `main`.\n'
+            printf '\nDeploy this immutable digest for engineering feedback. It is not a feature-complete release candidate.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   development:

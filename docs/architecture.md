@@ -135,7 +135,7 @@ Worker invariants:
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Add corrupt bundle, wrong-key, mixed-state and upgrade recovery cases |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Candidate digest publication and no-rebuild promotion | Add supply-chain evidence and exercise stable promotion |
+| Release | Gated preview publication and guarded no-rebuild promotion | Add supply-chain evidence, then enable semantic RC publication and exercise stable promotion |
 | Rollback | Immutable prior image can be retained | Define schema-compatible rollback and restore decision points |
 
 ## Architecture decisions and open questions
@@ -144,6 +144,7 @@ Durable decisions live in `docs/adr`; issues track their implementation.
 
 - [ADR-0001: Self-hosted single-instance deployment](adr/0001-self-hosted-single-instance.md)
 - [ADR-0002: Evidence-driven delivery and immutable promotion](adr/0002-evidence-driven-delivery.md)
+- [ADR-0003: Separate previews from release candidates](adr/0003-preview-and-release-candidate-channels.md)
 
 Decisions intentionally deferred beyond stable v1 include managed multi-tenancy,
 object storage, horizontal workers, a remote semantic-extraction provider, and

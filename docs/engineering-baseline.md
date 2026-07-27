@@ -2,8 +2,8 @@
 
 **Baseline date:** 2026-07-27
 **Source revision:** `8a8e37e`
-**Candidate:** `rc-2026.07.27.96`
-**Candidate digest:** `sha256:a1f05125ec9c95bba47c2fc977c7d235afa3ab8b7a0533b7ebeb09333b7ff543`
+**Published preview (historic tag):** `rc-2026.07.27.96`
+**Preview digest:** `sha256:a1f05125ec9c95bba47c2fc977c7d235afa3ab8b7a0533b7ebeb09333b7ff543`
 
 This audit distinguishes code that exists from behaviour that is proven ready.
 It is the evidence snapshot for baseline issues
@@ -37,8 +37,9 @@ changing delivery status after this snapshot.
   checks non-root secret permissions, ClamAV detection, backup/restore,
   signed-out privacy, authenticated lifecycle, mobile layout, and automated
   accessibility.
-- Release-candidate publication is gated on Compose success and records an
-  immutable digest. Stable promotion is designed to reuse that digest.
+- Gated image publication records an immutable digest. The image named above
+  predates the preview terminology and is not evidence of feature completeness.
+  Stable promotion is designed to reuse an accepted release-candidate digest.
 - Diagnostic V8 coverage across included source and operational scripts is
   15.14% statements, 12.83% branches, 13.91% functions, and 16.40% lines. No
   blocking threshold is set.
@@ -46,7 +47,7 @@ changing delivery status after this snapshot.
 The suite is meaningful, but no requirement-to-test traceability existed
 before this audit. The low whole-source coverage baseline confirms the missing
 route, repository, worker and component layers without turning a percentage
-into a release target. The candidate publication job also
+into a release target. The image-publication job also
 rebuilds after the smoke-tested local image, so CI does not yet prove that the
 published image is byte-for-byte the image exercised by the Compose gate.
 
@@ -70,13 +71,13 @@ published image is byte-for-byte the image exercised by the Compose gate.
 | Migrations and update | V1-OPS-03 | Drizzle migrations and migrate-on-start entrypoint | fresh empty Compose database starts | **Partially proven:** ordered fresh-schema comparison and representative previous-version upgrade/rollback tests are missing |
 | Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | PostgreSQL marker plus encrypted-file round trip | **Partially proven:** corrupt manifests, wrong KEK, mixed states, interrupted restore and off-host recovery exercise remain |
 | Health, audit and logging | V1-OPS-02 | health endpoints, audit table and safe failure categories | health smoke plus unit category checks | **Implemented, unverified:** redaction, audit completeness, retention and degraded-service behaviour need integration evidence |
-| CI, candidate and promotion | V1-REL-01 | validation and promotion workflows | successful candidate run 96 and recorded digest | **Partially proven:** the candidate is rebuilt after smoke; supply-chain reports and a completed stable promotion are absent |
+| CI, preview and promotion | V1-REL-01 | validation and promotion workflows | successful preview run 96 and recorded digest | **Partially proven:** the published image is rebuilt after smoke; no feature-complete RC, supply-chain reports, or completed stable promotion exists |
 | IMAP/SMTP ingestion | Deferred | ingestion, holding, review and receipt workers/routes | configuration, alias, TLS-header and worker-helper units | **Deferred:** live provider contract, hostile MIME, duplicate, recovery, browser review and privacy evidence are incomplete |
 | Local semantic extraction | Deferred | optional Ollama container only | Compose configuration validation | **Deferred:** no application adapter or automatic-write authority is allowed |
 
-No row is marked proven complete. That is intentional: a successful candidate
-is strong evidence, but representative manual acceptance and several critical
-integration layers are still missing.
+No row is marked proven complete. That is intentional: a successful preview is
+useful engineering evidence, but representative release acceptance and several
+critical integration layers are still missing.
 
 ## API evidence map
 
@@ -103,7 +104,7 @@ integration layers are still missing.
 3. Fresh-install and representative upgrade migration tests.
 4. Authenticated browser coverage for core item and secure-document journeys.
 5. Expanded backup/restore failure and key-mismatch evidence.
-6. Build-once CI so system tests and candidate publication use the same image
+6. Build-once CI so system tests and preview/RC publication use the same image
    identity.
 
 ### P1 — required professional quality
@@ -146,8 +147,9 @@ refined when they approach delivery.
 
 ## Baseline conclusion
 
-Orbit has a credible security-conscious foundation and a working candidate, not
-an empty prototype. Its principal quality deficit is missing integration
-evidence across real persistence and authorization boundaries, followed by
-core authenticated browser coverage and exact-image CI. The next work should
-add those proofs around existing behaviour before extending the feature set.
+Orbit has a credible security-conscious foundation and a working deployable
+preview, not an empty prototype. Its principal quality deficit is missing
+integration evidence across real persistence and authorization boundaries,
+followed by core authenticated browser coverage and exact-image CI. The next
+work should add those proofs around existing behaviour before extending the
+feature set.
