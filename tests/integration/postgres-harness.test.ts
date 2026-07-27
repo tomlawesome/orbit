@@ -1,16 +1,14 @@
 import { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { closeDatabase, getDb } from "@/db";
+import { getDb } from "@/db";
 import { households } from "@/db/schema";
 import { GET as listDocuments } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import { POST as applyWorkspaceCommand } from "@/app/api/workspace/commands/route";
-import { resetAuthConfigForTests } from "@/lib/env";
-import { createIntegrationFixture, sessionHeaders } from "./support/fixtures";
+import { createIntegrationFixture, cleanupIntegrationEnvironment, sessionHeaders } from "./support/fixtures";
 
 afterAll(async () => {
-  await closeDatabase();
-  resetAuthConfigForTests();
+  await cleanupIntegrationEnvironment();
 });
 
 describe("PostgreSQL service and API integration harness", () => {
