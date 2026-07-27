@@ -121,8 +121,9 @@ Engineering Baseline`; issues #14–#28 belong to `v1.0`.
    surprises.
 6. Open a focused pull request linked to the issue.
 7. Merge only after required checks pass and conversations are resolved.
-8. Record any required candidate/manual evidence before closing the issue.
+8. Record any required preview or manual evidence before closing the issue.
 
-Release candidates follow [the release policy](releasing.md): test and deploy
-by immutable digest, merge the accepted source through protection, and promote
-without rebuilding.
+Previews provide ongoing deployment evidence while v1 is incomplete. Once the
+release scope is feature-complete, release candidates follow
+[the release policy](releasing.md): test and deploy by immutable digest, merge
+the accepted source through protection, and promote without rebuilding.
