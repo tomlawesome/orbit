@@ -101,6 +101,9 @@ try {
     OIDC_CLIENT_SECRET: "integration-only-secret",
     ORBIT_INTEGRATION_RUN_ID: runId,
   };
+  delete integrationEnvironment.DATABASE_URL_FILE;
+  delete integrationEnvironment.SESSION_SECRET_FILE;
+  delete integrationEnvironment.OIDC_CLIENT_SECRET_FILE;
 
   run(packageManager, ["exec", "tsx", "src/db/migrate.ts"], integrationEnvironment, "Database migrations");
   run(packageManager, ["exec", "vitest", "run", "--config", "vitest.integration.config.ts"], integrationEnvironment, "Integration tests");
