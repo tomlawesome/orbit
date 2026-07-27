@@ -76,15 +76,15 @@ The roadmap contains ten outcome-level epics:
 9. [optional mail and document automation](https://github.com/tomlawesome/orbit/issues/22);
 10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
-Only the first two risk areas are decomposed at baseline. Later epics are
-refined when they are close enough to delivery for acceptance criteria to be
-real rather than speculative.
+Only work close to delivery is decomposed. Later epics are refined when their
+acceptance criteria can be based on the current implementation rather than a
+speculative backlog.
 
-The ready implementation queue is deliberately limited to:
+The first decomposed group is
+[#24](https://github.com/tomlawesome/orbit/issues/24) through
+[#28](https://github.com/tomlawesome/orbit/issues/28). GitHub owns their live
+status. The next implementation wave is deliberately limited to:
 
-- [PostgreSQL service/API integration harness](https://github.com/tomlawesome/orbit/issues/24);
-- [critical API authorization matrix](https://github.com/tomlawesome/orbit/issues/25);
-- [account disable, session and ownership invariants](https://github.com/tomlawesome/orbit/issues/26);
 - [fresh and baseline-upgrade migration tests](https://github.com/tomlawesome/orbit/issues/27);
 - [negative backup/restore recovery paths](https://github.com/tomlawesome/orbit/issues/28).
 
@@ -92,24 +92,80 @@ GitHub milestone assignment is administrative metadata rather than a second
 status source: issues #10–#13 and this baseline pull request belong to `v1
 Engineering Baseline`; issues #14–#28 belong to `v1.0`.
 
-## Risk-ordered execution
+## Rolling planning and delegation
 
-1. **Prove persistent authorization boundaries.** Add the PostgreSQL-backed
-   service/API harness and negative role/household matrix.
-2. **Prove data evolution and recovery.** Test fresh and representative upgrade
-   migrations, then corrupt/wrong-key/interrupted restore cases.
-3. **Prove the core vertical journeys.** Add authenticated browser coverage for
-   items, schedules and secure documents against the production image.
-4. **Make CI test the publishable identity.** Build once, exercise that exact
-   image, then attach supply-chain evidence and publish its digest.
-5. **Prove operations and providers.** Cover safe administrator actions,
-   notification contracts, degraded dependencies, installation, update and
-   rollback.
-6. **Complete experience acceptance.** Authenticated accessibility, responsive
-   layouts, text scaling, themes and an explicit offline-support decision.
-7. **Evaluate optional automation.** Only after the manual workflow is accepted,
-   decide which IMAP, parsing, duplicate and semantic-extraction capabilities
-   should graduate from experimental status.
+Delivery uses a rolling-wave model:
+
+1. Sol Extra High maintains the portfolio-level risk order, dependencies,
+   release gates and durable architecture decisions.
+2. Only the next two to four implementable issues are made decision-complete.
+3. Bounded implementations default to Luna Extra High. Independent issues may
+   run concurrently only in isolated worktrees with disjoint file ownership.
+4. Sol Extra High reviews architecture and security consequences, then
+   integrates protected pull requests sequentially. A later concurrent branch
+   rebases onto the accepted earlier result before final validation.
+5. The next wave is refined only after the current wave's evidence changes the
+   baseline. Terra may perform bounded read-only or mechanical audits, but may
+   not replace Sol architecture work or Luna feature implementation.
+
+This avoids both a stale hundred-issue backlog and repeated high-cost planning
+inside implementation. Handoffs must name permitted paths, protected paths,
+test obligations, hard stop conditions and the evidence required for Sol
+review.
+
+## Risk-ordered delivery waves
+
+### Wave 1 — operational data safety
+
+- Issue #27 proves fresh migrations, the supported baseline upgrade, migration
+  idempotency and failure recording.
+- Issue #28 proves corrupt, wrong-key, mismatched-object and interrupted
+  recovery behaviour.
+
+The architecture is planned jointly under
+[ADR-0004](adr/0004-supported-upgrades-and-recoverable-restore.md). The two
+implementations may run concurrently with disjoint ownership: #27 owns
+migration fixtures and the PostgreSQL migration harness; #28 owns backup,
+restore and disposable recovery scenarios. Integrate #27 first, then validate
+#28 against its upgrade-floor and rollback contract.
+
+### Wave 2 — core authenticated vertical journeys
+
+- Refine issue #16 into item persistence/concurrency, reminder delivery
+  contracts and one complete authenticated item journey.
+- Refine issue #17 into secure document lifecycle/API evidence and the
+  document-assisted, editable item-entry journey.
+- Collect the remaining representative real-provider evidence for issue #14
+  alongside the wave without mixing provider-specific authentication changes
+  into item or document pull requests.
+
+Item persistence and the manual editor land before the document-assisted
+browser journey because document suggestions extend, rather than replace, that
+workflow.
+
+### Wave 3 — lifecycle, administration and operations
+
+- Complete issue #15 retention and purge behaviour after document lifecycle
+  evidence exists.
+- Complete issue #19 administration, redaction, degraded dependency and
+  corrective-action evidence against established failure states.
+- Continue issue #21 supply-chain reporting independently, but defer update,
+  rollback, operator acceptance and stable-promotion closure until Waves 1 and
+  2 are complete.
+- Treat issue #23 as a guardrail applied at demonstrated seams, not a
+  behaviour-neutral refactor project.
+
+### Wave 4 — experience and release acceptance
+
+- Complete issue #20 against stable authenticated item, document and
+  administration journeys, including the explicit offline-support decision.
+- Finish representative provider, device, installation, update, recovery and
+  supply-chain evidence.
+- Publish a semantic release candidate only when all stable-v1 blockers are
+  closed, then accept and promote its exact digest.
+
+Issue #22 remains deferred until the manual item and document workflows are
+accepted. Optional automation does not block stable v1.
 
 ## Pull-request lifecycle
 
