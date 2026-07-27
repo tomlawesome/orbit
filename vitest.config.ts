@@ -10,5 +10,12 @@ export default defineConfig({
   test: {
     environment: "node",
     exclude: [...configDefaults.exclude, "tests/e2e/**"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}", "scripts/*.mjs"],
+      exclude: ["src/**/*.test.ts", "scripts/*.test.mjs"],
+      reporter: ["text-summary", "json-summary", "html"],
+      reportsDirectory: "coverage",
+    },
   },
 });
