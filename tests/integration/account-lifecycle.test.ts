@@ -114,15 +114,15 @@ describe("account disable, session and ownership invariants", () => {
     const fixture = await createIntegrationFixture("disabled-provisioning");
     const admin = await fixture.session("admin");
     const [identity] = await getDb().select().from(externalIdentities).where(eq(externalIdentities.userId, fixture.users.member.id));
-    const [beforeUser] = await getDb().select({ email: users.email, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
-      .from(users).where(eq(users.id, fixture.users.member.id));
-    const beforeIdentity = identity?.lastLoginAt?.getTime();
 
     await updateUser(requestForSession(admin, "http://127.0.0.1:3000/api/admin/users", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId: fixture.users.member.id, disabled: true }),
     }));
+    const [beforeUser] = await getDb().select({ email: users.email, displayName: users.displayName, avatarUrl: users.avatarUrl, emailVerified: users.emailVerified, updatedAt: users.updatedAt })
+      .from(users).where(eq(users.id, fixture.users.member.id));
+    const beforeIdentity = identity?.lastLoginAt?.getTime();
     const sessionsBeforeRejectedSignIn = await getDb().select({ id: sessions.id }).from(sessions)
       .where(eq(sessions.userId, fixture.users.member.id));
 
