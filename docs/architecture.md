@@ -135,7 +135,7 @@ Worker invariants:
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Add corrupt bundle, wrong-key, mixed-state and upgrade recovery cases |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Gated preview publication and guarded no-rebuild promotion | Add supply-chain evidence, then enable semantic RC publication and exercise stable promotion |
+| Release | Build-once, exact-image preview validation/publication and guarded no-rebuild promotion | Add supply-chain evidence, then enable semantic RC publication and exercise stable promotion |
 | Rollback | Immutable prior image can be retained | Define schema-compatible rollback and restore decision points |
 
 ## Architecture decisions and open questions
