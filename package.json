@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:integration": "node scripts/test-integration.mjs",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
