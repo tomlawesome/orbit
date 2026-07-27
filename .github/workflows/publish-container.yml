@@ -11,12 +11,6 @@ on:
       - develop
       - "release/**"
   workflow_dispatch:
-    inputs:
-      include_arm64:
-        description: Include ARM64 in this preview
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: orbit-container-${{ github.ref }}
@@ -125,12 +119,25 @@ jobs:
     needs:
       - fast
       - integration
+    if: >-
+      ${{
+        github.event_name == 'pull_request' ||
+        (
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          startsWith(github.ref_name, 'release/') &&
+          github.ref_name != 'release/architecture-consolidation-rc'
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      PUBLICATION_CHANNEL: ci
 
-    steps:
+    # Reuse one validation sequence while keeping PR and publication token
+    # permissions isolated at the job boundary.
+    steps: &container_validation_steps
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -156,6 +163,69 @@ jobs:
           sed --in-place 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=orbit-smoke/' .env-orbit
           sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Generate exact image metadata
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=ci-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'ci' }}
+            type=raw,value=preview-{{date 'YYYY.MM.DD' tz='Europe/London'}}.${{ github.run_number }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}
+            type=raw,value=dev-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'development' }}
+          labels: |
+            org.opencontainers.image.title=Orbit
+            org.opencontainers.image.description=Everything in your orbit, on track.
+            io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}
+
+      - name: Build and load final image
+        id: build
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record exact local image identity
+        id: image
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          mapfile -t image_tags < <(printf '%s\n' "${IMAGE_TAGS}" | sed '/^$/d')
+          [[ "${#image_tags[@]}" -eq 1 ]] || {
+            printf 'Expected exactly one image tag, received %s.\n' "${#image_tags[@]}" >&2
+            exit 1
+          }
+          image_tag="${image_tags[0]}"
+          image_id="$(docker image inspect --format '{{.Id}}' "${image_tag}")"
+          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image_tag}")"
+          release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image_tag}")"
+          [[ "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'Built image has no valid configuration identity.\n' >&2
+            exit 1
+          }
+          [[ "${revision}" == "${GITHUB_SHA}" ]] || {
+            printf 'Built image revision %s does not match workflow revision %s.\n' "${revision}" "${GITHUB_SHA}" >&2
+            exit 1
+          }
+          [[ "${release_stage}" == "${PUBLICATION_CHANNEL}" ]] || {
+            printf 'Built image stage %s does not match channel %s.\n' "${release_stage}" "${PUBLICATION_CHANNEL}" >&2
+            exit 1
+          }
+          {
+            printf 'id=%s\n' "${image_id}"
+            printf 'tag=%s\n' "${image_tag}"
+          } >> "${GITHUB_OUTPUT}"
+          printf 'ORBIT_IMAGE=%s\n' "${image_tag}" >> "${GITHUB_ENV}"
+
       - name: Validate Compose configuration
         run: |
           docker compose --env-file .env-orbit config --quiet
@@ -163,9 +233,6 @@ jobs:
           docker compose --env-file .env-orbit \
             -f docker-compose.yml -f docker-compose.full.yml \
             --profile processing --profile ai config --quiet
-
-      - name: Build application image
-        run: bash scripts/build-container.sh
 
       - name: Build disposable OIDC acceptance provider
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc
@@ -234,107 +301,94 @@ jobs:
         if: always()
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 
-  publish:
-    name: Publish preview image
-    needs: smoke
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'release/architecture-consolidation-rc' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Set up QEMU
-        if: github.event_name == 'workflow_dispatch' && inputs.include_arm64
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
-
       - name: Log in to GitHub Container Registry
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
-        id: meta
-        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=preview-{{date 'YYYY.MM.DD' tz='Europe/London'}}.${{ github.run_number }}
-          labels: |
-            org.opencontainers.image.title=Orbit
-            org.opencontainers.image.description=Everything in your orbit, on track.
-            io.github.tomlawesome.orbit.release-stage=preview
-
-      - name: Build and publish immutable image
-        id: build
-        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: ${{ (github.event_name == 'workflow_dispatch' && inputs.include_arm64) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Push exact tested image
+        id: publish
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
+        run: |
+          docker push "${IMAGE_TAG}"
+          published_digest="$(
+            docker buildx imagetools inspect "${IMAGE_TAG}" |
+              awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ { print $2; exit }'
+          )"
+          [[ "${published_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'Registry did not return a valid immutable image digest.\n' >&2
+            exit 1
+          }
+          repository="${IMAGE_TAG%:*}"
+          docker pull "${repository}@${published_digest}"
+          published_image_id="$(
+            docker image inspect --format '{{.Id}}' "${repository}@${published_digest}"
+          )"
+          [[ "${published_image_id}" == "${TESTED_IMAGE_ID}" ]] || {
+            printf 'Published image identity %s does not match tested identity %s.\n' \
+              "${published_image_id}" "${TESTED_IMAGE_ID}" >&2
+            exit 1
+          }
+          {
+            printf 'digest=%s\n' "${published_digest}"
+            printf 'id=%s\n' "${published_image_id}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Record published image
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
         env:
-          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          TESTED_IMAGE_ID: ${{ steps.publish.outputs.id }}
         run: |
+          if [[ "${PUBLICATION_CHANNEL}" == "preview" ]]; then
+            heading="Orbit preview image"
+            guidance="Deploy this immutable digest for engineering feedback. It is not a feature-complete release candidate."
+          else
+            heading="Orbit development image"
+            guidance="This development image is identified by its immutable source revision and digest."
+          fi
           {
-            printf '## Orbit preview image\n\n'
-            printf -- '- Tag: `%s`\n' "${IMAGE_TAGS}"
+            printf '## %s\n\n' "${heading}"
+            printf -- '- Tag: `%s`\n' "${IMAGE_TAG}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
+            printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
-            printf '\nDeploy this immutable digest for engineering feedback. It is not a feature-complete release candidate.\n'
+            printf '\n%s\n' "${guidance}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  development:
-    name: Publish development image
-    needs: smoke
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+  preview:
+    name: Validate and publish preview image
+    needs:
+      - fast
+      - integration
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'release/architecture-consolidation-rc' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
+    env:
+      PUBLICATION_CHANNEL: preview
+    steps: *container_validation_steps
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and publish immutable development image
-        id: build
-        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev-${{ github.sha }}
-          labels: |
-            org.opencontainers.image.title=Orbit
-            org.opencontainers.image.description=Orbit development build
-
-      - name: Record development image
-        run: |
-          printf 'Development image: `%s:dev-%s`\n' "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" "${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+  development:
+    name: Validate and publish development image
+    needs:
+      - fast
+      - integration
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLICATION_CHANNEL: development
+    steps: *container_validation_steps

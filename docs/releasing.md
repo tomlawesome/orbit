@@ -17,15 +17,24 @@ it does not make these images release candidates.
 Previews:
 
 - pass the repository's automated publication gates;
+- are built once with their final metadata, loaded into Compose, and pushed
+  only after that exact image passes system validation;
 - carry the immutable image label
   `io.github.tomlawesome.orbit.release-stage=preview`;
 - support deployment by digest for real-world engineering feedback;
 - may contain incomplete, experimental, or not-yet-proven v1 behaviour; and
 - cannot be promoted by the stable-promotion workflow.
 
-When preview feedback specifically requires ARM64, manually run **Validate
-Orbit and publish previews** with **Include ARM64** enabled. Routine previews
-remain AMD64 to avoid unnecessary build cost.
+Pull requests run the same production-image and Compose checks with a read-only
+token and cannot publish. The protected-branch push repeats validation because
+that merged revision is the publication identity, but it does not rebuild
+between system testing and publication. The workflow records both the tested
+image configuration ID and the resulting registry digest.
+
+Preview publication is currently AMD64 only. ARM64 remains disabled until CI
+can build and exercise that platform and assemble a multi-platform manifest
+from exact tested identities; it is not sufficient to append an untested
+architecture after the AMD64 gates pass.
 
 Historic `rc-YYYY.MM.DD.<run>` images published before
 [ADR-0003](adr/0003-preview-and-release-candidate-channels.md) are engineering
