@@ -6,6 +6,7 @@ tmp
 .env.*
 .env-orbit
 .orbit-secrets/
+.agents/handoffs/
 backups/
 coverage
 playwright-report/

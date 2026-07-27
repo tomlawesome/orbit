@@ -1,0 +1,38 @@
+name: Defect
+description: Report reproducible incorrect or unsafe behaviour.
+title: "Bug: "
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Describe who is affected and the severity, including security or data-loss implications.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give minimal steps with fake or sanitized data only.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: regression
+    attributes:
+      label: Regression test
+      description: Define the failing test that will reproduce the defect before the fix.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Closure evidence
+      description: Identify required negative tests, CI checks, candidate verification, and documentation.
+    validations:
+      required: true
