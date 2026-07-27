@@ -1,0 +1,68 @@
+name: Delivery issue
+description: Define a feature, engineering, security, or operational outcome.
+title: ""
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Work type
+      options:
+        - Epic
+        - Feature
+        - Security
+        - Reliability
+        - Operations
+        - Technical debt
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Problem and outcome
+      description: Explain the user or operator problem and the observable result.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use measurable, externally observable criteria.
+      placeholder: |
+        - [ ] Given ..., when ..., then ...
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: State what this issue must not expand into.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy
+      description: Cover authorization, household isolation, hostile inputs, secrets, and data exposure as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test-first plan
+      description: Identify the failing, characterization, negative, integration, browser, or operational tests required before implementation is complete.
+    validations:
+      required: true
+  - type: textarea
+    id: operations
+    attributes:
+      label: Migration, compatibility and operations
+      description: Record schema, upgrade, rollback, deployment, monitoring, backup, and documentation effects.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Closure evidence
+      description: List the CI, review, candidate, and manual evidence required to close this issue.
+    validations:
+      required: true

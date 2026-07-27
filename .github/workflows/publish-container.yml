@@ -37,6 +37,16 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Enforce protected planning governance
+        if: github.event_name == 'pull_request'
+        env:
+          ORBIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ORBIT_PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-planning-governance.mjs
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -55,7 +65,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run static and unit checks
+        env:
+          ORBIT_TEST_COVERAGE: "true"
         run: bash scripts/test-backend.sh
+
+      - name: Upload diagnostic coverage
+        if: success()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-coverage
+          path: coverage/
+          retention-days: 14
 
   smoke:
     name: Compose smoke test
