@@ -51,7 +51,8 @@ It then starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
 in the background and displays their status. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
-only through an explicit preview or release workflow request.
+only after a dedicated exact-image validation path is enabled for that
+architecture.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
