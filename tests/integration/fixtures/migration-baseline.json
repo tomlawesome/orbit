@@ -1,0 +1,374 @@
+{
+  "baselineCommit": "8a8e37e2bbef770de9a203e86a674f70834e2a18",
+  "postgresMajor": 17,
+  "finalMigrationTag": "0017_imap_recipient_alias_index",
+  "migrationPrefix": [
+    { "tag": "0000_initial_orbit", "sha256": "e1df393855c28ceabe5c79dcb73f35d2ca50ddf74126afabccc79e84b144a19b" },
+    { "tag": "0001_instance_setup_and_preferences", "sha256": "820b26d06b246d5ba851190853e41b8c93b6eeccacedfe3d95528e6a2d8f76bd" },
+    { "tag": "0002_spotty_nightshade", "sha256": "0e2e18a04fb748bbde9574c538c1dcdfa2a145f4adf828e6333462d2d79572af" },
+    { "tag": "0003_ambitious_kronos", "sha256": "38ca979346bc4d3fc981695bca823e0124626b65ddfb1e54c39bc4bb4e869a80" },
+    { "tag": "0004_admin_operations", "sha256": "6d149e5d2e11608c0e767834a0e938f71247fa4de94682ff192a138de34b4b2a" },
+    { "tag": "0005_account_lifecycle", "sha256": "c522559f4d7b7f3112f8f53e50cd45a597c87fc1c07f214d932e7454a2d7c187" },
+    { "tag": "0006_portable_archives", "sha256": "f73aa77471ce7744d084536f22e8d045cfdc488e974994a1c0882cf787fd4782" },
+    { "tag": "0007_household_lifecycle", "sha256": "4562d63912830383b1621c23e013c3a78410e35bd20be2b7f926cf59a4f1cca7" },
+    { "tag": "0008_document_drafts", "sha256": "da8b1240a81b139b112b663e60f85dfce33a6f908b81200a175e3e21b757a194" },
+    { "tag": "0009_imap_ingestion", "sha256": "04c03ed106f686f9c95f165148433f170fd7bc2449b7bf947c007e45504df8f6" },
+    { "tag": "0010_imap_attachment_holding", "sha256": "861ae3988c6a2757790aef4b5e3f5f87f1f2e3ec2e952dd64e56b04106f40a87" },
+    { "tag": "0011_imap_receipt_household", "sha256": "83d4aa8e3e00b04c305105a62bc50c77cbd3e0ee3294a6cd6ccff5b64d6a70f2" },
+    { "tag": "0012_imap_review_items", "sha256": "6b274727aedf0de8d25aaefd661839acfb3afdb13684349100fd956735b7bcf5" },
+    { "tag": "0013_imap_review_completion", "sha256": "e0d16c01e6a8f31482500d413e91b962ad9e74e9f9e5b21382234867d2497bdf" },
+    { "tag": "0014_imap_review_discard", "sha256": "7a7de97243796ed9a4e47158c6767ccdaa62f224f28138692478d363452b4343" },
+    { "tag": "0015_imap_smtp_receipts", "sha256": "32e1216f49c0b6ac1bd64dfcbc1326bf7431ec29604e5af52e1b4d24632e8262" },
+    { "tag": "0016_imap_receipt_leases", "sha256": "86991981367b14fb41d42dcc162bef65751ca105c46116128cac81a5bce9202d" },
+    { "tag": "0017_imap_recipient_alias_index", "sha256": "c24e40effeeff452c7c54f9af519354290763755ea1b4e5fba8af1e4a13d5295" }
+  ],
+  "rows": {
+    "users": [
+      {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "email": "fixture-owner@example.invalid",
+        "email_verified": true,
+        "display_name": "Synthetic Owner",
+        "avatar_url": null,
+        "is_instance_admin": true,
+        "imap_recipient_alias_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "disabled_at": null,
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000002",
+        "email": "fixture-member@example.invalid",
+        "email_verified": true,
+        "display_name": "Synthetic Member",
+        "avatar_url": null,
+        "is_instance_admin": false,
+        "imap_recipient_alias_sha256": null,
+        "disabled_at": null,
+        "created_at": "2026-01-01T00:01:00.000Z",
+        "updated_at": "2026-01-01T00:01:00.000Z"
+      }
+    ],
+    "user_preferences": [
+      {
+        "user_id": "10000000-0000-4000-8000-000000000001",
+        "theme_mode": "dark",
+        "theme_id": "after-dark",
+        "text_size": "comfortable",
+        "urgency_palette": "themed",
+        "email_notifications": true,
+        "push_notifications": true,
+        "updated_at": "2026-01-01T00:02:00.000Z"
+      },
+      {
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "theme_mode": "system",
+        "theme_id": "after-dark",
+        "text_size": "comfortable",
+        "urgency_palette": "themed",
+        "email_notifications": true,
+        "push_notifications": false,
+        "updated_at": "2026-01-01T00:03:00.000Z"
+      }
+    ],
+    "external_identities": [
+      {
+        "id": "11000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000001",
+        "issuer": "https://identity.invalid.example",
+        "subject": "fixture-owner-subject",
+        "last_login_at": "2026-01-01T00:04:00.000Z",
+        "created_at": "2026-01-01T00:04:00.000Z",
+        "updated_at": "2026-01-01T00:04:00.000Z"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "12000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000001",
+        "token_hash": "synthetic-placeholder-hash",
+        "active_household_id": "20000000-0000-4000-8000-000000000001",
+        "expires_at": "2027-01-01T00:00:00.000Z",
+        "rotated_at": null,
+        "created_at": "2026-01-01T00:05:00.000Z"
+      }
+    ],
+    "households": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "name": "Synthetic Household",
+        "timezone": "Europe/London",
+        "default_currency": "GBP",
+        "setup_completed": true,
+        "deletion_requested_at": null,
+        "delete_after": null,
+        "deletion_requested_by_user_id": null,
+        "created_at": "2026-01-01T00:06:00.000Z",
+        "updated_at": "2026-01-01T00:06:00.000Z"
+      }
+    ],
+    "memberships": [
+      {
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000001",
+        "role": "owner",
+        "created_at": "2026-01-01T00:07:00.000Z"
+      },
+      {
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "role": "member",
+        "created_at": "2026-01-01T00:08:00.000Z"
+      }
+    ],
+    "sections": [
+      {
+        "id": "30000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "slug": "fixture-documents",
+        "name": "Documents",
+        "icon": "home",
+        "accent": "sage",
+        "position": 0,
+        "visible": true,
+        "archived_at": null,
+        "created_at": "2026-01-01T00:09:00.000Z",
+        "updated_at": "2026-01-01T00:09:00.000Z"
+      }
+    ],
+    "items": [
+      {
+        "id": "40000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "section_id": "30000000-0000-4000-8000-000000000001",
+        "title": "Synthetic service item",
+        "subtype": "utility",
+        "provider": "synthetic-provider",
+        "reference": "fixture-reference-001",
+        "cost_minor": 1250,
+        "currency": "GBP",
+        "start_date": "2026-01-01",
+        "expiry_date": "2026-12-31",
+        "renewal_date": "2026-12-01",
+        "service_date": null,
+        "recurrence_months": 12,
+        "snoozed_until": null,
+        "notes": "Synthetic fixture row.",
+        "external_document_url": null,
+        "status": "active",
+        "requires_review": false,
+        "version": 1,
+        "created_at": "2026-01-01T00:10:00.000Z",
+        "updated_at": "2026-01-01T00:10:00.000Z"
+      }
+    ],
+    "documents": [
+      {
+        "id": "50000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "item_id": "40000000-0000-4000-8000-000000000001",
+        "uploaded_by_user_id": "10000000-0000-4000-8000-000000000002",
+        "display_name": "fixture-document.pdf",
+        "media_type": "application/pdf",
+        "size_bytes": 256,
+        "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "lifecycle": "available",
+        "scan_status": "clean",
+        "failure_code": null,
+        "delete_after": null,
+        "deleted_at": null,
+        "available_at": "2026-01-01T00:11:00.000Z",
+        "version": 1,
+        "created_at": "2026-01-01T00:11:00.000Z",
+        "updated_at": "2026-01-01T00:11:00.000Z"
+      }
+    ],
+    "document_crypto": [
+      {
+        "document_id": "50000000-0000-4000-8000-000000000001",
+        "storage_key": "fixture/storage/document-001",
+        "ciphertext_size": 272,
+        "envelope_version": 1,
+        "content_iv": "fixture-content-iv",
+        "content_auth_tag": "fixture-content-auth-tag",
+        "wrapped_dek": "fixture-wrapped-dek",
+        "wrap_iv": "fixture-wrap-iv",
+        "wrap_auth_tag": "fixture-wrap-auth-tag",
+        "key_id": "fixture-key-id",
+        "created_at": "2026-01-01T00:12:00.000Z",
+        "updated_at": "2026-01-01T00:12:00.000Z"
+      }
+    ],
+    "document_jobs": [
+      {
+        "id": "60000000-0000-4000-8000-000000000001",
+        "document_id": "50000000-0000-4000-8000-000000000001",
+        "kind": "encrypt",
+        "generation": 1,
+        "status": "completed",
+        "attempts": 1,
+        "locked_at": null,
+        "lease_expires_at": null,
+        "lease_token": null,
+        "last_error": null,
+        "completed_at": "2026-01-01T00:13:00.000Z",
+        "created_at": "2026-01-01T00:13:00.000Z",
+        "updated_at": "2026-01-01T00:13:00.000Z"
+      }
+    ],
+    "due_events": [
+      {
+        "id": "70000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "item_id": "40000000-0000-4000-8000-000000000001",
+        "kind": "renewal",
+        "due_date": "2026-12-01",
+        "completed_at": null,
+        "completed_by_user_id": null,
+        "completion_key": "fixture-due-event-001",
+        "next_event_id": null,
+        "created_at": "2026-01-01T00:14:00.000Z"
+      }
+    ],
+    "reminder_rules": [
+      {
+        "id": "80000000-0000-4000-8000-000000000001",
+        "item_id": "40000000-0000-4000-8000-000000000001",
+        "days_before": 30,
+        "email_enabled": true,
+        "push_enabled": true
+      }
+    ],
+    "push_subscriptions": [
+      {
+        "id": "90000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "endpoint": "https://push.invalid.example/fixture-endpoint",
+        "p256dh": "fixture-p256dh",
+        "auth": "fixture-auth",
+        "user_agent": "synthetic-test-agent",
+        "expires_at": null,
+        "revoked_at": null,
+        "created_at": "2026-01-01T00:15:00.000Z"
+      }
+    ],
+    "document_drafts": [
+      {
+        "id": "a0000000-0000-4000-8000-000000000001",
+        "document_id": "50000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "requested_by_user_id": "10000000-0000-4000-8000-000000000002",
+        "status": "approved",
+        "extracted_text_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+        "evidence": { "source": "synthetic", "confidence": 0.99 },
+        "proposal": { "title": "Synthetic service item" },
+        "approved_item_id": "40000000-0000-4000-8000-000000000001",
+        "created_at": "2026-01-01T00:16:00.000Z",
+        "updated_at": "2026-01-01T00:16:00.000Z"
+      }
+    ],
+    "notification_states": [
+      {
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "notification_id": "fixture-notification-001",
+        "read_at": null,
+        "dismissed_at": null,
+        "updated_at": "2026-01-01T00:17:00.000Z"
+      }
+    ],
+    "notification_deliveries": [
+      {
+        "id": "b0000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "event_id": "70000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "channel": "email",
+        "scheduled_for": "2026-11-01T00:00:00.000Z",
+        "status": "pending",
+        "attempts": 0,
+        "locked_at": null,
+        "lease_token": null,
+        "last_error": null,
+        "sent_at": null,
+        "created_at": "2026-01-01T00:18:00.000Z",
+        "updated_at": "2026-01-01T00:18:00.000Z"
+      }
+    ],
+    "audit_log": [
+      {
+        "id": "c0000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "actor_user_id": "10000000-0000-4000-8000-000000000001",
+        "entity_type": "item",
+        "entity_id": "40000000-0000-4000-8000-000000000001",
+        "action": "created",
+        "changes": { "source": "synthetic-fixture" },
+        "created_at": "2026-01-01T00:19:00.000Z"
+      }
+    ],
+    "portable_archives": [
+      {
+        "id": "d0000000-0000-4000-8000-000000000001",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "requested_by_user_id": "10000000-0000-4000-8000-000000000001",
+        "storage_key": "fixture/archive-001",
+        "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "size_bytes": 64,
+        "includes_documents": true,
+        "expires_at": "2027-01-01T00:00:00.000Z",
+        "downloaded_at": null,
+        "purged_at": null,
+        "created_at": "2026-01-01T00:20:00.000Z"
+      }
+    ],
+    "imap_ingestion_messages": [
+      {
+        "id": "e0000000-0000-4000-8000-000000000001",
+        "mailbox": "fixture-mailbox",
+        "mailbox_uid_validity": "fixture-uid-validity",
+        "mailbox_uid": 42,
+        "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "recipient_alias_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "user_id": "10000000-0000-4000-8000-000000000002",
+        "household_id": "20000000-0000-4000-8000-000000000001",
+        "review_item_id": "40000000-0000-4000-8000-000000000001",
+        "status": "completed",
+        "attempts": 1,
+        "failure_code": null,
+        "receipt_status": "sent",
+        "receipt_attempts": 1,
+        "receipt_locked_at": null,
+        "receipt_lease_token": null,
+        "receipt_sent_at": "2026-01-01T00:21:00.000Z",
+        "receipt_failure_code": null,
+        "received_at": "2026-01-01T00:21:00.000Z",
+        "created_at": "2026-01-01T00:21:00.000Z",
+        "updated_at": "2026-01-01T00:21:00.000Z"
+      }
+    ],
+    "imap_ingestion_attachments": [
+      {
+        "id": "f0000000-0000-4000-8000-000000000001",
+        "message_id": "e0000000-0000-4000-8000-000000000001",
+        "display_name": "fixture-attachment.bin",
+        "media_type": "application/octet-stream",
+        "size_bytes": 128,
+        "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "storage_key": "fixture/storage/attachment-001",
+        "ciphertext_size": 144,
+        "envelope_version": 1,
+        "content_iv": "fixture-attachment-content-iv",
+        "content_auth_tag": "fixture-attachment-content-auth-tag",
+        "wrapped_dek": "fixture-attachment-wrapped-dek",
+        "wrap_iv": "fixture-attachment-wrap-iv",
+        "wrap_auth_tag": "fixture-attachment-wrap-auth-tag",
+        "key_id": "fixture-key-id",
+        "status": "assigned",
+        "assigned_document_id": "50000000-0000-4000-8000-000000000001",
+        "created_at": "2026-01-01T00:22:00.000Z",
+        "updated_at": "2026-01-01T00:22:00.000Z"
+      }
+    ]
+  }
+}
