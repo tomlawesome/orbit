@@ -35,6 +35,13 @@ CSRF rejection before mutation, and household-scoped document listing with a
 non-disclosing outsider response. Uploading, parsing, scanning and encrypting
 document bytes belong to higher test layers.
 
+The PostgreSQL integration layer also contains a persisted authorization matrix
+covering malformed, expired and disabled sessions; live membership removal;
+workspace, household and lifecycle routes; document list/download/delete/
+restore denial; portable archive ownership and non-disclosure; and administrator
+operations. Denied requests assert bounded error contracts, `no-store` responses,
+unchanged target state and unchanged audit state where mutation is applicable.
+
 ## CI relationship
 
 CI runs two `pnpm test:integration` invocations concurrently after static/unit

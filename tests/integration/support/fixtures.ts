@@ -1,21 +1,36 @@
 import { createHash, randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { NextRequest } from "next/server";
+import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
-import { getAuthConfig } from "@/lib/env";
+import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
-import { getDb } from "@/db";
+import { closeDatabase, getDb } from "@/db";
 import {
+  auditLog,
   documents,
   externalIdentities,
   households,
   items,
   memberships,
+  portableArchives,
   sections,
+  sessions,
   userPreferences,
   users,
 } from "@/db/schema";
+import { resetDocumentConfigForTests } from "@/server/documents/config";
 
-type FixtureRole = "owner" | "member" | "outsider";
+export type FixtureRole = "owner" | "member" | "outsider" | "admin" | "disabled";
+
+const storageRoot = join(tmpdir(), `orbit-integration-documents-${randomUUID()}`);
+const quarantineRoot = join(tmpdir(), `orbit-integration-quarantine-${randomUUID()}`);
+process.env.DOCUMENTS_ROOT = storageRoot;
+process.env.DOCUMENTS_QUARANTINE_ROOT = quarantineRoot;
+process.env.DOCUMENT_KEK = "00".repeat(32);
+process.env.DOCUMENT_SCAN_MODE = "disabled";
 
 export interface IntegrationSession {
   userId: string;
@@ -25,16 +40,64 @@ export interface IntegrationSession {
   headers: Record<string, string>;
 }
 
+interface FixtureUser {
+  id: string;
+  email: string;
+}
+
 export interface IntegrationFixture {
   household: { id: string; name: string };
+  secondHousehold: { id: string; name: string };
   section: { id: string };
   item: { id: string };
   document: { id: string; displayName: string };
-  session(role: FixtureRole): Promise<IntegrationSession>;
+  secondItem: { id: string };
+  secondDocument: { id: string; displayName: string };
+  archive: { id: string };
+  users: Record<FixtureRole | "secondOwner", FixtureUser>;
+  session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession>;
+  expireSession(session: IntegrationSession): Promise<void>;
+  removeMember(): Promise<void>;
+  disableUser(role: FixtureRole): Promise<void>;
+  auditCount(entityId?: string): Promise<number>;
+  cleanup(): Promise<void>;
 }
 
-export function sessionHeaders(session: IntegrationSession): Record<string, string> {
-  return { ...session.headers };
+type RequestOptions = Omit<RequestInit, "headers" | "signal"> & { headers?: Record<string, string> };
+
+export function sessionHeaders(
+  session: IntegrationSession,
+  overrides: Record<string, string> = {},
+): Record<string, string> {
+  return { ...session.headers, ...overrides };
+}
+
+export function requestForSession(
+  session: IntegrationSession,
+  url: string,
+  init: RequestOptions = {},
+): NextRequest {
+  return new NextRequest(url, {
+    ...init,
+    headers: sessionHeaders(session, init.headers),
+  });
+}
+
+export function requestWithoutSession(
+  url: string,
+  init: RequestOptions = {},
+): NextRequest {
+  return new NextRequest(url, init);
+}
+
+export async function cleanupIntegrationEnvironment(): Promise<void> {
+  resetAuthConfigForTests();
+  resetDocumentConfigForTests();
+  await closeDatabase();
+  await Promise.all([
+    rm(storageRoot, { recursive: true, force: true }),
+    rm(quarantineRoot, { recursive: true, force: true }),
+  ]);
 }
 
 export async function createIntegrationFixture(label: string): Promise<IntegrationFixture> {
@@ -42,12 +105,13 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
   const namespace = `${label}-${randomUUID()}`;
   const issuer = "https://oidc.invalid.example";
 
-  async function createUser(role: FixtureRole) {
+  async function createUser(role: string, isInstanceAdmin = false): Promise<FixtureUser> {
     const [user] = await db.insert(users).values({
       email: `${namespace}-${role}@example.invalid`,
       emailVerified: true,
       displayName: `Integration ${role}`,
-    }).returning({ id: users.id });
+      isInstanceAdmin,
+    }).returning({ id: users.id, email: users.email });
     await db.insert(userPreferences).values({ userId: user.id });
     await db.insert(externalIdentities).values({
       userId: user.id,
@@ -57,37 +121,66 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     return user;
   }
 
-  const owner = await createUser("owner");
-  const member = await createUser("member");
-  const outsider = await createUser("outsider");
-  const householdName = `Integration household ${namespace}`;
+  const fixtureUsers = {
+    owner: await createUser("owner"),
+    member: await createUser("member"),
+    outsider: await createUser("outsider"),
+    admin: await createUser("admin", true),
+    disabled: await createUser("disabled"),
+    secondOwner: await createUser("second-owner"),
+  } satisfies Record<FixtureRole | "secondOwner", FixtureUser>;
+
   const [household] = await db.insert(households).values({
-    name: householdName,
+    name: `Integration household ${namespace}`,
     timezone: "Europe/London",
     defaultCurrency: "GBP",
     setupCompleted: true,
   }).returning({ id: households.id, name: households.name });
+  const [secondHousehold] = await db.insert(households).values({
+    name: `Second integration household ${namespace}`,
+    timezone: "Europe/London",
+    defaultCurrency: "GBP",
+    setupCompleted: true,
+  }).returning({ id: households.id, name: households.name });
+
   await db.insert(memberships).values([
-    { householdId: household.id, userId: owner.id, role: "owner" },
-    { householdId: household.id, userId: member.id, role: "member" },
+    { householdId: household.id, userId: fixtureUsers.owner.id, role: "owner" },
+    { householdId: household.id, userId: fixtureUsers.member.id, role: "member" },
+    { householdId: secondHousehold.id, userId: fixtureUsers.secondOwner.id, role: "owner" },
   ]);
+
   const [section] = await db.insert(sections).values({
     householdId: household.id,
     slug: `documents-${namespace}`,
     name: "Documents",
     position: 0,
   }).returning({ id: sections.id });
+  const [secondSection] = await db.insert(sections).values({
+    householdId: secondHousehold.id,
+    slug: `documents-second-${namespace}`,
+    name: "Documents",
+    position: 0,
+  }).returning({ id: sections.id });
+
   const [item] = await db.insert(items).values({
     householdId: household.id,
     sectionId: section.id,
     title: `Integration item ${namespace}`,
     currency: "GBP",
   }).returning({ id: items.id });
+  const [secondItem] = await db.insert(items).values({
+    householdId: secondHousehold.id,
+    sectionId: secondSection.id,
+    title: `Second integration item ${namespace}`,
+    currency: "GBP",
+  }).returning({ id: items.id });
+
   const displayName = "integration-document.pdf";
+  const secondDisplayName = "second-integration-document.pdf";
   const [document] = await db.insert(documents).values({
     householdId: household.id,
     itemId: item.id,
-    uploadedByUserId: member.id,
+    uploadedByUserId: fixtureUsers.member.id,
     displayName,
     mediaType: "application/pdf",
     sizeBytes: 128,
@@ -96,9 +189,29 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     scanStatus: "skipped",
     availableAt: new Date(),
   }).returning({ id: documents.id, displayName: documents.displayName });
+  const [secondDocument] = await db.insert(documents).values({
+    householdId: secondHousehold.id,
+    itemId: secondItem.id,
+    uploadedByUserId: fixtureUsers.secondOwner.id,
+    displayName: secondDisplayName,
+    mediaType: "application/pdf",
+    sizeBytes: 128,
+    contentSha256: createHash("sha256").update(`${namespace}-second`).digest("hex"),
+    lifecycle: "available",
+    scanStatus: "skipped",
+    availableAt: new Date(),
+  }).returning({ id: documents.id, displayName: documents.displayName });
+  const [archive] = await db.insert(portableArchives).values({
+    householdId: household.id,
+    requestedByUserId: fixtureUsers.owner.id,
+    storageKey: randomUUID(),
+    contentSha256: createHash("sha256").update(`${namespace}-archive`).digest("hex"),
+    sizeBytes: 32,
+    expiresAt: new Date(Date.now() + 86_400_000),
+  }).returning({ id: portableArchives.id });
 
-  async function session(role: FixtureRole): Promise<IntegrationSession> {
-    const userId = role === "owner" ? owner.id : role === "member" ? member.id : outsider.id;
+  async function session(role: FixtureRole | "secondOwner"): Promise<IntegrationSession> {
+    const userId = fixtureUsers[role].id;
     const config = getAuthConfig();
     const created = await createSession(userId, config);
     const sessionRequest = new NextRequest(config.appUrl.href, {
@@ -121,5 +234,32 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     };
   }
 
-  return { household, section, item, document, session };
+  return {
+    household,
+    secondHousehold,
+    section,
+    item,
+    document,
+    secondItem,
+    secondDocument,
+    archive,
+    users: fixtureUsers,
+    session,
+    async expireSession(sessionToExpire) {
+      await db.update(sessions).set({ expiresAt: new Date(0) }).where(eq(sessions.id, sessionToExpire.sessionId));
+    },
+    async removeMember() {
+      await db.delete(memberships).where(and(eq(memberships.householdId, household.id), eq(memberships.userId, fixtureUsers.member.id)));
+    },
+    async disableUser(role) {
+      await db.update(users).set({ disabledAt: new Date(), updatedAt: new Date() }).where(eq(users.id, fixtureUsers[role].id));
+    },
+    async auditCount(entityId) {
+      const rows = await db.select({ id: auditLog.id }).from(auditLog).where(entityId ? eq(auditLog.entityId, entityId) : eq(auditLog.householdId, household.id));
+      return rows.length;
+    },
+    async cleanup() {
+      await cleanupIntegrationEnvironment();
+    },
+  };
 }
