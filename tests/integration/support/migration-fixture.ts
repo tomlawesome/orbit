@@ -12,6 +12,11 @@ export const EXPECTED_POSTGRES_MAJOR = baselineFixture.postgresMajor;
 const MIGRATION_SCHEMA = "drizzle";
 const MIGRATION_TABLE = "__drizzle_migrations";
 
+function canonicalMigrationChecksum(content: string | Buffer): string {
+  const canonicalContent = content.toString().replace(/\r\n/g, "\n");
+  return createHash("sha256").update(canonicalContent, "utf8").digest("hex");
+}
+
 type FixtureRow = Record<string, unknown>;
 type MigrationJournalEntry = {
   idx: number;
@@ -156,7 +161,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   households_deletion_requested_by_user_id_users_id_fk: foreign("households", ["deletion_requested_by_user_id"], "users", ["id"], "set_null"),
   households_pkey: primary("households", ["id"]),
   imap_ingestion_attachments_assigned_document_id_documents_id_fk: foreign("imap_ingestion_attachments", ["assigned_document_id"], "documents", ["id"], "set_null"),
-  imap_ingestion_attachments_message_id_imap_ingestion_messages_id_fk: foreign("imap_ingestion_attachments", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
+  imap_ingestion_attachments_message_id_imap_ingestion_messages_i: foreign("imap_ingestion_attachments", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
   imap_ingestion_attachments_pkey: primary("imap_ingestion_attachments", ["id"]),
   imap_ingestion_attachments_storage_key_unique: unique("imap_ingestion_attachments", ["storage_key"]),
   imap_ingestion_messages_household_id_households_id_fk: foreign("imap_ingestion_messages", ["household_id"], "households", ["id"], "set_null"),
@@ -175,7 +180,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   notification_deliveries_pkey: primary("notification_deliveries", ["id"]),
   notification_deliveries_user_id_users_id_fk: foreign("notification_deliveries", ["user_id"], "users", ["id"], "cascade"),
   notification_states_household_id_households_id_fk: foreign("notification_states", ["household_id"], "households", ["id"], "cascade"),
-  notification_states_pkey: primary("notification_states", ["user_id", "household_id", "notification_id"]),
+  notification_states_user_id_household_id_notification_id_pk: primary("notification_states", ["user_id", "household_id", "notification_id"]),
   notification_states_user_id_users_id_fk: foreign("notification_states", ["user_id"], "users", ["id"], "cascade"),
   portable_archives_household_id_households_id_fk: foreign("portable_archives", ["household_id"], "households", ["id"], "cascade"),
   portable_archives_pkey: primary("portable_archives", ["id"]),
@@ -186,7 +191,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   push_subscriptions_user_id_users_id_fk: foreign("push_subscriptions", ["user_id"], "users", ["id"], "cascade"),
   reminder_rules_item_id_items_id_fk: foreign("reminder_rules", ["item_id"], "items", ["id"], "cascade"),
   reminder_rules_pkey: primary("reminder_rules", ["id"]),
-  section_household_id_households_id_fk: foreign("sections", ["household_id"], "households", ["id"], "cascade"),
+  sections_household_id_households_id_fk: foreign("sections", ["household_id"], "households", ["id"], "cascade"),
   sections_pkey: primary("sections", ["id"]),
   sessions_pkey: primary("sessions", ["id"]),
   sessions_token_hash_unique: unique("sessions", ["token_hash"]),
@@ -278,7 +283,7 @@ async function migrationDefinitions(migrationsFolder: string): Promise<Migration
   const journal = await readJournalDefinition(folder);
   return Promise.all(journal.entries.map(async (entry) => ({
     tag: entry.tag,
-    hash: createHash("sha256").update(await readFile(join(folder, `${entry.tag}.sql`))).digest("hex"),
+    hash: canonicalMigrationChecksum(await readFile(join(folder, `${entry.tag}.sql`))),
   })));
 }
 
@@ -293,7 +298,7 @@ export async function verifyMigrationPrefix(migrationsFolder: string): Promise<v
 
   for (const migration of baselineFixture.migrationPrefix) {
     const content = await readFile(join(folder, `${migration.tag}.sql`));
-    const actualHash = createHash("sha256").update(content).digest("hex");
+    const actualHash = canonicalMigrationChecksum(content);
     if (actualHash !== migration.sha256) {
       throw new Error(`Migration checksum mismatch for ${migration.tag}`);
     }
