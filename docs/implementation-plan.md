@@ -1,291 +1,128 @@
 # Orbit implementation plan
 
-This document is the version-controlled source of truth for active delivery
-work. Longer-term product directions remain in the
-[deferred feature register](feature-register.md). Decisions that affect an
-active phase must be recorded here or in a more focused document under
-`docs/`; they must not depend on a particular Codex task or local assistant
-memory.
+## Source-of-truth boundaries
 
-## Planning conventions
+This file defines delivery order and working policy. It does not repeat live
+feature status.
 
-- Keep only one active implementation phase.
-- Record agreed architecture before writing migrations or production data.
-- Mark completed work with the merge commit or pull request.
-- Move newly proposed product work to the feature register rather than
-  expanding the active phase silently.
-- Preserve Orbit's supported deployment shape: one Orbit application container
-  plus standard PostgreSQL. Established security or processing services may be
-  separate, replaceable containers.
-- Every phase must preserve household isolation, signed-out privacy,
-  auditability, backup/restore, and local-only document processing.
+- Product and release requirements: [v1 charter](v1-charter.md).
+- Current capability evidence and gaps:
+  [engineering baseline](engineering-baseline.md).
+- System boundaries and durable decisions:
+  [architecture](architecture.md) and [ADRs](adr/README.md).
+- Tests, CI and definition of done:
+  [quality strategy](quality-strategy.md).
+- Deferred product direction: [feature register](feature-register.md).
+- Priority, ownership and delivery status: GitHub milestones and issues.
 
-## Current baseline
+Historical consolidation and handover status files were removed after their
+accepted decisions were incorporated here, in the architecture baseline, or in
+focused security/operations documents. Git history remains the historical
+record.
 
-The operational hardening and CI-gating pass is complete as of pull request
-[#1](https://github.com/tomlawesome/orbit/pull/1), merged as `5d6bbc8`.
+## Governance
 
-`main` now requires:
+Broad planning and systems decisions are protected Sol Extra High work under
+the root `AGENTS.md` and `.github/planning-governance.json`. Bounded
+implementation subagents default to Luna Extra High. A different subagent model
+requires fresh, explicit user approval before use.
 
-- a pull request;
-- successful `Static and unit checks`;
-- successful `Compose smoke test`;
-- resolved review conversations;
-- protection from force-push and deletion.
+Every implementable issue must define:
 
-Static analysis and unit tests run before container, browser, accessibility,
-and privacy checks. Pull-request runs never publish images. ARM64 publishing is
-reserved for versioned releases or an explicit manual request.
+- the user or operator outcome;
+- measurable acceptance criteria and explicit non-goals;
+- security, privacy and authorization considerations;
+- tests to write or characterize before implementation;
+- migration, compatibility, deployment, backup and documentation impact;
+- evidence required before closure.
 
-## Current release-candidate focus
+Work uses short-lived `codex/` branches and small, issue-linked pull requests.
+Long-lived consolidation branches are retired after accepted changes reach the
+release line.
 
-The architecture-consolidation candidate is validated by CI run 80 on pull
-request [#7](https://github.com/tomlawesome/orbit/pull/7): static analysis,
-unit tests, production image build/startup, non-root secret handling, ClamAV,
-backup/restore, signed-out privacy, authenticated OIDC browser coverage and
-accessibility all passed. Publish and manually test this candidate before
-merging it into `main`.
+## Delivery structure
 
-The remaining dashboard/workspace source-file splits and an IMAP review browser
-fixture are maintainability/coverage follow-ups. They are not a reason to hold
-the candidate back: current unit tests cover IMAP configuration and alias
-privacy, while live provider acceptance remains an operator-owned test.
+### v1 Engineering Baseline
 
-## Release promotion policy
+The initial baseline is issues
+[#10](https://github.com/tomlawesome/orbit/issues/10),
+[#11](https://github.com/tomlawesome/orbit/issues/11),
+[#12](https://github.com/tomlawesome/orbit/issues/12), and
+[#13](https://github.com/tomlawesome/orbit/issues/13).
 
-`release/secure-documents` is Orbit's integration branch for accepted release
-candidates. It may receive focused, CI-gated pull requests while the agreed
-feature set is being completed. Do not promote changes to `main`, update the
-public `latest` image, or declare a stable public release until the required
-roadmap is complete through: reviewed Tika extraction, data portability,
-household lifecycle/deletion, mobile capture, reviewed document drafts and
-duplicate handling, IMAP ingestion with SMTP notifications, and final
-operational polish. Local Ollama-assisted extraction is explicitly optional and
-requires a fresh product decision at that stage.
+It establishes:
 
-## Completed phase: secure document management
+- the focused self-hosted v1 contract;
+- an evidence-backed capability and API audit;
+- current architecture, trust boundaries and ADRs;
+- a risk-based quality and CI strategy;
+- issue and pull-request templates;
+- protected planning-model governance;
+- diagnostic coverage collection;
+- a small, risk-ordered GitHub roadmap.
 
-**Register entry:** `ORB-FUT-003`
-**Status:** Implementation complete and manually accepted as
-`rc-2026.07.26.27` (digest
-`sha256:16696e706eb7bee9aa07443d619ee1193e100e7475fdf1997cb9d46685ff8594`)
-**Goal:** Attach durable, private, malware-scanned and encrypted documents to
-household items before adding email ingestion or automated extraction.
+### v1.0 roadmap
 
-### Architecture
+The roadmap contains ten outcome-level epics:
 
-1. Add a provider-neutral document storage interface.
-2. Implement a persistent local-volume provider first.
-3. Preserve an S3-compatible provider boundary without implementing S3 during
-   this phase.
-4. Store document metadata and lifecycle state in PostgreSQL.
-5. Use established ClamAV as a separate default scanner service; do not build
-   antivirus into the Orbit image.
-6. Keep parsing, OCR, and semantic extraction out of this phase.
+1. [identity, sessions, and authorization](https://github.com/tomlawesome/orbit/issues/14);
+2. [household and account lifecycle](https://github.com/tomlawesome/orbit/issues/15);
+3. [core items, schedules, and reminders](https://github.com/tomlawesome/orbit/issues/16);
+4. [secure documents and reviewed intake](https://github.com/tomlawesome/orbit/issues/17);
+5. [data integrity, migrations, backup, and recovery](https://github.com/tomlawesome/orbit/issues/18);
+6. [administration and observability](https://github.com/tomlawesome/orbit/issues/19);
+7. [accessible, responsive, and offline-safe experience](https://github.com/tomlawesome/orbit/issues/20);
+8. [CI, supply chain, release, and operator acceptance](https://github.com/tomlawesome/orbit/issues/21);
+9. [optional mail and document automation](https://github.com/tomlawesome/orbit/issues/22);
+10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
-The binding security analysis is maintained in the
-[secure document threat model](document-threat-model.md).
+Only the first two risk areas are decomposed at baseline. Later epics are
+refined when they are close enough to delivery for acceptance criteria to be
+real rather than speculative.
 
-### Document lifecycle
+The ready implementation queue is deliberately limited to:
 
-```text
-receiving -> validating -> quarantined -> scanning -> encrypting -> available
-                  |              |           |
-                  +--------------+-----------+-> rejected
+- [PostgreSQL service/API integration harness](https://github.com/tomlawesome/orbit/issues/24);
+- [critical API authorization matrix](https://github.com/tomlawesome/orbit/issues/25);
+- [account disable, session and ownership invariants](https://github.com/tomlawesome/orbit/issues/26);
+- [fresh and baseline-upgrade migration tests](https://github.com/tomlawesome/orbit/issues/27);
+- [negative backup/restore recovery paths](https://github.com/tomlawesome/orbit/issues/28).
 
-available -> pending_deletion -> deleted
-```
+GitHub milestone assignment is administrative metadata rather than a second
+status source: issues #10–#13 and this baseline pull request belong to `v1
+Engineering Baseline`; issues #14–#28 belong to `v1.0`.
 
-State transitions must be explicit, transactional where possible, idempotent,
-and recoverable after container restarts. A reconciliation job handles
-interrupted uploads, missing blobs, and orphaned storage objects.
+## Risk-ordered execution
 
-### Envelope encryption
+1. **Prove persistent authorization boundaries.** Add the PostgreSQL-backed
+   service/API harness and negative role/household matrix.
+2. **Prove data evolution and recovery.** Test fresh and representative upgrade
+   migrations, then corrupt/wrong-key/interrupted restore cases.
+3. **Prove the core vertical journeys.** Add authenticated browser coverage for
+   items, schedules and secure documents against the production image.
+4. **Make CI test the publishable identity.** Build once, exercise that exact
+   image, then attach supply-chain evidence and publish its digest.
+5. **Prove operations and providers.** Cover safe administrator actions,
+   notification contracts, degraded dependencies, installation, update and
+   rollback.
+6. **Complete experience acceptance.** Authenticated accessibility, responsive
+   layouts, text scaling, themes and an explicit offline-support decision.
+7. **Evaluate optional automation.** Only after the manual workflow is accepted,
+   decide which IMAP, parsing, duplicate and semantic-extraction capabilities
+   should graduate from experimental status.
 
-Application-level document encryption is required from the first production
-document; it is not deferred work.
+## Pull-request lifecycle
 
-- Generate an independent random data-encryption key for every document.
-- Use a reviewed authenticated encryption construction, initially
-  AES-256-GCM.
-- Validate and malware-scan plaintext while it is quarantined, then encrypt it
-  before final durable storage.
-- Wrap each data-encryption key with an instance key-encryption key.
-- Store ciphertext in the document volume.
-- Store only the wrapped data key and versioned cryptographic metadata in
-  PostgreSQL.
-- Supply the instance key through a dedicated secret file. Never store it in
-  PostgreSQL or `.env-orbit`.
-- Version the envelope format, algorithms, and key identifiers from the first
-  release.
-- Rotate the instance key by rewrapping document keys rather than re-encrypting
-  all document bytes.
-- Treat key backup and recovery as a mandatory part of backup/restore.
+1. Select a ready issue and confirm its acceptance cases.
+2. Add a failing or characterization test at the cheapest effective layer.
+3. Implement the smallest vertical change.
+4. Run static, unit, relevant integration and targeted browser checks.
+5. Review the diff for security, data, dependency, migration and operational
+   surprises.
+6. Open a focused pull request linked to the issue.
+7. Merge only after required checks pass and conversations are resolved.
+8. Record any required candidate/manual evidence before closing the issue.
 
-This protects copied document volumes and database backups. It does not claim
-to protect plaintext from a fully compromised running Orbit instance.
-
-### Upload and storage security
-
-- Stream uploads with bounded memory and request time.
-- Use generated opaque storage identifiers and prevent path traversal.
-- Inspect content instead of trusting filenames or supplied media types.
-- Start with a deliberately narrow supported set such as PDF, JPEG, PNG, and
-  WebP.
-- Apply configurable per-file, per-household, and instance storage limits.
-- Reject executables, archives, MIME mismatches, decompression bombs, and
-  unsupported active content.
-- Keep unfinished and unscanned files unavailable to users.
-- If ClamAV is unavailable, remain quarantined and fail closed.
-- Never give scanner services database credentials, Orbit secrets, Docker
-  socket access, or unrestricted host access.
-
-### Authorization and delivery
-
-- Require authentication and current household permission for every document
-  operation.
-- Recheck authorization when opening every byte stream.
-- Do not issue public or reusable document URLs.
-- Default downloads to safe attachment headers rather than inline rendering.
-- Do not reveal document existence, identifiers, metadata, or error
-  distinctions to signed-out or unauthorized callers.
-- Audit upload, scan result, download, attachment, deletion, restoration,
-  retention purge, and key-rotation events without logging document contents.
-
-### Product scope
-
-- Upload documents while creating or editing an item.
-- Display bounded progress and clear validation/scan states.
-- List document name, type, size, upload time, and safe operational state.
-- Download, remove, and—where policy permits—restore documents.
-- Support mobile file selection and camera capture without compromising the
-  compact PWA layout.
-- Give administrators scanner, storage, quota, reconciliation, and key-version
-  health without exposing document content.
-
-### Backup and retention
-
-- Back up metadata and encrypted bytes consistently.
-- Keep the key-encryption key outside ordinary database and document-volume
-  backups, with an explicit recovery procedure.
-- Verify restored document hashes and encryption metadata before availability.
-- Test restoration with mixed document states.
-- Implement a bounded soft-delete window followed by irreversible purge once
-  the owner confirms the retention default.
-
-### Test requirements
-
-- Unit tests for state transitions, storage keys, validation, envelope
-  encryption, authentication failure, and key wrapping/rotation.
-- Authorization tests across households, roles, removed members, and signed-out
-  callers.
-- Tests for malicious names, traversal, MIME mismatch, oversized input,
-  truncated input, unsupported content, scanner outage, malware detection, and
-  interrupted processing.
-- Container integration using ClamAV's standard antivirus test signature.
-- Backup/restore round trip with byte hashes and encryption metadata.
-- Playwright upload, state display, download, deletion, mobile capture, and
-  signed-out privacy checks.
-- Existing static, unit, Compose, browser, accessibility, and privacy gates
-  remain required.
-
-### Delivery sequence
-
-1. Write the threat model and confirm the unresolved policies below.
-2. Add schema migrations and the document lifecycle model.
-3. Implement and test the versioned encryption and storage interfaces.
-4. Add bounded quarantined uploads and content validation.
-5. Add the ClamAV adapter and default Compose service.
-6. Add authorized download, deletion, retention, and audit behaviour.
-7. Add item and mobile document interfaces.
-8. Extend backup, restore, reconciliation, health, and key-rotation tooling.
-9. Complete security, integration, browser, and accessibility testing.
-10. Deliver through a focused PR and the protected GitHub workflow.
-
-### Confirmed implementation decisions
-
-- 25 MiB maximum file size.
-- 5 GiB default household quota and 20 GiB default instance quota.
-- PDF, JPEG, PNG, and WebP identified from content signatures.
-- 30-day soft deletion.
-- ClamAV enabled by default and fail-closed. Administrators may explicitly
-  disable scanning with persistent warnings and unscanned status.
-- Missing encryption keys lock document operations without preventing the rest
-  of Orbit from starting. A replacement key is never generated automatically.
-- Recovery uses an explicit passphrase-encrypted bundle stored separately from
-  ordinary backups.
-- A named volume is mounted at `/var/lib/orbit/documents` and accessed only by
-  Orbit's non-root runtime UID/GID 1001.
-
-## Following phases
-
-After secure documents are complete:
-
-1. `ORB-FUT-004` administrator operations and job visibility, where not already
-   delivered by the document phase.
-2. `ORB-FUT-002` mobile/PWA information-density improvements.
-3. `ORB-FUT-006` data portability, including encrypted document archives.
-4. `ORB-FUT-007` refined mobile document capture.
-5. `ORB-FUT-001` intelligent IMAP ingestion and outbound SMTP.
-
-Email ingestion must not precede secure storage, malware scanning, review,
-duplicate handling, and administrative job visibility.
-
-## Completion checklist
-
-Keep this ordered list stable and update its status in place so release progress
-is visible without renumbering work already completed.
-
-1. **Release integration and acceptance** — In progress: CI-gate and manually
-   accept the current mobile, lifecycle and optional-Tika candidate.
-2. **Reviewed Tika extraction** — In progress: optional private Tika profile,
-   bounded adapter and a user-visible review draft are implemented. A
-   representative-document trial and administrator acceptance remain.
-3. **Data portability** — In progress: household-scoped, passphrase-encrypted
-   JSON exports with optional bounded original-document bytes, 24-hour private
-   storage, audited request/download and maintenance purge are implemented.
-   Conflict-aware import preview and transactionally committed metadata import
-   are implemented. Original document bytes are excluded from import pending
-   normal scan/encryption.
-4. **Household lifecycle** — Candidate validated: typed-confirmation removal
-   hides a household from every member immediately, while an owner or instance
-   administrator can restore its minimal recovery record for 30 days before
-   worker-driven purge. Authenticated OIDC browser coverage passed in CI run
-   80; real-world candidate acceptance remains.
-5. **Mobile document capture** — In progress: direct camera/file capture,
-   visual review/rotation, progress and retry are implemented; browser
-   acceptance coverage remains.
-6. **Document draft creation** — In progress: bounded evidence and a
-   user-approved create-item path are implemented; acceptance coverage remains.
-7. **Duplicate comparison** — In progress: household-scoped hash, reference,
-   provider/title and date-overlap candidates with create, merge and attach-only
-   choices are implemented; browser acceptance coverage remains.
-8. **IMAP and SMTP workflow** — In progress: pnpm 11 and maintained ImapFlow
-   are now in use. Dedicated-mailbox configuration is TLS-only, secret-backed,
-   requires SMTP, and uses opaque per-user aliases verified against a
-   provider-injected recipient header. The worker immediately scans and encrypts
-   verified attachments, then creates a hidden archived review item as soon as a
-   household is known (automatically for a sole membership, explicitly for a
-   multi-household user). The recipient selects a section to make it visible.
-   Users can discard review items safely and a durable SMTP receipt worker
-   records retries/failures without retaining provider details. Live provider
-   acceptance remains.
-9. **Optional local Ollama extraction** — Optional infrastructure is available
-   through the private `docker-compose.full.yml` overlay, with bounded local
-   Ollama and no cloud-model fallback. Application-level, schema-constrained
-   reviewed draft extraction remains a separate product decision after the
-   Tika-based workflow has been tested on representative documents.
-10. **Final operational and release polish** — Planned: provider diagnostics,
-    documentation, acceptance testing and promotion to `main`/`latest`.
-
-## Active phase: administrator operations
-
-`ORB-FUT-004` is being developed on the stacked
-`feature/admin-operations` branch, based on the accepted secure-document
-release.
-
-The phase adds bounded worker/provider health, safe queue summaries,
-state-checked retry/discard actions, SMTP connection verification, and
-cursor-paginated audit history. Its binding information-disclosure and
-state-transition rules are in
-[administrator operations](administrator-operations.md).
+Release candidates follow [the release policy](releasing.md): test and deploy
+by immutable digest, merge the accepted source through protection, and promote
+without rebuilding.

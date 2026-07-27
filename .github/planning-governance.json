@@ -1,0 +1,29 @@
+{
+  "requiredPlanningModel": "Sol Extra High",
+  "requiredAttestation": "Planning-Model: Sol Extra High",
+  "protectedFiles": [
+    ".github/planning-governance.json",
+    ".github/pull_request_template.md",
+    "AGENTS.md",
+    "Dockerfile",
+    "docker-compose.acceptance.yml",
+    "docker-compose.full.yml",
+    "docker-compose.yml",
+    "docs/administrator-operations.md",
+    "docs/architecture.md",
+    "docs/authentication.md",
+    "docs/document-threat-model.md",
+    "docs/engineering-baseline.md",
+    "docs/feature-register.md",
+    "docs/implementation-plan.md",
+    "docs/quality-strategy.md",
+    "docs/releasing.md",
+    "docs/v1-charter.md",
+    "scripts/check-planning-governance.mjs"
+  ],
+  "protectedPrefixes": [
+    ".github/ISSUE_TEMPLATE/",
+    ".github/workflows/",
+    "docs/adr/"
+  ]
+}

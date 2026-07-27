@@ -1,9 +1,13 @@
-# Orbit deferred feature register
+# Orbit product direction register
 
-This register captures agreed product directions that are intentionally deferred
-until the initial completion pass is finished. Entries describe the intended
-outcome and important constraints; they are not commitments to a particular
-implementation.
+This register captures possible or agreed product directions beyond the stable
+v1 contract. Entries describe intended outcomes and constraints; they are not
+implementation status, release commitments, or permission to expand an active
+issue.
+
+The [v1 charter](v1-charter.md) defines the release contract, the
+[engineering baseline](engineering-baseline.md) records dated evidence, and
+GitHub milestones/issues own live delivery status.
 
 ## Register conventions
 
@@ -14,18 +18,17 @@ Each entry records:
 - **Dependencies:** foundations that must exist before implementation.
 - **Decision status:** whether material architecture choices remain open.
 
-Changes should be delivered behind migrations and feature flags where partial
-deployment could expose unfinished behaviour. Every feature must preserve
-household isolation, signed-out privacy, auditability, and the supported
-deployment shape of one Orbit container plus standard PostgreSQL. Optional
-document or AI processors may be separate, administrator-selected services;
-they are opt-in deployment profiles rather than required parts of the core
-stack. Durable orchestration remains in Orbit's existing internal worker and
-PostgreSQL queues. Orbit must not require access to the Docker socket.
+Existing candidate code does not make a direction complete. Graduation into
+the v1 contract requires a scoped issue, acceptance evidence, and any necessary
+ADR or threat-model update. Changes should use migrations and feature flags
+where partial deployment could expose unfinished behaviour. Every feature must
+preserve household isolation, signed-out privacy, auditability, and the
+supported deployment shape in ADR-0001. Orbit must not require access to the
+Docker socket.
 
 ## ORB-FUT-001 — Intelligent email and document ingestion
 
-**Status:** Deferred
+**Roadmap disposition:** Deferred from the stable v1 gate; candidate code remains experimental
 **Priority:** High
 **Phase:** 5 — after secure document storage, parsing, extraction, and review
 **Dependencies:** ORB-FUT-003, ORB-FUT-004
@@ -160,7 +163,7 @@ the reviewed draft.
 
 ## ORB-FUT-002 — Mobile and installed-PWA information density
 
-**Status:** In progress
+**Roadmap disposition:** Basic responsive/accessibility quality is v1; enhanced PWA density remains future work
 **Priority:** High
 **Phase:** 2 — independent mobile polish
 **Dependencies:** Browser test coverage
@@ -195,7 +198,7 @@ desktop presentation.
 
 ## ORB-FUT-003 — Secure document-management foundation
 
-**Status:** Complete
+**Roadmap disposition:** Core v1 capability with incomplete acceptance evidence
 **Priority:** Critical foundation
 **Phase:** 1
 **Dependencies:** Backup/restore hardening
@@ -275,7 +278,7 @@ foundation, not a deferred enhancement.
 
 ## ORB-FUT-004 — Administrator operations and job visibility
 
-**Status:** In progress on `feature/admin-operations`
+**Roadmap disposition:** Core v1 operations capability with incomplete acceptance evidence
 **Priority:** High
 **Phase:** 1
 **Dependencies:** Existing administrator authorization
@@ -306,7 +309,7 @@ The binding implementation and security contract is recorded in
 
 ## ORB-FUT-005 — Account and household lifecycle
 
-**Status:** In progress
+**Roadmap disposition:** Core v1 lifecycle capability with incomplete acceptance evidence
 **Priority:** Medium
 **Phase:** 2
 **Dependencies:** Export and backup tooling
@@ -335,7 +338,7 @@ scope includes:
 
 ## ORB-FUT-006 — Data portability
 
-**Status:** Deferred
+**Roadmap disposition:** Portable export/import is post-v1; disaster-recovery backup/restore remains v1
 **Priority:** Medium
 **Phase:** 2
 **Dependencies:** ORB-FUT-003 for document-inclusive archives
@@ -355,7 +358,7 @@ being locked to Orbit.
 
 ## ORB-FUT-007 — Mobile document capture
 
-**Status:** Deferred
+**Roadmap disposition:** Basic mobile upload is v1; enhanced capture workflow is post-v1
 **Priority:** Medium
 **Phase:** 3
 **Dependencies:** ORB-FUT-002, ORB-FUT-003
@@ -373,7 +376,7 @@ phone quick and readable.
 
 ## ORB-FUT-008 — CI and release-host portability
 
-**Status:** Deferred fallback
+**Roadmap disposition:** Contingency only; GitHub-hosted validation remains the supported v1 path
 **Priority:** Low
 **Phase:** Operational, if GitHub-hosted validation becomes constrained
 **Dependencies:** Portable test scripts and container build
@@ -397,7 +400,7 @@ This option should only be activated if GitHub availability, policy, storage,
 or runner constraints provide a material reason. Standard GitHub-hosted runners
 for the public repository remain the simpler default.
 
-## Recently delivered hardening foundations
+## Foundations every future direction must preserve
 
 - Per-user email and browser-push reminder preferences.
 - Atomic household ownership transfer with an audit record.

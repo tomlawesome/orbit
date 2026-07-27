@@ -299,6 +299,7 @@ generated PostgreSQL password file as the container.
 
 ```sh
 bash scripts/test-backend.sh
+pnpm test:coverage
 bash scripts/test-frontend.sh
 bash scripts/test-all.sh
 ```
@@ -327,18 +328,19 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current suite contains 81 unit tests across authentication, environment
-and secret validation, database configuration, recurrence, preferences,
-notifications, workspace commands, document encryption/storage/scanning, and
-background workers. Playwright
-also verifies signed-out privacy in desktop and mobile Chromium, and uses the
-disposable OIDC profile for authenticated household-lifecycle acceptance.
+The current measured suite and its known gaps are recorded in the
+[engineering baseline](docs/engineering-baseline.md). Playwright verifies
+signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
+profile for authenticated household-lifecycle acceptance. Coverage is
+diagnostic while the database/API integration baseline is established; it is
+not an arbitrary release percentage.
 
-Product directions intentionally deferred until after the initial completion
-pass are recorded in the [feature register](docs/feature-register.md). The
-current delivery phase, agreed architecture, unresolved decisions, test gates,
-and implementation order are maintained in the version-controlled
-[implementation plan](docs/implementation-plan.md).
+The [v1 charter](docs/v1-charter.md) defines the supported release,
+[architecture and ADRs](docs/architecture.md) record durable system decisions,
+and the [quality strategy](docs/quality-strategy.md) defines test and CI
+evidence. GitHub milestones and issues own delivery status. Product directions
+outside the stable contract remain in the
+[feature register](docs/feature-register.md).
 
 ## Configuration
 
