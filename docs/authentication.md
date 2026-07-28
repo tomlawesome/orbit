@@ -40,7 +40,8 @@ Relevant Authentik references:
 A provider must support:
 
 - OpenID Connect discovery over HTTPS;
-- Authorization Code flow with S256 PKCE;
+- Authorization Code flow with S256 PKCE, explicitly advertised as supported in
+  the provider discovery document;
 - confidential-client authentication using `client_secret_basic`;
 - an asymmetrically signed ID token and a published JWKS;
 - exact issuer and audience validation;
