@@ -301,15 +301,16 @@ async function claimDeliveries(
   leaseDurationMs: number,
   limit = 25,
 ): Promise<ClaimedDelivery[]> {
-  const leaseExpiredBefore = new Date(now.getTime() - leaseDurationMs);
+  const nowIso = now.toISOString();
+  const leaseExpiredBeforeIso = new Date(now.getTime() - leaseDurationMs).toISOString();
   return db.transaction(async (transaction) => {
     const rows = await transaction.execute(sql<{ id: string }>`
       select id
       from notification_deliveries
       where (
-          (status = 'pending' and scheduled_for <= ${now})
-          or (status = 'retry' and scheduled_for <= ${now} and (locked_at is null or locked_at <= ${now}))
-          or (status = 'processing' and locked_at < ${leaseExpiredBefore})
+          (status = 'pending' and scheduled_for <= ${nowIso})
+          or (status = 'retry' and scheduled_for <= ${nowIso} and (locked_at is null or locked_at <= ${nowIso}))
+          or (status = 'processing' and locked_at < ${leaseExpiredBeforeIso})
         )
       order by scheduled_for, id
       for update skip locked
