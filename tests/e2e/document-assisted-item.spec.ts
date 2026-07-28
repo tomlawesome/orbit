@@ -130,12 +130,12 @@ test.describe("document-assisted item intake", () => {
       title: assistedTitle,
       subtype: "Insurance",
       provider: "Reviewed Cover",
-      reference: undefined,
       costMinor: 12550,
       dueDate: "2031-01-10",
       scheduleKind: "renewal",
       recurrenceMonths: 12,
     });
+    expect(finalItem?.reference).toBeUndefined();
     await page.getByRole("button", { name: `Open ${assistedTitle}`, exact: true }).click();
     const detail = page.getByRole("dialog", { name: assistedTitle });
     await expect(detail.getByRole("heading", { name: "Files" })).toBeVisible();
