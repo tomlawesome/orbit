@@ -6,6 +6,7 @@ import {
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
   householdReminderTime,
+  notificationRetryDelayMs,
   reminderIsSnoozed,
 } from "./notification-worker";
 
@@ -25,9 +26,21 @@ describe("notification worker scheduling", () => {
     })).toEqual(["email"]);
   });
 
-  it("schedules at 09:00 in the household timezone across daylight saving time", () => {
+  it("schedules at 09:00 in the household timezone across DST, calendar, and host timezone boundaries", () => {
     expect(householdReminderTime("2026-01-15", 0, "Europe/London").toISOString()).toBe("2026-01-15T09:00:00.000Z");
     expect(householdReminderTime("2026-07-15", 0, "Europe/London").toISOString()).toBe("2026-07-15T08:00:00.000Z");
+    expect(householdReminderTime("2026-03-29", 0, "Europe/London").toISOString()).toBe("2026-03-29T08:00:00.000Z");
+    expect(householdReminderTime("2026-10-25", 0, "Europe/London").toISOString()).toBe("2026-10-25T09:00:00.000Z");
+    expect(householdReminderTime("2026-01-01", 1, "Europe/London").toISOString()).toBe("2025-12-31T09:00:00.000Z");
+    expect(householdReminderTime("2026-03-08", 0, "America/New_York").toISOString()).toBe("2026-03-08T13:00:00.000Z");
+    expect(householdReminderTime("2026-11-01", 0, "America/New_York").toISOString()).toBe("2026-11-01T14:00:00.000Z");
+  });
+
+  it("uses bounded retry backoff without depending on the host clock", () => {
+    expect(notificationRetryDelayMs(1)).toBe(60_000);
+    expect(notificationRetryDelayMs(2)).toBe(120_000);
+    expect(notificationRetryDelayMs(5)).toBe(960_000);
+    expect(notificationRetryDelayMs(20)).toBe(3_600_000);
   });
 
   it("validates and defaults worker configuration", () => {

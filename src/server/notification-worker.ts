@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import nodemailer from "nodemailer";
 import webPush from "web-push";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
@@ -64,6 +65,53 @@ export interface NotificationWorkerHealth {
   lastErrorCategory: NotificationFailureCategory | null;
 }
 
+export interface SmtpNotification {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  tlsMode: NotificationWorkerConfig["smtpSecurity"];
+}
+
+export interface PushNotification {
+  target: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+  };
+  payload: {
+    title: string;
+    body: string;
+    url: "/";
+  };
+}
+
+export interface NotificationProviders {
+  sendEmail(notification: SmtpNotification): Promise<void>;
+  sendPush(notification: PushNotification): Promise<void>;
+}
+
+type NotificationDatabase = ReturnType<typeof getDb>;
+
+export interface NotificationWorkerDependencies {
+  /** A separate Drizzle client may be supplied for concurrency tests. */
+  db?: NotificationDatabase;
+  /** Supplies one stable instant for a complete worker cycle. */
+  now?: () => Date;
+  /** Supplies a lease identity per claimed row. */
+  nextLeaseToken?: () => string;
+  /** Explicit provider fakes keep tests off the network. */
+  providers?: NotificationProviders;
+  /** Deterministic barrier used to model a lease handoff before dispatch. */
+  beforeProviderDispatch?: (delivery: { id: string; channel: "email" | "web_push" }) => Promise<void>;
+  leaseDurationMs?: number;
+  retryDelayMs?: (attempts: number) => number;
+  claimLimit?: number;
+}
+
+const notificationLeaseDurationMs = 10 * 60_000;
+const notificationCatchUpWindowMs = 24 * 60 * 60_000;
+const notificationRetryBackoffCapMs = 60 * 60_000;
+
 type ProviderErrorDetails = {
   code?: unknown;
   responseCode?: unknown;
@@ -112,6 +160,12 @@ export function deliveryFailureState(
     "recipient_preferences_disabled",
   ].includes(category)) return "cancelled";
   return attempts >= maxAttempts ? "failed" : "retry";
+}
+
+/** Returns a bounded exponential delay for a transient notification failure. */
+export function notificationRetryDelayMs(attempts: number): number {
+  const boundedAttempts = Math.max(1, Math.min(Math.floor(attempts), 7));
+  return Math.min(notificationRetryBackoffCapMs, 60_000 * (2 ** (boundedAttempts - 1)));
 }
 
 export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = process.env): NotificationWorkerConfig {
@@ -187,8 +241,8 @@ export function enabledDeliveryChannels(input: {
   return channels;
 }
 
-async function materializeDueDeliveries(now: Date): Promise<void> {
-  const candidates = await getDb()
+async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Promise<void> {
+  const candidates = await db
     .select({
       eventId: dueEvents.id,
       householdId: dueEvents.householdId,
@@ -207,13 +261,15 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
     .innerJoin(households, eq(households.id, dueEvents.householdId))
     .innerJoin(reminderRules, eq(reminderRules.itemId, dueEvents.itemId))
     .innerJoin(memberships, eq(memberships.householdId, dueEvents.householdId))
+    .innerJoin(users, eq(users.id, memberships.userId))
     .leftJoin(userPreferences, eq(userPreferences.userId, memberships.userId))
     .where(and(
       isNull(dueEvents.completedAt),
       eq(items.status, "active"),
+      isNull(users.disabledAt),
     ));
 
-  const catchUpBoundary = new Date(now.getTime() - 86_400_000);
+  const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
   const deliveries = candidates.flatMap((candidate) => {
     const scheduledFor = householdReminderTime(candidate.dueDate, candidate.daysBefore, candidate.timezone);
     if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
@@ -229,7 +285,7 @@ async function materializeDueDeliveries(now: Date): Promise<void> {
   });
 
   if (deliveries.length) {
-    await getDb().insert(notificationDeliveries).values(deliveries).onConflictDoNothing();
+    await db.insert(notificationDeliveries).values(deliveries).onConflictDoNothing();
   }
 }
 
@@ -238,48 +294,156 @@ interface ClaimedDelivery {
   leaseToken: string;
 }
 
-async function claimDeliveries(limit = 25): Promise<ClaimedDelivery[]> {
-  const rows = await getDb().execute(sql<ClaimedDelivery>`
-    with claimable as (
+async function claimDeliveries(
+  db: NotificationDatabase,
+  now: Date,
+  nextLeaseToken: () => string,
+  leaseDurationMs: number,
+  limit = 25,
+): Promise<ClaimedDelivery[]> {
+  const nowIso = now.toISOString();
+  const leaseExpiredBeforeIso = new Date(now.getTime() - leaseDurationMs).toISOString();
+  return db.transaction(async (transaction) => {
+    const rows = await transaction.execute(sql<{ id: string }>`
       select id
       from notification_deliveries
       where (
-          (status in ('pending', 'retry') and scheduled_for <= now())
-          or (status = 'processing' and locked_at < now() - interval '10 minutes')
+          (status = 'pending' and scheduled_for <= ${nowIso})
+          or (status = 'retry' and scheduled_for <= ${nowIso} and (locked_at is null or locked_at <= ${nowIso}))
+          or (status = 'processing' and locked_at < ${leaseExpiredBeforeIso})
         )
-      order by scheduled_for
+      order by scheduled_for, id
       for update skip locked
       limit ${limit}
-    )
-    update notification_deliveries as delivery
-        set status = 'processing',
-        locked_at = now(),
-        lease_token = gen_random_uuid(),
-        attempts = delivery.attempts + 1,
-        updated_at = now()
-    from claimable
-    where delivery.id = claimable.id
-    returning delivery.id, delivery.lease_token as "leaseToken"
-  `);
-  return rows as unknown as ClaimedDelivery[];
+    `) as unknown as Array<{ id: string }>;
+    const claimed: ClaimedDelivery[] = [];
+    for (const row of rows) {
+      const leaseToken = nextLeaseToken();
+      const [updated] = await transaction.update(notificationDeliveries).set({
+        status: "processing",
+        lockedAt: now,
+        leaseToken,
+        attempts: sql`${notificationDeliveries.attempts} + 1`,
+        updatedAt: now,
+      }).where(eq(notificationDeliveries.id, row.id)).returning({
+        id: notificationDeliveries.id,
+        leaseToken: notificationDeliveries.leaseToken,
+      });
+      if (updated?.leaseToken) claimed.push({ id: updated.id, leaseToken: updated.leaseToken });
+    }
+    return claimed;
+  });
 }
 
-async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWorkerConfig): Promise<void> {
+function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
+  let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
+  if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
+    webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
+  }
+  return {
+    async sendEmail(notification) {
+      if (!transporter) {
+        transporter = nodemailer.createTransport(config.smtpUrl, {
+          secure: config.smtpSecurity === "implicit_tls",
+          requireTLS: config.smtpSecurity === "starttls",
+          tls: { minVersion: "TLSv1.2" },
+        });
+      }
+      await transporter.sendMail({
+        from: notification.from,
+        to: notification.to,
+        subject: notification.subject,
+        text: notification.text,
+      });
+    },
+    async sendPush(notification) {
+      await webPush.sendNotification(notification.target, JSON.stringify(notification.payload));
+    },
+  };
+}
+
+async function refreshLeaseBeforeDispatch(
+  db: NotificationDatabase,
+  id: string,
+  leaseToken: string,
+  dispatchNow: Date,
+  leaseDurationMs: number,
+): Promise<boolean> {
+  const [refreshed] = await db.update(notificationDeliveries).set({
+    lockedAt: dispatchNow,
+    updatedAt: dispatchNow,
+  }).where(and(
+    eq(notificationDeliveries.id, id),
+    eq(notificationDeliveries.status, "processing"),
+    eq(notificationDeliveries.leaseToken, leaseToken),
+    gte(notificationDeliveries.lockedAt, new Date(dispatchNow.getTime() - leaseDurationMs)),
+  )).returning({ id: notificationDeliveries.id });
+  return Boolean(refreshed);
+}
+
+async function prepareProviderDispatch(
+  db: NotificationDatabase,
+  delivery: { id: string; channel: "email" | "web_push" },
+  leaseToken: string,
+  currentTime: () => Date,
+  leaseDurationMs: number,
+  beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
+): Promise<boolean> {
+  await beforeProviderDispatch?.(delivery);
+  const dispatchNow = new Date(currentTime().getTime());
+  return refreshLeaseBeforeDispatch(db, delivery.id, leaseToken, dispatchNow, leaseDurationMs);
+}
+
+async function cancelDelivery(
+  db: NotificationDatabase,
+  id: string,
+  leaseToken: string,
+  now: Date,
+  lastError: NotificationFailureCategory | null,
+): Promise<void> {
+  await db.update(notificationDeliveries).set({
+    status: "cancelled",
+    lockedAt: null,
+    leaseToken: null,
+    lastError,
+    updatedAt: now,
+  }).where(and(
+    eq(notificationDeliveries.id, id),
+    eq(notificationDeliveries.status, "processing"),
+    eq(notificationDeliveries.leaseToken, leaseToken),
+  ));
+}
+
+async function deliverClaimed(
+  db: NotificationDatabase,
+  claimed: ClaimedDelivery[],
+  config: NotificationWorkerConfig,
+  now: Date,
+  currentTime: () => Date,
+  providers: NotificationProviders,
+  leaseDurationMs: number,
+  retryDelay: (attempts: number) => number,
+  beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
+): Promise<void> {
   if (!claimed.length) return;
   const leaseTokens = new Map(claimed.map((delivery) => [delivery.id, delivery.leaseToken]));
-  const deliveries = await getDb()
+  const deliveries = await db
     .select({
       id: notificationDeliveries.id,
       leaseToken: notificationDeliveries.leaseToken,
       channel: notificationDeliveries.channel,
+      scheduledFor: notificationDeliveries.scheduledFor,
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
       email: users.email,
-      displayName: users.displayName,
       title: items.title,
       dueDate: dueEvents.dueDate,
-      kind: dueEvents.kind,
-      householdName: households.name,
+      itemId: items.id,
+      itemStatus: items.status,
+      snoozedUntil: items.snoozedUntil,
+      timezone: households.timezone,
+      completedAt: dueEvents.completedAt,
+      userDisabledAt: users.disabledAt,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
       userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
     })
@@ -289,88 +453,122 @@ async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWo
     .innerJoin(items, eq(items.id, dueEvents.itemId))
     .innerJoin(households, eq(households.id, notificationDeliveries.householdId))
     .leftJoin(userPreferences, eq(userPreferences.userId, notificationDeliveries.userId))
-    .where(inArray(notificationDeliveries.id, claimed.map((delivery) => delivery.id)));
+    .where(and(
+      inArray(notificationDeliveries.id, claimed.map((delivery) => delivery.id)),
+      eq(notificationDeliveries.status, "processing"),
+    ));
 
-  const transporter = config.smtpUrl ? nodemailer.createTransport(config.smtpUrl, { requireTLS: config.smtpSecurity === "starttls", tls: { minVersion: "TLSv1.2" } }) : undefined;
-  if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
-    webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
-  }
+  const rules = await db.select({
+    itemId: reminderRules.itemId,
+    daysBefore: reminderRules.daysBefore,
+    emailEnabled: reminderRules.emailEnabled,
+    pushEnabled: reminderRules.pushEnabled,
+  }).from(reminderRules).where(inArray(reminderRules.itemId, [...new Set(deliveries.map((delivery) => delivery.itemId))]));
+  const rulesByItem = new Map<string, typeof rules>();
+  for (const rule of rules) rulesByItem.set(rule.itemId, [...(rulesByItem.get(rule.itemId) ?? []), rule]);
 
   for (const delivery of deliveries) {
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
-      const channelStillEnabled = delivery.channel === "email"
+      const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
+      const matchingRule = (rulesByItem.get(delivery.itemId) ?? []).find((rule) => (
+        householdReminderTime(delivery.dueDate, rule.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
+        && (delivery.channel === "email" ? rule.emailEnabled : rule.pushEnabled)
+      ));
+      const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
         : delivery.userPushEnabled;
-      if (!channelStillEnabled) {
-        await getDb().update(notificationDeliveries).set({
-          status: "cancelled",
-          lockedAt: null,
-          leaseToken: null,
-          lastError: "recipient_preferences_disabled",
-          updatedAt: new Date(),
-        }).where(and(
-          eq(notificationDeliveries.id, delivery.id),
-          eq(notificationDeliveries.status, "processing"),
-          eq(notificationDeliveries.leaseToken, leaseToken),
-        ));
+      if (delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule) {
+        await cancelDelivery(db, delivery.id, leaseToken, now, null);
         continue;
       }
-      const message = `${delivery.title} is due on ${delivery.dueDate}.`;
+      if (!preferenceEnabled) {
+        await cancelDelivery(db, delivery.id, leaseToken, now, "recipient_preferences_disabled");
+        continue;
+      }
+      const title = delivery.title.trim().slice(0, 160);
+      const body = `${title} is due on ${delivery.dueDate}.`.slice(0, 320);
+      const subject = `${title} is coming up`.slice(0, 180);
+      const text = `Reminder: ${body}\nOpen Orbit to review it.`.slice(0, 500);
       if (delivery.channel === "email") {
-        if (!transporter) {
-          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured");
+        if (!config.smtpUrl) {
+          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
           continue;
         }
-        await transporter.sendMail({
+        if (!await prepareProviderDispatch(
+          db,
+          { id: delivery.id, channel: delivery.channel },
+          leaseToken,
+          currentTime,
+          leaseDurationMs,
+          beforeProviderDispatch,
+        )) continue;
+        await providers.sendEmail({
           from: config.smtpFrom,
           to: delivery.email,
-          subject: `${delivery.title} is coming up`,
-          text: `Hello ${delivery.displayName},\n\n${message}\n\nOpen Orbit to review ${delivery.householdName}.`,
+          subject,
+          text,
+          tlsMode: config.smtpSecurity,
         });
       } else {
         if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) {
-          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unconfigured");
+          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unconfigured", now, retryDelay);
           continue;
         }
-        const subscriptions = await getDb().select().from(pushSubscriptions).where(and(
+        const subscriptions = await db.select().from(pushSubscriptions).where(and(
           eq(pushSubscriptions.userId, delivery.userId),
           isNull(pushSubscriptions.revokedAt),
-          or(isNull(pushSubscriptions.expiresAt), gte(pushSubscriptions.expiresAt, new Date())),
+          or(isNull(pushSubscriptions.expiresAt), gte(pushSubscriptions.expiresAt, now)),
         ));
         if (!subscriptions.length) {
-          await failDelivery(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unsubscribed");
+          await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unsubscribed", now, retryDelay);
           continue;
         }
-        await Promise.all(subscriptions.map(async (subscription) => {
+        let leaseLost = false;
+        for (const subscription of subscriptions) {
+          if (!await prepareProviderDispatch(
+            db,
+            { id: delivery.id, channel: delivery.channel },
+            leaseToken,
+            currentTime,
+            leaseDurationMs,
+            beforeProviderDispatch,
+          )) {
+            leaseLost = true;
+            break;
+          }
           try {
-            await webPush.sendNotification({
-              endpoint: subscription.endpoint,
-              keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-            }, JSON.stringify({
-              title: `${delivery.title} is coming up`,
-              body: message,
-              url: "/",
-            }));
+            await providers.sendPush({
+              target: {
+                endpoint: subscription.endpoint,
+                keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+              },
+              payload: {
+                title: subject,
+                body,
+                url: "/",
+              },
+            });
           } catch (error) {
             const statusCode = (error as { statusCode?: number }).statusCode;
             if (statusCode === 404 || statusCode === 410) {
-              await getDb().update(pushSubscriptions).set({ revokedAt: new Date() })
-                .where(eq(pushSubscriptions.id, subscription.id));
-              return;
+              await db.update(pushSubscriptions).set({ revokedAt: now })
+                .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
+              continue;
             }
             throw error;
           }
-        }));
+        }
+        if (leaseLost) continue;
       }
-      await getDb().update(notificationDeliveries).set({
+      await db.update(notificationDeliveries).set({
         status: "sent",
-        sentAt: new Date(),
+        sentAt: now,
         lockedAt: null,
         leaseToken: null,
         lastError: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       }).where(and(
         eq(notificationDeliveries.id, delivery.id),
         eq(notificationDeliveries.status, "processing"),
@@ -378,11 +576,14 @@ async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWo
       ));
     } catch (error) {
       await failDelivery(
+        db,
         delivery.id,
         leaseToken,
         delivery.attempts,
         config.maxAttempts,
         categorizeProviderError(delivery.channel, error),
+        now,
+        retryDelay,
       );
     }
   }
@@ -390,18 +591,23 @@ async function deliverClaimed(claimed: ClaimedDelivery[], config: NotificationWo
 
 /** Persists only a bounded failure code, never an untrusted provider message. */
 async function failDelivery(
+  db: NotificationDatabase,
   id: string,
   leaseToken: string,
   attempts: number,
   maxAttempts: number,
   category: NotificationFailureCategory,
+  now: Date,
+  retryDelay: (attempts: number) => number,
 ): Promise<void> {
-  await getDb().update(notificationDeliveries).set({
-    status: deliveryFailureState(category, attempts, maxAttempts),
-    lockedAt: null,
+  const status = deliveryFailureState(category, attempts, maxAttempts);
+  const retryAt = status === "retry" ? new Date(now.getTime() + retryDelay(attempts)) : null;
+  await db.update(notificationDeliveries).set({
+    status,
+    lockedAt: retryAt,
     leaseToken: null,
     lastError: category,
-    updatedAt: new Date(),
+    updatedAt: now,
   }).where(and(
     eq(notificationDeliveries.id, id),
     eq(notificationDeliveries.status, "processing"),
@@ -409,11 +615,30 @@ async function failDelivery(
   ));
 }
 
-export async function runNotificationCycle(config = getNotificationWorkerConfig()): Promise<void> {
-  const now = new Date();
-  await materializeDueDeliveries(now);
-  const claimed = await claimDeliveries();
-  await deliverClaimed(claimed, config);
+export async function runNotificationCycle(
+  config = getNotificationWorkerConfig(),
+  dependencies: NotificationWorkerDependencies = {},
+): Promise<void> {
+  const db = dependencies.db ?? getDb();
+  const currentTime = dependencies.now ?? (() => new Date());
+  const now = new Date(currentTime().getTime());
+  const leaseDurationMs = dependencies.leaseDurationMs ?? notificationLeaseDurationMs;
+  const retryDelay = dependencies.retryDelayMs ?? notificationRetryDelayMs;
+  const nextLeaseToken = dependencies.nextLeaseToken ?? randomUUID;
+  const providers = dependencies.providers ?? createDefaultNotificationProviders(config);
+  await materializeDueDeliveries(db, now);
+  const claimed = await claimDeliveries(db, now, nextLeaseToken, leaseDurationMs, dependencies.claimLimit ?? 25);
+  await deliverClaimed(
+    db,
+    claimed,
+    config,
+    now,
+    currentTime,
+    providers,
+    leaseDurationMs,
+    retryDelay,
+    dependencies.beforeProviderDispatch,
+  );
 }
 
 const workerState = globalThis as typeof globalThis & {
