@@ -33,7 +33,8 @@ Docker socket.
 **Priority:** Required core workflow
 **Phase:** 3 — after secure document storage, parsing, extraction, and review
 **Dependencies:** ORB-FUT-003, ORB-FUT-004
-**Decision status:** Architecture choices remain open
+**Decision status:** v1 architecture accepted in
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)
 **Objective:** Let a registered user forward household documents to Orbit, or
 upload them directly, and turn them into reviewed items with the original
 documents retained. Both sources use one editable draft-and-approval flow.
@@ -85,9 +86,10 @@ Before creating an item, Orbit should rank possible matches using:
 - overlapping effective, expiry, renewal or service dates;
 - similarity to existing item titles and attached documents.
 
-Potential matches must produce a comparison screen with explicit choices to
-create a separate item, merge new information, or attach the documents without
-changing existing fields. Orbit must not silently merge uncertain records.
+Potential matches must produce a comparison screen. For v1 the explicit
+choices are to create a separate item or attach the documents without changing
+existing fields. Field-level merge remains deferred; if introduced later it
+must be separately reviewed and must never silently merge uncertain records.
 
 ### Security and privacy requirements
 
@@ -115,24 +117,25 @@ changing existing fields. Orbit must not silently merge uncertain records.
   and technical classifications only—never message bodies, subjects, extracted
   text, sensitive filenames, prompts, or model responses.
 
-### Architecture decisions required
+### Architecture decisions
 
-- IMAP polling versus IDLE, including reconnect and mailbox-cursor behaviour.
-- Separate IMAP and SMTP hosts, credentials and TLS requirements.
-- Dedicated per-instance mailbox versus unique per-user forwarding addresses.
-- Local-volume versus object-storage document backend, with a replaceable
-  storage interface.
-- OCR/document parsing service and structured extraction provider. These are
-  separate replaceable HTTP adapters; either may be local or remote.
-- Supported document types, maximum sizes and retention defaults.
-- Behaviour when the sender belongs to multiple households.
-- Instance-wide dedicated mailbox versus multiple administrator-managed
-  mailboxes. The safest first release uses one dedicated instance mailbox.
-- File-backed deployment configuration versus application-managed encrypted
-  mailbox credentials.
-- Whether SMTP must already be configured before IMAP ingestion is enabled.
-  The first implementation treats outbound SMTP as a prerequisite for receipts
-  and review notifications.
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md) defines the v1
+boundary:
+
+- one dedicated instance mailbox using bounded polling and verified TLS;
+- a provider-preserved envelope-recipient header plus versioned HMAC per-user
+  aliases, with visible mail headers excluded from identity;
+- private user-owned encrypted staging rather than hidden household items;
+- transient direct-upload inspection and one source-aware approval contract;
+- the direct-upload document types, bounded MIME/message limits, rejected
+  archives, five processing attempts, and 30-day pending-draft retention;
+- explicit create-separate or attach-to-existing duplicate outcomes, without
+  automatic or field-level merge;
+- separate secret-backed SMTP configuration as an IMAP enablement prerequisite.
+
+Storage, scanner, and parser implementations remain replaceable through their
+existing interfaces. A sender with multiple households chooses the destination
+during review; receipt never guesses it.
 
 ### Safest implementation sequence
 
