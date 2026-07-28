@@ -431,21 +431,57 @@ export async function applyWorkspaceCommand(
 
     const itemId = requireUuid(command.itemId, "Item");
     const [current] = await transaction.select().from(items)
-      .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+      .where(and(eq(items.id, itemId), eq(items.householdId, householdId)))
+      .for("update")
+      .limit(1);
     if (!current) throw new AppError("item_not_found", "That item is not available", 404);
+
+    if (command.type === "item.complete") {
+      // The completion key is the idempotency boundary. Lock it before reading
+      // so a replay or cross-item reuse cannot race the first completion.
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:item-completion:${command.activity.id}`}, 0))`);
+      const [existingCompletion] = await transaction.select({ itemId: dueEvents.itemId })
+        .from(dueEvents)
+        .where(and(
+          eq(dueEvents.householdId, householdId),
+          eq(dueEvents.completionKey, command.activity.id),
+        ))
+        .for("update")
+        .limit(1);
+      if (existingCompletion) {
+        if (existingCompletion.itemId !== itemId) {
+          throw new AppError("version_conflict", "This completion was already used for another item", 409);
+        }
+        return;
+      }
+    }
+
+    if (current.version !== command.expectedVersion) {
+      throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
+    }
 
     if (command.type === "item.archive") {
       await transaction.update(items).set({ status: "archived", version: sql`${items.version} + 1`, updatedAt: new Date() })
-        .where(eq(items.id, itemId));
+        .where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
 
     if (command.type === "item.complete") {
       const [currentEvent] = await transaction.select().from(dueEvents)
-        .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).orderBy(asc(dueEvents.dueDate)).limit(1);
+        .where(and(
+          eq(dueEvents.householdId, householdId),
+          eq(dueEvents.itemId, itemId),
+          isNull(dueEvents.completedAt),
+        ))
+        .orderBy(asc(dueEvents.dueDate))
+        .for("update")
+        .limit(1);
+      if (!currentEvent) {
+        throw new AppError("version_conflict", "This item has no active scheduled event", 409);
+      }
       let nextEventId: string | undefined;
-      if (command.nextDate && currentEvent) {
+      if (command.nextDate) {
         nextEventId = randomUUID();
         await transaction.insert(dueEvents).values({
           id: nextEventId,
@@ -463,16 +499,15 @@ export async function applyWorkspaceCommand(
           nextEventId,
         }).where(eq(dueEvents.id, currentEvent.id));
       }
-      const kind = currentEvent?.kind ?? (current.serviceDate ? "service" : current.renewalDate ? "renewal" : undefined);
       await transaction.update(items).set({
         costMinor: command.costMinor ?? current.costMinor,
         status: "active",
         snoozedUntil: null,
         recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,
-        ...itemDates(command.nextDate ? kind : undefined, command.nextDate),
+        ...itemDates(command.nextDate ? currentEvent.kind : undefined, command.nextDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       if (!command.nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
       await recordActivity(itemId, command.activity);
       return;
@@ -486,7 +521,7 @@ export async function applyWorkspaceCommand(
         ...itemDates(kind, command.dueDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       const [event] = await transaction.select({ id: dueEvents.id }).from(dueEvents)
         .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).limit(1);
       if (event) {
@@ -503,7 +538,7 @@ export async function applyWorkspaceCommand(
         snoozedUntil: command.snoozedUntil,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
@@ -513,7 +548,7 @@ export async function applyWorkspaceCommand(
         status: command.status,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
