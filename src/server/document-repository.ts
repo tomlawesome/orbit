@@ -408,6 +408,9 @@ export async function requestDocumentDeletion(userId: string, documentId: string
   const config = getDocumentConfig();
   const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
   const updated = await getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
+    );
     const [changed] = await transaction.update(documents).set({
       lifecycle: "pending_deletion",
       deleteAfter,
