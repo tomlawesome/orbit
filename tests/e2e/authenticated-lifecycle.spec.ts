@@ -92,6 +92,20 @@ async function openItemRow(page: Page, title: string) {
   await openButton.click();
 }
 
+async function reopenItemFromList(page: Page, title: string, list: "home" | "archive") {
+  await page.reload();
+  await waitForActiveHouseholdItem(page, title);
+  const listButton = list === "archive"
+    ? page.getByRole("button", { name: /^Archive(?:\s|$)/ })
+    : page.getByRole("button", { name: /^Home(?:\s|$)/ });
+  await expect(listButton, `Expected the ${list} item list to be available`).toBeVisible({ timeout: 15_000 });
+  await listButton.click();
+  await openItemRow(page, title);
+  const detail = page.getByRole("dialog", { name: title });
+  await expect(detail, `Expected reopened details for "${title}"`).toBeVisible({ timeout: 15_000 });
+  return detail;
+}
+
 async function createManualHousehold(page: Page, isMobile: boolean, name: string) {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
   const householdPicker = page.locator("button.household-picker");
@@ -288,17 +302,14 @@ test.describe("authenticated household lifecycle", () => {
     await waitForSynced(page);
     await waitForActiveHouseholdItem(page, updatedTitle);
 
-    await page.reload();
-    await openItemRow(page, updatedTitle);
-    detail = page.getByRole("dialog", { name: updatedTitle });
+    detail = await reopenItemFromList(page, updatedTitle, "home");
     await detail.getByRole("button", { name: "Complete renewal" }).click();
     await detail.getByLabel("Completed on").fill("2030-12-20");
     await detail.getByLabel("Next scheduled date").fill("2031-12-20");
     await detail.getByRole("button", { name: "Save completion" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} renewal completed`);
     await waitForSynced(page);
-    detail = page.getByRole("dialog", { name: updatedTitle });
-    await expect(detail).toBeVisible({ timeout: 15_000 });
+    detail = await reopenItemFromList(page, updatedTitle, "home");
 
     await detail.getByRole("button", { name: "Reschedule" }).click();
     const reschedulePanel = detail.locator("form.detail-action-panel");
@@ -306,8 +317,7 @@ test.describe("authenticated household lifecycle", () => {
     await reschedulePanel.getByRole("button", { name: "Reschedule", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} rescheduled`);
     await waitForSynced(page);
-    detail = page.getByRole("dialog", { name: updatedTitle });
-    await expect(detail).toBeVisible({ timeout: 15_000 });
+    detail = await reopenItemFromList(page, updatedTitle, "home");
 
     await detail.getByRole("button", { name: "Snooze" }).click();
     const snoozePanel = detail.locator("form.detail-action-panel");
@@ -315,26 +325,21 @@ test.describe("authenticated household lifecycle", () => {
     await snoozePanel.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Reminders snoozed until");
     await waitForSynced(page);
-    detail = page.getByRole("dialog", { name: updatedTitle });
-    await expect(detail).toBeVisible({ timeout: 15_000 });
+    detail = await reopenItemFromList(page, updatedTitle, "home");
 
     await detail.getByRole("button", { name: "Cancel item" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} cancelled`);
     await waitForSynced(page);
-    await page.getByRole("button", { name: /^Archive/ }).click();
-    await openItemRow(page, updatedTitle);
-    detail = page.getByRole("dialog", { name: updatedTitle });
+    detail = await reopenItemFromList(page, updatedTitle, "archive");
     await detail.getByRole("button", { name: "Restore item" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} restored`);
     await waitForSynced(page);
-    detail = page.getByRole("dialog", { name: updatedTitle });
-    await expect(detail).toBeVisible({ timeout: 15_000 });
+    detail = await reopenItemFromList(page, updatedTitle, "home");
     await detail.getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} archived`);
     await waitForSynced(page);
 
-    await openItemRow(page, updatedTitle);
-    detail = page.getByRole("dialog", { name: updatedTitle });
+    detail = await reopenItemFromList(page, updatedTitle, "archive");
     await expect(detail.getByRole("heading", { name: "Activity" })).toBeVisible();
     await expect(detail).toContainText("Item added");
     await expect(detail).toContainText("Details updated");

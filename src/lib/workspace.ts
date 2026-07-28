@@ -7,6 +7,7 @@ import {
   sectionIcons,
   type HomeItem,
   type HouseholdSection,
+  type ScheduleKind,
 } from "@/lib/domain";
 
 export const WORKSPACE_VERSION = 1;
@@ -51,6 +52,10 @@ export const workspaceItemSchema = z.object({
     context.addIssue({ code: "custom", path: ["recurrenceMonths"], message: "Recurrence requires a schedule type" });
   }
 });
+
+export function initialScheduleKind(item?: Pick<HomeItem, "scheduleKind">): ScheduleKind | "none" {
+  return item ? item.scheduleKind ?? "none" : "renewal";
+}
 
 export const itemActivitySchema = z.object({
   id: z.string().min(1).max(100),
