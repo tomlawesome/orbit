@@ -80,17 +80,25 @@ Only work close to delivery is decomposed. Later epics are refined when their
 acceptance criteria can be based on the current implementation rather than a
 speculative backlog.
 
-The first decomposed group is
+The completed first decomposed group is
 [#24](https://github.com/tomlawesome/orbit/issues/24) through
-[#28](https://github.com/tomlawesome/orbit/issues/28). GitHub owns their live
-status. The next implementation wave is deliberately limited to:
+[#28](https://github.com/tomlawesome/orbit/issues/28). GitHub owns its live
+status and closure evidence.
 
-- [fresh and baseline-upgrade migration tests](https://github.com/tomlawesome/orbit/issues/27);
-- [negative backup/restore recovery paths](https://github.com/tomlawesome/orbit/issues/28).
+The active decomposed group is:
+
+- [#40 — conflict-safe item transitions and the manual item journey](https://github.com/tomlawesome/orbit/issues/40);
+- [#41 — deterministic reminder scheduling and bounded delivery](https://github.com/tomlawesome/orbit/issues/41);
+- [#42 — recoverable document purge and the secure document lifecycle](https://github.com/tomlawesome/orbit/issues/42);
+- [#43 — optional document-assisted editable item creation](https://github.com/tomlawesome/orbit/issues/43).
+
+The remaining Wave 2 identity evidence stays within
+[#14](https://github.com/tomlawesome/orbit/issues/14) because it closes the
+existing identity outcome rather than introducing a new delivery slice.
 
 GitHub milestone assignment is administrative metadata rather than a second
 status source: issues #10–#13 and this baseline pull request belong to `v1
-Engineering Baseline`; issues #14–#28 belong to `v1.0`.
+Engineering Baseline`; v1 roadmap and implementation issues belong to `v1.0`.
 
 ## Rolling planning and delegation
 
@@ -117,31 +125,45 @@ review.
 
 ### Wave 1 — operational data safety
 
-- Issue #27 proves fresh migrations, the supported baseline upgrade, migration
-  idempotency and failure recording.
-- Issue #28 proves corrupt, wrong-key, mismatched-object and interrupted
-  recovery behaviour.
+- Completed issue #27 proves fresh migrations, the supported baseline upgrade,
+  migration idempotency and failure recording.
+- Completed issue #28 proves corrupt, wrong-key, mismatched-object and
+  interrupted recovery behaviour.
 
 The architecture is planned jointly under
 [ADR-0004](adr/0004-supported-upgrades-and-recoverable-restore.md). The two
-implementations may run concurrently with disjoint ownership: #27 owns
-migration fixtures and the PostgreSQL migration harness; #28 owns backup,
-restore and disposable recovery scenarios. Integrate #27 first, then validate
-#28 against its upgrade-floor and rollback contract.
+implementations were integrated in dependency order: #27 established the
+upgrade floor and rollback contract before #28's final recovery validation.
+Their accepted pull requests and protected workflow runs are the live closure
+evidence in GitHub.
 
 ### Wave 2 — core authenticated vertical journeys
 
-- Refine issue #16 into item persistence/concurrency, reminder delivery
-  contracts and one complete authenticated item journey.
-- Refine issue #17 into secure document lifecycle/API evidence and the
-  document-assisted, editable item-entry journey.
-- Collect the remaining representative real-provider evidence for issue #14
-  alongside the wave without mixing provider-specific authentication changes
-  into item or document pull requests.
+The first implementation phase may run three disjoint Luna Extra High tasks in
+isolated worktrees:
 
-Item persistence and the manual editor land before the document-assisted
-browser journey because document suggestions extend, rather than replace, that
-workflow.
+- #40 owns item state transitions, persistence and the authenticated manual
+  item journey;
+- #41 owns reminder materialization, claims, leases and provider contracts;
+- #42 owns document purge ordering, recovery and the authenticated secure
+  document lifecycle.
+
+Sol Extra High integrates the resulting branches sequentially, with #40 first
+where shared workspace or browser fixtures overlap. Each later branch rebases
+onto the accepted release line and reruns its authoritative checks before
+merge.
+
+Issue #43 is planned now but implementation starts only after #40 and #42 are
+accepted. Document suggestions extend the manual editor and secure document
+lifecycle; they never replace manual entry or persist an item before explicit
+submission.
+
+In parallel, issue #14 closes successful atomic session refresh, logout and
+OIDC failure-route contracts. Representative Authentik or equivalent
+acceptance is then recorded against a digest-pinned preview using sanitized
+product/version and outcome evidence only. Production authentication remains
+provider-neutral; a provider-specific code path or security-policy change
+requires Sol Extra High review before implementation proceeds.
 
 ### Wave 3 — lifecycle, administration and operations
 

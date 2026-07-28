@@ -1,7 +1,8 @@
 # Orbit engineering baseline
 
 **Baseline date:** 2026-07-27
-**Source revision:** `8a8e37e`
+**Evidence updated:** 2026-07-28
+**Source revision:** `f9dadf9`
 **Published preview (historic tag):** `rc-2026.07.27.96`
 **Preview digest:** `sha256:a1f05125ec9c95bba47c2fc977c7d235afa3ab8b7a0533b7ebeb09333b7ff543`
 
@@ -47,31 +48,31 @@ changing delivery status after this snapshot.
 The suite is meaningful, but no requirement-to-test traceability existed
 before this audit. The low whole-source coverage baseline confirms the missing
 route, repository, worker and component layers without turning a percentage
-into a release target. The image-publication job also
-rebuilds after the smoke-tested local image, so CI does not yet prove that the
-published image is byte-for-byte the image exercised by the Compose gate.
+into a release target. Subsequent CI work now builds once and tests and
+publishes the same immutable image identity; feature completeness, manual
+acceptance and stable promotion remain separate release gates.
 
 ## Capability evidence
 
 | Capability | Requirements | Implementation evidence | Existing evidence | Classification and principal gap |
 | --- | --- | --- | --- | --- |
-| OIDC and sessions | V1-ID-01 | `src/lib/auth`, auth routes | OIDC/crypto/session units; disposable OIDC browser flow | **Partially proven:** representative real-provider sign-in, disabled-session revocation, and route-level failure cases remain |
-| Household privacy and authorization | V1-ID-02, V1-HH-02 | authorization and workspace access modules | signed-out route checks; member/admin lifecycle browser flow; document access pure tests | **Partially proven:** no database-backed cross-household matrix across critical APIs |
-| Account administration | V1-ID-03 | admin user repository/routes | indirect static/unit coverage only | **Implemented, unverified:** disable/re-enable, last-admin, owner, and session-revocation flows need integration/browser evidence |
+| OIDC and sessions | V1-ID-01 | `src/lib/auth`, auth routes | OIDC/crypto/session units; disposable OIDC protocol/browser flow; PostgreSQL session revocation | **Partially proven:** successful atomic refresh, logout/discovery failure contracts and representative real-provider sign-in remain |
+| Household privacy and authorization | V1-ID-02, V1-HH-02 | authorization and workspace access modules | PostgreSQL-backed member/admin/outsider matrix; signed-out checks; authenticated lifecycle browser flow | **Partially proven:** the core matrix is proven, while later archive, administration and document-lifecycle routes retain their issue-specific negative cases |
+| Account administration | V1-ID-03 | admin user repository/routes | PostgreSQL disable/re-enable, last-admin, owner-transfer and session-revocation evidence | **Partially proven:** retention expiry and permanent purge remain part of the account-lifecycle epic |
 | Household creation and lifecycle | V1-HH-01–03 | workspace and lifecycle services/routes | workspace reducer units; authenticated create/member/remove/restore browser flow | **Partially proven:** permanent purge, retention expiry, concurrent access, and negative route cases remain |
-| Items, sections, schedules and history | V1-ITEM-01–02 | workspace command contract/repository and UI | reducer/domain/preference units | **Partially proven:** persistence, authorization, concurrency, and authenticated browser journeys are untested |
+| Items, sections, schedules and history | V1-ITEM-01–02 | workspace command contract/repository and UI | reducer/domain/preference units; PostgreSQL authorization harness | **Partially proven:** non-upsert transitions lack complete stale-state guards; completion replay, persistence/history and the authenticated manual journey remain in #40 |
 | Responsive UI and accessibility | V1-UX-01, V1-UX-03 | dashboard/components/styles | signed-out axe and mobile overflow checks | **Partially proven:** authenticated workspace, dialogs, settings, documents, text scaling, themes and keyboard flows are absent |
 | Offline/PWA behaviour | V1-UX-02 | service worker, IndexedDB snapshot and queue | no dedicated automated evidence | **Implemented, unverified:** privacy, conflict, retry, upgrade and storage-clear behaviour need a product decision and browser tests |
-| Reminder calculation and delivery | V1-REM-01–02 | notification domain/worker and provider calls | calendar/DST/config/retry/category units | **Partially proven:** database claims, duplicate prevention, SMTP/Web Push contracts and representative delivery remain |
-| Secure documents | V1-DOC-01 | validation, ClamAV, envelope encryption, local storage, lifecycle worker/routes | validation/crypto/storage/scanner/authorization units; EICAR Compose check; backup marker round trip; signed-out routes | **Partially proven:** authenticated upload/download, cross-household denial, quota races, corrupt storage, purge and wrong-key recovery remain |
-| Document-assisted item entry | V1-DOC-02 | manual item editor plus bounded Tika inspection | safe suggestion units | **Partially proven:** parser contract/failure cases, representative documents and authenticated browser editing/submission remain |
+| Reminder calculation and delivery | V1-REM-01–02 | notification domain/worker and provider calls | calendar/DST/config/retry/category units | **Partially proven:** database materialization/claims, duplicate prevention, lease/restart behaviour, SMTP/Web Push contracts and DST transition boundaries remain in #41 |
+| Secure documents | V1-DOC-01 | validation, ClamAV, envelope encryption, local storage, lifecycle worker/routes | validation/crypto/storage/scanner/authorization units; EICAR Compose check; backup recovery matrix; signed-out routes | **Partially proven:** purge can be marked complete before ciphertext deletion; authenticated lifecycle, quota races and interrupted/corrupt dependency states remain in #42 |
+| Document-assisted item entry | V1-DOC-02 | manual item editor plus bounded Tika inspection | safe source-aware suggestion units | **Partially proven:** optional no-document entry, parser failure containment, explicit-submit semantics, representative documents and authenticated editable browser evidence remain in #43 |
 | Portable archives | V1-OPS-04 | encrypted archive, storage, preview/import routes | crypto/storage units | **Partially proven:** database-backed export/import authorization, conflicts, expiry, documents and failure atomicity remain |
 | Administrator operations | V1-OPS-02 | health, queue, audit and corrective-action routes/UI | no focused service/route/browser suite | **Implemented, unverified:** authorization, redaction, state transitions and degraded-provider evidence remain |
 | Installation and secrets | V1-OPS-01 | configure/install/deploy scripts; file-backed secrets; non-root entrypoint | Compose configuration and runtime permission checks | **Partially proven:** clean-host install, interrupted rerun, update compatibility and documented operator recovery remain |
-| Migrations and update | V1-OPS-03 | Drizzle migrations and migrate-on-start entrypoint | fresh empty Compose database starts | **Partially proven:** ordered fresh-schema comparison and representative previous-version upgrade/rollback tests are missing |
-| Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | PostgreSQL marker plus encrypted-file round trip | **Partially proven:** corrupt manifests, wrong KEK, mixed states, interrupted restore and off-host recovery exercise remain |
+| Migrations and update | V1-OPS-03 | Drizzle migrations and migrate-on-start entrypoint | ordered fresh-schema, supported-baseline upgrade, idempotency and failure-recording tests | **Partially proven:** automated migration integrity is established; operator update, rollback and clean-host acceptance remain |
+| Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | corrupt/wrong-key/mismatched-object/interrupted restore matrix plus successful PostgreSQL and encrypted-file recovery | **Partially proven:** automated recovery safety is established; documented off-host operator recovery remains |
 | Health, audit and logging | V1-OPS-02 | health endpoints, audit table and safe failure categories | health smoke plus unit category checks | **Implemented, unverified:** redaction, audit completeness, retention and degraded-service behaviour need integration evidence |
-| CI, preview and promotion | V1-REL-01 | validation and promotion workflows | successful preview run 96 and recorded digest | **Partially proven:** the published image is rebuilt after smoke; no feature-complete RC, supply-chain reports, or completed stable promotion exists |
+| CI, preview and promotion | V1-REL-01 | validation and promotion workflows | build-once exact-image preview flow and immutable digest recording | **Partially proven:** no feature-complete RC, supply-chain reports, representative operator acceptance or completed stable promotion exists |
 | IMAP/SMTP ingestion | Deferred | ingestion, holding, review and receipt workers/routes | configuration, alias, TLS-header and worker-helper units | **Deferred:** live provider contract, hostile MIME, duplicate, recovery, browser review and privacy evidence are incomplete |
 | Local semantic extraction | Deferred | optional Ollama container only | Compose configuration validation | **Deferred:** no application adapter or automatic-write authority is allowed |
 
@@ -83,12 +84,12 @@ critical integration layers are still missing.
 
 | Route group | Current evidence | Required next evidence |
 | --- | --- | --- |
-| `/api/auth/*` | auth unit tests and one full disposable-OIDC journey | callback/session/logout failures, revocation, disabled users, origin and cache headers |
-| `/api/workspace*` | reducer units; signed-out GET; lifecycle browser flow | database-backed command authorization, invalid/stale commands, concurrency and full item journey |
+| `/api/auth/*` | auth units; disposable-OIDC protocol/browser journey; PostgreSQL revocation and disabled-user evidence | successful atomic refresh, logout/discovery failure contracts, cache headers and representative real-provider acceptance |
+| `/api/workspace*` | reducer units; signed-out GET; PostgreSQL authorization matrix; lifecycle browser flow | invalid/stale item transitions, completion replay/concurrency and the full authenticated manual item journey |
 | `/api/preferences`, `/api/push/*` | preference and notification pure units | authenticated ownership, CSRF, endpoint redaction and provider contract tests |
-| `/api/households/*` | member/admin lifecycle browser flow | owner/member/outsider matrix, last-owner rules, retention/purge and archive authorization |
-| `/api/documents/*`, item documents | signed-out checks and lower-level document units | authenticated upload/download/delete/restore matrix, quota/state races and response headers |
-| `/api/document-drafts/*` | suggestion pure units | Tika bounds/failure contract, duplicate modes, authorization and editable browser flow |
+| `/api/households/*` | PostgreSQL owner/member/outsider and last-owner matrix; member/admin lifecycle browser flow | retention/purge and archive authorization |
+| `/api/documents/*`, item documents | signed-out checks, PostgreSQL access matrix and lower-level document units | authenticated upload/download/delete/restore lifecycle, quota/state races, purge recovery and response headers |
+| `/api/document-drafts/*` | source-aware suggestion pure units | Tika bounds/failure contract, no-document path, explicit-submit/abandonment semantics, authorization and editable browser flow |
 | `/api/portable-archives/*` | crypto/storage units | household authorization, atomic import, conflicts, expiry and corrupt/wrong-passphrase cases |
 | `/api/imap-inbox/*` | IMAP helper units | user isolation, hostile/duplicate receipt states and browser review; deferred from stable gate |
 | `/api/admin/*` | health smoke only | non-admin denial, safe redaction, corrective-state transitions and audit evidence |
@@ -98,20 +99,25 @@ critical integration layers are still missing.
 
 ### P0 — stable-release blockers
 
-1. A reusable PostgreSQL-backed service/API integration harness.
-2. A negative authorization matrix for critical household, document, archive,
-   membership, account, and administrator operations.
-3. Fresh-install and representative upgrade migration tests.
-4. Authenticated browser coverage for core item and secure-document journeys.
-5. Expanded backup/restore failure and key-mismatch evidence.
-6. Build-once CI so system tests and preview/RC publication use the same image
-   identity.
+1. Conflict-safe item transitions and authenticated manual item coverage
+   ([#40](https://github.com/tomlawesome/orbit/issues/40)).
+2. Recoverable document purge and authenticated secure-document lifecycle
+   coverage ([#42](https://github.com/tomlawesome/orbit/issues/42)).
+3. Optional document-assisted item entry that remains editable and persists
+   nothing before explicit submission
+   ([#43](https://github.com/tomlawesome/orbit/issues/43)).
+
+Completed baseline blockers now include the reusable PostgreSQL harness,
+critical negative authorization matrix, fresh/baseline-upgrade migration
+proof, expanded restore-failure matrix, and build-once exact-image CI. Their
+accepted issues and protected runs retain the detailed evidence.
 
 ### P1 — required professional quality
 
 1. Authenticated accessibility, responsive, text-scale and theme coverage.
 2. Administrator authorization, redaction and corrective-action tests.
-3. Notification database-claim and provider-contract tests.
+3. Notification database-claim and provider-contract tests
+   ([#41](https://github.com/tomlawesome/orbit/issues/41)).
 4. Offline/PWA support decision and evidence or removal of unsupported claims.
 5. Dependency review, vulnerability reporting, SBOM, image scan and provenance.
 6. Operator-tested clean installation, update, rollback decision, restart and
@@ -140,16 +146,21 @@ and this branch. The `v1.0` roadmap contains these outcome-level epics:
 9. [optional mail and document automation](https://github.com/tomlawesome/orbit/issues/22);
 10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
-Only the first two risk areas are decomposed into implementable issues at
-baseline: [#24](https://github.com/tomlawesome/orbit/issues/24) through
-[#28](https://github.com/tomlawesome/orbit/issues/28). The remaining epics are
-refined when they approach delivery.
+The completed first delivery group is
+[#24](https://github.com/tomlawesome/orbit/issues/24) through
+[#28](https://github.com/tomlawesome/orbit/issues/28). The active Wave 2 group
+is [#40](https://github.com/tomlawesome/orbit/issues/40) through
+[#43](https://github.com/tomlawesome/orbit/issues/43), plus the remaining
+session and representative-provider evidence within
+[#14](https://github.com/tomlawesome/orbit/issues/14). Later epics remain
+outcome-level until current evidence makes their next slices decision-complete.
 
 ## Baseline conclusion
 
 Orbit has a credible security-conscious foundation and a working deployable
-preview, not an empty prototype. Its principal quality deficit is missing
-integration evidence across real persistence and authorization boundaries,
-followed by core authenticated browser coverage and exact-image CI. The next
-work should add those proofs around existing behaviour before extending the
-feature set.
+preview, not an empty prototype. PostgreSQL integration, critical negative
+authorization, migration/recovery safety and exact-image CI now have useful
+automated evidence. The next release risks are conflict-safe item behaviour,
+secure document purge/lifecycle, bounded reminder delivery and complete
+authenticated core journeys. Wave 2 adds those proofs around existing
+behaviour before extending optional automation.
