@@ -246,9 +246,15 @@ the supported runtime. It must not introduce a custom cipher construction.
 - backup/restore with mixed states and key verification;
 - browser tests proving attachment-only delivery and signed-out privacy.
 
-## Deferred capabilities
+## Planned v1 intake extensions
 
-The first phase does not include inline previews, document parsing, OCR,
-semantic extraction, IMAP ingestion, public sharing, S3 storage, archive
-uploads, or automatic duplicate merging. Each must extend this threat model
-before implementation.
+Bounded document parsing and dedicated-mailbox ingestion are required v1
+inputs to the same private, editable review flow. Before mailbox enablement,
+this model must cover authenticated envelope identity, hostile MIME and archive
+limits, receipt idempotency, quarantine, retry/reconnect behaviour, cross-
+household draft isolation, retention, redacted diagnostics, and explicit user
+approval before any item write or attachment.
+
+Inline previews, OCR, model-dependent semantic extraction, public sharing, S3
+storage, archive uploads, and automatic duplicate merging remain deferred.
+Each must extend this threat model before implementation.
