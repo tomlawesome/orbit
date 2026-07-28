@@ -71,7 +71,7 @@ write_hmac() {
 document_kek_fingerprint() {
   local fingerprint
   if ! fingerprint="$(compose run --rm --no-deps -T --entrypoint node orbit-app \
-    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek 2>/dev/null)"; then
+    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek </dev/null 2>/dev/null)"; then
     fail 'preflight/key failed; the configured document key could not be checked.'
   fi
   [[ "$fingerprint" =~ ^[a-f0-9]{64}$ ]] || fail 'preflight/key failed; the configured document key is invalid.'

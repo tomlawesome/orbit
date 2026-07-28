@@ -61,7 +61,7 @@ write_hmac() {
 document_kek_fingerprint() {
   local fingerprint
   fingerprint="$(compose run --rm --no-deps -T --entrypoint node orbit-app \
-    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek 2>/dev/null)"
+    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek </dev/null 2>/dev/null)"
   [[ "$fingerprint" =~ ^[a-f0-9]{64}$ ]] || fail "Could not derive the document-key fingerprint."
   printf '%s' "$fingerprint"
 }
