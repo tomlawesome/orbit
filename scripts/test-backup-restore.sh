@@ -509,7 +509,7 @@ test_wrong_recovery_material() {
 }
 
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
-compose exec -T orbit-app sh -c \
+compose exec -T --user orbit:orbit orbit-app sh -c \
   'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2"' \
   sh "$storage_path" "$attachment_storage_path"
 expected_hash="$(compose exec -T orbit-app sha256sum "$storage_path" | awk '{print $1}')"
