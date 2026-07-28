@@ -66,4 +66,49 @@ describe("owned document purge coordination", () => {
     await expect(processOwnedPurge(job, driver)).resolves.toBe("stale");
     expect(events).toEqual(["read"]);
   });
+
+  it("retries idempotently after ciphertext deletion precedes stale finalization", async () => {
+    const events: string[] = [];
+    let ciphertextPresent = true;
+    let finalizationAttempts = 0;
+    let documentLifecycle = "pending_deletion";
+    let purgeStatus = "processing";
+    const driver = driverFor({
+      readOwnedPurge: async () => {
+        events.push(`read:${purgeStatus}`);
+        expect(["processing", "retry"]).toContain(purgeStatus);
+        purgeStatus = "processing";
+        return state;
+      },
+      deleteCiphertext: async () => {
+        events.push(ciphertextPresent ? "delete:present" : "delete:already-absent");
+        ciphertextPresent = false;
+      },
+      finalizeOwnedPurge: async () => {
+        finalizationAttempts += 1;
+        events.push(`finalize:${finalizationAttempts}`);
+        if (finalizationAttempts === 1) {
+          purgeStatus = "retry";
+          return false;
+        }
+        documentLifecycle = "deleted";
+        purgeStatus = "completed";
+        return true;
+      },
+    }, events);
+
+    await expect(processOwnedPurge(job, driver)).resolves.toBe("stale");
+    expect(ciphertextPresent).toBe(false);
+    expect(documentLifecycle).toBe("pending_deletion");
+    expect(purgeStatus).toBe("retry");
+    expect(events).toEqual(["read:processing", "delete:present", "finalize:1"]);
+
+    await expect(processOwnedPurge(job, driver)).resolves.toBe("completed");
+    expect(documentLifecycle).toBe("deleted");
+    expect(purgeStatus).toBe("completed");
+    expect(events).toEqual([
+      "read:processing", "delete:present", "finalize:1",
+      "read:retry", "delete:already-absent", "finalize:2",
+    ]);
+  });
 });

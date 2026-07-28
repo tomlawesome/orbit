@@ -4,6 +4,7 @@ import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeJob, type OwnedPurgeState } from "@/server/documents/purge";
+import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 
@@ -362,24 +363,43 @@ async function reconcileDocumentStorage(): Promise<void> {
     // A pending purge may have removed ciphertext before its finalization
     // transaction. Preserve that durable retry evidence for the next claim.
     if (record.lifecycle === "pending_deletion") continue;
-    await getDb().transaction(async (transaction) => {
-      const [rejected] = await transaction.update(documents).set({
-        lifecycle: "rejected",
-        failureCode: "storage_object_missing",
-        updatedAt: new Date(),
-      }).where(and(
-        eq(documents.id, record.documentId),
-        inArray(documents.lifecycle, ["available", "pending_deletion"]),
-      )).returning({ id: documents.id });
-      if (!rejected) return;
-      await transaction.insert(auditLog).values({
-        householdId: record.householdId,
-        actorUserId: null,
-        entityType: "document",
-        entityId: record.documentId,
-        action: "document_storage_missing",
-        changes: { itemId: record.itemId },
-      });
+    await reconcileMissingDocument(record, {
+      withDocumentLock: async (documentId, work) => getDb().transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
+        );
+        return work({
+          readCurrentLifecycle: async (currentDocumentId) => {
+            const records = await transaction.execute(sql<{ lifecycle: string }>`
+              select lifecycle
+              from documents
+              where id = ${currentDocumentId}
+              for update
+            `) as unknown as Array<{ lifecycle: string }>;
+            return records[0]?.lifecycle;
+          },
+          rejectAvailableDocument: async (snapshot) => {
+            const [rejected] = await transaction.update(documents).set({
+              lifecycle: "rejected",
+              failureCode: "storage_object_missing",
+              updatedAt: new Date(),
+            }).where(and(
+              eq(documents.id, snapshot.documentId),
+              eq(documents.lifecycle, "available"),
+            )).returning({ id: documents.id });
+            if (!rejected) return false;
+            await transaction.insert(auditLog).values({
+              householdId: snapshot.householdId,
+              actorUserId: null,
+              entityType: "document",
+              entityId: snapshot.documentId,
+              action: "document_storage_missing",
+              changes: { itemId: snapshot.itemId },
+            });
+            return true;
+          },
+        });
+      }),
     });
   }
 
