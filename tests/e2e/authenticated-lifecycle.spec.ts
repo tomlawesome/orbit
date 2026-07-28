@@ -26,11 +26,126 @@ async function readWorkspace(page: Page) {
   throw new Error("Workspace read did not run");
 }
 
+type DurableWorkspaceItem = { id: string; title: string };
+type DurableWorkspaceHousehold = { id: string; name: string; items: DurableWorkspaceItem[] };
+type DurableWorkspace = { activeHouseholdId: string | null; households: DurableWorkspaceHousehold[] };
+
+function isDurableWorkspace(workspace: unknown): workspace is DurableWorkspace {
+  if (!workspace || typeof workspace !== "object") return false;
+  const candidate = workspace as Record<string, unknown>;
+  if ((candidate.activeHouseholdId !== null && typeof candidate.activeHouseholdId !== "string") || !Array.isArray(candidate.households)) return false;
+  return candidate.households.every((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const household = entry as Record<string, unknown>;
+    if (typeof household.id !== "string" || typeof household.name !== "string" || !Array.isArray(household.items)) return false;
+    return household.items.every((item) => {
+      if (!item || typeof item !== "object") return false;
+      const candidateItem = item as Record<string, unknown>;
+      return typeof candidateItem.id === "string" && typeof candidateItem.title === "string";
+    });
+  });
+}
+
+async function waitForWorkspace(
+  page: Page,
+  condition: (workspace: DurableWorkspace) => boolean,
+  message: string,
+): Promise<DurableWorkspace> {
+  let workspace: DurableWorkspace | undefined;
+  await expect.poll(async () => {
+    const response = await readWorkspace(page);
+    if (!response.ok || !isDurableWorkspace(response.workspace)) return false;
+    workspace = response.workspace;
+    return condition(workspace);
+  }, { timeout: 15_000, message }).toBe(true);
+  if (!workspace) throw new Error(`Workspace condition completed without a durable response: ${message}`);
+  return workspace;
+}
+
+async function waitForDurableWorkspace(page: Page): Promise<DurableWorkspace> {
+  return waitForWorkspace(page, () => true, "Expected a durable authenticated workspace response");
+}
+
+async function waitForActiveHousehold(page: Page, name: string): Promise<DurableWorkspace> {
+  return waitForWorkspace(
+    page,
+    (workspace) => workspace.households.some((household) => household.id === workspace.activeHouseholdId && household.name === name),
+    `Expected household "${name}" to become the durable active household`,
+  );
+}
+
+async function waitForActiveHouseholdItem(page: Page, title: string): Promise<DurableWorkspace> {
+  return waitForWorkspace(
+    page,
+    (workspace) => workspace.households.some((household) => household.id === workspace.activeHouseholdId && household.items.some((item) => item.title === title)),
+    `Expected active household to durably contain item "${title}"`,
+  );
+}
+
+async function openItemRow(page: Page, title: string) {
+  const row = page.locator("article.item-card").filter({
+    has: page.getByRole("heading", { name: title, exact: true }),
+  });
+  await expect(row, `Expected exactly one item-list row for "${title}"`).toHaveCount(1, { timeout: 15_000 });
+  const openButton = row.getByRole("button", { name: `Open ${title}`, exact: true });
+  await expect(openButton, `Expected the scoped open action for "${title}"`).toBeVisible({ timeout: 15_000 });
+  await openButton.click();
+}
+
+async function reopenItemFromList(page: Page, title: string, list: "home" | "archive") {
+  await page.reload();
+  await waitForActiveHouseholdItem(page, title);
+  const listButton = list === "archive"
+    ? page.getByRole("button", { name: /^Archive(?:\s|$)/ })
+    : page.getByRole("button", { name: /^Home(?:\s|$)/ });
+  await expect(listButton, `Expected the ${list} item list to be available`).toBeVisible({ timeout: 15_000 });
+  await listButton.click();
+  await openItemRow(page, title);
+  const detail = page.getByRole("dialog", { name: title });
+  await expect(detail, `Expected reopened details for "${title}"`).toBeVisible({ timeout: 15_000 });
+  return detail;
+}
+
+async function createManualHousehold(page: Page, isMobile: boolean, name: string) {
+  const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
+  const householdPicker = page.locator("button.household-picker");
+  const workspace = await waitForDurableWorkspace(page);
+  if (workspace.activeHouseholdId && workspace.households.length > 0) {
+    if (isMobile) {
+      const navigation = page.getByRole("button", { name: "Open navigation" });
+      await expect(navigation).toBeVisible({ timeout: 15_000 });
+      await navigation.click();
+    }
+    await expect(householdPicker).toBeVisible({ timeout: 15_000 });
+    await householdPicker.click();
+    const addHousehold = page.getByRole("button", { name: "Add a household" });
+    await expect(addHousehold).toBeVisible({ timeout: 15_000 });
+    await addHousehold.click();
+  } else {
+    await expect(recoveryHeading).toBeVisible({ timeout: 15_000 });
+    const createHousehold = page.getByRole("button", { name: "Create a new household" });
+    await expect(createHousehold).toBeVisible({ timeout: 15_000 });
+    await createHousehold.click();
+  }
+  const dialog = page.getByRole("dialog", { name: "Set up your space" });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await dialog.getByLabel("Household name").fill(name);
+  await dialog.getByRole("button", { name: "Create household" }).click();
+  await waitForActiveHousehold(page, name);
+  await page.reload();
+  await waitForActiveHousehold(page, name);
+  await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+}
+
+async function waitForSynced(page: Page) {
+  await expect(page.locator(".sync-state")).toHaveText("Synced", { timeout: 15_000 });
+}
+
 test.describe("authenticated household lifecycle", () => {
   // This test intentionally mutates the one disposable acceptance database.
   // Retrying it would start from a different household state and hide the
   // original failure with a misleading first-sign-in assertion.
-  test.describe.configure({ retries: 0 });
+  test.describe.configure({ mode: "serial", retries: 0 });
 
   test("a first sign-in creates no household until the user chooses one", async ({ page, browser, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
@@ -142,5 +257,149 @@ test.describe("authenticated household lifecycle", () => {
       activeHouseholdId: createdWorkspace.activeHouseholdId,
       households: [{ name: "Acceptance household" }],
     });
+  });
+
+  test("proves the authenticated manual item journey without a document", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.skip(isMobile, "The complete stateful journey is exercised on desktop; mobile has its own deterministic scenario below.");
+
+    await signIn(page, administrator);
+    const suffix = Date.now();
+    await createManualHousehold(page, false, `Issue 40 desktop ${suffix}`);
+    const title = `Manual item ${suffix}`;
+    const updatedTitle = `${title} updated`;
+    const inspectionRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/item-document-inspection")) inspectionRequests.push(request.url());
+    });
+
+    await page.getByRole("button", { name: "Add item", exact: true }).first().click();
+    let editor = page.getByRole("dialog", { name: "Add an item" });
+    await editor.getByLabel("What do you want to keep track of?").fill(title);
+    await editor.getByLabel("Type").fill("Insurance");
+    await editor.getByLabel("Provider").fill("Orbit Cover");
+    await editor.getByLabel("Reference").fill("ISSUE-40");
+    await editor.getByLabel("Cost (GBP)").fill("125.00");
+    await editor.getByLabel("Renewal date").fill("2030-12-20");
+    await editor.getByLabel("Repeats").selectOption("12");
+    await editor.getByRole("button", { name: "Add item", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(`${title} added`);
+    await waitForActiveHouseholdItem(page, title);
+    await waitForSynced(page);
+    expect(inspectionRequests).toEqual([]);
+
+    await page.reload();
+    await waitForActiveHouseholdItem(page, title);
+    await openItemRow(page, title);
+    let detail = page.getByRole("dialog", { name: title });
+    await expect(detail).toContainText("Reminders 30 days, 7 days beforehand");
+    await detail.getByRole("button", { name: "Edit details" }).click();
+    editor = page.getByRole("dialog", { name: "Edit item" });
+    await editor.getByLabel("What do you want to keep track of?").fill(updatedTitle);
+    await editor.getByLabel("Provider").fill("Updated Cover");
+    await editor.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} updated`);
+    await waitForSynced(page);
+    await waitForActiveHouseholdItem(page, updatedTitle);
+
+    detail = await reopenItemFromList(page, updatedTitle, "home");
+    await detail.getByRole("button", { name: "Complete renewal" }).click();
+    await detail.getByLabel("Completed on").fill("2030-12-20");
+    await detail.getByLabel("Next scheduled date").fill("2031-12-20");
+    await detail.getByRole("button", { name: "Save completion" }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} renewal completed`);
+    await waitForSynced(page);
+    detail = await reopenItemFromList(page, updatedTitle, "home");
+
+    await detail.getByRole("button", { name: "Reschedule" }).click();
+    const reschedulePanel = detail.locator("form.detail-action-panel");
+    await reschedulePanel.getByLabel("New due date").fill("2031-11-20");
+    await reschedulePanel.getByRole("button", { name: "Reschedule", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} rescheduled`);
+    await waitForSynced(page);
+    detail = await reopenItemFromList(page, updatedTitle, "home");
+
+    await detail.getByRole("button", { name: "Snooze" }).click();
+    const snoozePanel = detail.locator("form.detail-action-panel");
+    await snoozePanel.getByLabel("Resume reminders").fill("2031-11-25");
+    await snoozePanel.getByRole("button", { name: "Snooze", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Reminders snoozed until");
+    await waitForSynced(page);
+    detail = await reopenItemFromList(page, updatedTitle, "home");
+
+    await detail.getByRole("button", { name: "Cancel item" }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} cancelled`);
+    await waitForSynced(page);
+    detail = await reopenItemFromList(page, updatedTitle, "archive");
+    await detail.getByRole("button", { name: "Restore item" }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} restored`);
+    await waitForSynced(page);
+    detail = await reopenItemFromList(page, updatedTitle, "home");
+    await detail.getByRole("button", { name: "Archive", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(`${updatedTitle} archived`);
+    await waitForSynced(page);
+
+    detail = await reopenItemFromList(page, updatedTitle, "archive");
+    await expect(detail.getByRole("heading", { name: "Activity" })).toBeVisible();
+    await expect(detail).toContainText("Item added");
+    await expect(detail).toContainText("Details updated");
+    await expect(detail).toContainText("Renewal completed");
+    await expect(detail).toContainText("Date rescheduled");
+    await expect(detail).toContainText("Reminder snoozed");
+    await expect(detail).toContainText("Item cancelled");
+    await expect(detail).toContainText("Item restored");
+    await expect(detail).toContainText("Item archived");
+
+    const finalWorkspace = (await readWorkspace(page)).workspace as { households: Array<{ items: Array<Record<string, unknown>> }> };
+    const finalItem = finalWorkspace.households.flatMap((household) => household.items).find((item) => item.title === updatedTitle);
+    expect(finalItem).toMatchObject({ status: "archived", version: 8, dueDate: "2031-11-20", snoozedUntil: "2031-11-25" });
+    expect(inspectionRequests).toEqual([]);
+    await page.reload();
+    await page.getByRole("button", { name: /^Archive/ }).click();
+    await expect(page.locator("article.item-card").filter({ has: page.getByRole("heading", { name: updatedTitle, exact: true }) })).toHaveCount(1, { timeout: 15_000 });
+  });
+
+  test("keeps mobile manual item entry keyboard-operable without document inspection", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.skip(!isMobile, "This is the representative mobile keyboard scenario.");
+
+    await signIn(page, administrator);
+    const suffix = Date.now();
+    await createManualHousehold(page, true, `Issue 40 mobile ${suffix}`);
+    const title = `Mobile item ${suffix}`;
+    const updatedTitle = `${title} edited`;
+    const inspectionRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/item-document-inspection")) inspectionRequests.push(request.url());
+    });
+
+    const addButton = page.locator("button.mobile-add");
+    await expect(addButton).toBeVisible();
+    await addButton.focus();
+    await page.keyboard.press("Enter");
+    const editor = page.getByRole("dialog", { name: "Add an item" });
+    await editor.getByLabel("What do you want to keep track of?").fill(title);
+    await editor.getByRole("button", { name: "No schedule" }).click();
+    const submit = editor.getByRole("button", { name: "Add item", exact: true });
+    await submit.focus();
+    await page.keyboard.press("Enter");
+    await waitForActiveHouseholdItem(page, title);
+    await waitForSynced(page);
+    expect(inspectionRequests).toEqual([]);
+
+    await page.reload();
+    await waitForActiveHouseholdItem(page, title);
+    await openItemRow(page, title);
+    await page.getByRole("dialog", { name: title }).getByRole("button", { name: "Edit details" }).click();
+    const edit = page.getByRole("dialog", { name: "Edit item" });
+    await edit.getByLabel("What do you want to keep track of?").fill(updatedTitle);
+    const save = edit.getByRole("button", { name: "Save changes" });
+    await save.focus();
+    await page.keyboard.press("Enter");
+    await waitForActiveHouseholdItem(page, updatedTitle);
+    await waitForSynced(page);
+    expect(inspectionRequests).toEqual([]);
+    await page.reload();
+    await openItemRow(page, updatedTitle);
   });
 });

@@ -323,6 +323,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.archive",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       activity: activity(item, "archived"),
     });
     setItemEditorOpen(false);
@@ -335,6 +336,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.status",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       status: "active",
       activity: activity(item, "restored"),
     });
@@ -347,6 +349,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.complete",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       ...input,
       activity: activity(item, kind, {
         effectiveDate: input.completedDate,
@@ -364,6 +367,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.reschedule",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       dueDate,
       activity: activity(item, "rescheduled", { previousDate: item.dueDate, nextDate: dueDate }),
     });
@@ -375,6 +379,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.snooze",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       snoozedUntil,
       activity: activity(item, "snoozed", { nextDate: snoozedUntil }),
     });
@@ -386,6 +391,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       type: "item.status",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       status,
       activity: activity(item, status === "active" ? "restored" : "cancelled"),
     });

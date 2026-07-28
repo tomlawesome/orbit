@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
 import type { HomeItem, HouseholdSection, ScheduleKind } from "@/lib/domain";
-import { workspaceItemSchema } from "@/lib/workspace";
+import { initialScheduleKind, workspaceItemSchema } from "@/lib/workspace";
 
 type ItemFieldErrors = Partial<Record<"title" | "sectionId" | "dueDate" | "costMinor", string>>;
 
@@ -24,7 +24,7 @@ function optionalValue(value: FormDataEntryValue | null): string | undefined {
 }
 
 export function ItemEditor({ item, sections, currency, householdId, csrfToken, onClose, onSave, onArchive }: ItemEditorProps) {
-  const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(item?.scheduleKind ?? "renewal");
+  const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(initialScheduleKind(item));
   const [errors, setErrors] = useState<ItemFieldErrors>({});
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [document, setDocument] = useState<File>();
