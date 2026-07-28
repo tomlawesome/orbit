@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Download, type Page } from "@playwright/test";
 
 const administrator = "Orbit Administrator";
 const syntheticPdf = Buffer.from("%PDF-1.7\nissue 42 authenticated browser document\n");
@@ -28,6 +28,13 @@ function newDisposableWorkspace(): DisposableWorkspace {
     householdName: `Issue 42 documents ${suffix}`,
     itemTitle: `Disposable item ${suffix}`,
   };
+}
+
+async function downloadBytes(download: Download): Promise<Buffer> {
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
 }
 
 async function createDisposableWorkspace(page: Page, workspace: DisposableWorkspace) {
@@ -141,15 +148,11 @@ test.describe("authenticated document lifecycle", () => {
       await expect(documentRow).toContainText("application/pdf");
       await expect(documentRow).toContainText(`${syntheticPdf.length} B`);
 
-      const downloadResponsePromise = page.waitForResponse((response) => (
-        response.url().includes("/api/documents/")
-        && response.url().endsWith("/download")
-        && response.request().method() === "GET"
-      ));
+      const downloadPromise = page.waitForEvent("download");
       await documentRow.getByRole("link", { name: "Download" }).click();
-      const downloadResponse = await downloadResponsePromise;
-      expect(downloadResponse.status()).toBe(200);
-      expect(await downloadResponse.body()).toEqual(syntheticPdf);
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe(documentName);
+      expect(await downloadBytes(download)).toEqual(syntheticPdf);
 
       await documentRow.getByRole("button", { name: "Delete" }).click();
       await expect(documentRow).toContainText("Scheduled for deletion");
@@ -158,15 +161,11 @@ test.describe("authenticated document lifecycle", () => {
       await documentRow.getByRole("button", { name: "Restore" }).click();
       await expect(documentRow.getByRole("link", { name: "Download" })).toBeVisible();
 
-      const restoredResponsePromise = page.waitForResponse((response) => (
-        response.url().includes("/api/documents/")
-        && response.url().endsWith("/download")
-        && response.request().method() === "GET"
-      ));
+      const restoredDownloadPromise = page.waitForEvent("download");
       await documentRow.getByRole("link", { name: "Download" }).click();
-      const restoredResponse = await restoredResponsePromise;
-      expect(restoredResponse.status()).toBe(200);
-      expect(await restoredResponse.body()).toEqual(syntheticPdf);
+      const restoredDownload = await restoredDownloadPromise;
+      expect(restoredDownload.suggestedFilename()).toBe(documentName);
+      expect(await downloadBytes(restoredDownload)).toEqual(syntheticPdf);
     } catch (error) {
       journeyFailed = true;
       throw error;
