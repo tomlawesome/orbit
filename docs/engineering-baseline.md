@@ -73,7 +73,7 @@ acceptance and stable promotion remain separate release gates.
 | Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | corrupt/wrong-key/mismatched-object/interrupted restore matrix plus successful PostgreSQL and encrypted-file recovery | **Partially proven:** automated recovery safety is established; documented off-host operator recovery remains |
 | Health, audit and logging | V1-OPS-02 | health endpoints, audit table and safe failure categories | health smoke plus unit category checks | **Implemented, unverified:** redaction, audit completeness, retention and degraded-service behaviour need integration evidence |
 | CI, preview and promotion | V1-REL-01 | validation and promotion workflows | build-once exact-image preview flow and immutable digest recording | **Partially proven:** no feature-complete RC, supply-chain reports, representative operator acceptance or completed stable promotion exists |
-| IMAP/SMTP ingestion | Deferred | ingestion, holding, review and receipt workers/routes | configuration, alias, TLS-header and worker-helper units | **Deferred:** live provider contract, hostile MIME, duplicate, recovery, browser review and privacy evidence are incomplete |
+| IMAP/SMTP ingestion | V1-DOC-03 | ingestion, holding, review and receipt workers/routes | configuration, alias, TLS-header and worker-helper units | **Partially proven:** live provider contracts, hostile MIME, identity, duplicate/retry recovery, shared draft review and privacy evidence remain in #22 |
 | Local semantic extraction | Deferred | optional Ollama container only | Compose configuration validation | **Deferred:** no application adapter or automatic-write authority is allowed |
 
 No row is marked proven complete. That is intentional: a successful preview is
@@ -91,7 +91,7 @@ critical integration layers are still missing.
 | `/api/documents/*`, item documents | signed-out checks, PostgreSQL access matrix and lower-level document units | authenticated upload/download/delete/restore lifecycle, quota/state races, purge recovery and response headers |
 | `/api/document-drafts/*` | source-aware suggestion pure units | Tika bounds/failure contract, no-document path, explicit-submit/abandonment semantics, authorization and editable browser flow |
 | `/api/portable-archives/*` | crypto/storage units | household authorization, atomic import, conflicts, expiry and corrupt/wrong-passphrase cases |
-| `/api/imap-inbox/*` | IMAP helper units | user isolation, hostile/duplicate receipt states and browser review; deferred from stable gate |
+| `/api/imap-inbox/*` | IMAP helper units | user isolation, hostile/duplicate receipt states, recovery and browser review remain required in #22 |
 | `/api/admin/*` | health smoke only | non-admin denial, safe redaction, corrective-state transitions and audit evidence |
 | `/api/health` | running-container smoke | degraded optional dependencies and migration/readiness semantics |
 
@@ -106,6 +106,8 @@ critical integration layers are still missing.
 3. Optional document-assisted item entry that remains editable and persists
    nothing before explicit submission
    ([#43](https://github.com/tomlawesome/orbit/issues/43)).
+4. Dedicated-mailbox ingestion into the same private, explicitly approved
+   review flow ([#22](https://github.com/tomlawesome/orbit/issues/22)).
 
 Completed baseline blockers now include the reusable PostgreSQL harness,
 critical negative authorization matrix, fresh/baseline-upgrade migration
@@ -125,7 +127,6 @@ accepted issues and protected runs retain the detailed evidence.
 
 ### Deferred without blocking stable v1
 
-- Live IMAP ingestion and SMTP receipt workflow.
 - Local or remote semantic model integration.
 - Automatic duplicate merging or model-written records.
 - Object storage, horizontal scale, managed SaaS, or public sharing.
@@ -143,7 +144,7 @@ and this branch. The `v1.0` roadmap contains these outcome-level epics:
 6. [administration and observability](https://github.com/tomlawesome/orbit/issues/19);
 7. [accessible, responsive, and offline-safe user experience](https://github.com/tomlawesome/orbit/issues/20);
 8. [CI, supply chain, release, and operator acceptance](https://github.com/tomlawesome/orbit/issues/21);
-9. [optional mail and document automation](https://github.com/tomlawesome/orbit/issues/22);
+9. [reviewed mail and document ingestion](https://github.com/tomlawesome/orbit/issues/22);
 10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
 The completed first delivery group is
@@ -162,5 +163,6 @@ preview, not an empty prototype. PostgreSQL integration, critical negative
 authorization, migration/recovery safety and exact-image CI now have useful
 automated evidence. The next release risks are conflict-safe item behaviour,
 secure document purge/lifecycle, bounded reminder delivery and complete
-authenticated core journeys. Wave 2 adds those proofs around existing
-behaviour before extending optional automation.
+authenticated core journeys. Those accepted contracts then support the
+required reviewed mailbox-ingestion flow without granting inbound content
+automatic write authority.

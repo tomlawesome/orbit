@@ -54,4 +54,5 @@ are local coordination state and are not committed.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - GitHub issues and milestones: delivery status and prioritisation.
-- `docs/feature-register.md`: deferred product direction only, not status.
+- `docs/feature-register.md`: detailed product direction and constraints, not
+  live delivery status.
