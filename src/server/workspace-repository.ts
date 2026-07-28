@@ -440,19 +440,26 @@ export async function applyWorkspaceCommand(
       // The completion key is the idempotency boundary. Lock it before reading
       // so a replay or cross-item reuse cannot race the first completion.
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:item-completion:${command.activity.id}`}, 0))`);
-      const [existingCompletion] = await transaction.select({ itemId: dueEvents.itemId })
+      const [existingCompletion] = await transaction.select({ householdId: dueEvents.householdId, itemId: dueEvents.itemId })
         .from(dueEvents)
-        .where(and(
-          eq(dueEvents.householdId, householdId),
-          eq(dueEvents.completionKey, command.activity.id),
-        ))
+        .where(eq(dueEvents.completionKey, command.activity.id))
         .for("update")
         .limit(1);
       if (existingCompletion) {
-        if (existingCompletion.itemId !== itemId) {
+        if (existingCompletion.householdId !== householdId || existingCompletion.itemId !== itemId) {
           throw new AppError("version_conflict", "This completion was already used for another item", 409);
         }
         return;
+      }
+      if (validUuid(command.activity.id)) {
+        const [existingAudit] = await transaction.select({ id: auditLog.id })
+          .from(auditLog)
+          .where(eq(auditLog.id, command.activity.id))
+          .for("update")
+          .limit(1);
+        if (existingAudit) {
+          throw new AppError("version_conflict", "This completion identity is already in use", 409);
+        }
       }
     }
 
