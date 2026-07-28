@@ -237,9 +237,9 @@ export async function applyWorkspaceCommand(
   const householdId = command.householdId;
 
   await getDb().transaction(async (transaction) => {
-    const recordActivity = async (itemId: string, activity: ItemActivity) => {
+    const recordActivity = async (itemId: string, activity: ItemActivity, requireInsert = false) => {
       const entityId = requireUuid(itemId, "Item");
-      await transaction.insert(auditLog).values({
+      const values = {
         id: validUuid(activity.id) ? activity.id : randomUUID(),
         householdId,
         actorUserId: userId,
@@ -248,7 +248,17 @@ export async function applyWorkspaceCommand(
         action: activity.kind,
         changes: { activity },
         createdAt: new Date(activity.occurredAt),
-      }).onConflictDoNothing();
+      };
+      if (requireInsert) {
+        const [inserted] = await transaction.insert(auditLog).values(values)
+          .onConflictDoNothing({ target: auditLog.id })
+          .returning({ id: auditLog.id });
+        if (!inserted) {
+          throw new AppError("version_conflict", "This completion identity is already in use", 409);
+        }
+        return;
+      }
+      await transaction.insert(auditLog).values(values).onConflictDoNothing();
     };
 
     if (command.type === "household.activate") {
@@ -516,7 +526,7 @@ export async function applyWorkspaceCommand(
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       if (!command.nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, command.activity, true);
       return;
     }
 
