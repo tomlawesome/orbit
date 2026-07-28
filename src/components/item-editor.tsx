@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
 import type { HomeItem, HouseholdSection, ScheduleKind } from "@/lib/domain";
 import { initialScheduleKind, workspaceItemSchema } from "@/lib/workspace";
@@ -23,12 +23,23 @@ function optionalValue(value: FormDataEntryValue | null): string | undefined {
   return trimmed || undefined;
 }
 
+type InspectionPayload = {
+  suggestions?: Array<{ field: string; value: string; source: "filename" | "document_text"; confidence: "high" | "medium" | "low" }>;
+  message?: string;
+  error?: { message?: string };
+};
+
 export function ItemEditor({ item, sections, currency, householdId, csrfToken, onClose, onSave, onArchive }: ItemEditorProps) {
+  const newItemIdRef = useRef(item?.id ?? crypto.randomUUID());
+  const inspectionSequenceRef = useRef(0);
+  const inspectionAbortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(initialScheduleKind(item));
   const [errors, setErrors] = useState<ItemFieldErrors>({});
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [document, setDocument] = useState<File>();
   const [inspectionMessage, setInspectionMessage] = useState("");
+  const [inspectionPending, setInspectionPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const visibleSections = sections.filter((section) => section.visible);
@@ -36,25 +47,58 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
     ? sections.filter((section) => section.visible || section.id === item?.sectionId)
     : sections;
 
+  useEffect(() => () => {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+  }, []);
+
+  function closeEditor() {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
+    onClose();
+  }
+
+  function clearDocument(message = "") {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
+    setInspectionPending(false);
+    setDocument(undefined);
+    setInspectionMessage(message);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   async function inspectDocument(file: File) {
+    inspectionAbortRef.current?.abort();
+    const sequence = ++inspectionSequenceRef.current;
+    const controller = new AbortController();
+    inspectionAbortRef.current = controller;
+    setDocument(file);
+    setInspectionPending(true);
     setInspectionMessage("Inspecting document securely…");
     try {
       const response = await fetch(`/api/households/${householdId}/item-document-inspection`, {
         method: "POST", credentials: "same-origin",
         headers: { "X-CSRF-Token": csrfToken, "X-Orbit-Filename": encodeURIComponent(file.name), "X-Orbit-Declared-Bytes": String(file.size) },
         body: file,
+        signal: controller.signal,
       });
-      const payload = await response.json() as { proposal?: { title?: string; provider?: string; reference?: string; dates?: string[] }; error?: { message?: string } };
+      const payload = await response.json() as InspectionPayload;
       if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not inspect that document");
+      if (sequence !== inspectionSequenceRef.current) return;
       const form = formRef.current;
-      if (!form || !payload.proposal) return;
-      for (const [name, value] of Object.entries({ title: payload.proposal.title, provider: payload.proposal.provider, reference: payload.proposal.reference, dueDate: payload.proposal.dates?.[0] })) {
-        const control = form.elements.namedItem(name) as HTMLInputElement | null;
-        if (control && !control.value && value) control.value = value;
+      for (const suggestion of payload.suggestions ?? []) {
+        const control = form?.elements.namedItem(suggestion.field) as HTMLInputElement | HTMLSelectElement | null;
+        if (control && !control.value && suggestion.value) control.value = suggestion.value;
       }
-      setInspectionMessage("Document inspected. Review or change the suggested fields, then add the item.");
+      setInspectionPending(false);
+      setInspectionMessage(payload.message ?? "Document inspected. Review or change the suggested fields, then add the item.");
     } catch (error) {
+      if (sequence !== inspectionSequenceRef.current || (error instanceof DOMException && error.name === "AbortError")) return;
+      setInspectionPending(false);
       setDocument(undefined);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setInspectionMessage(error instanceof Error ? error.message : "Orbit could not inspect that document");
     }
   }
@@ -65,7 +109,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
     const rawCost = optionalValue(formData.get("cost"));
     const rawRecurrence = optionalValue(formData.get("recurrenceMonths"));
     const candidate: HomeItem = {
-      id: item?.id ?? crypto.randomUUID(),
+      id: item?.id ?? newItemIdRef.current,
       sectionId: String(formData.get("sectionId") ?? ""),
       title: String(formData.get("title") ?? "").trim(),
       subtype: optionalValue(formData.get("subtype")),
@@ -96,20 +140,21 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
       });
       return;
     }
+    if (inspectionPending) return;
     setSubmitting(true);
     try { await onSave(parsed.data, document); } catch (error) { setInspectionMessage(error instanceof Error ? error.message : "Orbit could not add this item"); } finally { setSubmitting(false); }
   }
 
   return (
     <>
-      <button className="editor-scrim" type="button" aria-label="Close item editor" onClick={onClose} />
+      <button className="editor-scrim" type="button" aria-label="Close item editor" onClick={closeEditor} />
       <aside className="item-editor" role="dialog" aria-modal="true" aria-labelledby="item-editor-title">
         <header className="editor-header">
           <div>
             <p>{item ? "Update your records" : "Add to your home"}</p>
             <h2 id="item-editor-title">{item ? "Edit item" : "Add an item"}</h2>
           </div>
-          <button type="button" aria-label="Close item editor" onClick={onClose}>×</button>
+          <button type="button" aria-label="Close item editor" onClick={closeEditor}>×</button>
         </header>
 
         <form ref={formRef} onSubmit={handleSubmit} noValidate>
@@ -137,7 +182,13 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
 
             {!item && <section className="form-section">
               <div className="form-section-heading"><span>01</span><div><h3>Optional document</h3><p>Upload a document to inspect it and suggest editable fields. It is only stored with the item after you submit.</p></div></div>
-              <label className="field field-wide"><span>Document</span><input type="file" onChange={(event) => { const file = event.currentTarget.files?.[0]; setDocument(file); if (file) void inspectDocument(file); }} />{inspectionMessage && <small role="status">{inspectionMessage}</small>}</label>
+              <label className="field field-wide">
+                <span>Document</span>
+                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectDocument(file); }} />
+                {document && <small>{document.name} selected for attachment after you submit.</small>}
+                {document && !inspectionPending && <button type="button" onClick={() => clearDocument("Document selection cleared.")}>Remove document</button>}
+                {inspectionMessage && <small role="status">{inspectionMessage}</small>}
+              </label>
             </section>}
 
             <section className="form-section">
@@ -240,8 +291,8 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
           <footer className="editor-footer">
             <span>{item ? "Changes are saved automatically." : "You can add more details later."}</span>
             <div>
-              <button type="button" onClick={onClose}>Cancel</button>
-              <button type="submit" disabled={submitting}>{submitting ? "Adding item…" : item ? "Save changes" : "Add item"}</button>
+              <button type="button" onClick={closeEditor}>Cancel</button>
+              <button type="submit" disabled={submitting || inspectionPending}>{inspectionPending ? "Inspecting document…" : submitting ? "Adding item…" : item ? "Save changes" : "Add item"}</button>
             </div>
           </footer>
         </form>

@@ -301,17 +301,25 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     // offline-capable command path.
     if (document && !editingItem) {
       await executeCommand(command);
-      const response = await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
-        method: "POST", credentials: "same-origin",
-        headers: {
-          "X-CSRF-Token": session.csrfToken,
-          "X-Orbit-Filename": encodeURIComponent(document.name),
-        },
-        body: document,
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
-        throw new Error(payload?.error?.message ?? "Item saved, but its document could not be attached");
+      try {
+        const response = await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+          method: "POST", credentials: "same-origin",
+          headers: {
+            "X-CSRF-Token": session.csrfToken,
+            "X-Orbit-Filename": encodeURIComponent(document.name),
+          },
+          body: document,
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+          throw new Error(payload?.error?.message ?? "The document could not be attached");
+        }
+      } catch {
+        setEditingItem(undefined);
+        setItemEditorOpen(false);
+        setDetailItemId(item.id);
+        setNotice({ message: `${item.title} added, but the document could not be attached. Open its Files section to retry the original file.` });
+        return;
       }
     } else dispatch(command);
     setItemEditorOpen(false);
