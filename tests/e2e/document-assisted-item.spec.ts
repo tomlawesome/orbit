@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -40,6 +40,16 @@ async function openAddItem(page: Page, isMobile: boolean) {
   await page.getByRole("button", { name: "Add item", exact: true }).first().click();
 }
 
+async function submitAddItem(page: Page, editor: Locator, isMobile: boolean) {
+  const submit = editor.getByRole("button", { name: "Add item", exact: true });
+  if (isMobile) {
+    await submit.focus();
+    await page.keyboard.press("Enter");
+    return;
+  }
+  await submit.click();
+}
+
 test.describe("document-assisted item intake", () => {
   test.describe.configure({ mode: "serial", retries: 0 });
 
@@ -59,14 +69,8 @@ test.describe("document-assisted item intake", () => {
     const manualTitle = `Manual intake ${suffix}`;
     await editor.getByLabel("What do you want to keep track of?").fill(manualTitle);
     await editor.getByRole("button", { name: "No schedule" }).click();
-    const manualSubmit = editor.getByRole("button", { name: "Add item", exact: true });
-    if (isMobile) {
-      await manualSubmit.focus();
-      await page.keyboard.press("Enter");
-    } else {
-      await manualSubmit.click();
-    }
-    await expect(page.getByRole("status")).toContainText(`${manualTitle} added`);
+    await submitAddItem(page, editor, isMobile);
+    await expect(page.locator(".action-toast")).toContainText(`${manualTitle} added`);
     expect(inspectionRequests).toHaveLength(0);
 
     await openAddItem(page, isMobile);
@@ -111,13 +115,7 @@ test.describe("document-assisted item intake", () => {
     const beforeItems = beforeSubmit.workspace.households.flatMap((household) => household.items);
     expect(beforeItems.some((item) => item.title === assistedTitle)).toBe(false);
 
-    const assistedSubmit = editor.getByRole("button", { name: "Add item", exact: true });
-    if (isMobile) {
-      await assistedSubmit.focus();
-      await page.keyboard.press("Enter");
-    } else {
-      await assistedSubmit.click();
-    }
+    await submitAddItem(page, editor, isMobile);
     await expect(page.locator(".action-toast")).toContainText(`${assistedTitle} added`, { timeout: 15_000 });
     await expect.poll(async () => {
       const workspace = await readWorkspace(page);
@@ -136,7 +134,8 @@ test.describe("document-assisted item intake", () => {
       recurrenceMonths: 12,
     });
     expect(finalItem?.reference).toBeUndefined();
-    await page.getByRole("button", { name: `Open ${assistedTitle}`, exact: true }).click();
+    const itemCard = page.locator("article.item-card").filter({ hasText: assistedTitle });
+    await itemCard.getByRole("button", { name: `Open ${assistedTitle}`, exact: true }).click();
     const detail = page.getByRole("dialog", { name: assistedTitle });
     await expect(detail.getByRole("heading", { name: "Files" })).toBeVisible();
     await expect(detail).toContainText("synthetic-policy.pdf");
@@ -171,7 +170,7 @@ test.describe("document-assisted item intake", () => {
       if (request.method() === "POST" && request.url().includes("/documents")) uploadRequests.push(request.url());
     });
 
-    await editor.getByRole("button", { name: "Add item", exact: true }).click();
+    await submitAddItem(page, editor, isMobile);
     await expect(editor).toBeVisible();
     await expect(editor.getByRole("status")).toContainText("changed on another device");
     expect(uploadRequests).toHaveLength(0);
@@ -201,8 +200,8 @@ test.describe("document-assisted item intake", () => {
       await route.continue();
     });
 
-    await editor.getByRole("button", { name: "Add item", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Open its Files section to retry the original file.", { timeout: 15_000 });
+    await submitAddItem(page, editor, isMobile);
+    await expect(page.locator(".action-toast")).toContainText("Open its Files section to retry the original file.", { timeout: 15_000 });
     await expect(page.getByRole("dialog", { name: title })).toBeVisible();
     await expect(page.getByRole("dialog", { name: title })).toContainText("No documents attached yet.");
     const workspace = await readWorkspace(page);
