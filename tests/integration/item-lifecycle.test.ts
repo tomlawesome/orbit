@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, reminderRules } from "@/db/schema";
 import { GET as readWorkspace } from "@/app/api/workspace/route";
@@ -32,6 +32,31 @@ function activity(itemId: string, kind: "created" | "updated" | "renewal_complet
     occurredAt: new Date().toISOString(),
     ...details,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
+async function waitForCompletionAdvisory(activityId: string): Promise<void> {
+  const lockKey = `orbit:item-completion:${activityId}`;
+  for (;;) {
+    const ownsLock = await getDb().transaction(async (transaction) => {
+      const result = await transaction.execute<{ locked: boolean }>(sql`
+        select pg_try_advisory_lock(hashtextextended(${lockKey}, 0)) as locked
+      `);
+      const locked = Boolean(result[0]?.locked);
+      if (locked) {
+        await transaction.execute(sql`
+          select pg_advisory_unlock(hashtextextended(${lockKey}, 0))
+        `);
+      }
+      return locked;
+    });
+    if (!ownsLock) return;
+  }
 }
 
 function scheduledItem(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, version: number) {
@@ -361,6 +386,75 @@ describe("conflict-safe item lifecycle", () => {
     expect(await itemSnapshot(fixture)).toEqual(before);
     expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
     expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(0);
+  });
+
+  it("rolls back completion state when a concurrent non-completion claims its audit ID", async () => {
+    const completionFixture = await createIntegrationFixture("item-completion-audit-race-completion");
+    const completionOwner = await completionFixture.session("owner");
+    await upsertScheduledItem(completionFixture, completionOwner);
+    const competingFixture = await createIntegrationFixture("item-completion-audit-race-competing");
+    const competingOwner = await competingFixture.session("owner");
+    await upsertScheduledItem(competingFixture, competingOwner);
+
+    const completion = {
+      type: "item.complete",
+      householdId: completionFixture.household.id,
+      itemId: completionFixture.item.id,
+      expectedVersion: 2,
+      completedDate: "2026-12-20",
+      nextDate: "2027-12-20",
+      activity: activity(completionFixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+    } as const;
+    const competing = {
+      type: "item.archive",
+      householdId: competingFixture.household.id,
+      itemId: competingFixture.item.id,
+      expectedVersion: 2,
+      activity: { ...activity(competingFixture.item.id, "archived"), id: completion.activity.id },
+    } as const;
+    const beforeCompletion = await itemSnapshot(completionFixture);
+
+    const dueEventHeld = deferred<void>();
+    const releaseDueEvent = deferred<void>();
+    const dueEventLock = getDb().transaction(async (transaction) => {
+      const [event] = await transaction.select({ id: dueEvents.id }).from(dueEvents)
+        .where(and(eq(dueEvents.householdId, completionFixture.household.id), eq(dueEvents.itemId, completionFixture.item.id)))
+        .for("update")
+        .limit(1);
+      if (!event) throw new Error("Expected a completion due event");
+      dueEventHeld.resolve();
+      await releaseDueEvent.promise;
+    });
+
+    try {
+      await dueEventHeld.promise;
+      const completionRequest = applyWorkspaceCommand(requestForSession(completionOwner, commandUrl, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
+      }));
+      await waitForCompletionAdvisory(completion.activity.id);
+
+      const competingResponse = await applyWorkspaceCommand(requestForSession(competingOwner, commandUrl, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(competing),
+      }));
+      expect(competingResponse.status).toBe(200);
+      releaseDueEvent.resolve();
+
+      const completionResponse = await completionRequest;
+      await expectError(completionResponse, 409, "version_conflict");
+      expect(await itemSnapshot(completionFixture)).toEqual(beforeCompletion);
+      expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(0);
+      const [audit] = await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id));
+      expect(audit).toEqual(expect.objectContaining({
+        entityId: competingFixture.item.id,
+        action: "archived",
+      }));
+      expect(await itemSnapshot(competingFixture)).toEqual(expect.objectContaining({
+        item: expect.objectContaining({ status: "archived", version: 3 }),
+      }));
+    } finally {
+      releaseDueEvent.resolve();
+      await dueEventLock;
+    }
   });
 
   it("serializes distinct completions so one wins and one conflicts", async () => {
