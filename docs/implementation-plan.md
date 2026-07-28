@@ -172,7 +172,12 @@ requires Sol Extra High review before implementation proceeds.
   contract. Dedicated-mailbox messages and attachments enter that same private
   flow with authenticated identity, idempotent receipt, hostile-MIME bounds,
   quarantine, bounded retry and explicit user approval. Mail receipt never
-  creates, attaches or merges an item automatically.
+  creates, attaches or merges an item automatically. ADR-0005 preserves the
+  prototype's essential hidden-until-reviewed behaviour using a private
+  user-owned ingestion draft rather than an archived household item. Deliver it
+  as sequential vertical slices: shared approval contract; receipt/identity
+  foundation; hostile attachment staging; IMAP review journey; then SMTP and
+  administration acceptance.
 - Complete issue #15 retention and purge behaviour after document lifecycle
   evidence exists.
 - Complete issue #19 administration, redaction, degraded dependency and
@@ -185,10 +190,16 @@ requires Sol Extra High review before implementation proceeds.
 
 ### Wave 4 — experience and release acceptance
 
-- Complete issue #20 against stable authenticated item, document and
-  administration journeys, including the explicit offline-support decision.
-- Finish representative provider, device, installation, update, recovery and
-  supply-chain evidence.
+- Decompose issue #20 now into an authenticated accessibility/responsive matrix
+  and an explicit offline-support decision. Execute page-specific assertions
+  only against stable item, document, mailbox and administration journeys.
+- Continue issue #21's independent supply-chain slice now: dependency policy,
+  SBOM, exact-image vulnerability scanning, provenance and least-privilege
+  workflow evidence. Installation, update, rollback, recovery and promotion
+  acceptance wait for the feature-complete image.
+- Prepare the release-acceptance record structure now, but do not claim
+  representative provider/device/operator results before those checks run
+  against the exact candidate digest.
 - Publish a semantic release candidate only when all stable-v1 blockers are
   closed, then accept and promote its exact digest.
 

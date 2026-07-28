@@ -255,6 +255,22 @@ limits, receipt idempotency, quarantine, retry/reconnect behaviour, cross-
 household draft isolation, retention, redacted diagnostics, and explicit user
 approval before any item write or attachment.
 
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md) establishes that
+boundary. Mailbox input is identified only through a configured
+provider-preserved envelope-recipient header and a versioned HMAC alias. Orbit
+does not persist raw messages, active content, archives, malware, or incomplete
+staging. Supported clean attachments are encrypted into user-owned staging
+that is neither household data nor downloadable through item routes. Receipt
+identity, recipient-scoped content identity, leases, bounded retries, expiry,
+and purge must remain idempotent across polling, restart, UIDVALIDITY rollover,
+approval, discard, and alias-key rotation.
+
+Approval rechecks the user, selected household, section, existing-item target,
+draft version, and staged source identity. Only that explicit command may
+create an item or transfer a staged attachment through the secure document
+lifecycle. Quarantined and failed views expose technical classifications and
+opaque identifiers only.
+
 Inline previews, OCR, model-dependent semantic extraction, public sharing, S3
 storage, archive uploads, and automatic duplicate merging remain deferred.
 Each must extend this threat model before implementation.
