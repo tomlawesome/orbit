@@ -42,7 +42,11 @@ function deferred<T>() {
 
 async function waitForCompletionAdvisory(activityId: string): Promise<void> {
   const lockKey = `orbit:item-completion:${activityId}`;
+  const deadline = performance.now() + 5_000;
   for (;;) {
+    if (performance.now() >= deadline) {
+      throw new Error(`Timed out waiting for completion advisory ownership: ${lockKey}`);
+    }
     const ownsLock = await getDb().transaction(async (transaction) => {
       const result = await transaction.execute<{ locked: boolean }>(sql`
         select pg_try_advisory_lock(hashtextextended(${lockKey}, 0)) as locked
@@ -56,6 +60,7 @@ async function waitForCompletionAdvisory(activityId: string): Promise<void> {
       return locked;
     });
     if (!ownsLock) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
 }
 
