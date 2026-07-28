@@ -79,7 +79,15 @@ try {
   const readinessDeadline = Date.now() + 60_000;
   let databaseReady = false;
   while (Date.now() < readinessDeadline) {
-    const readiness = spawnSync(docker, ["exec", containerName, "pg_isready", "-U", databaseUser, "-d", databaseName], {
+    // The image briefly runs a temporary server during initialization. Wait
+    // until entrypoint has handed PID 1 to the final PostgreSQL process.
+    const readiness = spawnSync(docker, [
+      "exec",
+      containerName,
+      "sh",
+      "-c",
+      'test "$(cat /proc/1/comm)" = "postgres" && pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+    ], {
       stdio: "ignore",
     });
     if (readiness.status === 0) {
