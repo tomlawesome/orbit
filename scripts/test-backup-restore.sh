@@ -362,7 +362,8 @@ test_ordinary_rollback() {
 
 test_checkpoint_failure_recovery() {
   remove_document_fixture
-  if ORBIT_RESTORE_TEST_MODE=true ORBIT_RESTORE_TEST_FAILURE_STAGE=checkpoint-restore \
+  if ORBIT_RESTORE_TEST_MODE=true ORBIT_RESTORE_TEST_FAILURE_STAGE=after-document-replacement \
+    ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE=true \
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'The forced checkpoint restoration failure unexpectedly succeeded.'
   fi

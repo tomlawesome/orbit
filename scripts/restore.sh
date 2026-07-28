@@ -660,7 +660,8 @@ start_and_wait_for_health() {
 
 restore_checkpoint_state() {
   if [[ "${ORBIT_RESTORE_TEST_MODE:-false}" == true &&
-    "${ORBIT_RESTORE_TEST_FAILURE_STAGE:-}" == checkpoint-restore ]]; then
+    ( "${ORBIT_RESTORE_TEST_FAILURE_STAGE:-}" == checkpoint-restore ||
+      "${ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE:-false}" == true ) ]]; then
     return 1
   fi
   restore_active_database "$checkpoint_directory/database.dump" || return 1
