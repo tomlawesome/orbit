@@ -288,6 +288,81 @@ describe("conflict-safe item lifecycle", () => {
     ))).toEqual(beforeAudit);
   });
 
+  it("rejects a completion key reused in another household without side effects", async () => {
+    const firstFixture = await createIntegrationFixture("item-completion-cross-household-first");
+    const firstOwner = await firstFixture.session("owner");
+    await upsertScheduledItem(firstFixture, firstOwner);
+    const completion = {
+      type: "item.complete",
+      householdId: firstFixture.household.id,
+      itemId: firstFixture.item.id,
+      expectedVersion: 2,
+      completedDate: "2026-12-20",
+      nextDate: "2027-12-20",
+      activity: activity(firstFixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+    } as const;
+    const firstResponse = await applyWorkspaceCommand(requestForSession(firstOwner, commandUrl, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
+    }));
+    expect(firstResponse.status).toBe(200);
+
+    const secondFixture = await createIntegrationFixture("item-completion-cross-household-second");
+    const secondOwner = await secondFixture.session("owner");
+    await upsertScheduledItem(secondFixture, secondOwner);
+    const before = await itemSnapshot(secondFixture);
+    const beforeAudit = await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id));
+    const reused = {
+      ...completion,
+      householdId: secondFixture.household.id,
+      itemId: secondFixture.item.id,
+      expectedVersion: 2,
+      activity: { ...completion.activity, itemId: secondFixture.item.id },
+    };
+
+    const secondResponse = await applyWorkspaceCommand(requestForSession(secondOwner, commandUrl, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(reused),
+    }));
+    await expectError(secondResponse, 409, "version_conflict");
+    expect(await itemSnapshot(secondFixture)).toEqual(before);
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
+    expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(1);
+  });
+
+  it("fails closed when a completion key already belongs to a non-completion audit", async () => {
+    const fixture = await createIntegrationFixture("item-completion-audit-collision");
+    const owner = await fixture.session("owner");
+    await upsertScheduledItem(fixture, owner);
+    const completion = {
+      type: "item.complete",
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      expectedVersion: 2,
+      completedDate: "2026-12-20",
+      nextDate: "2027-12-20",
+      activity: activity(fixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+    } as const;
+    await getDb().insert(auditLog).values({
+      id: completion.activity.id,
+      householdId: fixture.household.id,
+      actorUserId: owner.userId,
+      entityType: "item",
+      entityId: fixture.item.id,
+      action: "created",
+      changes: { source: "prior-non-completion" },
+      createdAt: new Date(),
+    });
+    const before = await itemSnapshot(fixture);
+    const beforeAudit = await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id));
+
+    const response = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
+    }));
+    await expectError(response, 409, "version_conflict");
+    expect(await itemSnapshot(fixture)).toEqual(before);
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.id, completion.activity.id))).toEqual(beforeAudit);
+    expect(await getDb().select().from(dueEvents).where(eq(dueEvents.completionKey, completion.activity.id))).toHaveLength(0);
+  });
+
   it("serializes distinct completions so one wins and one conflicts", async () => {
     const fixture = await createIntegrationFixture("item-completion-conflict");
     const owner = await fixture.session("owner");
