@@ -106,6 +106,30 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
+  it.each([
+    ["non-string", 42],
+    ["oversized", "x".repeat(250_001)],
+  ] as const)("degrades %s parser output to filename-only manual review and cleans up", async (_label, parserOutput) => {
+    const bytes = Buffer.from("%PDF-1.7\nparser bytes");
+    mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.extract.mockResolvedValue(parserOutput);
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toEqual({
+      extracted: false,
+      message: "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.",
+      suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+    });
+    expect(bytes.every((byte) => byte === 0)).toBe(true);
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
   it("omits hostile or unsupported parser values instead of returning them as instructions", async () => {
     mocks.proposal.mockReturnValue({
       title: "<script>alert(1)</script>",
@@ -138,6 +162,26 @@ describe("item document inspection", () => {
       filename: "policy.pdf",
       body: new ReadableStream<Uint8Array>(),
     })).rejects.toMatchObject({ code: "document_scanner_unavailable", status: 503 });
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("fails closed for infected scanner results without exposing the signature", async () => {
+    mocks.scan.mockResolvedValue({ status: "infected", signature: "Eicar-Test-Signature" });
+
+    const error = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "malware.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: "document_malware_detected",
+      status: 422,
+      message: "Orbit rejected that document because malware was detected",
+    });
+    expect(error).not.toHaveProperty("signature");
     expect(mocks.extract).not.toHaveBeenCalled();
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
