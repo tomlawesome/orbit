@@ -118,7 +118,7 @@ test.describe("document-assisted item intake", () => {
     } else {
       await assistedSubmit.click();
     }
-    await expect(page.getByRole("status")).toContainText(`${assistedTitle} added`, { timeout: 15_000 });
+    await expect(page.locator(".action-toast")).toContainText(`${assistedTitle} added`, { timeout: 15_000 });
     await expect.poll(async () => {
       const workspace = await readWorkspace(page);
       return workspace.workspace.households.some((household) => household.items.some((item) => item.title === assistedTitle));
