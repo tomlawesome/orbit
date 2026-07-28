@@ -86,9 +86,10 @@ Before creating an item, Orbit should rank possible matches using:
 - overlapping effective, expiry, renewal or service dates;
 - similarity to existing item titles and attached documents.
 
-Potential matches must produce a comparison screen with explicit choices to
-create a separate item, merge new information, or attach the documents without
-changing existing fields. Orbit must not silently merge uncertain records.
+Potential matches must produce a comparison screen. For v1 the explicit
+choices are to create a separate item or attach the documents without changing
+existing fields. Field-level merge remains deferred; if introduced later it
+must be separately reviewed and must never silently merge uncertain records.
 
 ### Security and privacy requirements
 
