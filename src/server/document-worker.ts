@@ -3,13 +3,19 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
+import { processOwnedPurge, type OwnedPurgeJob, type OwnedPurgeState } from "@/server/documents/purge";
+import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 
-interface ClaimedDocumentJob {
-  id: string;
-  documentId: string;
-  leaseToken: string;
+type ClaimedDocumentJob = OwnedPurgeJob;
+
+interface OwnedPurgeRecord {
+  householdId: string;
+  itemId: string | null;
+  lifecycle: string;
+  generation: number;
+  storageKey: string | null;
 }
 
 export interface DocumentWorkerHealth {
@@ -68,62 +74,166 @@ async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> 
         updated_at = now()
     from claimable
     where job.id = claimable.id
-    returning job.id, job.document_id as "documentId", job.lease_token as "leaseToken"
+    returning job.id, job.document_id as "documentId", job.generation, job.lease_token as "leaseToken"
   `);
   return rows as unknown as ClaimedDocumentJob[];
 }
 
 async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
-  const storageKey = await getDb().transaction(async (transaction): Promise<string | undefined> => {
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`,
-    );
-    // Lock and verify ownership before any irreversible storage operation.
+  const config = getDocumentConfig();
+  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const outcome = await processOwnedPurge(job, {
+    readOwnedPurge: async (claimedJob): Promise<OwnedPurgeState | undefined> => {
+      return getDb().transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${claimedJob.documentId}`}, 0))`,
+        );
+        const activeClaims = await transaction.execute(sql<{ id: string }>`
+          select id
+          from document_jobs
+          where id = ${claimedJob.id}
+            and status = 'processing'
+            and generation = ${claimedJob.generation}
+            and lease_token = ${claimedJob.leaseToken}::uuid
+          for update
+        `);
+        if (activeClaims.length === 0) return undefined;
+
+        const records = await transaction.execute(sql<OwnedPurgeRecord>`
+          select document.household_id as "householdId",
+                 document.item_id as "itemId",
+                 document.lifecycle,
+                 document.version as generation,
+                 crypto.storage_key as "storageKey"
+          from documents document
+          left join document_crypto crypto on crypto.document_id = document.id
+          where document.id = ${claimedJob.documentId}
+          for update of document
+        `) as unknown as OwnedPurgeRecord[];
+        const [record] = records;
+        if (!record
+          || record.lifecycle !== "pending_deletion"
+          || record.generation !== claimedJob.generation
+        ) return undefined;
+        if (!record.storageKey || !/^[a-f0-9]{64}$/u.test(record.storageKey)) {
+          throw new Error("Invalid document purge storage metadata");
+        }
+        return {
+          householdId: record.householdId,
+          itemId: record.itemId,
+          storageKey: record.storageKey,
+          generation: record.generation,
+        };
+      });
+    },
+    deleteCiphertext: (storageKey) => storage.deleteCiphertext(storageKey),
+    finalizeOwnedPurge: async (claimedJob, state): Promise<boolean> => {
+      return getDb().transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${claimedJob.documentId}`}, 0))`,
+        );
+        const activeClaims = await transaction.execute(sql<{ id: string }>`
+          select id
+          from document_jobs
+          where id = ${claimedJob.id}
+            and status = 'processing'
+            and generation = ${claimedJob.generation}
+            and lease_token = ${claimedJob.leaseToken}::uuid
+          for update
+        `);
+        if (activeClaims.length === 0) return false;
+
+        const records = await transaction.execute(sql<OwnedPurgeRecord>`
+          select document.household_id as "householdId",
+                 document.item_id as "itemId",
+                 document.lifecycle,
+                 document.version as generation,
+                 crypto.storage_key as "storageKey"
+          from documents document
+          left join document_crypto crypto on crypto.document_id = document.id
+          where document.id = ${claimedJob.documentId}
+          for update of document
+        `) as unknown as OwnedPurgeRecord[];
+        const [record] = records;
+        if (!record
+          || record.lifecycle !== "pending_deletion"
+          || record.generation !== claimedJob.generation
+          || record.storageKey !== state.storageKey
+        ) return false;
+
+        const now = new Date();
+        const [changedDocument] = await transaction.update(documents).set({
+          lifecycle: "deleted",
+          deletedAt: now,
+          version: sql`${documents.version} + 1`,
+          updatedAt: now,
+        }).where(and(
+          eq(documents.id, claimedJob.documentId),
+          eq(documents.lifecycle, "pending_deletion"),
+          eq(documents.version, claimedJob.generation),
+        )).returning({ id: documents.id });
+        if (!changedDocument) throw new Error("Purge finalization lost document ownership");
+
+        const deletedCrypto = await transaction.delete(documentCrypto).where(and(
+          eq(documentCrypto.documentId, claimedJob.documentId),
+          eq(documentCrypto.storageKey, state.storageKey),
+        )).returning({ documentId: documentCrypto.documentId });
+        if (deletedCrypto.length !== 1) throw new Error("Purge finalization lost crypto metadata");
+
+        const [completedJob] = await transaction.update(documentJobs).set({
+          status: "completed",
+          completedAt: now,
+          lockedAt: null,
+          leaseExpiresAt: null,
+          leaseToken: null,
+          lastError: null,
+          updatedAt: now,
+        }).where(and(
+          eq(documentJobs.id, claimedJob.id),
+          eq(documentJobs.documentId, claimedJob.documentId),
+          eq(documentJobs.kind, "purge"),
+          eq(documentJobs.generation, claimedJob.generation),
+          eq(documentJobs.status, "processing"),
+          eq(documentJobs.leaseToken, claimedJob.leaseToken),
+        )).returning({ id: documentJobs.id });
+        if (!completedJob) throw new Error("Purge finalization lost job ownership");
+
+        await transaction.insert(auditLog).values({
+          householdId: record.householdId,
+          actorUserId: null,
+          entityType: "document",
+          entityId: claimedJob.documentId,
+          action: "document_purged",
+          changes: { itemId: record.itemId, reason: "retention_expired" },
+        });
+        return true;
+      });
+    },
+  });
+  if (outcome === "stale") await completeStalePurgeClaim(job);
+}
+
+async function completeStalePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
+  await getDb().transaction(async (transaction) => {
     const activeClaims = await transaction.execute(sql<{ id: string }>`
       select id
       from document_jobs
       where id = ${job.id}
+        and document_id = ${job.documentId}
+        and kind = 'purge'
+        and generation = ${job.generation}
         and status = 'processing'
         and lease_token = ${job.leaseToken}::uuid
       for update
     `);
-    if (activeClaims.length === 0) return undefined;
-
-    const [record] = await transaction
-      .select({
-        householdId: documents.householdId,
-        itemId: documents.itemId,
-        lifecycle: documents.lifecycle,
-        storageKey: documentCrypto.storageKey,
-      })
-      .from(documents)
-      .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
-      .where(eq(documents.id, job.documentId))
-      .limit(1);
-    if (!record || record.lifecycle !== "pending_deletion") {
-      await transaction.update(documentJobs).set({
-        status: "completed",
-        completedAt: new Date(),
-        lockedAt: null,
-        leaseExpiresAt: null,
-        leaseToken: null,
-        lastError: null,
-        updatedAt: new Date(),
-      }).where(and(
-        eq(documentJobs.id, job.id),
-        eq(documentJobs.status, "processing"),
-        eq(documentJobs.leaseToken, job.leaseToken),
-      ));
-      return undefined;
-    }
-
-    await transaction.delete(documentCrypto).where(eq(documentCrypto.documentId, job.documentId));
-    await transaction.update(documents).set({
-      lifecycle: "deleted",
-      deletedAt: new Date(),
-      version: sql`${documents.version} + 1`,
-      updatedAt: new Date(),
-    }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "pending_deletion")));
+    if (activeClaims.length === 0) return;
+    const [document] = await transaction.execute(sql<{ lifecycle: string; generation: number }>`
+      select lifecycle, version as generation
+      from documents
+      where id = ${job.documentId}
+      for update
+    `);
+    if (document?.lifecycle === "pending_deletion" && document.generation === job.generation) return;
     await transaction.update(documentJobs).set({
       status: "completed",
       completedAt: new Date(),
@@ -135,26 +245,10 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
     }).where(and(
       eq(documentJobs.id, job.id),
       eq(documentJobs.status, "processing"),
+      eq(documentJobs.generation, job.generation),
       eq(documentJobs.leaseToken, job.leaseToken),
     ));
-    await transaction.insert(auditLog).values({
-      householdId: record.householdId,
-      actorUserId: null,
-      entityType: "document",
-      entityId: job.documentId,
-      action: "document_purged",
-      changes: { itemId: record.itemId, reason: "retention_expired" },
-    });
-    return record.storageKey ?? undefined;
   });
-
-  if (!storageKey) return;
-  const config = getDocumentConfig();
-  // The durable record is already gone. If local cleanup is interrupted,
-  // reconciliation safely removes the encrypted orphan on a later cycle.
-  await new LocalDocumentStorage(config.storageRoot, config.quarantineRoot)
-    .deleteCiphertext(storageKey)
-    .catch(() => undefined);
 }
 
 async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
@@ -204,32 +298,108 @@ async function reconcileDocumentStorage(): Promise<void> {
       documentId: documents.id,
       householdId: documents.householdId,
       itemId: documents.itemId,
+      lifecycle: documents.lifecycle,
       storageKey: documentCrypto.storageKey,
     })
     .from(documents)
-    .innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+    .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
     .where(inArray(documents.lifecycle, ["available", "pending_deletion"]));
 
-  const referencedKeys = new Set(records.map((record) => record.storageKey));
+  const referencedKeys = new Set(records.flatMap((record) => record.storageKey ? [record.storageKey] : []));
   for (const record of records) {
-    if (await storage.ciphertextExists(record.storageKey)) continue;
-    await getDb().transaction(async (transaction) => {
-      await transaction.update(documents).set({
-        lifecycle: "rejected",
-        failureCode: "storage_object_missing",
-        updatedAt: new Date(),
-      }).where(and(
-        eq(documents.id, record.documentId),
-        inArray(documents.lifecycle, ["available", "pending_deletion"]),
-      ));
-      await transaction.insert(auditLog).values({
-        householdId: record.householdId,
-        actorUserId: null,
-        entityType: "document",
-        entityId: record.documentId,
-        action: "document_storage_missing",
-        changes: { itemId: record.itemId },
+    if (!record.storageKey) {
+      // Available documents without an envelope cannot be opened and must not
+      // remain user-visible. Pending purges retain their durable evidence for
+      // the job retry path instead of being rewritten as a new rejection.
+      if (record.lifecycle === "pending_deletion") continue;
+      await getDb().transaction(async (transaction) => {
+        const [rejected] = await transaction.update(documents).set({
+          lifecycle: "rejected",
+          failureCode: "crypto_metadata_missing",
+          updatedAt: new Date(),
+        }).where(and(
+          eq(documents.id, record.documentId),
+          eq(documents.lifecycle, "available"),
+        )).returning({ id: documents.id });
+        if (!rejected) return;
+        await transaction.insert(auditLog).values({
+          householdId: record.householdId,
+          actorUserId: null,
+          entityType: "document",
+          entityId: record.documentId,
+          action: "document_crypto_missing",
+          changes: { itemId: record.itemId },
+        });
       });
+      continue;
+    }
+    let ciphertextExists = false;
+    try {
+      ciphertextExists = await storage.ciphertextExists(record.storageKey);
+    } catch {
+      if (record.lifecycle === "pending_deletion") continue;
+      await getDb().transaction(async (transaction) => {
+        const [rejected] = await transaction.update(documents).set({
+          lifecycle: "rejected",
+          failureCode: "storage_object_invalid",
+          updatedAt: new Date(),
+        }).where(and(
+          eq(documents.id, record.documentId),
+          eq(documents.lifecycle, "available"),
+        )).returning({ id: documents.id });
+        if (!rejected) return;
+        await transaction.insert(auditLog).values({
+          householdId: record.householdId,
+          actorUserId: null,
+          entityType: "document",
+          entityId: record.documentId,
+          action: "document_storage_invalid",
+          changes: { itemId: record.itemId },
+        });
+      });
+      continue;
+    }
+    if (ciphertextExists) continue;
+    // A pending purge may have removed ciphertext before its finalization
+    // transaction. Preserve that durable retry evidence for the next claim.
+    if (record.lifecycle === "pending_deletion") continue;
+    await reconcileMissingDocument(record, {
+      withDocumentLock: async (documentId, work) => getDb().transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
+        );
+        return work({
+          readCurrentLifecycle: async (currentDocumentId) => {
+            const records = await transaction.execute(sql<{ lifecycle: string }>`
+              select lifecycle
+              from documents
+              where id = ${currentDocumentId}
+              for update
+            `) as unknown as Array<{ lifecycle: string }>;
+            return records[0]?.lifecycle;
+          },
+          rejectAvailableDocument: async (snapshot) => {
+            const [rejected] = await transaction.update(documents).set({
+              lifecycle: "rejected",
+              failureCode: "storage_object_missing",
+              updatedAt: new Date(),
+            }).where(and(
+              eq(documents.id, snapshot.documentId),
+              eq(documents.lifecycle, "available"),
+            )).returning({ id: documents.id });
+            if (!rejected) return false;
+            await transaction.insert(auditLog).values({
+              householdId: snapshot.householdId,
+              actorUserId: null,
+              entityType: "document",
+              entityId: snapshot.documentId,
+              action: "document_storage_missing",
+              changes: { itemId: snapshot.itemId },
+            });
+            return true;
+          },
+        });
+      }),
     });
   }
 

@@ -67,6 +67,7 @@ describe("local document storage", () => {
     await expect(storage.writeCiphertext("../escape", ciphertext)).rejects.toThrow("Invalid document storage key");
     await storage.deleteCiphertext(key);
     expect(await storage.ciphertextExists(key)).toBe(false);
+    await storage.deleteCiphertext(key);
     await expect(storage.readCiphertext(key, 1_024)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
