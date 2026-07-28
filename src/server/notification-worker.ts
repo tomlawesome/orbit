@@ -101,6 +101,8 @@ export interface NotificationWorkerDependencies {
   nextLeaseToken?: () => string;
   /** Explicit provider fakes keep tests off the network. */
   providers?: NotificationProviders;
+  /** Deterministic barrier used to model a lease handoff before dispatch. */
+  beforeProviderDispatch?: (delivery: { id: string; channel: "email" | "web_push" }) => Promise<void>;
   leaseDurationMs?: number;
   retryDelayMs?: (attempts: number) => number;
   claimLimit?: number;
@@ -359,20 +361,36 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
   };
 }
 
-async function ownsLease(
+async function refreshLeaseBeforeDispatch(
   db: NotificationDatabase,
   id: string,
   leaseToken: string,
-  now: Date,
+  dispatchNow: Date,
   leaseDurationMs: number,
 ): Promise<boolean> {
-  const [row] = await db.select({ id: notificationDeliveries.id }).from(notificationDeliveries).where(and(
+  const [refreshed] = await db.update(notificationDeliveries).set({
+    lockedAt: dispatchNow,
+    updatedAt: dispatchNow,
+  }).where(and(
     eq(notificationDeliveries.id, id),
     eq(notificationDeliveries.status, "processing"),
     eq(notificationDeliveries.leaseToken, leaseToken),
-    gte(notificationDeliveries.lockedAt, new Date(now.getTime() - leaseDurationMs)),
-  ));
-  return Boolean(row);
+    gte(notificationDeliveries.lockedAt, new Date(dispatchNow.getTime() - leaseDurationMs)),
+  )).returning({ id: notificationDeliveries.id });
+  return Boolean(refreshed);
+}
+
+async function prepareProviderDispatch(
+  db: NotificationDatabase,
+  delivery: { id: string; channel: "email" | "web_push" },
+  leaseToken: string,
+  currentTime: () => Date,
+  leaseDurationMs: number,
+  beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
+): Promise<boolean> {
+  await beforeProviderDispatch?.(delivery);
+  const dispatchNow = new Date(currentTime().getTime());
+  return refreshLeaseBeforeDispatch(db, delivery.id, leaseToken, dispatchNow, leaseDurationMs);
 }
 
 async function cancelDelivery(
@@ -400,9 +418,11 @@ async function deliverClaimed(
   claimed: ClaimedDelivery[],
   config: NotificationWorkerConfig,
   now: Date,
+  currentTime: () => Date,
   providers: NotificationProviders,
   leaseDurationMs: number,
   retryDelay: (attempts: number) => number,
+  beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
 ): Promise<void> {
   if (!claimed.length) return;
   const leaseTokens = new Map(claimed.map((delivery) => [delivery.id, delivery.leaseToken]));
@@ -450,7 +470,6 @@ async function deliverClaimed(
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
-      if (!await ownsLease(db, delivery.id, leaseToken, now, leaseDurationMs)) continue;
       const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
       const matchingRule = (rulesByItem.get(delivery.itemId) ?? []).find((rule) => (
         householdReminderTime(delivery.dueDate, rule.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
@@ -476,7 +495,14 @@ async function deliverClaimed(
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
           continue;
         }
-        if (!await ownsLease(db, delivery.id, leaseToken, now, leaseDurationMs)) continue;
+        if (!await prepareProviderDispatch(
+          db,
+          { id: delivery.id, channel: delivery.channel },
+          leaseToken,
+          currentTime,
+          leaseDurationMs,
+          beforeProviderDispatch,
+        )) continue;
         await providers.sendEmail({
           from: config.smtpFrom,
           to: delivery.email,
@@ -500,7 +526,14 @@ async function deliverClaimed(
         }
         let leaseLost = false;
         for (const subscription of subscriptions) {
-          if (!await ownsLease(db, delivery.id, leaseToken, now, leaseDurationMs)) {
+          if (!await prepareProviderDispatch(
+            db,
+            { id: delivery.id, channel: delivery.channel },
+            leaseToken,
+            currentTime,
+            leaseDurationMs,
+            beforeProviderDispatch,
+          )) {
             leaseLost = true;
             break;
           }
@@ -586,14 +619,25 @@ export async function runNotificationCycle(
   dependencies: NotificationWorkerDependencies = {},
 ): Promise<void> {
   const db = dependencies.db ?? getDb();
-  const now = new Date((dependencies.now?.() ?? new Date()).getTime());
+  const currentTime = dependencies.now ?? (() => new Date());
+  const now = new Date(currentTime().getTime());
   const leaseDurationMs = dependencies.leaseDurationMs ?? notificationLeaseDurationMs;
   const retryDelay = dependencies.retryDelayMs ?? notificationRetryDelayMs;
   const nextLeaseToken = dependencies.nextLeaseToken ?? randomUUID;
   const providers = dependencies.providers ?? createDefaultNotificationProviders(config);
   await materializeDueDeliveries(db, now);
   const claimed = await claimDeliveries(db, now, nextLeaseToken, leaseDurationMs, dependencies.claimLimit ?? 25);
-  await deliverClaimed(db, claimed, config, now, providers, leaseDurationMs, retryDelay);
+  await deliverClaimed(
+    db,
+    claimed,
+    config,
+    now,
+    currentTime,
+    providers,
+    leaseDurationMs,
+    retryDelay,
+    dependencies.beforeProviderDispatch,
+  );
 }
 
 const workerState = globalThis as typeof globalThis & {

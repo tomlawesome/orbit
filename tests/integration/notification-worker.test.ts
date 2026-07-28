@@ -285,6 +285,47 @@ describe("notification worker PostgreSQL contracts", () => {
     expect(staleFailure?.lastError).toBeNull();
   });
 
+  it("does not dispatch a lease reclaimed after the cycle starts", async () => {
+    const fixture = await ownerOnlyFixture("worker-reclaimed-before-dispatch");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    const [delivery] = await getDb().insert(notificationDeliveries).values({
+      householdId: fixture.household.id,
+      eventId,
+      userId: fixture.users.owner.id,
+      channel: "email",
+      scheduledFor: cycleTime,
+      status: "pending",
+    }).returning({ id: notificationDeliveries.id });
+    const reclaimer = openIndependentDatabase();
+    const oldLease = deterministicLeaseToken(30);
+    const newLease = deterministicLeaseToken(31);
+    let currentTime = cycleTime;
+    let providerCalls = 0;
+    try {
+      await runNotificationCycle(workerConfig(), {
+        now: () => currentTime,
+        nextLeaseToken: () => oldLease,
+        providers: fakeProviders(() => { providerCalls += 1; }),
+        beforeProviderDispatch: async ({ id }) => {
+          currentTime = new Date(cycleTime.getTime() + 11 * 60_000);
+          await reclaimer.db.update(notificationDeliveries).set({
+            status: "processing",
+            lockedAt: currentTime,
+            leaseToken: newLease,
+            attempts: 2,
+          }).where(eq(notificationDeliveries.id, id));
+        },
+      });
+      const reclaimed = await deliveryForEvent(eventId);
+      expect(reclaimed?.id).toBe(delivery.id);
+      expect(reclaimed?.status).toBe("processing");
+      expect(reclaimed?.leaseToken).toBe(newLease);
+      expect(providerCalls).toBe(0);
+    } finally {
+      await reclaimer.client.end();
+    }
+  });
+
   it("continues a persisted retry after restart and stops at the configured attempt bound", async () => {
     const fixture = await ownerOnlyFixture("worker-restart-retry");
     const eventId = await seedEvent(fixture, { pushEnabled: false });
