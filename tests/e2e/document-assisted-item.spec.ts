@@ -31,9 +31,8 @@ async function ensureHousehold(page: Page) {
 
 async function openAddItem(page: Page, isMobile: boolean) {
   if (isMobile) {
-    const navigation = page.getByRole("button", { name: "Open navigation" });
-    if (await navigation.isVisible()) await navigation.click();
     const add = page.locator("button.mobile-add");
+    await expect(add).toBeVisible();
     await add.focus();
     await page.keyboard.press("Enter");
     return;
