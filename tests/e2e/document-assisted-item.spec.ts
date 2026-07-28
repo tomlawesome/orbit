@@ -150,6 +150,7 @@ test.describe("document-assisted item intake", () => {
     await openAddItem(page, isMobile);
     const editor = page.getByRole("dialog", { name: "Add an item" });
     await editor.getByLabel("What do you want to keep track of?").fill(`Command failure ${Date.now()}`);
+    await editor.getByRole("button", { name: "No schedule" }).click();
     await editor.getByLabel("Document").setInputFiles({
       name: "command-failure.pdf",
       mimeType: "application/pdf",
@@ -186,6 +187,7 @@ test.describe("document-assisted item intake", () => {
     const editor = page.getByRole("dialog", { name: "Add an item" });
     const title = `Attachment failure ${Date.now()}`;
     await editor.getByLabel("What do you want to keep track of?").fill(title);
+    await editor.getByRole("button", { name: "No schedule" }).click();
     await editor.getByLabel("Document").setInputFiles({
       name: "attachment-failure.pdf",
       mimeType: "application/pdf",
