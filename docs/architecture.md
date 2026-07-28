@@ -15,7 +15,7 @@ flowchart LR
     files[("Encrypted document volume")]
     clamav["Private ClamAV"]
     tika["Optional private Tika"]
-    mail["Optional IMAP and SMTP"]
+    mail["Configured IMAP and SMTP"]
     push["Optional Web Push"]
 
     user <-->|"HTTPS + opaque session"| orbit

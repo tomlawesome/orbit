@@ -12,7 +12,7 @@ feature status.
   [architecture](architecture.md) and [ADRs](adr/README.md).
 - Tests, CI and definition of done:
   [quality strategy](quality-strategy.md).
-- Deferred product direction: [feature register](feature-register.md).
+- Detailed product direction: [feature register](feature-register.md).
 - Priority, ownership and delivery status: GitHub milestones and issues.
 
 Historical consolidation and handover status files were removed after their
@@ -73,7 +73,7 @@ The roadmap contains ten outcome-level epics:
 6. [administration and observability](https://github.com/tomlawesome/orbit/issues/19);
 7. [accessible, responsive, and offline-safe experience](https://github.com/tomlawesome/orbit/issues/20);
 8. [CI, supply chain, release, and operator acceptance](https://github.com/tomlawesome/orbit/issues/21);
-9. [optional mail and document automation](https://github.com/tomlawesome/orbit/issues/22);
+9. [reviewed mail and document ingestion](https://github.com/tomlawesome/orbit/issues/22);
 10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
 Only work close to delivery is decomposed. Later epics are refined when their
@@ -154,9 +154,10 @@ onto the accepted release line and reruns its authoritative checks before
 merge.
 
 Issue #43 is planned now but implementation starts only after #40 and #42 are
-accepted. Document suggestions extend the manual editor and secure document
-lifecycle; they never replace manual entry or persist an item before explicit
-submission.
+accepted. A document is optional for each item, but the document-assisted
+workflow is required v1 scope. Suggestions extend the manual editor and secure
+document lifecycle; they never replace manual entry or persist an item before
+explicit submission.
 
 In parallel, issue #14 closes successful atomic session refresh, logout and
 OIDC failure-route contracts. Representative Authentik or equivalent
@@ -167,6 +168,11 @@ requires Sol Extra High review before implementation proceeds.
 
 ### Wave 3 — lifecycle, administration and operations
 
+- Complete issue #22 after #43 establishes the shared editable draft and review
+  contract. Dedicated-mailbox messages and attachments enter that same private
+  flow with authenticated identity, idempotent receipt, hostile-MIME bounds,
+  quarantine, bounded retry and explicit user approval. Mail receipt never
+  creates, attaches or merges an item automatically.
 - Complete issue #15 retention and purge behaviour after document lifecycle
   evidence exists.
 - Complete issue #19 administration, redaction, degraded dependency and
@@ -186,8 +192,9 @@ requires Sol Extra High review before implementation proceeds.
 - Publish a semantic release candidate only when all stable-v1 blockers are
   closed, then accept and promote its exact digest.
 
-Issue #22 remains deferred until the manual item and document workflows are
-accepted. Optional automation does not block stable v1.
+Issue #22 begins only after the manual item and document-assisted review
+contracts are accepted, but its dedicated-mailbox ingestion and review journey
+remain required before stable v1.
 
 ## Pull-request lifecycle
 
