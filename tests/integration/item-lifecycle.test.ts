@@ -248,20 +248,21 @@ describe("conflict-safe item lifecycle", () => {
       ...completion,
       householdId: concurrentFixture.household.id,
       itemId: concurrentFixture.item.id,
-      activity: { ...completion.activity, itemId: concurrentFixture.item.id },
+      activity: activity(concurrentFixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20", nextDate: "2027-12-20" }),
     };
+    expect(concurrent.activity.id).not.toBe(completion.activity.id);
     const responses = await Promise.all([
       applyWorkspaceCommand(requestForSession(concurrentOwner, commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) })),
       applyWorkspaceCommand(requestForSession(concurrentOwner, commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(concurrent) })),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
 
-    for (const target of [fixture, concurrentFixture]) {
+    for (const [target, completionKey] of [[fixture, completion.activity.id], [concurrentFixture, concurrent.activity.id]] as const) {
       const snapshot = await itemSnapshot(target);
       expect(snapshot.item?.version).toBe(3);
       expect(snapshot.events.filter((event) => event.completedAt != null)).toHaveLength(1);
       expect(snapshot.events.filter((event) => event.completedAt == null)).toHaveLength(1);
-      expect(snapshot.events.filter((event) => event.completionKey === completion.activity.id)).toHaveLength(1);
+      expect(snapshot.events.filter((event) => event.completionKey === completionKey)).toHaveLength(1);
       expect(snapshot.auditCount).toBe(2);
     }
   });
