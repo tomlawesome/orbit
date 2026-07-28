@@ -122,20 +122,21 @@ export type WorkspaceCommand =
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
   | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
-  | { type: "item.archive"; householdId: string; itemId: string; activity: ItemActivity }
+  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivity }
   | {
       type: "item.complete";
       householdId: string;
       itemId: string;
+      expectedVersion: number;
       completedDate: string;
       nextDate?: string;
       costMinor?: number;
       notes?: string;
       activity: ItemActivity;
     }
-  | { type: "item.reschedule"; householdId: string; itemId: string; dueDate: string; activity: ItemActivity }
-  | { type: "item.snooze"; householdId: string; itemId: string; snoozedUntil: string; activity: ItemActivity }
-  | { type: "item.status"; householdId: string; itemId: string; status: "active" | "cancelled"; activity: ItemActivity }
+  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivity }
+  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivity }
+  | { type: "item.status"; householdId: string; itemId: string; expectedVersion: number; status: "active" | "cancelled"; activity: ItemActivity }
   | { type: "notification.read"; householdId: string; notificationId: string }
   | { type: "notification.dismiss"; householdId: string; notificationId: string }
   | { type: "notification.read-all"; householdId: string; notificationIds: string[] };
@@ -174,12 +175,14 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.archive"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     activity: itemActivitySchema,
   }),
   z.object({
     type: z.literal("item.complete"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     completedDate: calendarDate,
     nextDate: calendarDate.optional(),
     costMinor: z.number().int().min(0).max(100_000_000).optional(),
@@ -190,6 +193,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.reschedule"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     dueDate: calendarDate,
     activity: itemActivitySchema,
   }),
@@ -197,6 +201,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.snooze"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     snoozedUntil: calendarDate,
     activity: itemActivitySchema,
   }),
@@ -204,6 +209,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.status"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     status: z.enum(["active", "cancelled"]),
     activity: itemActivitySchema,
   }),
