@@ -34,9 +34,13 @@ async function createDisposableWorkspace(page: Page, workspace: DisposableWorksp
   const sessionResponse = await page.request.get("/api/auth/session");
   expect(sessionResponse.ok()).toBeTruthy();
   const session = await sessionResponse.json() as { csrfToken: string };
+  const headers = {
+    Origin: new URL(page.url()).origin,
+    "X-CSRF-Token": session.csrfToken,
+  };
 
   const householdResponse = await page.request.post("/api/workspace/commands", {
-    headers: { "X-CSRF-Token": session.csrfToken },
+    headers,
     data: {
       type: "household.create",
       household: {
@@ -58,13 +62,13 @@ async function createDisposableWorkspace(page: Page, workspace: DisposableWorksp
   expect(householdResponse.ok()).toBeTruthy();
 
   const activateResponse = await page.request.post("/api/workspace/commands", {
-    headers: { "X-CSRF-Token": session.csrfToken },
+    headers,
     data: { type: "household.activate", householdId: workspace.householdId },
   });
   expect(activateResponse.ok()).toBeTruthy();
 
   const itemResponse = await page.request.post("/api/workspace/commands", {
-    headers: { "X-CSRF-Token": session.csrfToken },
+    headers,
     data: {
       type: "item.upsert",
       householdId: workspace.householdId,
@@ -87,7 +91,10 @@ async function cleanupDisposableWorkspace(page: Page, workspace: DisposableWorks
   if (!sessionResponse.ok()) throw new Error(`Could not read the authenticated session for cleanup (${sessionResponse.status()})`);
   const session = await sessionResponse.json() as { csrfToken: string };
   const url = `/api/households/${workspace.householdId}/lifecycle`;
-  const headers = { "X-CSRF-Token": session.csrfToken };
+  const headers = {
+    Origin: new URL(page.url()).origin,
+    "X-CSRF-Token": session.csrfToken,
+  };
   const deletionResponse = await page.request.post(url, {
     headers,
     data: { action: "delete", confirmation: workspace.householdName },
@@ -116,6 +123,7 @@ test.describe("authenticated document lifecycle", () => {
 
     await signIn(page, administrator);
     const workspace = newDisposableWorkspace();
+    let journeyFailed = false;
     try {
       await createDisposableWorkspace(page, workspace);
       await page.goto("/");
@@ -159,8 +167,15 @@ test.describe("authenticated document lifecycle", () => {
       const restoredResponse = await restoredResponsePromise;
       expect(restoredResponse.status()).toBe(200);
       expect(await restoredResponse.body()).toEqual(syntheticPdf);
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
     } finally {
-      await cleanupDisposableWorkspace(page, workspace);
+      try {
+        await cleanupDisposableWorkspace(page, workspace);
+      } catch (cleanupError) {
+        if (!journeyFailed) throw cleanupError;
+      }
     }
   });
 });
