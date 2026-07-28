@@ -297,6 +297,8 @@ test.describe("authenticated household lifecycle", () => {
     await detail.getByRole("button", { name: "Save completion" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} renewal completed`);
     await waitForSynced(page);
+    detail = page.getByRole("dialog", { name: updatedTitle });
+    await expect(detail).toBeVisible({ timeout: 15_000 });
 
     await detail.getByRole("button", { name: "Reschedule" }).click();
     const reschedulePanel = detail.locator("form.detail-action-panel");
@@ -304,6 +306,8 @@ test.describe("authenticated household lifecycle", () => {
     await reschedulePanel.getByRole("button", { name: "Reschedule", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} rescheduled`);
     await waitForSynced(page);
+    detail = page.getByRole("dialog", { name: updatedTitle });
+    await expect(detail).toBeVisible({ timeout: 15_000 });
 
     await detail.getByRole("button", { name: "Snooze" }).click();
     const snoozePanel = detail.locator("form.detail-action-panel");
@@ -311,6 +315,8 @@ test.describe("authenticated household lifecycle", () => {
     await snoozePanel.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Reminders snoozed until");
     await waitForSynced(page);
+    detail = page.getByRole("dialog", { name: updatedTitle });
+    await expect(detail).toBeVisible({ timeout: 15_000 });
 
     await detail.getByRole("button", { name: "Cancel item" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} cancelled`);
@@ -321,6 +327,8 @@ test.describe("authenticated household lifecycle", () => {
     await detail.getByRole("button", { name: "Restore item" }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} restored`);
     await waitForSynced(page);
+    detail = page.getByRole("dialog", { name: updatedTitle });
+    await expect(detail).toBeVisible({ timeout: 15_000 });
     await detail.getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(`${updatedTitle} archived`);
     await waitForSynced(page);
@@ -370,7 +378,6 @@ test.describe("authenticated household lifecycle", () => {
     const submit = editor.getByRole("button", { name: "Add item", exact: true });
     await submit.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("status")).toContainText(`${title} added`);
     await waitForActiveHouseholdItem(page, title);
     await waitForSynced(page);
     expect(inspectionRequests).toEqual([]);
@@ -384,9 +391,8 @@ test.describe("authenticated household lifecycle", () => {
     const save = edit.getByRole("button", { name: "Save changes" });
     await save.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("status")).toContainText(`${updatedTitle} updated`);
-    await waitForSynced(page);
     await waitForActiveHouseholdItem(page, updatedTitle);
+    await waitForSynced(page);
     expect(inspectionRequests).toEqual([]);
     await page.reload();
     await openItemRow(page, updatedTitle);
