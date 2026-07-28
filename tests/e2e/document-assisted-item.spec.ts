@@ -20,7 +20,12 @@ async function ensureHousehold(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Set up your space" });
   await dialog.getByLabel("Household name").fill(`Document intake ${Date.now()}`);
   await dialog.getByRole("button", { name: "Create household" }).click();
-  const created = await expect.poll(async () => (await readWorkspace(page)).workspace.activeHouseholdId, { timeout: 15_000 });
+  let created: string | null = null;
+  await expect.poll(async () => {
+    created = (await readWorkspace(page)).workspace.activeHouseholdId;
+    return created;
+  }, { timeout: 15_000 }).toBeTruthy();
+  if (!created) throw new Error("Household creation did not produce an active household");
   return created;
 }
 
@@ -69,21 +74,39 @@ test.describe("document-assisted item intake", () => {
     editor = page.getByRole("dialog", { name: "Add an item" });
     const assistedTitle = `Reviewed intake ${suffix}`;
     await editor.getByLabel("What do you want to keep track of?").fill(assistedTitle);
+    const mockedSuggestions = [
+      { field: "title", value: "Suggested title", source: "filename", confidence: "high" },
+      { field: "provider", value: "Suggested Provider", source: "document_text", confidence: "medium" },
+      { field: "reference", value: "SUGGESTED-123", source: "document_text", confidence: "medium" },
+      { field: "dueDate", value: "2030-12-20", source: "document_text", confidence: "medium" },
+    ] as const;
+    await page.route("**/api/households/*/item-document-inspection", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ extracted: true, suggestions: mockedSuggestions }),
+      });
+    });
+    const inspectionResponse = page.waitForResponse((response) => response.url().includes("/item-document-inspection") && response.request().method() === "POST");
     await editor.getByLabel("Document").setInputFiles({
       name: "synthetic-policy.pdf",
       mimeType: "application/pdf",
       buffer: Buffer.from("%PDF-1.7\nProvider: Hostile-but-inert Cover\nPolicy number: REVIEW-12345\n2030-12-20\n"),
     });
-    await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    const inspectionPayload = await (await inspectionResponse).json() as { suggestions: typeof mockedSuggestions };
+    expect(inspectionPayload.suggestions).toEqual(mockedSuggestions);
     await expect(editor.getByLabel("What do you want to keep track of?")).toHaveValue(assistedTitle);
+    await expect(editor.getByLabel("Provider")).toHaveValue("Suggested Provider");
+    await expect(editor.getByLabel("Reference")).toHaveValue("SUGGESTED-123");
+    await expect(editor.getByLabel("Renewal date")).toHaveValue("2030-12-20");
     await editor.getByLabel("Type").fill("Insurance");
     await editor.getByLabel("Provider").fill("Reviewed Cover");
-    await editor.getByLabel("Reference").fill("REVIEWED-123");
     await editor.getByLabel("Reference").fill("");
     await editor.getByLabel("Cost (GBP)").fill("125.50");
     await editor.getByRole("button", { name: "Renews" }).click();
-    await editor.getByLabel("Renewal date").fill("2030-12-20");
+    await editor.getByLabel("Renewal date").fill("2031-01-10");
     await editor.getByLabel("Repeats").selectOption("12");
+    await page.unroute("**/api/households/*/item-document-inspection");
 
     const beforeSubmit = await readWorkspace(page);
     const beforeItems = beforeSubmit.workspace.households.flatMap((household) => household.items);
@@ -110,7 +133,7 @@ test.describe("document-assisted item intake", () => {
       provider: "Reviewed Cover",
       reference: undefined,
       costMinor: 12550,
-      dueDate: "2030-12-20",
+      dueDate: "2031-01-10",
       scheduleKind: "renewal",
       recurrenceMonths: 12,
     });
