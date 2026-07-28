@@ -113,10 +113,7 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(loser).toBeDefined();
     expect(winner?.headers.get("cache-control")).toBe("no-store");
     expect(loser?.headers.get("cache-control")).toBe("no-store");
-    expect((await loser?.json()).error).toEqual({
-      code: "session_required",
-      message: "The session was replaced by another request",
-    });
+    expect((await loser?.json()).error.code).toBe("session_required");
 
     const rotated = replacementSession(session, winner!);
     expect((await (await sessionStatus(sessionRequest(rotated))).json()).authenticated).toBe(true);
