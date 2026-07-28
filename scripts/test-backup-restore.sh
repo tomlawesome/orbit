@@ -552,4 +552,7 @@ test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
 
+remove_document_fixture
+assert_fixture_absent
+
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, and document/crypto round trip passed.\n'
