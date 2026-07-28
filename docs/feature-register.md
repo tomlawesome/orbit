@@ -1,9 +1,10 @@
 # Orbit product direction register
 
-This register captures possible or agreed product directions beyond the stable
-v1 contract. Entries describe intended outcomes and constraints; they are not
-implementation status, release commitments, or permission to expand an active
-issue.
+This register captures detailed possible or agreed product directions that do
+not belong in the concise release charter. An entry may be deferred or promoted
+into a release contract; its roadmap disposition makes that explicit. Entries
+describe intended outcomes and constraints, not implementation status or
+permission to expand an active issue.
 
 The [v1 charter](v1-charter.md) defines the release contract, the
 [engineering baseline](engineering-baseline.md) records dated evidence, and
@@ -18,23 +19,24 @@ Each entry records:
 - **Dependencies:** foundations that must exist before implementation.
 - **Decision status:** whether material architecture choices remain open.
 
-Existing candidate code does not make a direction complete. Graduation into
-the v1 contract requires a scoped issue, acceptance evidence, and any necessary
-ADR or threat-model update. Changes should use migrations and feature flags
-where partial deployment could expose unfinished behaviour. Every feature must
+Existing candidate code does not make a direction complete. Inclusion in the
+v1 contract requires a scoped issue, acceptance evidence, and any necessary ADR
+or threat-model update. Changes should use migrations and feature flags where
+partial deployment could expose unfinished behaviour. Every feature must
 preserve household isolation, signed-out privacy, auditability, and the
 supported deployment shape in ADR-0001. Orbit must not require access to the
 Docker socket.
 
-## ORB-FUT-001 — Intelligent email and document ingestion
+## ORB-FUT-001 — Reviewed email and document ingestion
 
-**Roadmap disposition:** Deferred from the stable v1 gate; candidate code remains experimental
-**Priority:** High
-**Phase:** 5 — after secure document storage, parsing, extraction, and review
+**Roadmap disposition:** Required for the stable v1 gate
+**Priority:** Required core workflow
+**Phase:** 3 — after secure document storage, parsing, extraction, and review
 **Dependencies:** ORB-FUT-003, ORB-FUT-004
 **Decision status:** Architecture choices remain open
-**Objective:** Let a registered user forward household documents to Orbit and
-turn them into reviewed items with the original documents retained.
+**Objective:** Let a registered user forward household documents to Orbit, or
+upload them directly, and turn them into reviewed items with the original
+documents retained. Both sources use one editable draft-and-approval flow.
 
 ### Intended experience
 

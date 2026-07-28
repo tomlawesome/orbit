@@ -67,6 +67,12 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   best-effort field suggestions, but the user can edit every field and must
   explicitly submit the item. Manual entry remains fully supported without a
   document.
+- **V1-DOC-03:** When an administrator configures a dedicated mailbox, Orbit
+  ingests bounded, authenticated messages and attachments idempotently into
+  the same private review flow used for direct uploads. The user selects the
+  household, can correct every suggested field, and must explicitly approve
+  creation or attachment; receipt of a message never writes or merges an item
+  automatically.
 - **V1-REM-01:** Due-date calculations and reminder preferences are
   deterministic across calendar and daylight-saving boundaries.
 - **V1-REM-02:** Notification delivery is idempotently scheduled, bounded on
@@ -123,8 +129,8 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
 - S3-compatible storage or horizontal application scaling.
 - Automatic AI writes to household data.
 - Requiring Ollama or any cloud model.
-- Treating advanced IMAP ingestion, semantic extraction, or automatic duplicate
-  merging as a release blocker before the manual workflow is proven.
+- Automatic duplicate merging or any inbound-mail path that bypasses explicit
+  user review and approval.
 - A numerical test-count target or an arbitrary coverage percentage.
 
 Optional preview features may ship disabled or explicitly experimental only
