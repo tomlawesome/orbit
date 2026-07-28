@@ -26,20 +26,50 @@ async function readWorkspace(page: Page) {
   throw new Error("Workspace read did not run");
 }
 
+type DurableWorkspace = { activeHouseholdId: string | null; households: unknown[] };
+
+function isDurableWorkspace(workspace: unknown): workspace is DurableWorkspace {
+  if (!workspace || typeof workspace !== "object") return false;
+  const candidate = workspace as Record<string, unknown>;
+  return (candidate.activeHouseholdId === null || typeof candidate.activeHouseholdId === "string")
+    && Array.isArray(candidate.households);
+}
+
+async function waitForDurableWorkspace(page: Page): Promise<DurableWorkspace> {
+  let workspace: DurableWorkspace | undefined;
+  await expect.poll(async () => {
+    const response = await readWorkspace(page);
+    if (!response.ok || !isDurableWorkspace(response.workspace)) return false;
+    workspace = response.workspace;
+    return true;
+  }, { timeout: 15_000, message: "Expected a durable authenticated workspace response" }).toBe(true);
+  if (!workspace) throw new Error("Durable workspace response was not captured");
+  return workspace;
+}
+
 async function createManualHousehold(page: Page, isMobile: boolean, name: string) {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
   const householdPicker = page.locator("button.household-picker");
-  await expect(recoveryHeading.or(householdPicker).first()).toBeVisible({ timeout: 15_000 });
-  if (await recoveryHeading.isVisible()) {
-    await page.getByRole("button", { name: "Create a new household" }).click();
-  } else {
-    if (isMobile && !(await householdPicker.isVisible())) {
-      await page.getByRole("button", { name: "Open navigation" }).click();
+  const workspace = await waitForDurableWorkspace(page);
+  if (workspace.activeHouseholdId && workspace.households.length > 0) {
+    if (isMobile) {
+      const navigation = page.getByRole("button", { name: "Open navigation" });
+      await expect(navigation).toBeVisible({ timeout: 15_000 });
+      await navigation.click();
     }
+    await expect(householdPicker).toBeVisible({ timeout: 15_000 });
     await householdPicker.click();
-    await page.getByRole("button", { name: "Add a household" }).click();
+    const addHousehold = page.getByRole("button", { name: "Add a household" });
+    await expect(addHousehold).toBeVisible({ timeout: 15_000 });
+    await addHousehold.click();
+  } else {
+    await expect(recoveryHeading).toBeVisible({ timeout: 15_000 });
+    const createHousehold = page.getByRole("button", { name: "Create a new household" });
+    await expect(createHousehold).toBeVisible({ timeout: 15_000 });
+    await createHousehold.click();
   }
   const dialog = page.getByRole("dialog", { name: "Set up your space" });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
   await dialog.getByLabel("Household name").fill(name);
   await dialog.getByRole("button", { name: "Create household" }).click();
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
