@@ -12,7 +12,7 @@ const discoverySchema = z.object({
   jwks_uri: z.url(),
   userinfo_endpoint: z.url().optional(),
   end_session_endpoint: z.url().optional(),
-  code_challenge_methods_supported: z.array(z.string()).optional(),
+  code_challenge_methods_supported: z.array(z.string()),
   id_token_signing_alg_values_supported: z.array(z.string()).optional(),
 });
 
@@ -64,7 +64,7 @@ export async function discoverProvider(config: AuthConfig): Promise<OidcMetadata
       assertHttpsEndpoint(metadata.jwks_uri, "JWKS endpoint");
       if (metadata.userinfo_endpoint) assertHttpsEndpoint(metadata.userinfo_endpoint, "UserInfo endpoint");
       if (metadata.end_session_endpoint) assertHttpsEndpoint(metadata.end_session_endpoint, "Logout endpoint");
-      if (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes("S256")) {
+      if (!metadata.code_challenge_methods_supported.includes("S256")) {
         throw new Error("Provider does not advertise S256 PKCE support");
       }
       return metadata;
