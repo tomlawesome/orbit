@@ -325,7 +325,7 @@ test_journal_publication_failures() {
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'Restore unexpectedly succeeded when initial journal file synchronization failed.'
   fi
-  health_check || fail 'Orbit was not healthy after unpublished checkpoint cleanup.'
+  wait_for_health
   [[ ! -f "$restore_root/restore.journal" ]] || fail 'Unpublished checkpoint failure left a journal behind.'
   if find "$restore_root" -mindepth 1 -maxdepth 1 -type d -name 'checkpoint-*' -print -quit | grep -q .; then
     fail 'Unpublished checkpoint failure left a checkpoint behind.'
