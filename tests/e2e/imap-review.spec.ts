@@ -110,7 +110,7 @@ test.describe("authenticated mailbox review", () => {
     await expect(review).not.toContainText(/sender|filename|storageKey|contentSha256/i);
     await review.getByLabel("Title").fill("Corrected reviewed title");
     await review.getByLabel("Type").fill("Insurance");
-    await review.getByLabel("Provider").fill("Corrected provider");
+    await review.getByRole("textbox", { name: "Provider" }).fill("Corrected provider");
     await review.getByLabel("Reference").fill("");
     await review.getByLabel("Cost").fill("125.50");
     await review.getByLabel("Currency").fill("GBP");
