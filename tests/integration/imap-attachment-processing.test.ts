@@ -190,14 +190,45 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       const receiptId = randomUUID();
       const leaseToken = randomUUID();
       const held = await holdImapAttachment({ bytes: Buffer.from("expired worker ciphertext"), displayName: "expired.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      await storage.deleteCiphertext(held.storageKey);
       await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "ledger-expired", mailboxUidValidity: "77", mailboxUid: 914, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "expired", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000) });
       await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "pending" });
       const { reconcileImapStagingObjects } = await import("@/server/imap-ingestion");
       await reconcileImapStagingObjects();
+      await storage.writeCiphertext(held.storageKey, Buffer.from("late worker ciphertext"));
       await expect(commitStagedAttachment(receiptId, leaseToken, held)).rejects.toThrow("staging_lease_lost");
       expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.storageKey, held.storageKey))).toHaveLength(0);
-      expect(await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).ciphertextExists(held.storageKey)).toBe(false);
+      expect(await storage.ciphertextExists(held.storageKey)).toBe(false);
     } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("retains an exact purge ledger when late commit cleanup storage deletion fails", async () => {
+    const fixture = await createIntegrationFixture("imap-ledger-late-write-purge-failure");
+    try {
+      const receiptId = randomUUID();
+      const leaseToken = randomUUID();
+      const held = await holdImapAttachment({ bytes: Buffer.from("paused worker ciphertext"), displayName: "paused.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      await storage.deleteCiphertext(held.storageKey);
+      await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "ledger-late-failure", mailboxUidValidity: "77", mailboxUid: 916, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "late-failure", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000) });
+      await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "pending" });
+      const { reconcileImapStagingObjects } = await import("@/server/imap-ingestion");
+      await reconcileImapStagingObjects();
+      await storage.writeCiphertext(held.storageKey, Buffer.from("late worker ciphertext"));
+      setImapHoldingPurgeImplementationForTests(async () => { throw new Error("injected late purge failure"); });
+      await expect(commitStagedAttachment(receiptId, leaseToken, held)).rejects.toThrow("staging_lease_lost");
+      expect(await storage.ciphertextExists(held.storageKey)).toBe(true);
+      expect((await getDb().select({ messageId: imapIngestionStagingObjects.messageId, leaseToken: imapIngestionStagingObjects.leaseToken, storageKey: imapIngestionStagingObjects.storageKey, status: imapIngestionStagingObjects.status }).from(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.storageKey, held.storageKey)))[0]).toMatchObject({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "purge_pending" });
+
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await reconcileImapStagingObjects();
+      expect(await storage.ciphertextExists(held.storageKey)).toBe(false);
+      expect(await getDb().select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.storageKey, held.storageKey))).toHaveLength(0);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
       await fixture.cleanup();
     }
   });
