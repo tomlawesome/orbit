@@ -142,7 +142,7 @@ test.describe("document-assisted item intake", () => {
     expect(inspectionRequests).toHaveLength(1);
   });
 
-  test("does not upload when the conflict-safe item command fails", async ({ page, isMobile }) => {
+  test("does not upload when reviewed approval fails", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
@@ -159,13 +159,10 @@ test.describe("document-assisted item intake", () => {
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
 
     const uploadRequests: string[] = [];
-    await page.route("**/api/workspace/commands", async (route) => {
-      const body = route.request().postDataJSON() as { type?: string } | null;
-      if (body?.type === "item.upsert") {
-        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "version_conflict", message: "This item changed on another device; refresh and try again" } }) });
-        return;
-      }
-      await route.continue();
+    let approvalRequests = 0;
+    await page.route("**/api/reviewed-intake/approve", async (route) => {
+      approvalRequests += 1;
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "reviewed_intake_conflict", message: "This item changed on another device; refresh and try again" } }) });
     });
     page.on("request", (request) => {
       if (request.method() === "POST" && request.url().includes("/documents")) uploadRequests.push(request.url());
@@ -174,11 +171,12 @@ test.describe("document-assisted item intake", () => {
     await submitAddItem(page, editor, isMobile);
     await expect(editor).toBeVisible();
     await expect(editor.getByRole("status")).toContainText("changed on another device");
+    expect(approvalRequests).toBe(1);
     expect(uploadRequests).toHaveLength(0);
-    await page.unroute("**/api/workspace/commands");
+    await page.unroute("**/api/reviewed-intake/approve");
   });
 
-  test("keeps a valid item and directs attachment retry after upload failure", async ({ page, isMobile }) => {
+  test("keeps the editor and original file available for bounded attachment retry", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
@@ -194,20 +192,28 @@ test.describe("document-assisted item intake", () => {
       buffer: Buffer.from("%PDF-1.7\nsynthetic attachment failure\n"),
     });
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    let attempts = 0;
     await page.route("**/api/households/*/items/*/documents", async (route) => {
       if (route.request().method() === "POST") {
-        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+        attempts += 1;
+        if (attempts === 1) {
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+        } else {
+          await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ document: { id: "22222222-2222-4222-8222-222222222222" } }) });
+        }
         return;
       }
       await route.continue();
     });
 
     await submitAddItem(page, editor, isMobile);
-    await expect(page.locator(".action-toast")).toContainText("Open its Files section to retry the original file.", { timeout: 15_000 });
-    await expect(page.getByRole("dialog", { name: title })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: title })).toContainText("No documents attached yet.");
+    await expect(editor).toBeVisible();
+    await expect(editor.getByRole("status")).toContainText("temporarily unavailable");
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(true);
+    await submitAddItem(page, editor, isMobile);
+    await expect(page.locator(".action-toast")).toContainText(`${title} added`, { timeout: 15_000 });
+    expect(attempts).toBe(2);
     await page.unroute("**/api/households/*/items/*/documents");
   });
 });

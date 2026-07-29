@@ -222,5 +222,15 @@ export function useWorkspace() {
     return canonical;
   }, []);
 
-  return { workspace, dispatch, executeCommand, session, syncStatus, syncMessage };
+  const refreshWorkspace = useCallback(async (): Promise<void> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) return;
+    const canonical = await fetchWorkspace();
+    setWorkspace(canonical);
+    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+    setSyncStatus("synced");
+    setSyncMessage("");
+  }, []);
+
+  return { workspace, dispatch, executeCommand, refreshWorkspace, session, syncStatus, syncMessage };
 }
