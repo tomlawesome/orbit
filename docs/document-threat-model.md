@@ -109,6 +109,25 @@ recoverable state.
 - Plaintext quarantine files use opaque names, restrictive permissions, and a
   directory inaccessible through HTTP.
 
+### Parsing, OCR, and indirect prompt injection
+
+- Treat every supported manual-upload format—PDF, JPEG, PNG, and WebP—as
+  hostile throughout parsing and review. The PDF-only mailbox rule narrows
+  transport input; it does not make mailbox PDFs more trusted or manual image
+  uploads less dangerous.
+- ClamAV detects known file threats. Parsers and OCR engines extract content.
+  Neither function proves that extracted text, metadata, or suggested values
+  are safe, accurate, or authoritative.
+- Parser and OCR output is bounded untrusted evidence. It may populate only
+  allowlisted, type- and length-validated editable suggestions; it cannot
+  select authority, read secrets or unrelated records, fetch URLs, invoke
+  tools, approve a draft, associate a document, or perform a household write.
+- Explicit authenticated review is required before any suggested value or
+  document association becomes household-visible.
+- Any future model-backed extraction remains a tool-free, secret-free,
+  network-isolated proposer. Its schema-constrained output receives the same
+  validation and trust level as parser or OCR output.
+
 ### Malware scanning
 
 - Default deployment uses the official ClamAV `1.4.5` LTS image and its

@@ -60,8 +60,9 @@ server/domain boundaries so they can be integration-tested without a browser.
    jobs, audit events, and document metadata. Transactions do not encompass
    external network or filesystem side effects.
 5. **Quarantine and processors:** plaintext documents are bounded, private,
-   temporary, and treated as hostile. Parser output is evidence, not an
-   instruction or automatic write.
+   temporary, and treated as hostile regardless of format or source. Parser,
+   metadata, and OCR output is bounded evidence, not an instruction, authority
+   decision, or automatic write.
 6. **Encrypted storage:** durable document bytes are ciphertext addressed by
    opaque keys. The key-encryption key is a separately mounted runtime secret.
 7. **External providers:** receive only the minimum data required by their
