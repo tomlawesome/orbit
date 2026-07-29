@@ -74,14 +74,23 @@ safety property while giving both sources one approval boundary.
   scoped to the verified recipient so the same legitimate document sent to two
   users is not suppressed. Cursor rollover, crash recovery, and repeated
   polling are idempotent.
-- Defaults are a 25 MiB raw message limit, ten attachments, a 25 MiB aggregate
-  decoded-attachment limit, 100 MIME parts, and ten MIME nesting levels. Each
-  file also obeys the configured document limit.
-- v1 accepts the same PDF, JPEG, PNG, and WebP document types as direct upload.
-  Archives and active content are rejected rather than decompressed or
-  previewed. Extracted input is bounded to the existing parser character limit.
+- Defaults are a 25 MiB raw message limit, ten candidate PDF attachments, a
+  25 MiB aggregate decoded-PDF limit, 100 MIME parts, and ten MIME nesting
+  levels. Each PDF also obeys the configured document limit.
+- Mailbox ingestion is PDF-only in v1. Non-PDF parts, including incidental
+  inline logos and signatures, are not downloaded or staged; they still count
+  toward the raw-message and MIME-structure bounds. A part represented as a
+  PDF must be detected as a structurally valid PDF after bounded download or
+  the receipt fails safely. A message with no PDF candidate reaches a bounded
+  private `no_supported_pdf` outcome and cannot produce a review draft or
+  household mutation. Direct upload continues to support PDF, JPEG, and PNG.
+  All supported direct-upload formats remain subject to the same
+  hostile-content, parser/OCR isolation, bounded-output, and indirect prompt
+  injection controls as mailbox PDFs.
+- Archives and active content are not decompressed or previewed. Extracted PDF
+  input is bounded to the existing parser character limit.
 - Raw messages, subjects, bodies, headers, and unsafe bytes are not durably
-  stored by Orbit. Supported attachments are scanned before encrypted staging;
+  stored by Orbit. Supported PDFs are scanned before encrypted staging;
   malware and incomplete staging are purged immediately.
 - Provider and processing work uses leases, five bounded attempts, classified
   retry state, and the established delivery backoff conventions. Poison input

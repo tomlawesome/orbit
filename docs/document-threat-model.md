@@ -112,8 +112,9 @@ recoverable state.
 ### Parsing, OCR, and indirect prompt injection
 
 - Treat every supported manual-upload format—PDF, JPEG, and PNG—as
-  hostile throughout parsing and review. Narrowing a transport's accepted
-  formats does not make those documents trusted.
+  hostile throughout parsing and review. The PDF-only mailbox rule narrows
+  transport input; it does not make mailbox PDFs more trusted or manual image
+  uploads less dangerous.
 - ClamAV detects known file threats. Parsers and OCR engines extract content.
   Neither function proves that extracted text, metadata, or suggested values
   are safe, accurate, or authoritative.
@@ -273,7 +274,12 @@ the supported runtime. It must not introduce a custom cipher construction.
 ## Planned v1 intake extensions
 
 Bounded document parsing and dedicated-mailbox ingestion are required v1
-inputs to the same private, editable review flow. Before mailbox enablement,
+inputs to the same private, editable review flow. Direct upload accepts the
+three document types above, while mailbox ingestion deliberately accepts only
+PDF candidates. Incidental non-PDF MIME parts are ignored without download or
+staging; a claimed PDF must pass bounded structural detection, malware
+scanning, and encryption. A message with no PDF reaches a content-free private
+terminal outcome rather than an empty review draft. Before mailbox enablement,
 this model must cover authenticated envelope identity, hostile MIME and archive
 limits, receipt idempotency, quarantine, retry/reconnect behaviour, cross-
 household draft isolation, retention, redacted diagnostics, and explicit user
@@ -283,7 +289,7 @@ approval before any item write or attachment.
 boundary. Mailbox input is identified only through a configured
 provider-preserved envelope-recipient header and a versioned HMAC alias. Orbit
 does not persist raw messages, active content, archives, malware, or incomplete
-staging. Supported clean attachments are encrypted into user-owned staging
+staging. Supported clean PDFs are encrypted into user-owned staging
 that is neither household data nor downloadable through item routes. Receipt
 identity, recipient-scoped content identity, leases, bounded retries, expiry,
 and purge must remain idempotent across polling, restart, UIDVALIDITY rollover,
