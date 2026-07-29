@@ -127,8 +127,10 @@ boundary:
   aliases, with visible mail headers excluded from identity;
 - private user-owned encrypted staging rather than hidden household items;
 - transient direct-upload inspection and one source-aware approval contract;
-- the direct-upload document types, bounded MIME/message limits, rejected
-  archives, five processing attempts, and 30-day pending-draft retention;
+- PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
+  parts, safely rejected malformed PDF claims, five processing attempts, and
+  30-day pending-draft retention; direct upload separately retains PDF, JPEG,
+  PNG, and WebP support;
 - explicit create-separate or attach-to-existing duplicate outcomes, without
   automatic or field-level merge;
 - separate secret-backed SMTP configuration as an IMAP enablement prerequisite.
