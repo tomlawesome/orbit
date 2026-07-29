@@ -142,7 +142,7 @@ test.describe("document-assisted item intake", () => {
     expect(inspectionRequests).toHaveLength(1);
   });
 
-  test("does not upload when the conflict-safe item command fails", async ({ page, isMobile }) => {
+  test("does not upload when reviewed approval fails", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
@@ -159,13 +159,10 @@ test.describe("document-assisted item intake", () => {
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
 
     const uploadRequests: string[] = [];
-    await page.route("**/api/workspace/commands", async (route) => {
-      const body = route.request().postDataJSON() as { type?: string } | null;
-      if (body?.type === "item.upsert") {
-        await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "version_conflict", message: "This item changed on another device; refresh and try again" } }) });
-        return;
-      }
-      await route.continue();
+    let approvalRequests = 0;
+    await page.route("**/api/reviewed-intake/approve", async (route) => {
+      approvalRequests += 1;
+      await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "reviewed_intake_conflict", message: "This item changed on another device; refresh and try again" } }) });
     });
     page.on("request", (request) => {
       if (request.method() === "POST" && request.url().includes("/documents")) uploadRequests.push(request.url());
@@ -174,8 +171,9 @@ test.describe("document-assisted item intake", () => {
     await submitAddItem(page, editor, isMobile);
     await expect(editor).toBeVisible();
     await expect(editor.getByRole("status")).toContainText("changed on another device");
+    expect(approvalRequests).toBe(1);
     expect(uploadRequests).toHaveLength(0);
-    await page.unroute("**/api/workspace/commands");
+    await page.unroute("**/api/reviewed-intake/approve");
   });
 
   test("keeps the editor and original file available for bounded attachment retry", async ({ page, isMobile }) => {
