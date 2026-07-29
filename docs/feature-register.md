@@ -98,7 +98,7 @@ must be separately reviewed and must never silently merge uncertain records.
   token, and user confirmation should form the trust boundary.
 - Treat message bodies and documents as hostile input, including possible
   prompt injection. This applies to every supported direct-upload format—PDF,
-  JPEG, PNG, and WebP—as well as mailbox PDFs and any text recovered through
+  JPEG, and PNG—as well as mailbox PDFs and any text recovered through
   OCR. ClamAV, parsers, and OCR reduce different risks but do not make content
   trustworthy. Extraction must not grant documents access to application
   tools, secrets or unrelated records.
@@ -133,7 +133,7 @@ boundary:
 - PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
   parts, safely rejected malformed PDF claims, five processing attempts, and
   30-day pending-draft retention; direct upload separately retains PDF, JPEG,
-  PNG, and WebP support under the same hostile-content and indirect-injection
+  and PNG support under the same hostile-content and indirect-injection
   boundary;
 - explicit create-separate or attach-to-existing duplicate outcomes, without
   automatic or field-level merge;
@@ -410,6 +410,57 @@ while retaining GitHub as Orbit's public source and release channel.
 This option should only be activated if GitHub availability, policy, storage,
 or runner constraints provide a material reason. Standard GitHub-hosted runners
 for the public repository remain the simpler default.
+
+## ORB-FUT-009 — Structured provider contact information
+
+**Roadmap disposition:** Deferred until after v1
+**Priority:** Medium
+**Phase:** Post-v1 product enrichment
+**Dependencies:** ORB-FUT-001 and a reviewed contact-data model
+**Decision status:** Storage and presentation model requires a decision
+**Objective:** Keep useful provider contact details with an item so household
+members can quickly find the correct support channel.
+
+### Intended direction
+
+- Allow manual entry of labelled support telephone numbers, email addresses,
+  business or registered addresses, and websites.
+- Propose the same structured fields from supported document and email
+  ingestion sources, with bounded source evidence and confidence.
+- Require explicit review before extracted contact details are saved. Every
+  proposed value remains editable or removable.
+- Treat telephone numbers, addresses, email addresses, URLs, display labels,
+  metadata, and OCR-derived text as hostile data. Extraction cannot initiate a
+  call, message, navigation, lookup, or write.
+- Present external links and contact actions with safe schemes, clear
+  destinations, and no embedded credentials or automatic requests.
+- Decide separately whether details belong to an individual item, a reusable
+  provider record, or both before implementation.
+
+## ORB-FUT-010 — AI-assisted item summaries and notes
+
+**Roadmap disposition:** Deferred until after v1
+**Priority:** Medium
+**Phase:** Post-v1 product enrichment
+**Dependencies:** ORB-FUT-001 and proven indirect-injection controls
+**Decision status:** Summary lifecycle and model-provider contract require a
+decision
+**Objective:** Help users understand an item quickly through a concise summary
+and useful notes without allowing generated text to become authoritative.
+
+### Intended direction
+
+- Provide a manually editable summary and notes section independently of
+  whether AI assistance is configured.
+- Optionally propose a concise summary or notes from the minimum necessary,
+  user-authorized item and document evidence.
+- Show provenance and make generated content visibly distinguishable until the
+  user explicitly accepts, edits, or discards it.
+- Treat source content and model output as hostile, fallible suggestions. The
+  model receives no tools, secrets, unrelated records, ambient network access,
+  authority decisions, or automatic write capability.
+- Never infer missing contractual facts or silently replace user-authored
+  notes. Regeneration must not erase prior accepted content.
 
 ## Foundations every future direction must preserve
 
