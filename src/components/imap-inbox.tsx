@@ -43,6 +43,16 @@ type FieldErrors = Partial<Record<"title" | "sectionId" | "currency" | "cost" | 
 
 const reminderOptions = [30, 14, 7, 3, 1];
 const suggestionFields = ["title", "subtype", "provider", "reference", "costMinor", "currency", "dueDate", "scheduleKind", "recurrenceMonths"] as const;
+const preClaimApprovalErrorCodes = new Set([
+  "validation_failed",
+  "household_not_found",
+  "section_not_found",
+  "item_not_found",
+  "reviewed_intake_stale",
+  "reviewed_intake_not_approvable",
+]);
+
+type SubmittedApprovalRequest = { operationId: string; body: Record<string, unknown> };
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -111,10 +121,14 @@ function ReviewForm({
   const [errors, setErrors] = useState<FieldErrors>({});
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [retryLocked, setRetryLocked] = useState(false);
   const operationIdRef = useRef<string | undefined>(undefined);
+  const submittedRequestRef = useRef<SubmittedApprovalRequest | undefined>(undefined);
 
   function changed() {
+    if (retryLocked) return;
     operationIdRef.current = undefined;
+    submittedRequestRef.current = undefined;
   }
 
   function updateField<K extends keyof ReviewFields>(key: K, value: ReviewFields[K]) {
@@ -136,9 +150,27 @@ function ReviewForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!validate() || submitting) return;
-    const operationId = operationIdRef.current ?? crypto.randomUUID();
+    if (submitting) return;
+    const retryRequest = retryLocked ? submittedRequestRef.current : undefined;
+    if (retryLocked && !retryRequest) {
+      setRetryLocked(false);
+      operationIdRef.current = undefined;
+      return;
+    }
+    if (!retryRequest && !validate()) return;
+    const operationId = retryRequest?.operationId ?? operationIdRef.current ?? crypto.randomUUID();
     operationIdRef.current = operationId;
+    const requestBody = retryRequest?.body ?? {
+      operationId,
+      source: { kind: "mailbox_draft", receiptId: review.receipt.id, draftVersion: review.receipt.draftVersion },
+      householdId: household.id,
+      sectionId,
+      action,
+      targetItemId: action === "attach_existing" ? targetItemId : undefined,
+      item: formItem(fields, sectionId),
+      attachmentIds: selectedAttachments,
+    };
+    submittedRequestRef.current = { operationId, body: requestBody };
     setSubmitting(true);
     setMessage("Submitting your reviewed values…");
     try {
@@ -146,27 +178,31 @@ function ReviewForm({
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
-        body: JSON.stringify({
-          operationId,
-          source: { kind: "mailbox_draft", receiptId: review.receipt.id, draftVersion: review.receipt.draftVersion },
-          householdId: household.id,
-          sectionId,
-          action,
-          targetItemId: action === "attach_existing" ? targetItemId : undefined,
-          item: formItem(fields, sectionId),
-          attachmentIds: selectedAttachments,
-        }),
+        body: JSON.stringify(requestBody),
       });
-      const payload = await response.json() as { error?: { message?: string }; outcome?: "approved" | "partial_success"; itemId?: string };
-      if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not approve this review");
+      const payload = await response.json() as { error?: { code?: string; message?: string }; outcome?: "approved" | "partial_success"; itemId?: string };
+      if (!response.ok) {
+        const error = new Error(payload.error?.message ?? "Orbit could not approve this review") as Error & { code?: string };
+        error.code = payload.error?.code;
+        throw error;
+      }
       if (payload.outcome !== "approved" && payload.outcome !== "partial_success") throw new Error("Orbit returned an incomplete approval result");
       if (payload.outcome === "partial_success") {
+        setRetryLocked(true);
         setMessage("The item is recorded, but selected document transfer needs another try. Your reviewed values are retained.");
         return;
       }
       setMessage("Review approved. Refreshing your private inbox…");
       onChanged();
     } catch (error) {
+      const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
+      if (code && preClaimApprovalErrorCodes.has(code)) {
+        operationIdRef.current = undefined;
+        submittedRequestRef.current = undefined;
+        setRetryLocked(false);
+      } else {
+        setRetryLocked(true);
+      }
       setMessage(error instanceof Error ? error.message : "Orbit could not approve this review");
     } finally {
       setSubmitting(false);
@@ -203,13 +239,13 @@ function ReviewForm({
       <div><p className="eyebrow">Private review</p><h4 id="imap-review-title">Check every value before saving</h4><p>{review.receipt.message}</p></div>
     </header>
     {!editable ? <p role="status">{review.receipt.message}</p> : <form onSubmit={submit} noValidate>
-      <fieldset className="imap-review-section">
+      <fieldset className="imap-review-section" disabled={retryLocked}>
         <legend>Destination</legend>
         <label className="field"><span>Household</span><input value={household.name} readOnly /></label>
         <label className="field"><span>Section</span><select value={sectionId} onChange={(event) => { changed(); setSectionId(event.currentTarget.value); }} aria-invalid={Boolean(errors.sectionId)}><option value="">Choose a section…</option>{review.sections.map((section) => <option key={section.id} value={section.id}>{section.name}</option>)}</select>{errors.sectionId && <small className="field-error">{errors.sectionId}</small>}</label>
       </fieldset>
 
-      <fieldset className="imap-review-section"><legend>Suggested item values</legend><p className="imap-review-help">These are untrusted suggestions. Edit or clear anything before approval.</p>
+      <fieldset className="imap-review-section" disabled={retryLocked}><legend>Suggested item values</legend><p className="imap-review-help">These are untrusted suggestions. Edit or clear anything before approval.</p>
         <label className="field"><span>Title</span><input value={fields.title} maxLength={100} onChange={(event) => updateField("title", event.currentTarget.value)} aria-invalid={Boolean(errors.title)} />{errors.title && <small className="field-error">{errors.title}</small>}</label>
         <div className="field-grid"><label className="field"><span>Type</span><input value={fields.subtype} maxLength={80} onChange={(event) => updateField("subtype", event.currentTarget.value)} /></label><label className="field"><span>Provider</span><input value={fields.provider} maxLength={100} onChange={(event) => updateField("provider", event.currentTarget.value)} /></label><label className="field"><span>Reference</span><input value={fields.reference} maxLength={80} onChange={(event) => updateField("reference", event.currentTarget.value)} /></label><label className="field"><span>Cost</span><input type="number" min="0" max="1000000" step="0.01" value={fields.cost} onChange={(event) => updateField("cost", event.currentTarget.value)} aria-invalid={Boolean(errors.cost)} />{errors.cost && <small className="field-error">{errors.cost}</small>}</label><label className="field"><span>Currency</span><input value={fields.currency} maxLength={3} onChange={(event) => updateField("currency", event.currentTarget.value)} aria-invalid={Boolean(errors.currency)} />{errors.currency && <small className="field-error">{errors.currency}</small>}</label></div>
         <div className="field-grid"><label className="field"><span>Schedule</span><select value={fields.scheduleKind} onChange={(event) => updateField("scheduleKind", event.currentTarget.value as ReviewFields["scheduleKind"])}><option value="">No schedule</option><option value="renewal">Renews</option><option value="service">Needs service</option></select></label>{fields.scheduleKind && <label className="field"><span>{fields.scheduleKind === "renewal" ? "Renewal date" : "Service date"}</span><input type="date" value={fields.dueDate} onChange={(event) => updateField("dueDate", event.currentTarget.value)} aria-invalid={Boolean(errors.dueDate)} />{errors.dueDate && <small className="field-error">{errors.dueDate}</small>}</label>}</div>
@@ -218,13 +254,13 @@ function ReviewForm({
         {evidence.length > 0 && <ul className="imap-evidence" aria-label="Suggestion evidence">{evidence.map(([field, value]) => <li key={field}><span>{field}</span><small>{value.source}; {value.confidence} confidence</small></li>)}</ul>}
       </fieldset>
 
-      <fieldset className="imap-review-section"><legend>Possible matches</legend><p className="imap-review-help">Only possible matches in {household.name} are shown. Orbit will not merge fields automatically.</p>{review.candidates.length === 0 ? <p>No possible matches were found.</p> : <div className="imap-candidates">{review.candidates.map((candidate) => <label key={candidate.itemId}><input type="radio" name="targetItemId" value={candidate.itemId} checked={targetItemId === candidate.itemId} onChange={(event) => { changed(); setAction("attach_existing"); setTargetItemId(event.currentTarget.value); }} /><span><strong>{candidate.title}</strong><small>{candidate.reason}</small></span></label>)}</div>}</fieldset>
+      <fieldset className="imap-review-section" disabled={retryLocked}><legend>Possible matches</legend><p className="imap-review-help">Only possible matches in {household.name} are shown. Orbit will not merge fields automatically.</p>{review.candidates.length === 0 ? <p>No possible matches were found.</p> : <div className="imap-candidates">{review.candidates.map((candidate) => <label key={candidate.itemId}><input type="radio" name="targetItemId" value={candidate.itemId} checked={targetItemId === candidate.itemId} onChange={(event) => { changed(); setAction("attach_existing"); setTargetItemId(event.currentTarget.value); }} /><span><strong>{candidate.title}</strong><small>{candidate.reason}</small></span></label>)}</div>}</fieldset>
 
-      <fieldset className="imap-review-section"><legend>Outcome</legend><label><input type="radio" name="reviewAction" checked={action === "create_separate"} onChange={() => { changed(); setAction("create_separate"); setTargetItemId(""); }} /> Create a separate item</label><label><input type="radio" name="reviewAction" checked={action === "attach_existing"} onChange={() => { changed(); setAction("attach_existing"); }} /> Attach selected documents to the chosen existing item</label></fieldset>
+      <fieldset className="imap-review-section" disabled={retryLocked}><legend>Outcome</legend><label><input type="radio" name="reviewAction" checked={action === "create_separate"} onChange={() => { changed(); setAction("create_separate"); setTargetItemId(""); }} /> Create a separate item</label><label><input type="radio" name="reviewAction" checked={action === "attach_existing"} onChange={() => { changed(); setAction("attach_existing"); }} /> Attach selected documents to the chosen existing item</label></fieldset>
 
-      <fieldset className="imap-review-section"><legend>Documents</legend><p className="imap-review-help">Select only the staged originals you want to transfer. Names and message metadata are not shown.</p>{review.attachments.map((attachment) => <label className="imap-attachment" key={attachment.id}><input type="checkbox" value={attachment.id} checked={selectedAttachments.includes(attachment.id)} onChange={toggleAttachment} /><span>Document {attachment.ordinal}<small>{attachment.mediaType} · {attachment.sizeBytes} bytes</small></span></label>)}</fieldset>
+      <fieldset className="imap-review-section" disabled={retryLocked}><legend>Documents</legend><p className="imap-review-help">Select only the staged originals you want to transfer. Names and message metadata are not shown.</p>{review.attachments.map((attachment) => <label className="imap-attachment" key={attachment.id}><input type="checkbox" value={attachment.id} checked={selectedAttachments.includes(attachment.id)} onChange={toggleAttachment} /><span>Document {attachment.ordinal}<small>{attachment.mediaType} · {attachment.sizeBytes} bytes</small></span></label>)}</fieldset>
       {message && <p role="status" className="imap-review-message">{message}</p>}
-      <footer className="imap-review-actions"><button type="button" onClick={() => void discard()} disabled={submitting}>Discard</button><button type="submit" className="primary" disabled={submitting}>{submitting ? "Working…" : action === "attach_existing" ? "Attach selected documents" : "Create separate item"}</button></footer>
+      <footer className="imap-review-actions"><button type="button" onClick={() => void discard()} disabled={submitting}>Discard</button><button type="submit" className="primary" disabled={submitting}>{submitting ? "Working…" : retryLocked ? "Retry approval" : action === "attach_existing" ? "Attach selected documents" : "Create separate item"}</button></footer>
     </form>}
   </div>;
 }

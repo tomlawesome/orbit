@@ -56,7 +56,7 @@ test.describe("authenticated mailbox review", () => {
     await ensureHousehold(page);
     const before = await readWorkspace(page);
     let approved = false;
-    let approvalBody: Record<string, unknown> | undefined;
+    const approvalBodies: Record<string, unknown>[] = [];
     const household = { id: syntheticHouseholdId, name: "Synthetic private household", currency: "GBP" };
     const receipt = {
       id: syntheticReceiptId,
@@ -90,7 +90,11 @@ test.describe("authenticated mailbox review", () => {
       });
     });
     await page.route("**/api/reviewed-intake/approve", async (route) => {
-      approvalBody = route.request().postDataJSON() as Record<string, unknown>;
+      approvalBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+      if (approvalBodies.length === 1) {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "partial_success", itemId: "ffffffff-ffff-4fff-8fff-ffffffffffff", approvalResultId: "99999999-9999-4999-8999-999999999999", attachmentState: "pending", attachedAttachmentIds: [], pendingAttachmentIds: [syntheticAttachmentId] }) });
+        return;
+      }
       approved = true;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "approved", itemId: "ffffffff-ffff-4fff-8fff-ffffffffffff", approvalResultId: "99999999-9999-4999-8999-999999999999", attachmentState: "attached", attachedAttachmentIds: [syntheticAttachmentId], pendingAttachmentIds: [] }) });
     });
@@ -117,21 +121,27 @@ test.describe("authenticated mailbox review", () => {
       await review.getByRole("radio", { name: /Existing household item/ }).check();
       await expect(review.getByRole("button", { name: "Attach selected documents" })).toBeVisible();
     }
+    const beforeApproval = await readWorkspace(page);
+    expect(beforeApproval).toEqual(before);
     const submit = review.getByRole("button", { name: isMobile ? "Attach selected documents" : "Create separate item" });
     await submit.focus();
     await page.keyboard.press("Enter");
-    await expect.poll(() => approvalBody).toMatchObject({
+    await expect.poll(() => approvalBodies.length).toBe(1);
+    expect(approvalBodies[0]).toMatchObject({
       source: { kind: "mailbox_draft", receiptId: syntheticReceiptId, draftVersion: 1 },
       householdId: syntheticHouseholdId,
       sectionId: syntheticSectionId,
       item: { title: "Corrected reviewed title", subtype: "Insurance", provider: "Corrected provider", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12, notes: "Reviewed notes" },
       attachmentIds: [syntheticAttachmentId],
     });
-    expect((approvalBody?.item as Record<string, unknown>).reference).toBeUndefined();
-    if (isMobile) expect(approvalBody?.action).toBe("attach_existing");
-    else expect(approvalBody?.action).toBe("create_separate");
+    expect((approvalBodies[0].item as Record<string, unknown>).reference).toBeUndefined();
+    if (isMobile) expect(approvalBodies[0].action).toBe("attach_existing");
+    else expect(approvalBodies[0].action).toBe("create_separate");
+    await expect(review.getByRole("button", { name: "Retry approval" })).toBeVisible();
+    await expect(review.getByLabel("Title")).toBeDisabled();
+    await review.getByRole("button", { name: "Retry approval" }).click();
+    await expect.poll(() => approvalBodies.length).toBe(2);
+    expect(approvalBodies[1]).toEqual(approvalBodies[0]);
     await expect(page.getByText("No incoming documents waiting for review.", { exact: true })).toBeVisible();
-    const after = await readWorkspace(page);
-    expect(after).toEqual(before);
   });
 });
