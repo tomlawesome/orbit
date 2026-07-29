@@ -1,4 +1,5 @@
-import { boolean, date, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
@@ -39,6 +40,7 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "failed",
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
+export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
@@ -55,10 +57,9 @@ export const users = pgTable("users", {
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
   isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
-  imapRecipientAliasSha256: text("imap_recipient_alias_sha256"),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
-}, (table) => [index("user_email_lookup_idx").on(table.email), index("user_imap_alias_lookup_idx").on(table.imapRecipientAliasSha256)]);
+}, (table) => [index("user_email_lookup_idx").on(table.email)]);
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -330,6 +331,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   mailboxUid: integer("mailbox_uid").notNull(),
   contentSha256: text("content_sha256").notNull(),
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
+  recipientAliasGeneration: integer("recipient_alias_generation"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
   /** Legacy prototype link. New receipt and approval code must never use it. */
@@ -360,7 +362,6 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
-  uniqueIndex("imap_message_content_unique").on(table.contentSha256),
   uniqueIndex("imap_message_approval_operation_unique").on(table.approvalOperationId),
   uniqueIndex("imap_message_approval_result_unique").on(table.approvalResultId),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
@@ -368,6 +369,24 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_message_expiry_idx").on(table.status, table.expiresAt),
   index("imap_message_approved_item_idx").on(table.approvedItemId),
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
+  index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
+]);
+
+/** Generation-aware per-user aliases. Legacy prototype digests are retained
+ * only as explicitly inactive rows and are never eligible for lookup. */
+export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  generation: integer("generation").notNull(),
+  aliasSha256: text("alias_sha256").notNull(),
+  status: imapRecipientAliasStatus("status").notNull().default("active"),
+  activeUntil: timestamp("active_until", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("imap_recipient_alias_user_generation_unique").on(table.userId, table.generation),
+  uniqueIndex("imap_recipient_alias_active_digest_unique").on(table.generation, table.aliasSha256).where(sql`${table.status} = 'active'`),
+  index("imap_recipient_alias_user_status_idx").on(table.userId, table.status),
+  check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
 ]);
 
 /** Durable idempotency/result state for an explicit reviewed approval. This is
