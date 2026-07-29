@@ -10,6 +10,12 @@ describe("document content validation", () => {
     expect(detectDocumentMediaType(bytes)).toBe(expected);
   });
 
+  it("rejects WebP content", () => {
+    expect(() => detectDocumentMediaType(Buffer.from("RIFF0000WEBP"))).toThrow(
+      "Choose a PDF, JPEG, or PNG document",
+    );
+  });
+
   it("rejects unsupported content and strips path/control data from display names", () => {
     expect(() => detectDocumentMediaType(Buffer.from("MZ executable"))).toThrow("Choose a PDF");
     expect(normalizedDocumentFilename("../private/\u0000policy.pdf", "application/pdf")).toBe("policy.pdf");
