@@ -97,7 +97,10 @@ must be separately reviewed and must never silently merge uncertain records.
   spoofed. Provider authentication results, a dedicated forwarding address or
   token, and user confirmation should form the trust boundary.
 - Treat message bodies and documents as hostile input, including possible
-  prompt injection. Extraction must not grant documents access to application
+  prompt injection. This applies to every supported direct-upload format—PDF,
+  JPEG, PNG, and WebP—as well as mailbox PDFs and any text recovered through
+  OCR. ClamAV, parsers, and OCR reduce different risks but do not make content
+  trustworthy. Extraction must not grant documents access to application
   tools, secrets or unrelated records.
 - Apply message, attachment-count and decompressed-size limits; reject unsafe
   MIME types and archive bombs; and scan retained files for malware.
@@ -130,7 +133,8 @@ boundary:
 - PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
   parts, safely rejected malformed PDF claims, five processing attempts, and
   30-day pending-draft retention; direct upload separately retains PDF, JPEG,
-  PNG, and WebP support;
+  PNG, and WebP support under the same hostile-content and indirect-injection
+  boundary;
 - explicit create-separate or attach-to-existing duplicate outcomes, without
   automatic or field-level merge;
 - separate secret-backed SMTP configuration as an IMAP enablement prerequisite.
