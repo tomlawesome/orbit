@@ -61,7 +61,33 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
-    expect(await readFixtureSnapshot(database.client)).toEqual(beforeUpgrade);
+    const expectedAfterUpgrade = structuredClone(beforeUpgrade);
+    const legacyReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.review_item_id);
+    if (!legacyReceipt) throw new Error("The migration fixture must include a legacy prototype receipt");
+    expect(legacyReceipt.status).toBe("completed");
+    const discardedReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.id === "e0000000-0000-4000-8000-000000000002");
+    const unresolvedReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.id === "e0000000-0000-4000-8000-000000000003");
+    if (!discardedReceipt || !unresolvedReceipt) throw new Error("The migration fixture must include discarded and unresolved legacy receipts");
+    expect(discardedReceipt.status).toBe("discarded");
+    unresolvedReceipt.status = "failed";
+    unresolvedReceipt.failure_code = "legacy_review_item";
+    const afterUpgrade = await readFixtureSnapshot(database.client);
+    const migratedUnresolvedReceipt = afterUpgrade.imap_ingestion_messages.find((row) => row.id === unresolvedReceipt.id);
+    if (!migratedUnresolvedReceipt) throw new Error("The unresolved legacy receipt must survive migration");
+    expect(migratedUnresolvedReceipt.updated_at).not.toBe(unresolvedReceipt.updated_at);
+    unresolvedReceipt.updated_at = migratedUnresolvedReceipt.updated_at;
+    expect(afterUpgrade).toEqual(expectedAfterUpgrade);
+    const legacyContract = await database.client.unsafe(`
+      SELECT id, status, failure_code, approved_item_id
+      FROM imap_ingestion_messages
+      WHERE id IN ('e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003')
+      ORDER BY id
+    `);
+    expect(legacyContract).toEqual([
+      { id: "e0000000-0000-4000-8000-000000000001", status: "completed", failure_code: null, approved_item_id: "40000000-0000-4000-8000-000000000001" },
+      { id: "e0000000-0000-4000-8000-000000000002", status: "discarded", failure_code: null, approved_item_id: null },
+      { id: "e0000000-0000-4000-8000-000000000003", status: "failed", failure_code: "legacy_review_item", approved_item_id: null },
+    ]);
 
     const beforeRerun = {
       journal: await readAppliedMigrationHashes(database.client),
