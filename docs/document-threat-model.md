@@ -269,7 +269,7 @@ the supported runtime. It must not introduce a custom cipher construction.
 
 Bounded document parsing and dedicated-mailbox ingestion are required v1
 inputs to the same private, editable review flow. Direct upload accepts the
-four document types above, while mailbox ingestion deliberately accepts only
+three document types above, while mailbox ingestion deliberately accepts only
 PDF candidates. Incidental non-PDF MIME parts are ignored without download or
 staging; a claimed PDF must pass bounded structural detection, malware
 scanning, and encryption. A message with no PDF reaches a content-free private
