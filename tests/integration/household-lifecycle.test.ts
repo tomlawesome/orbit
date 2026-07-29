@@ -283,6 +283,25 @@ describe("transactional household lifecycle", () => {
     expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityId, fixture.household.id), eq(auditLog.action, "household_hard_deleted")))).toHaveLength(1);
   });
 
+  it("converges concurrent hard-delete requests to one audit event", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-hard-delete-race");
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+
+    const [first, second] = await Promise.allSettled([
+      hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name),
+      hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name),
+    ]);
+    const results = [first, second];
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(["household_not_found", "household_not_recoverable"]).toContain(rejected?.reason?.code);
+    expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id))).toHaveLength(0);
+    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_hard_deleted"),
+    ))).toHaveLength(1);
+  });
+
   it("retention-purges expired households once and preserves the existing purge audit contract", async () => {
     const fixture = await createIntegrationFixture("lifecycle-retention");
     await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
