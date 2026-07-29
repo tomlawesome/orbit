@@ -22,7 +22,7 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import { getDocumentConfig } from "@/server/documents/config";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { reconcileDocumentStorage } from "@/server/document-worker";
-import { reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
+import { createPortableArchive, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import {
@@ -354,6 +354,37 @@ describe("transactional household lifecycle", () => {
 
     expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(false);
     expect((await archiveStorage.list()).map((entry) => entry.storageKey)).not.toContain(archiveRecord.storageKey);
+  });
+
+  it("immediately removes real document and portable-archive ciphertext after successful hard delete", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-storage-success");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+    const createdArchive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase: "integration-passphrase",
+      includeDocuments: false,
+    });
+    const [documentRecord] = await getDb().select({ storageKey: documentCrypto.storageKey })
+      .from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+    const [archiveRecord] = await getDb().select({ storageKey: portableArchives.storageKey })
+      .from(portableArchives).where(eq(portableArchives.id, createdArchive.id));
+    const config = getDocumentConfig();
+    const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+    const archiveStorage = new PortableArchiveStorage(join(config.storageRoot, "portable-archives"));
+
+    expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(true);
+    await expect(archiveStorage.read(archiveRecord.storageKey, 1_000_000)).resolves.toBeInstanceOf(Buffer);
+
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+    await hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name);
+
+    expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id))).toHaveLength(0);
+    expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, documentId))).toHaveLength(0);
+    expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    expect(await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.id, createdArchive.id))).toHaveLength(0);
+    expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(false);
+    await expect(archiveStorage.read(archiveRecord.storageKey, 1_000_000)).rejects.toThrow();
   });
 
   it("rejects a restore that reaches the expiry boundary while purge is concurrent", async () => {
