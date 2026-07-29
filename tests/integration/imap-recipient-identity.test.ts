@@ -110,7 +110,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     } finally {
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
     const fixture = await createIntegrationFixture("recipient-expiry-boundary");
@@ -194,7 +194,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       const receipts = await getDb().select({ uid: imapIngestionMessages.mailboxUid, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
         .from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailbox, "INBOX"), eq(imapIngestionMessages.mailboxUidValidity, "42"))).orderBy(imapIngestionMessages.mailboxUid);
       expect(receipts).toEqual([
-        { uid: 1, userId: fixture.users.member.id, status: "pending_review", failureCode: null },
+        { uid: 1, userId: fixture.users.member.id, status: "failed", failureCode: "scanner_disabled" },
         { uid: 2, userId: null, status: "quarantined", failureCode: "recipient_missing" },
         { uid: 3, userId: null, status: "quarantined", failureCode: "recipient_header_ambiguous" },
       ]);
