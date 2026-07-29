@@ -59,6 +59,31 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     await fixture.cleanup();
   });
 
+  it("does not newly approve a cleanup-recoverable mailbox receipt", async () => {
+    const fixture = await createIntegrationFixture("reviewed-cleanup-recoverable");
+    const receiptId = randomUUID();
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: "cleanup", mailboxUid: 5, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "cleanup", userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "recoverable", failureCode: "staging_purge_pending", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    const beforeItems = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id));
+    const input = {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "create_separate" as const,
+      item: { title: "Must not publish", currency: "GBP", status: "active" },
+      attachmentIds: [],
+    };
+    await expect(approveReviewedIntake(fixture.users.member.id, input)).rejects.toMatchObject({ code: "reviewed_intake_not_approvable" });
+    expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).toEqual(beforeItems);
+    expect(await getDb().select({ id: reviewedIntakeOperations.id }).from(reviewedIntakeOperations).where(eq(reviewedIntakeOperations.id, input.operationId))).toHaveLength(0);
+    expect((await getDb().select({ status: imapIngestionMessages.status, approvalOperationId: imapIngestionMessages.approvalOperationId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)))[0]).toMatchObject({ status: "recoverable", approvalOperationId: null });
+    await fixture.cleanup();
+  });
+
   it("runs concurrent mailbox approvals through transfer and leaves one document and one result audit", async () => {
     const fixture = await createIntegrationFixture("reviewed-concurrent-mailbox");
     const receiptId = randomUUID();
