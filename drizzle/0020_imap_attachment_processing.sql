@@ -18,7 +18,7 @@ CREATE TABLE "imap_ingestion_staging_objects" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "imap_staging_object_status_valid" CHECK ("status" IN ('pending', 'committed', 'purge_pending'))
 );--> statement-breakpoint
-ALTER TABLE "imap_ingestion_staging_objects" ADD CONSTRAINT "imap_ingestion_staging_objects_message_id_imap_ingestion_messages_id_fk"
+ALTER TABLE "imap_ingestion_staging_objects" ADD CONSTRAINT "imap_staging_objects_message_id_fk"
   FOREIGN KEY ("message_id") REFERENCES "public"."imap_ingestion_messages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "imap_ingestion_staging_objects" ADD CONSTRAINT "imap_ingestion_staging_objects_storage_key_unique" UNIQUE ("storage_key");--> statement-breakpoint
 CREATE INDEX "imap_staging_object_message_status_idx" ON "imap_ingestion_staging_objects" USING btree ("message_id", "status");--> statement-breakpoint

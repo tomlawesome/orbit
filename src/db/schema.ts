@@ -1,4 +1,4 @@
-import { boolean, check, date, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
@@ -477,7 +477,7 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
  * its attachment metadata row commits. It contains no plaintext or mail. */
 export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objects", {
   id: uuid("id").primaryKey().defaultRandom(),
-  messageId: uuid("message_id").notNull().references(() => imapIngestionMessages.id, { onDelete: "cascade" }),
+  messageId: uuid("message_id").notNull(),
   leaseToken: uuid("lease_token").notNull(),
   storageKey: text("storage_key").notNull().unique(),
   status: text("status").notNull().default("pending"),
@@ -485,6 +485,11 @@ export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objec
   purgeFailureCode: text("purge_failure_code"),
   ...auditColumns,
 }, (table) => [
+  foreignKey({
+    name: "imap_staging_objects_message_id_fk",
+    columns: [table.messageId],
+    foreignColumns: [imapIngestionMessages.id],
+  }).onDelete("cascade"),
   index("imap_staging_object_message_status_idx").on(table.messageId, table.status),
   index("imap_staging_object_created_idx").on(table.status, table.createdAt),
   check("imap_staging_object_status_valid", sql`${table.status} IN ('pending', 'committed', 'purge_pending')`),
