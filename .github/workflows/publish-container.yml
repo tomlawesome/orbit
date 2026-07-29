@@ -233,6 +233,14 @@ jobs:
           docker compose --env-file .env-orbit \
             -f docker-compose.yml -f docker-compose.full.yml \
             --profile processing --profile ai config --quiet
+          processing_config="$(docker compose --env-file .env-orbit \
+            --profile processing config --format json)"
+          jq --exit-status '
+            .networks["orbit-document-processing"].internal == true
+            and (.services["orbit-tika"].networks | keys == ["orbit-document-processing"])
+            and (.services["orbit-app"].networks | has("default") and has("orbit-document-processing"))
+            and (.services["orbit-db"].networks | has("default") and (has("orbit-document-processing") | not))
+          ' <<< "${processing_config}"
 
       - name: Build disposable OIDC acceptance provider
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc

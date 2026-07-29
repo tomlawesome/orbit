@@ -44,6 +44,9 @@ services:
       - orbit-vapid-private-key
     security_opt:
       - no-new-privileges:true
+    networks:
+      - default
+      - orbit-document-processing
     ports: ["${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000"]
     depends_on:
       orbit-db:
@@ -80,9 +83,17 @@ services:
       - ALL
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m
+    # The parser accepts hostile documents. Keep it reachable from Orbit while
+    # denying access to the database, sibling services and external networks.
+    networks:
+      - orbit-document-processing
     cpus: "1.0"
     mem_limit: ${TIKA_MEMORY_LIMIT:-1g}
     pids_limit: 256
+
+networks:
+  orbit-document-processing:
+    internal: true
 
 volumes:
   orbit-db-data:
