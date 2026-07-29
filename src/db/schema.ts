@@ -28,7 +28,16 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
-export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "completed", "discarded", "quarantined", "failed"]);
+export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
+  "pending_review",
+  "approving",
+  "recoverable",
+  "completed",
+  "discarded",
+  "expired",
+  "quarantined",
+  "failed",
+]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 
 const auditColumns = {
@@ -320,7 +329,20 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
+  /** Legacy prototype link. New receipt and approval code must never use it. */
   reviewItemId: uuid("review_item_id").references(() => items.id, { onDelete: "set null" }),
+  draftVersion: integer("draft_version").notNull().default(1),
+  proposal: jsonb("proposal").notNull().default({}),
+  fieldEvidence: jsonb("field_evidence").notNull().default({}),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  approvalOperationId: uuid("approval_operation_id"),
+  approvalResultId: uuid("approval_result_id"),
+  approvalRequestSha256: text("approval_request_sha256"),
+  approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
+  approvalStartedAt: timestamp("approval_started_at", { withTimezone: true }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  discardedAt: timestamp("discarded_at", { withTimezone: true }),
+  expiredAt: timestamp("expired_at", { withTimezone: true }),
   status: imapIngestionStatus("status").notNull(),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
@@ -336,8 +358,12 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
 }, (table) => [
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
   uniqueIndex("imap_message_content_unique").on(table.contentSha256),
+  uniqueIndex("imap_message_approval_operation_unique").on(table.approvalOperationId),
+  uniqueIndex("imap_message_approval_result_unique").on(table.approvalResultId),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
   index("imap_message_household_status_idx").on(table.householdId, table.status, table.receivedAt),
+  index("imap_message_expiry_idx").on(table.status, table.expiresAt),
+  index("imap_message_approved_item_idx").on(table.approvedItemId),
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
 ]);
 

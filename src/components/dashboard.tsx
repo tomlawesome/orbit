@@ -109,7 +109,7 @@ export function Dashboard() {
 }
 
 function AuthenticatedDashboard({ session, workspaceState }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace }) {
-  const { workspace, dispatch, executeCommand, syncStatus, syncMessage } = workspaceState;
+  const { workspace, dispatch, executeCommand, refreshWorkspace, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
   // Legacy placeholder households may already exist from releases that created
@@ -296,11 +296,27 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       item,
       activity: activity(item, kind, { nextDate: item.dueDate }),
     } as const;
-    // A document-assisted item must exist before its permanent upload can be
-    // encrypted and bound to it. Plain manual item creation keeps its normal
-    // offline-capable command path.
+    // A document-assisted item uses the same reviewed approval contract as a
+    // mailbox draft. The browser retains the original until this explicit
+    // approval succeeds, then sends it through the secure document route.
     if (document && !editingItem) {
-      await executeCommand(command);
+      const approvalResponse = await fetch("/api/reviewed-intake/approve", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
+        body: JSON.stringify({
+          operationId: item.id,
+          source: { kind: "direct_upload" },
+          householdId: household.id,
+          sectionId: item.sectionId,
+          action: "create_separate",
+          item,
+          attachmentIds: [],
+        }),
+      });
+      if (!approvalResponse.ok) {
+        const payload = await approvalResponse.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+        throw new Error(payload?.error?.message ?? "The reviewed item could not be approved");
+      }
       try {
         const response = await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
           method: "POST", credentials: "same-origin",
@@ -314,6 +330,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
           const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
           throw new Error(payload?.error?.message ?? "The document could not be attached");
         }
+        await refreshWorkspace();
       } catch {
         setEditingItem(undefined);
         setItemEditorOpen(false);

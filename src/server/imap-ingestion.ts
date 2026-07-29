@@ -7,7 +7,6 @@ import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/sch
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
 import { imapReceiptDestination } from "@/server/imap-inbox";
-import { materializeImapReviewItem } from "@/server/imap-review-items";
 
 const ingestionEnvironmentSchema = z.object({
   IMAP_HOST: z.string().trim().max(253).optional().default(""),
@@ -170,6 +169,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
         const [receipt] = await getDb().insert(imapIngestionMessages).values({
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, userId: userId ?? null, householdId: destination?.householdId ?? null,
+          expiresAt: new Date(Date.now() + 30 * 86_400_000),
           status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : "recipient_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
@@ -191,7 +191,6 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
               }).onConflictDoNothing();
               download.content.fill(0);
             }
-            if (destination?.householdId) await materializeImapReviewItem(userId, receipt.id);
             await getDb().update(imapIngestionMessages).set({ receiptStatus: "pending", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
           } catch {
             await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", receiptStatus: "cancelled", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
