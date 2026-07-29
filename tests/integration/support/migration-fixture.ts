@@ -45,6 +45,9 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   item_status: ["active", "expired", "cancelled", "archived"],
   membership_role: ["owner", "member"],
   theme_mode: ["system", "light", "dark"],
+  reviewed_intake_operation_status: ["processing", "pending_attachment", "completed", "recoverable", "failed"],
+  reviewed_intake_operation_source: ["direct_upload", "mailbox_draft"],
+  reviewed_intake_attachment_state: ["not_requested", "pending", "attached"],
 };
 
 export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
@@ -56,7 +59,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   due_events: ["id", "household_id", "item_id", "kind", "due_date", "completed_at", "completed_by_user_id", "completion_key", "next_event_id", "created_at"],
   external_identities: ["id", "user_id", "issuer", "subject", "last_login_at", "created_at", "updated_at"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
-  imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "created_at", "updated_at"],
+  imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "field_evidence", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at"],
   items: ["id", "household_id", "section_id", "title", "subtype", "provider", "reference", "cost_minor", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes", "external_document_url", "status", "requires_review", "version", "created_at", "updated_at"],
   memberships: ["household_id", "user_id", "role", "created_at"],
@@ -69,6 +72,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at"],
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "updated_at"],
   users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "imap_recipient_alias_sha256", "disabled_at", "created_at", "updated_at"],
+  reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -101,6 +105,9 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_message_user_status_idx: { table: "imap_ingestion_messages", columns: ["user_id", "status", "received_at"], unique: false },
   imap_receipt_claim_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "receipt_locked_at", "created_at"], unique: false },
   imap_receipt_delivery_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "created_at"], unique: false },
+  reviewed_intake_operation_result_unique: { table: "reviewed_intake_operations", columns: ["result_id"], unique: true },
+  reviewed_intake_operation_actor_idx: { table: "reviewed_intake_operations", columns: ["actor_user_id", "created_at"], unique: false },
+  reviewed_intake_operation_item_idx: { table: "reviewed_intake_operations", columns: ["item_id"], unique: false },
   item_household_section_idx: { table: "items", columns: ["household_id", "section_id"], unique: false },
   item_household_status_idx: { table: "items", columns: ["household_id", "status"], unique: false },
   membership_user_idx: { table: "memberships", columns: ["user_id"], unique: false },
@@ -204,6 +211,12 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   user_preferences_pkey: primary("user_preferences", ["user_id"]),
   user_preferences_user_id_users_id_fk: foreign("user_preferences", ["user_id"], "users", ["id"], "cascade"),
   users_pkey: primary("users", ["id"]),
+  reviewed_intake_operations_pkey: primary("reviewed_intake_operations", ["id"]),
+  reviewed_intake_operations_actor_user_id_users_id_fk: foreign("reviewed_intake_operations", ["actor_user_id"], "users", ["id"], "cascade"),
+  reviewed_intake_operations_household_id_households_id_fk: foreign("reviewed_intake_operations", ["household_id"], "households", ["id"], "cascade"),
+  reviewed_intake_operations_target_item_id_items_id_fk: foreign("reviewed_intake_operations", ["target_item_id"], "items", ["id"], "set_null"),
+  reviewed_intake_operations_document_id_documents_id_fk: foreign("reviewed_intake_operations", ["document_id"], "documents", ["id"], "set_null"),
+  reviewed_intake_operation_result_unique: unique("reviewed_intake_operations", ["result_id"]),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;

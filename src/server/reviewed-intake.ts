@@ -1,14 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
   auditLog,
+  dueEvents,
+  documents,
   households,
   imapIngestionAttachments,
   imapIngestionMessages,
   items,
   memberships,
+  reviewedIntakeOperations,
+  reminderRules,
   sections,
   users,
 } from "@/db/schema";
@@ -45,7 +49,7 @@ const proposalTextMaximum: Record<string, number> = {
 };
 
 const approvalSourceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("direct_upload") }),
+  z.object({ kind: z.literal("direct_upload"), expectedDocument: z.boolean().default(false) }),
   z.object({
     kind: z.literal("mailbox_draft"),
     receiptId: z.uuid(),
@@ -75,6 +79,9 @@ export const reviewedIntakeApprovalSchema = z.object({
 export type ReviewedIntakeApproval = z.infer<typeof reviewedIntakeApprovalSchema>;
 type MailboxApproval = ReviewedIntakeApproval & {
   source: Extract<ReviewedIntakeApproval["source"], { kind: "mailbox_draft" }>;
+};
+type DirectApproval = ReviewedIntakeApproval & {
+  source: Extract<ReviewedIntakeApproval["source"], { kind: "direct_upload" }>;
 };
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -124,15 +131,49 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
   return { proposal, fieldEvidence };
 }
 
-function approvalHash(input: ReviewedIntakeApproval): string {
+function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
+  return workspaceItemSchema.parse({
+    ...input.item,
+    id: itemId,
+    sectionId: input.sectionId,
+    version: 1,
+    status: "active",
+    updatedAt: "1970-01-01T00:00:00.000Z",
+  });
+}
+
+function canonicalItemValues(input: ReviewedIntakeApproval): Record<string, unknown> {
+  const item = canonicalItem(input, input.operationId);
+  return {
+    id: item.id,
+    sectionId: item.sectionId,
+    title: item.title,
+    subtype: item.subtype ?? null,
+    provider: item.provider ?? null,
+    reference: item.reference ?? null,
+    costMinor: item.costMinor ?? null,
+    currency: item.currency,
+    dueDate: item.dueDate ?? null,
+    scheduleKind: item.scheduleKind ?? null,
+    recurrenceMonths: item.recurrenceMonths ?? null,
+    reminderDays: [...(item.reminderDays ?? [])].sort((left, right) => left - right),
+    snoozedUntil: item.snoozedUntil ?? null,
+    notes: item.notes ?? null,
+    status: item.status,
+  };
+}
+
+export function canonicalReviewedIntakeHash(input: ReviewedIntakeApproval): string {
   const canonical = {
     operationId: input.operationId,
-    source: input.source,
+    source: input.source.kind === "direct_upload"
+      ? { kind: input.source.kind, expectedDocument: input.source.expectedDocument }
+      : { kind: input.source.kind, receiptId: input.source.receiptId, draftVersion: input.source.draftVersion },
     householdId: input.householdId,
     sectionId: input.sectionId,
     action: input.action,
     targetItemId: input.targetItemId ?? null,
-    item: input.item,
+    item: canonicalItemValues(input),
     attachmentIds: [...input.attachmentIds].sort(),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
@@ -170,35 +211,83 @@ async function requireDestination(userId: string, householdId: string, sectionId
 }
 
 function reviewedItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
-  return workspaceItemSchema.parse({
-    ...input.item,
-    id: itemId,
-    sectionId: input.sectionId,
-    version: 1,
-    status: "active",
-    updatedAt: new Date().toISOString(),
-  });
+  return { ...canonicalItem(input, itemId), updatedAt: new Date().toISOString() };
 }
 
-async function createReviewedItem(userId: string, input: ReviewedIntakeApproval): Promise<string> {
-  const itemId = input.operationId;
-  const [existing] = await getDb().select({ id: items.id, householdId: items.householdId }).from(items).where(eq(items.id, itemId)).limit(1);
-  if (existing) {
-    if (existing.householdId !== input.householdId) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
-    return existing.id;
+async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string): Promise<boolean | undefined> {
+  const [existing] = await getDb().select().from(items).where(eq(items.id, itemId)).limit(1);
+  if (!existing) return undefined;
+  const expected = reviewedItem(input, itemId);
+    const [event] = await getDb().select({ kind: dueEvents.kind, dueDate: dueEvents.dueDate }).from(dueEvents)
+      .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).limit(1);
+    const reminders = await getDb().select({ daysBefore: reminderRules.daysBefore }).from(reminderRules)
+      .where(eq(reminderRules.itemId, itemId));
+    const persisted = {
+      id: existing.id,
+      sectionId: existing.sectionId,
+      title: existing.title,
+      subtype: existing.subtype ?? undefined,
+      provider: existing.provider ?? undefined,
+      reference: existing.reference ?? undefined,
+      costMinor: existing.costMinor ?? undefined,
+      currency: existing.currency,
+      dueDate: event?.dueDate ?? existing.serviceDate ?? existing.renewalDate ?? undefined,
+      scheduleKind: event?.kind ?? (existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : undefined),
+      recurrenceMonths: existing.recurrenceMonths ?? undefined,
+      reminderDays: reminders.map((row) => row.daysBefore).sort((left, right) => left - right),
+      snoozedUntil: existing.snoozedUntil ?? undefined,
+      notes: existing.notes ?? undefined,
+      status: existing.status,
+    };
+    const comparableExpected = {
+      id: expected.id,
+      sectionId: expected.sectionId,
+      title: expected.title,
+      subtype: expected.subtype,
+      provider: expected.provider,
+      reference: expected.reference,
+      costMinor: expected.costMinor,
+      currency: expected.currency,
+      dueDate: expected.dueDate,
+      scheduleKind: expected.scheduleKind,
+      recurrenceMonths: expected.recurrenceMonths,
+      reminderDays: [...(expected.reminderDays ?? [])].sort((left, right) => left - right),
+      snoozedUntil: expected.snoozedUntil,
+      notes: expected.notes,
+      status: expected.status,
+    };
+    const same = existing.householdId === input.householdId && JSON.stringify(persisted) === JSON.stringify(comparableExpected);
+  return same;
+}
+
+async function createReviewedItem(userId: string, input: ReviewedIntakeApproval, itemId: string): Promise<string> {
+  const existingMatch = await reviewedItemMatches(input, itemId);
+  if (existingMatch !== undefined) {
+    if (!existingMatch) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
+    return itemId;
   }
   const item = reviewedItem(input, itemId);
-  await applyWorkspaceCommand(userId, "reviewed-intake", {
-    type: "item.upsert",
-    householdId: input.householdId,
-    item,
-    activity: {
-      id: input.operationId,
-      itemId,
-      kind: "created",
-      occurredAt: new Date().toISOString(),
-    },
-  });
+  try {
+    await applyWorkspaceCommand(userId, "reviewed-intake", {
+      type: "item.upsert",
+      householdId: input.householdId,
+      item,
+      activity: {
+        id: input.operationId,
+        itemId,
+        kind: "created",
+        occurredAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    // The command is authoritative and owns its transaction. If another
+    // caller won the item PK race, accept only the exact canonical persisted
+    // value; unrelated collisions and other failures remain conflicts.
+    const reloadedMatch = await reviewedItemMatches(input, itemId);
+    if (reloadedMatch === true) return itemId;
+    if (reloadedMatch === false) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
+    throw error;
+  }
   return itemId;
 }
 
@@ -206,6 +295,7 @@ type ApprovalOutcome = {
   outcome: "approved" | "partial_success";
   itemId: string;
   approvalResultId: string;
+  attachmentState: "not_requested" | "pending" | "attached";
   attachedAttachmentIds: string[];
   pendingAttachmentIds: string[];
 };
@@ -221,12 +311,24 @@ async function receiptAttachments(receiptId: string, selectedIds: string[]) {
 }
 
 async function purgeReceiptStaging(receiptId: string): Promise<void> {
-  const attachments = await getDb().select({ id: imapIngestionAttachments.id, storageKey: imapIngestionAttachments.storageKey })
+  const attachments = await getDb().select({ id: imapIngestionAttachments.id, storageKey: imapIngestionAttachments.storageKey, status: imapIngestionAttachments.status })
     .from(imapIngestionAttachments).where(and(
       eq(imapIngestionAttachments.messageId, receiptId),
       inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
     ));
-  for (const attachment of attachments) await purgeHeldImapAttachment(attachment.storageKey);
+  let failed = false;
+  for (const attachment of attachments) {
+    try {
+      await purgeHeldImapAttachment(attachment.storageKey);
+      await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
+        .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, attachment.status)));
+    } catch {
+      failed = true;
+      await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+        .where(eq(imapIngestionAttachments.id, attachment.id));
+    }
+  }
+  if (failed) throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry later", 503);
 }
 
 async function transferAttachments(userId: string, householdId: string, itemId: string, receiptId: string, selectedIds: string[]): Promise<{ attached: string[]; pending: string[]; failureCode?: string }> {
@@ -234,14 +336,82 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
   const attached: string[] = [];
   const pending: string[] = [];
   let failureCode: string | undefined;
-  for (const attachment of attachments) {
-    if (attachment.status === "assigned" && attachment.assignedDocumentId) {
+  attachmentLoop: for (const candidate of attachments) {
+    const [attachment] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, candidate.id)).limit(1);
+    if (!attachment) {
+      pending.push(candidate.id);
+      failureCode ??= "attachment_state_invalid";
+      continue;
+    }
+    if (attachment.status === "assigned" && attachment.assignedDocumentId && !attachment.purgePending) {
       attached.push(attachment.id);
+      continue;
+    }
+    if (attachment.status === "assigned" && attachment.assignedDocumentId && attachment.purgePending) {
+      try {
+        await purgeHeldImapAttachment(attachment.storageKey);
+        const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId))).returning({ id: imapIngestionAttachments.id });
+        if (!cleared) throw new AppError("attachment_state_changed", "That staged attachment changed; retry later", 503);
+        attached.push(attachment.id);
+      } catch {
+        pending.push(attachment.id);
+        failureCode ??= "staging_purge_failed";
+        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId)));
+      }
       continue;
     }
     if (attachment.status !== "stored") {
       pending.push(attachment.id);
       failureCode ??= "attachment_state_invalid";
+      continue;
+    }
+    const claim = async () => {
+      const token = randomUUID();
+      const [row] = await getDb().update(imapIngestionAttachments).set({
+        transferClaimToken: token,
+        transferClaimedAt: new Date(),
+        transferLeaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+        updatedAt: new Date(),
+      }).where(and(
+        eq(imapIngestionAttachments.id, attachment.id),
+        eq(imapIngestionAttachments.status, "stored"),
+        or(isNull(imapIngestionAttachments.transferClaimToken), lt(imapIngestionAttachments.transferLeaseExpiresAt, new Date())),
+      )).returning({ id: imapIngestionAttachments.id, token: imapIngestionAttachments.transferClaimToken });
+      return row ? { row, token } : undefined;
+    };
+    let claimed = await claim();
+    for (let attempt = 0; !claimed && attempt < 40; attempt += 1) {
+      const [latest] = await getDb().select().from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, attachment.id)).limit(1);
+      if (!latest) break;
+      if (latest.status === "assigned" && latest.assignedDocumentId && !latest.purgePending) {
+        attached.push(latest.id);
+        continue attachmentLoop;
+      }
+      if (latest.status === "assigned" && latest.assignedDocumentId && latest.purgePending) {
+        try {
+          await purgeHeldImapAttachment(latest.storageKey);
+          const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
+            .where(and(eq(imapIngestionAttachments.id, latest.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, latest.assignedDocumentId))).returning({ id: imapIngestionAttachments.id });
+          if (!cleared) throw new AppError("attachment_state_changed", "That staged attachment changed; retry later", 503);
+          attached.push(latest.id);
+        } catch {
+          pending.push(latest.id);
+          failureCode ??= "staging_purge_failed";
+        }
+        continue attachmentLoop;
+      }
+      if (latest.status !== "stored") break;
+      if (latest.transferClaimToken && latest.transferLeaseExpiresAt && latest.transferLeaseExpiresAt > new Date()) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } else {
+        claimed = await claim();
+      }
+    }
+    if (!claimed) {
+      pending.push(attachment.id);
+      failureCode ??= "attachment_transfer_in_progress";
       continue;
     }
     let bytes: Buffer | undefined;
@@ -269,21 +439,44 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         filename: attachment.displayName,
         body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
         declaredBytes: attachment.sizeBytes,
+        documentId: attachment.id,
       });
-      await getDb().update(imapIngestionAttachments).set({
+      const [assignedRow] = await getDb().update(imapIngestionAttachments).set({
         status: "assigned",
         assignedDocumentId: document.id,
+        transferClaimToken: null,
+        transferClaimedAt: null,
+        transferLeaseExpiresAt: null,
+        purgePending: true,
+        purgeFailureCode: null,
         updatedAt: new Date(),
-      }).where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored")));
+      }).where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.transferClaimToken, claimed.token))).returning({ id: imapIngestionAttachments.id });
+      if (!assignedRow) {
+        pending.push(attachment.id);
+        failureCode ??= "attachment_state_changed";
+        continue;
+      }
       try {
         await purgeHeldImapAttachment(attachment.storageKey);
+        const [purged] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true))).returning({ id: imapIngestionAttachments.id });
+        if (!purged) {
+          pending.push(attachment.id);
+          failureCode ??= "attachment_state_changed";
+          continue;
+        }
       } catch {
         attached.push(attachment.id);
+        pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
+        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id)));
         continue;
       }
       attached.push(attachment.id);
     } catch {
+      await getDb().update(imapIngestionAttachments).set({ transferClaimToken: null, transferClaimedAt: null, transferLeaseExpiresAt: null, updatedAt: new Date() })
+        .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.transferClaimToken, claimed.token)));
       pending.push(attachment.id);
       failureCode ??= "attachment_transfer_failed";
     } finally {
@@ -311,6 +504,7 @@ async function finishMailboxApproval(
           outcome: "approved" as const,
           itemId: receipt.approvedItemId,
           approvalResultId: receipt.approvalResultId,
+          attachmentState: "attached" as const,
           attachedAttachmentIds: [],
           pendingAttachmentIds: [],
         } };
@@ -357,71 +551,211 @@ async function finishMailboxApproval(
       .where(and(eq(imapIngestionAttachments.messageId, input.source.receiptId), eq(imapIngestionAttachments.status, "assigned")));
     return { ...result.result, attachedAttachmentIds: assigned.map((row) => row.id) };
   }
-  const itemId = input.action === "create_separate" ? await createReviewedItem(userId, input) : input.targetItemId!;
+  const itemId = input.action === "create_separate" ? await createReviewedItem(userId, input, input.operationId) : input.targetItemId!;
   await getDb().update(imapIngestionMessages).set({ approvedItemId: itemId, updatedAt: new Date() })
     .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.approvalOperationId, input.operationId)));
 
   const transferred = await transferAttachments(userId, input.householdId, itemId, input.source.receiptId, input.attachmentIds);
   const approvalResultId = result.receipt.approvalResultId!;
   const partial = Boolean(transferred.failureCode || transferred.pending.length);
+  let effectivePartial = partial;
   await getDb().transaction(async (transaction) => {
-    await transaction.update(imapIngestionMessages).set({
+    const [changed] = await transaction.update(imapIngestionMessages).set({
       status: partial ? "recoverable" : "completed",
       failureCode: partial ? transferred.failureCode ?? "attachment_transfer_failed" : null,
       approvedItemId: itemId,
       approvedAt: partial ? null : new Date(),
       updatedAt: new Date(),
-    }).where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.approvalOperationId, input.operationId)));
+    }).where(and(
+      eq(imapIngestionMessages.id, input.source.receiptId),
+      eq(imapIngestionMessages.approvalOperationId, input.operationId),
+      or(eq(imapIngestionMessages.status, "approving"), eq(imapIngestionMessages.status, "recoverable")),
+    )).returning({ status: imapIngestionMessages.status });
+    if (!changed) {
+      const [current] = await transaction.select({ status: imapIngestionMessages.status }).from(imapIngestionMessages)
+        .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.approvalOperationId, input.operationId))).limit(1);
+      effectivePartial = current?.status !== "completed";
+    }
     await transaction.insert(auditLog).values({
+      id: approvalResultId,
       householdId: input.householdId,
       actorUserId: userId,
       entityType: "reviewed_intake",
       entityId: approvalResultId,
-      action: partial ? "reviewed_intake_partial" : "reviewed_intake_approved",
+      action: effectivePartial ? "reviewed_intake_partial" : "reviewed_intake_approved",
       changes: {
         source: "mailbox_draft",
         action: input.action,
         itemId,
-        result: partial ? "retryable" : "completed",
+        result: effectivePartial ? "retryable" : "completed",
       },
-    }).onConflictDoNothing();
+    }).onConflictDoUpdate({ target: auditLog.id, set: {
+      action: effectivePartial ? "reviewed_intake_partial" : "reviewed_intake_approved",
+      changes: {
+        source: "mailbox_draft",
+        action: input.action,
+        itemId,
+        result: effectivePartial ? "retryable" : "completed",
+      },
+    } });
   });
   return {
-    outcome: partial ? "partial_success" : "approved",
+    outcome: effectivePartial ? "partial_success" : "approved",
     itemId,
     approvalResultId,
+    attachmentState: effectivePartial ? "pending" : "attached",
     attachedAttachmentIds: transferred.attached,
     pendingAttachmentIds: transferred.pending,
   };
 }
 
-async function finishDirectApproval(userId: string, input: ReviewedIntakeApproval, requestHash: string): Promise<ApprovalOutcome> {
-  const [existing] = await getDb().select({ actorUserId: auditLog.actorUserId, changes: auditLog.changes }).from(auditLog).where(and(
-    eq(auditLog.entityType, "reviewed_intake"),
-    eq(auditLog.entityId, input.operationId),
-  )).orderBy(desc(auditLog.createdAt)).limit(1);
-  if (existing) {
-    if (existing.actorUserId !== userId) throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
-    const changes = existing.changes as { requestHash?: string; itemId?: string; result?: string };
-    if (changes.requestHash !== requestHash) throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
+async function readOrCreateDirectOperation(userId: string, input: DirectApproval, requestHash: string) {
+  return getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:reviewed-intake:${input.operationId}`}, 0))`);
+    const [existing] = await transaction.select().from(reviewedIntakeOperations)
+      .where(eq(reviewedIntakeOperations.id, input.operationId)).for("update").limit(1);
+    if (existing) {
+      if (existing.actorUserId !== userId
+        || existing.source !== "direct_upload"
+        || existing.householdId !== input.householdId
+        || existing.sectionId !== input.sectionId
+        || existing.action !== input.action
+        || existing.targetItemId !== (input.targetItemId ?? null)
+        || existing.requestSha256 !== requestHash
+        || existing.expectedDocument !== input.source.expectedDocument) {
+        throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
+      }
+      return existing;
+    }
+    if (input.action === "create_separate") {
+      const [collision] = await transaction.select({ id: items.id }).from(items).where(eq(items.id, input.operationId)).limit(1);
+      if (collision) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
+    }
+    const [created] = await transaction.insert(reviewedIntakeOperations).values({
+      id: input.operationId,
+      actorUserId: userId,
+      source: "direct_upload",
+      householdId: input.householdId,
+      sectionId: input.sectionId,
+      action: input.action,
+      targetItemId: input.targetItemId ?? null,
+      itemId: input.action === "create_separate" ? input.operationId : input.targetItemId!,
+      requestSha256: requestHash,
+      resultId: randomUUID(),
+      expectedDocument: input.source.expectedDocument,
+      attachmentState: input.source.expectedDocument ? "pending" : "not_requested",
+      status: input.source.expectedDocument ? "pending_attachment" : "processing",
+    }).returning();
+    return created;
+  });
+}
+
+async function finishDirectApproval(userId: string, input: DirectApproval, requestHash: string): Promise<ApprovalOutcome> {
+  const operation = await readOrCreateDirectOperation(userId, input, requestHash);
+  if (operation.status === "completed") {
     return {
-      outcome: changes.result === "retryable" ? "partial_success" : "approved",
-      itemId: changes.itemId!,
-      approvalResultId: input.operationId,
+      outcome: "approved",
+      itemId: operation.itemId,
+      approvalResultId: operation.resultId,
+      attachmentState: operation.attachmentState,
       attachedAttachmentIds: [],
       pendingAttachmentIds: [],
     };
   }
-  const itemId = input.action === "create_separate" ? await createReviewedItem(userId, input) : input.targetItemId!;
+  const itemId = input.action === "create_separate" ? await createReviewedItem(userId, input, operation.itemId) : operation.itemId;
+  const completed = !operation.expectedDocument;
+  const [updated] = await getDb().update(reviewedIntakeOperations).set({
+    status: completed ? "completed" : "pending_attachment",
+    attachmentState: completed ? "not_requested" : "pending",
+    completedAt: completed ? new Date() : null,
+    updatedAt: new Date(),
+  }).where(and(eq(reviewedIntakeOperations.id, operation.id), eq(reviewedIntakeOperations.itemId, itemId))).returning();
+  if (!updated) throw new AppError("reviewed_intake_conflict", "That approval identity changed; retry later", 409);
   await getDb().insert(auditLog).values({
+    id: operation.resultId,
     householdId: input.householdId,
     actorUserId: userId,
     entityType: "reviewed_intake",
-    entityId: input.operationId,
-    action: "reviewed_intake_approved",
-    changes: { source: "direct_upload", action: input.action, itemId, result: "completed", requestHash },
+    entityId: operation.resultId,
+    action: completed ? "reviewed_intake_approved" : "reviewed_intake_pending_document",
+    changes: { source: "direct_upload", action: input.action, itemId, result: completed ? "completed" : "pending_document" },
   }).onConflictDoNothing();
-  return { outcome: "approved", itemId, approvalResultId: input.operationId, attachedAttachmentIds: [], pendingAttachmentIds: [] };
+  return {
+    outcome: completed ? "approved" : "partial_success",
+    itemId,
+    approvalResultId: operation.resultId,
+    attachmentState: completed ? "not_requested" : "pending",
+    attachedAttachmentIds: [],
+    pendingAttachmentIds: [],
+  };
+}
+
+/** Completes a direct document-assisted operation only after the secure route has made the document durable. */
+export async function completeDirectReviewedUpload(userId: string, operationId: string, householdId: string, itemId: string, documentId: string): Promise<void> {
+  const changed = await getDb().transaction(async (transaction) => {
+    const [operation] = await transaction.select().from(reviewedIntakeOperations)
+      .where(eq(reviewedIntakeOperations.id, operationId)).for("update").limit(1);
+    if (!operation || operation.actorUserId !== userId || operation.source !== "direct_upload" || operation.householdId !== householdId || operation.itemId !== itemId || !operation.expectedDocument) {
+      throw new AppError("reviewed_intake_not_found", "That reviewed intake is not available", 404);
+    }
+    if (operation.status === "completed") {
+      if (operation.documentId !== documentId) throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
+      return true;
+    }
+    const [document] = await transaction.select({ id: documents.id }).from(documents).where(and(
+      eq(documents.id, documentId),
+      eq(documents.householdId, householdId),
+      eq(documents.itemId, itemId),
+      eq(documents.lifecycle, "available"),
+    )).limit(1);
+    if (!document) throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
+    const [updated] = await transaction.update(reviewedIntakeOperations).set({
+      status: "completed",
+      attachmentState: "attached",
+      documentId,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    }).where(and(eq(reviewedIntakeOperations.id, operationId), or(
+      eq(reviewedIntakeOperations.status, "pending_attachment"),
+      eq(reviewedIntakeOperations.status, "recoverable"),
+    ))).returning({ id: reviewedIntakeOperations.id });
+    if (!updated) throw new AppError("reviewed_intake_conflict", "That approval identity changed; retry later", 409);
+    await transaction.insert(auditLog).values({
+      id: operation.resultId,
+      householdId,
+      actorUserId: userId,
+      entityType: "reviewed_intake",
+      entityId: operation.resultId,
+      action: "reviewed_intake_approved",
+      changes: { source: "direct_upload", result: "completed", itemId, documentId },
+    }).onConflictDoUpdate({ target: auditLog.id, set: {
+      action: "reviewed_intake_approved",
+      changes: { source: "direct_upload", result: "completed", itemId, documentId },
+    } });
+    return true;
+  });
+  if (changed) return;
+}
+
+export async function authorizeDirectReviewedUpload(userId: string, operationId: string, householdId: string, itemId: string): Promise<{ documentId?: string }> {
+  const [operation] = await getDb().select().from(reviewedIntakeOperations)
+    .where(eq(reviewedIntakeOperations.id, operationId)).limit(1);
+  if (!operation || operation.actorUserId !== userId || operation.source !== "direct_upload" || operation.householdId !== householdId || operation.itemId !== itemId || !operation.expectedDocument) {
+    throw new AppError("reviewed_intake_not_found", "That reviewed intake is not available", 404);
+  }
+  if (operation.status === "completed") {
+    if (!operation.documentId) throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
+    return { documentId: operation.documentId };
+  }
+  if (!["pending_attachment", "recoverable"].includes(operation.status)) {
+    throw new AppError("reviewed_intake_not_ready", "That reviewed document is not ready for upload", 409);
+  }
+  return {};
+}
+
+export async function markDirectReviewedUploadRecoverable(userId: string, operationId: string, failureCode: string): Promise<void> {
+  await getDb().update(reviewedIntakeOperations).set({ status: "recoverable", failureCode, updatedAt: new Date() })
+    .where(and(eq(reviewedIntakeOperations.id, operationId), eq(reviewedIntakeOperations.actorUserId, userId), eq(reviewedIntakeOperations.expectedDocument, true), eq(reviewedIntakeOperations.status, "pending_attachment")));
 }
 
 /** One authorization, idempotency, and reviewed-value boundary for both sources. */
@@ -429,9 +763,9 @@ export async function approveReviewedIntake(userId: string, rawInput: unknown): 
   const input = reviewedIntakeApprovalSchema.parse(rawInput);
   await requireActiveUser(userId);
   await requireDestination(userId, input.householdId, input.sectionId, input.targetItemId);
-  const requestHash = approvalHash(input);
+  const requestHash = canonicalReviewedIntakeHash(input);
   if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
-  return finishDirectApproval(userId, input, requestHash);
+  return finishDirectApproval(userId, input as DirectApproval, requestHash);
 }
 
 export async function listStagedAttachmentIds(receiptId: string): Promise<string[]> {

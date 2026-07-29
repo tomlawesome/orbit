@@ -7,6 +7,7 @@ import { detectDocumentMediaType, normalizedDocumentFilename } from "@/server/do
 
 const HOLDING_HOUSEHOLD = "imap-holding";
 const HOLDING_ITEM = "unassigned";
+let purgeImplementationForTests: ((storageKey: string) => Promise<void>) | undefined;
 
 function storage() {
   const config = getDocumentConfig();
@@ -73,5 +74,11 @@ export async function readHeldImapAttachment(attachment: Pick<HeldImapAttachment
 
 /** Idempotently removes private holding ciphertext after durable transfer or discard. */
 export async function purgeHeldImapAttachment(storageKey: string): Promise<void> {
+  if (purgeImplementationForTests) return purgeImplementationForTests(storageKey);
   await storage().deleteCiphertext(storageKey);
+}
+
+/** Test seam for deterministic purge-failure recovery coverage. */
+export function setImapHoldingPurgeImplementationForTests(implementation: ((storageKey: string) => Promise<void>) | undefined): void {
+  purgeImplementationForTests = implementation;
 }

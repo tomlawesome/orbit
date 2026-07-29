@@ -227,11 +227,43 @@ export async function uploadItemDocument(input: {
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  documentId?: string;
 }): Promise<DocumentSummary> {
   await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
   const config = getDocumentConfig();
   const storage = documentStorage();
-  const documentId = randomUUID();
+  const documentId = input.documentId ?? randomUUID();
+  if (input.documentId) {
+    const [existing] = await getDb().select({
+      id: documents.id,
+      itemId: documents.itemId,
+      householdId: documents.householdId,
+      displayName: documents.displayName,
+      mediaType: documents.mediaType,
+      sizeBytes: documents.sizeBytes,
+      lifecycle: documents.lifecycle,
+      scanStatus: documents.scanStatus,
+      availableAt: documents.availableAt,
+      deleteAfter: documents.deleteAfter,
+    }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
+    if (existing) {
+      if (existing.householdId !== input.householdId || existing.itemId !== input.itemId) {
+        throw new AppError("document_conflict", "That document identity is already in use", 409);
+      }
+      if (existing.lifecycle === "available") return toSummary(existing);
+      if (existing.lifecycle === "rejected") {
+        const [cryptoRecord] = await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
+          .where(eq(documentCrypto.documentId, input.documentId)).limit(1);
+        if (cryptoRecord) throw new AppError("document_conflict", "That document identity is already in use", 409);
+        const [removed] = await getDb().delete(documents)
+          .where(and(eq(documents.id, input.documentId), eq(documents.householdId, input.householdId), eq(documents.itemId, input.itemId), eq(documents.lifecycle, "rejected")))
+          .returning({ id: documents.id });
+        if (!removed) throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+      } else {
+        throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+      }
+    }
+  }
   const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
   let metadataReserved = false;

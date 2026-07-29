@@ -64,9 +64,25 @@ describe("PostgreSQL migration evidence", () => {
     const expectedAfterUpgrade = structuredClone(beforeUpgrade);
     const legacyReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.review_item_id);
     if (!legacyReceipt) throw new Error("The migration fixture must include a legacy prototype receipt");
-    legacyReceipt.status = "failed";
-    legacyReceipt.failure_code = "legacy_review_item";
+    expect(legacyReceipt.status).toBe("completed");
+    const discardedReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.id === "e0000000-0000-4000-8000-000000000002");
+    const unresolvedReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.id === "e0000000-0000-4000-8000-000000000003");
+    if (!discardedReceipt || !unresolvedReceipt) throw new Error("The migration fixture must include discarded and unresolved legacy receipts");
+    expect(discardedReceipt.status).toBe("discarded");
+    unresolvedReceipt.status = "failed";
+    unresolvedReceipt.failure_code = "legacy_review_item";
     expect(await readFixtureSnapshot(database.client)).toEqual(expectedAfterUpgrade);
+    const legacyContract = await database.client.unsafe(`
+      SELECT id, status, failure_code, approved_item_id
+      FROM imap_ingestion_messages
+      WHERE id IN ('e0000000-0000-4000-8000-000000000001', 'e0000000-0000-4000-8000-000000000002', 'e0000000-0000-4000-8000-000000000003')
+      ORDER BY id
+    `);
+    expect(legacyContract).toEqual([
+      { id: "e0000000-0000-4000-8000-000000000001", status: "completed", failure_code: null, approved_item_id: "40000000-0000-4000-8000-000000000001" },
+      { id: "e0000000-0000-4000-8000-000000000002", status: "discarded", failure_code: null, approved_item_id: null },
+      { id: "e0000000-0000-4000-8000-000000000003", status: "failed", failure_code: "legacy_review_item", approved_item_id: null },
+    ]);
 
     const beforeRerun = {
       journal: await readAppliedMigrationHashes(database.client),
