@@ -178,7 +178,7 @@ test.describe("document-assisted item intake", () => {
     await page.unroute("**/api/workspace/commands");
   });
 
-  test("keeps a valid item and directs attachment retry after upload failure", async ({ page, isMobile }) => {
+  test("keeps the editor and original file available for bounded attachment retry", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
@@ -194,20 +194,28 @@ test.describe("document-assisted item intake", () => {
       buffer: Buffer.from("%PDF-1.7\nsynthetic attachment failure\n"),
     });
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    let attempts = 0;
     await page.route("**/api/households/*/items/*/documents", async (route) => {
       if (route.request().method() === "POST") {
-        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+        attempts += 1;
+        if (attempts === 1) {
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+        } else {
+          await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ document: { id: "22222222-2222-4222-8222-222222222222" } }) });
+        }
         return;
       }
       await route.continue();
     });
 
     await submitAddItem(page, editor, isMobile);
-    await expect(page.locator(".action-toast")).toContainText("Open its Files section to retry the original file.", { timeout: 15_000 });
     await expect(page.getByRole("dialog", { name: title })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: title })).toContainText("No documents attached yet.");
+    await expect(page.getByRole("dialog", { name: title })).toContainText("temporarily unavailable");
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(true);
+    await submitAddItem(page, editor, isMobile);
+    await expect(page.locator(".action-toast")).toContainText(`${title} added`, { timeout: 15_000 });
+    expect(attempts).toBe(2);
     await page.unroute("**/api/households/*/items/*/documents");
   });
 });
