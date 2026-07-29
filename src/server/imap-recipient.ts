@@ -38,6 +38,20 @@ export function digestImapRecipientAlias(value: string): string {
   return createHash("sha256").update(value.trim().toLowerCase(), "utf8").digest("hex");
 }
 
+/** Non-secret binding persisted with rotation authority; raw key/domain/header data never leave runtime configuration. */
+export function digestImapAliasConfiguration(domain: string, trustedHeader: string, key: ImapAliasGeneration): string {
+  return createHash("sha256")
+    .update("orbit:imap-recipient-alias-commitment:v1\0")
+    .update(normalizedDomain(domain))
+    .update("\0")
+    .update(trustedHeader.trim().toLowerCase())
+    .update("\0")
+    .update(String(key.generation))
+    .update("\0")
+    .update(key.secret)
+    .digest("hex");
+}
+
 /** Parses the generated address shape and enforces the configured recipient domain. */
 export function normalizeImapRecipientAlias(value: string, domain: string): string | undefined {
   const trimmed = value.trim();

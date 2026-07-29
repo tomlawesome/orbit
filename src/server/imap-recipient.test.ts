@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveImapRecipientAlias,
+  digestImapAliasConfiguration,
   digestImapRecipientAlias,
   matchImapRecipientAliasGeneration,
   parseTrustedRecipientHeader,
@@ -34,6 +35,18 @@ describe("IMAP recipient alias derivation", () => {
     expect(matchImapRecipientAliasGeneration(previousAlias, userId, domain, previous, new Date("2026-07-29T00:00:00.000Z"))).toBe(true);
     expect(matchImapRecipientAliasGeneration(previousAlias, userId, domain, previous, new Date("2026-08-16T00:00:00.000Z"))).toBe(false);
     expect(digestImapRecipientAlias(currentAlias)).toHaveLength(64);
+  });
+
+  it("commits the normalized domain, generation, and key without persisting either secret or address", () => {
+    const commitment = digestImapAliasConfiguration(domain, "X-Original-To", current);
+    expect(commitment).toHaveLength(64);
+    expect(commitment).toBe(digestImapAliasConfiguration(domain.toUpperCase(), "x-original-to", current));
+    expect(digestImapAliasConfiguration("other.example.test", "X-Original-To", current)).not.toBe(commitment);
+    expect(digestImapAliasConfiguration(domain, "X-Other-To", current)).not.toBe(commitment);
+    expect(digestImapAliasConfiguration(domain, "X-Original-To", { ...current, generation: 8 })).not.toBe(commitment);
+    expect(digestImapAliasConfiguration(domain, "X-Original-To", { ...current, secret: "different-alias-secret-that-is-long-enough" })).not.toBe(commitment);
+    expect(commitment).not.toContain(current.secret);
+    expect(commitment).not.toContain(deriveImapRecipientAlias(userId, domain, current));
   });
 });
 
