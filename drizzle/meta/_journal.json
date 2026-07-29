@@ -134,6 +134,13 @@
       "when": 1785087000000,
       "tag": "0018_private_review_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785088000000,
+      "tag": "0019_receipt_identity_and_alias_rotation",
+      "breakpoints": true
     }
   ]
 }

@@ -88,6 +88,17 @@ describe("PostgreSQL migration evidence", () => {
       { id: "e0000000-0000-4000-8000-000000000002", status: "discarded", failure_code: null, approved_item_id: null },
       { id: "e0000000-0000-4000-8000-000000000003", status: "failed", failure_code: "legacy_review_item", approved_item_id: null },
     ]);
+    expect(await database.client.unsafe(`
+      SELECT user_id, generation, alias_sha256, status, active_until
+      FROM imap_recipient_aliases
+      ORDER BY user_id, generation
+    `)).toEqual([{
+      user_id: "10000000-0000-4000-8000-000000000001",
+      generation: 0,
+      alias_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "legacy_inactive",
+      active_until: expect.any(Date),
+    }]);
 
     const beforeRerun = {
       journal: await readAppliedMigrationHashes(database.client),
