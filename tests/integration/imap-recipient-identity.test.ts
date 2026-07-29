@@ -196,7 +196,11 @@ describe("receipt identity PostgreSQL boundaries", () => {
         { uid: 3, userId: null, status: "quarantined", failureCode: "recipient_header_ambiguous" },
       ]);
       expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-        .where(inArray(imapIngestionMessages.mailboxUid, [1, 2, 3]))).toHaveLength(3);
+        .where(and(
+          eq(imapIngestionMessages.mailbox, "INBOX"),
+          eq(imapIngestionMessages.mailboxUidValidity, "42"),
+          inArray(imapIngestionMessages.mailboxUid, [1, 2, 3]),
+        ))).toHaveLength(3);
     } finally {
       setImapClientFactoryForTests(undefined);
       await fixture.cleanup();
