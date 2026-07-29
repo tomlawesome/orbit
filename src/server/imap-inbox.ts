@@ -11,16 +11,37 @@ const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 
 export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "cleanup" | "unavailable";
 
-export function reviewInboxState(status: string, failureCode: string | null | undefined, hasApprovalOperation = false): {
+export type ReviewInboxStateContext = {
+  hasApprovalOperation?: boolean;
+  hasApprovedItem?: boolean;
+  expiresAt?: Date;
+  now?: Date;
+};
+
+const attachmentTransferFailureCodes = new Set([
+  "attachment_state_changed",
+  "attachment_state_invalid",
+  "attachment_transfer_failed",
+  "attachment_transfer_in_progress",
+  "staging_purge_failed",
+]);
+
+export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {
   classification: ReviewInboxClassification;
   canApprove: boolean;
   canDiscard: boolean;
   message: string;
 } {
+  const now = context.now ?? new Date();
+  const hasUnexpiredReceipt = Boolean(context.expiresAt && context.expiresAt > now);
+  const canRetryAttachmentTransfer = status === "recoverable"
+    && Boolean(context.hasApprovalOperation)
+    && Boolean(context.hasApprovedItem)
+    && hasUnexpiredReceipt
+    && attachmentTransferFailureCodes.has(failureCode ?? "");
   if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review." };
   if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review." };
-  if (status === "recoverable" && hasApprovalOperation && !["staging_expiry_pending", "staging_purge_pending"].includes(failureCode ?? "")) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
-  if (status === "recoverable" && failureCode === "attachment_transfer_failed") return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
+  if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
   if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard." };
   if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup." };
   return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review." };
@@ -80,6 +101,7 @@ export async function listImapInbox(userId: string) {
       receivedAt: imapIngestionMessages.receivedAt,
       failureCode: imapIngestionMessages.failureCode,
       hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
+      hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
@@ -89,12 +111,16 @@ export async function listImapInbox(userId: string) {
       .limit(50),
     getDb().select({ id: households.id, name: households.name, currency: households.defaultCurrency })
       .from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
-      .where(eq(memberships.userId, userId)).orderBy(asc(households.name)),
+      .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt))).orderBy(asc(households.name)),
   ]);
   const visibleHouseholdIds = new Set(choices.map((choice) => choice.id));
   return {
     receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
-      const state = reviewInboxState(receipt.status, receipt.failureCode, Boolean(receipt.hasApprovalOperation));
+      const state = reviewInboxState(receipt.status, receipt.failureCode, {
+        hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
+        hasApprovedItem: Boolean(receipt.hasApprovedItem),
+        expiresAt: receipt.expiresAt,
+      });
       const metadata = state.classification === "ready" || state.classification === "retry"
         ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
         : { proposal: {}, fieldEvidence: {} };
@@ -131,13 +157,18 @@ export async function getImapReview(userId: string, receiptId: string, household
     receivedAt: imapIngestionMessages.receivedAt,
     failureCode: imapIngestionMessages.failureCode,
     hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
+    hasApprovedItem: isNotNull(imapIngestionMessages.approvedItemId),
   }).from(imapIngestionMessages).where(and(
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.userId, userId),
     eq(imapIngestionMessages.householdId, householdId),
   )).limit(1);
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
-  const state = reviewInboxState(receipt.status, receipt.failureCode, Boolean(receipt.hasApprovalOperation));
+  const state = reviewInboxState(receipt.status, receipt.failureCode, {
+    hasApprovalOperation: Boolean(receipt.hasApprovalOperation),
+    hasApprovedItem: Boolean(receipt.hasApprovedItem),
+    expiresAt: receipt.expiresAt,
+  });
   const metadata = state.classification === "ready" || state.classification === "retry"
     ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
     : { proposal: {}, fieldEvidence: {} };
@@ -149,7 +180,8 @@ export async function getImapReview(userId: string, receiptId: string, household
     getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, subtype: items.subtype })
       .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
     getDb().select({ id: imapIngestionAttachments.id, mediaType: imapIngestionAttachments.mediaType, sizeBytes: imapIngestionAttachments.sizeBytes })
-      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"]))),
+      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
+      .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
   const candidates = householdItems.flatMap((item) => {
     const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
@@ -249,7 +281,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
           .where(and(eq(imapIngestionAttachments.messageId, receipt.id), eq(imapIngestionAttachments.storageKey, storageKey), eq(imapIngestionAttachments.purgePending, true)));
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: now })
           .where(and(eq(imapIngestionStagingObjects.messageId, receipt.id), eq(imapIngestionStagingObjects.storageKey, storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")));
-        await transaction.update(imapIngestionMessages).set({ status: "recoverable", failureCode: "staging_purge_failed", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now })
+        await transaction.update(imapIngestionMessages).set({ status: "recoverable", failureCode: "discard_purge_failed", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now })
           .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
       });
       throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry discard", 503);
