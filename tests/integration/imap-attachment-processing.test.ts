@@ -367,10 +367,20 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
         if (storageKey === retryHeld.storageKey && purgeFailures > 0) { purgeFailures -= 1; throw new Error("synthetic storage failure"); }
         await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).deleteCiphertext(storageKey);
       });
-      await purgeExpiredImapStaging(new Date());
-      expect((await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, retryReceiptId)))[0].status).toBe("recoverable");
-      await purgeExpiredImapStaging(new Date());
-      expect((await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, retryReceiptId)))[0].status).toBe("expired");
+      const firstPurgeAt = new Date();
+      await purgeExpiredImapStaging(firstPurgeAt, 100);
+      const [failedRetry] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode, nextAttemptAt: imapIngestionMessages.attachmentProcessingNextAttemptAt })
+        .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, retryReceiptId));
+      expect(failedRetry).toMatchObject({ status: "recoverable", failureCode: "staging_purge_failed" });
+      expect(failedRetry.nextAttemptAt).toBeInstanceOf(Date);
+      expect(failedRetry.nextAttemptAt!.getTime()).toBeGreaterThan(firstPurgeAt.getTime());
+
+      const beforeRetry = new Date(failedRetry.nextAttemptAt!.getTime() - 1);
+      await purgeExpiredImapStaging(beforeRetry, 100);
+      expect((await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, retryReceiptId)))[0]).toEqual({ status: "recoverable", failureCode: "staging_purge_failed" });
+
+      await purgeExpiredImapStaging(failedRetry.nextAttemptAt!, 100);
+      expect((await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode, nextAttemptAt: imapIngestionMessages.attachmentProcessingNextAttemptAt }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, retryReceiptId)))[0]).toEqual({ status: "expired", failureCode: null, nextAttemptAt: null });
     } finally {
       setImapHoldingPurgeImplementationForTests(undefined);
       await fixture.cleanup();

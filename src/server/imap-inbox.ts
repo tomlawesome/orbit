@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
 import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, sections, users } from "@/db/schema";
 import { purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+
+const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 
 /** Returns only the caller's receipt states; subjects, headers, and attachment names stay private. */
 export async function listImapInbox(userId: string) {
@@ -173,6 +175,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
         inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing"]),
         or(lt(imapIngestionMessages.expiresAt, now), isNotNull(users.disabledAt), and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted"))),
         or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+        or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
       )).orderBy(asc(imapIngestionMessages.expiresAt)).limit(1);
       if (!candidate) return undefined;
       const token = randomUUID();
@@ -184,7 +187,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
         attachmentProcessingLeaseToken: token,
         attachmentProcessingNextAttemptAt: null,
         updatedAt: now,
-      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing"]), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
+      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing"]), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))), or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
       if (!claimed?.token) return undefined;
       await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: now }).where(and(
         eq(imapIngestionAttachments.messageId, candidate.id),
@@ -274,7 +277,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       failureCode: failed ? (claim.terminalFailure ? "attachment_processing_exhausted" : "staging_purge_failed") : claim.terminalFailure ? "attachment_processing_exhausted" : claim.disabled ? "account_disabled" : null,
       attachmentProcessingLockedAt: null,
       attachmentProcessingLeaseToken: null,
-      attachmentProcessingNextAttemptAt: null,
+      attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
       updatedAt: now,
     }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
   }
