@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalReviewedIntakeHash,
   reviewedIntakeApprovalSchema,
   sanitizeReviewDraftMetadata,
 } from "./reviewed-intake";
@@ -56,5 +57,33 @@ describe("reviewed intake contract", () => {
         provider: { source: "parser", confidence: "medium" },
       },
     });
+  });
+
+  it("hashes canonical reviewed values instead of raw object key order", () => {
+    const base = {
+      operationId: "11111111-1111-4111-8111-111111111111",
+      source: { kind: "direct_upload", expectedDocument: true },
+      householdId: "33333333-3333-4333-8333-333333333333",
+      sectionId: "44444444-4444-4444-8444-444444444444",
+      action: "create_separate" as const,
+      item: { title: "Reviewed", provider: "Provider", currency: "GBP", status: "active" },
+      attachmentIds: [],
+    };
+    const reordered = { ...base, item: { status: "active", currency: "GBP", provider: "Provider", title: "Reviewed" } };
+    expect(canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(base))).toBe(
+      canonicalReviewedIntakeHash(reviewedIntakeApprovalSchema.parse(reordered)),
+    );
+  });
+
+  it("requires an explicit, validated operation identity to complete a direct document upload", () => {
+    expect(reviewedIntakeApprovalSchema.parse({
+      operationId: "11111111-1111-4111-8111-111111111111",
+      source: { kind: "direct_upload", expectedDocument: true },
+      householdId: "33333333-3333-4333-8333-333333333333",
+      sectionId: "44444444-4444-4444-8444-444444444444",
+      action: "create_separate",
+      item: { title: "Reviewed", currency: "GBP" },
+      attachmentIds: [],
+    }).source).toEqual({ kind: "direct_upload", expectedDocument: true });
   });
 });
