@@ -71,7 +71,12 @@ describe("PostgreSQL migration evidence", () => {
     expect(discardedReceipt.status).toBe("discarded");
     unresolvedReceipt.status = "failed";
     unresolvedReceipt.failure_code = "legacy_review_item";
-    expect(await readFixtureSnapshot(database.client)).toEqual(expectedAfterUpgrade);
+    const afterUpgrade = await readFixtureSnapshot(database.client);
+    const migratedUnresolvedReceipt = afterUpgrade.imap_ingestion_messages.find((row) => row.id === unresolvedReceipt.id);
+    if (!migratedUnresolvedReceipt) throw new Error("The unresolved legacy receipt must survive migration");
+    expect(migratedUnresolvedReceipt.updated_at).not.toBe(unresolvedReceipt.updated_at);
+    unresolvedReceipt.updated_at = migratedUnresolvedReceipt.updated_at;
+    expect(afterUpgrade).toEqual(expectedAfterUpgrade);
     const legacyContract = await database.client.unsafe(`
       SELECT id, status, failure_code, approved_item_id
       FROM imap_ingestion_messages
