@@ -198,7 +198,7 @@ describe("transactional household lifecycle", () => {
 
   it("denies a stale schedule after authority changes while it waits on the lifecycle lock", async () => {
     const fixture = await createIntegrationFixture("lifecycle-schedule-lock");
-    const result = await holdLifecycleLockWhileChangingAuthority(
+    const result = holdLifecycleLockWhileChangingAuthority(
       fixture.household.id,
       () => requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name),
       async (transaction) => {
@@ -218,7 +218,7 @@ describe("transactional household lifecycle", () => {
   it("denies a stale restore after the owner loses authority while it waits on the lifecycle lock", async () => {
     const fixture = await createIntegrationFixture("lifecycle-restore-lock");
     await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
-    const result = await holdLifecycleLockWhileChangingAuthority(
+    const result = holdLifecycleLockWhileChangingAuthority(
       fixture.household.id,
       () => restoreHousehold(fixture.users.owner.id, fixture.household.id),
       async (transaction) => {
@@ -238,7 +238,7 @@ describe("transactional household lifecycle", () => {
   it("denies a stale hard-delete after administrator authority changes while it waits on the lifecycle lock", async () => {
     const fixture = await createIntegrationFixture("lifecycle-hard-delete-lock");
     await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
-    const result = await holdLifecycleLockWhileChangingAuthority(
+    const result = holdLifecycleLockWhileChangingAuthority(
       fixture.household.id,
       () => hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name),
       async (transaction) => {
