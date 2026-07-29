@@ -1,11 +1,14 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
-import { and, asc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, lt, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
-import { scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
+import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
+import { getDocumentConfig } from "@/server/documents/config";
+import { LocalDocumentStorage } from "@/server/documents/storage";
+import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "@/server/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
   digestImapAliasConfiguration,
@@ -398,7 +401,7 @@ type ImapReceiptValues = {
   userId: string | null;
   householdId: string | null;
   expiresAt: Date;
-  status: "pending_review" | "failed" | "quarantined";
+  status: "processing" | "pending_review" | "failed" | "quarantined";
   failureCode: string | null;
   receiptStatus: "processing" | "cancelled";
   receivedAt: Date;
@@ -407,14 +410,460 @@ type ImapReceiptValues = {
 async function recordImapReceipt(config: ImapIngestionConfig, values: ImapReceiptValues) {
   return getDb().transaction(async (transaction) => {
     await ensureImapRotationAuthority(transaction, config, new Date());
-    return transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
+    const inserted = await transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status });
+    if (inserted.length) return inserted;
+    return transaction.select({ id: imapIngestionMessages.id, userId: imapIngestionMessages.userId, status: imapIngestionMessages.status })
+      .from(imapIngestionMessages)
+      .where(and(
+        eq(imapIngestionMessages.mailbox, values.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, values.mailboxUidValidity),
+        eq(imapIngestionMessages.mailboxUid, values.mailboxUid),
+      )).limit(1);
   });
 }
 
-function attachmentParts(structure: MessageStructureObject | undefined): string[] {
-  if (!structure) return [];
-  const children = structure.childNodes?.flatMap(attachmentParts) ?? [];
-  return structure.part && structure.disposition?.toLowerCase() === "attachment" ? [structure.part, ...children] : children;
+function safeAttachmentFailure(error: unknown): string {
+  const code = error instanceof Error ? error.message : "attachment_processing_failed";
+  return new Set([
+    "attachment_count_exceeded", "attachment_total_too_large", "document_too_large",
+    "mime_part_count_exceeded", "mime_nesting_too_deep", "mime_structure_invalid",
+    "mime_type_mismatch", "document_type_unsupported", "malware_detected", "scanner_disabled",
+    "scanner_unavailable", "message_too_large", "attachment_download_failed",
+    "staging_lease_lost", "staging_purge_failed",
+  ]).has(code) ? code : "attachment_processing_failed";
+}
+
+async function boundedDownloadedContent(content: unknown, maximumBytes: number): Promise<Buffer> {
+  if (Buffer.isBuffer(content)) {
+    if (content.length > maximumBytes) { content.fill(0); throw new Error("attachment_total_too_large"); }
+    const copy = Buffer.from(content);
+    content.fill(0);
+    return copy;
+  }
+  if (content instanceof Uint8Array) {
+    if (content.length > maximumBytes) { content.fill(0); throw new Error("attachment_total_too_large"); }
+    const copy = Buffer.from(content);
+    content.fill(0);
+    return copy;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const append = (value: unknown) => {
+    const chunk = Buffer.isBuffer(value) ? value : value instanceof Uint8Array ? Buffer.from(value) : undefined;
+    if (!chunk) throw new Error("attachment_download_failed");
+    total += chunk.length;
+    if (total > maximumBytes) throw new Error("attachment_total_too_large");
+    chunks.push(chunk);
+  };
+  const finish = () => {
+    const result = Buffer.concat(chunks);
+    for (const chunk of chunks) chunk.fill(0);
+    return result;
+  };
+  try {
+    if (content && typeof (content as AsyncIterable<unknown>)[Symbol.asyncIterator] === "function") {
+      for await (const chunk of content as AsyncIterable<unknown>) append(chunk);
+      return finish();
+    }
+    if (content && typeof (content as ReadableStream<Uint8Array>).getReader === "function") {
+      const reader = (content as ReadableStream<Uint8Array>).getReader();
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          append(next.value);
+        }
+        return finish();
+      } finally {
+        reader.releaseLock();
+      }
+    }
+    throw new Error("attachment_download_failed");
+  } catch (error) {
+    for (const chunk of chunks) chunk.fill(0);
+    throw error;
+  }
+}
+
+async function downloadImapPart(client: ImapFlow, uid: number, part: string, maximumBytes: number): Promise<Buffer> {
+  const downloader = (client as unknown as { download?: (uid: number, part: string, options: { uid: boolean }) => Promise<{ content: unknown }> }).download;
+  if (typeof downloader !== "function") throw new Error("attachment_download_failed");
+  const result = await downloader.call(client, uid, part, { uid: true });
+  return boundedDownloadedContent(result?.content, maximumBytes);
+}
+
+type StagedObject = { id: string; storageKey: string };
+
+function heldStorage() {
+  const config = getDocumentConfig();
+  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+}
+
+/** Re-establishes durable ownership for a ciphertext written after its worker
+ * ledger was reconciled, then purges only that uncommitted attempt object. */
+async function recoverUncommittedStagingObject(messageId: string, leaseToken: string, object: StagedObject): Promise<boolean> {
+  const [ledger] = await getDb().transaction(async (transaction) => {
+    const [inserted] = await transaction.insert(imapIngestionStagingObjects).values({
+      messageId, leaseToken, storageKey: object.storageKey, status: "purge_pending",
+    }).onConflictDoNothing().returning({ id: imapIngestionStagingObjects.id });
+    if (inserted) return [inserted] as const;
+    const [existing] = await transaction.select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects)
+      .where(and(
+        eq(imapIngestionStagingObjects.messageId, messageId),
+        eq(imapIngestionStagingObjects.leaseToken, leaseToken),
+        eq(imapIngestionStagingObjects.storageKey, object.storageKey),
+        inArray(imapIngestionStagingObjects.status, ["pending", "purge_pending"]),
+      )).for("update").limit(1);
+    if (!existing) return [] as const;
+    const [marked] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.id, existing.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), inArray(imapIngestionStagingObjects.status, ["pending", "purge_pending"])))
+      .returning({ id: imapIngestionStagingObjects.id });
+    return marked ? [marked] as const : [] as const;
+  });
+  if (!ledger) return false;
+  try {
+    await purgeHeldImapAttachment(object.storageKey);
+  } catch {
+    await getDb().update(imapIngestionStagingObjects).set({ purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.id, ledger.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending"))).catch(() => undefined);
+    return false;
+  }
+  try {
+    await getDb().delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, ledger.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** Registers the allocated storage key before writing ciphertext. A pending
+ * row is safe if the subsequent write fails or the worker crashes. */
+async function registerStagingObject(messageId: string, leaseToken: string, object: StagedObject): Promise<void> {
+  const inserted = await getDb().transaction(async (transaction) => {
+    const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken)))
+      .for("update").limit(1);
+    if (!active) return false;
+    await transaction.insert(imapIngestionStagingObjects).values({ messageId, leaseToken, storageKey: object.storageKey, status: "pending" });
+    return true;
+  });
+  if (!inserted) throw new Error("staging_lease_lost");
+}
+
+/** Commits the ledger and metadata together while holding the current lease row lock. */
+export async function commitStagedAttachment(
+  messageId: string,
+  leaseToken: string,
+  staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>,
+): Promise<"inserted" | "duplicate"> {
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
+        .for("update").limit(1);
+      if (!active) throw new Error("staging_lease_lost");
+      const [inserted] = await transaction.insert(imapIngestionAttachments).values({
+        id: staged.id, messageId, displayName: staged.displayName, mediaType: staged.mediaType,
+        sizeBytes: staged.sizeBytes, contentSha256: staged.contentSha256, storageKey: staged.storageKey,
+        ciphertextSize: staged.ciphertextSize, ...staged.envelope,
+      }).onConflictDoNothing().returning({ id: imapIngestionAttachments.id });
+      if (!inserted) {
+        const [purgePending] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+          .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
+          .returning({ id: imapIngestionStagingObjects.id });
+        if (!purgePending) throw new Error("staging_lease_lost");
+        return "duplicate";
+      }
+      const [committed] = await transaction.update(imapIngestionStagingObjects).set({ status: "committed", updatedAt: new Date() })
+        .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
+        .returning({ id: imapIngestionStagingObjects.id });
+      if (!committed) throw new Error("staging_lease_lost");
+      return "inserted";
+    });
+  } catch (error) {
+    await recoverUncommittedStagingObject(messageId, leaseToken, { id: staged.id, storageKey: staged.storageKey }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function markStagingPurgeIntent(messageId: string, leaseToken: string, objects: StagedObject[]): Promise<boolean> {
+  if (!objects.length) return true;
+  return getDb().transaction(async (transaction) => {
+    const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken)))
+      .for("update").limit(1);
+    if (!active) return false;
+    const ledgers = await Promise.all(objects.map((object) => transaction.select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects)
+      .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey)))
+      .for("update").limit(1)));
+    if (ledgers.some(([ledger]) => !ledger)) return false;
+    for (const object of objects) {
+      await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+        .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey)));
+      await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: new Date() })
+        .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
+    }
+    return true;
+  });
+}
+
+async function finalizeStagingPurge(messageId: string, leaseToken: string, object: StagedObject): Promise<boolean> {
+  return getDb().transaction(async (transaction) => {
+    const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken)))
+      .for("update").limit(1);
+    if (!active) return false;
+    const [ledger] = await transaction.select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects)
+      .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")))
+      .for("update").limit(1);
+    if (!ledger) return false;
+    await transaction.delete(imapIngestionAttachments).where(and(
+      eq(imapIngestionAttachments.messageId, messageId),
+      eq(imapIngestionAttachments.id, object.id),
+      eq(imapIngestionAttachments.storageKey, object.storageKey),
+      eq(imapIngestionAttachments.status, "stored"),
+      eq(imapIngestionAttachments.purgePending, true),
+    ));
+    await transaction.delete(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.id, ledger.id));
+    return true;
+  });
+}
+
+async function recordStagingPurgeFailure(messageId: string, leaseToken: string, object: StagedObject): Promise<void> {
+  await getDb().transaction(async (transaction) => {
+    const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken)))
+      .for("update").limit(1);
+    if (!active) return;
+    await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey)));
+    await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+      .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
+  });
+}
+
+async function purgeStagingObjectAfterIntent(messageId: string, leaseToken: string, object: StagedObject): Promise<boolean> {
+  if (!await markStagingPurgeIntent(messageId, leaseToken, [object])) return false;
+  try {
+    await purgeHeldImapAttachment(object.storageKey);
+  } catch {
+    await recordStagingPurgeFailure(messageId, leaseToken, object);
+    return false;
+  }
+  return finalizeStagingPurge(messageId, leaseToken, object);
+}
+
+export async function cleanupImapStagingAttempt(messageId: string, leaseToken: string, objects: StagedObject[]): Promise<boolean> {
+  if (!await markStagingPurgeIntent(messageId, leaseToken, objects)) return false;
+  let complete = true;
+  for (const object of objects) {
+    try {
+      await purgeHeldImapAttachment(object.storageKey);
+      if (!await finalizeStagingPurge(messageId, leaseToken, object)) complete = false;
+    } catch {
+      complete = false;
+      await recordStagingPurgeFailure(messageId, leaseToken, object);
+    }
+  }
+  return complete;
+}
+
+/** Reconciles pending/committed staging ledgers after crashes and stale leases. */
+export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("IMAP staging reconciliation limit is invalid");
+  const rows = await getDb().select({
+    id: imapIngestionStagingObjects.id,
+    messageId: imapIngestionStagingObjects.messageId,
+    leaseToken: imapIngestionStagingObjects.leaseToken,
+    storageKey: imapIngestionStagingObjects.storageKey,
+    status: imapIngestionStagingObjects.status,
+    parentStatus: imapIngestionMessages.status,
+    parentLeaseToken: imapIngestionMessages.attachmentProcessingLeaseToken,
+    parentLockedAt: imapIngestionMessages.attachmentProcessingLockedAt,
+  }).from(imapIngestionStagingObjects).innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionStagingObjects.messageId)).orderBy(asc(imapIngestionStagingObjects.createdAt)).limit(limit);
+  const liveCutoff = Date.now() - 10 * 60_000;
+  for (const row of rows) {
+    if (row.parentStatus === "processing" && row.parentLeaseToken === row.leaseToken && row.parentLockedAt && row.parentLockedAt.getTime() > liveCutoff) continue;
+    const [attachment] = await getDb().select({ id: imapIngestionAttachments.id, status: imapIngestionAttachments.status, purgePending: imapIngestionAttachments.purgePending })
+      .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.storageKey, row.storageKey)).limit(1);
+    if (row.status === "committed" && attachment?.status === "assigned" && !attachment.purgePending) {
+      await getDb().transaction(async (transaction) => {
+        const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+          .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
+      });
+      continue;
+    }
+    if (row.status === "committed" && attachment?.status === "stored" && !attachment.purgePending && await heldStorage().ciphertextExists(row.storageKey)) {
+      await getDb().transaction(async (transaction) => {
+        const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+          .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
+      });
+      continue;
+    }
+    const marked = await getDb().transaction(async (transaction) => {
+      const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+        .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
+      if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return false;
+      await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", updatedAt: new Date() })
+        .where(eq(imapIngestionStagingObjects.id, row.id));
+      if (attachment?.status === "stored") {
+        await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: new Date() })
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.purgePending, false)));
+      }
+      return true;
+    });
+    if (!marked) continue;
+    try {
+      await purgeHeldImapAttachment(row.storageKey);
+      await getDb().transaction(async (transaction) => {
+        const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+          .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        if (attachment?.status === "stored") {
+          await transaction.delete(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.purgePending, true)));
+        } else if (attachment?.status === "assigned" && attachment.purgePending) {
+          await transaction.update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
+            .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.purgePending, true)));
+        }
+        await transaction.delete(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.id, row.id));
+      });
+    } catch {
+      await getDb().transaction(async (transaction) => {
+        const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+          .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+          .where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
+        if (attachment?.status === "stored") {
+          await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+            .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.storageKey, row.storageKey), eq(imapIngestionAttachments.status, "stored")));
+        }
+      });
+    }
+  }
+}
+
+type ImapAttachmentClaim = { id: string; leaseToken: string; attempts: number };
+
+/** Bounded retry schedule shared by claim tests and the attachment worker. */
+export function imapAttachmentRetryDelayMs(attempts: number): number {
+  if (!Number.isSafeInteger(attempts) || attempts < 1) throw new Error("IMAP attachment attempt is invalid");
+  return Math.min(15 * 60_000, 1_000 * 2 ** Math.min(attempts - 1, 10));
+}
+
+async function claimImapAttachmentProcessing(receiptId: string): Promise<ImapAttachmentClaim | undefined> {
+  const now = new Date();
+  await getDb().update(imapIngestionMessages).set({
+    status: "recoverable", failureCode: "attachment_processing_exhausted", receiptStatus: "pending",
+    attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: now,
+  }).where(and(
+    eq(imapIngestionMessages.id, receiptId),
+    eq(imapIngestionMessages.status, "processing"),
+    sql`${imapIngestionMessages.attachmentProcessingAttempts} >= 5`,
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+  ));
+  const token = randomUUID();
+  const [claimed] = await getDb().update(imapIngestionMessages).set({
+    attachmentProcessingAttempts: sql`${imapIngestionMessages.attachmentProcessingAttempts} + 1`,
+    attachmentProcessingLockedAt: now,
+    attachmentProcessingLeaseToken: token,
+    updatedAt: now,
+  }).where(and(
+    eq(imapIngestionMessages.id, receiptId),
+    eq(imapIngestionMessages.status, "processing"),
+    lt(imapIngestionMessages.attachmentProcessingAttempts, 5),
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+    or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
+  )).returning({ id: imapIngestionMessages.id, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, attempts: imapIngestionMessages.attachmentProcessingAttempts });
+  return claimed?.leaseToken ? { id: claimed.id, leaseToken: claimed.leaseToken, attempts: claimed.attempts } : undefined;
+}
+
+const permanentAttachmentFailures = new Set([
+  "attachment_count_exceeded", "attachment_total_too_large", "document_too_large",
+  "mime_part_count_exceeded", "mime_nesting_too_deep", "mime_structure_invalid",
+  "mime_type_mismatch", "document_type_unsupported", "malware_detected", "scanner_disabled",
+  "message_too_large",
+]);
+
+async function processImapAttachments(
+  client: ImapFlow,
+  message: { uid: number; bodyStructure?: MessageStructureObject },
+  receipt: { id: string; leaseToken: string; attempts: number },
+  userId: string,
+): Promise<void> {
+  const held: Array<{ storageKey: string; id: string }> = [];
+  try {
+    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes: getDocumentConfig().maxBytes, mailboxPdfOnly: true });
+    if (!classification.ok) throw new Error(classification.code ?? "mime_structure_invalid");
+    if (classification.candidates.length === 0) {
+      const [finished] = await getDb().update(imapIngestionMessages).set({ status: "failed", receiptStatus: "cancelled", failureCode: "no_supported_pdf", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
+      if (!finished) throw new Error("staging_lease_lost");
+      return;
+    }
+    let aggregateBytes = 0;
+    for (const candidate of classification.candidates as ImapAttachmentCandidate[]) {
+      const content = await downloadImapPart(client, message.uid, candidate.part, IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes - aggregateBytes);
+      aggregateBytes += content.length;
+      if (aggregateBytes > IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes) throw new Error("attachment_total_too_large");
+      let staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>;
+      try {
+        staged = await scanAndHoldImapAttachment({
+          bytes: content,
+          filename: candidate.filename,
+          declaredMediaType: candidate.declaredMediaType,
+          recipientUserId: userId,
+          receiptId: receipt.id,
+          mailboxIngestion: true,
+          onCiphertextAllocated: (object) => registerStagingObject(receipt.id, receipt.leaseToken, object),
+        });
+      } finally { content.fill(0); }
+      const attemptObject = { storageKey: staged.storageKey, id: staged.id };
+      held.push(attemptObject);
+      let commit: "inserted" | "duplicate";
+      try {
+        commit = await commitStagedAttachment(receipt.id, receipt.leaseToken, staged);
+      } catch (error) {
+        // The commit helper handles this exact newly written key; keep it out
+        // of broader attempt cleanup so no successor-owned key is touched.
+        held.pop();
+        throw error;
+      }
+      if (commit === "duplicate") {
+        if (!await purgeStagingObjectAfterIntent(receipt.id, receipt.leaseToken, attemptObject)) throw new Error("staging_purge_failed");
+        held.pop();
+      }
+    }
+    const [finished] = await getDb().update(imapIngestionMessages).set({ status: "pending_review", receiptStatus: "pending", failureCode: null, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });
+    if (!finished) {
+      await cleanupImapStagingAttempt(receipt.id, receipt.leaseToken, held);
+      return;
+    }
+  } catch (error) {
+    const cleanupComplete = await cleanupImapStagingAttempt(receipt.id, receipt.leaseToken, held);
+    const code = safeAttachmentFailure(error);
+    const terminal = permanentAttachmentFailures.has(code) || receipt.attempts >= 5;
+    const [remainingAttachment] = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(and(
+      eq(imapIngestionAttachments.messageId, receipt.id),
+      inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+    )).limit(1);
+    const [remainingLedger] = await getDb().select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.messageId, receipt.id)).limit(1);
+    const terminalReady = terminal && cleanupComplete && !remainingAttachment && !remainingLedger;
+    const cleanupToken = terminalReady || cleanupComplete ? null : randomUUID();
+    await getDb().update(imapIngestionMessages).set({
+      status: terminalReady ? "failed" : terminal ? "recoverable" : cleanupComplete ? "processing" : "recoverable",
+      failureCode: terminalReady ? code : terminal ? "attachment_processing_exhausted" : code,
+      receiptStatus: terminalReady ? "cancelled" : "processing",
+      attachmentProcessingLockedAt: cleanupComplete ? null : new Date(),
+      attachmentProcessingLeaseToken: cleanupToken,
+      attachmentProcessingNextAttemptAt: terminal ? null : new Date(Date.now() + imapAttachmentRetryDelayMs(receipt.attempts)),
+      attachmentProcessingFailureCode: code,
+      updatedAt: new Date(),
+    }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken)));
+  }
 }
 
 /**
@@ -424,13 +873,14 @@ function attachmentParts(structure: MessageStructureObject | undefined): string[
  */
 export async function runImapIngestionCycle(config = getImapIngestionConfig()): Promise<void> {
   if (!config.enabled) return;
+  await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
   const client = imapClientFactoryForTests?.(config) ?? new ImapFlow({
     host: config.host, port: config.port, secure: true,
     auth: { user: config.user, pass: config.password },
     tls: { rejectUnauthorized: true, servername: config.tlsServerName || config.host },
     logger: false, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000,
-    maxLiteralSize: 32 * 1024 * 1024,
+    maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
   });
   try {
     await client.connect();
@@ -438,18 +888,26 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
     try {
       if (!client.mailbox) throw new Error("IMAP mailbox could not be opened");
       const uidValidity = client.mailbox.uidValidity.toString();
-      const [checkpoint] = await getDb().select({ lastUid: sql<number | null>`max(${imapIngestionMessages.mailboxUid})` })
-        .from(imapIngestionMessages)
-        .where(and(
-          eq(imapIngestionMessages.mailbox, config.mailbox),
-          eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
-        ));
-      // IMAP UIDs are monotonic within UIDVALIDITY. This keeps a dedicated
-      // mailbox read-only while avoiding a full rescan of all unseen mail.
-      const uidRange = `${(checkpoint?.lastUid ?? 0) + 1}:*`;
-      for await (const message of client.fetch(uidRange, { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: 25 * 1024 * 1024 }, internalDate: true, size: true, bodyStructure: true }, { uid: true })) {
+      const retryRows = await getDb().select({
+        uid: imapIngestionMessages.mailboxUid,
+      }).from(imapIngestionMessages).where(and(
+        eq(imapIngestionMessages.mailbox, config.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+        eq(imapIngestionMessages.status, "processing"),
+        or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
+        or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))),
+      )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
+      const [checkpoint] = await getDb().select({
+        lastUid: sql<number | null>`max(${imapIngestionMessages.mailboxUid})`,
+      }).from(imapIngestionMessages).where(and(
+        eq(imapIngestionMessages.mailbox, config.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+      ));
+      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+      const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
+        try {
         const source = message.source;
-        const oversized = !source || (message.size ?? 0) > 25 * 1024 * 1024 || source.length > 25 * 1024 * 1024;
+        const oversized = !source || (message.size ?? 0) > IMAP_ATTACHMENT_LIMITS.rawMessageBytes || source.length > IMAP_ATTACHMENT_LIMITS.rawMessageBytes;
         const recipient = await userForRecipientAlias(message.headers, config);
         const userId = recipient.userId;
         const contentSha256 = oversized
@@ -461,33 +919,40 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
           expiresAt: new Date(Date.now() + 30 * 86_400_000),
-          status: oversized ? "failed" : userId ? "pending_review" : "quarantined",
+          status: oversized ? "failed" : userId ? "processing" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : recipient.failureCode ?? "recipient_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
           // have been held successfully. All other outcomes are terminal here.
           receiptStatus: userId && !oversized ? "processing" : "cancelled",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
         });
-        if (receipt && userId && !oversized) {
-          try {
-            const parts = attachmentParts(message.bodyStructure);
-            const downloads = parts.length ? await client.downloadMany(message.uid, parts, { uid: true }) : {};
-            for (const download of Object.values(downloads)) {
-              if (!download.content) continue;
-              const held = await scanAndHoldImapAttachment({ bytes: download.content, filename: download.meta.filename, declaredMediaType: download.meta.contentType });
-              await getDb().insert(imapIngestionAttachments).values({
-                id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType,
-                sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
-                ciphertextSize: held.ciphertextSize, ...held.envelope,
-              }).onConflictDoNothing();
-              download.content.fill(0);
-            }
-            await getDb().update(imapIngestionMessages).set({ receiptStatus: "pending", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
-          } catch {
-            await getDb().update(imapIngestionMessages).set({ status: "failed", failureCode: "attachment_processing_failed", receiptStatus: "cancelled", updatedAt: new Date() }).where(eq(imapIngestionMessages.id, receipt.id));
-          }
+        if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
+          await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
+            .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
         }
+        if (receipt && userId && receipt.userId === userId && !oversized) {
+          const claim = await claimImapAttachmentProcessing(receipt.id);
+          if (claim) await processImapAttachments(client, message, claim, receipt.userId);
+        }
+        } finally {
         message.source?.fill(0);
+        if (Buffer.isBuffer(message.headers)) message.headers.fill(0);
+        }
+      };
+      // Retries are fetched by exact UID in a bounded batch. A poison retry
+      // therefore cannot force a mailbox-wide rescan or starve newer mail.
+      for (const retry of retryRows) {
+        for await (const message of client.fetch(`${retry.uid}:${retry.uid}`, fetchOptions, { uid: true })) await processMessage(message);
+      }
+      // New mail is a separate bounded pass from the highest durable UID.
+      // Breaking the iterator bounds work even when the provider has a large
+      // unseen tail; the next poll resumes at the next UID.
+      const nextUid = (checkpoint?.lastUid ?? 0) + 1;
+      let newMessages = 0;
+      for await (const message of client.fetch(`${nextUid}:*`, fetchOptions, { uid: true })) {
+        await processMessage(message);
+        newMessages += 1;
+        if (newMessages >= 25) break;
       }
     } finally { lock.release(); }
   } finally {
@@ -544,7 +1009,7 @@ export async function verifyImapProvider(config = getImapIngestionConfig()): Pro
     connectionTimeout: 5_000,
     greetingTimeout: 5_000,
     socketTimeout: 5_000,
-    maxLiteralSize: 32 * 1024 * 1024,
+    maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
     verifyOnly: true,
   });
   try {

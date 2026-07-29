@@ -24,6 +24,22 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
   throw new AppError("document_type_unsupported", "Choose a PDF, JPEG, or PNG document", 415);
 }
 
+/** Performs cheap bounded container checks without rendering or decompressing. */
+export function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): boolean {
+  if (mediaType === "application/pdf") {
+    const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
+    return bytes.length >= 16
+      && /^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
+      && !bytes.subarray(0, 512).includes(0)
+      && tail.includes("%%EOF")
+      && /\b(?:obj|stream|xref|trailer)\b/u.test(bytes.toString("latin1"));
+  }
+  // Direct upload compatibility intentionally remains magic-type based for
+  // established PDF/JPEG/PNG set. Mailbox v1 is PDF-only and the
+  // mailbox validator short-circuits non-PDF bytes before this seam.
+  return true;
+}
+
 export function normalizedDocumentFilename(input: string, mediaType: SupportedDocumentMediaType): string {
   const leaf = basename(input.replaceAll("\\", "/"))
     .normalize("NFKC")

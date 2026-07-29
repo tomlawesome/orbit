@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapRecipientAlias, matchesImapRecipientAlias } from "./imap-ingestion";
+import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapRecipientAlias, matchesImapRecipientAlias } from "./imap-ingestion";
 import { deriveImapRecipientAlias } from "./imap-recipient";
 
 const temporaryDirectories: string[] = [];
@@ -107,5 +107,12 @@ describe("IMAP ingestion configuration", () => {
     const userId = "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a";
     expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasPrevious!), userId, config)).toBe(true);
     expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent));
+  });
+
+  it("uses bounded exponential attachment backoff and rejects invalid attempts", () => {
+    expect(imapAttachmentRetryDelayMs(1)).toBe(1_000);
+    expect(imapAttachmentRetryDelayMs(5)).toBe(16_000);
+    expect(imapAttachmentRetryDelayMs(50)).toBe(900_000);
+    expect(() => imapAttachmentRetryDelayMs(0)).toThrow("attempt is invalid");
   });
 });

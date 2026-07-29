@@ -59,14 +59,43 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     await fixture.cleanup();
   });
 
+  it("does not newly approve a cleanup-recoverable mailbox receipt", async () => {
+    const fixture = await createIntegrationFixture("reviewed-cleanup-recoverable");
+    const receiptId = randomUUID();
+    await getDb().insert(imapIngestionMessages).values({
+      id: receiptId, mailbox: "private", mailboxUidValidity: "cleanup", mailboxUid: 5, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "cleanup", userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "recoverable", failureCode: "staging_purge_pending", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    });
+    const beforeItems = await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id));
+    const input = {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "create_separate" as const,
+      item: { title: "Must not publish", currency: "GBP", status: "active" },
+      attachmentIds: [],
+    };
+    await expect(approveReviewedIntake(fixture.users.member.id, input)).rejects.toMatchObject({ code: "reviewed_intake_not_approvable" });
+    expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).toEqual(beforeItems);
+    expect(await getDb().select({ id: reviewedIntakeOperations.id }).from(reviewedIntakeOperations).where(eq(reviewedIntakeOperations.id, input.operationId))).toHaveLength(0);
+    expect((await getDb().select({ status: imapIngestionMessages.status, approvalOperationId: imapIngestionMessages.approvalOperationId }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receiptId)))[0]).toMatchObject({ status: "recoverable", approvalOperationId: null });
+    await fixture.cleanup();
+  });
+
   it("runs concurrent mailbox approvals through transfer and leaves one document and one result audit", async () => {
     const fixture = await createIntegrationFixture("reviewed-concurrent-mailbox");
+    const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({
-      bytes: Buffer.from("%PDF-1.7\nconcurrent mailbox attachment\n"),
+      bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nconcurrent mailbox attachment\n%%EOF"),
       filename: "concurrent-mailbox.pdf",
       declaredMediaType: "application/pdf",
+      recipientUserId: fixture.users.member.id,
+      receiptId,
     });
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
+      id: receiptId,
       mailbox: "private", mailboxUidValidity: "mailbox", mailboxUid: 2, contentSha256: randomUUID().replaceAll("-", ""),
       recipientAliasSha256: "mailbox", userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
@@ -101,14 +130,16 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     const fixture = await createIntegrationFixture("reviewed-crash-replay");
     const targetItemId = randomUUID();
     await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Crash replay target", currency: "GBP" });
-    const bytes = Buffer.from("%PDF-1.7\nstable crash replay\n");
-    const held = await scanAndHoldImapAttachment({ bytes, filename: "crash-replay.pdf", declaredMediaType: "application/pdf" });
+    const bytes = Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nstable crash replay\n%%EOF");
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({ bytes, filename: "crash-replay.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
     const available = await uploadItemDocument({
       userId: fixture.users.member.id, householdId: fixture.household.id, itemId: targetItemId,
       filename: "crash-replay.pdf", body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
       declaredBytes: bytes.length, documentId: held.id,
     });
     const [receipt] = await getDb().insert(imapIngestionMessages).values({
+      id: receiptId,
       mailbox: "private", mailboxUidValidity: "crash", mailboxUid: 3, contentSha256: randomUUID().replaceAll("-", ""),
       recipientAliasSha256: "crash", userId: fixture.users.member.id, householdId: fixture.household.id,
       status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
@@ -124,8 +155,9 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
 
   it("retries a purge failure after assignment without re-uploading the document", async () => {
     const fixture = await createIntegrationFixture("reviewed-purge-retry");
-    const held = await scanAndHoldImapAttachment({ bytes: Buffer.from("%PDF-1.7\npurge retry\n"), filename: "purge-retry.pdf", declaredMediaType: "application/pdf" });
-    const [receipt] = await getDb().insert(imapIngestionMessages).values({ mailbox: "private", mailboxUidValidity: "purge", mailboxUid: 4, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "purge", userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" }).returning({ id: imapIngestionMessages.id });
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({ bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\npurge retry\n%%EOF"), filename: "purge-retry.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+    const [receipt] = await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "private", mailboxUidValidity: "purge", mailboxUid: 4, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "purge", userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" }).returning({ id: imapIngestionMessages.id });
     await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
     const input = { operationId: randomUUID(), source: { kind: "mailbox_draft" as const, receiptId: receipt.id, draftVersion: 1 }, householdId: fixture.household.id, sectionId: fixture.section.id, action: "create_separate" as const, item: { title: "Purge retry value", currency: "GBP", status: "active" }, attachmentIds: [held.id] };
     let attempts = 0;
