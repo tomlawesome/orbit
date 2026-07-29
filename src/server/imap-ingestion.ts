@@ -499,6 +499,43 @@ function heldStorage() {
   return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
 }
 
+/** Re-establishes durable ownership for a ciphertext written after its worker
+ * ledger was reconciled, then purges only that uncommitted attempt object. */
+async function recoverUncommittedStagingObject(messageId: string, leaseToken: string, object: StagedObject): Promise<boolean> {
+  const [ledger] = await getDb().transaction(async (transaction) => {
+    const [inserted] = await transaction.insert(imapIngestionStagingObjects).values({
+      messageId, leaseToken, storageKey: object.storageKey, status: "purge_pending",
+    }).onConflictDoNothing().returning({ id: imapIngestionStagingObjects.id });
+    if (inserted) return [inserted] as const;
+    const [existing] = await transaction.select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects)
+      .where(and(
+        eq(imapIngestionStagingObjects.messageId, messageId),
+        eq(imapIngestionStagingObjects.leaseToken, leaseToken),
+        eq(imapIngestionStagingObjects.storageKey, object.storageKey),
+        inArray(imapIngestionStagingObjects.status, ["pending", "purge_pending"]),
+      )).for("update").limit(1);
+    if (!existing) return [] as const;
+    const [marked] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.id, existing.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), inArray(imapIngestionStagingObjects.status, ["pending", "purge_pending"])))
+      .returning({ id: imapIngestionStagingObjects.id });
+    return marked ? [marked] as const : [] as const;
+  });
+  if (!ledger) return false;
+  try {
+    await purgeHeldImapAttachment(object.storageKey);
+  } catch {
+    await getDb().update(imapIngestionStagingObjects).set({ purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.id, ledger.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending"))).catch(() => undefined);
+    return false;
+  }
+  try {
+    await getDb().delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, ledger.id), eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")));
+  } catch {
+    return false;
+  }
+  return true;
+}
+
 /** Registers the allocated storage key before writing ciphertext. A pending
  * row is safe if the subsequent write fails or the worker crashes. */
 async function registerStagingObject(messageId: string, leaseToken: string, object: StagedObject): Promise<void> {
@@ -519,29 +556,34 @@ export async function commitStagedAttachment(
   leaseToken: string,
   staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>,
 ): Promise<"inserted" | "duplicate"> {
-  return getDb().transaction(async (transaction) => {
-    const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
-      .for("update").limit(1);
-    if (!active) throw new Error("staging_lease_lost");
-    const [inserted] = await transaction.insert(imapIngestionAttachments).values({
-      id: staged.id, messageId, displayName: staged.displayName, mediaType: staged.mediaType,
-      sizeBytes: staged.sizeBytes, contentSha256: staged.contentSha256, storageKey: staged.storageKey,
-      ciphertextSize: staged.ciphertextSize, ...staged.envelope,
-    }).onConflictDoNothing().returning({ id: imapIngestionAttachments.id });
-    if (!inserted) {
-      const [purgePending] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+  try {
+    return await getDb().transaction(async (transaction) => {
+      const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
+        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
+        .for("update").limit(1);
+      if (!active) throw new Error("staging_lease_lost");
+      const [inserted] = await transaction.insert(imapIngestionAttachments).values({
+        id: staged.id, messageId, displayName: staged.displayName, mediaType: staged.mediaType,
+        sizeBytes: staged.sizeBytes, contentSha256: staged.contentSha256, storageKey: staged.storageKey,
+        ciphertextSize: staged.ciphertextSize, ...staged.envelope,
+      }).onConflictDoNothing().returning({ id: imapIngestionAttachments.id });
+      if (!inserted) {
+        const [purgePending] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+          .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
+          .returning({ id: imapIngestionStagingObjects.id });
+        if (!purgePending) throw new Error("staging_lease_lost");
+        return "duplicate";
+      }
+      const [committed] = await transaction.update(imapIngestionStagingObjects).set({ status: "committed", updatedAt: new Date() })
         .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
         .returning({ id: imapIngestionStagingObjects.id });
-      if (!purgePending) throw new Error("staging_lease_lost");
-      return "duplicate";
-    }
-    const [committed] = await transaction.update(imapIngestionStagingObjects).set({ status: "committed", updatedAt: new Date() })
-      .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
-      .returning({ id: imapIngestionStagingObjects.id });
-    if (!committed) throw new Error("staging_lease_lost");
-    return "inserted";
-  });
+      if (!committed) throw new Error("staging_lease_lost");
+      return "inserted";
+    });
+  } catch (error) {
+    await recoverUncommittedStagingObject(messageId, leaseToken, { id: staged.id, storageKey: staged.storageKey }).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function markStagingPurgeIntent(messageId: string, leaseToken: string, objects: StagedObject[]): Promise<boolean> {
@@ -781,7 +823,15 @@ async function processImapAttachments(
       } finally { content.fill(0); }
       const attemptObject = { storageKey: staged.storageKey, id: staged.id };
       held.push(attemptObject);
-      const commit = await commitStagedAttachment(receipt.id, receipt.leaseToken, staged);
+      let commit: "inserted" | "duplicate";
+      try {
+        commit = await commitStagedAttachment(receipt.id, receipt.leaseToken, staged);
+      } catch (error) {
+        // The commit helper handles this exact newly written key; keep it out
+        // of broader attempt cleanup so no successor-owned key is touched.
+        held.pop();
+        throw error;
+      }
       if (commit === "duplicate") {
         if (!await purgeStagingObjectAfterIntent(receipt.id, receipt.leaseToken, attemptObject)) throw new Error("staging_purge_failed");
         held.pop();

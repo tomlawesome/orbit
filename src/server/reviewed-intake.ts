@@ -515,7 +515,7 @@ async function finishMailboxApproval(
       }
       return { receipt, claimed: false, result: undefined };
     }
-    if (!["pending_review", "recoverable", "approving"].includes(receipt.status)) throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
+    if (receipt.status !== "pending_review") throw new AppError("reviewed_intake_not_approvable", "That reviewed intake is no longer available", 409);
     if (!receipt.householdId || receipt.householdId !== input.householdId) throw notFound();
     if (receipt.status === "pending_review" && receipt.draftVersion !== input.source.draftVersion) {
       throw new AppError("reviewed_intake_stale", "That reviewed intake changed; refresh and try again", 409);
