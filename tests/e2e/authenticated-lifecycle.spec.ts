@@ -230,9 +230,6 @@ test.describe("authenticated household lifecycle", () => {
       await memberPage.reload();
       await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
       await expect(memberPage.getByText("Acceptance household", { exact: true })).toHaveCount(0);
-    } finally {
-      await memberContext.close();
-    }
 
     await page.getByRole("button", { name: "Create a new household" }).click();
     await page.getByRole("dialog", { name: "Set up your space" }).getByLabel("Household name").fill("Acceptance household");
@@ -257,6 +254,12 @@ test.describe("authenticated household lifecycle", () => {
       activeHouseholdId: createdWorkspace.activeHouseholdId,
       households: [{ name: "Acceptance household" }],
     });
+    await memberPage.reload();
+    await waitForActiveHousehold(memberPage, "Acceptance household");
+    await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
+  } finally {
+    await memberContext.close();
+  }
   });
 
   test("proves the authenticated manual item journey without a document", async ({ page, isMobile }) => {
