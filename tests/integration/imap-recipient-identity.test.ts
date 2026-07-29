@@ -58,9 +58,9 @@ describe("receipt identity PostgreSQL boundaries", () => {
       await fixture.disableUser("disabled");
       const previousExpiry = new Date(Date.now() + 86_400_000);
       const initial = config(1);
-      await Promise.all([reconcileImapRecipientAliases(initial, 1), reconcileImapRecipientAliases(initial, 1)]);
+      await Promise.all([reconcileImapRecipientAliases(initial, 5), reconcileImapRecipientAliases(initial, 5)]);
       const rotation = config(2, { generation: 1, expiresAt: previousExpiry });
-      await Promise.all([reconcileImapRecipientAliases(rotation, 1), reconcileImapRecipientAliases(rotation, 1)]);
+      await Promise.all([reconcileImapRecipientAliases(rotation, 5), reconcileImapRecipientAliases(rotation, 5)]);
 
       const [authority] = await getDb().select({
         currentGeneration: imapRecipientRotationState.currentGeneration,
@@ -109,7 +109,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     } finally {
       await fixture.cleanup();
     }
-  }, 15_000);
+  });
 
   it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
     const fixture = await createIntegrationFixture("recipient-expiry-boundary");
@@ -129,11 +129,11 @@ describe("receipt identity PostgreSQL boundaries", () => {
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
-      await reconcileImapRecipientAliases(config(1), 1);
-      await reconcileImapRecipientAliases(rotation, 1, beforeExpiry);
+      await reconcileImapRecipientAliases(config(1));
+      await reconcileImapRecipientAliases(rotation, 1_000, beforeExpiry);
       expect(await getDb().select({ previousGeneration: imapRecipientRotationState.previousGeneration })
         .from(imapRecipientRotationState)).toEqual([{ previousGeneration: 1 }]);
-      await reconcileImapRecipientAliases(rotation, 1, expiry);
+      await reconcileImapRecipientAliases(rotation, 1_000, expiry);
       expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration })
         .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 2, previousGeneration: null }]);
       await runImapIngestionCycle(rotation);
