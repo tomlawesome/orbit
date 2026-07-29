@@ -8,7 +8,7 @@ version-controlled implementation requirement, not an aspirational checklist.
 Orbit will attach encrypted documents to household items using a local
 persistent volume. The first release supports:
 
-- PDF, JPEG, PNG, and WebP content identified from file signatures;
+- PDF, JPEG, and PNG content identified from file signatures;
 - a 25 MiB maximum file size;
 - a 5 GiB default quota per household;
 - a 20 GiB default quota per instance;
@@ -108,6 +108,30 @@ recoverable state.
   concurrent uploads from exceeding limits.
 - Plaintext quarantine files use opaque names, restrictive permissions, and a
   directory inaccessible through HTTP.
+
+### Parsing, OCR, and indirect prompt injection
+
+- Treat every supported manual-upload format—PDF, JPEG, and PNG—as
+  hostile throughout parsing and review. Narrowing a transport's accepted
+  formats does not make those documents trusted.
+- ClamAV detects known file threats. Parsers and OCR engines extract content.
+  Neither function proves that extracted text, metadata, or suggested values
+  are safe, accurate, or authoritative.
+- Parser responses must be content-type checked, strictly decoded, and bounded
+  before allocation. Redirects and arbitrary request URLs or options are
+  rejected. Parser errors expose no provider or document content.
+- The optional Tika service shares only a dedicated internal network with the
+  Orbit application. It has no network path to PostgreSQL, default-network
+  services, or external networks.
+- Parser and OCR output is bounded untrusted evidence. It may populate only
+  allowlisted, type- and length-validated editable suggestions; it cannot
+  select authority, read secrets or unrelated records, fetch URLs, invoke
+  tools, approve a draft, associate a document, or perform a household write.
+- Explicit authenticated review is required before any suggested value or
+  document association becomes household-visible.
+- Any future model-backed extraction remains a tool-free, secret-free,
+  network-isolated proposer. Its schema-constrained output receives the same
+  validation and trust level as parser or OCR output.
 
 ### Malware scanning
 
