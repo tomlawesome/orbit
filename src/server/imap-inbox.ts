@@ -65,6 +65,35 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
 
+  const cleanupToken = randomUUID();
+  const now = new Date();
+  const claimed = await getDb().transaction(async (transaction) => {
+    const [current] = await transaction.select({ id: imapIngestionMessages.id, status: imapIngestionMessages.status, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
+      .where(and(
+        eq(imapIngestionMessages.id, receipt.id),
+        eq(imapIngestionMessages.userId, userId),
+        or(
+          inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]),
+          and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "legacy_review_item")),
+        ),
+      )).for("update").limit(1);
+    if (!current || (current.lockedAt && current.lockedAt.getTime() > now.getTime() - 10 * 60_000)) return false;
+    const [changed] = await transaction.update(imapIngestionMessages).set({ status: "recoverable", receiptStatus: "pending", failureCode: "staging_purge_pending", attachmentProcessingLockedAt: now, attachmentProcessingLeaseToken: cleanupToken, attachmentProcessingNextAttemptAt: null, updatedAt: now })
+      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, current.status))).returning({ id: imapIngestionMessages.id });
+    if (!changed) return false;
+    await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: now }).where(and(
+      eq(imapIngestionAttachments.messageId, receipt.id),
+      or(eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.status, "assigned")),
+    ));
+    await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: now }).where(eq(imapIngestionStagingObjects.messageId, receipt.id));
+    return true;
+  });
+  if (!claimed) {
+    const [latest] = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id)).limit(1);
+    if (latest && ["discarded", "expired"].includes(latest.status)) return;
+    throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
+  }
+
   // Rows created by the prototype remain linked to their item so encrypted
   // bytes and foreign-key targets can be cleaned through the accepted path.
   if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
@@ -81,27 +110,6 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     if (error instanceof AppError && error.code === "document_not_found") return;
     throw error;
   });
-
-  const cleanupToken = randomUUID();
-  const now = new Date();
-  const claimed = await getDb().transaction(async (transaction) => {
-    const [current] = await transaction.select({ id: imapIngestionMessages.id, status: imapIngestionMessages.status, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
-      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, ["pending_review", "recoverable"]))).for("update").limit(1);
-    if (!current || (current.lockedAt && current.lockedAt.getTime() > now.getTime() - 10 * 60_000)) return false;
-    await transaction.update(imapIngestionMessages).set({ status: "recoverable", receiptStatus: "pending", failureCode: "staging_purge_pending", attachmentProcessingLockedAt: now, attachmentProcessingLeaseToken: cleanupToken, attachmentProcessingNextAttemptAt: null, updatedAt: now })
-      .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, current.status)));
-    await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: now }).where(and(
-      eq(imapIngestionAttachments.messageId, receipt.id),
-      or(eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.status, "assigned")),
-    ));
-    await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: now }).where(eq(imapIngestionStagingObjects.messageId, receipt.id));
-    return true;
-  });
-  if (!claimed) {
-    const [latest] = await getDb().select({ status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id)).limit(1);
-    if (latest && ["discarded", "expired"].includes(latest.status)) return;
-    throw new AppError("staging_cleanup_busy", "The incoming document is already being cleaned up; retry discard", 409);
-  }
 
   const held = await getDb().select().from(imapIngestionAttachments).where(and(
     eq(imapIngestionAttachments.messageId, receipt.id),

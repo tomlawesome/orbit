@@ -1,4 +1,4 @@
-ALTER TYPE "public"."imap_ingestion_status" ADD VALUE IF NOT EXISTS 'processing';--> statement-breakpoint
+ALTER TYPE "public"."imap_ingestion_status" ADD VALUE IF NOT EXISTS 'processing' BEFORE 'pending_review';--> statement-breakpoint
 ALTER TABLE "imap_ingestion_messages" ADD COLUMN "attachment_processing_attempts" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "imap_ingestion_messages" ADD COLUMN "attachment_processing_locked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "imap_ingestion_messages" ADD COLUMN "attachment_processing_lease_token" uuid;--> statement-breakpoint

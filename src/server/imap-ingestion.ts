@@ -514,14 +514,14 @@ async function registerStagingObject(messageId: string, leaseToken: string, obje
 }
 
 /** Commits the ledger and metadata together while holding the current lease row lock. */
-async function commitStagedAttachment(
+export async function commitStagedAttachment(
   messageId: string,
   leaseToken: string,
   staged: Awaited<ReturnType<typeof scanAndHoldImapAttachment>>,
 ): Promise<"inserted" | "duplicate"> {
   return getDb().transaction(async (transaction) => {
     const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken)))
+      .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
       .for("update").limit(1);
     if (!active) throw new Error("staging_lease_lost");
     const [inserted] = await transaction.insert(imapIngestionAttachments).values({
@@ -530,12 +530,16 @@ async function commitStagedAttachment(
       ciphertextSize: staged.ciphertextSize, ...staged.envelope,
     }).onConflictDoNothing().returning({ id: imapIngestionAttachments.id });
     if (!inserted) {
-      await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
-        .where(and(eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.leaseToken, leaseToken)));
+      const [purgePending] = await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: new Date() })
+        .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
+        .returning({ id: imapIngestionStagingObjects.id });
+      if (!purgePending) throw new Error("staging_lease_lost");
       return "duplicate";
     }
-    await transaction.update(imapIngestionStagingObjects).set({ status: "committed", updatedAt: new Date() })
-      .where(and(eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.leaseToken, leaseToken)));
+    const [committed] = await transaction.update(imapIngestionStagingObjects).set({ status: "committed", updatedAt: new Date() })
+      .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, staged.storageKey), eq(imapIngestionStagingObjects.status, "pending")))
+      .returning({ id: imapIngestionStagingObjects.id });
+    if (!committed) throw new Error("staging_lease_lost");
     return "inserted";
   });
 }
