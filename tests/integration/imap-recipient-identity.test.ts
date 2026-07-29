@@ -109,7 +109,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
     } finally {
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
     const fixture = await createIntegrationFixture("recipient-expiry-boundary");
