@@ -233,7 +233,7 @@ function ReviewForm({
 
   const evidence = Object.entries(review.receipt.fieldEvidence).filter(([field]) => suggestionFields.includes(field as typeof suggestionFields[number]));
   const editable = review.receipt.canApprove;
-  return <div className="imap-review" aria-labelledby="imap-review-title">
+  return <div className="imap-review" role="region" aria-labelledby="imap-review-title">
     <header className="imap-review-heading">
       <button type="button" onClick={onBack}>Back to inbox</button>
       <div><p className="eyebrow">Private review</p><h4 id="imap-review-title">Check every value before saving</h4><p>{review.receipt.message}</p></div>
