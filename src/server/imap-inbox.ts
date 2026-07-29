@@ -9,10 +9,65 @@ import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 
+export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "cleanup" | "unavailable";
+
+export function reviewInboxState(status: string, failureCode: string | null | undefined, hasApprovalOperation = false): {
+  classification: ReviewInboxClassification;
+  canApprove: boolean;
+  canDiscard: boolean;
+  message: string;
+} {
+  if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review." };
+  if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review." };
+  if (status === "recoverable" && hasApprovalOperation && !["staging_expiry_pending", "staging_purge_pending"].includes(failureCode ?? "")) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
+  if (status === "recoverable" && failureCode === "attachment_transfer_failed") return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
+  if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard." };
+  if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup." };
+  return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review." };
+}
+
+function comparableText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-GB");
+  return normalized || undefined;
+}
+
+export function findReviewedIntakeCandidateReason(
+  proposal: Record<string, unknown>,
+  item: { title: string; provider: string | null; reference: string | null; subtype: string | null },
+): "matching title" | "matching provider" | "matching reference" | "matching type" | undefined {
+  const pairs = [
+    ["title", proposal.title, item.title, "matching title"],
+    ["provider", proposal.provider, item.provider, "matching provider"],
+    ["reference", proposal.reference, item.reference, "matching reference"],
+    ["subtype", proposal.subtype, item.subtype, "matching type"],
+  ] as const;
+  for (const [, left, right, reason] of pairs) {
+    const comparableLeft = comparableText(left);
+    const comparableRight = comparableText(right);
+    if (comparableLeft && comparableRight && comparableLeft === comparableRight) return reason;
+  }
+  return undefined;
+}
+
+async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
+  const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
+    .where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
+  if (!user) throw new AppError("account_disabled", "This Orbit account cannot read reviewed intake", 403);
+  return user;
+}
+
+async function hasHouseholdMembership(userId: string, householdId: string): Promise<boolean> {
+  const [membership] = await getDb().select({ householdId: memberships.householdId }).from(memberships)
+    .innerJoin(households, eq(households.id, memberships.householdId))
+    .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);
+  return Boolean(membership);
+}
+
 /** Returns only the caller's receipt states; subjects, headers, and attachment names stay private. */
 export async function listImapInbox(userId: string) {
-  const [activeUser] = await getDb().select({ id: users.id }).from(users).where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
-  if (!activeUser) throw new AppError("account_disabled", "This Orbit account cannot read reviewed intake", 403);
+  const activeUser = await privateMailboxUser(userId);
+  if (activeUser.isInstanceAdmin) return { receipts: [], households: [] };
   const [receipts, choices] = await Promise.all([
     getDb().select({
       id: imapIngestionMessages.id,
@@ -24,47 +79,98 @@ export async function listImapInbox(userId: string) {
       expiresAt: imapIngestionMessages.expiresAt,
       receivedAt: imapIngestionMessages.receivedAt,
       failureCode: imapIngestionMessages.failureCode,
+      hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
-      .where(and(eq(imapIngestionMessages.userId, userId), or(
-        inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
-        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "legacy_review_item")),
-      )))
+      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, ["processing", "pending_review", "approving", "recoverable", "failed", "quarantined"])))
       .groupBy(imapIngestionMessages.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
       .limit(50),
-    getDb().select({ id: households.id, name: households.name })
+    getDb().select({ id: households.id, name: households.name, currency: households.defaultCurrency })
       .from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(eq(memberships.userId, userId)).orderBy(asc(households.name)),
   ]);
-  const householdSections = choices.length ? await getDb().select({ id: sections.id, householdId: sections.householdId, name: sections.name })
-    .from(sections).where(and(inArray(sections.householdId, choices.map((choice) => choice.id)), eq(sections.visible, true))).orderBy(asc(sections.position)) : [];
+  const visibleHouseholdIds = new Set(choices.map((choice) => choice.id));
   return {
-    receipts: receipts.map((receipt) => ({
-      ...receipt,
-      cleanupOnly: receipt.status === "failed" && receipt.failureCode === "legacy_review_item",
-      ...sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence }),
-    })),
-    households: choices.map((household) => ({ ...household, sections: householdSections.filter((section) => section.householdId === household.id) })),
+    receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
+      const state = reviewInboxState(receipt.status, receipt.failureCode, Boolean(receipt.hasApprovalOperation));
+      const metadata = state.classification === "ready" || state.classification === "retry"
+        ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
+        : { proposal: {}, fieldEvidence: {} };
+      return {
+        id: receipt.id,
+        status: receipt.status,
+        householdId: receipt.householdId,
+        draftVersion: receipt.draftVersion,
+        expiresAt: receipt.expiresAt,
+        receivedAt: receipt.receivedAt,
+        attachmentCount: receipt.attachmentCount,
+        ...state,
+        cleanupOnly: state.classification === "cleanup",
+        ...metadata,
+      };
+    }),
+    households: choices,
   };
 }
 
-/** Retained route compatibility: mailbox drafts now require the reviewed approval contract. */
-export async function activateImapReviewItem(userId: string, receiptId: string, sectionId: string): Promise<{ itemId: string }> {
-  void userId;
-  void receiptId;
-  void sectionId;
-  throw new AppError("reviewed_intake_approval_required", "Submit the reviewed intake values before publishing household data", 409);
+/** Reads one owned draft only after the selected household has been authorized. */
+export async function getImapReview(userId: string, receiptId: string, householdId: string) {
+  const user = await privateMailboxUser(userId);
+  if (user.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  if (!(await hasHouseholdMembership(userId, householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  const [receipt] = await getDb().select({
+    id: imapIngestionMessages.id,
+    status: imapIngestionMessages.status,
+    householdId: imapIngestionMessages.householdId,
+    draftVersion: imapIngestionMessages.draftVersion,
+    proposal: imapIngestionMessages.proposal,
+    fieldEvidence: imapIngestionMessages.fieldEvidence,
+    expiresAt: imapIngestionMessages.expiresAt,
+    receivedAt: imapIngestionMessages.receivedAt,
+    failureCode: imapIngestionMessages.failureCode,
+    hasApprovalOperation: isNotNull(imapIngestionMessages.approvalOperationId),
+  }).from(imapIngestionMessages).where(and(
+    eq(imapIngestionMessages.id, receiptId),
+    eq(imapIngestionMessages.userId, userId),
+    eq(imapIngestionMessages.householdId, householdId),
+  )).limit(1);
+  if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  const state = reviewInboxState(receipt.status, receipt.failureCode, Boolean(receipt.hasApprovalOperation));
+  const metadata = state.classification === "ready" || state.classification === "retry"
+    ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
+    : { proposal: {}, fieldEvidence: {} };
+  if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
+
+  const [householdSections, householdItems, attachments] = await Promise.all([
+    getDb().select({ id: sections.id, name: sections.name }).from(sections)
+      .where(and(eq(sections.householdId, householdId), eq(sections.visible, true), isNull(sections.archivedAt))).orderBy(asc(sections.position)),
+    getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, subtype: items.subtype })
+      .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
+    getDb().select({ id: imapIngestionAttachments.id, mediaType: imapIngestionAttachments.mediaType, sizeBytes: imapIngestionAttachments.sizeBytes })
+      .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"]))),
+  ]);
+  const candidates = householdItems.flatMap((item) => {
+    const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
+    return reason ? [{ itemId: item.id, title: item.title, reason }] : [];
+  }).slice(0, 10);
+  return {
+    receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata },
+    sections: householdSections,
+    candidates,
+    attachments: attachments.map((attachment, index) => ({ id: attachment.id, ordinal: index + 1, mediaType: attachment.mediaType === "application/pdf" ? "application/pdf" : "application/octet-stream", sizeBytes: attachment.sizeBytes })),
+  };
 }
 
 /** Discards a private draft and purges unassigned holding ciphertext idempotently. */
 export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
-  const [activeUser] = await getDb().select({ id: users.id }).from(users).where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
-  if (!activeUser) throw new AppError("account_disabled", "This Orbit account cannot discard reviewed intake", 403);
+  const activeUser = await privateMailboxUser(userId);
+  if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   const [receipt] = await getDb().select().from(imapIngestionMessages)
     .where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId))).limit(1);
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
 
   const cleanupToken = randomUUID();
@@ -284,8 +390,8 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
 }
 
 export async function assignImapReceiptHousehold(userId: string, receiptId: string, householdId: string): Promise<{ receiptId: string }> {
-  const [activeUser] = await getDb().select({ id: users.id }).from(users).where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
-  if (!activeUser) throw new AppError("account_disabled", "This Orbit account cannot assign reviewed intake", 403);
+  const activeUser = await privateMailboxUser(userId);
+  if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   const changed = await getDb().transaction(async (transaction) => {
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);

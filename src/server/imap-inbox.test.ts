@@ -18,6 +18,11 @@ describe("private mailbox review mapping", () => {
       canApprove: false,
       canDiscard: true,
     });
+    expect(reviewInboxState("recoverable", "staging_purge_failed", true)).toMatchObject({
+      classification: "retry",
+      canApprove: true,
+      canDiscard: true,
+    });
     expect(reviewInboxState("quarantined", "provider_identity_ambiguous")).toMatchObject({
       classification: "unavailable",
       canApprove: false,

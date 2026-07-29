@@ -1,0 +1,137 @@
+import { randomUUID } from "node:crypto";
+import { expect, test, type Page } from "@playwright/test";
+
+const syntheticReceiptId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const syntheticHouseholdId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const syntheticSectionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const syntheticItemId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const syntheticAttachmentId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+async function signIn(page: Page) {
+  await page.goto("/");
+  await page.getByRole("link", { name: "Sign in securely" }).click();
+  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+}
+
+async function readWorkspace(page: Page) {
+  const response = await page.request.get("/api/workspace");
+  return await response.json() as { workspace?: { households?: Array<{ items?: unknown[] }> } };
+}
+
+async function openInbox(page: Page) {
+  const settings = page.getByRole("button", { name: "Open personalisation settings" });
+  if (!(await settings.isVisible())) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  }
+  await settings.click();
+  await page.getByRole("tab", { name: "Inbox" }).click();
+  await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
+}
+
+async function ensureHousehold(page: Page) {
+  const current = await readWorkspace(page);
+  if (current.workspace?.households?.length) return;
+  const session = await page.request.get("/api/auth/session");
+  const { csrfToken } = await session.json() as { csrfToken: string };
+  const householdId = randomUUID();
+  const sectionId = randomUUID();
+  const headers = { Origin: new URL(page.url()).origin, "X-CSRF-Token": csrfToken };
+  const create = await page.request.post("/api/workspace/commands", {
+    headers,
+    data: {
+      type: "household.create",
+      household: { id: householdId, name: `Mailbox review ${householdId.slice(0, 8)}`, timezone: "Europe/London", currency: "GBP", memberCount: 1, canManage: true, onboardingComplete: true, sections: [{ id: sectionId, name: "Documents", icon: "home", accent: "sage", visible: true }], items: [], activities: [], readNotificationIds: [], dismissedNotificationIds: [],
+      },
+    },
+  });
+  expect(create.ok()).toBeTruthy();
+  await page.reload();
+}
+
+test.describe("authenticated mailbox review", () => {
+  test("reviews synthetic receipt on desktop and mobile without pre-approval mutation", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    await signIn(page);
+    await ensureHousehold(page);
+    const before = await readWorkspace(page);
+    let approved = false;
+    let approvalBody: Record<string, unknown> | undefined;
+    const household = { id: syntheticHouseholdId, name: "Synthetic private household", currency: "GBP" };
+    const receipt = {
+      id: syntheticReceiptId,
+      status: "pending_review",
+      householdId: syntheticHouseholdId,
+      draftVersion: 1,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      receivedAt: new Date().toISOString(),
+      attachmentCount: 1,
+      classification: "ready",
+      canApprove: true,
+      canDiscard: true,
+      message: "Ready for your review.",
+      proposal: { title: "Untrusted suggested title", provider: "Suggested provider", reference: "SUGGESTED-123", currency: "GBP" },
+      fieldEvidence: { title: { source: "parser", confidence: "medium" } },
+    };
+    await page.route("**/api/imap-inbox", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ receipts: approved ? [] : [receipt], households: [household] }) });
+    });
+    await page.route("**/api/imap-inbox/*", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          receipt,
+          sections: [{ id: syntheticSectionId, name: "Documents" }],
+          candidates: [{ itemId: syntheticItemId, title: "Existing household item", reason: "matching provider" }],
+          attachments: [{ id: syntheticAttachmentId, ordinal: 1, mediaType: "application/pdf", sizeBytes: 128 }],
+        }),
+      });
+    });
+    await page.route("**/api/reviewed-intake/approve", async (route) => {
+      approvalBody = route.request().postDataJSON() as Record<string, unknown>;
+      approved = true;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "approved", itemId: "ffffffff-ffff-4fff-8fff-ffffffffffff", approvalResultId: "99999999-9999-4999-8999-999999999999", attachmentState: "attached", attachedAttachmentIds: [syntheticAttachmentId], pendingAttachmentIds: [] }) });
+    });
+
+    await openInbox(page);
+    await expect(page.getByText("Ready for your review.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    const review = page.getByRole("region", { name: "Check every value before saving" });
+    await expect(review).toBeVisible();
+    await expect(review.getByLabel("Title")).toHaveValue("Untrusted suggested title");
+    await expect(review).not.toContainText(/sender|filename|storageKey|contentSha256/i);
+    await review.getByLabel("Title").fill("Corrected reviewed title");
+    await review.getByLabel("Type").fill("Insurance");
+    await review.getByLabel("Provider").fill("Corrected provider");
+    await review.getByLabel("Reference").fill("");
+    await review.getByLabel("Cost").fill("125.50");
+    await review.getByLabel("Currency").fill("GBP");
+    await review.getByLabel("Schedule").selectOption("renewal");
+    await review.getByLabel("Renewal date").fill("2031-01-10");
+    await review.getByLabel("Repeats every").selectOption("12");
+    await review.getByLabel("Notes").fill("Reviewed notes");
+    await review.getByLabel("Section").selectOption(syntheticSectionId);
+    if (isMobile) {
+      await review.getByRole("radio", { name: /Existing household item/ }).check();
+      await expect(review.getByRole("button", { name: "Attach selected documents" })).toBeVisible();
+    }
+    const submit = review.getByRole("button", { name: isMobile ? "Attach selected documents" : "Create separate item" });
+    await submit.focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => approvalBody).toMatchObject({
+      source: { kind: "mailbox_draft", receiptId: syntheticReceiptId, draftVersion: 1 },
+      householdId: syntheticHouseholdId,
+      sectionId: syntheticSectionId,
+      item: { title: "Corrected reviewed title", subtype: "Insurance", provider: "Corrected provider", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12, notes: "Reviewed notes" },
+      attachmentIds: [syntheticAttachmentId],
+    });
+    expect((approvalBody?.item as Record<string, unknown>).reference).toBeUndefined();
+    if (isMobile) expect(approvalBody?.action).toBe("attach_existing");
+    else expect(approvalBody?.action).toBe("create_separate");
+    await expect(page.getByText("No incoming documents waiting for review.", { exact: true })).toBeVisible();
+    const after = await readWorkspace(page);
+    expect(after).toEqual(before);
+  });
+});
