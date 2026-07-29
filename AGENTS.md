@@ -10,11 +10,11 @@ ADR, release-policy, and engineering-baseline work is reserved for **Sol Extra
 High**. Only Sol Extra High may materially create, edit, approve, or restructure
 the protected planning files listed in `.github/planning-governance.json`.
 
-Implementation subagents use **Luna Extra High** by default. A different
-subagent model may be used only after the user gives fresh, explicit approval
-for that invocation. Lower-capability models may read protected planning and
-implement bounded issues, tests, migrations, and feature documentation, but
-must not edit the protected planning set.
+Implementation agents and separate implementation tasks use **Luna Extra
+High** by default. A different model may be used only after the user gives
+fresh, explicit approval for that invocation. Lower-capability models may read
+protected planning and implement bounded issues, tests, migrations, and
+feature documentation, but must not edit the protected planning set.
 
 Pull requests that modify protected planning files must contain the exact
 attestation `Planning-Model: Sol Extra High`. The CI check verifies the
@@ -23,11 +23,22 @@ cryptographic proof of model identity; authors must never make a false
 attestation.
 
 When Luna Extra High is not available in the current subagent pool, Sol must
-write a bounded local prompt under `.agents/handoffs/` and ask the user to
-switch the task manually. The prompt must name permitted and protected paths,
-forbid remote mutations, define hard stop conditions, require a result file,
-and tell Luna exactly when to hand control back for Sol review. Handoff files
-are local coordination state and are not committed.
+use the Codex task launcher, when available, to create a separate user-visible
+task on Luna Extra High automatically. Start it in a dedicated worktree from
+the exact accepted base, give it the bounded handoff, and let it make focused
+local commits without pushing or changing GitHub state. Sol retains
+architecture, security decisions, integration review, protected CI, and
+delivery sequencing; it must inspect and integrate the Luna result before
+publication.
+
+Do not ask the user to switch the current task manually merely because Luna is
+absent from the subagent pool. Manual switching is a fallback only when the
+separate-task launcher is also unavailable or has failed with a genuine hard
+block. In either path, write the bounded prompt under `.agents/handoffs/`. The
+prompt must name permitted and protected paths, forbid unapproved remote
+mutations, define hard stop conditions, require a result file, and tell Luna
+exactly when to hand control back for Sol review. Handoff files are local
+coordination state and are not committed.
 
 ## Delivery workflow
 
