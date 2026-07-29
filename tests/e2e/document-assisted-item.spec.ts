@@ -207,8 +207,8 @@ test.describe("document-assisted item intake", () => {
     });
 
     await submitAddItem(page, editor, isMobile);
-    await expect(page.getByRole("dialog", { name: title })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: title })).toContainText("temporarily unavailable");
+    await expect(editor).toBeVisible();
+    await expect(editor.getByRole("status")).toContainText("temporarily unavailable");
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(true);
     await submitAddItem(page, editor, isMobile);
