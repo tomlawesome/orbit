@@ -401,6 +401,11 @@ and add a matching read-only secret mount to the Compose service.
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/secrets/orbit-smtp-password` |
 | `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `IMAP_ALIAS_CURRENT_GENERATION` | Orbit | Positive current HMAC alias generation. | `1` |
+| `IMAP_ALIAS_CURRENT_SECRET_FILE` | Orbit | Runtime secret file for the current alias key; use a distinct file from the previous key. | `/run/secrets/orbit-imap-alias-current` |
+| `IMAP_ALIAS_PREVIOUS_GENERATION` | Orbit | Optional previous HMAC alias generation during an explicit bounded rotation. | `0` |
+| `IMAP_ALIAS_PREVIOUS_SECRET_FILE` | Orbit | Runtime secret file for the previous alias key. | `/run/secrets/orbit-imap-alias-previous` |
+| `IMAP_ALIAS_PREVIOUS_EXPIRES_AT` | Orbit | Explicit UTC expiry for the previous generation; omit all previous-generation settings for emergency invalidation. | `2026-08-15T00:00:00.000Z` |
 | `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |

@@ -1,5 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapRecipientAlias, matchesImapRecipientAlias, trustedRecipientFromHeaders } from "./imap-ingestion";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { getImapIngestionConfig, imapRecipientAlias, matchesImapRecipientAlias } from "./imap-ingestion";
+import { deriveImapRecipientAlias } from "./imap-recipient";
+
+const temporaryDirectories: string[] = [];
+
+function secretFile(value: string): string {
+  const directory = mkdtempSync(join(tmpdir(), "orbit-imap-alias-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "secret");
+  writeFileSync(path, `${value}\n`, { mode: 0o600 });
+  return path;
+}
+
+afterEach(() => {
+  temporaryDirectories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
+});
 
 describe("IMAP ingestion configuration", () => {
   const environment = (values: Record<string, string | undefined>): NodeJS.ProcessEnv => ({ ...values, NODE_ENV: "test" } as NodeJS.ProcessEnv);
@@ -12,7 +30,7 @@ describe("IMAP ingestion configuration", () => {
       .toThrow("SMTP must be configured");
   });
 
-  it("uses verified implicit TLS and a bounded poll interval", () => {
+  it("uses verified implicit TLS, file-backed alias generations, and a bounded poll interval", () => {
     expect(getImapIngestionConfig(environment({
       IMAP_HOST: "imap.example.test",
       IMAP_PORT: "993",
@@ -20,35 +38,72 @@ describe("IMAP ingestion configuration", () => {
       IMAP_PASSWORD: "test-password",
       IMAP_POLL_SECONDS: "30",
       IMAP_RECIPIENT_DOMAIN: "ingest.example.test",
-      IMAP_ALIAS_SECRET: "test-alias-secret-that-is-long-enough",
+      IMAP_ALIAS_CURRENT_GENERATION: "2",
+      IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
       IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
       SMTP_URL: "smtps://smtp.example.test",
-    }))).toMatchObject({ enabled: true, port: 993, pollMilliseconds: 30_000, mailbox: "INBOX" });
+    }))).toMatchObject({
+      enabled: true,
+      port: 993,
+      pollMilliseconds: 30_000,
+      mailbox: "INBOX",
+      currentAliasGeneration: 2,
+      previousAliasGeneration: undefined,
+    });
   });
 
   it("accepts individual SMTP configuration", () => {
     expect(getImapIngestionConfig(environment({
       IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
-      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_SECRET: "test-alias-secret-that-is-long-enough",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
       IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test",
     }))).toMatchObject({ enabled: true });
   });
 
-  it("derives opaque aliases and rejects non-matching provider recipients", () => {
-    const config = getImapIngestionConfig(environment({
+  it("loads distinct current and previous alias keys through runtime secret files", () => {
+    const currentPath = secretFile("test-current-alias-secret-that-is-long-enough");
+    const previousPath = secretFile("test-previous-alias-secret-that-is-long-enough");
+    const configured = getImapIngestionConfig(environment({
       IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
-      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_SECRET: "test-alias-secret-that-is-long-enough",
-      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_URL: "smtps://smtp.example.test",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "2", IMAP_ALIAS_CURRENT_SECRET_FILE: currentPath,
+      IMAP_ALIAS_PREVIOUS_GENERATION: "1", IMAP_ALIAS_PREVIOUS_SECRET_FILE: previousPath, IMAP_ALIAS_PREVIOUS_EXPIRES_AT: "2026-08-15T00:00:00.000Z",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test",
     }));
-    const alias = imapRecipientAlias("6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a", config);
-    expect(alias).toMatch(/^orbit\+[A-Za-z0-9_-]+@ingest\.example\.test$/);
-    expect(matchesImapRecipientAlias(alias.toUpperCase(), "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a", config)).toBe(true);
-    expect(matchesImapRecipientAlias("orbit+other@ingest.example.test", "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a", config)).toBe(false);
+    expect(configured.currentAliasSecret).toBe("test-current-alias-secret-that-is-long-enough");
+    expect(configured.previousAliasSecret).toBe("test-previous-alias-secret-that-is-long-enough");
   });
 
-  it("reads only the configured folded provider header", () => {
-    const headers = Buffer.from("X-Original-To: orbit+token@ingest.example.test\r\n\tcontinued\r\nTo: attacker@example.test\r\n");
-    expect(trustedRecipientFromHeaders(headers, "X-Original-To")).toBe("orbit+token@ingest.example.test continued");
-    expect(trustedRecipientFromHeaders(headers, "Delivered-To")).toBeUndefined();
+  it("rejects partial current and previous generation configuration", () => {
+    const base = {
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To",
+      SMTP_URL: "smtps://smtp.example.test",
+    };
+    expect(() => getImapIngestionConfig(environment({ ...base, IMAP_ALIAS_CURRENT_GENERATION: "1" })))
+      .toThrow("alias current generation and secret");
+    expect(() => getImapIngestionConfig(environment({ ...base, IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough" })))
+      .toThrow("alias current generation and secret");
+    expect(() => getImapIngestionConfig(environment({
+      ...base,
+      IMAP_ALIAS_CURRENT_GENERATION: "2",
+      IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_ALIAS_PREVIOUS_GENERATION: "1",
+    }))).toThrow("alias previous generation, secret, and expiry");
+  });
+
+  it("accepts a bounded previous generation and invalidates it after expiry", () => {
+    const config = getImapIngestionConfig(environment({
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test",
+      IMAP_ALIAS_CURRENT_GENERATION: "2", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_ALIAS_PREVIOUS_GENERATION: "1", IMAP_ALIAS_PREVIOUS_SECRET: "test-previous-alias-secret-that-is-long-enough",
+      IMAP_ALIAS_PREVIOUS_EXPIRES_AT: "2026-08-15T00:00:00.000Z",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_URL: "smtps://smtp.example.test",
+    }));
+    expect(config).toMatchObject({ currentAliasGeneration: 2, previousAliasGeneration: 1 });
+    expect(config.previousAliasExpiresAt?.toISOString()).toBe("2026-08-15T00:00:00.000Z");
+    const userId = "6f7aa3dc-347d-4ff4-bf50-bc4f4ffc054a";
+    expect(matchesImapRecipientAlias(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasPrevious!), userId, config)).toBe(true);
+    expect(imapRecipientAlias(userId, config)).toBe(deriveImapRecipientAlias(userId, config.recipientDomain, config.aliasCurrent));
   });
 });
