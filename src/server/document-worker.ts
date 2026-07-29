@@ -290,7 +290,7 @@ async function rejectInterruptedDocuments(): Promise<void> {
   ));
 }
 
-async function reconcileDocumentStorage(): Promise<void> {
+export async function reconcileDocumentStorage(): Promise<void> {
   const config = getDocumentConfig();
   const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
   const records = await getDb()
