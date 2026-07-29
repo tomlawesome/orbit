@@ -35,7 +35,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     const member = await fixture.session("member");
     const csrf = await POST(request(member, url, body(fixture), { "x-csrf-token": "wrong" }));
     expect(csrf.status).toBe(403);
-    expect(await csrf.json()).toEqual({ error: { code: "csrf_failed", message: "The request could not be verified" } });
+    expect(await csrf.json()).toEqual({ error: { code: "csrf_failed", message: "The CSRF token is missing or invalid" } });
     expect(csrf.headers.get("cache-control")).toBe("no-store");
     await fixture.cleanup();
   });
@@ -69,7 +69,7 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     const url = "http://127.0.0.1:3000/api/reviewed-intake/approve";
     await fixture.disableUser("disabled");
     const disabledResponse = await POST(request(disabled, url, body(fixture)));
-    expect(disabledResponse.status).toBe(403);
+    expect(disabledResponse.status).toBe(401);
     expect(disabledResponse.headers.get("cache-control")).toBe("no-store");
 
     const removedFixture = await createIntegrationFixture("reviewed-route-removed");
