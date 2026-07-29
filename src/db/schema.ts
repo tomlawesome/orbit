@@ -39,6 +39,9 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "failed",
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
+export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
+export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
+export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -367,6 +370,35 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
 ]);
 
+/** Durable idempotency/result state for an explicit reviewed approval. This is
+ * an operation ledger, not a private mailbox draft aggregate. */
+export const reviewedIntakeOperations = pgTable("reviewed_intake_operations", {
+  id: uuid("id").primaryKey(),
+  actorUserId: uuid("actor_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  source: reviewedIntakeOperationSource("source").notNull(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  // Retained reviewed section UUID is audit metadata; section lifecycle must
+  // remain independently replaceable after an operation completes.
+  sectionId: uuid("section_id").notNull(),
+  action: text("action").notNull(),
+  targetItemId: uuid("target_item_id").references(() => items.id, { onDelete: "set null" }),
+  itemId: uuid("item_id").notNull(),
+  requestSha256: text("request_sha256").notNull(),
+  resultId: uuid("result_id").notNull(),
+  expectedDocument: boolean("expected_document").notNull().default(false),
+  attachmentState: reviewedIntakeAttachmentState("attachment_state").notNull().default("not_requested"),
+  documentId: uuid("document_id").references(() => documents.id, { onDelete: "set null" }),
+  status: reviewedIntakeOperationStatus("status").notNull(),
+  failureCode: text("failure_code"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("reviewed_intake_operation_result_unique").on(table.resultId),
+  index("reviewed_intake_operation_actor_idx").on(table.actorUserId, table.createdAt),
+  index("reviewed_intake_operation_item_idx").on(table.itemId),
+]);
+
 /** Encrypted attachment bytes held until the recipient chooses a household, if needed. */
 export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -386,6 +418,12 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   keyId: text("key_id").notNull(),
   status: imapAttachmentStatus("status").notNull().default("stored"),
   assignedDocumentId: uuid("assigned_document_id").references(() => documents.id, { onDelete: "set null" }),
+  transferClaimToken: uuid("transfer_claim_token"),
+  transferClaimedAt: timestamp("transfer_claimed_at", { withTimezone: true }),
+  transferLeaseExpiresAt: timestamp("transfer_lease_expires_at", { withTimezone: true }),
+  purgePending: boolean("purge_pending").notNull().default(false),
+  purgeAttempts: integer("purge_attempts").notNull().default(0),
+  purgeFailureCode: text("purge_failure_code"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

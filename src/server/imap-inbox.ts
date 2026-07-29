@@ -1,18 +1,10 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
 import { documents, households, imapIngestionAttachments, imapIngestionMessages, items, memberships, sections, users } from "@/db/schema";
 import { purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
-
-/** Returns the sole destination or indicates that the user must choose one. */
-export async function imapReceiptDestination(userId: string): Promise<{ householdId?: string; requiresSelection: boolean }> {
-  const choices = await getDb().select({ householdId: households.id })
-    .from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
-    .where(eq(memberships.userId, userId)).orderBy(asc(households.createdAt));
-  return choices.length === 1 ? { householdId: choices[0].householdId, requiresSelection: false } : { requiresSelection: true };
-}
 
 /** Returns only the caller's receipt states; subjects, headers, and attachment names stay private. */
 export async function listImapInbox(userId: string) {
@@ -28,10 +20,14 @@ export async function listImapInbox(userId: string) {
       fieldEvidence: imapIngestionMessages.fieldEvidence,
       expiresAt: imapIngestionMessages.expiresAt,
       receivedAt: imapIngestionMessages.receivedAt,
+      failureCode: imapIngestionMessages.failureCode,
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
-      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"])))
+      .where(and(eq(imapIngestionMessages.userId, userId), or(
+        inArray(imapIngestionMessages.status, ["pending_review", "approving", "recoverable"]),
+        and(eq(imapIngestionMessages.status, "failed"), eq(imapIngestionMessages.failureCode, "legacy_review_item")),
+      )))
       .groupBy(imapIngestionMessages.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
       .limit(50),
@@ -44,6 +40,7 @@ export async function listImapInbox(userId: string) {
   return {
     receipts: receipts.map((receipt) => ({
       ...receipt,
+      cleanupOnly: receipt.status === "failed" && receipt.failureCode === "legacy_review_item",
       ...sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence }),
     })),
     households: choices.map((household) => ({ ...household, sections: householdSections.filter((section) => section.householdId === household.id) })),

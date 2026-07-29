@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse, AppError } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
-import { listItemDocuments, uploadItemDocument } from "@/server/document-repository";
+import { listItemDocuments, requestDocumentDeletion, uploadItemDocument } from "@/server/document-repository";
+import { authorizeDirectReviewedUpload, completeDirectReviewedUpload, markDirectReviewedUploadRecoverable } from "@/server/reviewed-intake";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,11 +25,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  let reviewedOperationId: string | undefined;
+  let reviewedOperationUserId: string | undefined;
+  let uploadAttempted = false;
   try {
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
     const { householdId, itemId } = await context.params;
+    const operationIdHeader = request.headers.get("x-orbit-review-operation");
+    if (operationIdHeader) {
+      if (!z.uuid().safeParse(operationIdHeader).success) throw new AppError("reviewed_intake_operation_invalid", "The reviewed intake operation is invalid", 422);
+      reviewedOperationId = operationIdHeader;
+      reviewedOperationUserId = session.user.id;
+      const existing = await authorizeDirectReviewedUpload(session.user.id, reviewedOperationId, householdId, itemId);
+      if (existing.documentId) {
+        const document = (await listItemDocuments(session.user.id, householdId, itemId)).find((candidate) => candidate.id === existing.documentId);
+        if (!document) throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
+        return NextResponse.json({ document }, { status: 201, headers: { "Cache-Control": "no-store" } });
+      }
+    }
     const encodedFilename = request.headers.get("x-orbit-filename");
     if (!encodedFilename) throw new AppError("document_filename_required", "The document filename is required", 422);
     let filename: string;
@@ -41,6 +58,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (declaredBytes !== undefined && (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0)) {
       throw new AppError("document_size_invalid", "The document size is invalid", 422);
     }
+    uploadAttempted = true;
     const document = await uploadItemDocument({
       userId: session.user.id,
       householdId,
@@ -49,11 +67,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       body: request.body,
       declaredBytes,
     });
+    if (reviewedOperationId) {
+      try {
+        await completeDirectReviewedUpload(session.user.id, reviewedOperationId, householdId, itemId, document.id);
+      } catch (error) {
+        await requestDocumentDeletion(session.user.id, document.id).catch(() => undefined);
+        throw error;
+      }
+    }
     return NextResponse.json({ document }, {
       status: 201,
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
+    if (reviewedOperationId && reviewedOperationUserId && uploadAttempted) {
+      await markDirectReviewedUploadRecoverable(reviewedOperationUserId, reviewedOperationId, "document_upload_failed").catch(() => undefined);
+    }
     return appErrorResponse(error);
   }
 }

@@ -61,4 +61,44 @@ describe("POST /api/reviewed-intake/approve security contract", () => {
     expect((await altered.json()).error).toEqual({ code: "reviewed_intake_conflict", message: "That approval identity was already used" });
     await fixture.cleanup();
   });
+
+  it("covers disabled membership, destination, target, stale-version, and cache boundaries", async () => {
+    const fixture = await createIntegrationFixture("reviewed-route-boundaries");
+    const member = await fixture.session("member");
+    const disabled = await fixture.session("disabled");
+    const url = "http://127.0.0.1:3000/api/reviewed-intake/approve";
+    await fixture.disableUser("disabled");
+    const disabledResponse = await POST(request(disabled, url, body(fixture)));
+    expect(disabledResponse.status).toBe(403);
+    expect(disabledResponse.headers.get("cache-control")).toBe("no-store");
+
+    const removedFixture = await createIntegrationFixture("reviewed-route-removed");
+    const removedMember = await removedFixture.session("member");
+    await removedFixture.removeMember();
+    const removed = await POST(request(removedMember, url, body(removedFixture)));
+    expect(removed.status).toBe(404);
+    expect(await removed.json()).toEqual({ error: { code: "household_not_found", message: "That household is not available" } });
+
+    const wrongTarget = await POST(request(member, url, body(fixture, { targetItemId: fixture.secondItem.id, action: "attach_existing" })));
+    expect(wrongTarget.status).toBe(404);
+    expect((await wrongTarget.json()).error.code).toBe("item_not_found");
+    const wrongHousehold = await POST(request(member, url, body(fixture, { householdId: fixture.secondHousehold.id })));
+    expect(wrongHousehold.status).toBe(404);
+    expect((await wrongHousehold.json()).error.code).toBe("household_not_found");
+    const wrongSection = await POST(request(member, url, body(fixture, { sectionId: "55555555-5555-4555-8555-555555555555" })));
+    expect(wrongSection.status).toBe(404);
+    expect((await wrongSection.json()).error.code).toBe("section_not_found");
+
+    const [receipt] = await getDb().insert(imapIngestionMessages).values({
+      mailbox: "private", mailboxUidValidity: "2", mailboxUid: 9001,
+      contentSha256: crypto.randomUUID().replaceAll("-", ""), recipientAliasSha256: "stale-alias",
+      userId: fixture.users.member.id, householdId: fixture.household.id, draftVersion: 2, status: "pending_review",
+      expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    }).returning({ id: imapIngestionMessages.id });
+    const stale = await POST(request(member, url, body(fixture, { source: { kind: "mailbox_draft", receiptId: receipt.id, draftVersion: 1 }, operationId: "44444444-4444-4444-8444-444444444444" })));
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe("reviewed_intake_stale");
+    await fixture.cleanup();
+    await removedFixture.cleanup();
+  });
 });

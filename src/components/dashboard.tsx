@@ -305,7 +305,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
         headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
         body: JSON.stringify({
           operationId: item.id,
-          source: { kind: "direct_upload" },
+          source: { kind: "direct_upload", expectedDocument: true },
           householdId: household.id,
           sectionId: item.sectionId,
           action: "create_separate",
@@ -317,27 +317,25 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
         const payload = await approvalResponse.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
         throw new Error(payload?.error?.message ?? "The reviewed item could not be approved");
       }
-      try {
-        const response = await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+      const approval = await approvalResponse.json() as { itemId?: string; attachmentState?: string };
+      const approvedItemId = approval.itemId ?? item.id;
+      // Refresh the canonical workspace before the secure upload. The item is
+      // intentionally durable and reachable even when attachment storage fails.
+      await refreshWorkspace();
+      const response = await fetch(`/api/households/${household.id}/items/${approvedItemId}/documents`, {
           method: "POST", credentials: "same-origin",
           headers: {
             "X-CSRF-Token": session.csrfToken,
             "X-Orbit-Filename": encodeURIComponent(document.name),
+            "X-Orbit-Review-Operation": item.id,
           },
           body: document,
         });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
-          throw new Error(payload?.error?.message ?? "The document could not be attached");
-        }
-        await refreshWorkspace();
-      } catch {
-        setEditingItem(undefined);
-        setItemEditorOpen(false);
-        setDetailItemId(item.id);
-        setNotice({ message: `${item.title} added, but the document could not be attached. Open its Files section to retry the original file.` });
-        return;
+      if (!response.ok) {
+        const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+        throw new Error(payload?.error?.message ?? "The document could not be attached");
       }
+      await refreshWorkspace();
     } else dispatch(command);
     setItemEditorOpen(false);
     setNotice({ message: editingItem ? `${item.title} updated` : `${item.title} added` });
