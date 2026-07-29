@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, users } from "@/db/schema";
 import { categorizeProviderError, getNotificationWorkerConfig } from "@/server/notification-worker";
+import { purgeExpiredImapStaging } from "@/server/imap-inbox";
 
 interface ClaimedReceipt { id: string; leaseToken: string }
 
@@ -34,6 +35,7 @@ async function claimReceipts(limit = 25): Promise<ClaimedReceipt[]> {
 /** Sends content-free IMAP receipts from durable records; retry state never stores provider text. */
 export async function runImapReceiptCycle(): Promise<void> {
   const config = getNotificationWorkerConfig();
+  await purgeExpiredImapStaging();
   const claimed = await claimReceipts();
   if (!claimed.length) return;
   const tokens = new Map(claimed.map((receipt) => [receipt.id, receipt.leaseToken]));
