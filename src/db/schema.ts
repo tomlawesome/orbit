@@ -30,6 +30,7 @@ export const documentJobStatus = pgEnum("document_job_status", [
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
+  "processing",
   "pending_review",
   "approving",
   "recoverable",
@@ -351,6 +352,11 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   status: imapIngestionStatus("status").notNull(),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
+  attachmentProcessingAttempts: integer("attachment_processing_attempts").notNull().default(0),
+  attachmentProcessingLockedAt: timestamp("attachment_processing_locked_at", { withTimezone: true }),
+  attachmentProcessingLeaseToken: uuid("attachment_processing_lease_token"),
+  attachmentProcessingNextAttemptAt: timestamp("attachment_processing_next_attempt_at", { withTimezone: true }),
+  attachmentProcessingFailureCode: text("attachment_processing_failure_code"),
   receiptStatus: deliveryStatus("receipt_status").notNull().default("processing"),
   receiptAttempts: integer("receipt_attempts").notNull().default(0),
   receiptLockedAt: timestamp("receipt_locked_at", { withTimezone: true }),
@@ -370,6 +376,7 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_message_approved_item_idx").on(table.approvedItemId),
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
   index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
+  index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
 ]);
 
 /** Generation-aware per-user aliases. Legacy prototype digests are retained
@@ -464,4 +471,21 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
 }, (table) => [
   uniqueIndex("imap_attachment_message_hash_unique").on(table.messageId, table.contentSha256),
   index("imap_attachment_message_status_idx").on(table.messageId, table.status),
+]);
+
+/** Durable bridge for the crash window after ciphertext is durable and before
+ * its attachment metadata row commits. It contains no plaintext or mail. */
+export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => imapIngestionMessages.id, { onDelete: "cascade" }),
+  leaseToken: uuid("lease_token").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  purgeAttempts: integer("purge_attempts").notNull().default(0),
+  purgeFailureCode: text("purge_failure_code"),
+  ...auditColumns,
+}, (table) => [
+  index("imap_staging_object_message_status_idx").on(table.messageId, table.status),
+  index("imap_staging_object_created_idx").on(table.status, table.createdAt),
+  check("imap_staging_object_status_valid", sql`${table.status} IN ('pending', 'committed', 'purge_pending')`),
 ]);

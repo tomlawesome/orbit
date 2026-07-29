@@ -205,6 +205,7 @@ validate_correspondence() {
   local crypto_report="$report_directory/crypto.tsv"
   local visible_report="$report_directory/visible.tsv"
   local attachment_report="$report_directory/attachments.tsv"
+  local staging_report="$report_directory/staging.tsv"
   local transient_report="$report_directory/transient"
   local document_id attachment_id storage_key ciphertext_size lifecycle key_id actual_size relative_path object_key object_count
   declare -A referenced_objects=()
@@ -218,8 +219,11 @@ validate_correspondence() {
     'SELECT d.id::text, d.lifecycle::text, COALESCE(c.storage_key, '\'''\''), COALESCE(c.ciphertext_size::text, '\'''\'') FROM documents d LEFT JOIN document_crypto c ON c.document_id = d.id WHERE d.lifecycle IN ('\''available'\'', '\''pending_deletion'\'') ORDER BY d.id;' \
     "$visible_report" || return 1
   query_report "$database_name" \
-    'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' ORDER BY a.storage_key;' \
+    'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' OR (a.status = '\''assigned'\'' AND a.purge_pending = true) ORDER BY a.storage_key;' \
     "$attachment_report" || return 1
+  query_report "$database_name" \
+    'SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
+    "$staging_report" || return 1
   query_report "$database_name" \
     'SELECT count(*)::text FROM documents WHERE lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''scanning'\'', '\''encrypting'\'');' \
     "$transient_report" || return 1
@@ -257,6 +261,19 @@ validate_correspondence() {
       return 1
     referenced_objects["$storage_key"]=1
   done < "$attachment_report"
+
+  # Pending ledger rows are the bounded recovery reference for a ciphertext
+  # written before its attachment row committed. A missing object is safe
+  # (the write may have failed); an existing object must not be called an
+  # unreferenced ordinary document.
+  while IFS='|' read -r storage_key lifecycle; do
+    [[ -n "$storage_key" ]] || continue
+    [[ "$storage_key" =~ ^[a-f0-9]{64}$ && "$lifecycle" =~ ^(pending|purge_pending)$ ]] || return 1
+    local staging_object_path="$documents_root/objects/${storage_key:0:2}/${storage_key:2:2}/${storage_key}.bin"
+    if [[ -f "$staging_object_path" && ! -L "$staging_object_path" ]]; then
+      referenced_objects["$storage_key"]=1
+    fi
+  done < "$staging_report"
 
   while IFS='|' read -r document_id lifecycle storage_key ciphertext_size; do
     [[ -n "$document_id" ]] || continue
@@ -566,6 +583,7 @@ validate_active_correspondence() {
   local crypto_report="$report_directory/crypto.tsv"
   local visible_report="$report_directory/visible.tsv"
   local attachment_report="$report_directory/attachments.tsv"
+  local staging_report="$report_directory/staging.tsv"
   local transient_report="$report_directory/transient"
   if ! query_active_report \
     'SELECT c.document_id::text, c.storage_key, c.ciphertext_size::text, COALESCE(d.lifecycle::text, '\''<missing-document>'\'') FROM document_crypto c LEFT JOIN documents d ON d.id = c.document_id ORDER BY c.storage_key;' \
@@ -578,8 +596,13 @@ validate_active_correspondence() {
     return 1
   fi
   if ! query_active_report \
-    'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' ORDER BY a.storage_key;' \
+    'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' OR (a.status = '\''assigned'\'' AND a.purge_pending = true) ORDER BY a.storage_key;' \
     "$attachment_report"; then
+    return 1
+  fi
+  if ! query_active_report \
+    'SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
+    "$staging_report"; then
     return 1
   fi
   if ! query_active_report \
@@ -587,13 +610,13 @@ validate_active_correspondence() {
     "$transient_report"; then
     return 1
   fi
-  if ! validate_correspondence_reports "$temporary_directory/active-documents" "$crypto_report" "$visible_report" "$attachment_report" "$transient_report" active; then
+  if ! validate_correspondence_reports "$temporary_directory/active-documents" "$crypto_report" "$visible_report" "$attachment_report" "$staging_report" "$transient_report" active; then
     return 1
   fi
 }
 
 validate_correspondence_reports() {
-  local documents_root="$1" crypto_report="$2" visible_report="$3" attachment_report="$4" transient_report="$5" category="$6"
+  local documents_root="$1" crypto_report="$2" visible_report="$3" attachment_report="$4" staging_report="$5" transient_report="$6" category="$7"
   local document_id attachment_id storage_key ciphertext_size lifecycle key_id actual_size relative_path object_key object_count
   declare -A referenced_objects=()
   declare -A stored_counts=()
@@ -623,6 +646,14 @@ validate_correspondence_reports() {
     [[ "$actual_size" == "$ciphertext_size" ]] || return 1
     referenced_objects["$storage_key"]=1
   done < "$attachment_report"
+  while IFS='|' read -r storage_key lifecycle; do
+    [[ -n "$storage_key" ]] || continue
+    [[ "$storage_key" =~ ^[a-f0-9]{64}$ && "$lifecycle" =~ ^(pending|purge_pending)$ ]] || return 1
+    local staging_object_path="$documents_root/objects/${storage_key:0:2}/${storage_key:2:2}/${storage_key}.bin"
+    if [[ -f "$staging_object_path" && ! -L "$staging_object_path" ]]; then
+      referenced_objects["$storage_key"]=1
+    fi
+  done < "$staging_report"
   while IFS='|' read -r document_id lifecycle storage_key ciphertext_size; do
     [[ -n "$document_id" ]] || continue
     [[ "$storage_key" =~ ^[a-f0-9]{64}$ && "$ciphertext_size" =~ ^[1-9][0-9]*$ ]] ||

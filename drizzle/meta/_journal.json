@@ -141,6 +141,13 @@
       "when": 1785088000000,
       "tag": "0019_receipt_identity_and_alias_rotation",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785089000000,
+      "tag": "0020_imap_attachment_processing",
+      "breakpoints": true
     }
   ]
 }

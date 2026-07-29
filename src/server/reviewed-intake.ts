@@ -431,7 +431,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
           wrapAuthTag: attachment.wrapAuthTag,
           keyId: attachment.keyId,
         },
-      });
+      }, { recipientUserId: userId, receiptId });
       const document = await uploadItemDocument({
         userId,
         householdId,
