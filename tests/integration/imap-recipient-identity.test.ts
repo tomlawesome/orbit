@@ -22,7 +22,7 @@ beforeEach(async () => {
   await getDb().delete(imapRecipientRotationState);
 });
 
-function config(currentGeneration = 1, previous?: { generation: number; expiresAt: Date }): ImapIngestionConfig {
+function config(currentGeneration = 1, previous?: { generation: number; expiresAt: Date }, mailbox = "INBOX"): ImapIngestionConfig {
   const current = { generation: currentGeneration, secret: `current-secret-generation-${currentGeneration}-that-is-long-enough` };
   const aliasPrevious = previous ? {
     generation: previous.generation,
@@ -35,7 +35,7 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
     port: 993,
     user: "orbit",
     password: "provider-password",
-    mailbox: "INBOX",
+    mailbox,
     tlsServerName: "imap.example.test",
     recipientDomain: "ingest.example.test",
     currentAliasGeneration: current.generation,
@@ -57,9 +57,10 @@ describe("receipt identity PostgreSQL boundaries", () => {
     try {
       await fixture.disableUser("disabled");
       const previousExpiry = new Date(Date.now() + 86_400_000);
-      const initial = config(1);
+      const mailbox = "recipient-reconcile-mailbox";
+      const initial = config(1, undefined, mailbox);
       await Promise.all([reconcileImapRecipientAliases(initial, 5), reconcileImapRecipientAliases(initial, 5)]);
-      const rotation = config(2, { generation: 1, expiresAt: previousExpiry });
+      const rotation = config(2, { generation: 1, expiresAt: previousExpiry }, mailbox);
       await Promise.all([reconcileImapRecipientAliases(rotation, 5), reconcileImapRecipientAliases(rotation, 5)]);
 
       const [authority] = await getDb().select({
@@ -91,11 +92,11 @@ describe("receipt identity PostgreSQL boundaries", () => {
       expect(await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status, activeUntil: imapRecipientAliases.activeUntil })
         .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation)).toEqual(rowsBeforeStale);
       await expect(runImapIngestionCycle(initial)).rejects.toThrow("stale or invalid");
-      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)).toHaveLength(0);
+      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages).where(eq(imapIngestionMessages.mailbox, mailbox))).toHaveLength(0);
       await expect(reconcileImapRecipientAliases({ ...rotation, recipientDomain: "other.example.test" }, 1)).rejects.toThrow("stale or invalid");
       await expect(reconcileImapRecipientAliases({ ...rotation, trustedRecipientHeader: "X-Envelope-To" }, 1)).rejects.toThrow("stale or invalid");
 
-      await reconcileImapRecipientAliases(config(3));
+      await reconcileImapRecipientAliases(config(3, undefined, mailbox));
       expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration, previousExpiresAt: imapRecipientRotationState.previousExpiresAt })
         .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 3, previousGeneration: null, previousExpiresAt: null }]);
       expect(await getDb().select({ generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
@@ -172,8 +173,9 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fixture = await createIntegrationFixture("recipient-provider-replay");
     const current = config();
     const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const verifiedPdfBodyStructure = { part: "1", type: "application", subtype: "pdf", disposition: "attachment", dispositionParameters: { filename: "verified.pdf" }, size: 31 };
     const messages = [
-      { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\nTo: attacker@example.invalid\r\n`), source: Buffer.from("message-one") },
+      { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\nTo: attacker@example.invalid\r\n`), source: Buffer.from("message-one"), bodyStructure: verifiedPdfBodyStructure },
       { uid: 2, headers: Buffer.from("To: attacker@example.invalid\r\n"), source: Buffer.from("message-two") },
       { uid: 3, headers: Buffer.from("X-Original-To: one@example.invalid\r\nX-Original-To: two@example.invalid\r\n"), source: Buffer.from("message-three") },
     ];
@@ -183,6 +185,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
       async *fetch() { yield* messages; },
+      async download() { return { content: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\n%%EOF") }; },
     };
     setImapClientFactoryForTests(() => fakeClient as unknown as import("imapflow").ImapFlow);
     try {

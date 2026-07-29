@@ -72,7 +72,7 @@ function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructur
       fetches.push(range);
       const exact = /^(\d+):\1$/u.exec(range)?.[1];
       const start = exact ? Number(exact) : Number(/^\d+/u.exec(range)?.[0] ?? 0);
-      for (const message of messages) if (exact ? message.uid === start : message.uid >= start) yield { ...message, internalDate: new Date() };
+      for (const message of messages) if (exact ? message.uid === start : message.uid >= start) yield { ...message, headers: message.headers ? Buffer.from(message.headers) : undefined, internalDate: new Date() };
     },
     async download(uid: number, part: string) {
       downloads.push(`${uid}:${part}`);
@@ -364,7 +364,7 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       await getDb().insert(imapIngestionAttachments).values({ id: retryHeld.id, messageId: retryReceiptId, displayName: retryHeld.displayName, mediaType: retryHeld.mediaType, sizeBytes: retryHeld.sizeBytes, contentSha256: retryHeld.contentSha256, storageKey: retryHeld.storageKey, ciphertextSize: retryHeld.ciphertextSize, ...retryHeld.envelope, status: "stored" });
       let purgeFailures = 1;
       setImapHoldingPurgeImplementationForTests(async (storageKey) => {
-        if (purgeFailures > 0) { purgeFailures -= 1; throw new Error("synthetic storage failure"); }
+        if (storageKey === retryHeld.storageKey && purgeFailures > 0) { purgeFailures -= 1; throw new Error("synthetic storage failure"); }
         await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).deleteCiphertext(storageKey);
       });
       await purgeExpiredImapStaging(new Date());

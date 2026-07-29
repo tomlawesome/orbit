@@ -190,7 +190,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_ingestion_messages_review_item_id_items_id_fk: foreign("imap_ingestion_messages", ["review_item_id"], "items", ["id"], "set_null"),
   imap_ingestion_messages_approved_item_id_items_id_fk: foreign("imap_ingestion_messages", ["approved_item_id"], "items", ["id"], "set_null"),
   imap_ingestion_messages_user_id_users_id_fk: foreign("imap_ingestion_messages", ["user_id"], "users", ["id"], "set_null"),
-  imap_ingestion_staging_objects_message_id_imap_ingestion_messages_id_fk: foreign("imap_ingestion_staging_objects", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
+  imap_staging_objects_message_id_fk: foreign("imap_ingestion_staging_objects", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
   imap_ingestion_staging_objects_pkey: primary("imap_ingestion_staging_objects", ["id"]),
   imap_ingestion_staging_objects_storage_key_unique: unique("imap_ingestion_staging_objects", ["storage_key"]),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
