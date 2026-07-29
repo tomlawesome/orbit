@@ -184,7 +184,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
               <div className="form-section-heading"><span>01</span><div><h3>Optional document</h3><p>Upload a document to inspect it and suggest editable fields. It is only stored with the item after you submit.</p></div></div>
               <label className="field field-wide">
                 <span>Document</span>
-                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectDocument(file); }} />
+                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectDocument(file); }} />
                 {document && <small>{document.name} selected for attachment after you submit.</small>}
                 {document && !inspectionPending && <button type="button" onClick={() => clearDocument("Document selection cleared.")}>Remove document</button>}
                 {inspectionMessage && <small role="status">{inspectionMessage}</small>}

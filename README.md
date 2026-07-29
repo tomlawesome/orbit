@@ -194,11 +194,13 @@ docker compose --env-file .env-orbit \
   --profile processing --profile ai up -d
 ```
 
-The services have no published host ports: Tika and Ollama are reachable only
-on the private Compose network. The Ollama volume is persistent, local-only,
-uses no cloud models, and is bounded to 2 CPUs and 6 GiB by default. It does
-not download a model automatically. After the server reports healthy, pull the
-model selected above explicitly:
+The services have no published host ports. Tika is attached only to a dedicated
+internal processing network shared with Orbit, so it has no route to the
+database, sibling services on the default network, or external networks.
+Ollama remains reachable only on the private default Compose network. Its
+volume is persistent, local-only, uses no cloud models, and is bounded to 2
+CPUs and 6 GiB by default. It does not download a model automatically. After
+the server reports healthy, pull the model selected above explicitly:
 
 ```sh
 docker compose --env-file .env-orbit \
@@ -262,7 +264,7 @@ Orbit already includes:
   signed-out visitors;
 - production health checks, standalone Next.js output, a purpose-built browser
   favicon, and version-controlled migrations.
-- bounded PDF/JPEG/PNG/WebP uploads, ClamAV malware rejection, per-document
+- bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
   retention purge, and storage reconciliation.
 
