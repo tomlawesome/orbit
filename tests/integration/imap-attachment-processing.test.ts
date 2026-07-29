@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects } from "@/db/schema";
+import { documents, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   cleanupImapStagingAttempt,
+  commitStagedAttachment,
   getImapIngestionConfig,
   imapRecipientAlias,
   runImapIngestionCycle,
@@ -156,6 +157,64 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect(mismatchProvider.downloads).toEqual([]);
     } finally {
       setImapClientFactoryForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("rolls back attachment metadata when the exact staging ledger transition is absent", async () => {
+    const fixture = await createIntegrationFixture("imap-ledger-transition-fencing");
+    try {
+      const insertedReceiptId = randomUUID();
+      const insertedToken = randomUUID();
+      const insertedHeld = await holdImapAttachment({ bytes: Buffer.from("missing inserted ledger"), displayName: "inserted.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: insertedReceiptId });
+      await getDb().insert(imapIngestionMessages).values({ id: insertedReceiptId, mailbox: "ledger-transition", mailboxUidValidity: "77", mailboxUid: 912, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "inserted", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: insertedToken, attachmentProcessingLockedAt: new Date() });
+      await expect(commitStagedAttachment(insertedReceiptId, insertedToken, insertedHeld)).rejects.toThrow("staging_lease_lost");
+      expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.storageKey, insertedHeld.storageKey))).toHaveLength(0);
+
+      const duplicateReceiptId = randomUUID();
+      const duplicateToken = randomUUID();
+      const duplicateHeld = await holdImapAttachment({ bytes: Buffer.from("missing duplicate ledger"), displayName: "duplicate.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId: duplicateReceiptId });
+      await getDb().insert(imapIngestionMessages).values({ id: duplicateReceiptId, mailbox: "ledger-transition", mailboxUidValidity: "77", mailboxUid: 913, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "duplicate", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: duplicateToken, attachmentProcessingLockedAt: new Date() });
+      await getDb().insert(imapIngestionAttachments).values({ id: randomUUID(), messageId: duplicateReceiptId, displayName: duplicateHeld.displayName, mediaType: duplicateHeld.mediaType, sizeBytes: duplicateHeld.sizeBytes, contentSha256: duplicateHeld.contentSha256, storageKey: "a".repeat(64), ciphertextSize: duplicateHeld.ciphertextSize, ...duplicateHeld.envelope, status: "stored" });
+      await expect(commitStagedAttachment(duplicateReceiptId, duplicateToken, duplicateHeld)).rejects.toThrow("staging_lease_lost");
+      expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.messageId, duplicateReceiptId))).toHaveLength(1);
+      expect(await getDb().select({ id: imapIngestionStagingObjects.id }).from(imapIngestionStagingObjects).where(eq(imapIngestionStagingObjects.messageId, duplicateReceiptId))).toHaveLength(0);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("rejects a commit after lease expiry and reconciliation removes its ledger", async () => {
+    const fixture = await createIntegrationFixture("imap-ledger-expired-before-commit");
+    try {
+      const receiptId = randomUUID();
+      const leaseToken = randomUUID();
+      const held = await holdImapAttachment({ bytes: Buffer.from("expired worker ciphertext"), displayName: "expired.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "ledger-expired", mailboxUidValidity: "77", mailboxUid: 914, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "expired", userId: fixture.users.member.id, status: "processing", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "processing", attachmentProcessingLeaseToken: leaseToken, attachmentProcessingLockedAt: new Date(Date.now() - 11 * 60_000) });
+      await getDb().insert(imapIngestionStagingObjects).values({ messageId: receiptId, leaseToken, storageKey: held.storageKey, status: "pending" });
+      const { reconcileImapStagingObjects } = await import("@/server/imap-ingestion");
+      await reconcileImapStagingObjects();
+      await expect(commitStagedAttachment(receiptId, leaseToken, held)).rejects.toThrow("staging_lease_lost");
+      expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.storageKey, held.storageKey))).toHaveLength(0);
+      expect(await new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot).ciphertextExists(held.storageKey)).toBe(false);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("does not discard a completed receipt or schedule deletion of its assigned document", async () => {
+    const fixture = await createIntegrationFixture("imap-discard-completed-state");
+    try {
+      const receiptId = randomUUID();
+      const held = await holdImapAttachment({ bytes: Buffer.from("published attachment"), displayName: "published.pdf", mediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+      const documentId = randomUUID();
+      await getDb().insert(documents).values({ id: documentId, householdId: fixture.household.id, uploadedByUserId: fixture.users.member.id, displayName: "published.pdf", mediaType: "application/pdf", sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, lifecycle: "available", scanStatus: "skipped", availableAt: new Date() });
+      await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "discard-completed", mailboxUidValidity: "77", mailboxUid: 915, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "completed", userId: fixture.users.member.id, householdId: fixture.household.id, status: "completed", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent", approvedAt: new Date() });
+      await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receiptId, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "assigned", assignedDocumentId: documentId });
+
+      await expect(discardImapReviewItem(fixture.users.member.id, receiptId)).rejects.toMatchObject({ code: "staging_cleanup_busy" });
+      expect((await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))[0].lifecycle).toBe("available");
+    } finally {
       await fixture.cleanup();
     }
   });
