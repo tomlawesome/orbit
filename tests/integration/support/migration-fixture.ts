@@ -216,7 +216,6 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   reviewed_intake_operations_household_id_households_id_fk: foreign("reviewed_intake_operations", ["household_id"], "households", ["id"], "cascade"),
   reviewed_intake_operations_target_item_id_items_id_fk: foreign("reviewed_intake_operations", ["target_item_id"], "items", ["id"], "set_null"),
   reviewed_intake_operations_document_id_documents_id_fk: foreign("reviewed_intake_operations", ["document_id"], "documents", ["id"], "set_null"),
-  reviewed_intake_operation_result_unique: unique("reviewed_intake_operations", ["result_id"]),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;
