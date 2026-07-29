@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { imapIngestionMessages, imapRecipientAliases, users } from "@/db/schema";
+import { imapIngestionMessages, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
 import {
   imapRecipientAlias,
   reconcileImapRecipientAliases,
@@ -10,7 +10,7 @@ import {
   setImapClientFactoryForTests,
   type ImapIngestionConfig,
 } from "@/server/imap-ingestion";
-import { digestImapRecipientAlias } from "@/server/imap-recipient";
+import { digestImapAliasConfiguration, digestImapRecipientAlias } from "@/server/imap-recipient";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 afterAll(async () => {
@@ -22,7 +22,7 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
   const current = { generation: currentGeneration, secret: `current-secret-generation-${currentGeneration}-that-is-long-enough` };
   const aliasPrevious = previous ? {
     generation: previous.generation,
-    secret: `previous-secret-generation-${previous.generation}-that-is-long-enough`,
+    secret: `current-secret-generation-${previous.generation}-that-is-long-enough`,
     expiresAt: previous.expiresAt,
   } : undefined;
   return {
@@ -53,9 +53,20 @@ describe("receipt identity PostgreSQL boundaries", () => {
     try {
       await fixture.disableUser("disabled");
       const previousExpiry = new Date(Date.now() + 86_400_000);
+      const initial = config(1);
+      await Promise.all([reconcileImapRecipientAliases(initial, 1), reconcileImapRecipientAliases(initial, 1)]);
       const rotation = config(2, { generation: 1, expiresAt: previousExpiry });
-      await reconcileImapRecipientAliases(rotation);
-      await reconcileImapRecipientAliases(rotation);
+      await Promise.all([reconcileImapRecipientAliases(rotation, 1), reconcileImapRecipientAliases(rotation, 1)]);
+
+      const [authority] = await getDb().select({
+        currentGeneration: imapRecipientRotationState.currentGeneration,
+        previousGeneration: imapRecipientRotationState.previousGeneration,
+        previousExpiresAt: imapRecipientRotationState.previousExpiresAt,
+        currentCommitment: imapRecipientRotationState.currentCommitment,
+        previousCommitment: imapRecipientRotationState.previousCommitment,
+      }).from(imapRecipientRotationState);
+      expect(authority).toMatchObject({ currentGeneration: 2, previousGeneration: 1, currentCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 2, secret: "current-secret-generation-2-that-is-long-enough" }), previousCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 1, secret: "current-secret-generation-1-that-is-long-enough" }) });
+      expect(authority.previousExpiresAt).toEqual(previousExpiry);
 
       const activeRows = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
         .from(imapRecipientAliases).where(eq(imapRecipientAliases.status, "active"));
@@ -66,7 +77,19 @@ describe("receipt identity PostgreSQL boundaries", () => {
         .innerJoin(users, eq(users.id, imapRecipientAliases.userId))
         .where(and(eq(users.id, fixture.users.disabled.id), eq(imapRecipientAliases.status, "active")))).toHaveLength(0);
 
+      const rowsBeforeStale = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status, activeUntil: imapRecipientAliases.activeUntil })
+        .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation);
+      await expect(reconcileImapRecipientAliases(initial, 1)).rejects.toThrow("stale or invalid");
+      expect(await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status, activeUntil: imapRecipientAliases.activeUntil })
+        .from(imapRecipientAliases).orderBy(imapRecipientAliases.userId, imapRecipientAliases.generation)).toEqual(rowsBeforeStale);
+      await expect(runImapIngestionCycle(initial)).rejects.toThrow("stale or invalid");
+      expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)).toHaveLength(0);
+      await expect(reconcileImapRecipientAliases({ ...rotation, recipientDomain: "other.example.test" }, 1)).rejects.toThrow("stale or invalid");
+      await expect(reconcileImapRecipientAliases({ ...rotation, trustedRecipientHeader: "X-Envelope-To" }, 1)).rejects.toThrow("stale or invalid");
+
       await reconcileImapRecipientAliases(config(3));
+      expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration, previousExpiresAt: imapRecipientRotationState.previousExpiresAt })
+        .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 3, previousGeneration: null, previousExpiresAt: null }]);
       expect(await getDb().select({ generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
         .from(imapRecipientAliases).where(eq(imapRecipientAliases.userId, fixture.users.member.id)))
         .toEqual(expect.arrayContaining([
@@ -74,7 +97,44 @@ describe("receipt identity PostgreSQL boundaries", () => {
           { generation: 2, status: "legacy_inactive" },
           { generation: 3, status: "active" },
         ]));
+      await expect(reconcileImapRecipientAliases(rotation)).rejects.toThrow("stale or invalid");
     } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
+    const fixture = await createIntegrationFixture("recipient-expiry-boundary");
+    const expiry = new Date(Date.now() - 1_000);
+    const rotation = config(2, { generation: 1, expiresAt: expiry });
+    const beforeExpiry = new Date(expiry.getTime() - 1);
+    const alias = imapRecipientAlias(fixture.users.member.id, rotation);
+    const ranges: string[] = [];
+    setImapClientFactoryForTests(() => ({
+      mailbox: { uidValidity: 300n },
+      async connect() {},
+      async logout() {},
+      async getMailboxLock() { return { release() {} }; },
+      async *fetch(range: string) {
+        ranges.push(range);
+        yield { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("post-expiry-current") };
+      },
+    } as unknown as import("imapflow").ImapFlow));
+    try {
+      await reconcileImapRecipientAliases(config(1), 1);
+      await reconcileImapRecipientAliases(rotation, 1, beforeExpiry);
+      expect(await getDb().select({ previousGeneration: imapRecipientRotationState.previousGeneration })
+        .from(imapRecipientRotationState)).toEqual([{ previousGeneration: 1 }]);
+      await reconcileImapRecipientAliases(rotation, 1, expiry);
+      expect(await getDb().select({ currentGeneration: imapRecipientRotationState.currentGeneration, previousGeneration: imapRecipientRotationState.previousGeneration })
+        .from(imapRecipientRotationState)).toEqual([{ currentGeneration: 2, previousGeneration: null }]);
+      await runImapIngestionCycle(rotation);
+      expect(ranges).toEqual(["1:*"]);
+      expect(await getDb().select({ uid: imapIngestionMessages.mailboxUid, userId: imapIngestionMessages.userId, generation: imapIngestionMessages.recipientAliasGeneration })
+        .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "300")))
+        .toEqual([{ uid: 1, userId: fixture.users.member.id, generation: 2 }]);
+    } finally {
+      setImapClientFactoryForTests(undefined);
       await fixture.cleanup();
     }
   });
@@ -129,6 +189,75 @@ describe("receipt identity PostgreSQL boundaries", () => {
       ]);
       expect(await getDb().select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
         .where(inArray(imapIngestionMessages.mailboxUid, [1, 2, 3]))).toHaveLength(3);
+    } finally {
+      setImapClientFactoryForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("starts a fresh UID namespace at UID 1 without mixing checkpoints across UIDVALIDITY", async () => {
+    const fixture = await createIntegrationFixture("recipient-uidvalidity-rollover");
+    const current = config();
+    const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const ranges: string[] = [];
+    let poll = 0;
+    setImapClientFactoryForTests(() => {
+      const uidValidity = poll++ === 0 ? "100" : "101";
+      const uid = uidValidity === "100" ? 7 : 1;
+      const client = {
+        mailbox: { uidValidity: BigInt(uidValidity) },
+        async connect() {},
+        async logout() {},
+        async getMailboxLock() { return { release() {} }; },
+        async *fetch(range: string) {
+          ranges.push(range);
+          yield { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`rollover-${uidValidity}`) };
+        },
+      };
+      return client as unknown as import("imapflow").ImapFlow;
+    });
+    try {
+      await runImapIngestionCycle(current);
+      await runImapIngestionCycle(current);
+      expect(ranges).toEqual(["1:*", "1:*"]);
+      expect(await getDb().select({ uidValidity: imapIngestionMessages.mailboxUidValidity, uid: imapIngestionMessages.mailboxUid })
+        .from(imapIngestionMessages).where(eq(imapIngestionMessages.userId, fixture.users.member.id)).orderBy(imapIngestionMessages.mailboxUidValidity, imapIngestionMessages.mailboxUid))
+        .toEqual([{ uidValidity: "100", uid: 7 }, { uidValidity: "101", uid: 1 }]);
+    } finally {
+      setImapClientFactoryForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
+  it("retains a durable UID outcome when the provider disconnects and resumes after the checkpoint", async () => {
+    const fixture = await createIntegrationFixture("recipient-crash-restart-cursor");
+    const current = config();
+    const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const ranges: string[] = [];
+    let poll = 0;
+    setImapClientFactoryForTests(() => {
+      const firstPoll = poll++ === 0;
+      const client = {
+        mailbox: { uidValidity: 200n },
+        async connect() {},
+        async logout() {},
+        async getMailboxLock() { return { release() {} }; },
+        async *fetch(range: string) {
+          ranges.push(range);
+          const uid = firstPoll ? 1 : 2;
+          yield { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`restart-${uid}`) };
+          if (firstPoll) throw new Error("provider disconnect after durable receipt");
+        },
+      };
+      return client as unknown as import("imapflow").ImapFlow;
+    });
+    try {
+      await expect(runImapIngestionCycle(current)).rejects.toThrow("provider disconnect");
+      await runImapIngestionCycle(current);
+      expect(ranges).toEqual(["1:*", "2:*"]);
+      expect(await getDb().select({ uid: imapIngestionMessages.mailboxUid }).from(imapIngestionMessages)
+        .where(eq(imapIngestionMessages.mailboxUidValidity, "200")).orderBy(imapIngestionMessages.mailboxUid))
+        .toEqual([{ uid: 1 }, { uid: 2 }]);
     } finally {
       setImapClientFactoryForTests(undefined);
       await fixture.cleanup();

@@ -389,6 +389,22 @@ export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
   check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
 ]);
 
+/** Database-authoritative singleton for monotonic alias rotation handover. */
+export const imapRecipientRotationState = pgTable("imap_recipient_rotation_state", {
+  id: integer("id").primaryKey().default(1),
+  currentGeneration: integer("current_generation").notNull(),
+  currentCommitment: text("current_commitment").notNull(),
+  previousGeneration: integer("previous_generation"),
+  previousExpiresAt: timestamp("previous_expires_at", { withTimezone: true }),
+  previousCommitment: text("previous_commitment"),
+  ...auditColumns,
+}, (table) => [
+  check("imap_recipient_rotation_state_singleton", sql`${table.id} = 1`),
+  check("imap_recipient_rotation_state_current_valid", sql`${table.currentGeneration} > 0`),
+  check("imap_recipient_rotation_state_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} <> ${table.currentGeneration})`),
+  check("imap_recipient_rotation_state_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL) AND (${table.previousGeneration} IS NULL) = (${table.previousCommitment} IS NULL)`),
+]);
+
 /** Durable idempotency/result state for an explicit reviewed approval. This is
  * an operation ledger, not a private mailbox draft aggregate. */
 export const reviewedIntakeOperations = pgTable("reviewed_intake_operations", {

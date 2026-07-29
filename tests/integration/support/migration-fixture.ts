@@ -74,6 +74,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "updated_at"],
   users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "status", "active_until", "created_at", "updated_at"],
+  imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
   reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
@@ -186,6 +187,7 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_ingestion_messages_user_id_users_id_fk: foreign("imap_ingestion_messages", ["user_id"], "users", ["id"], "set_null"),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
   imap_recipient_aliases_user_id_users_id_fk: foreign("imap_recipient_aliases", ["user_id"], "users", ["id"], "cascade"),
+  imap_recipient_rotation_state_pkey: primary("imap_recipient_rotation_state", ["id"]),
   imap_attachment_message_hash_unique: unique("imap_ingestion_attachments", ["message_id", "content_sha256"]),
   items_household_id_households_id_fk: foreign("items", ["household_id"], "households", ["id"], "cascade"),
   items_section_id_sections_id_fk: foreign("items", ["section_id"], "sections", ["id"], "restrict"),

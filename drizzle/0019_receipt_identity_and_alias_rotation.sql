@@ -23,3 +23,18 @@ CREATE INDEX "imap_recipient_alias_user_status_idx" ON "imap_recipient_aliases" 
 ALTER TABLE "imap_ingestion_messages" ADD COLUMN "recipient_alias_generation" integer;--> statement-breakpoint
 DROP INDEX "imap_message_content_unique";--> statement-breakpoint
 CREATE INDEX "imap_message_recipient_content_idx" ON "imap_ingestion_messages" USING btree ("user_id", "content_sha256");
+--> statement-breakpoint
+CREATE TABLE "imap_recipient_rotation_state" (
+	"id" integer PRIMARY KEY DEFAULT 1 NOT NULL,
+	"current_generation" integer NOT NULL,
+	"current_commitment" text NOT NULL,
+	"previous_generation" integer,
+	"previous_expires_at" timestamp with time zone,
+	"previous_commitment" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "imap_recipient_rotation_state_singleton" CHECK ("id" = 1),
+	CONSTRAINT "imap_recipient_rotation_state_current_valid" CHECK ("current_generation" > 0),
+	CONSTRAINT "imap_recipient_rotation_state_previous_valid" CHECK ("previous_generation" IS NULL OR ("previous_generation" > 0 AND "previous_generation" <> "current_generation")),
+	CONSTRAINT "imap_recipient_rotation_state_previous_pair" CHECK (("previous_generation" IS NULL) = ("previous_expires_at" IS NULL) AND ("previous_generation" IS NULL) = ("previous_commitment" IS NULL))
+ );

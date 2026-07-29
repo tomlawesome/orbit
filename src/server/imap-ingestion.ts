@@ -3,17 +3,23 @@ import { ImapFlow, type MessageStructureObject } from "imapflow";
 import { and, asc, eq, gt, inArray, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { imapIngestionAttachments, imapIngestionMessages, imapRecipientAliases, users } from "@/db/schema";
+import { imapIngestionAttachments, imapIngestionMessages, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
 import {
   deriveImapRecipientAlias,
+  digestImapAliasConfiguration,
   digestImapRecipientAlias,
   matchImapRecipientAliasGeneration,
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
   type ImapAliasGeneration,
 } from "@/server/imap-recipient";
+import {
+  decideImapRotationState,
+  type ImapRotationConfigState,
+  type ImapRotationState,
+} from "@/server/imap-rotation";
 
 const ingestionEnvironmentSchema = z.object({
   IMAP_HOST: z.string().trim().max(253).optional().default(""),
@@ -198,16 +204,101 @@ function trustedRecipientFailure(result: ReturnType<typeof parseTrustedRecipient
   }
 }
 
+type ImapDbExecutor = Pick<ReturnType<typeof getDb>, "select" | "insert" | "update">;
+
+function rotationConfigState(config: ImapIngestionConfig, now: Date): ImapRotationConfigState {
+  const activePrevious = config.aliasPrevious && config.aliasPrevious.expiresAt && config.aliasPrevious.expiresAt.getTime() > now.getTime()
+    ? config.aliasPrevious
+    : undefined;
+  return {
+    currentGeneration: config.aliasCurrent.generation,
+    currentCommitment: digestImapAliasConfiguration(config.recipientDomain, config.trustedRecipientHeader, config.aliasCurrent),
+    previousGeneration: activePrevious?.generation,
+    previousExpiresAt: activePrevious?.expiresAt,
+    previousCommitment: activePrevious ? digestImapAliasConfiguration(config.recipientDomain, config.trustedRecipientHeader, activePrevious) : undefined,
+  };
+}
+
+function sameRotationState(left: ImapRotationState, right: ImapRotationState): boolean {
+  return left.currentGeneration === right.currentGeneration
+    && left.currentCommitment === right.currentCommitment
+    && left.previousGeneration === right.previousGeneration
+    && left.previousExpiresAt?.getTime() === right.previousExpiresAt?.getTime()
+    && left.previousCommitment === right.previousCommitment;
+}
+
+async function readPersistedImapRotationState(executor: ImapDbExecutor, lock: boolean): Promise<ImapRotationState | null> {
+  const query = executor.select({
+    currentGeneration: imapRecipientRotationState.currentGeneration,
+    currentCommitment: imapRecipientRotationState.currentCommitment,
+    previousGeneration: imapRecipientRotationState.previousGeneration,
+    previousExpiresAt: imapRecipientRotationState.previousExpiresAt,
+    previousCommitment: imapRecipientRotationState.previousCommitment,
+  }).from(imapRecipientRotationState).where(eq(imapRecipientRotationState.id, 1)).limit(1);
+  const rows = lock ? await query.for("update") : await query;
+  const row = rows[0];
+  return row
+    ? {
+      currentGeneration: row.currentGeneration,
+      currentCommitment: row.currentCommitment,
+      previousGeneration: row.previousGeneration,
+      previousExpiresAt: row.previousExpiresAt,
+      previousCommitment: row.previousCommitment,
+    }
+    : null;
+}
+
+/** Locks and advances the database-authoritative singleton before any alias or receipt mutation. */
+async function ensureImapRotationAuthority(executor: ImapDbExecutor, config: ImapIngestionConfig, now: Date): Promise<ImapRotationState> {
+  let persisted = await readPersistedImapRotationState(executor, true);
+  if (!persisted) {
+    const initial = decideImapRotationState(null, rotationConfigState(config, now), now);
+    await executor.insert(imapRecipientRotationState).values({
+      id: 1,
+      currentGeneration: initial.currentGeneration,
+      currentCommitment: initial.currentCommitment,
+      previousGeneration: initial.previousGeneration,
+      previousExpiresAt: initial.previousExpiresAt,
+      previousCommitment: initial.previousCommitment,
+      createdAt: now,
+      updatedAt: now,
+    }).onConflictDoNothing();
+    persisted = await readPersistedImapRotationState(executor, true);
+    if (!persisted) throw new Error("IMAP alias rotation state could not be initialized");
+  }
+
+  const next = decideImapRotationState(persisted, rotationConfigState(config, now), now);
+  if (!sameRotationState(persisted, next)) {
+    await executor.update(imapRecipientRotationState).set({
+      currentGeneration: next.currentGeneration,
+      currentCommitment: next.currentCommitment,
+      previousGeneration: next.previousGeneration,
+      previousExpiresAt: next.previousExpiresAt,
+      previousCommitment: next.previousCommitment,
+      updatedAt: now,
+    }).where(eq(imapRecipientRotationState.id, 1));
+  }
+  return next;
+}
+
 /** Reconciles current and at most one previous aliases from trusted application code. */
 export async function reconcileImapRecipientAliases(config: ImapIngestionConfig, limit = 1_000, now = new Date()): Promise<void> {
   if (!config.enabled) return;
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("IMAP alias reconciliation limit must be positive");
   const database = getDb();
+  await database.transaction(async (transaction) => {
+    await ensureImapRotationAuthority(transaction, config, now);
+  });
   let lastUserId: string | undefined;
   while (true) {
     const candidates = await database.select({ id: users.id, disabledAt: users.disabledAt }).from(users)
       .where(lastUserId ? gt(users.id, lastUserId) : undefined).orderBy(asc(users.id)).limit(limit);
     if (candidates.length === 0) break;
     await database.transaction(async (transaction) => {
+      const authority = await ensureImapRotationAuthority(transaction, config, now);
+      const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
+        ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
+        : undefined;
       for (const candidate of candidates) {
         if (candidate.disabledAt) {
           await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
@@ -228,10 +319,6 @@ export async function reconcileImapRecipientAliases(config: ImapIngestionConfig,
           set: { aliasSha256: currentDigest, status: "active", activeUntil: null, updatedAt: now },
         });
 
-        const previousExpiryAt = config.aliasPrevious?.expiresAt;
-        const activePrevious = config.aliasPrevious && previousExpiryAt && previousExpiryAt.getTime() > now.getTime()
-          ? { ...config.aliasPrevious, expiresAt: previousExpiryAt }
-          : undefined;
         if (activePrevious) {
           const previousDigest = digestImapRecipientAlias(deriveImapRecipientAlias(candidate.id, config.recipientDomain, activePrevious));
           await transaction.insert(imapRecipientAliases).values({
@@ -247,7 +334,7 @@ export async function reconcileImapRecipientAliases(config: ImapIngestionConfig,
           });
         }
 
-        const retainedGenerations = [config.aliasCurrent.generation, ...(activePrevious ? [activePrevious.generation] : [])];
+        const retainedGenerations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
         await transaction.update(imapRecipientAliases).set({ status: "legacy_inactive", activeUntil: now, updatedAt: now })
           .where(and(
             eq(imapRecipientAliases.userId, candidate.id),
@@ -271,7 +358,11 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
     return { failureCode: domain && domain !== config.recipientDomain ? "recipient_wrong_domain" : "recipient_malformed" };
   }
   const aliasDigest = digestImapRecipientAlias(normalizedRecipient);
-  const generations = [config.aliasCurrent.generation, ...(config.aliasPrevious ? [config.aliasPrevious.generation] : [])];
+  const authority = await getDb().transaction(async (transaction) => ensureImapRotationAuthority(transaction, config, now));
+  const activePrevious = authority.previousGeneration && authority.previousExpiresAt && config.aliasPrevious?.generation === authority.previousGeneration
+    ? { ...config.aliasPrevious, expiresAt: authority.previousExpiresAt }
+    : undefined;
+  const generations = [authority.currentGeneration, ...(activePrevious ? [activePrevious.generation] : [])];
   const rows = await getDb().select({
     userId: imapRecipientAliases.userId,
     generation: imapRecipientAliases.generation,
@@ -285,16 +376,39 @@ async function userForRecipientAlias(headers: Buffer | undefined, config: ImapIn
   const disabled = rows.some((row) => row.disabledAt);
   const matches = rows.filter((row) => {
     if (row.disabledAt || row.status !== "active" || (row.activeUntil && row.activeUntil.getTime() <= now.getTime())) return false;
-    const key = row.generation === config.aliasCurrent.generation ? config.aliasCurrent : config.aliasPrevious;
+    const key = row.generation === authority.currentGeneration ? config.aliasCurrent : activePrevious;
     return Boolean(key && matchImapRecipientAliasGeneration(normalizedRecipient, row.userId, config.recipientDomain, key, now));
   });
   if (matches.length > 1) return { failureCode: "recipient_alias_ambiguous", digest: aliasDigest };
   if (matches.length === 1) return { userId: matches[0].userId, generation: matches[0].generation, digest: aliasDigest };
   if (disabled) return { failureCode: "recipient_disabled", digest: aliasDigest };
-  if (config.aliasPrevious && rows.some((row) => row.generation === config.aliasPrevious?.generation && row.activeUntil && row.activeUntil.getTime() <= now.getTime())) {
+  if (activePrevious && rows.some((row) => row.generation === activePrevious.generation && row.activeUntil && row.activeUntil.getTime() <= now.getTime())) {
     return { failureCode: "recipient_alias_expired", digest: aliasDigest };
   }
   return { failureCode: "recipient_unverified", digest: aliasDigest };
+}
+
+type ImapReceiptValues = {
+  mailbox: string;
+  mailboxUidValidity: string;
+  mailboxUid: number;
+  contentSha256: string;
+  recipientAliasSha256: string;
+  recipientAliasGeneration: number | null;
+  userId: string | null;
+  householdId: string | null;
+  expiresAt: Date;
+  status: "pending_review" | "failed" | "quarantined";
+  failureCode: string | null;
+  receiptStatus: "processing" | "cancelled";
+  receivedAt: Date;
+};
+
+async function recordImapReceipt(config: ImapIngestionConfig, values: ImapReceiptValues) {
+  return getDb().transaction(async (transaction) => {
+    await ensureImapRotationAuthority(transaction, config, new Date());
+    return transaction.insert(imapIngestionMessages).values(values).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
+  });
 }
 
 function attachmentParts(structure: MessageStructureObject | undefined): string[] {
@@ -342,7 +456,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           ? createHash("sha256").update(`oversized:${uidValidity}:${message.uid}`).digest("hex")
           : createHash("sha256").update(source!).digest("hex");
         const aliasSha256 = recipient.digest ?? createHash("sha256").update("").digest("hex");
-        const [receipt] = await getDb().insert(imapIngestionMessages).values({
+        const [receipt] = await recordImapReceipt(config, {
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
@@ -353,7 +467,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           // have been held successfully. All other outcomes are terminal here.
           receiptStatus: userId && !oversized ? "processing" : "cancelled",
           receivedAt: message.internalDate instanceof Date ? message.internalDate : new Date(),
-        }).onConflictDoNothing().returning({ id: imapIngestionMessages.id });
+        });
         if (receipt && userId && !oversized) {
           try {
             const parts = attachmentParts(message.bodyStructure);
