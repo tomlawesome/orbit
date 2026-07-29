@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
 import {
@@ -16,6 +16,10 @@ import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./suppo
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
   await cleanupIntegrationEnvironment();
+});
+
+beforeEach(async () => {
+  await getDb().delete(imapRecipientRotationState);
 });
 
 function config(currentGeneration = 1, previous?: { generation: number; expiresAt: Date }): ImapIngestionConfig {
@@ -68,8 +72,12 @@ describe("receipt identity PostgreSQL boundaries", () => {
       expect(authority).toMatchObject({ currentGeneration: 2, previousGeneration: 1, currentCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 2, secret: "current-secret-generation-2-that-is-long-enough" }), previousCommitment: digestImapAliasConfiguration("ingest.example.test", "X-Original-To", { generation: 1, secret: "current-secret-generation-1-that-is-long-enough" }) });
       expect(authority.previousExpiresAt).toEqual(previousExpiry);
 
+      const fixtureUserIds = Object.values(fixture.users).map((user) => user.id);
       const activeRows = await getDb().select({ userId: imapRecipientAliases.userId, generation: imapRecipientAliases.generation, status: imapRecipientAliases.status })
-        .from(imapRecipientAliases).where(eq(imapRecipientAliases.status, "active"));
+        .from(imapRecipientAliases).where(and(
+          eq(imapRecipientAliases.status, "active"),
+          inArray(imapRecipientAliases.userId, fixtureUserIds),
+        ));
       expect(activeRows).toHaveLength(10);
       expect(new Set(activeRows.map((row) => row.userId))).toHaveLength(5);
       expect(new Set(activeRows.map((row) => row.generation))).toEqual(new Set([1, 2]));
