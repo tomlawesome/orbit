@@ -83,8 +83,8 @@ safety property while giving both sources one approval boundary.
   PDF must be detected as a structurally valid PDF after bounded download or
   the receipt fails safely. A message with no PDF candidate reaches a bounded
   private `no_supported_pdf` outcome and cannot produce a review draft or
-  household mutation. Direct upload continues to support PDF, JPEG, PNG, and
-  WebP. All supported direct-upload formats remain subject to the same
+  household mutation. Direct upload continues to support PDF, JPEG, and PNG.
+  All supported direct-upload formats remain subject to the same
   hostile-content, parser/OCR isolation, bounded-output, and indirect prompt
   injection controls as mailbox PDFs.
 - Archives and active content are not decompressed or previewed. Extracted PDF

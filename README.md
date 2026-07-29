@@ -262,7 +262,7 @@ Orbit already includes:
   signed-out visitors;
 - production health checks, standalone Next.js output, a purpose-built browser
   favicon, and version-controlled migrations.
-- bounded PDF/JPEG/PNG/WebP uploads, ClamAV malware rejection, per-document
+- bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
   retention purge, and storage reconciliation.
 

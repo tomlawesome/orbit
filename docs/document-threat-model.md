@@ -8,7 +8,7 @@ version-controlled implementation requirement, not an aspirational checklist.
 Orbit will attach encrypted documents to household items using a local
 persistent volume. The first release supports:
 
-- PDF, JPEG, PNG, and WebP content identified from file signatures;
+- PDF, JPEG, and PNG content identified from file signatures;
 - a 25 MiB maximum file size;
 - a 5 GiB default quota per household;
 - a 20 GiB default quota per instance;
@@ -111,7 +111,7 @@ recoverable state.
 
 ### Parsing, OCR, and indirect prompt injection
 
-- Treat every supported manual-upload format—PDF, JPEG, PNG, and WebP—as
+- Treat every supported manual-upload format—PDF, JPEG, and PNG—as
   hostile throughout parsing and review. The PDF-only mailbox rule narrows
   transport input; it does not make mailbox PDFs more trusted or manual image
   uploads less dangerous.
