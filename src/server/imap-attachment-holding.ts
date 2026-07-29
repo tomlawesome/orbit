@@ -70,3 +70,8 @@ export async function readHeldImapAttachment(attachment: Pick<HeldImapAttachment
     mediaType: attachment.mediaType, plaintextSize: attachment.sizeBytes,
   }, attachment.envelope, config.keyEncryptionKey);
 }
+
+/** Idempotently removes private holding ciphertext after durable transfer or discard. */
+export async function purgeHeldImapAttachment(storageKey: string): Promise<void> {
+  await storage().deleteCiphertext(storageKey);
+}

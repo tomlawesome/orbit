@@ -61,7 +61,12 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
-    expect(await readFixtureSnapshot(database.client)).toEqual(beforeUpgrade);
+    const expectedAfterUpgrade = structuredClone(beforeUpgrade);
+    const legacyReceipt = expectedAfterUpgrade.imap_ingestion_messages.find((row) => row.review_item_id);
+    if (!legacyReceipt) throw new Error("The migration fixture must include a legacy prototype receipt");
+    legacyReceipt.status = "failed";
+    legacyReceipt.failure_code = "legacy_review_item";
+    expect(await readFixtureSnapshot(database.client)).toEqual(expectedAfterUpgrade);
 
     const beforeRerun = {
       journal: await readAppliedMigrationHashes(database.client),
