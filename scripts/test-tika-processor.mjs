@@ -153,9 +153,10 @@ async function extract(fixture) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 45_000);
   try {
-    const response = await fetch(new URL("/tika/text", tikaUrl), {
+    const response = await fetch(new URL("/tika", tikaUrl), {
       method: "PUT",
       headers: {
+        Accept: "text/plain",
         "Content-Type": fixture.mediaType,
         "X-Tika-OCRskipOcr": "true",
         "X-Tika-Skip-Embedded": "true",

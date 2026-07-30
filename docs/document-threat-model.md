@@ -131,7 +131,7 @@ recoverable state.
   services, or external networks. The pinned image runs as UID/GID 35002,
   drops all capabilities, uses a read-only root filesystem and a bounded
   private tmpfs, and mounts only its read-only configuration.
-- Orbit sends bytes only to the fixed `/tika/text` endpoint with fixed
+- Orbit sends bytes only to the fixed `/tika` endpoint with fixed
   no-embedded-recursion and no-OCR headers. The server configuration also
   excludes `TesseractOCRParser`. OCR is disabled in v1 and requires a separate
   opt-in design with bounded pages, languages, resources and adversarial

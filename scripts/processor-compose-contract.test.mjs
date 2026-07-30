@@ -25,7 +25,7 @@ describe("hostile document processor contract", () => {
     expect(tikaConfig).toContain("org.apache.tika.parser.ocr.TesseractOCRParser");
     expect(tikaAdapter).toContain('"X-Tika-OCRskipOcr": "true"');
     expect(tikaAdapter).toContain('"X-Tika-Skip-Embedded": "true"');
-    expect(tikaAdapter).toContain('new URL("/tika/text", config.tika.url)');
+    expect(tikaAdapter).toContain('new URL("/tika", config.tika.url)');
     expect(tikaAdapter).not.toContain("input.url");
     expect(tikaAdapter).not.toContain("input.headers");
   });
