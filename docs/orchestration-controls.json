@@ -12,8 +12,8 @@
         "A subsequent full task-list response confirmed the task was active in its generated worktree."
       ],
       "issue": 74,
-      "pullRequest": null,
-      "approvedByModel": null
+      "pullRequest": 77,
+      "approvedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-002",
@@ -26,8 +26,8 @@
         "Repository model governance permits Terra to read protected planning but forbids it from materially creating, editing, approving, or restructuring that planning."
       ],
       "issue": 74,
-      "pullRequest": null,
-      "approvedByModel": null
+      "pullRequest": 77,
+      "approvedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-003",
@@ -40,8 +40,8 @@
         "Repository-owned controls can be validated and applied by every future task and heartbeat."
       ],
       "issue": 74,
-      "pullRequest": null,
-      "approvedByModel": null
+      "pullRequest": 77,
+      "approvedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-004",
@@ -54,8 +54,8 @@
         "The successful issue #60 task was confirmed only after a full task observation exposed its real task ID and generated worktree."
       ],
       "issue": 74,
-      "pullRequest": null,
-      "approvedByModel": null
+      "pullRequest": 77,
+      "approvedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-005",
@@ -68,8 +68,8 @@
         "Repository ownership, public reads and SSH pushes succeeded while the stored CLI credential was denied issue updates and pull-request mutations."
       ],
       "issue": 74,
-      "pullRequest": null,
-      "approvedByModel": null
+      "pullRequest": 77,
+      "approvedByModel": "Sol Extra High"
     }
   ]
 }
