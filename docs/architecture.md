@@ -51,9 +51,10 @@ server/domain boundaries so they can be integration-tested without a browser.
 
 1. **Unauthenticated network:** no household, document, archive, account, or
    operations metadata is disclosed.
-2. **Authenticated browser:** input, cached state, queued commands, filenames,
-   uploaded bytes, and identifiers remain untrusted. Client-side visibility is
-   never authorization.
+2. **Authenticated browser:** input, rendered state, filenames, uploaded bytes,
+   and identifiers remain untrusted. Client-side visibility is never
+   authorization. Private workspace snapshots and commands are not retained in
+   app-controlled durable browser storage.
 3. **Household authorization:** access is rechecked server-side for every
    request and stream. Removed membership must take effect immediately.
 4. **PostgreSQL:** the durable source for identities, permissions, lifecycle,
@@ -107,6 +108,8 @@ Worker invariants:
 4. The route returns non-cacheable state. The client refreshes from the server
    rather than treating optimistic state as authoritative for structural
    changes.
+5. Failed browser commands are visible, are not queued or replayed, and leave
+   the last server-confirmed workspace in memory.
 
 ### Document intake
 
@@ -160,6 +163,8 @@ Durable decisions live in `docs/adr`; issues track their implementation.
 - [ADR-0002: Evidence-driven delivery and immutable promotion](adr/0002-evidence-driven-delivery.md)
 - [ADR-0003: Gitflow preview and stable channels](adr/0003-gitflow-preview-and-stable-channels.md)
 - [ADR-0004: Supported upgrades and recoverable restore](adr/0004-supported-upgrades-and-recoverable-restore.md)
+- [ADR-0005: Private reviewed ingestion and mailbox staging](adr/0005-reviewed-ingestion-and-mailbox-staging.md)
+- [ADR-0006: Online-authoritative private workspace](adr/0006-online-authoritative-private-workspace.md)
 
 Decisions intentionally deferred beyond stable v1 include managed multi-tenancy,
 object storage, horizontal workers, a remote semantic-extraction provider, and

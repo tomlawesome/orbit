@@ -23,7 +23,9 @@ export async function POST(request: NextRequest) {
       // Local logout must succeed even if the provider is unavailable.
     }
 
-    const response = NextResponse.redirect(redirectTarget, 303);
+    const response = request.headers.get("accept")?.includes("application/json")
+      ? NextResponse.json({ redirectTo: redirectTarget.href })
+      : NextResponse.redirect(redirectTarget, 303);
     response.headers.set("Cache-Control", "no-store");
     clearSessionCookie(response, config);
     return response;

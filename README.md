@@ -98,9 +98,9 @@ become urgent.
 - **A complete record of care** — item details, schedule history, activity
   timelines, archived records, reminders, notification state, and encrypted
   supporting documents.
-- **Useful even when disconnected** — an installable PWA with IndexedDB
-  snapshots, queued offline changes, explicit sync state, an offline shell, and
-  service-worker push handling.
+- **Installable without private offline storage** — a PWA shell and
+  service-worker push handling, while authenticated workspace data remains
+  server-authoritative and changes are never queued for later replay.
 - **Private by design** — provider-neutral OIDC, opaque server-side sessions,
   PKCE, signed token validation, same-origin enforcement, CSRF protection, and
   authenticated household APIs.
@@ -270,9 +270,11 @@ Orbit already includes:
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
   retention purge, and storage reconciliation.
 
-For authenticated users, Orbit retains a user-scoped IndexedDB snapshot and
-synchronises user-scoped queued offline changes. Production images contain no
-sample household items or seeded fake records.
+Orbit does not retain authenticated workspace snapshots or queued changes in
+app-controlled browser storage. It purges the legacy preview-build IndexedDB
+database before session bootstrap and local logout, and its service worker
+excludes API and authentication responses. Production images contain no sample
+household items or seeded fake records.
 
 ## Local development
 
