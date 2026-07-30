@@ -224,6 +224,9 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       setDraftApprovalBusy(false);
     }
   }
+  function updateDraftReview(field: keyof DraftReview, value: string) {
+    setDraftReview((current) => ({ ...current, [field]: value }));
+  }
 
   return (
     <section className="detail-section documents-section" aria-labelledby="documents-heading">
@@ -268,10 +271,10 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       {draft && <section className="detail-action-panel" aria-labelledby="document-draft-heading">
         <h3 id="document-draft-heading">Review extracted draft</h3>
         <p>Suggestions are untrusted document text. Check, edit or clear every field before approval.</p>
-        <label className="field field-wide"><span>Item title</span><input value={draftReview.title} maxLength={100} required onChange={(event) => setDraftReview((current) => ({ ...current, title: event.currentTarget.value }))} /></label>
+        <label className="field field-wide"><span>Item title</span><input value={draftReview.title} maxLength={100} required onChange={(event) => updateDraftReview("title", event.currentTarget.value)} /></label>
         <div className="field-grid">
-          <label className="field"><span>Provider</span><input value={draftReview.provider} maxLength={100} onChange={(event) => setDraftReview((current) => ({ ...current, provider: event.currentTarget.value }))} /></label>
-          <label className="field"><span>Reference</span><input value={draftReview.reference} maxLength={80} onChange={(event) => setDraftReview((current) => ({ ...current, reference: event.currentTarget.value }))} /></label>
+          <label className="field"><span>Provider</span><input value={draftReview.provider} maxLength={100} onChange={(event) => updateDraftReview("provider", event.currentTarget.value)} /></label>
+          <label className="field"><span>Reference</span><input value={draftReview.reference} maxLength={80} onChange={(event) => updateDraftReview("reference", event.currentTarget.value)} /></label>
         </div>
         {draft.evidence.excerpt && <p>Extracted evidence: {draft.evidence.excerpt.slice(0, 500)}</p>}
         {draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}

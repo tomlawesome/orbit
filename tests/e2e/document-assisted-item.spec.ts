@@ -92,7 +92,7 @@ test.describe("document-assisted item intake", () => {
       });
     });
     const inspectionResponse = page.waitForResponse((response) => response.url().includes("/item-document-inspection") && response.request().method() === "POST");
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "synthetic-policy.pdf",
       mimeType: "application/pdf",
       buffer: syntheticPdf("Provider: Hostile-but-inert Cover\nPolicy number: REVIEW-12345\n2030-12-20"),
@@ -152,7 +152,7 @@ test.describe("document-assisted item intake", () => {
     const editor = page.getByRole("dialog", { name: "Add an item" });
     await editor.getByLabel("What do you want to keep track of?").fill(`Command failure ${Date.now()}`);
     await editor.getByRole("button", { name: "No schedule" }).click();
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "command-failure.pdf",
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic command failure"),
@@ -187,7 +187,7 @@ test.describe("document-assisted item intake", () => {
     const title = `Attachment failure ${Date.now()}`;
     await editor.getByLabel("What do you want to keep track of?").fill(title);
     await editor.getByRole("button", { name: "No schedule" }).click();
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "attachment-failure.pdf",
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic attachment failure"),
