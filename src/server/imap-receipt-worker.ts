@@ -108,11 +108,11 @@ export function materializeImapNotificationsForTests(now = new Date(), limit = n
 }
 
 /** Atomically leases mailbox notifications with stale-token protection. */
-async function claimNotifications(now = new Date(), limit = 25, onlyIds?: string[]): Promise<ClaimedNotification[]> {
+async function claimNotifications(now = new Date(), limit = 25, onlyDeliveryIds?: string[]): Promise<ClaimedNotification[]> {
   const boundedLimit = Math.max(1, Math.min(Math.floor(limit), notificationMaterializationBatchSize));
   const nowIso = now.toISOString();
   const staleIso = new Date(now.getTime() - notificationLeaseDurationMs).toISOString();
-  const idScope = onlyIds?.length ? sql`AND id IN (${sql.join(onlyIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
+  const idScope = onlyDeliveryIds?.length ? sql`AND id IN (${sql.join(onlyDeliveryIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
   const rows = await getDb().execute(sql<ClaimedNotification>`
     with claimable as (
       select id
@@ -135,8 +135,8 @@ async function claimNotifications(now = new Date(), limit = 25, onlyIds?: string
 }
 
 /** PostgreSQL contract seam for concurrent lease tests. */
-export function claimImapNotificationsForTests(now = new Date(), limit = notificationMaterializationBatchSize, ids?: string[]): Promise<ClaimedNotification[]> {
-  return claimNotifications(now, limit, ids);
+export function claimImapNotificationsForTests(now = new Date(), limit = notificationMaterializationBatchSize, deliveryIds?: string[]): Promise<ClaimedNotification[]> {
+  return claimNotifications(now, limit, deliveryIds);
 }
 
 function failureState(category: ImapNotificationFailure, attempts: number, maxAttempts: number): "retry" | "failed" | "cancelled" {
