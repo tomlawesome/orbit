@@ -2,6 +2,11 @@ import { expect, test, type Page } from "@playwright/test";
 
 const administrator = "Orbit Administrator";
 
+interface SyntheticHousehold {
+  id: string;
+  name: string;
+}
+
 async function signIn(page: Page) {
   await page.goto("/");
   await page.getByRole("link", { name: "Sign in securely" }).click();
@@ -9,7 +14,15 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
-async function ensureSyntheticHousehold(page: Page) {
+async function readDurableWorkspace(page: Page): Promise<{ households: SyntheticHousehold[] }> {
+  const response = await page.request.get("/api/workspace");
+  if (!response.ok()) throw new Error(`Could not read the authenticated workspace (${response.status()})`);
+  const payload = await response.json() as { workspace?: { households?: SyntheticHousehold[] } };
+  if (!payload.workspace || !Array.isArray(payload.workspace.households)) throw new Error("Authenticated workspace response was invalid");
+  return { households: payload.workspace.households };
+}
+
+async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold | null> {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
   const desktopSettings = page.getByRole("button", { name: "Open personalisation settings" });
   const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
@@ -22,7 +35,7 @@ async function ensureSyntheticHousehold(page: Page) {
     ]);
     return recoveryVisible || desktopSettingsVisible || mobileNavigationVisible;
   }, { timeout: 15_000 }).toBe(true);
-  if (!await recoveryHeading.isVisible()) return;
+  if (!await recoveryHeading.isVisible()) return null;
 
   const projectName = test.info().project.name.replace(/[^a-z0-9]+/gi, "-");
   const householdName = `Operations ${projectName}`;
@@ -39,6 +52,34 @@ async function ensureSyntheticHousehold(page: Page) {
     ]);
     return desktopSettingsVisible || mobileNavigationVisible;
   }, { timeout: 15_000 }).toBe(true);
+  const workspace = await readDurableWorkspace(page);
+  const household = workspace.households.find((entry) => entry.name === householdName);
+  if (!household) throw new Error(`Created household "${householdName}" was not present in the durable workspace`);
+  return household;
+}
+
+async function cleanupSyntheticHousehold(page: Page, household: SyntheticHousehold) {
+  const sessionResponse = await page.request.get("/api/auth/session");
+  if (!sessionResponse.ok()) throw new Error(`Could not read the authenticated session for cleanup (${sessionResponse.status()})`);
+  const session = await sessionResponse.json() as { csrfToken: string };
+  const url = `/api/households/${encodeURIComponent(household.id)}/lifecycle`;
+  const headers = {
+    Origin: new URL(page.url()).origin,
+    "X-CSRF-Token": session.csrfToken,
+  };
+  const deletionResponse = await page.request.post(url, {
+    headers,
+    data: { action: "delete", confirmation: household.name },
+  });
+  if (deletionResponse.status() === 404) return;
+  if (!deletionResponse.ok()) throw new Error(`Could not schedule synthetic household cleanup (${deletionResponse.status()})`);
+
+  const hardDeleteResponse = await page.request.post(url, {
+    headers,
+    data: { action: "hard_delete", confirmation: household.name },
+  });
+  if (hardDeleteResponse.status() === 404) return;
+  if (!hardDeleteResponse.ok()) throw new Error(`Could not permanently remove synthetic household (${hardDeleteResponse.status()})`);
 }
 
 function operationsPayload(audit: Array<Record<string, unknown>>, nextCursor: string | null, deliveries: Array<Record<string, unknown>> = []) {
@@ -128,35 +169,50 @@ test.describe("administrator operations evidence", () => {
     });
 
     await signIn(page);
-    await ensureSyntheticHousehold(page);
-    const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
-    if (await mobileNavigation.isVisible()) {
-      await mobileNavigation.click();
-      await page.getByRole("button", { name: "Personalise", exact: true }).click();
-    } else {
-      await page.getByRole("button", { name: "Open personalisation settings" }).click();
+    let createdHousehold: SyntheticHousehold | null = null;
+    let journeyFailed = false;
+    try {
+      createdHousehold = await ensureSyntheticHousehold(page);
+      const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
+      if (await mobileNavigation.isVisible()) {
+        await mobileNavigation.click();
+        await page.getByRole("button", { name: "Personalise", exact: true }).click();
+      } else {
+        await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      }
+      const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
+      await expect(settings).toBeVisible();
+      await settings.getByRole("tab", { name: "Admin" }).click();
+      await expect(settings.getByRole("heading", { name: "Operations" })).toBeVisible();
+      await expect(settings.getByText("provider_unavailable", { exact: true })).toBeVisible();
+      await expect(settings.getByText("Household ownership transferred", { exact: true })).toHaveCount(25);
+      await expect(settings.getByText("synthetic-secret-must-not-render", { exact: true })).toHaveCount(0);
+      await expect(settings.getByText("synthetic-key-id", { exact: true })).toHaveCount(0);
+
+      page.once("dialog", async (dialog) => {
+        expect(dialog.message()).toContain("duplicate");
+        await dialog.accept();
+      });
+      await settings.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect(page.getByText("Job queued for retry.", { exact: true })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      await expect(page.locator("body")).not.toContainText("synthetic-secret-must-not-render");
+      await expect(page.locator("body")).not.toContainText("synthetic-key-id");
+
+      await settings.getByRole("button", { name: "Load older history" }).click();
+      await expect(settings.getByText("Account disabled", { exact: true })).toBeVisible();
+      await expect(settings.getByRole("button", { name: "Load older history" })).toHaveCount(0);
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
+    } finally {
+      if (createdHousehold) {
+        try {
+          await cleanupSyntheticHousehold(page, createdHousehold);
+        } catch (cleanupError) {
+          if (!journeyFailed) throw cleanupError;
+        }
+      }
     }
-    const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
-    await expect(settings).toBeVisible();
-    await settings.getByRole("tab", { name: "Admin" }).click();
-    await expect(settings.getByRole("heading", { name: "Operations" })).toBeVisible();
-    await expect(settings.getByText("provider_unavailable", { exact: true })).toBeVisible();
-    await expect(settings.getByText("Household ownership transferred", { exact: true })).toBeVisible();
-    await expect(settings.getByText("synthetic-secret-must-not-render", { exact: true })).toHaveCount(0);
-    await expect(settings.getByText("synthetic-key-id", { exact: true })).toHaveCount(0);
-
-    page.once("dialog", async (dialog) => {
-      expect(dialog.message()).toContain("duplicate");
-      await dialog.accept();
-    });
-    await settings.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(page.getByText("Job queued for retry.", { exact: true })).toBeVisible();
-    await expect(settings.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
-    await expect(page.locator("body")).not.toContainText("synthetic-secret-must-not-render");
-    await expect(page.locator("body")).not.toContainText("synthetic-key-id");
-
-    await settings.getByRole("button", { name: "Load older history" }).click();
-    await expect(settings.getByText("Account disabled", { exact: true })).toBeVisible();
-    await expect(settings.getByRole("button", { name: "Load older history" })).toHaveCount(0);
   });
 });
