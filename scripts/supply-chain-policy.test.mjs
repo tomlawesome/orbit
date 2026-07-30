@@ -154,6 +154,7 @@ describe("supply-chain policy", () => {
     expect(configure).toContain(
       "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag.",
     );
+    expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
     expect(deploy).toContain(
       "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest.",
     );
