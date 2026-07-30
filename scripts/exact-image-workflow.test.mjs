@@ -112,6 +112,12 @@ describe("exact-image publication workflow", () => {
     expect(workflow.slice(push, attest)).not.toContain("docker/build-push-action");
   });
 
+  it("requires the database-backed ready contract before smoke acceptance continues", () => {
+    expect(workflow).toContain("- name: Verify health endpoint");
+    expect(workflow).toContain('.status == "ready" and .service == "orbit"');
+    expect(workflow).not.toContain('.status == "ok" and .service == "orbit"');
+  });
+
   it("attests and verifies the resolved registry digest with least privilege", () => {
     const smoke = jobBlock("smoke", "publish_preview");
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));

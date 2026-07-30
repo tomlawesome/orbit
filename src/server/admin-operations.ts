@@ -39,6 +39,24 @@ const documentFailureCodes = new Set([
 ]);
 
 const actionLabels: Record<string, string> = {
+  administrator_granted: "Administrator access granted",
+  administrator_revoked: "Administrator access revoked",
+  account_disabled: "Account disabled",
+  account_enabled: "Account enabled",
+  member_left: "Household membership left",
+  member_removed: "Household member removed",
+  ownership_transferred: "Household ownership transferred",
+  household_deletion_requested: "Household deletion scheduled",
+  household_deletion_cancelled: "Household deletion cancelled",
+  household_hard_deleted: "Household deleted",
+  household_purged: "Household retention completed",
+  portable_archive_requested: "Archive requested",
+  portable_archive_downloaded: "Archive downloaded",
+  portable_archive_expired: "Archive expired",
+  portable_archive_imported: "Archive imported",
+  document_available: "Document made available",
+  document_crypto_missing: "Document protection issue detected",
+  document_storage_invalid: "Document storage issue detected",
   notification_delivery_retried: "Notification delivery retried",
   notification_delivery_discarded: "Notification delivery discarded",
   document_job_retried: "Document maintenance job retried",
@@ -47,6 +65,14 @@ const actionLabels: Record<string, string> = {
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
 };
+
+/** Maps persisted actions to a bounded administrator-facing label. */
+export function safeAdministratorAuditLabel(action: string): string {
+  if (actionLabels[action]) return actionLabels[action];
+  if (action.startsWith("document_draft_")) return "Document review updated";
+  if (action.startsWith("reviewed_intake_")) return "Reviewed intake updated";
+  return "Orbit administration activity";
+}
 
 const providerVerificationState = globalThis as typeof globalThis & {
   __orbitAdminSmtpVerification?: { inFlight?: Promise<string>; lastStartedAt?: number };
@@ -219,7 +245,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       id: entry.id,
       actorName: entry.actorName ?? "Orbit system",
       householdName: entry.householdName ?? "Instance",
-      actionLabel: actionLabels[entry.action] ?? "Orbit administration activity",
+      actionLabel: safeAdministratorAuditLabel(entry.action),
       createdAt: entry.createdAt,
     })),
     nextCursor: historyRows.length > history.length && history.length
@@ -256,7 +282,7 @@ export async function updateNotificationDelivery(
       throw new AppError("operation_conflict", "That operation is no longer available", 409);
     }
 
-    await transaction.update(notificationDeliveries).set(action === "retry" ? {
+    const updated = await transaction.update(notificationDeliveries).set(action === "retry" ? {
       status: "pending",
       attempts: 0,
       scheduledFor: new Date(),
@@ -274,7 +300,10 @@ export async function updateNotificationDelivery(
     }).where(and(
       eq(notificationDeliveries.id, deliveryId),
       eq(notificationDeliveries.status, expectedStatus),
-    ));
+    )).returning({ id: notificationDeliveries.id });
+    if (!updated.length) {
+      throw new AppError("operation_conflict", "That operation is no longer available", 409);
+    }
     await transaction.insert(auditLog).values({
       householdId: record.householdId,
       actorUserId,
@@ -312,7 +341,7 @@ export async function updateDocumentJob(
       throw new AppError("operation_conflict", "That operation is no longer available", 409);
     }
 
-    await transaction.update(documentJobs).set(action === "retry" ? {
+    const updated = await transaction.update(documentJobs).set(action === "retry" ? {
       status: "pending",
       attempts: 0,
       lockedAt: null,
@@ -329,7 +358,10 @@ export async function updateDocumentJob(
       lastError: null,
       completedAt: null,
       updatedAt: new Date(),
-    }).where(and(eq(documentJobs.id, jobId), eq(documentJobs.status, expectedStatus)));
+    }).where(and(eq(documentJobs.id, jobId), eq(documentJobs.status, expectedStatus))).returning({ id: documentJobs.id });
+    if (!updated.length) {
+      throw new AppError("operation_conflict", "That operation is no longer available", 409);
+    }
     await transaction.insert(auditLog).values({
       householdId: record.householdId,
       actorUserId,
@@ -381,14 +413,16 @@ export async function retryExhaustedImapNotifications(actorUserId: string): Prom
       failureCode: null,
       updatedAt: new Date(),
     }).where(and(eq(imapNotificationDeliveries.status, "failed"), inArray(imapNotificationDeliveries.id, candidates.map((row) => row.id)))).returning({ id: imapNotificationDeliveries.id }) : [];
-    await transaction.insert(auditLog).values({
-      householdId: null,
-      actorUserId,
-      entityType: "imap_notification_delivery",
-      entityId: randomUUID(),
-      action: "imap_notification_delivery_retried",
-      changes: { previousStatus: "failed", count: rows.length },
-    });
+    if (rows.length) {
+      await transaction.insert(auditLog).values({
+        householdId: null,
+        actorUserId,
+        entityType: "imap_notification_delivery",
+        entityId: randomUUID(),
+        action: "imap_notification_delivery_retried",
+        changes: { previousStatus: "failed", count: rows.length },
+      });
+    }
     return { queued: rows.length };
   });
 }

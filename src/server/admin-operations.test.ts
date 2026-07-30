@@ -20,7 +20,7 @@ vi.mock("@/server/imap-ingestion", () => ({
   verifyImapIngestionProviders: mocks.verify,
 }));
 
-import { setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider } from "./admin-operations";
+import { safeAdministratorAuditLabel, setImapProviderVerificationDependenciesForTests, verifyImapIngestionProvider } from "./admin-operations";
 
 describe("administrator mailbox provider verification bounds", () => {
   beforeEach(() => {
@@ -54,5 +54,13 @@ describe("administrator mailbox provider verification bounds", () => {
     mocks.verify.mockResolvedValueOnce("available");
     await expect(verifyImapIngestionProvider("admin-user")).resolves.toEqual({ result: "available" });
     expect(mocks.verify).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("administrator audit labels", () => {
+  it("uses explicit safe labels for critical actions and a generic label for unknown values", () => {
+    expect(safeAdministratorAuditLabel("ownership_transferred")).toBe("Household ownership transferred");
+    expect(safeAdministratorAuditLabel("document_draft_approved")).toBe("Document review updated");
+    expect(safeAdministratorAuditLabel("raw recipient=recipient@example.invalid secret=not-real")).toBe("Orbit administration activity");
   });
 });
