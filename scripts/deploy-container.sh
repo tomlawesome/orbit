@@ -20,6 +20,15 @@ fail() {
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 
+if [[ "$mode" == "--build" ]]; then
+  export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
+else
+  configured_image="${ORBIT_IMAGE:-$(sed -n 's/^ORBIT_IMAGE=//p' "$environment_file" | tail -n 1)}"
+  [[ "$configured_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
+    fail "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest."
+  export ORBIT_IMAGE="$configured_image"
+fi
+
 bash scripts/configure.sh
 
 compose() {

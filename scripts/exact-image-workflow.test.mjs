@@ -140,7 +140,11 @@ describe("exact-image publication workflow", () => {
   });
 
   it("removes build-only package managers from the production image", () => {
-    const runner = dockerfile.slice(dockerfile.indexOf("FROM node:22-alpine AS runner"));
+    const runnerStart = dockerfile.search(
+      /^FROM node:22-alpine@sha256:[0-9a-f]{64} AS runner$/mu,
+    );
+    expect(runnerStart).toBeGreaterThanOrEqual(0);
+    const runner = dockerfile.slice(runnerStart);
 
     expect(runner).toContain("rm -rf /usr/local/lib/node_modules /opt/yarn-v*");
     expect(runner).toContain("/usr/local/bin/corepack");
