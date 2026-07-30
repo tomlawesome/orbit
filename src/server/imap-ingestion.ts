@@ -89,6 +89,27 @@ export function setImapClientFactoryForTests(factory: ImapClientFactory | undefi
   imapClientFactoryForTests = factory;
 }
 
+/** TLS-only provider options shared by polling and bounded verification. */
+export function imapProviderConnectionOptions(config: ImapIngestionConfig) {
+  return {
+    host: config.host,
+    port: config.port,
+    secure: true,
+    auth: { user: config.user, pass: config.password },
+    tls: { rejectUnauthorized: true, servername: config.tlsServerName || config.host },
+    logger: false as const,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
+    maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
+  };
+}
+
+function createImapClient(config: ImapIngestionConfig, verifyOnly = false): ImapFlow {
+  if (imapClientFactoryForTests) return imapClientFactoryForTests(config);
+  return new ImapFlow({ ...imapProviderConnectionOptions(config), ...(verifyOnly ? { verifyOnly: true } : {}) });
+}
+
 /** One-way process-local commitment used only to invalidate stale preflight results. */
 export function imapProviderConfigCommitment(config: ImapIngestionConfig, smtp: NotificationWorkerConfig): string {
   return createHash("sha256").update(JSON.stringify([
@@ -136,10 +157,12 @@ export async function verifyImapIngestionProviders(
 
   const pending: ImapProviderPreflightState = { status: "verification_pending", smtp: "not_configured", imap: "not_configured", checkedAt: null };
   const inFlight = (async () => {
-    const [smtpResult, imapResult] = await Promise.all([
+    const [smtpVerification, imapVerification] = await Promise.allSettled([
       dependencies.verifySmtp?.(smtp) ?? verifySmtpProviderConnection(smtp),
       dependencies.verifyImap?.(config) ?? verifyImapProvider(config),
     ]);
+    const smtpResult = smtpVerification.status === "fulfilled" ? smtpVerification.value : "smtp_unavailable";
+    const imapResult = imapVerification.status === "fulfilled" ? imapVerification.value : "imap_unavailable";
     const smtpStatus = smtpResult === "ready" ? "available" : smtpResult === "smtp_unconfigured" ? "not_configured" : smtpResult === "unsafe_input" ? "unsafe_input" : "provider_unavailable";
     const imapStatus = imapResult === "ready" ? "available" : imapResult === "imap_unconfigured" ? "not_configured" : "provider_unavailable";
     const status: ImapPreflightStatus = smtpStatus === "unsafe_input" ? "unsafe_input"
@@ -203,9 +226,6 @@ export function getImapIngestionConfig(environment: NodeJS.ProcessEnv = process.
   }
   if (configuredValues === 3 && parsed.IMAP_ENABLED && !parsed.SMTP_URL && !parsed.SMTP_HOST) {
     throw new Error("SMTP must be configured before IMAP ingestion is enabled");
-  }
-  if (configuredValues === 3 && parsed.IMAP_PORT !== 993) {
-    throw new Error("IMAP ingestion requires verified TLS on port 993; plaintext or STARTTLS downgrade is not supported");
   }
   const currentAliasSecret = runtimeSecretFromNames(environment, ["IMAP_ALIAS_CURRENT_SECRET", "IMAP_ALIAS_CURRENT_KEY", "IMAP_ALIAS_SECRET"]);
   const currentAliasGeneration = positiveGeneration(
@@ -965,13 +985,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
   if (!config.enabled) return;
   await reconcileImapStagingObjects();
   await reconcileImapRecipientAliases(config);
-  const client = imapClientFactoryForTests?.(config) ?? new ImapFlow({
-    host: config.host, port: config.port, secure: true,
-    auth: { user: config.user, pass: config.password },
-    tls: { rejectUnauthorized: true, servername: config.tlsServerName || config.host },
-    logger: false, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000,
-    maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
-  });
+  const client = createImapClient(config);
   try {
     await client.connect();
     const lock = await client.getMailboxLock(config.mailbox, { readOnly: true });
@@ -1114,19 +1128,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */
 export async function verifyImapProvider(config = getImapIngestionConfig()): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
   if (!config.enabled) return "imap_unconfigured";
-  const client = imapClientFactoryForTests?.(config) ?? new ImapFlow({
-    host: config.host,
-    port: config.port,
-    secure: true,
-    auth: { user: config.user, pass: config.password },
-    tls: { rejectUnauthorized: true, servername: config.tlsServerName || config.host },
-    logger: false,
-    connectionTimeout: 5_000,
-    greetingTimeout: 5_000,
-    socketTimeout: 5_000,
-    maxLiteralSize: IMAP_ATTACHMENT_LIMITS.rawMessageBytes,
-    verifyOnly: true,
-  });
+  const client = createImapClient(config, true);
   try {
     await client.connect();
     return "ready";

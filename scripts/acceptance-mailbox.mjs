@@ -5,11 +5,12 @@
  *
  * The operator supplies ORBIT_EXPECTED_DIGEST and ORBIT_IMAGE_DIGEST from the
  * exact immutable image under test, plus ORBIT_EXPECTED_REVISION and
- * ORBIT_IMAGE_REVISION. In fake mode, deterministic adapter evidence marks all
- * contract stages as passed for ordinary CI. In live mode, an external
- * provider harness supplies only boolean stage proofs in JSON; credentials,
- * addresses, headers, and provider responses are intentionally not accepted
- * as inputs or emitted as evidence.
+ * ORBIT_IMAGE_REVISION. In fake mode, deterministic adapter evidence is
+ * explicitly synthetic and non-representative; it is never reported as live
+ * provider acceptance. In live mode, an external provider harness supplies
+ * only boolean stage proofs in JSON; credentials, addresses, headers, and
+ * provider responses are intentionally not accepted as inputs or emitted as
+ * evidence.
  */
 
 import { writeFileSync } from "node:fs";
@@ -47,22 +48,34 @@ if (!expectedDigest || !actualDigest || expectedDigest !== actualDigest || !/^sh
   fail("exact_revision_mismatch");
 } else {
   const mode = process.env.ORBIT_ACCEPTANCE_MODE === "fake" ? "fake" : "live";
-  let proof = {};
-  if (mode === "live") {
-    try { proof = JSON.parse(process.env.ORBIT_ACCEPTANCE_PROOF ?? "{}"); } catch { fail("invalid_sanitized_proof"); }
+  if (mode === "fake") {
+    emit({
+      result: "synthetic_pass",
+      code: "synthetic_only",
+      classification: "synthetic_non_representative",
+      mode,
+      digest: actualDigest,
+      revision: actualRevision,
+      stages: Object.fromEntries(stages.map((stage) => [stage, true])),
+    });
   } else {
-    proof = Object.fromEntries(stages.map((stage) => [stage, true]));
+    let proof = {};
+    try {
+      const parsedProof = JSON.parse(process.env.ORBIT_ACCEPTANCE_PROOF ?? "{}");
+      if (!parsedProof || typeof parsedProof !== "object" || Array.isArray(parsedProof)) throw new Error("invalid proof shape");
+      proof = parsedProof;
+    } catch { fail("invalid_sanitized_proof"); }
+    if (process.exitCode) process.exit();
+    const evidence = Object.fromEntries(stages.map((stage) => [stage, proof[stage] === true]));
+    const passed = stages.every((stage) => evidence[stage]);
+    emit({
+      result: passed ? "passed" : "failed",
+      code: passed ? "ok" : "provider_acceptance_incomplete",
+      mode,
+      digest: actualDigest,
+      revision: actualRevision,
+      stages: evidence,
+    });
+    if (!passed) process.exitCode = 1;
   }
-  if (process.exitCode) process.exit();
-  const evidence = Object.fromEntries(stages.map((stage) => [stage, proof[stage] === true]));
-  const passed = stages.every((stage) => evidence[stage]);
-  emit({
-    result: passed ? "passed" : "failed",
-    code: passed ? "ok" : "provider_acceptance_incomplete",
-    mode,
-    digest: actualDigest,
-    revision: actualRevision,
-    stages: evidence,
-  });
-  if (!passed) process.exitCode = 1;
 }

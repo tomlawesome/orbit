@@ -1,11 +1,12 @@
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapNotificationDeliveries, users } from "@/db/schema";
-import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig, type NotificationWorkerConfig } from "@/server/notification-worker";
+import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeExpiredImapStaging } from "@/server/imap-inbox";
+import { AppError } from "@/lib/app-error";
 
 type ImapNotificationKind = "receipt" | "review_ready";
-type ImapNotificationFailure = "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unknown";
+export type ImapNotificationFailure = "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unknown";
 interface ClaimedNotification { id: string; leaseToken: string }
 
 const notificationLeaseDurationMs = 10 * 60_000;
@@ -32,52 +33,95 @@ export function buildImapNotification(_kind: ImapNotificationKind, reviewUrl: st
 
 export function authenticatedReviewUrl(environment: NodeJS.ProcessEnv = process.env): string {
   const configured = environment.APP_URL;
-  if (!configured) return "/?open=inbox";
+  if (!configured) throw new AppError("unsafe_input", "The mailbox notification application URL is unavailable", 503);
   try {
     const url = new URL(configured);
-    url.username = "";
-    url.password = "";
-    url.pathname = "/";
-    url.search = "?open=inbox";
-    url.hash = "";
-    return url.href;
+    if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
+    return new URL("/?open=inbox", url.origin).href;
   } catch {
-    return "/?open=inbox";
+    throw new AppError("unsafe_input", "The mailbox notification application URL is unavailable", 503);
   }
 }
 
-/** Inserts one durable operation per receipt kind; duplicates are harmless. */
-async function materializeNotifications(now = new Date()): Promise<void> {
+const notificationMaterializationBatchSize = 25;
+
+/** Inserts only bounded, eligible durable operations at the database boundary. */
+async function materializeNotifications(now = new Date(), requestedLimit = notificationMaterializationBatchSize, onlyUserId?: string): Promise<number> {
+  const limit = Math.max(1, Math.min(Math.floor(requestedLimit), notificationMaterializationBatchSize));
   const db = getDb();
-  const rows = await db.select({
-    id: imapIngestionMessages.id,
-    userId: imapIngestionMessages.userId,
-    status: imapIngestionMessages.status,
-    receiptStatus: imapIngestionMessages.receiptStatus,
-  }).from(imapIngestionMessages).innerJoin(users, eq(users.id, imapIngestionMessages.userId)).where(and(isNotNull(imapIngestionMessages.userId), isNull(users.disabledAt)));
-  const values = rows.flatMap((row) => {
-    if (!row.userId) return [];
-    const kinds: ImapNotificationKind[] = [];
-    if (["pending", "retry", "processing"].includes(row.receiptStatus)) kinds.push("receipt");
-    if (row.status === "pending_review") kinds.push("review_ready");
-    return kinds.map((kind) => ({ messageId: row.id, userId: row.userId!, kind, nextAttemptAt: now }));
-  });
-  if (values.length) await db.insert(imapNotificationDeliveries).values(values).onConflictDoNothing();
+  const userScope = onlyUserId ? sql`AND m.user_id = ${onlyUserId}` : sql``;
+  const [receiptRows, reviewRows] = await Promise.all([
+    db.execute(sql`
+      WITH eligible AS (
+        SELECT m.id AS message_id, m.user_id
+        FROM imap_ingestion_messages AS m
+        INNER JOIN users AS u ON u.id = m.user_id
+        WHERE m.user_id IS NOT NULL
+          AND u.disabled_at IS NULL
+          ${userScope}
+          AND m.receipt_status IN ('pending', 'retry', 'processing')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM imap_notification_deliveries AS d
+            WHERE d.message_id = m.id AND d.kind = 'receipt'
+          )
+        ORDER BY m.id
+        LIMIT ${limit}
+      )
+      INSERT INTO imap_notification_deliveries (message_id, user_id, kind, next_attempt_at)
+      SELECT message_id, user_id, 'receipt'::imap_notification_kind, ${now}
+      FROM eligible
+      ON CONFLICT (message_id, kind) DO NOTHING
+      RETURNING id
+    `),
+    db.execute(sql`
+      WITH eligible AS (
+        SELECT m.id AS message_id, m.user_id
+        FROM imap_ingestion_messages AS m
+        INNER JOIN users AS u ON u.id = m.user_id
+        WHERE m.user_id IS NOT NULL
+          AND u.disabled_at IS NULL
+          ${userScope}
+          AND m.status = 'pending_review'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM imap_notification_deliveries AS d
+            WHERE d.message_id = m.id AND d.kind = 'review_ready'
+          )
+        ORDER BY m.id
+        LIMIT ${limit}
+      )
+      INSERT INTO imap_notification_deliveries (message_id, user_id, kind, next_attempt_at)
+      SELECT message_id, user_id, 'review_ready'::imap_notification_kind, ${now}
+      FROM eligible
+      ON CONFLICT (message_id, kind) DO NOTHING
+      RETURNING id
+    `),
+  ]);
+  return receiptRows.length + reviewRows.length;
+}
+
+/** PostgreSQL contract seam for bounded materialization tests. */
+export function materializeImapNotificationsForTests(now = new Date(), limit = notificationMaterializationBatchSize, userId?: string): Promise<number> {
+  return materializeNotifications(now, limit, userId);
 }
 
 /** Atomically leases mailbox notifications with stale-token protection. */
-async function claimNotifications(now = new Date(), limit = 25): Promise<ClaimedNotification[]> {
+async function claimNotifications(now = new Date(), limit = 25, onlyIds?: string[]): Promise<ClaimedNotification[]> {
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), notificationMaterializationBatchSize));
   const nowIso = now.toISOString();
   const staleIso = new Date(now.getTime() - notificationLeaseDurationMs).toISOString();
+  const idScope = onlyIds?.length ? sql`AND id IN (${sql.join(onlyIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
   const rows = await getDb().execute(sql<ClaimedNotification>`
     with claimable as (
       select id
       from imap_notification_deliveries
-      where (status in ('pending', 'retry') and next_attempt_at <= ${nowIso})
-         or (status = 'processing' and locked_at < ${staleIso})
+      where ((status in ('pending', 'retry') and next_attempt_at <= ${nowIso})
+         or (status = 'processing' and locked_at < ${staleIso}))
+        ${idScope}
       order by next_attempt_at, id
       for update skip locked
-      limit ${limit}
+      limit ${boundedLimit}
     )
     update imap_notification_deliveries as delivery
     set status = 'processing', locked_at = ${nowIso}, lease_token = gen_random_uuid(),
@@ -89,6 +133,11 @@ async function claimNotifications(now = new Date(), limit = 25): Promise<Claimed
   return rows as unknown as ClaimedNotification[];
 }
 
+/** PostgreSQL contract seam for concurrent lease tests. */
+export function claimImapNotificationsForTests(now = new Date(), limit = notificationMaterializationBatchSize, ids?: string[]): Promise<ClaimedNotification[]> {
+  return claimNotifications(now, limit, ids);
+}
+
 function failureState(category: ImapNotificationFailure, attempts: number, maxAttempts: number): "retry" | "failed" | "cancelled" {
   if (category === "smtp_unconfigured" || category === "smtp_rejected") return "cancelled";
   return attempts >= maxAttempts ? "failed" : "retry";
@@ -98,11 +147,11 @@ async function markNotificationFailure(
   id: string,
   leaseToken: string,
   attempts: number,
-  config: NotificationWorkerConfig,
+  maxAttempts: number,
   category: ImapNotificationFailure,
   now: Date,
 ): Promise<void> {
-  const status = failureState(category, attempts, config.maxAttempts);
+  const status = failureState(category, attempts, maxAttempts);
   const nextAttemptAt = status === "retry" ? new Date(now.getTime() + imapNotificationRetryDelayMs(attempts)) : now;
   const [updated] = await getDb().update(imapNotificationDeliveries).set({
     status,
@@ -123,6 +172,18 @@ async function markNotificationFailure(
       updatedAt: now,
     }).where(eq(imapIngestionMessages.id, updated.messageId));
   }
+}
+
+/** PostgreSQL contract seam for retry, exhaustion, and lease-fencing tests. */
+export function markImapNotificationFailureForTests(input: {
+  id: string;
+  leaseToken: string;
+  attempts: number;
+  maxAttempts: number;
+  category: ImapNotificationFailure;
+  now: Date;
+}): Promise<void> {
+  return markNotificationFailure(input.id, input.leaseToken, input.attempts, input.maxAttempts, input.category, input.now);
 }
 
 async function markNotificationSent(
@@ -154,12 +215,33 @@ async function markNotificationSent(
   }
 }
 
+async function cancelDisabledNotification(id: string, leaseToken: string, disabledAt: Date | null | undefined, now: Date): Promise<boolean> {
+  if (!disabledAt) return false;
+  const [cancelled] = await getDb().update(imapNotificationDeliveries).set({
+    status: "cancelled", lockedAt: null, leaseToken: null, failureCode: null, updatedAt: now,
+  }).where(and(
+    eq(imapNotificationDeliveries.id, id),
+    eq(imapNotificationDeliveries.status, "processing"),
+    eq(imapNotificationDeliveries.leaseToken, leaseToken),
+  )).returning({ id: imapNotificationDeliveries.id });
+  return Boolean(cancelled);
+}
+
+/** PostgreSQL contract seam for disabled-user cancellation tests. */
+export async function cancelDisabledImapNotificationForTests(id: string, leaseToken: string, now = new Date()): Promise<boolean> {
+  const [delivery] = await getDb().select({ disabledAt: users.disabledAt }).from(imapNotificationDeliveries)
+    .innerJoin(users, eq(users.id, imapNotificationDeliveries.userId))
+    .where(and(eq(imapNotificationDeliveries.id, id), eq(imapNotificationDeliveries.status, "processing"), eq(imapNotificationDeliveries.leaseToken, leaseToken)));
+  return cancelDisabledNotification(id, leaseToken, delivery?.disabledAt, now);
+}
+
 /** Sends only leased, content-free receipt/review-ready operations. */
 export async function runImapReceiptCycle(): Promise<void> {
   const config = getNotificationWorkerConfig();
   const now = new Date();
   await purgeExpiredImapStaging();
   await materializeNotifications(now);
+  const reviewUrl = authenticatedReviewUrl();
   const claimed = await claimNotifications(now);
   if (!claimed.length) return;
   const tokens = new Map(claimed.map((notification) => [notification.id, notification.leaseToken]));
@@ -175,16 +257,12 @@ export async function runImapReceiptCycle(): Promise<void> {
     .innerJoin(users, eq(users.id, imapNotificationDeliveries.userId))
     .where(and(inArray(imapNotificationDeliveries.id, claimed.map((notification) => notification.id)), eq(imapNotificationDeliveries.status, "processing")));
   const transporter = config.smtpUrl ? createSmtpTransport(config) : undefined;
-  const reviewUrl = authenticatedReviewUrl();
   try {
     for (const delivery of deliveries) {
       const leaseToken = tokens.get(delivery.id);
       if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
       try {
-        if (delivery.disabledAt) {
-          await getDb().update(imapNotificationDeliveries).set({ status: "cancelled", lockedAt: null, leaseToken: null, failureCode: null, updatedAt: now }).where(and(eq(imapNotificationDeliveries.id, delivery.id), eq(imapNotificationDeliveries.status, "processing"), eq(imapNotificationDeliveries.leaseToken, leaseToken)));
-          continue;
-        }
+        if (await cancelDisabledNotification(delivery.id, leaseToken, delivery.disabledAt, now)) continue;
         if (!transporter) throw Object.assign(new Error("SMTP unavailable"), { code: "smtp_unconfigured" });
         const notification = buildImapNotification(delivery.kind, reviewUrl);
         await transporter.sendMail({ from: config.smtpFrom, to: delivery.email, ...notification });
@@ -197,7 +275,7 @@ export async function runImapReceiptCycle(): Promise<void> {
             : categorizeProviderError("email", error) === "smtp_unavailable"
               ? "smtp_unavailable"
               : "unknown";
-        await markNotificationFailure(delivery.id, leaseToken, delivery.attempts, config, category, now);
+        await markNotificationFailure(delivery.id, leaseToken, delivery.attempts, config.maxAttempts, category, now);
       }
     }
   } finally {
