@@ -2,7 +2,7 @@
   --font-body: "Segoe UI Variable", "Segoe UI", Inter, Arial, sans-serif;
   --font-heading: "Segoe UI Variable Display", "Segoe UI", Manrope, Arial, sans-serif;
   --ink: #1b1b31;
-  --muted: #73738b;
+  --muted: #66667e;
   --canvas: #f2f1f9;
   --paper: #fff;
   --forest: #6255ed;
@@ -17,7 +17,7 @@
   --hero-start: #171833;
   --hero-end: #30266e;
   --focus-ink: #401137;
-  --focus-muted: #7b2a68;
+  --focus-muted: #4d1542;
   --shadow: 0 20px 55px rgb(32 27 83 / 11%);
   --text-bump: 2px;
   --heat-overdue: var(--coral);
@@ -77,9 +77,9 @@ button { color: inherit; }
   --sidebar-glow: rgb(221 136 61 / 22%); --hero-start: #2d2e2a; --hero-end: #4a4840; --focus-ink: #4e2713; --focus-muted: #813e1c;
 }
 .app-frame[data-theme="after-dark"] {
-  --ink: #1b1b31; --muted: #73738b; --canvas: #f2f1f9; --paper: #fff; --forest: #6255ed; --forest-2: #4c40c9;
+  --ink: #1b1b31; --muted: #66667e; --canvas: #f2f1f9; --paper: #fff; --forest: #6255ed; --forest-2: #4c40c9;
   --mint: #dffaf7; --coral: #ff4fa3; --coral-dark: #a72168; --sun: #22e7d3; --line: #deddf0; --sidebar: #12132c;
-  --sidebar-glow: rgb(113 92 255 / 32%); --hero-start: #171833; --hero-end: #30266e; --focus-ink: #401137; --focus-muted: #7b2a68;
+  --sidebar-glow: rgb(113 92 255 / 32%); --hero-start: #171833; --hero-end: #30266e; --focus-ink: #401137; --focus-muted: #4d1542;
 }
 
 .app-frame[data-mode="dark"] {
@@ -350,7 +350,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 }
 .list-heading { flex: 0 0 auto; padding-bottom: 15px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
 .list-heading > div:first-child { display: flex; align-items: baseline; gap: 11px; }
-.section-number { margin: 0; color: var(--coral); font-size: calc(9px + var(--text-bump)); font-weight: 850; letter-spacing: 1px; }
+.section-number { margin: 0; color: var(--coral-dark); font-size: calc(9px + var(--text-bump)); font-weight: 850; letter-spacing: 1px; }
 .list-heading h2 { margin: 0; font-size: calc(20px + var(--text-bump)); letter-spacing: -.7px; }
 .list-actions { display: flex; align-items: center; gap: 10px; }
 .list-actions > span { color: var(--muted); font-size: calc(9px + var(--text-bump)); }
@@ -403,7 +403,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .status-later { color: color-mix(in srgb, var(--heat-later) 80%, #132); background: color-mix(in srgb, var(--heat-later-bg) 80%, var(--paper)); }
 .status-due-soon { color: #76510e; background: #f7e8bc; }
 .status-upcoming { color: #1c5a42; background: #d9ebdf; }
-.status-unscheduled { color: #656962; background: #e8e6df; }
+.status-unscheduled { color: #60645e; background: #e8e6df; }
 .status-archived { color: #555b57; background: #e3e5e1; }
 .status-cancelled { color: #7a3a32; background: #f2dcd8; }
 .item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
