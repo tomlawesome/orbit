@@ -381,22 +381,25 @@ describe("notification worker PostgreSQL contracts", () => {
       leaseToken: deterministicLeaseToken(14),
     }).returning({ id: notificationDeliveries.id });
     const newerLease = deterministicLeaseToken(15);
+    let staleProviderCalls = 0;
     await runNotificationCycle(workerConfig(), {
       now: () => staleNow,
-      providers: fakeProviders(async () => {
+      providers: fakeProviders(() => { staleProviderCalls += 1; }),
+      beforeProviderDispatch: async () => {
         await getDb().update(notificationDeliveries).set({
           status: "processing",
           lockedAt: staleNow,
           leaseToken: newerLease,
           attempts: 2,
         }).where(eq(notificationDeliveries.id, staleDelivery.id));
-      }),
+      },
       nextLeaseToken: () => deterministicLeaseToken(16),
     });
     const staleCompletion = await deliveryForEvent(staleEventId);
     expect(staleCompletion?.status).toBe("processing");
     expect(staleCompletion?.leaseToken).toBe(newerLease);
     expect(staleCompletion?.sentAt).toBeNull();
+    expect(staleProviderCalls).toBe(0);
 
     const staleFailureFixture = await ownerOnlyFixture("worker-stale-failure");
     const staleFailureEventId = await seedEvent(staleFailureFixture, { pushEnabled: false });
@@ -412,23 +415,28 @@ describe("notification worker PostgreSQL contracts", () => {
       leaseToken: deterministicLeaseToken(17),
     }).returning({ id: notificationDeliveries.id });
     const newerFailureLease = deterministicLeaseToken(18);
+    let staleFailureProviderCalls = 0;
     await runNotificationCycle(workerConfig(), {
       now: () => staleNow,
-      providers: fakeProviders(async () => {
+      providers: fakeProviders(() => {
+        staleFailureProviderCalls += 1;
+        throw { code: "ETIMEDOUT", message: "private provider detail" };
+      }),
+      beforeProviderDispatch: async () => {
         await getDb().update(notificationDeliveries).set({
           status: "processing",
           lockedAt: staleNow,
           leaseToken: newerFailureLease,
           attempts: 2,
         }).where(eq(notificationDeliveries.id, staleFailureDelivery.id));
-        throw { code: "ETIMEDOUT", message: "private provider detail" };
-      }),
+      },
       nextLeaseToken: () => deterministicLeaseToken(19),
     });
     const staleFailure = await deliveryForEvent(staleFailureEventId);
     expect(staleFailure?.status).toBe("processing");
     expect(staleFailure?.leaseToken).toBe(newerFailureLease);
     expect(staleFailure?.lastError).toBeNull();
+    expect(staleFailureProviderCalls).toBe(0);
   });
 
   it("does not dispatch a lease reclaimed after the cycle starts", async () => {
