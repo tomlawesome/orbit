@@ -25,6 +25,12 @@ function isSha(value) {
   return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
 }
 
+function hasExactStrings(value, expected) {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && expected.every((entry) => value.includes(entry));
+}
+
 function readJson(urlOrPath) {
   return JSON.parse(readFileSync(urlOrPath, "utf8"));
 }
@@ -66,6 +72,73 @@ export function validateOrchestrationPolicy(policy) {
         .every((source) => policy.taskStatusSources.includes(source)),
     "task status sources are incomplete.",
   );
+  const access = policy.remoteAccessPreflight;
+  assert(isObject(access), "remoteAccessPreflight is required.");
+  assert(
+    access.connectorMountProof === "live_connector_call",
+    "connector mounting must be proven by a live connector call.",
+  );
+  assert(
+    access.sshRefProof === "ssh_exact_ref_read",
+    "SSH reachability must be proven by an exact non-mutating ref read.",
+  );
+  assert(
+    hasExactStrings(access.cliReadProofs, [
+      "cli_auth_status",
+      "repository_read",
+      "issues_read",
+      "pull_requests_read",
+      "actions_read",
+    ]),
+    "CLI preflight proofs are incomplete.",
+  );
+  assert(
+    hasExactStrings(access.actionClasses, [
+      "repository_read",
+      "issue_read",
+      "pull_request_read",
+      "actions_read",
+      "git_fetch",
+      "git_push",
+      "issue_write",
+      "pull_request_write",
+      "protected_merge",
+    ]),
+    "remote action classes are incomplete.",
+  );
+  assert(
+    hasExactStrings(access.capabilityStates, ["available", "unavailable", "untested"]),
+    "remote capability states are incomplete.",
+  );
+  assert(
+    Array.isArray(access.routeOrder)
+      && access.routeOrder.join(",") === "connector,cli,browser_user_controlled",
+    "remote access routing must be connector first, CLI second, and user-controlled browser last.",
+  );
+  assert(
+    hasExactStrings(access.protectedWriteClasses, ["pull_request_write", "protected_merge"]),
+    "protected write classes are incomplete.",
+  );
+  assert(
+    hasExactStrings(access.writeEvidenceKinds, [
+      "authenticated_write_capability",
+      "endpoint_write_success",
+    ]),
+    "authenticated write evidence kinds are incomplete.",
+  );
+  assert(
+    access.rejectInstalledMetadataAsMountProof === true,
+    "installed plugin metadata must not prove connector mounting.",
+  );
+  assert(
+    access.rejectOwnershipOrPublicReadAsWriteProof === true,
+    "repository ownership or public reads must not prove write capability.",
+  );
+  assert(
+    access.failClosedBeforeDependentLaunch === true,
+    "dependent delivery must fail closed without a protected write path.",
+  );
+  assert(access.secretsInChat === false, "credential or session material must never enter chat.");
   assert(
     Array.isArray(policy.deliveryStages) && policy.deliveryStages.length > 0,
     "deliveryStages are required.",
@@ -137,11 +210,133 @@ function validateAuthoritativeTaskStatus(status, policy) {
   assert(isTimestamp(status.observedAt), "task status requires an observation timestamp.");
 }
 
+function validateRemoteAccessPreflight(preflight, policy) {
+  const access = policy.remoteAccessPreflight;
+  assert(isObject(preflight), "remote access preflight is required.");
+  assert(isTimestamp(preflight.observedAt), "remote access preflight requires an observation timestamp.");
+
+  assert(isObject(preflight.connector), "connector preflight is required.");
+  assert(typeof preflight.connector.mounted === "boolean", "connector mounted state is required.");
+  if (preflight.connector.mounted) {
+    assert(
+      preflight.connector.proof === access.connectorMountProof,
+      "connector mounting requires a live connector call.",
+    );
+  } else {
+    assert(
+      preflight.connector.proof === "unavailable_result",
+      "an unavailable connector requires an explicit unavailable result.",
+    );
+  }
+
+  assert(isObject(preflight.ssh), "SSH preflight is required.");
+  assert(typeof preflight.ssh.reachable === "boolean", "SSH reachability state is required.");
+  if (preflight.ssh.reachable) {
+    assert(
+      preflight.ssh.proof === access.sshRefProof,
+      "SSH reachability requires an exact non-mutating ref read.",
+    );
+    assert(
+      Array.isArray(preflight.ssh.refs) && preflight.ssh.refs.length > 0,
+      "SSH reachability requires exact remote refs.",
+    );
+    for (const ref of preflight.ssh.refs) {
+      assert(isObject(ref), "each SSH ref proof must be an object.");
+      assert(
+        typeof ref.name === "string" && /^refs\/(heads|tags)\/[^ \u0000-\u001f]+$/u.test(ref.name),
+        "SSH ref proof requires an exact heads or tags ref.",
+      );
+      assert(isSha(ref.sha), "SSH ref proof requires an exact commit SHA.");
+    }
+  } else {
+    assert(
+      preflight.ssh.proof === "unavailable_result",
+      "unavailable SSH requires an explicit unavailable result.",
+    );
+  }
+
+  assert(isObject(preflight.cli), "CLI preflight is required.");
+  assert(preflight.cli.checked === true, "CLI account and read capability checks are required.");
+  assert(
+    typeof preflight.cli.accountVerified === "boolean",
+    "CLI account verification result is required.",
+  );
+  assert(preflight.cli.proof === "cli_auth_status", "CLI account must be checked with auth status.");
+  assert(
+    preflight.cli.credentialMaterialRecorded === false,
+    "CLI credential material must not be recorded.",
+  );
+  assert(isObject(preflight.cli.readCapabilities), "CLI read capability results are required.");
+  for (const capability of access.cliReadProofs.filter((proof) => proof !== "cli_auth_status")) {
+    assert(
+      access.capabilityStates.includes(preflight.cli.readCapabilities[capability]),
+      `CLI ${capability} capability result is invalid.`,
+    );
+  }
+
+  assert(isObject(preflight.browser), "browser fallback state is required.");
+  assert(
+    typeof preflight.browser.userControlled === "boolean",
+    "browser fallback control state is required.",
+  );
+
+  assert(Array.isArray(preflight.capabilities), "remote action capabilities are required.");
+  const capabilities = new Map();
+  for (const capability of preflight.capabilities) {
+    assert(isObject(capability), "each remote action capability must be an object.");
+    assert(
+      access.actionClasses.includes(capability.actionClass),
+      `unknown remote action class ${String(capability.actionClass)}.`,
+    );
+    assert(
+      !capabilities.has(capability.actionClass),
+      `duplicate remote action class ${capability.actionClass}.`,
+    );
+    assert(
+      access.capabilityStates.includes(capability.status),
+      `${capability.actionClass} capability status is invalid.`,
+    );
+    assert(
+      access.routeOrder.includes(capability.route),
+      `${capability.actionClass} capability route is invalid.`,
+    );
+    assert(isNonEmptyString(capability.evidenceKind), `${capability.actionClass} evidence is required.`);
+    if (
+      capability.status === "available"
+      && [
+        "git_push",
+        "issue_write",
+        "pull_request_write",
+        "protected_merge",
+      ].includes(capability.actionClass)
+    ) {
+      assert(
+        access.writeEvidenceKinds.includes(capability.evidenceKind),
+        "protected write capability requires authenticated write evidence.",
+      );
+    }
+    if (capability.status === "available" && capability.route === "browser_user_controlled") {
+      assert(
+        preflight.browser.userControlled === true,
+        "browser fallback must remain explicitly user-controlled.",
+      );
+    }
+    capabilities.set(capability.actionClass, capability);
+  }
+  assert(
+    capabilities.size === access.actionClasses.length
+      && access.actionClasses.every((actionClass) => capabilities.has(actionClass)),
+    "every remote action class must record available, unavailable, or untested state.",
+  );
+  return capabilities;
+}
+
 export function validateOperationalState(state, policy) {
   validateOrchestrationPolicy(policy);
   assert(isObject(state), "operational state must be an object.");
   assert(state.schemaVersion === 1, "unsupported operational-state schema version.");
   validateActor(state.actor, policy);
+  const remoteCapabilities = validateRemoteAccessPreflight(state.accessPreflight, policy);
   assert(isObject(state.delivery), "delivery state is required.");
 
   const delivery = state.delivery;
@@ -165,6 +360,18 @@ export function validateOperationalState(state, policy) {
   }
 
   const taskStages = new Set(["launch_pending", "active", "handback", "sol_review"]);
+  const protectedWriteStages = new Set(["launch_pending", "active", "handback", "sol_review", "pr_open"]);
+  if (
+    policy.remoteAccessPreflight.failClosedBeforeDependentLaunch
+    && protectedWriteStages.has(delivery.stage)
+  ) {
+    assert(
+      policy.remoteAccessPreflight.protectedWriteClasses.every(
+        (actionClass) => remoteCapabilities.get(actionClass)?.status === "available",
+      ),
+      "protected write path is unavailable; do not launch or advance dependent delivery.",
+    );
+  }
   if (taskStages.has(delivery.stage)) {
     assert(isObject(delivery.task), `${delivery.stage} delivery requires task state.`);
     assert(

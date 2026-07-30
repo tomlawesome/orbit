@@ -31,6 +31,50 @@
     "read_thread",
     "wait_threads"
   ],
+  "remoteAccessPreflight": {
+    "connectorMountProof": "live_connector_call",
+    "sshRefProof": "ssh_exact_ref_read",
+    "cliReadProofs": [
+      "cli_auth_status",
+      "repository_read",
+      "issues_read",
+      "pull_requests_read",
+      "actions_read"
+    ],
+    "actionClasses": [
+      "repository_read",
+      "issue_read",
+      "pull_request_read",
+      "actions_read",
+      "git_fetch",
+      "git_push",
+      "issue_write",
+      "pull_request_write",
+      "protected_merge"
+    ],
+    "capabilityStates": [
+      "available",
+      "unavailable",
+      "untested"
+    ],
+    "routeOrder": [
+      "connector",
+      "cli",
+      "browser_user_controlled"
+    ],
+    "protectedWriteClasses": [
+      "pull_request_write",
+      "protected_merge"
+    ],
+    "writeEvidenceKinds": [
+      "authenticated_write_capability",
+      "endpoint_write_success"
+    ],
+    "rejectInstalledMetadataAsMountProof": true,
+    "rejectOwnershipOrPublicReadAsWriteProof": true,
+    "failClosedBeforeDependentLaunch": true,
+    "secretsInChat": false
+  },
   "deliveryStages": [
     "planned",
     "launch_pending",

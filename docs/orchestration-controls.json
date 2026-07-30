@@ -56,6 +56,20 @@
       "issue": 74,
       "pullRequest": null,
       "approvedByModel": null
+    },
+    {
+      "id": "ORCH-005",
+      "status": "candidate",
+      "decisionClass": "protected_planning",
+      "summary": "Before dependent delivery, prove live GitHub connector, exact SSH refs, credential-safe CLI reads and an authenticated protected write path; record each action class and keep browser authentication explicitly user-controlled.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Installed GitHub plugin files remained present while the live connector disappeared from a prior task, so installation metadata did not prove mounting.",
+        "Repository ownership, public reads and SSH pushes succeeded while the stored CLI credential was denied issue updates and pull-request mutations."
+      ],
+      "issue": 74,
+      "pullRequest": null,
+      "approvedByModel": null
     }
   ]
 }
