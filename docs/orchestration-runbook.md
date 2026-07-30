@@ -94,20 +94,39 @@ heartbeat reconciles, in order:
 3. full active-task state and generated worktree;
 4. local result handoff and focused commit;
 5. pull request head, reviews, required checks and merge state; and
-6. the next action permitted by the dependency graph.
+6. exact post-merge target-branch validation;
+7. issue acceptance, closure evidence and every declared parent outcome; and
+8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
 `sol_review` requires independent diff, test, privacy, credential, dependency
 and protected-path review. `pr_open` requires a pushed short-lived branch and
-linked issue. `merged` requires the exact protected merge SHA and required
-checks. A merge response or remote mutation with an ambiguous result is
-re-read before retry.
+linked issue. `merged` requires the exact protected merge SHA, pull request and
+target branch, but it is not terminal completion. `trusted` requires successful
+target-branch checks for that exact merge SHA. `reconciled` is the only
+terminal delivery state.
+
+Before entering `reconciled`, update the delivered issue's acceptance
+checklist against linked evidence, add bounded closure evidence, close it as
+completed, and record one outcome for every parent declared when delivery was
+planned. Each parent outcome records the child result and re-evaluates the
+parent's acceptance. A genuinely incomplete parent remains open with its
+precise residual acceptance; it is never bulk-closed or inferred complete from
+a child title. Re-evaluate the milestone or wave gate after those parent
+updates. A dependent delivery remains `planned` until every declared
+dependency is `reconciled`.
+
+GitHub closing keywords apply only through the repository's default-branch
+semantics. A merge to another integration branch does not replace explicit
+issue reconciliation. A merge response, issue mutation or other remote action
+with an ambiguous result is re-read before retry.
 
 Operational state may name issue numbers, public commit SHAs, task IDs,
-worktree paths, safe status categories and timestamps. It must not contain
-prompts, task output, credentials, provider configuration, mail/document
-content, personal data, private repository enumeration or raw errors that may
-carry sensitive material.
+public workflow run IDs and outcomes, worktree paths, bounded acceptance
+summaries, safe status categories and timestamps. It must not contain prompts,
+task output, credentials, provider configuration, mail/document content,
+personal data, private repository enumeration or raw errors that may carry
+sensitive material.
 
 ## Retained-learning loop
 
