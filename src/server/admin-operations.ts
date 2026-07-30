@@ -50,7 +50,21 @@ const actionLabels: Record<string, string> = {
 
 const providerVerificationState = globalThis as typeof globalThis & {
   __orbitAdminSmtpVerification?: { inFlight?: Promise<string>; lastStartedAt?: number };
+  __orbitAdminImapVerification?: { inFlight?: Promise<string>; lastStartedAt?: number };
 };
+
+export interface AdminImapVerificationDependencies {
+  now?: () => number;
+  verify?: () => Promise<string>;
+}
+
+let adminImapVerificationDependenciesForTests: AdminImapVerificationDependencies | undefined;
+
+/** Resets the process-local IMAP admin verification seam without persisting provider state. */
+export function setImapProviderVerificationDependenciesForTests(dependencies: AdminImapVerificationDependencies | undefined): void {
+  adminImapVerificationDependenciesForTests = dependencies;
+  providerVerificationState.__orbitAdminImapVerification = undefined;
+}
 
 function boundedCounts(rows: Array<{ status: string; count: number }>): Record<string, number> {
   return Object.fromEntries(rows.map((row) => [row.status, row.count]));
@@ -382,10 +396,26 @@ export async function retryExhaustedImapNotifications(actorUserId: string): Prom
 /** Administrator-only bounded preflight for the independent IMAP provider. */
 export async function verifyImapIngestionProvider(actorUserId: string): Promise<{ result: string }> {
   await requireInstanceAdministrator(actorUserId);
+  const now = adminImapVerificationDependenciesForTests?.now?.() ?? Date.now();
+  const current = providerVerificationState.__orbitAdminImapVerification;
+  if (current?.inFlight) return { result: "verification_pending" };
+  if (current?.lastStartedAt !== undefined && now - current.lastStartedAt < 1_000) return { result: "retrying" };
+  const inFlight = (async () => {
+    try {
+      if (adminImapVerificationDependenciesForTests?.verify) return await adminImapVerificationDependenciesForTests.verify();
+      const state = await verifyImapIngestionProviders(getImapIngestionConfig(), getNotificationWorkerConfig());
+      return state.status;
+    } catch {
+      return "unsafe_input";
+    }
+  })();
+  providerVerificationState.__orbitAdminImapVerification = { inFlight, lastStartedAt: now };
   try {
-    const state = await verifyImapIngestionProviders(getImapIngestionConfig(), getNotificationWorkerConfig());
-    return { result: state.status };
+    return { result: await inFlight };
   } catch {
     return { result: "unsafe_input" };
+  } finally {
+    const state = providerVerificationState.__orbitAdminImapVerification;
+    if (state?.inFlight === inFlight) providerVerificationState.__orbitAdminImapVerification = { lastStartedAt: now };
   }
 }

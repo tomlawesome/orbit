@@ -135,6 +135,7 @@ describe("administrator mailbox operation boundaries", () => {
     const fixture = await createIntegrationFixture("imap-admin-auth");
     try {
       const member = await fixture.session("member");
+      const admin = await fixture.session("admin");
       for (const [url, body] of [[adminVerifyUrl, undefined], [adminRetryUrl, JSON.stringify({ action: "retry_exhausted" })]] as const) {
         const signedOut = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestWithoutSession(url, { method: "POST", body, headers: { "content-type": "application/json" } }));
         expect(signedOut.status).toBe(401);
@@ -142,12 +143,14 @@ describe("administrator mailbox operation boundaries", () => {
         const nonAdmin = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestForSession(member, url, { method: "POST", body, headers: { "content-type": "application/json" } }));
         expect(nonAdmin.status).toBe(403);
         expectNoStore(nonAdmin);
-        const missingCsrf = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestForSession(member, url, { method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "" } }));
+        const missingCsrf = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestForSession(admin, url, { method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "" } }));
         expect(missingCsrf.status).toBe(403);
         expectNoStore(missingCsrf);
-        const wrongCsrf = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestForSession(member, url, { method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "wrong" } }));
+        expect((await missingCsrf.json()).error.code).toBe("csrf_failed");
+        const wrongCsrf = await (url === adminVerifyUrl ? verifyImap : retryMailboxNotifications)(requestForSession(admin, url, { method: "POST", body, headers: { "content-type": "application/json", "x-csrf-token": "wrong" } }));
         expect(wrongCsrf.status).toBe(403);
         expectNoStore(wrongCsrf);
+        expect((await wrongCsrf.json()).error.code).toBe("csrf_failed");
       }
     } finally {
       await fixture.cleanup();

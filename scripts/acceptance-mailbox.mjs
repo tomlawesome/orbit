@@ -63,6 +63,8 @@ if (!expectedDigest || !actualDigest || expectedDigest !== actualDigest || !/^sh
     try {
       const parsedProof = JSON.parse(process.env.ORBIT_ACCEPTANCE_PROOF ?? "{}");
       if (!parsedProof || typeof parsedProof !== "object" || Array.isArray(parsedProof)) throw new Error("invalid proof shape");
+      const proofKeys = Object.keys(parsedProof);
+      if (proofKeys.some((key) => !stages.includes(key)) || proofKeys.some((key) => typeof parsedProof[key] !== "boolean")) throw new Error("invalid proof fields");
       proof = parsedProof;
     } catch { fail("invalid_sanitized_proof"); }
     if (process.exitCode) process.exit();
