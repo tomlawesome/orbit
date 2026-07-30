@@ -428,7 +428,15 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       const detail = await openItemDetail(page, fixture);
       await expect(detail.dialog.getByRole("heading", { name: fixture.itemTitle })).toBeFocused();
       const cameraInput = detail.dialog.locator('input[capture="environment"]');
+      await expect(cameraInput).toHaveAttribute("accept", "image/jpeg,image/png");
       await cameraInput.focus();
+      await cameraInput.setInputFiles({
+        name: "hostile-camera.svg",
+        mimeType: "image/svg+xml",
+        buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+      });
+      await expect(detail.dialog.getByRole("alert")).toHaveText("Choose a JPEG or PNG photo from your camera.");
+      await expect(page.getByRole("dialog", { name: "Review captured photo" })).toBeHidden();
       await cameraInput.setInputFiles({
         name: "synthetic-camera.png",
         mimeType: "image/png",
@@ -436,6 +444,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       });
       const captureReview = page.getByRole("dialog", { name: "Review captured photo" });
       await expect(captureReview.getByRole("button", { name: "Rotate" })).toBeFocused();
+      await expect(captureReview.getByRole("img", { name: "Captured document preview" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Close captured photo review" })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(captureReview).toBeHidden();
