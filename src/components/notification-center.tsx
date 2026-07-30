@@ -1,5 +1,6 @@
 "use client";
 
+import { FocusDialog } from "@/components/focus-dialog";
 import { Icon } from "@/components/icons";
 import { PushNotificationControl } from "@/components/push-notification-control";
 import type { HouseholdNotification } from "@/lib/notifications";
@@ -29,9 +30,9 @@ export function NotificationCenter({
   return (
     <>
       <button className="editor-scrim" type="button" aria-label="Close notifications" onClick={onClose} />
-      <aside className="notification-center" role="dialog" aria-modal="true" aria-labelledby="notifications-title">
+      <FocusDialog className="notification-center" aria-labelledby="notifications-title" onDismiss={onClose}>
         <header className="editor-header">
-          <div><p>Keep ahead</p><h2 id="notifications-title">Notifications</h2></div>
+          <div><p>Keep ahead</p><h2 id="notifications-title" tabIndex={-1} data-dialog-initial-focus>Notifications</h2></div>
           <button type="button" aria-label="Close notifications" onClick={onClose}>×</button>
         </header>
         <div className="notification-toolbar">
@@ -64,7 +65,7 @@ export function NotificationCenter({
             </div>
           )}
         </div>
-      </aside>
+      </FocusDialog>
     </>
   );
 }
