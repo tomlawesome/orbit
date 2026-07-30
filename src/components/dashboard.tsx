@@ -193,6 +193,12 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("open") !== "inbox") return;
+    const timer = window.setTimeout(() => setSettingsView("inbox"), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
     storePreference(THEME_STORAGE_KEY, preference);
