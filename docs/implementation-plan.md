@@ -192,8 +192,11 @@ requires Sol Extra High review before implementation proceeds.
 
 ### Wave 4 — experience and release acceptance
 
-- Decompose issue #20 now into an authenticated accessibility/responsive matrix
-  and an explicit offline-support decision. Execute page-specific assertions
+- Deliver issue #20 — Accessible, responsive, and offline-safe UX through
+  #87 — Authenticated accessibility and responsive UX and #88 — Remove private
+  workspace caching. V1 keeps an installable shell and push handling but makes
+  private workspace data online-authoritative; it purges legacy preview
+  storage and never queues failed changes. Execute page-specific assertions
   only against stable item, document, mailbox and administration journeys.
 - Complete issue #21's protected CI evidence for dependency/secret policy,
   SPDX output, exact-image vulnerability scanning, verified digest-bound

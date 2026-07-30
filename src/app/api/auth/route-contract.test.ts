@@ -80,6 +80,30 @@ async function loadLoginRoute(): Promise<{
   return { GET: route.GET, AuthError, discoverProvider };
 }
 
+async function loadLogoutRoute(): Promise<{
+  POST: typeof import("./logout/route").POST;
+  deleteSessionToken: ReturnType<typeof vi.fn>;
+  clearSessionCookie: ReturnType<typeof vi.fn>;
+}> {
+  vi.resetModules();
+  const deleteSessionToken = vi.fn();
+  const clearSessionCookie = vi.fn();
+  vi.doMock("@/lib/env", () => ({ getAuthConfig: () => config }));
+  vi.doMock("@/lib/auth/cookies", () => ({ clearSessionCookie }));
+  vi.doMock("@/lib/auth/oidc", () => ({
+    createProviderLogoutUrl: () => new URL("https://issuer.route-contract.example.invalid/logout"),
+    discoverProvider: vi.fn().mockResolvedValue(providerMetadata),
+  }));
+  vi.doMock("@/lib/auth/session", () => ({
+    assertCsrf: vi.fn(),
+    assertSameOrigin: vi.fn(),
+    deleteSessionToken,
+    readSession: vi.fn().mockResolvedValue({ token: "opaque-session-token" }),
+  }));
+  const route = await import("./logout/route");
+  return { POST: route.POST, deleteSessionToken, clearSessionCookie };
+}
+
 async function transactionCookie(state = "expected-state"): Promise<string> {
   return sealLoginTransaction({
     state,
@@ -206,5 +230,26 @@ describe("authentication callback and login route contracts", () => {
       },
     });
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("returns the provider logout target to an authenticated browser request without following it", async () => {
+    const { POST, deleteSessionToken, clearSessionCookie } = await loadLogoutRoute();
+
+    const response = await POST(new NextRequest("https://orbit.example/api/auth/logout", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        origin: config.appUrl.origin,
+        "x-csrf-token": "csrf-token",
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      redirectTo: "https://issuer.route-contract.example.invalid/logout",
+    });
+    expect(deleteSessionToken).toHaveBeenCalledWith("opaque-session-token");
+    expect(clearSessionCookie).toHaveBeenCalledOnce();
   });
 });

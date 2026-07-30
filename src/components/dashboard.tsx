@@ -65,15 +65,19 @@ const urgencyPaletteLabels = {
   themed: { name: "Theme matched", detail: "Urgency colours adapt to your colourway" },
 } as const;
 
-function AuthenticationGate({ loading }: { loading: boolean }) {
+function AuthenticationGate({ loading, error }: { loading: boolean; error?: string }) {
   return (
     <main className="authentication-gate">
       <section>
         <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
         <p className="eyebrow">Everything in your orbit, on track</p>
-        <h1>{loading ? "Checking access…" : "Sign in to Orbit."}</h1>
-        <p>{loading ? "Orbit is confirming your session." : "Your household information is private and is only available after authentication."}</p>
-        {!loading && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
+        <h1>{loading ? "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
+        <p role={error ? "alert" : undefined}>
+          {loading
+            ? "Orbit is confirming your session."
+            : error ?? "Your household information is private and is only available after authentication."}
+        </p>
+        {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
       </section>
     </main>
   );
@@ -104,12 +108,19 @@ type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
 /** Keeps signed-out/loading state outside the authenticated dashboard tree. */
 export function Dashboard() {
   const { session, ...workspaceState } = useWorkspace();
-  if (!session) return <AuthenticationGate loading={workspaceState.syncStatus === "loading"} />;
+  if (!session) {
+    return (
+      <AuthenticationGate
+        loading={workspaceState.syncStatus === "loading"}
+        error={workspaceState.syncStatus === "error" ? workspaceState.syncMessage : undefined}
+      />
+    );
+  }
   return <AuthenticatedDashboard session={session} workspaceState={workspaceState} />;
 }
 
 function AuthenticatedDashboard({ session, workspaceState }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace }) {
-  const { workspace, dispatch, executeCommand, refreshWorkspace, syncStatus, syncMessage } = workspaceState;
+  const { workspace, dispatch, executeCommand, refreshWorkspace, signOut, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
   // Legacy placeholder households may already exist from releases that created
@@ -131,6 +142,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const storedTheme = useLocalStorageValue(THEME_STORAGE_KEY, DEFAULT_THEME_JSON);
   const themePreference = useMemo(() => {
     try {
@@ -342,7 +354,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
         throw new Error(payload?.error?.message ?? "The document could not be attached");
       }
       await refreshWorkspace();
-    } else dispatch(command);
+    } else await executeCommand(command);
     setItemEditorOpen(false);
     setNotice({ message: editingItem ? `${item.title} updated` : `${item.title} added` });
   }
@@ -462,9 +474,19 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     setNotice({ message: "That name belongs to a removed household. Restore it, permanently delete it if you are an instance administrator, or choose a different name." });
   }
 
-  function updateHousehold(input: HouseholdSettingsInput) {
-    dispatch({ type: "household.update", householdId: household.id, ...input });
+  async function updateHousehold(input: HouseholdSettingsInput) {
+    await executeCommand({ type: "household.update", householdId: household.id, ...input });
     setNotice({ message: `${input.name} was updated` });
+  }
+
+  async function handleSignOut() {
+    setLogoutBusy(true);
+    setNotice(null);
+    try {
+      await signOut();
+    } catch {
+      setLogoutBusy(false);
+    }
   }
 
   function completeFirstRun(input: HouseholdSetupInput) {
@@ -532,12 +554,16 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
           <button className="mobile-menu" aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /><span /></button>
           <label className="search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${household.name.toLowerCase()}…`} /></label>
           <span className={`sync-state sync-${syncStatus}`} title={syncMessage || undefined}>
-            <i />{syncStatus === "saving" ? "Saving" : syncStatus === "offline" ? "Offline" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
+            <i />{syncStatus === "saving" ? "Saving" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
           <button className="topbar-profile" onClick={() => setSettingsView("appearance")} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
         </header>
+
+        {syncStatus === "error" && syncMessage && (
+          <div className="sync-error-banner" role="alert">{syncMessage}</div>
+        )}
 
         <section className="content">
           <div className="overview-grid">
@@ -751,6 +777,15 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
             ) : (
               <AdminManager session={session} />
             )}
+            <footer className="settings-session-actions">
+              <div>
+                <strong>End this session</strong>
+                <span>Private workspace data is not retained for offline use.</span>
+              </div>
+              <button type="button" onClick={handleSignOut} disabled={logoutBusy}>
+                {logoutBusy ? "Signing out…" : "Sign out securely"}
+              </button>
+            </footer>
           </aside>
         </>
       )}
