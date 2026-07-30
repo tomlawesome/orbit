@@ -19,6 +19,7 @@ const focusableSelector = [
 
 function isVisibleFocusable(element: HTMLElement): boolean {
   const bounds = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
   return (
     bounds.width > 0
     && bounds.height > 0
@@ -26,6 +27,8 @@ function isVisibleFocusable(element: HTMLElement): boolean {
     && bounds.bottom > 0
     && bounds.left < window.innerWidth
     && bounds.top < window.innerHeight
+    && style.display !== "none"
+    && style.visibility !== "hidden"
     && !element.closest("[hidden], [aria-hidden='true']")
   );
 }
