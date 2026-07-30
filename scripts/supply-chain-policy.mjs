@@ -121,6 +121,15 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   policy.attestationActions.forEach((tool, index) =>
     validateTool(tool, `Attestation action ${index + 1}`, currentDate),
   );
+  if (
+    !Array.isArray(policy.dependencyReviewActions) ||
+    policy.dependencyReviewActions.length === 0
+  ) {
+    throw new Error("At least one reviewed dependency action is required.");
+  }
+  policy.dependencyReviewActions.forEach((tool, index) =>
+    validateTool(tool, `Dependency review action ${index + 1}`, currentDate),
+  );
   validateThresholds(policy.thresholds);
   if (!Array.isArray(policy.exceptions)) {
     throw new Error("Supply-chain exceptions must be an array.");
@@ -142,6 +151,7 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   }
   return {
     scannerVersion: policy.scanner.version,
+    dependencyReviewActionCount: policy.dependencyReviewActions.length,
     exceptionCount: policy.exceptions.length,
     mutableReferenceCount: policy.mutableImageReferences.length,
   };
@@ -410,7 +420,7 @@ function runCli() {
   if (command === "validate") {
     const result = validateSupplyChainPolicy(policy, now);
     process.stdout.write(
-      `Supply-chain policy: Trivy ${result.scannerVersion}, ${result.exceptionCount} exception(s), ${result.mutableReferenceCount} mutable reference exception(s).\n`,
+      `Supply-chain policy: Trivy ${result.scannerVersion}, ${result.dependencyReviewActionCount} dependency review action(s), ${result.exceptionCount} exception(s), ${result.mutableReferenceCount} mutable reference exception(s).\n`,
     );
     return;
   }
