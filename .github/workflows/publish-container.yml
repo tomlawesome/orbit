@@ -10,7 +10,6 @@ on:
     branches:
       - develop
       - "release/**"
-  workflow_dispatch:
 
 concurrency:
   group: orbit-container-${{ github.ref }}
@@ -119,15 +118,7 @@ jobs:
     needs:
       - fast
       - integration
-    if: >-
-      ${{
-        github.event_name == 'pull_request' ||
-        (
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-          startsWith(github.ref_name, 'release/') &&
-          github.ref_name != 'release/architecture-consolidation-rc'
-        )
-      }}
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -180,6 +171,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
+      - name: Generate unique preview tag
+        id: preview_tag
+        run: |
+          branch_slug="$(
+            printf '%s' "${GITHUB_REF_NAME}" |
+              tr '[:upper:]' '[:lower:]' |
+              sed --regexp-extended 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g'
+          )"
+          [[ -n "${branch_slug}" ]] || {
+            printf 'Could not derive a safe preview branch identifier.\n' >&2
+            exit 1
+          }
+          preview_tag="preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          printf 'tag=%s\n' "${preview_tag}" >> "${GITHUB_OUTPUT}"
+
       - name: Generate exact image metadata
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
@@ -187,12 +193,12 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=ci-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'ci' }}
-            type=raw,value=preview-{{date 'YYYY.MM.DD' tz='Europe/London'}}.${{ github.run_number }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}
-            type=raw,value=dev-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'development' }}
+            type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}
           labels: |
             org.opencontainers.image.title=Orbit
             org.opencontainers.image.description=Everything in your orbit, on track.
             io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}
+            io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}
 
       - name: Build and load final image
         id: build
@@ -371,28 +377,32 @@ jobs:
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
           TESTED_IMAGE_ID: ${{ steps.publish.outputs.id }}
         run: |
-          if [[ "${PUBLICATION_CHANNEL}" == "preview" ]]; then
-            heading="Orbit preview image"
-            guidance="Deploy this immutable digest for engineering feedback. It is not a feature-complete release candidate."
-          else
-            heading="Orbit development image"
-            guidance="This development image is identified by its immutable source revision and digest."
-          fi
           {
-            printf '## %s\n\n' "${heading}"
+            printf '## Orbit preview image\n\n'
             printf -- '- Tag: `%s`\n' "${IMAGE_TAG}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
             printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
-            printf '\n%s\n' "${guidance}"
+            printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
+            printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  preview:
+  publish_preview:
     name: Validate and publish preview image
     needs:
       - fast
       - integration
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'release/architecture-consolidation-rc' }}
+    if: >-
+      ${{
+        github.event_name == 'push' &&
+        (
+          github.ref == 'refs/heads/develop' ||
+          (
+            startsWith(github.ref, 'refs/heads/release/') &&
+            github.ref_name != 'release/architecture-consolidation-rc'
+          )
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -400,19 +410,4 @@ jobs:
       packages: write
     env:
       PUBLICATION_CHANNEL: preview
-    steps: *container_validation_steps
-
-  development:
-    name: Validate and publish development image
-    needs:
-      - fast
-      - integration
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    env:
-      PUBLICATION_CHANNEL: development
     steps: *container_validation_steps

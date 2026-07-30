@@ -27,7 +27,8 @@
     "docs/v1-charter.md",
     "scripts/check-orchestration-governance.mjs",
     "scripts/check-orchestration-governance.test.mjs",
-    "scripts/check-planning-governance.mjs"
+    "scripts/check-planning-governance.mjs",
+    "scripts/stable-promotion-policy.mjs"
   ],
   "protectedPrefixes": [
     ".github/ISSUE_TEMPLATE/",

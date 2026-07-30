@@ -17,26 +17,41 @@ function jobBlock(job, nextJob) {
 
 describe("exact-image publication workflow", () => {
   it("keeps pull-request container validation read-only", () => {
-    const smoke = jobBlock("smoke", "preview");
+    const smoke = jobBlock("smoke", "publish_preview");
 
-    expect(smoke).toContain("github.event_name == 'pull_request'");
+    expect(smoke).toContain("if: github.event_name == 'pull_request'");
     expect(smoke).toContain("contents: read");
     expect(smoke).not.toContain("packages: write");
     expect(smoke).toContain("steps: &container_validation_steps");
   });
 
-  it("gives package write access only to trusted publication jobs", () => {
-    const preview = jobBlock("preview", "development");
-    const development = workflow.slice(workflow.indexOf("  development:\n"));
+  it("publishes unique previews only from trusted Gitflow integration branches", () => {
+    const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
+    expect(preview).toContain("github.event_name == 'push'");
+    expect(preview).toContain("github.ref == 'refs/heads/develop'");
+    expect(preview).toContain("startsWith(github.ref, 'refs/heads/release/')");
     expect(preview).toContain(
-      "github.ref_name == 'release/architecture-consolidation-rc'",
+      "github.ref_name != 'release/architecture-consolidation-rc'",
     );
     expect(preview).toContain("packages: write");
+    expect(preview).toContain("PUBLICATION_CHANNEL: preview");
     expect(preview).toContain("steps: *container_validation_steps");
-    expect(development).toContain("github.ref == 'refs/heads/develop'");
-    expect(development).toContain("packages: write");
-    expect(development).toContain("steps: *container_validation_steps");
+    expect(workflow).not.toContain("  development:\n");
+    expect(workflow).not.toContain("  preview:\n");
+    expect(workflow).not.toContain("PUBLICATION_CHANNEL: development");
+  });
+
+  it("gives every preview an immutable human-readable branch and run tag", () => {
+    expect(workflow).toContain("- name: Generate unique preview tag");
+    expect(workflow).toContain("preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
+    expect(workflow).toContain(
+      "type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}",
+    );
+    expect(workflow).toContain(
+      "io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}",
+    );
+    expect(workflow).not.toContain("type=raw,value=dev-");
   });
 
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
@@ -88,5 +103,10 @@ describe("exact-image publication workflow", () => {
     expect(workflow).toContain(
       "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml up --detach --no-build --wait",
     );
+  });
+
+  it("does not describe any preview as a release candidate", () => {
+    expect(workflow.toLowerCase()).not.toContain("release candidate");
+    expect(workflow.toLowerCase()).not.toContain("release-candidate");
   });
 });

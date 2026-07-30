@@ -15,8 +15,8 @@
       "proof": "ssh_exact_ref_read",
       "refs": [
         {
-          "name": "refs/heads/release/architecture-consolidation-rc",
-          "sha": "90e240a51bed89bf19d50d0819601de19a3ecc8d"
+          "name": "refs/heads/develop",
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       ]
     },

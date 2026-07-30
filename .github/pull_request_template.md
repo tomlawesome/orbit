@@ -5,6 +5,9 @@ closes.
 
 Closes #
 
+Ordinary issue branches start from and target `develop`. A release or hotfix
+pull request must identify its required `main`/`develop` merge pair.
+
 ## Changes
 
 -

@@ -20,10 +20,11 @@ requirement to its implementation and release evidence.
 - Tests are selected by risk and requirement, not by a target count.
 - CI runs fast feedback first, builds one production image, and performs
   integration, browser, security, and operational checks against that image.
-- A preview or release candidate is published only after its gates pass.
-  Manual acceptance records the digest. Stable promotion retags an accepted
-  release-candidate digest without rebuilding. Channel semantics are defined in
-  [ADR-0003](0003-preview-and-release-candidate-channels.md).
+- A preview is published only after its gates pass. Manual release acceptance
+  records the versioned-release preview digest. Stable promotion retags that
+  accepted digest without rebuilding after its exact source reaches protected
+  `main` and `develop`. Channel semantics are defined in
+  [ADR-0003](0003-gitflow-preview-and-stable-channels.md).
 - Protected planning is authored or materially changed only by Sol Extra High.
   Bounded implementation subagents default to Luna Extra High; a different
   model requires fresh user approval.
@@ -31,7 +32,7 @@ requirement to its implementation and release evidence.
 ## Consequences
 
 - Progress can be audited from requirement through issue, test, pull request,
-  preview, release candidate, and release.
+  preview acceptance and stable release.
 - Coverage data is diagnostic until a measured baseline supports ratcheting.
 - Planning attestations are reviewable policy evidence, not cryptographic proof
   of model identity.
