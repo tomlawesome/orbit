@@ -95,3 +95,6 @@ planning or release-policy changes.
 - GitHub issues and milestones: delivery status and prioritisation.
 - `docs/feature-register.md`: detailed product direction and constraints, not
   live delivery status.
+- `docs/releasing.md`: release procedure and operator acceptance.
+- `SECURITY.md`: supported-version and private vulnerability-reporting
+  contract.

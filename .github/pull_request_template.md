@@ -28,6 +28,10 @@ pull request must identify its required `main`/`develop` merge pair.
 - [ ] Documentation and operational guidance reflect the change.
 - [ ] The diff contains no credentials, personal data, debug output, or
       unrelated files.
+- [ ] Generated build/test artifacts and local coordination files are absent
+      from the tracked diff.
+- [ ] No unmerged unique work must remain on the short-lived head branch; it
+      may be deleted after protected merge and reconciliation.
 
 ## Planning governance
 
