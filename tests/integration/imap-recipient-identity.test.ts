@@ -12,6 +12,7 @@ import {
 } from "@/server/imap-ingestion";
 import { digestImapAliasConfiguration, digestImapRecipientAlias } from "@/server/imap-recipient";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
@@ -186,7 +187,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
       async *fetch() { yield* messages; },
-      async download() { return { content: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\n%%EOF") }; },
+      async download() { return { content: syntheticPdf("recipient identity") }; },
     };
     setImapClientFactoryForTests(() => fakeClient as unknown as import("imapflow").ImapFlow);
     try {

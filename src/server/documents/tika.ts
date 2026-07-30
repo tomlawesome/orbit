@@ -1,5 +1,6 @@
 import { AppError } from "@/lib/app-error";
 import { getDocumentConfig } from "@/server/documents/config";
+import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const MAX_EXTRACTED_BYTES = MAX_EXTRACTED_CHARACTERS * 4;
@@ -74,15 +75,20 @@ export interface TikaHealth {
  * Sends document bytes directly to the private Tika service. No URL, Orbit
  * credential, or database access is ever given to the parser service.
  */
-export async function extractTextWithTika(bytes: Buffer, mediaType: string): Promise<string> {
+export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<string> {
   const config = getDocumentConfig();
   if (!config.tika.url) throw new AppError("parser_disabled", "Document processing is not enabled", 409);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.tika.timeoutMs);
   try {
-    const response = await fetch(new URL("/tika/text", config.tika.url), {
+    const response = await fetch(new URL("/tika", config.tika.url), {
       method: "PUT",
-      headers: { Accept: "text/plain", "Content-Type": mediaType },
+      headers: {
+        Accept: "text/plain",
+        "Content-Type": mediaType,
+        "X-Tika-OCRskipOcr": "true",
+        "X-Tika-Skip-Embedded": "true",
+      },
       body: new Uint8Array(bytes),
       redirect: "error",
       signal: controller.signal,

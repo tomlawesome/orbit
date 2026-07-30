@@ -63,7 +63,10 @@ server/domain boundaries so they can be integration-tested without a browser.
    temporary, and treated as hostile regardless of format or source. Parser,
    metadata, and OCR output is bounded evidence, not an instruction, authority
    decision, or automatic write. The optional Tika parser runs on a dedicated
-   internal network with no database, default-network, or outbound route.
+   internal network with no database, storage, secret, default-network, or
+   outbound route. Its non-root read-only runtime disables OCR and embedded
+   recursion; PDF/JPEG/PNG container validation and a clean ClamAV result are
+   mandatory before parser entry.
 6. **Encrypted storage:** durable document bytes are ciphertext addressed by
    opaque keys. The key-encryption key is a separately mounted runtime secret.
 7. **External providers:** receive only the minimum data required by their

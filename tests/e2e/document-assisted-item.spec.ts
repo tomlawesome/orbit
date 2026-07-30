@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -91,10 +92,10 @@ test.describe("document-assisted item intake", () => {
       });
     });
     const inspectionResponse = page.waitForResponse((response) => response.url().includes("/item-document-inspection") && response.request().method() === "POST");
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "synthetic-policy.pdf",
       mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-1.7\nProvider: Hostile-but-inert Cover\nPolicy number: REVIEW-12345\n2030-12-20\n"),
+      buffer: syntheticPdf("Provider: Hostile-but-inert Cover\nPolicy number: REVIEW-12345\n2030-12-20"),
     });
     const inspectionPayload = await (await inspectionResponse).json() as { suggestions: typeof mockedSuggestions };
     expect(inspectionPayload.suggestions).toEqual(mockedSuggestions);
@@ -151,10 +152,10 @@ test.describe("document-assisted item intake", () => {
     const editor = page.getByRole("dialog", { name: "Add an item" });
     await editor.getByLabel("What do you want to keep track of?").fill(`Command failure ${Date.now()}`);
     await editor.getByRole("button", { name: "No schedule" }).click();
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "command-failure.pdf",
       mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-1.7\nsynthetic command failure\n"),
+      buffer: syntheticPdf("synthetic command failure"),
     });
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
 
@@ -186,10 +187,10 @@ test.describe("document-assisted item intake", () => {
     const title = `Attachment failure ${Date.now()}`;
     await editor.getByLabel("What do you want to keep track of?").fill(title);
     await editor.getByRole("button", { name: "No schedule" }).click();
-    await editor.getByLabel("Document").setInputFiles({
+    await editor.getByLabel("Document", { exact: true }).setInputFiles({
       name: "attachment-failure.pdf",
       mimeType: "application/pdf",
-      buffer: Buffer.from("%PDF-1.7\nsynthetic attachment failure\n"),
+      buffer: syntheticPdf("synthetic attachment failure"),
     });
     await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
     let attempts = 0;

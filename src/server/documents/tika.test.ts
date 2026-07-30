@@ -91,10 +91,15 @@ describe("Tika adapter", () => {
     await expect(extractTextWithTika(Buffer.from("document bytes"), "application/pdf"))
       .resolves.toBe("bounded text");
 
-    expect(fetchMock.mock.calls[0][0]).toEqual(new URL(`${TIKA_URL}/tika/text`));
+    expect(fetchMock.mock.calls[0][0]).toEqual(new URL(`${TIKA_URL}/tika`));
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.method).toBe("PUT");
-    expect(init?.headers).toEqual({ Accept: "text/plain", "Content-Type": "application/pdf" });
+    expect(init?.headers).toEqual({
+      Accept: "text/plain",
+      "Content-Type": "application/pdf",
+      "X-Tika-OCRskipOcr": "true",
+      "X-Tika-Skip-Embedded": "true",
+    });
     expect(init?.redirect).toBe("error");
     expect(init?.body).toBeInstanceOf(Uint8Array);
     expect(Object.keys(init as RequestInit).sort()).toEqual(["body", "headers", "method", "redirect", "signal"]);

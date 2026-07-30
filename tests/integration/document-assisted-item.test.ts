@@ -4,8 +4,9 @@ import { POST as inspectRoute } from "@/app/api/households/[householdId]/item-do
 import { getDb } from "@/db";
 import { auditLog, documents, items } from "@/db/schema";
 import { requestForSession, createIntegrationFixture } from "./support/fixtures";
+import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
-const syntheticPdf = Buffer.from("%PDF-1.7\nProvider: Inert Cover\nPolicy number: SAFE-12345\n2030-12-20\n");
+const syntheticPdf = createSyntheticPdf("Provider: Inert Cover\nPolicy number: SAFE-12345\n2030-12-20");
 
 function context(householdId: string) {
   return { params: Promise.resolve({ householdId }) };
