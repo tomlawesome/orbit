@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
+import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -25,6 +26,7 @@ import {
 } from "@/server/imap-rotation";
 
 const ingestionEnvironmentSchema = z.object({
+  IMAP_ENABLED: z.enum(["true", "false"]).optional().default("true").transform((value) => value === "true"),
   IMAP_HOST: z.string().trim().max(253).optional().default(""),
   IMAP_PORT: z.coerce.number().int().min(1).max(65_535).default(993),
   IMAP_USER: z.string().trim().max(512).optional().default(""),
@@ -39,6 +41,7 @@ const ingestionEnvironmentSchema = z.object({
 });
 
 export interface ImapIngestionConfig {
+  configured: boolean;
   enabled: boolean;
   host: string;
   port: number;
@@ -60,12 +63,95 @@ export interface ImapIngestionConfig {
   pollMilliseconds: number;
 }
 
+export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "retrying" | "exhausted" | "retention_backlog";
+
+export interface ImapProviderPreflightState {
+  status: ImapPreflightStatus;
+  smtp: "not_configured" | "available" | "provider_unavailable" | "unsafe_input";
+  imap: "not_configured" | "available" | "provider_unavailable" | "unsafe_input";
+  checkedAt: string | null;
+}
+
+export interface ImapProviderVerificationDependencies {
+  verifySmtp?: (config: NotificationWorkerConfig) => Promise<"ready" | "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unsafe_input">;
+  verifyImap?: (config: ImapIngestionConfig) => Promise<"ready" | "imap_unconfigured" | "imap_unavailable">;
+}
+
 export type ImapClientFactory = (config: ImapIngestionConfig) => ImapFlow;
 let imapClientFactoryForTests: ImapClientFactory | undefined;
+
+const providerState = globalThis as typeof globalThis & {
+  __orbitImapProviderPreflight?: ImapProviderPreflightState & { commitment?: string; inFlight?: Promise<ImapProviderPreflightState> };
+};
 
 /** Injects a deterministic provider adapter for receipt/restart contract tests. */
 export function setImapClientFactoryForTests(factory: ImapClientFactory | undefined): void {
   imapClientFactoryForTests = factory;
+}
+
+/** One-way process-local commitment used only to invalidate stale preflight results. */
+export function imapProviderConfigCommitment(config: ImapIngestionConfig, smtp: NotificationWorkerConfig): string {
+  return createHash("sha256").update(JSON.stringify([
+    "orbit:mail-provider-preflight:v1",
+    config.host, config.port, config.user, config.password, config.mailbox, config.tlsServerName,
+    config.recipientDomain, config.trustedRecipientHeader, config.currentAliasGeneration, config.currentAliasSecret,
+    config.previousAliasGeneration ?? null, config.previousAliasSecret ?? null, config.previousAliasExpiresAt?.toISOString() ?? null,
+    smtp.smtpUrl, smtp.smtpSecurity, smtp.smtpFrom,
+  ])).digest("hex");
+}
+
+export function getImapProviderPreflightState(config?: ImapIngestionConfig, smtp?: NotificationWorkerConfig): ImapProviderPreflightState {
+  const state = providerState.__orbitImapProviderPreflight;
+  if (config && !config.configured) return { status: "not_configured", smtp: "not_configured", imap: "not_configured", checkedAt: null };
+  if (config && !config.enabled) return { status: "disabled", smtp: "not_configured", imap: "not_configured", checkedAt: null };
+  if (state && config && smtp && state.commitment !== imapProviderConfigCommitment(config, smtp) && config.enabled) {
+    return { status: "verification_pending", smtp: "not_configured", imap: "not_configured", checkedAt: null };
+  }
+  return state ? { status: state.status, smtp: state.smtp, imap: state.imap, checkedAt: state.checkedAt } : {
+    status: "verification_pending", smtp: "not_configured", imap: "not_configured", checkedAt: null,
+  };
+}
+
+/** Verifies both independent providers before a worker is allowed to poll. */
+export async function verifyImapIngestionProviders(
+  config = getImapIngestionConfig(),
+  smtp = getNotificationWorkerConfig(),
+  dependencies: ImapProviderVerificationDependencies = {},
+): Promise<ImapProviderPreflightState> {
+  const commitment = imapProviderConfigCommitment(config, smtp);
+  if (!config.configured) {
+    const state: ImapProviderPreflightState = { status: "not_configured", smtp: "not_configured", imap: "not_configured", checkedAt: new Date().toISOString() };
+    providerState.__orbitImapProviderPreflight = { ...state, commitment };
+    return state;
+  }
+  if (!config.enabled) {
+    const state: ImapProviderPreflightState = { status: "disabled", smtp: smtp.smtpUrl ? "not_configured" : "not_configured", imap: "not_configured", checkedAt: null };
+    providerState.__orbitImapProviderPreflight = { ...state, commitment };
+    return state;
+  }
+  const previous = providerState.__orbitImapProviderPreflight;
+  if (previous?.commitment === commitment && previous.status === "available" && previous.checkedAt
+    && Date.now() - Date.parse(previous.checkedAt) < 60_000) return getImapProviderPreflightState();
+  if (previous?.commitment === commitment && previous.inFlight) return previous.inFlight;
+
+  const pending: ImapProviderPreflightState = { status: "verification_pending", smtp: "not_configured", imap: "not_configured", checkedAt: null };
+  const inFlight = (async () => {
+    const [smtpResult, imapResult] = await Promise.all([
+      dependencies.verifySmtp?.(smtp) ?? verifySmtpProviderConnection(smtp),
+      dependencies.verifyImap?.(config) ?? verifyImapProvider(config),
+    ]);
+    const smtpStatus = smtpResult === "ready" ? "available" : smtpResult === "smtp_unconfigured" ? "not_configured" : smtpResult === "unsafe_input" ? "unsafe_input" : "provider_unavailable";
+    const imapStatus = imapResult === "ready" ? "available" : imapResult === "imap_unconfigured" ? "not_configured" : "provider_unavailable";
+    const status: ImapPreflightStatus = smtpStatus === "unsafe_input" ? "unsafe_input"
+      : smtpStatus === "available" && imapStatus === "available" ? "available"
+      : smtpStatus === "not_configured" || imapStatus === "not_configured" ? "not_configured"
+      : "provider_unavailable";
+    const state: ImapProviderPreflightState = { status, smtp: smtpStatus, imap: imapStatus, checkedAt: new Date().toISOString() };
+    providerState.__orbitImapProviderPreflight = { ...state, commitment };
+    return state;
+  })();
+  providerState.__orbitImapProviderPreflight = { ...pending, commitment, inFlight };
+  return inFlight;
 }
 
 const MAX_PREVIOUS_ALIAS_TRANSITION_MS = 90 * 86_400_000;
@@ -115,8 +201,11 @@ export function getImapIngestionConfig(environment: NodeJS.ProcessEnv = process.
   if (configuredValues !== 0 && configuredValues !== 3) {
     throw new Error("IMAP_HOST, IMAP_USER, and IMAP_PASSWORD must be configured together");
   }
-  if (configuredValues === 3 && !parsed.SMTP_URL && !parsed.SMTP_HOST) {
+  if (configuredValues === 3 && parsed.IMAP_ENABLED && !parsed.SMTP_URL && !parsed.SMTP_HOST) {
     throw new Error("SMTP must be configured before IMAP ingestion is enabled");
+  }
+  if (configuredValues === 3 && parsed.IMAP_PORT !== 993) {
+    throw new Error("IMAP ingestion requires verified TLS on port 993; plaintext or STARTTLS downgrade is not supported");
   }
   const currentAliasSecret = runtimeSecretFromNames(environment, ["IMAP_ALIAS_CURRENT_SECRET", "IMAP_ALIAS_CURRENT_KEY", "IMAP_ALIAS_SECRET"]);
   const currentAliasGeneration = positiveGeneration(
@@ -150,7 +239,8 @@ export function getImapIngestionConfig(environment: NodeJS.ProcessEnv = process.
     ? { generation: previousAliasGeneration, secret: previousAliasSecret, expiresAt: previousAliasExpiresAt }
     : undefined;
   return {
-    enabled: configuredValues === 3,
+    configured: configuredValues === 3,
+    enabled: configuredValues === 3 && parsed.IMAP_ENABLED,
     host: parsed.IMAP_HOST,
     port: parsed.IMAP_PORT,
     user: parsed.IMAP_USER,
@@ -965,6 +1055,7 @@ const workerState = globalThis as typeof globalThis & {
   __orbitImapWorkerRunning?: boolean;
   __orbitImapWorkerLastSuccessAt?: string;
   __orbitImapWorkerLastErrorAt?: string;
+  __orbitImapWorkerLastErrorCode?: string;
 };
 
 export function getImapIngestionWorkerHealth() {
@@ -973,24 +1064,48 @@ export function getImapIngestionWorkerHealth() {
     running: workerState.__orbitImapWorkerRunning ?? false,
     lastSuccessAt: workerState.__orbitImapWorkerLastSuccessAt ?? null,
     lastErrorAt: workerState.__orbitImapWorkerLastErrorAt ?? null,
+    lastErrorCode: workerState.__orbitImapWorkerLastErrorCode ?? null,
+    preflightStatus: getImapProviderPreflightState().status,
   };
 }
 
-/** Starts one polling loop per process; receipt uniqueness protects replica workers. */
-export function startImapIngestionWorker(config = getImapIngestionConfig()): void {
-  if (workerState.__orbitImapWorkerStarted || !config.enabled) return;
+/** Starts one polling loop per process; provider preflight gates every poll. */
+export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
+  if (workerState.__orbitImapWorkerStarted) return;
   workerState.__orbitImapWorkerStarted = true;
   const poll = async () => {
     workerState.__orbitImapWorkerRunning = true;
     try {
-      await runImapIngestionCycle(config);
-      workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
+      let currentConfig = config;
+      try {
+        currentConfig ??= getImapIngestionConfig();
+      } catch {
+        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+        return;
+      }
+      let smtp: NotificationWorkerConfig;
+      try {
+        smtp = getNotificationWorkerConfig();
+      } catch {
+        workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+        return;
+      }
+      const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
+      if (preflight.status === "available") {
+        await runImapIngestionCycle(currentConfig);
+        workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
+        workerState.__orbitImapWorkerLastErrorCode = undefined;
+      } else if (preflight.status !== "disabled" && preflight.status !== "not_configured") {
+        workerState.__orbitImapWorkerLastErrorCode = preflight.status;
+      }
     } catch {
       workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
+      workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
       console.error("Orbit IMAP ingestion cycle failed");
     } finally {
       workerState.__orbitImapWorkerRunning = false;
-      setTimeout(poll, config.pollMilliseconds).unref();
+      const pollMilliseconds = config?.pollMilliseconds ?? 60_000;
+      setTimeout(poll, pollMilliseconds).unref();
     }
   };
   void poll();
@@ -999,7 +1114,7 @@ export function startImapIngestionWorker(config = getImapIngestionConfig()): voi
 /** Establishes a bounded TLS-only connection without listing or fetching mail. */
 export async function verifyImapProvider(config = getImapIngestionConfig()): Promise<"ready" | "imap_unconfigured" | "imap_unavailable"> {
   if (!config.enabled) return "imap_unconfigured";
-  const client = new ImapFlow({
+  const client = imapClientFactoryForTests?.(config) ?? new ImapFlow({
     host: config.host,
     port: config.port,
     secure: true,

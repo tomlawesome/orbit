@@ -30,6 +30,7 @@ function config(currentGeneration = 1, previous?: { generation: number; expiresA
     expiresAt: previous.expiresAt,
   } : undefined;
   return {
+    configured: true,
     enabled: true,
     host: "imap.example.test",
     port: 993,
