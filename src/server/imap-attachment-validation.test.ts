@@ -5,6 +5,7 @@ import {
   normalizeImapAttachmentName,
   validateImapAttachmentBytes,
 } from "./imap-attachment-validation";
+import { syntheticPdf } from "../../tests/support/synthetic-documents";
 
 function structure(overrides: Record<string, unknown> = {}) {
   return {
@@ -48,13 +49,13 @@ describe("hostile IMAP attachment validation", () => {
   });
 
   it("only accepts supported types when the declaration agrees with detected bytes", () => {
-    const validPdf = Buffer.from("%PDF-1.7\n1 0 obj\nendobj\n%%EOF");
+    const validPdf = syntheticPdf();
     expect(validateImapAttachmentBytes(validPdf, "application/pdf")).toMatchObject({ ok: true, mediaType: "application/pdf" });
     expect(validateImapAttachmentBytes(validPdf, "image/png")).toMatchObject({ ok: false, code: "mime_type_mismatch" });
     expect(validateImapAttachmentBytes(Buffer.from("PK\x03\x04"), "application/pdf")).toMatchObject({ ok: false, code: "document_type_unsupported" });
     expect(validateImapAttachmentBytes(Buffer.from("<svg></svg>"), "image/svg+xml")).toMatchObject({ ok: false, code: "document_type_unsupported" });
     expect(validateImapAttachmentBytes(Buffer.from("%PDF-"), "application/pdf")).toMatchObject({ ok: false, code: "mime_structure_invalid" });
-    expect(validateImapAttachmentBytes(Buffer.from("%PDF-1.7\n1 0 obj\nendobj\n%%EOF"), "application/pdf", { pdfOnly: true })).toMatchObject({ ok: true, mediaType: "application/pdf" });
+    expect(validateImapAttachmentBytes(validPdf, "application/pdf", { pdfOnly: true })).toMatchObject({ ok: true, mediaType: "application/pdf" });
     expect(validateImapAttachmentBytes(Buffer.from([0xff, 0xd8, 0xff]), "application/pdf", { pdfOnly: true })).toMatchObject({ ok: false, code: "mime_type_mismatch" });
   });
 

@@ -270,8 +270,11 @@ foundation, not a deferred enhancement.
   as one application container plus PostgreSQL and its existing document
   protection profile.
 - **First real-document trial:** an administrator may opt into one Apache Tika
-  full container. It supplies broad text/metadata extraction and Tesseract OCR
-  in one service; its output remains review evidence, never an automatic write.
+  full container. Orbit restricts it to bounded PDF/JPEG/PNG text and metadata
+  extraction; Tesseract OCR and embedded recursion are disabled even though
+  their binaries may exist in the pinned image. Output remains editable review
+  evidence, never an automatic write. Enabling OCR requires separate review
+  and bounded acceptance evidence.
 - **Advanced parser:** Docling Serve is a replacement parser, not a companion
   to Tika. It is considered only if representative documents prove that Tika's
   layout or table handling is insufficient; its large image excludes it from

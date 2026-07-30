@@ -267,6 +267,8 @@ describe("transactional household lifecycle", () => {
         body: JSON.stringify({
           sectionId: fixture.section.id,
           title: "Should not be created",
+          provider: null,
+          reference: null,
           mode: "create",
         }),
       }),

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
+import { syntheticPdf } from "../../tests/support/synthetic-documents";
 import { readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 
 const originalEnvironment = { ...process.env };
@@ -28,7 +29,7 @@ describe("private IMAP attachment holding", () => {
   it("binds encryption to the verified recipient and receipt, and stores ciphertext only", async () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-holding-"));
     configure();
-    const bytes = Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nprivate staging\n%%EOF");
+    const bytes = syntheticPdf("private staging");
     const held = await holdImapAttachment({ bytes, displayName: "receipt.pdf", mediaType: "application/pdf", recipientUserId: "10000000-0000-4000-8000-000000000001", receiptId: "20000000-0000-4000-8000-000000000002" });
     const object = join(root, "objects");
     const files = await readdir(object, { recursive: true });
@@ -44,7 +45,7 @@ describe("private IMAP attachment holding", () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-scanner-"));
     configure("disabled");
     await expect(scanAndHoldImapAttachment({
-      bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nscanner policy\n%%EOF"),
+      bytes: syntheticPdf("scanner policy"),
       filename: "scanner-policy.pdf",
       declaredMediaType: "application/pdf",
       recipientUserId: "10000000-0000-4000-8000-000000000001",

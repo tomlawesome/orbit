@@ -115,6 +115,11 @@ recoverable state.
   hostile throughout parsing and review. The PDF-only mailbox rule narrows
   transport input; it does not make mailbox PDFs more trusted or manual image
   uploads less dangerous.
+- Validate the complete bounded container before reserving durable upload
+  metadata or invoking a scanner or parser. PDF active/embedded-file markers,
+  malformed JPEG marker streams, malformed PNG chunk/CRC structure, and
+  decompression-risk image dimensions are rejected. Magic bytes alone are not
+  structural validation.
 - ClamAV detects known file threats. Parsers and OCR engines extract content.
   Neither function proves that extracted text, metadata, or suggested values
   are safe, accurate, or authoritative.
@@ -123,11 +128,23 @@ recoverable state.
   rejected. Parser errors expose no provider or document content.
 - The optional Tika service shares only a dedicated internal network with the
   Orbit application. It has no network path to PostgreSQL, default-network
-  services, or external networks.
+  services, or external networks. The pinned image runs as UID/GID 35002,
+  drops all capabilities, uses a read-only root filesystem and a bounded
+  private tmpfs, and mounts only its read-only configuration.
+- Orbit sends bytes only to the fixed `/tika/text` endpoint with fixed
+  no-embedded-recursion and no-OCR headers. The server configuration also
+  excludes `TesseractOCRParser`. OCR is disabled in v1 and requires a separate
+  opt-in design with bounded pages, languages, resources and adversarial
+  evidence before it can be enabled.
 - Parser and OCR output is bounded untrusted evidence. It may populate only
   allowlisted, type- and length-validated editable suggestions; it cannot
   select authority, read secrets or unrelated records, fetch URLs, invoke
   tools, approve a draft, associate a document, or perform a household write.
+- Raw processor responses are discarded after proposal derivation. An
+  authorised reviewer may receive only a 2,000-character, normalized
+  plain-text evidence excerpt with markup delimiters, controls and bidi
+  formatting removed. Logs, errors, diagnostics, audits and test artifacts do
+  not contain that excerpt or the raw response.
 - Explicit authenticated review is required before any suggested value or
   document association becomes household-visible.
 - Any future model-backed extraction remains a tool-free, secret-free,
@@ -138,9 +155,11 @@ recoverable state.
 
 - Default deployment uses the official ClamAV `1.4.5` LTS image and its
   maintained signature updater.
-- `clamd` is reachable only on an internal Compose network and is never
-  published to the host. Its TCP protocol is unauthenticated and unencrypted,
-  so it must not cross an untrusted network.
+- `clamd` is reachable from Orbit only on the internal document-processing
+  network and is never published to the host. FreshClam receives a separate
+  signature-update network with no route to PostgreSQL or default-network
+  services. The unauthenticated, unencrypted clamd TCP protocol never crosses
+  an untrusted network.
 - Orbit uses `INSTREAM` with bounded chunks, connection/read timeouts, and a
   scan-size limit no larger than Orbit's upload limit.
 - Malware, scanner errors, timeouts, oversized-stream responses, and unavailable
