@@ -70,7 +70,7 @@ ensure_secrets_directory() {
 
 persist_orbit_image() {
   local orbit_image="${ORBIT_IMAGE:-}"
-  [[ -n "$orbit_image" ]] || return
+  [[ -n "$orbit_image" ]] || return 0
   if [[ ! "$orbit_image" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$orbit_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
     fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
   fi
