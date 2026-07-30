@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -56,7 +56,10 @@ async function requireHouseholdAndItemAccess(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, householdId)),
     )
-    .where(eq(users.id, userId))
+    .where(and(
+      eq(users.id, userId),
+      isNull(households.deletionRequestedAt),
+    ))
     .limit(1);
   if (!access || !canAccessHouseholdDocuments(access.administrator, access.membershipUserId)) {
     throw new AppError("item_not_found", "That item is not available", 404);
@@ -82,11 +85,15 @@ async function requireDocumentAccess(userId: string, documentId: string) {
     })
     .from(users)
     .innerJoin(documents, eq(documents.id, documentId))
+    .innerJoin(households, eq(households.id, documents.householdId))
     .leftJoin(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)),
     )
-    .where(eq(users.id, userId))
+    .where(and(
+      eq(users.id, userId),
+      isNull(households.deletionRequestedAt),
+    ))
     .limit(1);
   if (
     !record

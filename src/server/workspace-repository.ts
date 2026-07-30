@@ -14,7 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { ACCOUNT_LIFECYCLE_LOCK_KEY, householdOwnerLockKey } from "@/lib/auth/authority-locks";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import {
   itemActivitySchema,
   workspaceSchema,
@@ -23,7 +23,13 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { planOwnershipTransfer } from "@/server/household-ownership";
-import { requireHouseholdAccess, requireUuid, sectionSlug, validUuid } from "@/server/workspace-access";
+import {
+  acquireActiveHouseholdLock,
+  requireHouseholdAccess,
+  requireUuid,
+  sectionSlug,
+  validUuid,
+} from "@/server/workspace-access";
 import { isInstanceAdministrator } from "@/server/authorization";
 
 /**
@@ -237,6 +243,7 @@ export async function applyWorkspaceCommand(
   const householdId = command.householdId;
 
   await getDb().transaction(async (transaction) => {
+    await acquireActiveHouseholdLock(transaction, householdId);
     const recordActivity = async (itemId: string, activity: ItemActivity, requireInsert = false) => {
       const entityId = requireUuid(itemId, "Item");
       const values = {
@@ -626,9 +633,7 @@ export async function addHouseholdMember(userId: string, householdId: string, me
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
   await getDb().transaction(async (transaction) => {
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
-    );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
@@ -657,9 +662,7 @@ export async function removeHouseholdMember(userId: string, householdId: string,
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
   await getDb().transaction(async (transaction) => {
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
-    );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
@@ -708,9 +711,7 @@ export async function transferHouseholdOwnership(
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`,
     );
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(validHouseholdId)}, 0))`,
-    );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const householdMembers = await transaction.select({
       userId: memberships.userId,
       role: memberships.role,

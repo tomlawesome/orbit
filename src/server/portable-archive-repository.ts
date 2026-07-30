@@ -8,6 +8,7 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { readDocumentDownload } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
+import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
@@ -24,7 +25,7 @@ async function requireHouseholdAccess(userId: string, householdId: string) {
   const [access] = await getDb().select({ id: households.id, administrator: users.isInstanceAdmin, membershipUserId: memberships.userId })
     .from(households).innerJoin(users, eq(users.id, userId))
     .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, households.id)))
-    .where(eq(households.id, householdId)).limit(1);
+    .where(and(eq(households.id, householdId), isNull(households.deletionRequestedAt))).limit(1);
   if (!access || (!access.administrator && !access.membershipUserId)) {
     throw new AppError("household_not_found", "That household is not available", 404);
   }
@@ -104,8 +105,9 @@ export async function createPortableArchive(input: {
   const storageKey = storage().createStorageKey();
   const expiresAt = new Date(Date.now() + ARCHIVE_TTL_MS);
   try {
-    await storage().write(storageKey, contents);
     await db.transaction(async (transaction) => {
+      await acquireActiveHouseholdLock(transaction, input.householdId);
+      await storage().write(storageKey, contents);
       await transaction.insert(portableArchives).values({
         id, householdId: input.householdId, requestedByUserId: input.userId, storageKey,
         contentSha256: createHash("sha256").update(contents).digest("hex"), sizeBytes: contents.length,
@@ -216,6 +218,7 @@ export async function importPortableArchive(input: { userId: string; householdId
   const archive = decodeImportArchive(input.archive, input.passphrase);
   const skipped = new Set(input.conflictItemIds);
   const imported = await getDb().transaction(async (transaction) => {
+    await acquireActiveHouseholdLock(transaction, input.householdId);
     const existingSections = await transaction.select({ id: sections.id, slug: sections.slug }).from(sections).where(eq(sections.householdId, input.householdId));
     const sectionMap = new Map<string, string>();
     for (const source of archive.sections) {
