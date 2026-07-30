@@ -156,7 +156,6 @@ async function extract(fixture) {
     const response = await fetch(new URL("/tika/text", tikaUrl), {
       method: "PUT",
       headers: {
-        Accept: "text/plain",
         "Content-Type": fixture.mediaType,
         "X-Tika-OCRskipOcr": "true",
         "X-Tika-Skip-Embedded": "true",
