@@ -53,3 +53,23 @@ reusable as a single isolated run during local development.
 If Docker is unavailable, the command fails clearly. If a run is interrupted,
 inspect only the uniquely named `orbit-integration-*` container reported by the
 run; do not use broad Docker prune or delete commands.
+
+## Authenticated accessibility acceptance
+
+The exact-image browser job runs `authenticated-accessibility.spec.ts` against
+the production container with the disposable OIDC profile. The automated
+matrix is deliberately representative rather than device certification:
+
+| Contract | Automated evidence |
+| --- | --- |
+| WCAG A/AA | Axe on the authenticated dashboard/navigation, item editor and detail, document draft review, notifications, personalisation, mailbox review and administrator surfaces |
+| Keyboard and focus | Initial focus, tab containment, Escape dismissal, visible focus and return to desktop and mobile invoking controls; nested camera review is pointer-shielded |
+| Responsive layout | Chromium at 1440×900, 820×1180 and 412×915 with document and core-overlay overflow/bounds assertions |
+| Text and colour | Every Orbit text-size setting on every tested viewport, plus representative light, dark and system modes across After Dark, Verdant and Coast |
+| Feedback and recovery | Authenticated lifecycle, document-assisted item, IMAP review and online-workspace-policy journeys cover success, validation/conflict, provider failure and failed online mutation announcements |
+
+Fixtures use disposable synthetic households, items, documents and mailbox
+metadata. The acceptance spec does not create screenshots; the standard
+Playwright trace is retained only on the first retry. Representative physical
+device and assistive-technology checks remain release acceptance and are not
+implied by the automated Chromium evidence.

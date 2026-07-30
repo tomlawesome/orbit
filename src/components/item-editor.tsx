@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { FocusDialog } from "@/components/focus-dialog";
 import { Icon } from "@/components/icons";
 import type { HomeItem, HouseholdSection, ScheduleKind } from "@/lib/domain";
 import { initialScheduleKind, workspaceItemSchema } from "@/lib/workspace";
@@ -148,7 +149,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
   return (
     <>
       <button className="editor-scrim" type="button" aria-label="Close item editor" onClick={closeEditor} />
-      <aside className="item-editor" role="dialog" aria-modal="true" aria-labelledby="item-editor-title">
+      <FocusDialog className="item-editor" aria-labelledby="item-editor-title" onDismiss={closeEditor}>
         <header className="editor-header">
           <div>
             <p>{item ? "Update your records" : "Add to your home"}</p>
@@ -162,7 +163,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
             <section className="form-section form-section-lead">
               <label className="field field-wide">
                 <span>What do you want to keep track of?</span>
-                <input name="title" defaultValue={item?.title} maxLength={100} autoFocus placeholder="e.g. Buildings insurance" aria-invalid={Boolean(errors.title)} />
+                <input name="title" defaultValue={item?.title} maxLength={100} data-dialog-initial-focus placeholder="e.g. Buildings insurance" aria-invalid={Boolean(errors.title)} />
                 {errors.title && <small className="field-error">{errors.title}</small>}
               </label>
               <div className="field field-wide">
@@ -296,7 +297,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
             </div>
           </footer>
         </form>
-      </aside>
+      </FocusDialog>
     </>
   );
 }

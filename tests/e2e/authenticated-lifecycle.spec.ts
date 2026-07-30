@@ -134,7 +134,7 @@ async function createManualHousehold(page: Page, isMobile: boolean, name: string
   await waitForActiveHousehold(page, name);
   await page.reload();
   await waitForActiveHousehold(page, name);
-  await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+  await expect(page.getByPlaceholder(`Search ${name.toLowerCase()}…`)).toBeVisible();
 }
 
 async function waitForSynced(page: Page) {
