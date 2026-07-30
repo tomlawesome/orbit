@@ -362,6 +362,76 @@ test.describe("authenticated household lifecycle", () => {
     await expect(page.locator("article.item-card").filter({ has: page.getByRole("heading", { name: updatedTitle, exact: true }) })).toHaveCount(1, { timeout: 15_000 });
   });
 
+  test("proves member leave, owner/admin removal and ownership transfer journeys", async ({ page, browser, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+
+    await signIn(page, administrator);
+    const householdName = `Issue 94 membership ${Date.now()}`;
+    await createManualHousehold(page, isMobile, householdName);
+    const memberContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const memberPage = await memberContext.newPage();
+    try {
+      await signIn(memberPage, member);
+
+      const openMembers = async (targetPage: Page) => {
+        const closeSettings = targetPage.getByRole("button", { name: "Close personalisation" });
+        if (!(await closeSettings.isVisible())) {
+          await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
+        }
+        await targetPage.getByRole("tab", { name: "Members" }).click();
+      };
+      const addMember = async () => {
+        await openMembers(page);
+        await page.getByLabel("Registered user").selectOption({ label: member });
+        await page.getByRole("button", { name: "Add member" }).click();
+        await expect(page.getByRole("status")).toContainText(`${member} can now access this household.`);
+      };
+      const waitForMemberHousehold = async () => {
+        await memberPage.reload();
+        await waitForActiveHousehold(memberPage, householdName);
+        await expect(memberPage.getByText(householdName, { exact: true }).first()).toBeVisible();
+      };
+      const expectMemberRemoved = async () => {
+        await memberPage.reload();
+        await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
+        await expect(memberPage.getByText(householdName, { exact: true })).toHaveCount(0);
+      };
+
+      await addMember();
+      await waitForMemberHousehold();
+      await openMembers(memberPage);
+      const leaveRow = memberPage.locator(".member-list article").filter({ hasText: member });
+      await expect(leaveRow.getByRole("button", { name: "Leave household" })).toBeVisible();
+      memberPage.once("dialog", (dialog) => dialog.accept());
+      await leaveRow.getByRole("button", { name: "Leave household" }).click();
+      await expectMemberRemoved();
+
+      await addMember();
+      await waitForMemberHousehold();
+      await openMembers(page);
+      const ownerRemovalRow = page.locator(".member-list article").filter({ hasText: member });
+      page.once("dialog", (dialog) => dialog.accept());
+      await ownerRemovalRow.getByRole("button", { name: "Remove" }).click();
+      await expect(page.getByRole("status")).toContainText(`${member} was removed from this household.`);
+      await expectMemberRemoved();
+
+      await addMember();
+      await waitForMemberHousehold();
+      await openMembers(page);
+      const transferRow = page.locator(".member-list article").filter({ hasText: member });
+      page.once("dialog", (dialog) => dialog.accept());
+      await transferRow.getByRole("button", { name: "Make owner" }).click();
+      await expect(page.getByRole("status")).toContainText(`${member} is now the household owner.`);
+      await expect(page.getByText(householdName, { exact: true }).first()).toBeVisible();
+      await waitForMemberHousehold();
+      await openMembers(memberPage);
+      await expect(memberPage.getByText("Household owner", { exact: true })).toBeVisible();
+      await expect(memberPage.getByRole("button", { name: "Add member" })).toBeVisible();
+    } finally {
+      await memberContext.close();
+    }
+  });
+
   test("keeps mobile manual item entry keyboard-operable without document inspection", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.skip(!isMobile, "This is the representative mobile keyboard scenario.");
