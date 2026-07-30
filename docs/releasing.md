@@ -32,6 +32,11 @@ Previews:
 - pass the repository's automated publication gates;
 - are built once with their final metadata, loaded into Compose, and pushed
   only after that exact image passes system validation;
+- carry retained source dependency/secret evidence plus an exact-image
+  vulnerability report and SPDX SBOM under the repository's explicit
+  [supply-chain policy](supply-chain.md);
+- receive verified GitHub OIDC provenance and SBOM attestations bound to the
+  resolved registry digest after publication, without rebuilding;
 - carry the immutable image label
   `io.github.tomlawesome.orbit.release-stage=preview` plus the exact source
   branch and revision;
@@ -44,7 +49,8 @@ Pull requests run the same production-image and Compose checks with a read-only
 token and cannot publish. The protected-branch push repeats validation because
 that merged revision is the publication identity, but it does not rebuild
 between system testing and publication. The workflow records both the tested
-image configuration ID and the resulting registry digest.
+image configuration ID and the resulting registry digest. A preview is not
+recorded as deployable if either digest-bound attestation cannot be verified.
 
 Preview publication is currently AMD64 only. ARM64 remains disabled until CI
 can build and exercise that platform and assemble a multi-platform manifest

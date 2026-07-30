@@ -18,6 +18,7 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
 
 jobs:
   fast:
@@ -70,9 +71,65 @@ jobs:
           path: coverage/
           retention-days: 14
 
+  supply_chain_source:
+    name: Source dependency and secret policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate supply-chain policy
+        run: node scripts/supply-chain-policy.mjs validate
+
+      - name: Scan repository dependencies and secrets
+        run: |
+          mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" fs \
+            --scanners vuln,secret \
+            --format json \
+            --output /workspace/.orbit-supply-chain/source-raw.json \
+            /workspace
+          docker run --rm \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" version --format json \
+            > .orbit-supply-chain/trivy-version.json
+
+      - name: Enforce source supply-chain policy
+        run: |
+          set +e
+          node scripts/supply-chain-policy.mjs source \
+            --input .orbit-supply-chain/source-raw.json \
+            --output .orbit-supply-chain/source-evidence.json
+          policy_status=$?
+          set -e
+          rm -f .orbit-supply-chain/source-raw.json
+          exit "${policy_status}"
+
+      - name: Upload bounded source supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-supply-chain-source
+          path: |
+            .orbit-supply-chain/source-evidence.json
+            .orbit-supply-chain/trivy-version.json
+          if-no-files-found: warn
+          retention-days: 14
+
   integration:
     name: PostgreSQL service and API integration
-    needs: fast
+    needs:
+      - fast
+      - supply_chain_source
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -117,10 +174,11 @@ jobs:
     name: Compose smoke test
     needs:
       - fast
+      - supply_chain_source
       - integration
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -246,6 +304,55 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
           printf 'ORBIT_IMAGE=%s\n' "${image_tag}" >> "${GITHUB_ENV}"
 
+      - name: Scan exact local image
+        env:
+          TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
+          TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" image \
+            --scanners vuln \
+            --format json \
+            --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
+            "${TESTED_IMAGE_TAG}"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" image \
+            --scanners vuln \
+            --format spdx-json \
+            --output /workspace/.orbit-supply-chain/image.spdx.json \
+            "${TESTED_IMAGE_TAG}"
+          docker run --rm \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" version --format json \
+            > .orbit-supply-chain/trivy-version.json
+          node scripts/supply-chain-policy.mjs image \
+            --input .orbit-supply-chain/image-vulnerabilities.json \
+            --sbom .orbit-supply-chain/image.spdx.json \
+            --output .orbit-supply-chain/image-evidence.json \
+            --expected-image-id "${TESTED_IMAGE_ID}" \
+            --expected-tag "${TESTED_IMAGE_TAG}" \
+            --revision "${GITHUB_SHA}"
+
+      - name: Upload exact-image supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-supply-chain-image-${{ env.PUBLICATION_CHANNEL }}
+          path: |
+            .orbit-supply-chain/image-vulnerabilities.json
+            .orbit-supply-chain/image.spdx.json
+            .orbit-supply-chain/image-evidence.json
+            .orbit-supply-chain/trivy-version.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Validate Compose configuration
         run: |
           docker compose --env-file .env-orbit config --quiet
@@ -370,6 +477,53 @@ jobs:
             printf 'id=%s\n' "${published_image_id}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Attest published image provenance
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest published image SBOM
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: .orbit-supply-chain/image.spdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Verify published image attestations
+        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --format json \
+            > .orbit-supply-chain/provenance-verification.json
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://spdx.dev/Document/v2.3 \
+            --format json \
+            > .orbit-supply-chain/sbom-verification.json
+
+      - name: Upload attestation verification evidence
+        if: ${{ !cancelled() && env.PUBLICATION_CHANNEL != 'ci' }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-supply-chain-attestation
+          path: |
+            .orbit-supply-chain/provenance-verification.json
+            .orbit-supply-chain/sbom-verification.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Record published image
         if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
         env:
@@ -384,6 +538,7 @@ jobs:
             printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
+            printf -- '- Supply-chain evidence: dependency/secret policy, exact-image vulnerability report, SPDX SBOM, and verified provenance/SBOM attestations\n'
             printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -391,6 +546,7 @@ jobs:
     name: Validate and publish preview image
     needs:
       - fast
+      - supply_chain_source
       - integration
     if: >-
       ${{
@@ -404,10 +560,12 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     env:
       PUBLICATION_CHANNEL: preview
     steps: *container_validation_steps
