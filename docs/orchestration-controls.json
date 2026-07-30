@@ -3,7 +3,7 @@
   "controls": [
     {
       "id": "ORCH-001",
-      "status": "candidate",
+      "status": "adopted",
       "decisionClass": "protected_planning",
       "summary": "Keep a created task launch-pending until an authoritative full task observation confirms its state; omission from a partial or limited list is not failure evidence.",
       "automaticPromotion": false,
@@ -17,7 +17,7 @@
     },
     {
       "id": "ORCH-002",
-      "status": "candidate",
+      "status": "adopted",
       "decisionClass": "model_governance",
       "summary": "Check model authority before any mutation and stop all orchestration, protected planning or governance work unless the active model is Sol Extra High.",
       "automaticPromotion": false,
@@ -31,7 +31,7 @@
     },
     {
       "id": "ORCH-003",
-      "status": "candidate",
+      "status": "adopted",
       "decisionClass": "protected_planning",
       "summary": "Capture operational lessons automatically as local candidates, but adopt durable controls only through evidence, an issue, Sol Extra High approval, tests, and a protected pull request.",
       "automaticPromotion": false,
@@ -45,7 +45,7 @@
     },
     {
       "id": "ORCH-004",
-      "status": "candidate",
+      "status": "adopted",
       "decisionClass": "protected_planning",
       "summary": "Advance a launched implementation only after its authoritative task record proves the requested model, generated worktree and exact accepted base SHA.",
       "automaticPromotion": false,
@@ -59,7 +59,7 @@
     },
     {
       "id": "ORCH-005",
-      "status": "candidate",
+      "status": "adopted",
       "decisionClass": "protected_planning",
       "summary": "Before dependent delivery, prove live GitHub connector, exact SSH refs, credential-safe CLI reads and an authenticated protected write path; record each action class and keep browser authentication explicitly user-controlled.",
       "automaticPromotion": false,
