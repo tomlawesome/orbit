@@ -66,8 +66,11 @@ function validPolicy() {
       "sol_review",
       "pr_open",
       "merged",
+      "trusted",
+      "reconciled",
       "blocked",
     ],
+    terminalDeliveryStages: ["reconciled"],
     allowedTransitions: {
       planned: ["launch_pending", "blocked"],
       launch_pending: ["active", "blocked"],
@@ -75,8 +78,10 @@ function validPolicy() {
       handback: ["sol_review", "blocked"],
       sol_review: ["active", "pr_open", "blocked"],
       pr_open: ["active", "merged", "blocked"],
-      merged: [],
-      blocked: ["planned", "launch_pending", "active", "handback", "sol_review", "pr_open"],
+      merged: ["trusted", "blocked"],
+      trusted: ["reconciled", "blocked"],
+      reconciled: [],
+      blocked: ["planned", "launch_pending", "active", "handback", "sol_review", "pr_open", "merged", "trusted"],
     },
     learning: {
       automaticCandidateCapture: true,
@@ -197,6 +202,8 @@ function activeState() {
       branch: "codex/issue-74-orchestration-learning",
       stage: "active",
       previousStage: "launch_pending",
+      dependencies: [],
+      parentIssues: [],
       task: {
         requestedModel: "Luna Extra High",
         launchReceipt: {
@@ -217,6 +224,52 @@ function activeState() {
       },
     },
   };
+}
+
+function reconciledState() {
+  const state = activeState();
+  state.delivery.stage = "reconciled";
+  state.delivery.previousStage = "trusted";
+  state.delivery.merge = {
+    pullRequest: 75,
+    sha: SHA,
+    targetBranch: "develop",
+    observedAt: "2026-07-30T07:00:00.000Z",
+  };
+  state.delivery.trustedValidation = {
+    branch: "develop",
+    sha: SHA,
+    conclusion: "success",
+    observedAt: "2026-07-30T07:20:00.000Z",
+    checks: [
+      {
+        name: "Validate Orbit and publish previews",
+        runId: 123456789,
+        conclusion: "success",
+      },
+      {
+        name: "CodeQL",
+        runId: 123456790,
+        conclusion: "success",
+      },
+    ],
+  };
+  state.delivery.reconciliation = {
+    issue: {
+      number: 74,
+      acceptanceChecklist: "reviewed_complete",
+      closureEvidence: [
+        "PR #75 merged at the recorded SHA.",
+        "Trusted develop validation passed for the same SHA.",
+      ],
+      state: "closed",
+      stateReason: "completed",
+      observedAt: "2026-07-30T07:25:00.000Z",
+    },
+    parents: [],
+    milestoneReevaluated: true,
+  };
+  return state;
 }
 
 describe("orchestration governance", () => {
@@ -318,6 +371,76 @@ describe("orchestration governance", () => {
     state.delivery.previousStage = "planned";
     expect(() => validateOperationalState(state, validPolicy())).toThrow(
       /planned -> active is not an allowed transition/u,
+    );
+  });
+
+  it("rejects a policy that treats merge as terminal completion", () => {
+    const policy = validPolicy();
+    policy.terminalDeliveryStages = ["merged"];
+    policy.allowedTransitions.merged = [];
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /reconciled must be the only terminal delivery stage/u,
+    );
+  });
+
+  it("requires exact protected merge evidence before trusted validation", () => {
+    const state = activeState();
+    state.delivery.stage = "merged";
+    state.delivery.previousStage = "pr_open";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /merged delivery requires exact merge evidence/u,
+    );
+  });
+
+  it("requires trusted target-branch checks for reconciliation", () => {
+    const state = reconciledState();
+    delete state.delivery.trustedValidation;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /trusted delivery requires exact target-branch validation/u,
+    );
+  });
+
+  it("rejects reconciliation with an incomplete acceptance review", () => {
+    const state = reconciledState();
+    state.delivery.reconciliation.issue.acceptanceChecklist = "reviewed_incomplete";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /acceptance checklist must be reviewed complete/u,
+    );
+  });
+
+  it("requires an outcome for every declared parent issue", () => {
+    const state = reconciledState();
+    state.delivery.parentIssues = [22];
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /every declared parent issue requires one reconciliation outcome/u,
+    );
+  });
+
+  it("accepts a reconciled child whose parent remains open with precise residual acceptance", () => {
+    const state = reconciledState();
+    state.delivery.parentIssues = [22];
+    state.delivery.reconciliation.parents = [{
+      issue: 22,
+      childOutcomeRecorded: true,
+      acceptanceReevaluated: true,
+      state: "open",
+      residualAcceptance: [
+        "Stable release promotion remains pending exact-digest release acceptance.",
+      ],
+      observedAt: "2026-07-30T07:25:00.000Z",
+    }];
+    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
+  });
+
+  it("rejects dependent delivery advancement before dependencies are reconciled", () => {
+    const state = activeState();
+    state.delivery.dependencies = [{
+      issue: 22,
+      stage: "trusted",
+      observedAt: "2026-07-30T06:20:00.000Z",
+    }];
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /dependencies must be reconciled before delivery advances/u,
     );
   });
 

@@ -70,6 +70,22 @@
       "issue": 74,
       "pullRequest": 77,
       "approvedByModel": "Sol Extra High"
+    },
+    {
+      "id": "ORCH-006",
+      "status": "adopted",
+      "decisionClass": "protected_planning",
+      "summary": "Treat merge as non-terminal: require exact trusted target-branch validation, issue acceptance and closure evidence, every declared parent outcome, and milestone or wave re-evaluation before reconciliation or dependent delivery.",
+      "automaticPromotion": false,
+      "evidence": [
+        "The delivery state previously made merged terminal and represented neither trusted target-branch validation nor issue and parent reconciliation.",
+        "Closed Wave 3 child issues retained unchecked acceptance criteria while parent epic #22 remained entirely unchecked with no roll-up evidence.",
+        "The repository default branch is main while ordinary delivery targets develop, so closing keywords did not replace explicit integration-branch reconciliation.",
+        "Protected PR #93 passed planning governance, unit, integration, exact-image browser, CodeQL and dependency review before this ledger adoption."
+      ],
+      "issue": 92,
+      "pullRequest": 93,
+      "approvedByModel": "Sol Extra High"
     }
   ]
 }
