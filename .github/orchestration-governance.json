@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "modelAuthority": {
+    "orchestration": [
+      "Sol Extra High"
+    ],
+    "protectedPlanning": [
+      "Sol Extra High"
+    ],
+    "implementation": [
+      "Luna Extra High"
+    ],
+    "mechanicalAnalysis": [
+      "Terra Medium",
+      "Luna Extra High",
+      "Sol Extra High"
+    ]
+  },
+  "protectedDecisionClasses": [
+    "architecture",
+    "model_governance",
+    "product_scope",
+    "release",
+    "repository_settings",
+    "security",
+    "protected_planning"
+  ],
+  "taskStatusSources": [
+    "create_thread",
+    "list_threads_full",
+    "read_thread",
+    "wait_threads"
+  ],
+  "deliveryStages": [
+    "planned",
+    "launch_pending",
+    "active",
+    "handback",
+    "sol_review",
+    "pr_open",
+    "merged",
+    "blocked"
+  ],
+  "allowedTransitions": {
+    "planned": [
+      "launch_pending",
+      "blocked"
+    ],
+    "launch_pending": [
+      "active",
+      "blocked"
+    ],
+    "active": [
+      "handback",
+      "blocked"
+    ],
+    "handback": [
+      "sol_review",
+      "blocked"
+    ],
+    "sol_review": [
+      "active",
+      "pr_open",
+      "blocked"
+    ],
+    "pr_open": [
+      "active",
+      "merged",
+      "blocked"
+    ],
+    "merged": [],
+    "blocked": [
+      "planned",
+      "launch_pending",
+      "active",
+      "handback",
+      "sol_review",
+      "pr_open"
+    ]
+  },
+  "learning": {
+    "automaticCandidateCapture": true,
+    "automaticAdoption": false,
+    "minimumEvidenceForAdoption": 2,
+    "prohibitedAutomaticClasses": [
+      "architecture",
+      "model_governance",
+      "product_scope",
+      "release",
+      "repository_settings",
+      "security",
+      "protected_planning"
+    ]
+  }
+}

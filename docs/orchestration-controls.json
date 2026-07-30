@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "controls": [
+    {
+      "id": "ORCH-001",
+      "status": "candidate",
+      "decisionClass": "protected_planning",
+      "summary": "Keep a created task launch-pending until an authoritative full task observation confirms its state; omission from a partial or limited list is not failure evidence.",
+      "automaticPromotion": false,
+      "evidence": [
+        "A limited task-list response omitted an active issue #60 Luna task.",
+        "A subsequent full task-list response confirmed the task was active in its generated worktree."
+      ],
+      "issue": 74,
+      "pullRequest": null,
+      "approvedByModel": null
+    },
+    {
+      "id": "ORCH-002",
+      "status": "candidate",
+      "decisionClass": "model_governance",
+      "summary": "Check model authority before any mutation and stop all orchestration, protected planning or governance work unless the active model is Sol Extra High.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Protected orchestration design began while the active model was Terra Medium.",
+        "Repository model governance permits Terra to read protected planning but forbids it from materially creating, editing, approving, or restructuring that planning."
+      ],
+      "issue": 74,
+      "pullRequest": null,
+      "approvedByModel": null
+    },
+    {
+      "id": "ORCH-003",
+      "status": "candidate",
+      "decisionClass": "protected_planning",
+      "summary": "Capture operational lessons automatically as local candidates, but adopt durable controls only through evidence, an issue, Sol Extra High approval, tests, and a protected pull request.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Chat memory did not reliably preserve prior task-launch semantics.",
+        "Repository-owned controls can be validated and applied by every future task and heartbeat."
+      ],
+      "issue": 74,
+      "pullRequest": null,
+      "approvedByModel": null
+    },
+    {
+      "id": "ORCH-004",
+      "status": "candidate",
+      "decisionClass": "protected_planning",
+      "summary": "Advance a launched implementation only after its authoritative task record proves the requested model, generated worktree and exact accepted base SHA.",
+      "automaticPromotion": false,
+      "evidence": [
+        "A task creation requested a commit before the protected remote-tracking ref had been fetched locally.",
+        "The successful issue #60 task was confirmed only after a full task observation exposed its real task ID and generated worktree."
+      ],
+      "issue": 74,
+      "pullRequest": null,
+      "approvedByModel": null
+    }
+  ]
+}

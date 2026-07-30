@@ -7,6 +7,7 @@ tmp
 .env-orbit
 .orbit-secrets/
 .agents/handoffs/
+.agents/orchestration-state.json
 backups/
 coverage
 playwright-report/
