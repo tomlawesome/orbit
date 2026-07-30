@@ -146,7 +146,7 @@ evidence rather than starting with unproven mixed state.
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Implement and prove staged correspondence, durable rollback checkpoints, corrupt/wrong-key cases and interrupted recovery |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Build-once, exact-image preview validation/publication and guarded no-rebuild promotion | Add supply-chain evidence, then enable semantic RC publication and exercise stable promotion |
+| Release | Build-once previews from `develop` and versioned release branches, plus guarded no-rebuild promotion after exact protected merges | Add supply-chain evidence and exercise release-preview acceptance plus stable promotion |
 | Rollback | Prior image and verified pre-update backup retained; no unproven database downgrade | Prove the ADR-0004 update and recovery decision points |
 
 ## Architecture decisions and open questions
@@ -155,7 +155,7 @@ Durable decisions live in `docs/adr`; issues track their implementation.
 
 - [ADR-0001: Self-hosted single-instance deployment](adr/0001-self-hosted-single-instance.md)
 - [ADR-0002: Evidence-driven delivery and immutable promotion](adr/0002-evidence-driven-delivery.md)
-- [ADR-0003: Separate previews from release candidates](adr/0003-preview-and-release-candidate-channels.md)
+- [ADR-0003: Gitflow preview and stable channels](adr/0003-gitflow-preview-and-stable-channels.md)
 - [ADR-0004: Supported upgrades and recoverable restore](adr/0004-supported-upgrades-and-recoverable-restore.md)
 
 Decisions intentionally deferred beyond stable v1 include managed multi-tenancy,

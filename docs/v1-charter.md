@@ -103,9 +103,10 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   documents, detect corruption or mismatched key material, and document the
   separate recovery-key requirement.
 - **V1-REL-01:** CI tests the exact production image that may be published.
-  Engineering previews, feature-complete release candidates, and stable
-  versions are identified and deployed by immutable digest. Stable promotion
-  accepts only the matching release-candidate digest and never rebuilds it.
+  Development and versioned-release previews, and stable versions, are
+  identified and deployed by immutable digest. Stable promotion accepts only
+  the matching tested release-branch preview after its exact source reaches
+  protected `main` and `develop`, and never rebuilds it.
 
 ## Quality attributes
 
@@ -144,8 +145,8 @@ Stable v1 requires:
    the [engineering baseline](engineering-baseline.md).
 2. All release-blocking issues closed with linked tests and review evidence.
 3. The [quality strategy](quality-strategy.md) and required CI gates passing.
-4. A release candidate deployed by digest and exercised on a representative
-   self-hosted test bed, including update, sign-in, core records, documents,
-   backup, restore, and restart.
+4. A versioned-release preview deployed by digest and exercised on a
+   representative self-hosted test bed, including update, sign-in, core
+   records, documents, backup, restore, and restart.
 5. The exact accepted digest promoted through the protected production
    environment.

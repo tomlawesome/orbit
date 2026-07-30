@@ -22,6 +22,7 @@ describe("planning governance", () => {
       isProtectedPlanningPath("docker-compose.mail-alias-rotation.yml"),
     ).toBe(true);
     expect(isProtectedPlanningPath("scripts/check-orchestration-governance.mjs")).toBe(true);
+    expect(isProtectedPlanningPath("scripts/stable-promotion-policy.mjs")).toBe(true);
     expect(isProtectedPlanningPath("src/server/example.ts")).toBe(false);
   });
 

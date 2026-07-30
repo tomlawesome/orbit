@@ -480,7 +480,7 @@ bash scripts/deploy-container.sh --build
 
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.
-See [Previews, release candidates and stable promotion](docs/releasing.md) for
+See [Gitflow previews and stable promotion](docs/releasing.md) for
 the protected branch, test, manual-validation, and digest-promotion workflow.
 
 ## Before the first real launch

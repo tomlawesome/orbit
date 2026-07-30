@@ -36,9 +36,11 @@ Every implementable issue must define:
 - migration, compatibility, deployment, backup and documentation impact;
 - evidence required before closure.
 
-Work uses short-lived `codex/` branches and small, issue-linked pull requests.
-Long-lived consolidation branches are retired after accepted changes reach the
-release line.
+Work uses short-lived `codex/` branches created from and normally merged into
+protected `develop`. Versioned `release/*` branches move accepted release
+source through `main` and back to `develop`; `hotfix/*` branches start from
+`main` and merge into both. Long-lived consolidation branches are retired after
+their accepted changes reach `develop`.
 
 ## Delivery structure
 
@@ -199,9 +201,9 @@ requires Sol Extra High review before implementation proceeds.
   acceptance wait for the feature-complete image.
 - Prepare the release-acceptance record structure now, but do not claim
   representative provider/device/operator results before those checks run
-  against the exact candidate digest.
-- Publish a semantic release candidate only when all stable-v1 blockers are
-  closed, then accept and promote its exact digest.
+  against the exact versioned-release preview digest.
+- Cut a semantic versioned release branch only when all stable-v1 blockers are
+  closed, then accept and promote its exact preview digest.
 
 Issue #22 begins only after the manual item and document-assisted review
 contracts are accepted, but its dedicated-mailbox ingestion and review journey
@@ -220,6 +222,7 @@ remain required before stable v1.
 8. Record any required preview or manual evidence before closing the issue.
 
 Previews provide ongoing deployment evidence while v1 is incomplete. Once the
-release scope is feature-complete, release candidates follow
-[the release policy](releasing.md): test and deploy by immutable digest, merge
-the accepted source through protection, and promote without rebuilding.
+release scope is feature-complete, [the release policy](releasing.md) requires
+a versioned release branch, testing and deployment by immutable digest, merging
+the accepted source into both protected `main` and `develop`, and promotion
+without rebuilding.
