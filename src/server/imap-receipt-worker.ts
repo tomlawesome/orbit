@@ -48,6 +48,7 @@ const notificationMaterializationBatchSize = 25;
 /** Inserts only bounded, eligible durable operations at the database boundary. */
 async function materializeNotifications(now = new Date(), requestedLimit = notificationMaterializationBatchSize, onlyUserId?: string): Promise<number> {
   const limit = Math.max(1, Math.min(Math.floor(requestedLimit), notificationMaterializationBatchSize));
+  const nowIso = now.toISOString();
   const db = getDb();
   const userScope = onlyUserId ? sql`AND m.user_id = ${onlyUserId}` : sql``;
   const [receiptRows, reviewRows] = await Promise.all([
@@ -69,7 +70,7 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
         LIMIT ${limit}
       )
       INSERT INTO imap_notification_deliveries (message_id, user_id, kind, next_attempt_at)
-      SELECT message_id, user_id, 'receipt'::imap_notification_kind, ${now}
+      SELECT message_id, user_id, 'receipt'::imap_notification_kind, ${nowIso}
       FROM eligible
       ON CONFLICT (message_id, kind) DO NOTHING
       RETURNING id
@@ -92,7 +93,7 @@ async function materializeNotifications(now = new Date(), requestedLimit = notif
         LIMIT ${limit}
       )
       INSERT INTO imap_notification_deliveries (message_id, user_id, kind, next_attempt_at)
-      SELECT message_id, user_id, 'review_ready'::imap_notification_kind, ${now}
+      SELECT message_id, user_id, 'review_ready'::imap_notification_kind, ${nowIso}
       FROM eligible
       ON CONFLICT (message_id, kind) DO NOTHING
       RETURNING id

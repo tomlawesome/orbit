@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
 import { and, asc, eq, gt, inArray, isNull, lte, lt, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -82,7 +82,6 @@ let imapClientFactoryForTests: ImapClientFactory | undefined;
 
 const providerState = globalThis as typeof globalThis & {
   __orbitImapProviderPreflight?: ImapProviderPreflightState & { commitment?: string; inFlight?: Promise<ImapProviderPreflightState> };
-  __orbitMailProviderCommitmentKey?: Buffer;
 };
 
 /** Injects a deterministic provider adapter for receipt/restart contract tests. */
@@ -111,18 +110,14 @@ function createImapClient(config: ImapIngestionConfig, verifyOnly = false): Imap
   return new ImapFlow({ ...imapProviderConnectionOptions(config), ...(verifyOnly ? { verifyOnly: true } : {}) });
 }
 
-function mailProviderCommitmentKey(): Buffer {
-  return providerState.__orbitMailProviderCommitmentKey ??= randomBytes(32);
-}
-
-/** Keyed process-local commitment used only to invalidate stale preflight results. */
+/** Non-secret configuration commitment used only to invalidate stale preflight results. */
 export function imapProviderConfigCommitment(config: ImapIngestionConfig, smtp: NotificationWorkerConfig): string {
-  return createHmac("sha256", mailProviderCommitmentKey()).update(JSON.stringify([
+  return createHash("sha256").update(JSON.stringify([
     "orbit:mail-provider-preflight:v1",
-    config.host, config.port, config.user, config.password, config.mailbox, config.tlsServerName,
-    config.recipientDomain, config.trustedRecipientHeader, config.currentAliasGeneration, config.currentAliasSecret,
-    config.previousAliasGeneration ?? null, config.previousAliasSecret ?? null, config.previousAliasExpiresAt?.toISOString() ?? null,
-    smtp.smtpUrl, smtp.smtpSecurity, smtp.smtpFrom,
+    config.host, config.port, config.user, config.mailbox, config.tlsServerName,
+    config.recipientDomain, config.trustedRecipientHeader, config.currentAliasGeneration,
+    config.previousAliasGeneration ?? null, config.previousAliasExpiresAt?.toISOString() ?? null,
+    smtp.smtpSecurity, smtp.smtpFrom,
   ])).digest("hex");
 }
 

@@ -140,7 +140,7 @@ describe("IMAP ingestion configuration", () => {
     expect(() => imapAttachmentRetryDelayMs(0)).toThrow("attempt is invalid");
   });
 
-  it("requires both current provider preflights and invalidates readiness on credential rotation", async () => {
+  it("requires both current provider preflights and invalidates readiness on safe provider configuration changes", async () => {
     const environmentValues = {
       IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "provider-password",
       IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
@@ -152,14 +152,14 @@ describe("IMAP ingestion configuration", () => {
       verifySmtp: async () => "ready",
       verifyImap: async () => "ready",
     })).resolves.toMatchObject({ status: "available", smtp: "available", imap: "available" });
-    const rotated = getImapIngestionConfig(environment({ ...environmentValues, IMAP_PASSWORD: "rotated-provider-password" }));
-    await expect(verifyImapIngestionProviders(rotated, smtp, {
+    const changed = getImapIngestionConfig(environment({ ...environmentValues, IMAP_HOST: "replacement-imap.example.test" }));
+    await expect(verifyImapIngestionProviders(changed, smtp, {
       verifySmtp: async () => "smtp_unavailable",
       verifyImap: async () => "imap_unavailable",
     })).resolves.toMatchObject({ status: "provider_unavailable" });
   });
 
-  it("keeps the process-local provider commitment stable, rotation-sensitive, and content-free", () => {
+  it("keeps the provider commitment stable, non-secret, and sensitive to safe configuration", () => {
     const environmentValues = {
       IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "provider-password",
       IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
@@ -173,6 +173,10 @@ describe("IMAP ingestion configuration", () => {
     expect(imapProviderConfigCommitment(config, smtp)).toBe(commitment);
     expect(imapProviderConfigCommitment(
       getImapIngestionConfig(environment({ ...environmentValues, IMAP_PASSWORD: "rotated-password" })),
+      smtp,
+    )).toBe(commitment);
+    expect(imapProviderConfigCommitment(
+      getImapIngestionConfig(environment({ ...environmentValues, IMAP_HOST: "replacement-imap.example.test" })),
       smtp,
     )).not.toBe(commitment);
     expect(commitment).not.toContain(environmentValues.IMAP_PASSWORD);
