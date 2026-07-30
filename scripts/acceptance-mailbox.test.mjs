@@ -74,7 +74,7 @@ describe("mailbox acceptance evidence", () => {
     });
   });
 
-  it("sanitizes live proof output to stage booleans only", () => {
+  it("rejects arrays, unknown fields, and non-boolean stage values", () => {
     const proof = {
       tls_verification: true,
       envelope_recipient_preservation: true,
@@ -83,13 +83,31 @@ describe("mailbox acceptance evidence", () => {
       authenticated_review_link: true,
       content_free_notification: true,
       recovery: true,
-      smtpPassword: "must-not-appear",
-      providerResponse: "private provider details",
+    };
+    const array = run({ ORBIT_ACCEPTANCE_MODE: "live", ORBIT_ACCEPTANCE_PROOF: JSON.stringify([]) });
+    expect(array.status).toBe(1);
+    expect(array.record).toEqual({ result: "failed", code: "invalid_sanitized_proof" });
+    const unknown = run({ ORBIT_ACCEPTANCE_MODE: "live", ORBIT_ACCEPTANCE_PROOF: JSON.stringify({ ...proof, smtpPassword: "must-not-appear", providerResponse: "private provider details" }) });
+    expect(unknown.status).toBe(1);
+    expect(unknown.record).toEqual({ result: "failed", code: "invalid_sanitized_proof" });
+    const nonBoolean = run({ ORBIT_ACCEPTANCE_MODE: "live", ORBIT_ACCEPTANCE_PROOF: JSON.stringify({ ...proof, recovery: "true" }) });
+    expect(nonBoolean.status).toBe(1);
+    expect(nonBoolean.record).toEqual({ result: "failed", code: "invalid_sanitized_proof" });
+  });
+
+  it("sanitizes a complete live proof to fixed fields only", () => {
+    const proof = {
+      tls_verification: true,
+      envelope_recipient_preservation: true,
+      reconnect_restart: true,
+      idempotent_receipt: true,
+      authenticated_review_link: true,
+      content_free_notification: true,
+      recovery: true,
     };
     const result = run({ ORBIT_ACCEPTANCE_MODE: "live", ORBIT_ACCEPTANCE_PROOF: JSON.stringify(proof) });
     expect(result.status).toBe(0);
     expect(result.record).toMatchObject({ result: "passed", code: "ok", mode: "live", digest, revision });
-    expect(JSON.stringify(result.record)).not.toMatch(/must-not-appear|private provider details|smtpPassword|providerResponse/u);
     expect(Object.keys(result.record)).toEqual(["result", "code", "mode", "digest", "revision", "stages"]);
   });
 });
