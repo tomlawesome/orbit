@@ -6,6 +6,10 @@ const workflow = readFileSync(
   new URL("../.github/workflows/publish-container.yml", import.meta.url),
   "utf8",
 ).replaceAll("\r\n", "\n");
+const dockerfile = readFileSync(
+  new URL("../Dockerfile", import.meta.url),
+  "utf8",
+).replaceAll("\r\n", "\n");
 
 function jobBlock(job, nextJob) {
   const start = workflow.indexOf(`  ${job}:\n`);
@@ -133,6 +137,17 @@ describe("exact-image publication workflow", () => {
     expect(workflow).toContain("rm -f .orbit-supply-chain/source-raw.json");
     expect(workflow).not.toContain("aquasecurity/setup-trivy@");
     expect(workflow).not.toContain("aquasecurity/trivy-action@");
+  });
+
+  it("removes build-only package managers from the production image", () => {
+    const runner = dockerfile.slice(dockerfile.indexOf("FROM node:22-alpine AS runner"));
+
+    expect(runner).toContain("rm -rf /usr/local/lib/node_modules /opt/yarn-v*");
+    expect(runner).toContain("/usr/local/bin/corepack");
+    expect(runner).toContain("/usr/local/bin/npm");
+    expect(runner).toContain("/usr/local/bin/npx");
+    expect(runner).toContain("/usr/local/bin/pnpm");
+    expect(runner).toContain("/usr/local/bin/yarn");
   });
 
   it("pins every third-party action to an immutable commit", () => {

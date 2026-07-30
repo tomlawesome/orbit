@@ -26,6 +26,15 @@ WORKDIR /opt/orbit
 # Seed the mount point with the runtime user's ownership so a new named volume
 # is writable when Docker copies the image directory into it on first use.
 RUN apk add --no-cache su-exec \
+  && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
+  && rm -f \
+    /usr/local/bin/corepack \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx \
+    /usr/local/bin/pnpm \
+    /usr/local/bin/pnpx \
+    /usr/local/bin/yarn \
+    /usr/local/bin/yarnpkg \
   && addgroup --system --gid 1001 orbit \
   && adduser --system --uid 1001 --ingroup orbit orbit \
   && mkdir -p /var/lib/orbit/documents \
