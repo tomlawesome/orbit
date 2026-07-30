@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentDrafts, documents, households, items, memberships, sections, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { extractTextWithTika } from "@/server/documents/tika";
 import { readDocumentDownload } from "@/server/document-repository";
+import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 export function proposalFromText(text: string, filename: string) {
   const reference = text.match(/(?:policy|account|reference)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9-]{5,})/i)?.[1];
@@ -31,8 +32,12 @@ async function findDuplicates(householdId: string, documentId: string, proposal:
 
 async function requireDocumentMember(userId: string, documentId: string) {
   const [record] = await getDb().select({ id: documents.id, householdId: documents.householdId, displayName: documents.displayName, mediaType: documents.mediaType, lifecycle: documents.lifecycle, administrator: users.isInstanceAdmin, member: memberships.userId })
-    .from(documents).innerJoin(users, eq(users.id, userId)).leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)))
-    .where(eq(documents.id, documentId)).limit(1);
+    .from(documents)
+    .innerJoin(households, eq(households.id, documents.householdId))
+    .innerJoin(users, eq(users.id, userId))
+    .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)))
+    .where(and(eq(documents.id, documentId), isNull(households.deletionRequestedAt)))
+    .limit(1);
   if (!record || (record.lifecycle !== "available") || (!record.administrator && !record.member)) throw new AppError("document_not_found", "That document is not available", 404);
   return record;
 }
@@ -71,6 +76,7 @@ export async function approveDocumentDraft(userId: string, draftId: string, sect
     itemId = target.id;
   }
   await getDb().transaction(async (transaction) => {
+    await acquireActiveHouseholdLock(transaction, record.householdId);
     if (mode === "create") await transaction.insert(items).values({ id: itemId, householdId: record.householdId, sectionId, title: title.trim().slice(0, 100), currency: household.currency });
     if (mode === "merge") await transaction.update(items).set({ provider: proposal.provider ?? undefined, reference: proposal.reference ?? undefined, updatedAt: new Date() }).where(eq(items.id, itemId));
     await transaction.update(documents).set({ itemId, updatedAt: new Date() }).where(eq(documents.id, draft.documentId));

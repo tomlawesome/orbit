@@ -1,6 +1,16 @@
-import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, households, memberships, portableArchives, sessions, users } from "@/db/schema";
+import {
+  auditLog,
+  documentCrypto,
+  documents,
+  households,
+  memberships,
+  notificationDeliveries,
+  portableArchives,
+  sessions,
+  users,
+} from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { requireUuid } from "@/server/workspace-access";
@@ -15,20 +25,45 @@ interface HouseholdStorageKeys {
   archives: string[];
 }
 
+type HouseholdDeletionAction = "household_hard_deleted" | "household_purged";
+type HouseholdDeletionReason = "administrator_requested" | "retention_expired";
+
 type Database = ReturnType<typeof getDb>;
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
-async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<void> {
+async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<boolean> {
   const config = getDocumentConfig();
   const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
   const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
   // Database access has already been removed. A failed local cleanup leaves
   // only encrypted orphan data, which reconciliation can safely remove later;
   // it must not make the completed deletion appear to have failed to the user.
-  await Promise.allSettled([
+  const results = await Promise.allSettled([
     ...keys.documents.map((storageKey) => documentStorage.deleteCiphertext(storageKey)),
     ...keys.archives.map((storageKey) => archiveStorage.delete(storageKey)),
   ]);
+  return results.every((result) => result.status === "fulfilled");
+}
+
+async function recordHouseholdStorageCleanup(
+  householdId: string,
+  action: HouseholdDeletionAction,
+  reason: HouseholdDeletionReason,
+  complete: boolean,
+): Promise<void> {
+  // The tombstone starts as pending inside the deletion transaction. If the
+  // process or database becomes unavailable here, it remains conservatively
+  // pending instead of claiming that every encrypted object was removed.
+  await getDb().update(auditLog).set({
+    changes: {
+      reason,
+      storageCleanup: complete ? "complete" : "reconciliation_pending",
+    },
+  }).where(and(
+    eq(auditLog.entityType, "household"),
+    eq(auditLog.entityId, householdId),
+    eq(auditLog.action, action),
+  )).catch(() => undefined);
 }
 
 interface HouseholdLifecycleRecord {
@@ -121,6 +156,16 @@ export async function requestHouseholdDeletion(userId: string, householdId: stri
     if (!changed) {
       throw new AppError("household_deletion_pending", "This household is already scheduled for deletion", 409);
     }
+    await transaction.update(notificationDeliveries).set({
+      status: "cancelled",
+      lockedAt: null,
+      leaseToken: null,
+      lastError: "household_pending_deletion",
+      updatedAt: now,
+    }).where(and(
+      eq(notificationDeliveries.householdId, validHouseholdId),
+      inArray(notificationDeliveries.status, ["pending", "processing", "retry"]),
+    ));
     await transaction.insert(auditLog).values({
       householdId: validHouseholdId,
       actorUserId: userId,
@@ -153,6 +198,17 @@ export async function restoreHousehold(userId: string, householdId: string, sess
     if (!changed) {
       throw new AppError("household_not_recoverable", "This household changed and can no longer be restored", 409);
     }
+    await transaction.update(notificationDeliveries).set({
+      status: "pending",
+      lockedAt: null,
+      leaseToken: null,
+      lastError: null,
+      updatedAt: now,
+    }).where(and(
+      eq(notificationDeliveries.householdId, validHouseholdId),
+      eq(notificationDeliveries.status, "cancelled"),
+      eq(notificationDeliveries.lastError, "household_pending_deletion"),
+    ));
     if (sessionId) {
       await transaction.update(sessions).set({ activeHouseholdId: validHouseholdId })
         .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)));
@@ -191,7 +247,7 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
       entityType: "household",
       entityId: validHouseholdId,
       action: "household_hard_deleted",
-      changes: { reason: "administrator_requested" },
+      changes: { reason: "administrator_requested", storageCleanup: "pending" },
     });
     const [deleted] = await transaction.delete(households)
       .where(and(eq(households.id, validHouseholdId), isNotNull(households.deletionRequestedAt)))
@@ -207,7 +263,13 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
 
   // The database has made the data inaccessible before any external side effect.
   // Reconciliation later removes an orphan if a local storage delete is interrupted.
-  await deleteHouseholdStorage(storageKeys);
+  const storageCleanupComplete = await deleteHouseholdStorage(storageKeys);
+  await recordHouseholdStorageCleanup(
+    validHouseholdId,
+    "household_hard_deleted",
+    "administrator_requested",
+    storageCleanupComplete,
+  );
 }
 
 /** Purges expired household records and private encrypted blobs. PostgreSQL locks serialize replica workers. */
@@ -236,11 +298,19 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
         entityType: "household",
         entityId: candidate.id,
         action: "household_purged",
-        changes: { reason: "retention_expired" },
+        changes: { reason: "retention_expired", storageCleanup: "pending" },
       });
       await transaction.delete(households).where(eq(households.id, candidate.id));
       return { documents: documentRows.map((row) => row.storageKey), archives: archiveRows.map((row) => row.storageKey) };
     });
-    if (storageKeys) await deleteHouseholdStorage(storageKeys);
+    if (storageKeys) {
+      const storageCleanupComplete = await deleteHouseholdStorage(storageKeys);
+      await recordHouseholdStorageCleanup(
+        candidate.id,
+        "household_purged",
+        "retention_expired",
+        storageCleanupComplete,
+      );
+    }
   }
 }
