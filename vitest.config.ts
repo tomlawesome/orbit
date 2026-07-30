@@ -9,7 +9,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    exclude: [...configDefaults.exclude, "tests/e2e/**", "tests/integration/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      ".agents/worktrees/**",
+      "tests/e2e/**",
+      "tests/integration/**",
+    ],
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}", "scripts/*.mjs"],
