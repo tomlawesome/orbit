@@ -91,7 +91,6 @@ services:
     configs:
       - source: orbit-tika-config
         target: /etc/orbit/tika-config.xml
-        mode: 0444
     security_opt:
       - no-new-privileges:true
     cap_drop:
