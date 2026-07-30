@@ -138,7 +138,7 @@ test.describe("online-only private workspace policy", () => {
     const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
     await settings.getByLabel("Household name").fill(rejectedName);
     await settings.getByRole("button", { name: "Save household" }).click();
-    await expect(page.getByRole("alert")).toContainText("could not save");
+    await expect(page.getByRole("alert").filter({ hasText: "could not save" })).toBeVisible();
     expect(await legacyWorkspaceCacheExists(page)).toBe(false);
 
     await page.unroute("**/api/workspace/commands");
