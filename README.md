@@ -44,8 +44,9 @@ application container locally:
 
 - answer **Y/Yes** (or press Enter) to pull current base images and build
   the `orbit-app` service from source;
-- answer **N/No** to pull `ghcr.io/tomlawesome/orbit:latest` from GitHub
-  Container Registry instead.
+- answer **N/No** only after setting `ORBIT_IMAGE` to an exact published
+  `registry/repository@sha256:...` digest. Orbit deliberately has no implicit
+  `latest` deployment default.
 
 It then starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
@@ -128,9 +129,9 @@ flowchart LR
 
 - `orbit` is the complete Orbit application: interface, authenticated
   APIs, versioned migrations, and notification scheduler. It can be built from
-  source or pulled as `ghcr.io/tomlawesome/orbit:latest`.
-- `orbit-postgres` is the unmodified official `postgres:17-alpine` image with a
-  persistent volume.
+  source or pulled only when `ORBIT_IMAGE` names an exact registry digest.
+- `orbit-postgres` is the digest-pinned official PostgreSQL 17 Alpine image
+  with a persistent volume.
 - `orbit-clamav` is the official scanner image. It receives only quarantined
   file streams over the private Compose network and has no published host port,
   database credentials, document volume, or Orbit secrets.
@@ -158,7 +159,8 @@ public key is written to `.env-orbit`. Configure your OIDC provider in
 ### 2. Start Orbit
 
 ```sh
-docker compose --env-file .env-orbit up --build
+ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
+  docker compose --env-file .env-orbit up --build
 ```
 
 Open `http://<docker-host-ip>:3000` from another device, or
@@ -362,6 +364,7 @@ and add a matching read-only secret mount to the Compose service.
 | Variable | Used by | Purpose | Example value |
 | --- | --- | --- | --- |
 | `APP_URL` | Orbit | Canonical browser origin used for cookies and request validation. Use HTTPS except on loopback. | `https://orbit.example.com` |
+| `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |

@@ -99,5 +99,6 @@ the requested stable tag. It then points the version tag and, when requested,
 - Keep the repository-linked GHCR package writable by this repository's
   `GITHUB_TOKEN`. No personal token or long-lived registry secret is required.
 
-Tags can move; digests cannot. Always deploy and record the digest shown in the
-publication workflow summary.
+Tags can move; digests cannot. Compose does not default to `latest`; always set
+`ORBIT_IMAGE` to and record the digest shown in the publication workflow
+summary. A promoted `latest` tag remains only a convenience pointer.

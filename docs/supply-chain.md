@@ -69,10 +69,46 @@ Validate the current policy locally with:
 node scripts/supply-chain-policy.mjs validate
 ```
 
-The policy also inventories mutable build and runtime image references. Those
-references have explicit owners, rationales, tracking issue
-[#80](https://github.com/tomlawesome/orbit/issues/80) and an expiry. They are
-not treated as immutable merely because a version appears in the tag.
+The policy inventories every upstream build and runtime container using its
+human-readable version tag, the tag's observed multi-platform index digest and
+the exact Linux/AMD64 manifest used by Orbit. Repository configuration uses the
+tag plus that AMD64 digest, so an upstream tag move cannot change a build,
+integration test or deployment. Each entry records source and registry
+provenance, licence evidence, file locations, an update owner, resolution date
+and review deadline.
+
+The application image is different: it does not have a repository-owned stable
+digest until a release is accepted. Compose therefore requires `ORBIT_IMAGE`
+explicitly. Pull deployments accept a full `registry/repository@sha256:...`
+identity; local build scripts supply a revision-specific local tag for the
+image they build from the checked-out source. There is no implicit `latest`
+deployment default. A `latest` tag may still be published during an explicitly
+approved stable promotion, but it is a convenience pointer rather than
+deployment or acceptance evidence.
+
+## Updating pinned images
+
+Use a focused pull request for image updates:
+
+1. Read the upstream release notes and image-source change history. Confirm
+   maintenance status, provenance and licence evidence before accepting a new
+   tag or a moved tag.
+2. Query the authoritative registry for the tag's current index and
+   Linux/AMD64 manifest. Record both digests and the resolution date in
+   `.github/supply-chain-policy.json`.
+3. Replace every location listed by the policy with the same reviewed
+   tag-plus-manifest identity. Do not update an untracked reference or add a
+   temporary mutable fallback.
+4. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
+   tests, static/unit checks and Compose configuration validation.
+5. Let protected CI pull the pinned identities and repeat PostgreSQL,
+   malware-detection, parser-isolation, backup/restore, privacy, browser,
+   accessibility, exact-image vulnerability and SBOM gates.
+6. Merge only when the protected pull-request checks pass. The trusted branch
+   run must then publish and attest the exact application image it tested.
+
+If an upstream registry no longer serves a recorded manifest, the update is a
+release blocker; do not silently fall back to the tag.
 
 ## Tool provenance and ownership
 

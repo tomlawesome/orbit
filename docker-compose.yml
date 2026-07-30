@@ -3,7 +3,7 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
@@ -20,7 +20,7 @@ services:
       retries: 10
   orbit-app:
     container_name: orbit
-    image: ${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}
+    image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     build: .
     restart: unless-stopped
     env_file: .env-orbit
@@ -55,7 +55,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.4.5-debian
+    image: clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6
     restart: unless-stopped
     volumes:
       - orbit-clamav-data:/var/lib/clamav
@@ -74,7 +74,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:3.2.2.0-full
+    image: apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8
     profiles: ["processing"]
     restart: unless-stopped
     security_opt:

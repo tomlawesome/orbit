@@ -42,6 +42,10 @@ changing delivery status after this snapshot.
   predates the preview terminology and is not evidence of feature completeness.
   Stable promotion reuses an accepted versioned-release preview digest after
   its exact source reaches protected `main` and `develop`.
+- Build, database, malware-scanner, parser, optional-AI and disposable OIDC
+  container inputs are pinned to reviewed Linux/AMD64 manifests. Pulled Orbit
+  deployments require an explicit immutable application digest; local builds
+  use a revision-specific local tag.
 - Diagnostic V8 coverage across included source and operational scripts is
   15.14% statements, 12.83% branches, 13.91% functions, and 16.40% lines. No
   blocking threshold is set.
@@ -69,7 +73,7 @@ acceptance and stable promotion remain separate release gates.
 | Document-assisted item entry | V1-DOC-02 | manual item editor plus bounded Tika inspection | safe source-aware suggestion units | **Partially proven:** optional no-document entry, parser failure containment, explicit-submit semantics, representative documents and authenticated editable browser evidence remain in #43 |
 | Portable archives | V1-OPS-04 | encrypted archive, storage, preview/import routes | crypto/storage units | **Partially proven:** database-backed export/import authorization, conflicts, expiry, documents and failure atomicity remain |
 | Administrator operations | V1-OPS-02 | health, queue, audit and corrective-action routes/UI | no focused service/route/browser suite | **Implemented, unverified:** authorization, redaction, state transitions and degraded-provider evidence remain |
-| Installation and secrets | V1-OPS-01 | configure/install/deploy scripts; file-backed secrets; non-root entrypoint | Compose configuration and runtime permission checks | **Partially proven:** clean-host install, interrupted rerun, update compatibility and documented operator recovery remain |
+| Installation and secrets | V1-OPS-01 | configure/install/deploy scripts; file-backed secrets; non-root entrypoint | Compose configuration, digest-pinned upstream images, explicit pulled application identity and runtime permission checks | **Partially proven:** clean-host install, interrupted rerun, update compatibility and documented operator recovery remain |
 | Migrations and update | V1-OPS-03 | Drizzle migrations and migrate-on-start entrypoint | ordered fresh-schema, supported-baseline upgrade, idempotency and failure-recording tests | **Partially proven:** automated migration integrity is established; operator update, rollback and clean-host acceptance remain |
 | Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | corrupt/wrong-key/mismatched-object/interrupted restore matrix plus successful PostgreSQL and encrypted-file recovery | **Partially proven:** automated recovery safety is established; documented off-host operator recovery remains |
 | Health, audit and logging | V1-OPS-02 | health endpoints, audit table and safe failure categories | health smoke plus unit category checks | **Implemented, unverified:** redaction, audit completeness, retention and degraded-service behaviour need integration evidence |

@@ -24,6 +24,7 @@ docker compose version >/dev/null 2>&1 || {
   printf 'Orbit build: Docker Compose v2 is required.\n' >&2
   exit 1
 }
+export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 
 if [[ -n "$pull_option" ]]; then
   docker compose --env-file "$environment_file" build --pull orbit-app

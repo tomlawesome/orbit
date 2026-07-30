@@ -52,16 +52,24 @@ function policy(overrides = {}) {
       imageVulnerabilities: ["HIGH", "CRITICAL"],
     },
     exceptions: [],
-    mutableImageReferences: [
+    containerImages: [
       {
-        reference: "node:22-alpine",
+        name: "Node.js build and runtime",
+        tag: "node:22-alpine",
+        reference: `node:22-alpine@${DIGEST}`,
+        indexDigest: `sha256:${"f".repeat(64)}`,
+        platform: "linux/amd64",
         locations: ["Dockerfile"],
-        owner: "Orbit maintainers",
-        rationale: "Digest update automation is tracked separately.",
-        expiresOn: "2026-08-31",
-        trackingIssue: 80,
+        source: "https://github.com/nodejs/docker-node",
+        registry: "https://hub.docker.com/_/node",
+        license: "MIT",
+        licenseSource: "https://github.com/nodejs/docker-node/blob/main/LICENSE",
+        updateOwner: "Orbit maintainers",
+        resolvedOn: "2026-07-30",
+        reviewBy: "2026-10-30",
       },
     ],
+    mutableImageReferences: [],
     ...overrides,
   };
 }
@@ -81,7 +89,7 @@ function sourceReport(overrides = {}) {
 }
 
 describe("supply-chain policy", () => {
-  it("inventories every mutable base and runtime image reference", () => {
+  it("pins every upstream base and runtime image and requires an explicit Orbit image", () => {
     const policyDocument = JSON.parse(
       readFileSync(
         new URL("../.github/supply-chain-policy.json", import.meta.url),
@@ -93,31 +101,31 @@ describe("supply-chain policy", () => {
       "tests/oidc/Dockerfile",
       "docker-compose.yml",
       "docker-compose.full.yml",
+      "scripts/test-integration.mjs",
     ];
     const discovered = new Map();
     for (const file of files) {
       const content = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
       for (const line of content.split(/\r?\n/u)) {
         const from = line.match(/^FROM\s+(\S+)/u)?.[1];
-        const compose = line.match(/^\s+image:\s+(\S+)/u)?.[1];
-        let reference = from ?? compose;
-        if (reference?.startsWith("${ORBIT_IMAGE:-") && reference.endsWith("}")) {
-          reference = reference.slice("${ORBIT_IMAGE:-".length, -1);
-        }
-        if (
-          !reference ||
-          reference === "base" ||
-          reference.includes("@sha256:")
-        ) {
+        const compose = line.match(/^\s+image:\s+"?([^"]+)"?\s*$/u)?.[1];
+        const integration = line.match(/^\s+"(postgres:[^"]+)",?$/u)?.[1];
+        const reference = from ?? compose ?? integration;
+        if (!reference || reference === "base") continue;
+        if (reference.startsWith("${ORBIT_IMAGE:")) {
+          expect(reference).toBe(
+            "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}",
+          );
           continue;
         }
+        expect(reference).toMatch(/@sha256:[0-9a-f]{64}$/u);
         const locations = discovered.get(reference) ?? new Set();
         locations.add(file);
         discovered.set(reference, locations);
       }
     }
     const tracked = new Map(
-      policyDocument.mutableImageReferences.map((entry) => [
+      (policyDocument.containerImages ?? []).map((entry) => [
         entry.reference,
         new Set(entry.locations),
       ]),
@@ -127,6 +135,29 @@ describe("supply-chain policy", () => {
     for (const [reference, locations] of discovered) {
       expect(tracked.get(reference)).toEqual(locations);
     }
+    expect(policyDocument.mutableImageReferences ?? []).toEqual([]);
+    const install = readFileSync(new URL("../scripts/install.sh", import.meta.url), "utf8");
+    const configure = readFileSync(
+      new URL("../scripts/configure.sh", import.meta.url),
+      "utf8",
+    );
+    const deploy = readFileSync(
+      new URL("../scripts/deploy-container.sh", import.meta.url),
+      "utf8",
+    );
+    for (const script of [install, configure, deploy]) {
+      expect(script).not.toContain("ghcr.io/tomlawesome/orbit:latest");
+    }
+    expect(install).toContain(
+      "Set ORBIT_IMAGE to the exact published registry digest",
+    );
+    expect(configure).toContain(
+      "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag.",
+    );
+    expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
+    expect(deploy).toContain(
+      "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest.",
+    );
   });
 
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {
@@ -134,7 +165,8 @@ describe("supply-chain policy", () => {
       scannerVersion: "0.72.0",
       dependencyReviewActionCount: 1,
       exceptionCount: 0,
-      mutableReferenceCount: 1,
+      pinnedImageCount: 1,
+      mutableReferenceCount: 0,
     });
   });
 
@@ -156,11 +188,34 @@ describe("supply-chain policy", () => {
     [{ dependencyReviewActions: [] }, /dependency action/u],
     [
       {
-        mutableImageReferences: [
-          { ...policy().mutableImageReferences[0], expiresOn: "2026-07-29" },
+        containerImages: [
+          { ...policy().containerImages[0], reference: "node:22-alpine" },
         ],
       },
-      /expired/u,
+      /pinned/u,
+    ],
+    [
+      {
+        containerImages: [
+          { ...policy().containerImages[0], reviewBy: "2026-07-29" },
+        ],
+      },
+      /Container image 1 review/u,
+    ],
+    [
+      {
+        mutableImageReferences: [
+          {
+            reference: "node:22-alpine",
+            locations: ["Dockerfile"],
+            owner: "Orbit maintainers",
+            rationale: "Temporary mutable fallback.",
+            expiresOn: "2026-08-31",
+            trackingIssue: 80,
+          },
+        ],
+      },
+      /not permitted/u,
     ],
     [
       {
