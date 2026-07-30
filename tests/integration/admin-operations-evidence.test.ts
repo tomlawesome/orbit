@@ -204,7 +204,7 @@ describe("administrator operations evidence", () => {
     const admin = await fixture.session("admin");
     const db = getDb();
     const createdAt = new Date("2030-01-01T00:00:00.000Z");
-    await db.insert(auditLog).values(Array.from({ length: 27 }, () => ({
+    const seededAuditRows = await db.insert(auditLog).values(Array.from({ length: 27 }, () => ({
       householdId: fixture.household.id,
       actorUserId: fixture.users.admin.id,
       entityType: "household",
@@ -212,7 +212,8 @@ describe("administrator operations evidence", () => {
       action: "ownership_transferred",
       changes: { privateSecret: "synthetic-raw-change" },
       createdAt,
-    })));
+    }))).returning({ id: auditLog.id });
+    const seededAuditIds = seededAuditRows.map(({ id }) => id);
 
     const firstPage = await getOperations(requestForSession(admin, "http://127.0.0.1:3000/api/admin/operations"));
     expect(firstPage.status).toBe(200);
@@ -221,8 +222,14 @@ describe("administrator operations evidence", () => {
     expect(firstPayload.operations.nextCursor).toEqual(expect.any(String));
     const secondPage = await getOperations(requestForSession(admin, `http://127.0.0.1:3000/api/admin/operations?auditCursor=${encodeURIComponent(firstPayload.operations.nextCursor!)}`));
     const secondPayload = await json(secondPage) as { operations: { audit: Array<{ id: string }>; nextCursor: string | null } };
-    expect(secondPayload.operations.audit).toHaveLength(2);
-    expect(new Set([...firstPayload.operations.audit, ...secondPayload.operations.audit].map((entry) => entry.id)).size).toBe(27);
+    const firstPageIds = firstPayload.operations.audit.map(({ id }) => id);
+    const secondPageIds = secondPayload.operations.audit.map(({ id }) => id);
+    expect(new Set(firstPageIds).size).toBe(firstPageIds.length);
+    expect(new Set(secondPageIds).size).toBe(secondPageIds.length);
+    expect(new Set([...firstPageIds, ...secondPageIds]).size).toBe(firstPageIds.length + secondPageIds.length);
+    const traversedSeededIds = [...firstPageIds, ...secondPageIds].filter((id) => seededAuditIds.includes(id));
+    expect(traversedSeededIds).toHaveLength(seededAuditIds.length);
+    expect([...new Set(traversedSeededIds)].sort()).toEqual([...seededAuditIds].sort());
 
     const privateName = fixture.household.name;
     await db.insert(auditLog).values({
