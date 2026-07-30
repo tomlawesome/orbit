@@ -15,6 +15,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
+import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const notificationEnvironmentSchema = z.object({
@@ -54,6 +55,7 @@ export const notificationFailureCategories = [
   "push_unsubscribed",
   "push_unavailable",
   "recipient_preferences_disabled",
+  "household_pending_deletion",
   "unknown",
 ] as const;
 
@@ -93,6 +95,7 @@ export interface NotificationProviders {
 }
 
 type NotificationDatabase = ReturnType<typeof getDb>;
+type NotificationTransaction = Parameters<Parameters<NotificationDatabase["transaction"]>[0]>[0];
 
 export interface NotificationWorkerDependencies {
   /** A separate Drizzle client may be supplied for concurrency tests. */
@@ -160,6 +163,7 @@ export function deliveryFailureState(
     "push_unconfigured",
     "push_unsubscribed",
     "recipient_preferences_disabled",
+    "household_pending_deletion",
   ].includes(category)) return "cancelled";
   return attempts >= maxAttempts ? "failed" : "retry";
 }
@@ -311,6 +315,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
       isNull(dueEvents.completedAt),
       eq(items.status, "active"),
       isNull(users.disabledAt),
+      isNull(households.deletionRequestedAt),
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
@@ -402,36 +407,75 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
   };
 }
 
-async function refreshLeaseBeforeDispatch(
+async function dispatchUnderHouseholdLifecycleLock(
   db: NotificationDatabase,
-  id: string,
-  leaseToken: string,
-  dispatchNow: Date,
-  leaseDurationMs: number,
-): Promise<boolean> {
-  const [refreshed] = await db.update(notificationDeliveries).set({
-    lockedAt: dispatchNow,
-    updatedAt: dispatchNow,
-  }).where(and(
-    eq(notificationDeliveries.id, id),
-    eq(notificationDeliveries.status, "processing"),
-    eq(notificationDeliveries.leaseToken, leaseToken),
-    gte(notificationDeliveries.lockedAt, new Date(dispatchNow.getTime() - leaseDurationMs)),
-  )).returning({ id: notificationDeliveries.id });
-  return Boolean(refreshed);
-}
-
-async function prepareProviderDispatch(
-  db: NotificationDatabase,
-  delivery: { id: string; channel: "email" | "web_push" },
+  delivery: { id: string; householdId: string; channel: "email" | "web_push" },
   leaseToken: string,
   currentTime: () => Date,
   leaseDurationMs: number,
+  dispatch: (transaction: NotificationTransaction) => Promise<void>,
   beforeProviderDispatch?: NotificationWorkerDependencies["beforeProviderDispatch"],
 ): Promise<boolean> {
   await beforeProviderDispatch?.(delivery);
   const dispatchNow = new Date(currentTime().getTime());
-  return refreshLeaseBeforeDispatch(db, delivery.id, leaseToken, dispatchNow, leaseDurationMs);
+  return db.transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${householdOwnerLockKey(delivery.householdId)}, 0))`,
+    );
+    const [current] = await transaction.select({
+      id: notificationDeliveries.id,
+      deletionRequestedAt: households.deletionRequestedAt,
+    })
+      .from(notificationDeliveries)
+      .innerJoin(households, eq(households.id, notificationDeliveries.householdId))
+      .where(and(
+        eq(notificationDeliveries.id, delivery.id),
+        eq(notificationDeliveries.householdId, delivery.householdId),
+        eq(notificationDeliveries.status, "processing"),
+        eq(notificationDeliveries.leaseToken, leaseToken),
+        gte(notificationDeliveries.lockedAt, new Date(dispatchNow.getTime() - leaseDurationMs)),
+      ))
+      .for("update")
+      .limit(1);
+    if (!current) return false;
+    if (current.deletionRequestedAt) {
+      await transaction.update(notificationDeliveries).set({
+        status: "cancelled",
+        lockedAt: null,
+        leaseToken: null,
+        lastError: "household_pending_deletion",
+        updatedAt: dispatchNow,
+      }).where(and(
+        eq(notificationDeliveries.id, delivery.id),
+        eq(notificationDeliveries.status, "processing"),
+        eq(notificationDeliveries.leaseToken, leaseToken),
+      ));
+      return false;
+    }
+
+    await transaction.update(notificationDeliveries).set({
+      lockedAt: dispatchNow,
+      updatedAt: dispatchNow,
+    }).where(and(
+      eq(notificationDeliveries.id, delivery.id),
+      eq(notificationDeliveries.status, "processing"),
+      eq(notificationDeliveries.leaseToken, leaseToken),
+    ));
+    await dispatch(transaction);
+    const [sent] = await transaction.update(notificationDeliveries).set({
+      status: "sent",
+      sentAt: dispatchNow,
+      lockedAt: null,
+      leaseToken: null,
+      lastError: null,
+      updatedAt: dispatchNow,
+    }).where(and(
+      eq(notificationDeliveries.id, delivery.id),
+      eq(notificationDeliveries.status, "processing"),
+      eq(notificationDeliveries.leaseToken, leaseToken),
+    )).returning({ id: notificationDeliveries.id });
+    return Boolean(sent);
+  });
 }
 
 async function cancelDelivery(
@@ -475,6 +519,7 @@ async function deliverClaimed(
       scheduledFor: notificationDeliveries.scheduledFor,
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
+      householdId: notificationDeliveries.householdId,
       email: users.email,
       title: items.title,
       dueDate: dueEvents.dueDate,
@@ -482,6 +527,7 @@ async function deliverClaimed(
       itemStatus: items.status,
       snoozedUntil: items.snoozedUntil,
       timezone: households.timezone,
+      householdDeletionRequestedAt: households.deletionRequestedAt,
       completedAt: dueEvents.completedAt,
       userDisabledAt: users.disabledAt,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
@@ -519,8 +565,14 @@ async function deliverClaimed(
       const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
         : delivery.userPushEnabled;
-      if (delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule) {
-        await cancelDelivery(db, delivery.id, leaseToken, now, null);
+      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule) {
+        await cancelDelivery(
+          db,
+          delivery.id,
+          leaseToken,
+          now,
+          delivery.householdDeletionRequestedAt ? "household_pending_deletion" : null,
+        );
         continue;
       }
       if (!preferenceEnabled) {
@@ -536,21 +588,25 @@ async function deliverClaimed(
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "smtp_unconfigured", now, retryDelay);
           continue;
         }
-        if (!await prepareProviderDispatch(
+        if (!await dispatchUnderHouseholdLifecycleLock(
           db,
-          { id: delivery.id, channel: delivery.channel },
+          {
+            id: delivery.id,
+            householdId: delivery.householdId,
+            channel: delivery.channel,
+          },
           leaseToken,
           currentTime,
           leaseDurationMs,
+          async () => providers.sendEmail({
+            from: config.smtpFrom,
+            to: delivery.email,
+            subject,
+            text,
+            tlsMode: config.smtpSecurity,
+          }),
           beforeProviderDispatch,
         )) continue;
-        await providers.sendEmail({
-          from: config.smtpFrom,
-          to: delivery.email,
-          subject,
-          text,
-          tlsMode: config.smtpSecurity,
-        });
       } else {
         if (!config.vapidSubject || !config.vapidPublicKey || !config.vapidPrivateKey) {
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unconfigured", now, retryDelay);
@@ -565,55 +621,44 @@ async function deliverClaimed(
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unsubscribed", now, retryDelay);
           continue;
         }
-        let leaseLost = false;
-        for (const subscription of subscriptions) {
-          if (!await prepareProviderDispatch(
-            db,
-            { id: delivery.id, channel: delivery.channel },
-            leaseToken,
-            currentTime,
-            leaseDurationMs,
-            beforeProviderDispatch,
-          )) {
-            leaseLost = true;
-            break;
-          }
-          try {
-            await providers.sendPush({
-              target: {
-                endpoint: subscription.endpoint,
-                keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-              },
-              payload: {
-                title: subject,
-                body,
-                url: "/",
-              },
-            });
-          } catch (error) {
-            const statusCode = (error as { statusCode?: number }).statusCode;
-            if (statusCode === 404 || statusCode === 410) {
-              await db.update(pushSubscriptions).set({ revokedAt: now })
-                .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
-              continue;
+        if (!await dispatchUnderHouseholdLifecycleLock(
+          db,
+          {
+            id: delivery.id,
+            householdId: delivery.householdId,
+            channel: delivery.channel,
+          },
+          leaseToken,
+          currentTime,
+          leaseDurationMs,
+          async (transaction) => {
+            for (const subscription of subscriptions) {
+              try {
+                await providers.sendPush({
+                  target: {
+                    endpoint: subscription.endpoint,
+                    keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+                  },
+                  payload: {
+                    title: subject,
+                    body,
+                    url: "/",
+                  },
+                });
+              } catch (error) {
+                const statusCode = (error as { statusCode?: number }).statusCode;
+                if (statusCode === 404 || statusCode === 410) {
+                  await transaction.update(pushSubscriptions).set({ revokedAt: now })
+                    .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
+                  continue;
+                }
+                throw error;
+              }
             }
-            throw error;
-          }
-        }
-        if (leaseLost) continue;
+          },
+          beforeProviderDispatch,
+        )) continue;
       }
-      await db.update(notificationDeliveries).set({
-        status: "sent",
-        sentAt: now,
-        lockedAt: null,
-        leaseToken: null,
-        lastError: null,
-        updatedAt: now,
-      }).where(and(
-        eq(notificationDeliveries.id, delivery.id),
-        eq(notificationDeliveries.status, "processing"),
-        eq(notificationDeliveries.leaseToken, leaseToken),
-      ));
     } catch (error) {
       await failDelivery(
         db,

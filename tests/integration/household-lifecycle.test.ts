@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import {
   auditLog,
   documentCrypto,
+  documentDrafts,
   documents,
   households,
   items,
@@ -17,14 +18,24 @@ import {
 import { POST as lifecycle } from "@/app/api/households/[householdId]/lifecycle/route";
 import { GET as workspace } from "@/app/api/workspace/route";
 import { hardDeleteHousehold, purgeExpiredHouseholds, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
-import { transferHouseholdOwnership } from "@/server/workspace-repository";
+import { addHouseholdMember, transferHouseholdOwnership } from "@/server/workspace-repository";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { getDocumentConfig } from "@/server/documents/config";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { reconcileDocumentStorage } from "@/server/document-worker";
 import { createPortableArchive, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
+import { requireHouseholdAccess } from "@/server/workspace-access";
+import {
+  GET as listDocuments,
+  POST as uploadDocument,
+} from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
+import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
+import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
+import { POST as createDocumentDraft } from "@/app/api/documents/[documentId]/draft/route";
+import { POST as approveDocumentDraft } from "@/app/api/document-drafts/[draftId]/approve/route";
+import { POST as createArchive } from "@/app/api/households/[householdId]/portable-archives/route";
+import { GET as downloadArchive } from "@/app/api/portable-archives/[archiveId]/download/route";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
@@ -45,6 +56,18 @@ function itemDocumentsContext(householdId: string, itemId: string) {
 
 function documentContext(documentId: string) {
   return { params: Promise.resolve({ documentId }) };
+}
+
+function archiveContext(archiveId: string) {
+  return { params: Promise.resolve({ archiveId }) };
+}
+
+function draftContext(draftId: string) {
+  return { params: Promise.resolve({ draftId }) };
+}
+
+function householdContext(householdId: string) {
+  return { params: Promise.resolve({ householdId }) };
 }
 
 function deferred<T>() {
@@ -166,6 +189,21 @@ describe("transactional household lifecycle", () => {
     const fixture = await createIntegrationFixture("lifecycle-privacy");
     const owner = await fixture.session("owner");
     const member = await fixture.session("member");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase: "integration-passphrase",
+      includeDocuments: false,
+    });
+    const [draft] = await getDb().insert(documentDrafts).values({
+      documentId,
+      householdId: fixture.household.id,
+      requestedByUserId: fixture.users.member.id,
+      extractedTextSha256: "0".repeat(64),
+      evidence: { excerpt: "private lifecycle evidence", characters: 26 },
+      proposal: { title: "Private lifecycle proposal" },
+    }).returning({ id: documentDrafts.id });
 
     const [first, second] = await Promise.allSettled([
       requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name),
@@ -177,11 +215,90 @@ describe("transactional household lifecycle", () => {
     const memberWorkspace = await workspace(requestForSession(member, "http://127.0.0.1:3000/api/workspace"));
     expect(memberWorkspace.status).toBe(200);
     expect((await memberWorkspace.json()).workspace.households).toEqual([]);
+    await expect(requireHouseholdAccess(fixture.users.owner.id, fixture.household.id))
+      .rejects.toMatchObject({ code: "household_not_found", status: 404 });
+    await expect(requireHouseholdAccess(fixture.users.outsider.id, fixture.household.id))
+      .rejects.toMatchObject({ code: "household_not_found", status: 404 });
+
+    const hiddenDocuments = await listDocuments(
+      requestForSession(member, "http://127.0.0.1:3000/api/households/documents"),
+      itemDocumentsContext(fixture.household.id, fixture.item.id),
+    );
+    await expectApiError(hiddenDocuments, 404, "item_not_found");
+
+    const hiddenDocument = await downloadDocument(
+      requestForSession(member, "http://127.0.0.1:3000/api/documents/download"),
+      documentContext(documentId),
+    );
+    await expectApiError(hiddenDocument, 404, "document_not_found");
+
+    const hiddenArchive = await downloadArchive(
+      requestForSession(owner, "http://127.0.0.1:3000/api/portable-archives/download"),
+      archiveContext(archive.id),
+    );
+    await expectApiError(hiddenArchive, 404, "archive_not_found");
+
+    const deniedArchiveCreation = await createArchive(
+      requestForSession(owner, "http://127.0.0.1:3000/api/households/portable-archives", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passphrase: "integration-passphrase", includeDocuments: false }),
+      }),
+      householdContext(fixture.household.id),
+    );
+    await expectApiError(deniedArchiveCreation, 404, "household_not_found");
+
+    const deniedDocumentDeletion = await deleteDocument(
+      requestForSession(member, "http://127.0.0.1:3000/api/documents/delete", { method: "DELETE" }),
+      documentContext(documentId),
+    );
+    await expectApiError(deniedDocumentDeletion, 404, "document_not_found");
+
+    const hiddenDraft = await createDocumentDraft(
+      requestForSession(member, "http://127.0.0.1:3000/api/documents/draft", { method: "POST" }),
+      documentContext(documentId),
+    );
+    await expectApiError(hiddenDraft, 404, "document_not_found");
+
+    const deniedDraftApproval = await approveDocumentDraft(
+      requestForSession(member, "http://127.0.0.1:3000/api/document-drafts/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sectionId: fixture.section.id,
+          title: "Should not be created",
+          mode: "create",
+        }),
+      }),
+      draftContext(draft.id),
+    );
+    await expectApiError(deniedDraftApproval, 404, "document_not_found");
+    expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId)))
+      .toEqual([{ lifecycle: "available" }]);
+    expect(await getDb().select({ id: items.id }).from(items).where(eq(items.title, "Should not be created")))
+      .toHaveLength(0);
 
     await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name))
       .rejects.toMatchObject({ code: "household_deletion_pending" });
 
     await restoreHousehold(fixture.users.owner.id, fixture.household.id, owner.sessionId);
+    const restoredDocuments = await listDocuments(
+      requestForSession(member, "http://127.0.0.1:3000/api/households/documents"),
+      itemDocumentsContext(fixture.household.id, fixture.item.id),
+    );
+    expect(restoredDocuments.status).toBe(200);
+    expect((await restoredDocuments.json()).documents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: documentId, displayName: "lifecycle-document.pdf" }),
+    ]));
+    expect((await downloadDocument(
+      requestForSession(member, "http://127.0.0.1:3000/api/documents/download"),
+      documentContext(documentId),
+    )).status).toBe(200);
+    expect((await downloadArchive(
+      requestForSession(owner, "http://127.0.0.1:3000/api/portable-archives/download"),
+      archiveContext(archive.id),
+    )).status).toBe(200);
+
     await expect(restoreHousehold(fixture.users.owner.id, fixture.household.id, owner.sessionId))
       .rejects.toMatchObject({ code: "household_not_recoverable" });
   });
@@ -213,6 +330,32 @@ describe("transactional household lifecycle", () => {
       .from(households).where(eq(households.id, fixture.household.id))).toEqual([
       expect.objectContaining({ id: fixture.household.id, deletionRequestedAt: null }),
     ]);
+  });
+
+  it("denies a stale membership mutation after deletion is scheduled under the lifecycle lock", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-membership-lock");
+    const result = holdLifecycleLockWhileChangingAuthority(
+      fixture.household.id,
+      () => addHouseholdMember(
+        fixture.users.owner.id,
+        fixture.household.id,
+        fixture.users.outsider.id,
+      ),
+      async (transaction) => {
+        const now = new Date();
+        await transaction.update(households).set({
+          deletionRequestedAt: now,
+          deleteAfter: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1_000),
+          deletionRequestedByUserId: fixture.users.owner.id,
+          updatedAt: now,
+        }).where(eq(households.id, fixture.household.id));
+      },
+    );
+    await expect(result).rejects.toMatchObject({ code: "household_not_found" });
+    expect(await getDb().select({ userId: memberships.userId }).from(memberships).where(and(
+      eq(memberships.householdId, fixture.household.id),
+      eq(memberships.userId, fixture.users.outsider.id),
+    ))).toHaveLength(0);
   });
 
   it("denies a stale restore after the owner loses authority while it waits on the lifecycle lock", async () => {
@@ -311,9 +454,19 @@ describe("transactional household lifecycle", () => {
     await purgeExpiredHouseholds();
 
     expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id))).toHaveLength(0);
-    const audits = await getDb().select({ householdId: auditLog.householdId, entityId: auditLog.entityId, action: auditLog.action })
+    const audits = await getDb().select({
+      householdId: auditLog.householdId,
+      entityId: auditLog.entityId,
+      action: auditLog.action,
+      changes: auditLog.changes,
+    })
       .from(auditLog).where(and(eq(auditLog.entityId, fixture.household.id), eq(auditLog.action, "household_purged")));
-    expect(audits).toEqual([{ householdId: null, entityId: fixture.household.id, action: "household_purged" }]);
+    expect(audits).toEqual([{
+      householdId: null,
+      entityId: fixture.household.id,
+      action: "household_purged",
+      changes: { reason: "retention_expired", storageCleanup: "complete" },
+    }]);
   });
 
   it("removes document and archive ciphertext after a failed deletion retry without exposing data", async () => {
@@ -345,6 +498,71 @@ describe("transactional household lifecycle", () => {
     await expectApiError(download, 404, "document_not_found");
     expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(true);
     expect((await archiveStorage.list()).map((entry) => entry.storageKey)).toContain(archiveRecord.storageKey);
+    expect(await getDb().select({ changes: auditLog.changes }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_hard_deleted"),
+    ))).toEqual([{
+      changes: { reason: "administrator_requested", storageCleanup: "reconciliation_pending" },
+    }]);
+
+    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000);
+    await utimes(join(config.storageRoot, "objects", documentRecord.storageKey.slice(0, 2), documentRecord.storageKey.slice(2, 4), `${documentRecord.storageKey}.bin`), old, old);
+    await utimes(join(config.storageRoot, "portable-archives", `${archiveRecord.storageKey}.archive`), old, old);
+    await reconcileDocumentStorage();
+    await reconcilePortableArchiveStorage();
+
+    expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(false);
+    expect((await archiveStorage.list()).map((entry) => entry.storageKey)).not.toContain(archiveRecord.storageKey);
+  });
+
+  it("keeps retention-purge storage failure private, auditable, and recoverable by reconciliation", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-retention-storage");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase: "integration-passphrase",
+      includeDocuments: false,
+    });
+    const [documentRecord] = await getDb().select({ storageKey: documentCrypto.storageKey }).from(documentCrypto)
+      .where(eq(documentCrypto.documentId, documentId));
+    const [archiveRecord] = await getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives)
+      .where(eq(portableArchives.id, archive.id));
+    const config = getDocumentConfig();
+    const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+    const archiveStorage = new PortableArchiveStorage(join(config.storageRoot, "portable-archives"));
+
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+    await getDb().update(households).set({ deleteAfter: new Date(Date.now() - 1_000) })
+      .where(eq(households.id, fixture.household.id));
+    const documentDelete = vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext")
+      .mockRejectedValue(new Error("injected retention storage outage"));
+    const archiveDelete = vi.spyOn(PortableArchiveStorage.prototype, "delete")
+      .mockRejectedValue(new Error("injected retention storage outage"));
+    try {
+      await purgeExpiredHouseholds();
+    } finally {
+      documentDelete.mockRestore();
+      archiveDelete.mockRestore();
+    }
+
+    expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id)))
+      .toHaveLength(0);
+    expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.id, documentId)))
+      .toHaveLength(0);
+    const download = await downloadDocument(
+      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/download`),
+      documentContext(documentId),
+    );
+    await expectApiError(download, 404, "document_not_found");
+    expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(true);
+    expect((await archiveStorage.list()).map((entry) => entry.storageKey)).toContain(archiveRecord.storageKey);
+    expect(await getDb().select({ changes: auditLog.changes }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_purged"),
+    ))).toEqual([{
+      changes: { reason: "retention_expired", storageCleanup: "reconciliation_pending" },
+    }]);
 
     const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000);
     await utimes(join(config.storageRoot, "objects", documentRecord.storageKey.slice(0, 2), documentRecord.storageKey.slice(2, 4), `${documentRecord.storageKey}.bin`), old, old);
@@ -385,6 +603,12 @@ describe("transactional household lifecycle", () => {
     expect(await getDb().select({ id: portableArchives.id }).from(portableArchives).where(eq(portableArchives.id, createdArchive.id))).toHaveLength(0);
     expect(await documentStorage.ciphertextExists(documentRecord.storageKey)).toBe(false);
     await expect(archiveStorage.read(archiveRecord.storageKey, 1_000_000)).rejects.toThrow();
+    expect(await getDb().select({ changes: auditLog.changes }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_hard_deleted"),
+    ))).toEqual([{
+      changes: { reason: "administrator_requested", storageCleanup: "complete" },
+    }]);
   });
 
   it("rejects a restore that reaches the expiry boundary while purge is concurrent", async () => {
