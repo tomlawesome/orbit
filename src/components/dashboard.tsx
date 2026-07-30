@@ -14,6 +14,7 @@ import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import { PortableArchiveManager } from "@/components/portable-archive-manager";
 import { ImapInbox } from "@/components/imap-inbox";
+import { calendarDateInTimeZone, dueCopy as dashboardDueCopy, formatCost, formatHeadingDate, formatLongDate, householdInitials, PREFERENCE_EVENT, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
 import {
   daysUntil,
   getDueBand,
@@ -36,8 +37,6 @@ import {
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createEmptyWorkspace, createHousehold, type ItemActivity } from "@/lib/workspace";
 
-const THEME_STORAGE_KEY = "orbit:theme:v1";
-const PREFERENCE_EVENT = "orbit:preference-change";
 const DEFAULT_THEME: ThemePreference = {
   mode: "system",
   colourway: "after-dark",
@@ -47,6 +46,7 @@ const DEFAULT_THEME: ThemePreference = {
   pushNotifications: true,
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
+const NOTICE_DURATION_MS = 10_000;
 
 type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
 type ItemFilter = "all" | "attention" | "unscheduled";
@@ -99,62 +99,24 @@ function useLocalStorageValue(key: string, fallback: string): string {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-function storePreference(key: string, value: unknown) {
-  window.localStorage.setItem(key, JSON.stringify(value));
-  window.dispatchEvent(new CustomEvent(PREFERENCE_EVENT, { detail: key }));
-}
+type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
 
-function calendarDateInTimeZone(timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone,
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
-}
-
-function formatLongDate(value: string, timeZone = "UTC") {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone,
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function formatHeadingDate(value: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
-}
-
-function formatCost(item: HomeItem) {
-  if (item.costMinor == null) return "No cost recorded";
-  return new Intl.NumberFormat("en-GB", { style: "currency", currency: item.currency }).format(item.costMinor / 100);
-}
-
-function dueCopy(item: HomeItem, today: string) {
-  if (!item.dueDate) return "No due date";
-  const days = daysUntil(item.dueDate, today);
-  if (days < 0) return `${Math.abs(days)} days overdue`;
-  if (days === 0) return "Due today";
-  return `Due in ${days} days`;
-}
-
-function householdInitials(name: string) {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
-}
-
+/** Keeps signed-out/loading state outside the authenticated dashboard tree. */
 export function Dashboard() {
-  const { workspace, dispatch, session, syncStatus, syncMessage } = useWorkspace();
+  const { session, ...workspaceState } = useWorkspace();
+  if (!session) return <AuthenticationGate loading={workspaceState.syncStatus === "loading"} />;
+  return <AuthenticatedDashboard session={session} workspaceState={workspaceState} />;
+}
+
+function AuthenticatedDashboard({ session, workspaceState }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace }) {
+  const { workspace, dispatch, executeCommand, refreshWorkspace, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
-  const recoveryRequired = workspace.recoverableHouseholds.length > 0 && (!hasActiveHousehold || !household.onboardingComplete);
+  // Legacy placeholder households may already exist from releases that created
+  // one during a workspace read. Give recovery choices precedence over that
+  // unfinished setup, but never create another household from this view.
+  const householdChoiceRequired = workspace.householdLanding === "choose"
+    || (workspace.recoverableHouseholds.length > 0 && (!hasActiveHousehold || !household.onboardingComplete));
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
@@ -225,7 +187,17 @@ export function Dashboard() {
     });
   }, [session]);
 
-  if (!session) return <AuthenticationGate loading={syncStatus === "loading"} />;
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), NOTICE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("open") !== "inbox") return;
+    const timer = window.setTimeout(() => setSettingsView("inbox"), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
@@ -322,14 +294,55 @@ export function Dashboard() {
     };
   }
 
-  function saveItem(item: HomeItem) {
+  async function saveItem(item: HomeItem, document?: File) {
     const kind = editingItem ? "updated" : "created";
-    dispatch({
+    const command = {
       type: "item.upsert",
       householdId: household.id,
       item,
       activity: activity(item, kind, { nextDate: item.dueDate }),
-    });
+    } as const;
+    // A document-assisted item uses the same reviewed approval contract as a
+    // mailbox draft. The browser retains the original until this explicit
+    // approval succeeds, then sends it through the secure document route.
+    if (document && !editingItem) {
+      const approvalResponse = await fetch("/api/reviewed-intake/approve", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken },
+        body: JSON.stringify({
+          operationId: item.id,
+          source: { kind: "direct_upload", expectedDocument: true },
+          householdId: household.id,
+          sectionId: item.sectionId,
+          action: "create_separate",
+          item,
+          attachmentIds: [],
+        }),
+      });
+      if (!approvalResponse.ok) {
+        const payload = await approvalResponse.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+        throw new Error(payload?.error?.message ?? "The reviewed item could not be approved");
+      }
+      const approval = await approvalResponse.json() as { itemId?: string; attachmentState?: string };
+      const approvedItemId = approval.itemId ?? item.id;
+      // Refresh the canonical workspace before the secure upload. The item is
+      // intentionally durable and reachable even when attachment storage fails.
+      await refreshWorkspace();
+      const response = await fetch(`/api/households/${household.id}/items/${approvedItemId}/documents`, {
+          method: "POST", credentials: "same-origin",
+          headers: {
+            "X-CSRF-Token": session.csrfToken,
+            "X-Orbit-Filename": encodeURIComponent(document.name),
+            "X-Orbit-Review-Operation": item.id,
+          },
+          body: document,
+        });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+        throw new Error(payload?.error?.message ?? "The document could not be attached");
+      }
+      await refreshWorkspace();
+    } else dispatch(command);
     setItemEditorOpen(false);
     setNotice({ message: editingItem ? `${item.title} updated` : `${item.title} added` });
   }
@@ -339,6 +352,7 @@ export function Dashboard() {
       type: "item.archive",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       activity: activity(item, "archived"),
     });
     setItemEditorOpen(false);
@@ -351,6 +365,7 @@ export function Dashboard() {
       type: "item.status",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       status: "active",
       activity: activity(item, "restored"),
     });
@@ -363,6 +378,7 @@ export function Dashboard() {
       type: "item.complete",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       ...input,
       activity: activity(item, kind, {
         effectiveDate: input.completedDate,
@@ -380,6 +396,7 @@ export function Dashboard() {
       type: "item.reschedule",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       dueDate,
       activity: activity(item, "rescheduled", { previousDate: item.dueDate, nextDate: dueDate }),
     });
@@ -391,6 +408,7 @@ export function Dashboard() {
       type: "item.snooze",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       snoozedUntil,
       activity: activity(item, "snoozed", { nextDate: snoozedUntil }),
     });
@@ -402,6 +420,7 @@ export function Dashboard() {
       type: "item.status",
       householdId: household.id,
       itemId: item.id,
+      expectedVersion: item.version ?? 1,
       status,
       activity: activity(item, status === "active" ? "restored" : "cancelled"),
     });
@@ -427,8 +446,8 @@ export function Dashboard() {
     setMenuOpen(false);
   }
 
-  function addHousehold(input: HouseholdInput) {
-    dispatch({
+  async function addHousehold(input: HouseholdInput) {
+    await executeCommand({
       type: "household.create",
       household: createHousehold({ id: crypto.randomUUID(), ...input }),
     });
@@ -436,6 +455,11 @@ export function Dashboard() {
     setOnboardingOpen(false);
     setHouseholdMenuOpen(false);
     setNotice({ message: `${input.name} is ready` });
+  }
+
+  function returnToHouseholdRecovery() {
+    setOnboardingOpen(false);
+    setNotice({ message: "That name belongs to a removed household. Restore it, permanently delete it if you are an instance administrator, or choose a different name." });
   }
 
   function updateHousehold(input: HouseholdSettingsInput) {
@@ -570,7 +594,7 @@ export function Dashboard() {
                     <span className="row-number">{String(index + 1).padStart(2, "0")}</span>
                     <span className={`category-icon type-icon-${itemSection?.icon ?? "calendar"} accent-${itemSection?.accent ?? "sage"}`}><Icon name={itemSection?.icon ?? "calendar"} /></span>
                     <button className="item-main" onClick={() => openItem(item)}>
-                      <div className="item-title-row"><h3>{item.title}</h3><span className={`status status-${displayState}`}>{archiveMode ? displayState : dueCopy(item, today)}</span></div>
+                      <div className="item-title-row"><h3>{item.title}</h3><span className={`status status-${displayState}`}>{archiveMode ? displayState : dashboardDueCopy(item, today, daysUntil)}</span></div>
                       <p><b>{item.subtype ?? itemSection?.name ?? "Household item"}</b><span>{item.provider ?? "No provider"}{item.reference ? ` · ${item.reference}` : ""}{item.recurrenceMonths ? ` · every ${item.recurrenceMonths === 12 ? "year" : `${item.recurrenceMonths} months`}` : ""}</span></p>
                     </button>
                     <div className="item-meta"><strong>{formatCost(item)}</strong><small>{item.dueDate ? formatLongDate(item.dueDate) : "Add a schedule"}</small></div>
@@ -690,7 +714,7 @@ export function Dashboard() {
             ) : settingsView === "inbox" ? (
               <ImapInbox csrfToken={session.csrfToken} />
             ) : settingsView === "recovery" ? (
-              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} />
+              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />
             ) : settingsView === "household" && household.canManage ? (
               <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
             ) : settingsView === "sections" && household.canManage ? (
@@ -737,6 +761,8 @@ export function Dashboard() {
           item={editingItem}
           sections={sections}
           currency={household.currency}
+          householdId={household.id}
+          csrfToken={session.csrfToken}
           onClose={() => setItemEditorOpen(false)}
           onSave={saveItem}
           onArchive={editingItem ? archiveItem : undefined}
@@ -779,11 +805,11 @@ export function Dashboard() {
         />
       )}
 
-      {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} />}
+      {onboardingOpen && <HouseholdOnboarding onClose={() => setOnboardingOpen(false)} onCreate={addHousehold} onRecoverableNameConflict={returnToHouseholdRecovery} />}
 
-      {recoveryRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
+      {householdChoiceRequired && !onboardingOpen && <HouseholdRecoveryPrompt households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} onCreate={() => setOnboardingOpen(true)} />}
 
-      {!household.onboardingComplete && !recoveryRequired && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
+      {!household.onboardingComplete && !householdChoiceRequired && <FirstRunWizard household={household} onComplete={completeFirstRun} />}
 
       {notice && (
         <div className="action-toast" role="status">

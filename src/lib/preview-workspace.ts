@@ -36,6 +36,14 @@ export interface WorkspaceSession {
   };
 }
 
+/** A safe, actionable failure returned by the workspace command endpoint. */
+export class WorkspaceCommandError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "WorkspaceCommandError";
+  }
+}
+
 async function fetchSession(): Promise<WorkspaceSession | null> {
   const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
   if (response.status === 401) return null;
@@ -191,5 +199,38 @@ export function useWorkspace() {
       });
   }, [flushQueue]);
 
-  return { workspace, dispatch, session, syncStatus, syncMessage };
+  const executeCommand = useCallback(async (command: WorkspaceCommand): Promise<WorkspaceState> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) throw new Error("A valid session is required");
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": activeSession.csrfToken },
+      body: JSON.stringify(command),
+    });
+    const payload = await response.json() as { workspace?: unknown; error?: { code?: string; message?: string } };
+    if (!response.ok) {
+      throw new WorkspaceCommandError(
+        payload.error?.code ?? "workspace_command_failed",
+        payload.error?.message ?? "Orbit could not save this change",
+      );
+    }
+    const canonical = workspaceSchema.parse(payload.workspace);
+    setWorkspace(canonical);
+    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+    setSyncStatus("synced");
+    setSyncMessage("");
+    return canonical;
+  }, []);
+
+  const refreshWorkspace = useCallback(async (): Promise<void> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) return;
+    const canonical = await fetchWorkspace();
+    setWorkspace(canonical);
+    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
+    setSyncStatus("synced");
+    setSyncMessage("");
+  }, []);
+
+  return { workspace, dispatch, executeCommand, refreshWorkspace, session, syncStatus, syncMessage };
 }

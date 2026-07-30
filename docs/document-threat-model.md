@@ -8,7 +8,7 @@ version-controlled implementation requirement, not an aspirational checklist.
 Orbit will attach encrypted documents to household items using a local
 persistent volume. The first release supports:
 
-- PDF, JPEG, PNG, and WebP content identified from file signatures;
+- PDF, JPEG, and PNG content identified from file signatures;
 - a 25 MiB maximum file size;
 - a 5 GiB default quota per household;
 - a 20 GiB default quota per instance;
@@ -108,6 +108,31 @@ recoverable state.
   concurrent uploads from exceeding limits.
 - Plaintext quarantine files use opaque names, restrictive permissions, and a
   directory inaccessible through HTTP.
+
+### Parsing, OCR, and indirect prompt injection
+
+- Treat every supported manual-upload format—PDF, JPEG, and PNG—as
+  hostile throughout parsing and review. The PDF-only mailbox rule narrows
+  transport input; it does not make mailbox PDFs more trusted or manual image
+  uploads less dangerous.
+- ClamAV detects known file threats. Parsers and OCR engines extract content.
+  Neither function proves that extracted text, metadata, or suggested values
+  are safe, accurate, or authoritative.
+- Parser responses must be content-type checked, strictly decoded, and bounded
+  before allocation. Redirects and arbitrary request URLs or options are
+  rejected. Parser errors expose no provider or document content.
+- The optional Tika service shares only a dedicated internal network with the
+  Orbit application. It has no network path to PostgreSQL, default-network
+  services, or external networks.
+- Parser and OCR output is bounded untrusted evidence. It may populate only
+  allowlisted, type- and length-validated editable suggestions; it cannot
+  select authority, read secrets or unrelated records, fetch URLs, invoke
+  tools, approve a draft, associate a document, or perform a household write.
+- Explicit authenticated review is required before any suggested value or
+  document association becomes household-visible.
+- Any future model-backed extraction remains a tool-free, secret-free,
+  network-isolated proposer. Its schema-constrained output receives the same
+  validation and trust level as parser or OCR output.
 
 ### Malware scanning
 
@@ -246,9 +271,36 @@ the supported runtime. It must not introduce a custom cipher construction.
 - backup/restore with mixed states and key verification;
 - browser tests proving attachment-only delivery and signed-out privacy.
 
-## Deferred capabilities
+## Planned v1 intake extensions
 
-The first phase does not include inline previews, document parsing, OCR,
-semantic extraction, IMAP ingestion, public sharing, S3 storage, archive
-uploads, or automatic duplicate merging. Each must extend this threat model
-before implementation.
+Bounded document parsing and dedicated-mailbox ingestion are required v1
+inputs to the same private, editable review flow. Direct upload accepts the
+three document types above, while mailbox ingestion deliberately accepts only
+PDF candidates. Incidental non-PDF MIME parts are ignored without download or
+staging; a claimed PDF must pass bounded structural detection, malware
+scanning, and encryption. A message with no PDF reaches a content-free private
+terminal outcome rather than an empty review draft. Before mailbox enablement,
+this model must cover authenticated envelope identity, hostile MIME and archive
+limits, receipt idempotency, quarantine, retry/reconnect behaviour, cross-
+household draft isolation, retention, redacted diagnostics, and explicit user
+approval before any item write or attachment.
+
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md) establishes that
+boundary. Mailbox input is identified only through a configured
+provider-preserved envelope-recipient header and a versioned HMAC alias. Orbit
+does not persist raw messages, active content, archives, malware, or incomplete
+staging. Supported clean PDFs are encrypted into user-owned staging
+that is neither household data nor downloadable through item routes. Receipt
+identity, recipient-scoped content identity, leases, bounded retries, expiry,
+and purge must remain idempotent across polling, restart, UIDVALIDITY rollover,
+approval, discard, and alias-key rotation.
+
+Approval rechecks the user, selected household, section, existing-item target,
+draft version, and staged source identity. Only that explicit command may
+create an item or transfer a staged attachment through the secure document
+lifecycle. Quarantined and failed views expose technical classifications and
+opaque identifiers only.
+
+Inline previews, OCR, model-dependent semantic extraction, public sharing, S3
+storage, archive uploads, and automatic duplicate merging remain deferred.
+Each must extend this threat model before implementation.

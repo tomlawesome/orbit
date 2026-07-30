@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "actor": {
+    "model": "Sol Extra High",
+    "role": "orchestration"
+  },
+  "accessPreflight": {
+    "observedAt": "2026-07-30T06:25:00.000Z",
+    "connector": {
+      "mounted": true,
+      "proof": "live_connector_call"
+    },
+    "ssh": {
+      "reachable": true,
+      "proof": "ssh_exact_ref_read",
+      "refs": [
+        {
+          "name": "refs/heads/develop",
+          "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    "cli": {
+      "checked": true,
+      "accountVerified": false,
+      "proof": "cli_auth_status",
+      "credentialMaterialRecorded": false,
+      "readCapabilities": {
+        "repository_read": "unavailable",
+        "issues_read": "unavailable",
+        "pull_requests_read": "unavailable",
+        "actions_read": "unavailable"
+      }
+    },
+    "browser": {
+      "userControlled": true
+    },
+    "capabilities": [
+      {
+        "actionClass": "repository_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "issue_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "pull_request_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "actions_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "git_fetch",
+        "status": "available",
+        "route": "cli",
+        "evidenceKind": "ssh_exact_ref_read"
+      },
+      {
+        "actionClass": "git_push",
+        "status": "available",
+        "route": "cli",
+        "evidenceKind": "endpoint_write_success"
+      },
+      {
+        "actionClass": "issue_write",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "authenticated_write_capability"
+      },
+      {
+        "actionClass": "pull_request_write",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "endpoint_write_success"
+      },
+      {
+        "actionClass": "protected_merge",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "authenticated_write_capability"
+      }
+    ]
+  },
+  "delivery": {
+    "issue": 74,
+    "repository": "tomlawesome/orbit",
+    "baseSha": "90e240a51bed89bf19d50d0819601de19a3ecc8d",
+    "branch": "codex/issue-74-orchestration-learning",
+    "stage": "active",
+    "previousStage": "launch_pending",
+    "task": {
+      "requestedModel": "Luna Extra High",
+      "launchReceipt": {
+        "source": "create_thread",
+        "clientThreadId": "client-new-thread:example",
+        "requestedModel": "Luna Extra High",
+        "baseSha": "90e240a51bed89bf19d50d0819601de19a3ecc8d",
+        "observedAt": "2026-07-30T06:30:00.000Z"
+      },
+      "authoritativeStatus": {
+        "source": "list_threads_full",
+        "status": "active",
+        "threadId": "example-thread-id",
+        "worktree": "C:\\example\\orbit-worktree",
+        "baseSha": "90e240a51bed89bf19d50d0819601de19a3ecc8d",
+        "observedAt": "2026-07-30T06:31:00.000Z"
+      }
+    }
+  }
+}
