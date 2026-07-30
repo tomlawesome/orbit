@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Dialog, type Page } from "@playwright/test";
 
 const administrator = "Orbit Administrator";
 const member = "Orbit Member";
@@ -8,6 +8,21 @@ async function signIn(page: Page, identity: string) {
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: identity }).click();
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+}
+
+async function clickWithConfirmation(page: Page, click: () => Promise<void>) {
+  let accepted: Promise<void> | undefined;
+  const handleDialog = (dialog: Dialog) => {
+    accepted = dialog.accept();
+  };
+  page.once("dialog", handleDialog);
+  try {
+    await click();
+    if (!accepted) throw new Error("Expected a confirmation dialog for the authenticated action");
+    await accepted;
+  } finally {
+    page.off("dialog", handleDialog);
+  }
 }
 
 type AuthenticatedBrowserSession = { userId: string; displayName: string; csrfToken: string };
@@ -517,15 +532,13 @@ test.describe("authenticated household lifecycle", () => {
       await openMembers(memberPage);
       const leaveRow = memberPage.locator(".member-list article").filter({ hasText: member });
       await expect(leaveRow.getByRole("button", { name: "Leave household" })).toBeVisible();
-      memberPage.once("dialog", (dialog) => dialog.accept());
-      await leaveRow.getByRole("button", { name: "Leave household" }).click();
+      await clickWithConfirmation(memberPage, () => leaveRow.getByRole("button", { name: "Leave household" }).click());
       await expectMemberRemoved();
 
       await addMember();
       await waitForMemberHousehold();
       await openMembers(page);
       const ownerRemovalRow = page.locator(".member-list article").filter({ hasText: member });
-      page.once("dialog", (dialog) => dialog.accept());
       await ownerRemovalRow.getByRole("button", { name: "Remove" }).click();
       await expect(page.getByRole("status")).toContainText(`${member} was removed from this household.`);
       await expectMemberRemoved();
@@ -534,8 +547,7 @@ test.describe("authenticated household lifecycle", () => {
       await waitForMemberHousehold();
       await openMembers(page);
       const transferRow = page.locator(".member-list article").filter({ hasText: member });
-      page.once("dialog", (dialog) => dialog.accept());
-      await transferRow.getByRole("button", { name: "Make owner" }).click();
+      await clickWithConfirmation(page, () => transferRow.getByRole("button", { name: "Make owner" }).click());
       await expect(page.getByRole("status")).toContainText(`${member} is now the household owner.`);
       await waitForActiveHousehold(page, householdName);
       await waitForMemberHousehold();
