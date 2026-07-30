@@ -28,6 +28,36 @@ function validPolicy() {
       "protected_planning",
     ],
     taskStatusSources: ["create_thread", "list_threads_full", "read_thread", "wait_threads"],
+    remoteAccessPreflight: {
+      connectorMountProof: "live_connector_call",
+      sshRefProof: "ssh_exact_ref_read",
+      cliReadProofs: [
+        "cli_auth_status",
+        "repository_read",
+        "issues_read",
+        "pull_requests_read",
+        "actions_read",
+      ],
+      actionClasses: [
+        "repository_read",
+        "issue_read",
+        "pull_request_read",
+        "actions_read",
+        "git_fetch",
+        "git_push",
+        "issue_write",
+        "pull_request_write",
+        "protected_merge",
+      ],
+      capabilityStates: ["available", "unavailable", "untested"],
+      routeOrder: ["connector", "cli", "browser_user_controlled"],
+      protectedWriteClasses: ["pull_request_write", "protected_merge"],
+      writeEvidenceKinds: ["authenticated_write_capability", "endpoint_write_success"],
+      rejectInstalledMetadataAsMountProof: true,
+      rejectOwnershipOrPublicReadAsWriteProof: true,
+      failClosedBeforeDependentLaunch: true,
+      secretsInChat: false,
+    },
     deliveryStages: [
       "planned",
       "launch_pending",
@@ -71,6 +101,94 @@ function activeState() {
     actor: {
       model: "Sol Extra High",
       role: "orchestration",
+    },
+    accessPreflight: {
+      observedAt: "2026-07-30T06:25:00.000Z",
+      connector: {
+        mounted: true,
+        proof: "live_connector_call",
+      },
+      ssh: {
+        reachable: true,
+        proof: "ssh_exact_ref_read",
+        refs: [
+          {
+            name: "refs/heads/release/architecture-consolidation-rc",
+            sha: SHA,
+          },
+        ],
+      },
+      cli: {
+        checked: true,
+        accountVerified: false,
+        proof: "cli_auth_status",
+        credentialMaterialRecorded: false,
+        readCapabilities: {
+          repository_read: "unavailable",
+          issues_read: "unavailable",
+          pull_requests_read: "unavailable",
+          actions_read: "unavailable",
+        },
+      },
+      browser: {
+        userControlled: true,
+      },
+      capabilities: [
+        {
+          actionClass: "repository_read",
+          status: "available",
+          route: "connector",
+          evidenceKind: "live_connector_call",
+        },
+        {
+          actionClass: "issue_read",
+          status: "available",
+          route: "connector",
+          evidenceKind: "live_connector_call",
+        },
+        {
+          actionClass: "pull_request_read",
+          status: "available",
+          route: "connector",
+          evidenceKind: "live_connector_call",
+        },
+        {
+          actionClass: "actions_read",
+          status: "available",
+          route: "connector",
+          evidenceKind: "live_connector_call",
+        },
+        {
+          actionClass: "git_fetch",
+          status: "available",
+          route: "cli",
+          evidenceKind: "ssh_exact_ref_read",
+        },
+        {
+          actionClass: "git_push",
+          status: "available",
+          route: "cli",
+          evidenceKind: "endpoint_write_success",
+        },
+        {
+          actionClass: "issue_write",
+          status: "available",
+          route: "connector",
+          evidenceKind: "authenticated_write_capability",
+        },
+        {
+          actionClass: "pull_request_write",
+          status: "available",
+          route: "connector",
+          evidenceKind: "endpoint_write_success",
+        },
+        {
+          actionClass: "protected_merge",
+          status: "available",
+          route: "connector",
+          evidenceKind: "authenticated_write_capability",
+        },
+      ],
     },
     delivery: {
       issue: 74,
@@ -146,6 +264,52 @@ describe("orchestration governance", () => {
     };
     expect(() => validateOperationalState(state, validPolicy())).toThrow(
       /task absence is not failure evidence/u,
+    );
+  });
+
+  it("requires live connector, exact SSH ref, and credential-safe CLI preflight evidence", () => {
+    const state = activeState();
+    state.accessPreflight.connector.proof = "installed_plugin_files";
+    state.accessPreflight.ssh.refs = [];
+    state.accessPreflight.cli.credentialMaterialRecorded = true;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /live connector call/u,
+    );
+  });
+
+  it("rejects ownership or public-read evidence as proof of protected write access", () => {
+    const state = activeState();
+    const pullRequestWrite = state.accessPreflight.capabilities.find(
+      ({ actionClass }) => actionClass === "pull_request_write",
+    );
+    pullRequestWrite.evidenceKind = "repository_owner_or_public_read";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /protected write capability requires authenticated write evidence/u,
+    );
+  });
+
+  it("fails closed before dependent launch when no protected write path is available", () => {
+    const state = activeState();
+    for (const capability of state.accessPreflight.capabilities) {
+      if (["pull_request_write", "protected_merge"].includes(capability.actionClass)) {
+        capability.status = "unavailable";
+        capability.evidenceKind = "unavailable_result";
+      }
+    }
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /protected write path is unavailable/u,
+    );
+  });
+
+  it("requires an explicit user-controlled browser fallback", () => {
+    const state = activeState();
+    const issueWrite = state.accessPreflight.capabilities.find(
+      ({ actionClass }) => actionClass === "issue_write",
+    );
+    issueWrite.route = "browser_user_controlled";
+    state.accessPreflight.browser.userControlled = false;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /browser fallback must remain explicitly user-controlled/u,
     );
   });
 

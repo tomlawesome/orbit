@@ -4,6 +4,94 @@
     "model": "Sol Extra High",
     "role": "orchestration"
   },
+  "accessPreflight": {
+    "observedAt": "2026-07-30T06:25:00.000Z",
+    "connector": {
+      "mounted": true,
+      "proof": "live_connector_call"
+    },
+    "ssh": {
+      "reachable": true,
+      "proof": "ssh_exact_ref_read",
+      "refs": [
+        {
+          "name": "refs/heads/release/architecture-consolidation-rc",
+          "sha": "90e240a51bed89bf19d50d0819601de19a3ecc8d"
+        }
+      ]
+    },
+    "cli": {
+      "checked": true,
+      "accountVerified": false,
+      "proof": "cli_auth_status",
+      "credentialMaterialRecorded": false,
+      "readCapabilities": {
+        "repository_read": "unavailable",
+        "issues_read": "unavailable",
+        "pull_requests_read": "unavailable",
+        "actions_read": "unavailable"
+      }
+    },
+    "browser": {
+      "userControlled": true
+    },
+    "capabilities": [
+      {
+        "actionClass": "repository_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "issue_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "pull_request_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "actions_read",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "live_connector_call"
+      },
+      {
+        "actionClass": "git_fetch",
+        "status": "available",
+        "route": "cli",
+        "evidenceKind": "ssh_exact_ref_read"
+      },
+      {
+        "actionClass": "git_push",
+        "status": "available",
+        "route": "cli",
+        "evidenceKind": "endpoint_write_success"
+      },
+      {
+        "actionClass": "issue_write",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "authenticated_write_capability"
+      },
+      {
+        "actionClass": "pull_request_write",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "endpoint_write_success"
+      },
+      {
+        "actionClass": "protected_merge",
+        "status": "available",
+        "route": "connector",
+        "evidenceKind": "authenticated_write_capability"
+      }
+    ]
+  },
   "delivery": {
     "issue": 74,
     "repository": "tomlawesome/orbit",

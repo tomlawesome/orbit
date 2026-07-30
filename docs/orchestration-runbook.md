@@ -28,6 +28,28 @@ Before any mutation, delivery agent or heartbeat:
 6. runs `pnpm orchestration:check` when the repository dependencies are
    available.
 
+The same preflight records remote access before launching or advancing
+dependent work:
+
+1. prove the GitHub connector is mounted with a live repository, issue or pull
+   request call; installed plugin files or settings are not mounting evidence;
+2. read the exact accepted base and delivery refs over SSH without mutation;
+3. check the CLI account plus repository, issue, pull-request and Actions read
+   capabilities without reading or recording credential material;
+4. record each required remote action class as `available`, `unavailable` or
+   `untested`, with its authenticated evidence and route;
+5. route GitHub actions through the live connector first, the CLI second, and
+   an explicitly user-controlled browser only as the last resort; and
+6. fail closed before dependent implementation starts or advances when no
+   authenticated pull-request and protected-merge path is available.
+
+Repository ownership, an administrator label, a public read, installed
+connector files or successful SSH fetch do not prove issue, pull-request,
+Actions or protected-merge write authority. A successful write endpoint or a
+separate authenticated capability check is required. Never ask a remote user
+to put a token, password, device code, recovery code, session value or other
+authentication material in chat.
+
 All orchestration—including task launch, monitoring, sequencing,
 reconciliation, blocker classification, handback acceptance, delivery
 decisions and retained-learning promotion—is a hard **Sol Extra High** gate.
