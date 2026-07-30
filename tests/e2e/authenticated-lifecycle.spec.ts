@@ -74,6 +74,30 @@ async function waitForActiveHousehold(page: Page, name: string): Promise<Durable
   );
 }
 
+async function openMobileNavigationIfNeeded(page: Page) {
+  const closeNavigation = page.getByRole("button", { name: "Close navigation" });
+  if (await closeNavigation.isVisible()) return;
+  const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  if (await openNavigation.isVisible()) await openNavigation.click();
+}
+
+async function selectHouseholdByName(page: Page, name: string): Promise<DurableWorkspace> {
+  const workspace = await waitForDurableWorkspace(page);
+  const target = workspace.households.find((household) => household.name === name);
+  if (!target) throw new Error(`Expected household "${name}" to be available for selection`);
+
+  await openMobileNavigationIfNeeded(page);
+  const householdPicker = page.locator("button.household-picker");
+  await expect(householdPicker, `Expected the household picker before selecting "${name}"`).toBeVisible({ timeout: 15_000 });
+  await householdPicker.click();
+  const householdMenu = page.getByRole("menu");
+  await expect(householdMenu).toBeVisible({ timeout: 15_000 });
+  const targetItem = householdMenu.getByRole("menuitem").filter({ hasText: name });
+  await expect(targetItem, `Expected exactly one household menu item for "${name}"`).toHaveCount(1, { timeout: 15_000 });
+  await targetItem.click();
+  return waitForActiveHousehold(page, name);
+}
+
 async function waitForActiveHouseholdItem(page: Page, title: string): Promise<DurableWorkspace> {
   return waitForWorkspace(
     page,
@@ -371,6 +395,9 @@ test.describe("authenticated household lifecycle", () => {
     const projectPartition = testInfo.project.name.replace(/[^a-z0-9]+/giu, "-").replace(/^-|-$/gu, "").toLowerCase();
     const householdName = `Issue 94 membership ${projectPartition} ${Date.now()}`;
     await createManualHousehold(page, isMobile, householdName);
+    const createdWorkspace = await waitForActiveHousehold(page, householdName);
+    const householdId = createdWorkspace.activeHouseholdId;
+    if (!householdId) throw new Error(`Expected household "${householdName}" to have a durable id`);
     const memberContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const memberPage = await memberContext.newPage();
     try {
@@ -379,7 +406,13 @@ test.describe("authenticated household lifecycle", () => {
       const openMembers = async (targetPage: Page) => {
         const closeSettings = targetPage.getByRole("button", { name: "Close personalisation" });
         if (!(await closeSettings.isVisible())) {
-          await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
+          const openNavigation = targetPage.getByRole("button", { name: "Open navigation" });
+          if (await openNavigation.isVisible()) {
+            await openMobileNavigationIfNeeded(targetPage);
+            await targetPage.getByRole("button", { name: "Personalise", exact: true }).click();
+          } else {
+            await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
+          }
         }
         await targetPage.getByRole("tab", { name: "Members" }).click();
       };
@@ -391,13 +424,28 @@ test.describe("authenticated household lifecycle", () => {
       };
       const waitForMemberHousehold = async () => {
         await memberPage.reload();
-        await waitForActiveHousehold(memberPage, householdName);
+        await selectHouseholdByName(memberPage, householdName);
         await expect(memberPage.getByText(householdName, { exact: true }).first()).toBeVisible();
       };
       const expectMemberRemoved = async () => {
         await memberPage.reload();
-        await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
-        await expect(memberPage.getByText(householdName, { exact: true })).toHaveCount(0);
+        const removedWorkspace = await waitForWorkspace(
+          memberPage,
+          (workspace) => !workspace.households.some((household) => household.id === householdId || household.name === householdName),
+          `Expected member access to household "${householdName}" to be removed`,
+        );
+        expect(removedWorkspace.activeHouseholdId).not.toBe(householdId);
+        expect(removedWorkspace.households).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: householdId, name: householdName }),
+        ]));
+        const inaccessible = await memberPage.evaluate(async (id) => {
+          const response = await fetch(`/api/households/${id}/members`, { credentials: "same-origin", cache: "no-store" });
+          return { status: response.status, body: await response.json() };
+        }, householdId);
+        expect(inaccessible).toEqual({
+          status: 404,
+          body: { error: { code: "household_not_found", message: "That household is not available" } },
+        });
       };
 
       await addMember();
