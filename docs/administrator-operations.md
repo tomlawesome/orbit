@@ -29,10 +29,35 @@ Worker boundaries convert errors to versioned categories before persistence:
 
 Historical raw notification errors remain internal and are never returned.
 
+## Readiness and classified diagnostics
+
+The public `GET /api/health` endpoint is a content-free readiness probe. It
+checks the required database dependency and returns HTTP `200` with `ready` or
+HTTP `503` with `degraded`. Both responses are non-cacheable and identify
+neither the dependency nor its error. Optional SMTP, push, IMAP, scanner, and
+document-processor failures do not make core records unreadable and therefore
+do not change this required-dependency result.
+
+Authenticated administrators use the bounded diagnostics surfaces together:
+
+| Failure class | Authoritative surface | Safe evidence |
+| --- | --- | --- |
+| Required dependency | `/api/health` | `ready` or `degraded` only |
+| Configuration and provider | `/api/admin/operations` | configured state and allowlisted provider category |
+| Queue | `/api/admin/operations` | bounded status counts, safe failure category, attempts and timestamps |
+| Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, quota and worker state |
+
+The administrator routes remain session- and administrator-protected and
+non-cacheable. A degraded optional category is actionable independently and
+does not disclose configuration values, provider identity, private content, or
+raw dependency errors.
+
 ## Corrective actions
 
 All mutations require CSRF validation, administrator authorization, an exact
-expected source state, and an audit event.
+expected source state, and an audit event after an accepted transition. A
+missing, stale, replayed, processing, or otherwise zero-row transition returns
+the bounded conflict result and writes no misleading success audit.
 
 - A failed or cancelled notification may be retried. Its attempt count, lock,
   sent time, and failure state are cleared and it is scheduled immediately.
@@ -234,6 +259,11 @@ docker compose --env-file .env-orbit --profile processing stop orbit-tika
 
 Instance-wide actions may have no household, so `audit_log.household_id` is
 nullable. Administrator history is cursor-paginated and selects only safe
-columns. Raw `changes` remain available solely to trusted internal code.
+columns. Pages use the stable descending `(created_at, id)` keyset and the
+administrator interface exposes a bounded **Load older history** action rather
+than replacing the current page. Equal timestamps therefore neither duplicate
+nor skip events. Raw `changes` remain available solely to trusted internal
+code. Retained events use only safe actor, household, and action labels after
+household purge; deleted private names and raw changes are never rendered.
 Unknown future action codes receive a generic label rather than exposing raw
 payloads.
