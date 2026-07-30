@@ -168,9 +168,9 @@ describe("administrator mailbox operation boundaries", () => {
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review",
         proposal: { title: "Private receipt marker" }, expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent",
       }).returning({ id: imapIngestionMessages.id });
-      await getDb().insert(imapNotificationDeliveries).values({
+      const [delivery] = await getDb().insert(imapNotificationDeliveries).values({
         messageId: message.id, userId: fixture.users.member.id, kind: "review_ready", status: "failed",
-      });
+      }).returning({ id: imapNotificationDeliveries.id });
       const before = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       const verifyResponse = await verifyImap(requestForSession(admin, adminVerifyUrl, { method: "POST" }));
       const retryResponse = await retryMailboxNotifications(requestForSession(admin, adminRetryUrl, { method: "POST", body: JSON.stringify({ action: "retry_exhausted" }), headers: { "content-type": "application/json" } }));
@@ -180,7 +180,16 @@ describe("administrator mailbox operation boundaries", () => {
         expectNoStore(response);
         expect(await response.clone().text()).not.toContain("Private receipt marker");
       }
-      expect(await retryResponse.json()).toEqual({ queued: 1 });
+      const retryResult = await retryResponse.json() as { queued: number };
+      expect(retryResult.queued).toBeGreaterThanOrEqual(1);
+      expect(retryResult.queued).toBeLessThanOrEqual(25);
+      const retriedDelivery = (await getDb().select({
+        status: imapNotificationDeliveries.status,
+        attempts: imapNotificationDeliveries.attempts,
+        leaseToken: imapNotificationDeliveries.leaseToken,
+        failureCode: imapNotificationDeliveries.failureCode,
+      }).from(imapNotificationDeliveries).where(eq(imapNotificationDeliveries.id, delivery.id)))[0];
+      expect(retriedDelivery).toEqual({ status: "retry", attempts: 0, leaseToken: null, failureCode: null });
       const after = (await getDb().select({ proposal: imapIngestionMessages.proposal, status: imapIngestionMessages.status }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, message.id)))[0];
       expect(after).toEqual(before);
     } finally {
