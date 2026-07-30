@@ -44,6 +44,8 @@ export interface NotificationWorkerConfig {
   maxAttempts: number;
 }
 
+export type SmtpProviderVerification = "ready" | "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unsafe_input";
+
 export const notificationFailureCategories = [
   "smtp_unconfigured",
   "smtp_unavailable",
@@ -178,13 +180,25 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
   const smtpRequested = Boolean(parsed.SMTP_HOST || parsed.SMTP_USER || parsed.SMTP_PASSWORD);
   if (smtpRequested && !(parsed.SMTP_HOST && parsed.SMTP_USER && parsed.SMTP_PASSWORD)) throw new Error("SMTP_HOST, SMTP_USER, and SMTP_PASSWORD must be configured together");
   if (parsed.SMTP_URL && smtpRequested) throw new Error("Use either SMTP_URL or individual SMTP settings, not both");
-  const smtpPort = parsed.SMTP_PORT ?? (parsed.SMTP_SECURITY === "implicit_tls" ? 465 : 587);
+  const hasExplicitSmtpSecurity = typeof environment.SMTP_SECURITY === "string" && environment.SMTP_SECURITY.length > 0;
+  let smtpSecurity = parsed.SMTP_SECURITY;
+  if (parsed.SMTP_URL) {
+    let smtpUrl: URL;
+    try { smtpUrl = new URL(parsed.SMTP_URL); } catch { throw new Error("SMTP_URL must be a valid SMTP URL"); }
+    if (!smtpUrl.hostname || !["smtp:", "smtps:"].includes(smtpUrl.protocol)) throw new Error("SMTP_URL must use smtp or smtps");
+    const inferredSecurity = smtpUrl.protocol === "smtps:" ? "implicit_tls" : "starttls";
+    if (hasExplicitSmtpSecurity && inferredSecurity !== parsed.SMTP_SECURITY) {
+      throw new Error(parsed.SMTP_SECURITY === "implicit_tls" ? "SMTP_URL must use implicit TLS" : "SMTP_URL requires STARTTLS");
+    }
+    smtpSecurity = inferredSecurity;
+  }
+  const smtpPort = parsed.SMTP_PORT ?? (smtpSecurity === "implicit_tls" ? 465 : 587);
   const smtpUrl = smtpRequested
-    ? `${parsed.SMTP_SECURITY === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${smtpPort}`
+    ? `${smtpSecurity === "implicit_tls" ? "smtps" : "smtp"}://${encodeURIComponent(parsed.SMTP_USER)}:${encodeURIComponent(parsed.SMTP_PASSWORD)}@${parsed.SMTP_HOST}:${smtpPort}`
     : parsed.SMTP_URL;
   return {
     smtpUrl,
-    smtpSecurity: parsed.SMTP_SECURITY,
+    smtpSecurity,
     smtpFrom: parsed.SMTP_FROM,
     vapidSubject: parsed.VAPID_SUBJECT,
     vapidPublicKey: parsed.VAPID_PUBLIC_KEY,
@@ -192,6 +206,36 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
     pollMilliseconds: parsed.WORKER_POLL_SECONDS * 1_000,
     maxAttempts: parsed.NOTIFICATION_MAX_ATTEMPTS,
   };
+}
+
+/** Builds a TLS-pinned Nodemailer transport without exposing provider details. */
+export function createSmtpTransport(config: NotificationWorkerConfig, timeouts = true): ReturnType<typeof nodemailer.createTransport> {
+  let hostname: string | undefined;
+  try { hostname = new URL(config.smtpUrl).hostname; } catch { /* verification returns a safe failure below */ }
+  return nodemailer.createTransport(config.smtpUrl, {
+    secure: config.smtpSecurity === "implicit_tls",
+    requireTLS: config.smtpSecurity === "starttls",
+    tls: { minVersion: "TLSv1.2", rejectUnauthorized: true, ...(hostname ? { servername: hostname } : {}) },
+    ...(timeouts ? { connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 5_000 } : {}),
+  });
+}
+
+/** Verifies SMTP TLS and authentication only; it never sends a message. */
+export async function verifySmtpProviderConnection(config = getNotificationWorkerConfig()): Promise<SmtpProviderVerification> {
+  if (!config.smtpUrl) return "smtp_unconfigured";
+  let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
+  try {
+    transporter = createSmtpTransport(config);
+    await transporter.verify();
+    return "ready";
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (message.includes("url") || message.includes("protocol")) return "unsafe_input";
+    const category = categorizeProviderError("email", error);
+    return category === "smtp_rejected" ? "smtp_rejected" : "smtp_unavailable";
+  } finally {
+    transporter?.close();
+  }
 }
 
 /**
@@ -343,11 +387,7 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
   return {
     async sendEmail(notification) {
       if (!transporter) {
-        transporter = nodemailer.createTransport(config.smtpUrl, {
-          secure: config.smtpSecurity === "implicit_tls",
-          requireTLS: config.smtpSecurity === "starttls",
-          tls: { minVersion: "TLSv1.2" },
-        });
+        transporter = createSmtpTransport(config, false);
       }
       await transporter.sendMail({
         from: notification.from,

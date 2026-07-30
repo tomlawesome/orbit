@@ -1,0 +1,13 @@
+# Add this overlay only during a bounded alias-key rotation, after preserving
+# the old current key as the previous key and configuring its generation and
+# expiry in .env-orbit. docker-compose.mail.yml remains required.
+services:
+  orbit-app:
+    environment:
+      IMAP_ALIAS_PREVIOUS_SECRET_FILE: /run/orbit-secrets/orbit-imap-alias-previous-secret
+    secrets:
+      - orbit-imap-alias-previous-secret
+
+secrets:
+  orbit-imap-alias-previous-secret:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/imap-alias-previous-secret

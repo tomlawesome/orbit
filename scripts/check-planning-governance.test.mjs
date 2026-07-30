@@ -17,6 +17,10 @@ describe("planning governance", () => {
     expect(isProtectedPlanningPath(".github/ISSUE_TEMPLATE/delivery.yml")).toBe(true);
     expect(isProtectedPlanningPath(".github/workflows/publish-container.yml")).toBe(true);
     expect(isProtectedPlanningPath("docker-compose.yml")).toBe(true);
+    expect(isProtectedPlanningPath("docker-compose.mail.yml")).toBe(true);
+    expect(
+      isProtectedPlanningPath("docker-compose.mail-alias-rotation.yml"),
+    ).toBe(true);
     expect(isProtectedPlanningPath("scripts/check-orchestration-governance.mjs")).toBe(true);
     expect(isProtectedPlanningPath("src/server/example.ts")).toBe(false);
   });

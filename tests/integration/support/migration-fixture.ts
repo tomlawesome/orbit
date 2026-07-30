@@ -43,6 +43,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   imap_attachment_status: ["stored", "rejected", "assigned"],
   imap_recipient_alias_status: ["active", "legacy_inactive"],
   imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired"],
+  imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
   membership_role: ["owner", "member"],
   theme_mode: ["system", "light", "dark"],
@@ -77,6 +78,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
   reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
+  imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -110,6 +112,8 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_attachment_processing_claim_idx: { table: "imap_ingestion_messages", columns: ["status", "attachment_processing_locked_at", "created_at"], unique: false },
   imap_staging_object_message_status_idx: { table: "imap_ingestion_staging_objects", columns: ["message_id", "status"], unique: false },
   imap_staging_object_created_idx: { table: "imap_ingestion_staging_objects", columns: ["status", "created_at"], unique: false },
+  imap_notification_message_kind_unique: { table: "imap_notification_deliveries", columns: ["message_id", "kind"], unique: true },
+  imap_notification_claim_idx: { table: "imap_notification_deliveries", columns: ["status", "next_attempt_at", "locked_at"], unique: false },
   imap_ingestion_staging_objects_storage_key_unique: { table: "imap_ingestion_staging_objects", columns: ["storage_key"], unique: true },
   imap_receipt_claim_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "receipt_locked_at", "created_at"], unique: false },
   imap_receipt_delivery_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "created_at"], unique: false },
@@ -193,6 +197,9 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   imap_staging_objects_message_id_fk: foreign("imap_ingestion_staging_objects", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
   imap_ingestion_staging_objects_pkey: primary("imap_ingestion_staging_objects", ["id"]),
   imap_ingestion_staging_objects_storage_key_unique: unique("imap_ingestion_staging_objects", ["storage_key"]),
+  imap_notification_deliveries_pkey: primary("imap_notification_deliveries", ["id"]),
+  imap_notification_deliveries_message_id_fk: foreign("imap_notification_deliveries", ["message_id"], "imap_ingestion_messages", ["id"], "cascade"),
+  imap_notification_deliveries_user_id_users_id_fk: foreign("imap_notification_deliveries", ["user_id"], "users", ["id"], "cascade"),
   imap_recipient_aliases_pkey: primary("imap_recipient_aliases", ["id"]),
   imap_recipient_aliases_user_id_users_id_fk: foreign("imap_recipient_aliases", ["user_id"], "users", ["id"], "cascade"),
   imap_recipient_rotation_state_pkey: primary("imap_recipient_rotation_state", ["id"]),
@@ -586,6 +593,7 @@ const fixtureOrderColumns: Record<string, string[]> = {
   households: ["id"],
   imap_ingestion_attachments: ["id"],
   imap_ingestion_messages: ["id"],
+  imap_notification_deliveries: ["id"],
   items: ["id"],
   memberships: ["household_id", "user_id"],
   notification_deliveries: ["id"],
