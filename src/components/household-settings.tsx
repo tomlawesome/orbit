@@ -11,7 +11,7 @@ export interface HouseholdSettingsInput {
 
 interface HouseholdSettingsProps {
   household: HouseholdWorkspace;
-  onSave(input: HouseholdSettingsInput): void;
+  onSave(input: HouseholdSettingsInput): Promise<void>;
   csrfToken: string;
 }
 
@@ -29,18 +29,27 @@ const timezones = [
 
 export function HouseholdSettings({ household, onSave, csrfToken }: HouseholdSettingsProps) {
   const [message, setMessage] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
-    onSave({
-      name: String(data.get("name") ?? "").trim(),
-      timezone: String(data.get("timezone") ?? household.timezone),
-      currency: String(data.get("currency") ?? household.currency),
-    });
+    setSaveBusy(true);
     setMessage("Household settings are being saved.");
+    try {
+      await onSave({
+        name: String(data.get("name") ?? "").trim(),
+        timezone: String(data.get("timezone") ?? household.timezone),
+        currency: String(data.get("currency") ?? household.currency),
+      });
+      setMessage("Household settings were saved.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Orbit could not save this change");
+    } finally {
+      setSaveBusy(false);
+    }
   }
 
   async function changeLifecycle(action: "delete" | "restore") {
@@ -84,7 +93,7 @@ export function HouseholdSettings({ household, onSave, csrfToken }: HouseholdSet
               {["GBP", "EUR", "USD", "CAD", "AUD", "NZD"].map((currency) => <option key={currency}>{currency}</option>)}
             </select>
           </label>
-          <button type="submit">Save household</button>
+          <button type="submit" disabled={saveBusy}>{saveBusy ? "Saving…" : "Save household"}</button>
         </form>
         {message && <p className="member-message" role="status">{message}</p>}
       </section>
