@@ -1,5 +1,5 @@
-import nodemailer from "nodemailer";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import {
@@ -7,16 +7,23 @@ import {
   documentJobs,
   documents,
   households,
+  imapNotificationDeliveries,
   notificationDeliveries,
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import {
-  categorizeProviderError,
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
   notificationFailureCategories,
+  verifySmtpProviderConnection,
 } from "@/server/notification-worker";
+import {
+  getImapIngestionConfig,
+  getImapIngestionWorkerHealth,
+  getImapProviderPreflightState,
+  verifyImapIngestionProviders,
+} from "@/server/imap-ingestion";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
 const uuidSchema = z.uuid();
@@ -36,8 +43,13 @@ const actionLabels: Record<string, string> = {
   notification_delivery_discarded: "Notification delivery discarded",
   document_job_retried: "Document maintenance job retried",
   document_job_discarded: "Document maintenance job discarded",
+  imap_notification_delivery_retried: "Mailbox notification delivery retried",
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
+};
+
+const providerVerificationState = globalThis as typeof globalThis & {
+  __orbitAdminSmtpVerification?: { inFlight?: Promise<string>; lastStartedAt?: number };
 };
 
 function boundedCounts(rows: Array<{ status: string; count: number }>): Record<string, number> {
@@ -71,7 +83,12 @@ function encodeAuditCursor(entry: { createdAt: Date; id: string }): string {
 /** Returns a bounded operations snapshot with no recipients, secrets, or raw provider errors. */
 export async function getAdministratorOperations(actorUserId: string, auditCursor?: string) {
   await requireInstanceAdministrator(actorUserId);
-  const config = getNotificationWorkerConfig();
+  let config: ReturnType<typeof getNotificationWorkerConfig> | undefined;
+  let notificationConfigError = false;
+  try { config = getNotificationWorkerConfig(); } catch { notificationConfigError = true; }
+  let imapConfig: ReturnType<typeof getImapIngestionConfig> | undefined;
+  let imapConfigError = false;
+  try { imapConfig = getImapIngestionConfig(); } catch { imapConfigError = true; }
   const decodedCursor = decodeAuditCursor(auditCursor);
   const auditQuery = getDb().select({
     id: auditLog.id,
@@ -94,6 +111,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     deliveries,
     jobs,
     historyRows,
+    mailboxNotificationCountRows,
   ] = await Promise.all([
     getDb().select({
       status: notificationDeliveries.status,
@@ -128,10 +146,20 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     historyQuery
       .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
       .limit(26),
+    getDb().select({
+      status: imapNotificationDeliveries.status,
+      count: sql<number>`count(*)::int`,
+    }).from(imapNotificationDeliveries).groupBy(imapNotificationDeliveries.status),
   ]);
   const history = historyRows.slice(0, 25);
+  const mailboxCounts = boundedCounts(mailboxNotificationCountRows);
+  const mailboxNotificationStatus = (mailboxCounts.failed ?? 0) > 0 ? "exhausted" as const
+    : (mailboxCounts.retry ?? 0) > 0 ? "retrying" as const
+      : "available" as const;
 
   const worker = getNotificationWorkerHealth();
+  const imapWorker = getImapIngestionWorkerHealth();
+  const preflight = getImapProviderPreflightState(imapConfig, config);
   return {
     notificationWorker: {
       started: worker.started,
@@ -141,13 +169,30 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       lastErrorCode: worker.lastErrorCategory,
     },
     providers: {
-      smtp: config.smtpUrl ? "configured" as const : "unconfigured" as const,
-      push: config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey
+      smtp: config?.smtpUrl ? "configured" as const : "unconfigured" as const,
+      push: config?.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey
         ? "configured" as const
         : "unconfigured" as const,
     },
+    mailboxIngestion: {
+      enabled: imapConfig?.enabled ?? false,
+      configured: imapConfig?.configured ?? false,
+      status: imapConfigError ? "unsafe_input" as const
+        : notificationConfigError ? "unsafe_input" as const
+        : imapConfig?.configured ? preflight.status : "not_configured" as const,
+      smtp: notificationConfigError ? "unsafe_input" as const : preflight.smtp,
+      imap: imapConfigError ? "unsafe_input" as const : preflight.imap,
+      worker: {
+        started: imapWorker.started,
+        running: imapWorker.running,
+        lastSuccessAt: imapWorker.lastSuccessAt,
+        lastErrorAt: imapWorker.lastErrorAt,
+        lastErrorCode: imapWorker.lastErrorCode,
+      },
+    },
     deliveryCounts: boundedCounts(deliveryCountRows),
     documentJobCounts: boundedCounts(documentJobCountRows),
+    mailboxNotifications: { status: mailboxNotificationStatus },
     deliveries: deliveries.map(({ lastError, ...delivery }) => ({
       ...delivery,
       lastErrorCode: safeNotificationFailure(lastError),
@@ -285,21 +330,62 @@ export async function updateDocumentJob(
 /** Verifies SMTP connectivity/authentication without sending a message. */
 export async function verifySmtpProvider(actorUserId: string): Promise<{ result: string }> {
   await requireInstanceAdministrator(actorUserId);
-  const config = getNotificationWorkerConfig();
-  if (!config.smtpUrl) return { result: "smtp_unconfigured" };
-  const transporter = nodemailer.createTransport(config.smtpUrl, {
-    requireTLS: config.smtpSecurity === "starttls",
-    tls: { minVersion: "TLSv1.2" },
-    connectionTimeout: 5_000,
-    greetingTimeout: 5_000,
-    socketTimeout: 5_000,
-  });
+  const now = Date.now();
+  if (providerVerificationState.__orbitAdminSmtpVerification?.inFlight) return { result: "verification_pending" };
+  if (providerVerificationState.__orbitAdminSmtpVerification?.lastStartedAt && now - providerVerificationState.__orbitAdminSmtpVerification.lastStartedAt < 1_000) return { result: "retrying" };
+  const inFlight = (async () => {
+    try {
+      return await verifySmtpProviderConnection(getNotificationWorkerConfig());
+    } catch {
+      return "unsafe_input";
+    }
+  })();
+  providerVerificationState.__orbitAdminSmtpVerification = { inFlight, lastStartedAt: now };
   try {
-    await transporter.verify();
-    return { result: "ready" };
-  } catch (error) {
-    return { result: categorizeProviderError("email", error) };
+    return { result: await inFlight };
   } finally {
-    transporter.close();
+    const state = providerVerificationState.__orbitAdminSmtpVerification;
+    if (state?.inFlight === inFlight) providerVerificationState.__orbitAdminSmtpVerification = { lastStartedAt: now };
+  }
+}
+
+/** Retries only terminal content-free mailbox notifications, in a bounded batch. */
+export async function retryExhaustedImapNotifications(actorUserId: string): Promise<{ queued: number }> {
+  await requireInstanceAdministrator(actorUserId);
+  return getDb().transaction(async (transaction) => {
+    const candidates = await transaction.select({ id: imapNotificationDeliveries.id }).from(imapNotificationDeliveries)
+      .where(eq(imapNotificationDeliveries.status, "failed"))
+      .orderBy(imapNotificationDeliveries.updatedAt)
+      .limit(25)
+      .for("update", { skipLocked: true });
+    const rows = candidates.length ? await transaction.update(imapNotificationDeliveries).set({
+      status: "retry",
+      attempts: 0,
+      nextAttemptAt: new Date(),
+      lockedAt: null,
+      leaseToken: null,
+      failureCode: null,
+      updatedAt: new Date(),
+    }).where(and(eq(imapNotificationDeliveries.status, "failed"), inArray(imapNotificationDeliveries.id, candidates.map((row) => row.id)))).returning({ id: imapNotificationDeliveries.id }) : [];
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "imap_notification_delivery",
+      entityId: randomUUID(),
+      action: "imap_notification_delivery_retried",
+      changes: { previousStatus: "failed", count: rows.length },
+    });
+    return { queued: rows.length };
+  });
+}
+
+/** Administrator-only bounded preflight for the independent IMAP provider. */
+export async function verifyImapIngestionProvider(actorUserId: string): Promise<{ result: string }> {
+  await requireInstanceAdministrator(actorUserId);
+  try {
+    const state = await verifyImapIngestionProviders(getImapIngestionConfig(), getNotificationWorkerConfig());
+    return { result: state.status };
+  } catch {
+    return { result: "unsafe_input" };
   }
 }

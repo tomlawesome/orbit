@@ -42,6 +42,7 @@ export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
 ]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
 export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);
+export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt", "review_ready"]);
 export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
 export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
 export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
@@ -377,6 +378,25 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
   index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
   index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
+]);
+
+/** Content-free, leased notification operations for private mailbox receipts. */
+export const imapNotificationDeliveries = pgTable("imap_notification_deliveries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => imapIngestionMessages.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: imapNotificationKind("kind").notNull(),
+  status: deliveryStatus("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  leaseToken: uuid("lease_token"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  failureCode: text("failure_code"),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("imap_notification_message_kind_unique").on(table.messageId, table.kind),
+  index("imap_notification_claim_idx").on(table.status, table.nextAttemptAt, table.lockedAt),
 ]);
 
 /** Generation-aware per-user aliases. Legacy prototype digests are retained
