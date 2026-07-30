@@ -16,6 +16,7 @@ import {
 import { holdImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { discardImapReviewItem, purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 afterAll(async () => {
   setImapClientFactoryForTests(undefined);
@@ -78,7 +79,7 @@ function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructur
       downloads.push(`${uid}:${part}`);
       const message = messages.find((candidate) => candidate.uid === uid);
       if (message?.downloadError) throw new Error(message.downloadError);
-      return { content: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\n%%EOF") };
+      return { content: syntheticPdf("mailbox attachment") };
     },
   };
   return { client, fetches, downloads };

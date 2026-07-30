@@ -199,6 +199,37 @@ malformed or incomplete proof, and emits no raw provider material.
 ordinary CI only. Its record is explicitly non-representative and cannot be
 used as live provider or release acceptance.
 
+## Hostile document processor operation
+
+The default stack keeps `TIKA_URL` empty and does not start the `processing`
+profile. Documents remain uploadable and reviewable without parser-derived
+suggestions.
+
+To opt into the pinned processor, set
+`TIKA_URL=http://orbit-tika:9998`, validate the resolved Compose configuration,
+and start the profile:
+
+```sh
+docker compose --env-file .env-orbit --profile processing config --quiet
+docker compose --env-file .env-orbit --profile processing up -d orbit-tika orbit-app
+```
+
+Do not add host ports, application secrets, document volumes, default-network
+membership, arbitrary Tika headers or caller-selected endpoints. The supplied
+configuration runs Tika non-root with a read-only filesystem, disables OCR and
+embedded recursion, and keeps it on the egress-denied processing network.
+ClamAV uses that network for bounded scan streams and a separate network only
+for signature updates; it does not share PostgreSQL's default network.
+
+To disable extraction safely, clear `TIKA_URL`, recreate `orbit-app`, and stop
+the optional processor. Already-clean encrypted originals remain available and
+the review flow falls back to manual fields:
+
+```sh
+docker compose --env-file .env-orbit up -d orbit-app
+docker compose --env-file .env-orbit --profile processing stop orbit-tika
+```
+
 ## Audit history
 
 Instance-wide actions may have no household, so `audit_log.household_id` is

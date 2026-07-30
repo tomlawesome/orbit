@@ -10,6 +10,7 @@ import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } 
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { requestHouseholdDeletion } from "@/server/household-lifecycle";
 import { requestForSession, requestWithoutSession, createIntegrationFixture } from "./support/fixtures";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 describe("authenticated mailbox review read boundary", () => {
   it("does not disclose a receipt to signed-out or cross-user callers", async () => {
@@ -122,7 +123,7 @@ describe("authenticated mailbox review read boundary", () => {
     const fixture = await createIntegrationFixture("imap-review-discard-boundary");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({
-      bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\ndiscard boundary\n%%EOF"),
+      bytes: syntheticPdf("discard boundary"),
       filename: "discard-boundary.pdf",
       declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id,
