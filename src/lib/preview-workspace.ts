@@ -8,15 +8,9 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
-import {
-  enqueueWorkspaceCommand,
-  readQueuedWorkspaceCommands,
-  readWorkspaceSnapshot,
-  removeQueuedWorkspaceCommand,
-  writeWorkspaceSnapshot,
-} from "@/lib/workspace-cache";
+import { purgeLegacyWorkspaceCache } from "@/lib/private-browser-storage";
 
-export type WorkspaceSyncStatus = "loading" | "signed-out" | "synced" | "saving" | "offline" | "error";
+export type WorkspaceSyncStatus = "loading" | "signed-out" | "synced" | "saving" | "error";
 
 export interface WorkspaceSession {
   authenticated: true;
@@ -59,8 +53,8 @@ async function fetchWorkspace(): Promise<WorkspaceState> {
 }
 
 /**
- * Loads authenticated workspace state and keeps its offline cache isolated by
- * user. Signed-out visitors never receive a cached or server workspace.
+ * Loads authenticated workspace state from the server without retaining
+ * private workspace content in durable browser storage.
  */
 export function useWorkspace() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => createEmptyWorkspace());
@@ -68,169 +62,173 @@ export function useWorkspace() {
   const [syncStatus, setSyncStatus] = useState<WorkspaceSyncStatus>("loading");
   const [syncMessage, setSyncMessage] = useState("");
   const sessionRef = useRef<WorkspaceSession | null>(null);
-  const flushingRef = useRef(false);
-
-  const flushQueue = useCallback(async (activeSession: WorkspaceSession) => {
-    if (flushingRef.current) return;
-    flushingRef.current = true;
-    try {
-      const queued = await readQueuedWorkspaceCommands(activeSession.user.id);
-      for (const entry of queued) {
-        const response = await fetch("/api/workspace/commands", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": activeSession.csrfToken,
-          },
-          body: JSON.stringify(entry.command),
-        });
-        if (!response.ok) {
-          if (response.status >= 400 && response.status < 500) {
-            await removeQueuedWorkspaceCommand(entry.id);
-            const canonical = await fetchWorkspace();
-            setWorkspace(canonical);
-            await writeWorkspaceSnapshot(activeSession.user.id, canonical);
-            setSyncStatus("error");
-            setSyncMessage(response.status === 409
-              ? "A newer version was found; Orbit refreshed this workspace."
-              : "One queued change could not be saved.");
-            continue;
-          }
-          throw new Error("The queued command could not be synchronized");
-        }
-        const payload = await response.json() as { workspace: unknown };
-        const canonical = workspaceSchema.parse(payload.workspace);
-        await removeQueuedWorkspaceCommand(entry.id);
-        setWorkspace(canonical);
-        await writeWorkspaceSnapshot(activeSession.user.id, canonical);
-      }
-      setSyncStatus("synced");
-      setSyncMessage("");
-    } catch {
-      setSyncStatus("offline");
-      setSyncMessage("Changes are safely queued on this device.");
-    } finally {
-      flushingRef.current = false;
-    }
-  }, []);
+  const confirmedWorkspaceRef = useRef<WorkspaceState>(createEmptyWorkspace());
+  const commandTailRef = useRef<Promise<void>>(Promise.resolve());
+  const operationGenerationRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     async function initialize() {
       try {
+        await purgeLegacyWorkspaceCache();
         const activeSession = await fetchSession();
         if (cancelled) return;
         sessionRef.current = activeSession;
         setSession(activeSession);
         if (!activeSession) {
-          setWorkspace(createEmptyWorkspace());
+          const emptyWorkspace = createEmptyWorkspace();
+          confirmedWorkspaceRef.current = emptyWorkspace;
+          setWorkspace(emptyWorkspace);
           setSyncStatus("signed-out");
           return;
         }
-        const cached = await readWorkspaceSnapshot(activeSession.user.id).catch(() => undefined);
-        if (!cancelled && cached) setWorkspace(cached);
-        try {
-          const canonical = await fetchWorkspace();
-          if (cancelled) return;
-          setWorkspace(canonical);
-          await writeWorkspaceSnapshot(activeSession.user.id, canonical);
-          setSyncStatus("synced");
-          void flushQueue(activeSession);
-        } catch {
-          if (cancelled) return;
-          if (cached) {
-            setSyncStatus("offline");
-            setSyncMessage("Showing your saved workspace while Orbit reconnects.");
-            return;
-          }
-          throw new Error("No authenticated workspace is available");
-        }
-      } catch {
-        if (cancelled) return;
-        sessionRef.current = null;
-        setSession(null);
-        setWorkspace(createEmptyWorkspace());
-        setSyncStatus("signed-out");
-        setSyncMessage("");
-      }
-    }
-    void initialize();
-    const synchronize = async () => {
-      const activeSession = sessionRef.current;
-      if (!activeSession) return;
-      await flushQueue(activeSession);
-      try {
         const canonical = await fetchWorkspace();
         if (cancelled) return;
+        confirmedWorkspaceRef.current = canonical;
         setWorkspace(canonical);
-        await writeWorkspaceSnapshot(activeSession.user.id, canonical);
         setSyncStatus("synced");
         setSyncMessage("");
       } catch {
         if (cancelled) return;
-        setSyncStatus("offline");
-        setSyncMessage("Showing your saved workspace while Orbit reconnects.");
+        sessionRef.current = null;
+        setSession(null);
+        const emptyWorkspace = createEmptyWorkspace();
+        confirmedWorkspaceRef.current = emptyWorkspace;
+        setWorkspace(emptyWorkspace);
+        setSyncStatus("error");
+        setSyncMessage("Orbit could not load your private workspace safely. Check your connection, close other Orbit tabs, and try again.");
       }
-    };
-    window.addEventListener("online", synchronize);
+    }
+    void initialize();
     return () => {
       cancelled = true;
-      window.removeEventListener("online", synchronize);
     };
-  }, [flushQueue]);
+  }, []);
+
+  const runWorkspaceCommand = useCallback(async (command: WorkspaceCommand): Promise<WorkspaceState> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) {
+      throw new WorkspaceCommandError("session_required", "A valid session is required");
+    }
+    const operationGeneration = operationGenerationRef.current;
+    const isCurrentOperation = () => (
+      operationGenerationRef.current === operationGeneration
+      && sessionRef.current === activeSession
+    );
+    try {
+      const response = await fetch("/api/workspace/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": activeSession.csrfToken },
+        body: JSON.stringify(command),
+      });
+      const payload = await response.json() as { workspace?: unknown; error?: { code?: string; message?: string } };
+      if (!response.ok) {
+        throw new WorkspaceCommandError(
+          payload.error?.code ?? "workspace_command_failed",
+          payload.error?.message ?? "Orbit could not save this change",
+        );
+      }
+      const canonical = workspaceSchema.parse(payload.workspace);
+      if (isCurrentOperation()) {
+        confirmedWorkspaceRef.current = canonical;
+        setWorkspace(canonical);
+        setSyncStatus("synced");
+        setSyncMessage("");
+      }
+      return canonical;
+    } catch (error) {
+      const commandError = error instanceof WorkspaceCommandError
+        ? error
+        : new WorkspaceCommandError(
+          "workspace_command_failed",
+          "Orbit could not save this change. Check your connection and try again.",
+        );
+      if (isCurrentOperation()) {
+        let canonical: WorkspaceState | undefined;
+        try {
+          canonical = await fetchWorkspace();
+        } catch {
+          // The last confirmed state remains the safe fallback.
+        }
+        if (isCurrentOperation()) {
+          if (canonical) confirmedWorkspaceRef.current = canonical;
+          setWorkspace(canonical ?? confirmedWorkspaceRef.current);
+          setSyncStatus("error");
+          setSyncMessage(commandError.message);
+        }
+      }
+      throw commandError;
+    }
+  }, []);
+
+  const executeCommand = useCallback((command: WorkspaceCommand): Promise<WorkspaceState> => {
+    if (!sessionRef.current) {
+      return Promise.reject(new WorkspaceCommandError("session_required", "A valid session is required"));
+    }
+    setSyncStatus("saving");
+    setSyncMessage("");
+    const result = commandTailRef.current.then(() => runWorkspaceCommand(command));
+    commandTailRef.current = result.then(() => undefined, () => undefined);
+    return result;
+  }, [runWorkspaceCommand]);
 
   const dispatch = useCallback((command: WorkspaceCommand) => {
-    setWorkspace((current) => {
-      const next = reduceWorkspace(current, command);
-      const activeSession = sessionRef.current;
-      if (activeSession) void writeWorkspaceSnapshot(activeSession.user.id, next);
-      return next;
-    });
-
-    const activeSession = sessionRef.current;
-    if (!activeSession) return;
-    setSyncStatus("saving");
-    void enqueueWorkspaceCommand(activeSession.user.id, command)
-      .then(() => flushQueue(activeSession))
-      .catch(() => {
-        setSyncStatus("offline");
-        setSyncMessage("Changes are safely queued on this device.");
-      });
-  }, [flushQueue]);
-
-  const executeCommand = useCallback(async (command: WorkspaceCommand): Promise<WorkspaceState> => {
-    const activeSession = sessionRef.current;
-    if (!activeSession) throw new Error("A valid session is required");
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": activeSession.csrfToken },
-      body: JSON.stringify(command),
-    });
-    const payload = await response.json() as { workspace?: unknown; error?: { code?: string; message?: string } };
-    if (!response.ok) {
-      throw new WorkspaceCommandError(
-        payload.error?.code ?? "workspace_command_failed",
-        payload.error?.message ?? "Orbit could not save this change",
-      );
-    }
-    const canonical = workspaceSchema.parse(payload.workspace);
-    setWorkspace(canonical);
-    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
-    setSyncStatus("synced");
-    setSyncMessage("");
-    return canonical;
-  }, []);
+    if (!sessionRef.current) return;
+    setWorkspace((current) => reduceWorkspace(current, command));
+    void executeCommand(command).catch(() => undefined);
+  }, [executeCommand]);
 
   const refreshWorkspace = useCallback(async (): Promise<void> => {
     const activeSession = sessionRef.current;
     if (!activeSession) return;
     const canonical = await fetchWorkspace();
+    confirmedWorkspaceRef.current = canonical;
     setWorkspace(canonical);
-    await writeWorkspaceSnapshot(activeSession.user.id, canonical);
     setSyncStatus("synced");
     setSyncMessage("");
   }, []);
 
-  return { workspace, dispatch, executeCommand, refreshWorkspace, session, syncStatus, syncMessage };
+  const signOut = useCallback(async (): Promise<void> => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) return;
+    operationGenerationRef.current += 1;
+    sessionRef.current = null;
+    setSyncStatus("saving");
+    setSyncMessage("");
+    try {
+      await purgeLegacyWorkspaceCache();
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Accept": "application/json",
+          "X-CSRF-Token": activeSession.csrfToken,
+        },
+      });
+      if (!response.ok) throw new Error("The session could not be ended");
+      const payload = await response.json() as { redirectTo?: string };
+      setSession(null);
+      const emptyWorkspace = createEmptyWorkspace();
+      confirmedWorkspaceRef.current = emptyWorkspace;
+      setWorkspace(emptyWorkspace);
+      setSyncStatus("signed-out");
+      setSyncMessage("");
+      window.location.assign(payload.redirectTo || "/");
+    } catch {
+      sessionRef.current = activeSession;
+      try {
+        const canonical = await fetchWorkspace();
+        confirmedWorkspaceRef.current = canonical;
+        setWorkspace(canonical);
+      } catch {
+        setWorkspace(confirmedWorkspaceRef.current);
+      }
+      setSyncStatus("error");
+      setSyncMessage("Orbit could not sign you out safely. Close other Orbit tabs and try again.");
+      throw new Error("Orbit could not sign you out safely");
+    }
+  }, []);
+
+  return { workspace, dispatch, executeCommand, refreshWorkspace, signOut, session, syncStatus, syncMessage };
 }
