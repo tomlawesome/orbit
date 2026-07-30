@@ -9,7 +9,11 @@ describe("planning governance", () => {
   it("protects architecture, ADR, governance, and roadmap sources", () => {
     expect(isProtectedPlanningPath("AGENTS.md")).toBe(true);
     expect(isProtectedPlanningPath("docs/architecture.md")).toBe(true);
+    expect(isProtectedPlanningPath("docs/orchestration-runbook.md")).toBe(true);
+    expect(isProtectedPlanningPath("docs/orchestration-controls.json")).toBe(true);
+    expect(isProtectedPlanningPath("docs/examples/orchestration-state.example.json")).toBe(true);
     expect(isProtectedPlanningPath("docs/adr/0001-example.md")).toBe(true);
+    expect(isProtectedPlanningPath(".github/orchestration-governance.json")).toBe(true);
     expect(isProtectedPlanningPath(".github/ISSUE_TEMPLATE/delivery.yml")).toBe(true);
     expect(isProtectedPlanningPath(".github/workflows/publish-container.yml")).toBe(true);
     expect(isProtectedPlanningPath("docker-compose.yml")).toBe(true);
@@ -17,6 +21,7 @@ describe("planning governance", () => {
     expect(
       isProtectedPlanningPath("docker-compose.mail-alias-rotation.yml"),
     ).toBe(true);
+    expect(isProtectedPlanningPath("scripts/check-orchestration-governance.mjs")).toBe(true);
     expect(isProtectedPlanningPath("src/server/example.ts")).toBe(false);
   });
 

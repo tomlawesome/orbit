@@ -2,6 +2,7 @@
   "requiredPlanningModel": "Sol Extra High",
   "requiredAttestation": "Planning-Model: Sol Extra High",
   "protectedFiles": [
+    ".github/orchestration-governance.json",
     ".github/planning-governance.json",
     ".github/pull_request_template.md",
     "AGENTS.md",
@@ -16,11 +17,16 @@
     "docs/authentication.md",
     "docs/document-threat-model.md",
     "docs/engineering-baseline.md",
+    "docs/examples/orchestration-state.example.json",
     "docs/feature-register.md",
     "docs/implementation-plan.md",
+    "docs/orchestration-controls.json",
+    "docs/orchestration-runbook.md",
     "docs/quality-strategy.md",
     "docs/releasing.md",
     "docs/v1-charter.md",
+    "scripts/check-orchestration-governance.mjs",
+    "scripts/check-orchestration-governance.test.mjs",
     "scripts/check-planning-governance.mjs"
   ],
   "protectedPrefixes": [
