@@ -136,6 +136,10 @@ dependencies outside the approved SPDX licence policy block integration.
 - Scanner and attestation tooling is immutable at execution time, with
   provenance, licence, update ownership and review dates recorded in the
   [supply-chain policy](supply-chain.md).
+- Upstream build, database, scanner, parser, optional-AI and disposable-test
+  images are pinned to reviewed Linux/AMD64 manifests. Configuration tests
+  reject untracked mutable references, and pulled Orbit deployments require an
+  explicit application digest.
 - Stable promotion accepts only a tested preview from the matching semantic
   release branch, validates its revision in `main` and `develop` plus exact
   `main` tree identity, and never replaces an existing version.

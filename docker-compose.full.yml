@@ -10,7 +10,7 @@ services:
   # reviewed semantic-extraction workflow. Orbit does not call it yet.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.32.2
+    image: ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7
     profiles: ["ai"]
     restart: unless-stopped
     environment:

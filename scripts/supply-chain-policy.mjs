@@ -93,9 +93,25 @@ function validateException(exception, index, now) {
   requireTrackingIssue(exception.trackingIssue, label);
 }
 
-function validateMutableReference(entry, index, now) {
-  const label = `Mutable image reference ${index + 1}`;
-  requiredString(entry?.reference, `${label} reference`);
+function validateContainerImage(entry, index, now) {
+  const label = `Container image ${index + 1}`;
+  requiredString(entry?.name, `${label} name`);
+  const tag = requiredString(entry?.tag, `${label} tag`);
+  const reference = requiredString(entry?.reference, `${label} reference`);
+  const separator = reference.lastIndexOf("@");
+  const digest = separator === -1 ? "" : reference.slice(separator + 1);
+  if (separator === -1 || !DIGEST_PATTERN.test(digest)) {
+    throw new Error(`${label} reference must be pinned to a full sha256 digest.`);
+  }
+  if (reference !== `${tag}@${digest}`) {
+    throw new Error(`${label} tag and pinned reference must identify the same image.`);
+  }
+  if (!DIGEST_PATTERN.test(entry?.indexDigest ?? "")) {
+    throw new Error(`${label} index digest must be a full sha256 digest.`);
+  }
+  if (entry?.platform !== "linux/amd64") {
+    throw new Error(`${label} platform must be linux/amd64.`);
+  }
   if (
     !Array.isArray(entry?.locations) ||
     entry.locations.length === 0 ||
@@ -103,10 +119,22 @@ function validateMutableReference(entry, index, now) {
   ) {
     throw new Error(`${label} requires at least one location.`);
   }
-  requiredString(entry.owner, `${label} owner`);
-  requiredString(entry.rationale, `${label} rationale`);
-  requireLiveDate(entry.expiresOn, `${label} expiry`, now);
-  requireTrackingIssue(entry.trackingIssue, label);
+  if (new Set(entry.locations).size !== entry.locations.length) {
+    throw new Error(`${label} locations must be unique.`);
+  }
+  for (const key of ["source", "registry", "licenseSource"]) {
+    const value = requiredString(entry?.[key], `${label} ${key}`);
+    if (!value.startsWith("https://")) {
+      throw new Error(`${label} ${key} must use HTTPS.`);
+    }
+  }
+  requiredString(entry?.license, `${label} licence`);
+  requiredString(entry?.updateOwner, `${label} update owner`);
+  const resolvedOn = validDate(entry?.resolvedOn, `${label} resolution date`);
+  if (resolvedOn > now) {
+    throw new Error(`${label} resolution date cannot be in the future.`);
+  }
+  requireLiveDate(entry?.reviewBy, `${label} review`, now);
 }
 
 export function validateSupplyChainPolicy(policy, now = new Date().toISOString().slice(0, 10)) {
@@ -137,23 +165,30 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   policy.exceptions.forEach((exception, index) =>
     validateException(exception, index, currentDate),
   );
+  if (!Array.isArray(policy.containerImages) || policy.containerImages.length === 0) {
+    throw new Error("At least one reviewed container image is required.");
+  }
+  policy.containerImages.forEach((entry, index) =>
+    validateContainerImage(entry, index, currentDate),
+  );
+  if (
+    new Set(policy.containerImages.map((entry) => entry.reference)).size !==
+    policy.containerImages.length
+  ) {
+    throw new Error("Pinned container image references must be unique.");
+  }
   if (!Array.isArray(policy.mutableImageReferences)) {
     throw new Error("Mutable image references must be an array.");
   }
-  policy.mutableImageReferences.forEach((entry, index) =>
-    validateMutableReference(entry, index, currentDate),
-  );
-  if (
-    new Set(policy.mutableImageReferences.map((entry) => entry.reference)).size !==
-    policy.mutableImageReferences.length
-  ) {
-    throw new Error("Mutable image references must be unique.");
+  if (policy.mutableImageReferences.length !== 0) {
+    throw new Error("Mutable image references are not permitted.");
   }
   return {
     scannerVersion: policy.scanner.version,
     dependencyReviewActionCount: policy.dependencyReviewActions.length,
     exceptionCount: policy.exceptions.length,
-    mutableReferenceCount: policy.mutableImageReferences.length,
+    pinnedImageCount: policy.containerImages.length,
+    mutableReferenceCount: 0,
   };
 }
 
@@ -420,7 +455,7 @@ function runCli() {
   if (command === "validate") {
     const result = validateSupplyChainPolicy(policy, now);
     process.stdout.write(
-      `Supply-chain policy: Trivy ${result.scannerVersion}, ${result.dependencyReviewActionCount} dependency review action(s), ${result.exceptionCount} exception(s), ${result.mutableReferenceCount} mutable reference exception(s).\n`,
+      `Supply-chain policy: Trivy ${result.scannerVersion}, ${result.dependencyReviewActionCount} dependency review action(s), ${result.pinnedImageCount} pinned container image(s), ${result.exceptionCount} exception(s), ${result.mutableReferenceCount} mutable reference exception(s).\n`,
     );
     return;
   }
