@@ -189,6 +189,12 @@ async function requireActiveUser(userId: string): Promise<void> {
   if (!user) throw new AppError("account_disabled", "This Orbit account cannot approve reviewed intake", 403);
 }
 
+async function requirePrivateMailboxRecipient(userId: string): Promise<void> {
+  const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
+    .where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
+  if (!user || user.isInstanceAdmin) throw notFound();
+}
+
 async function requireDestination(userId: string, householdId: string, sectionId: string, targetItemId: string | undefined): Promise<void> {
   const [destination] = await getDb().select({ householdId: memberships.householdId })
     .from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
@@ -762,6 +768,7 @@ export async function markDirectReviewedUploadRecoverable(userId: string, operat
 export async function approveReviewedIntake(userId: string, rawInput: unknown): Promise<ApprovalOutcome> {
   const input = reviewedIntakeApprovalSchema.parse(rawInput);
   await requireActiveUser(userId);
+  if (input.source.kind === "mailbox_draft") await requirePrivateMailboxRecipient(userId);
   await requireDestination(userId, input.householdId, input.sectionId, input.targetItemId);
   const requestHash = canonicalReviewedIntakeHash(input);
   if (input.source.kind === "mailbox_draft") return finishMailboxApproval(userId, input as MailboxApproval, requestHash);
