@@ -96,16 +96,16 @@ flowchart LR
     promote["Promote exact digest"]
 
     fast --> integration --> build --> system
-    system --> preview --> feedback
-    system --> supply --> ready
+    system --> supply --> preview --> feedback
+    supply --> ready
     ready -->|"yes"| releasePreview --> manual --> promote
 ```
 
-Engineering previews may be published after the currently implemented
-automated gates while supply-chain evidence is being established. A
-versioned-release preview is eligible for stable acceptance only after the
-complete target path, including the supply-chain gate, is implemented and
-passing.
+Engineering previews are published only after source dependency/secret policy,
+exact-image vulnerability and SBOM evidence, and the existing system gates
+pass. Trusted publication then attaches and verifies digest-bound provenance
+and SBOM attestations. A versioned-release preview is eligible for stable
+acceptance only when this complete target path passes.
 
 ### Required behaviour
 
@@ -121,6 +121,14 @@ passing.
   dedicated exact-image validation path before it can be enabled for a preview
   or release.
 - Reports required for diagnosis are retained for a bounded period.
+- Raw secret matches are never retained as artifacts; CI uploads only sanitized
+  finding identity and policy decisions.
+- High and critical dependency/image findings fail closed unless an owned,
+  justified, linked and unexpired vulnerability exception matches exactly.
+  All repository secret findings fail closed without an exception path.
+- Scanner and attestation tooling is immutable at execution time, with
+  provenance, licence, update ownership and review dates recorded in the
+  [supply-chain policy](supply-chain.md).
 - Stable promotion accepts only a tested preview from the matching semantic
   release branch, validates its revision in `main` and `develop` plus exact
   `main` tree identity, and never replaces an existing version.

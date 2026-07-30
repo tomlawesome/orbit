@@ -195,10 +195,11 @@ requires Sol Extra High review before implementation proceeds.
 - Decompose issue #20 now into an authenticated accessibility/responsive matrix
   and an explicit offline-support decision. Execute page-specific assertions
   only against stable item, document, mailbox and administration journeys.
-- Continue issue #21's independent supply-chain slice now: dependency policy,
-  SBOM, exact-image vulnerability scanning, provenance and least-privilege
-  workflow evidence. Installation, update, rollback, recovery and promotion
-  acceptance wait for the feature-complete image.
+- Complete issue #21's protected CI evidence for dependency/secret policy,
+  SPDX output, exact-image vulnerability scanning, verified digest-bound
+  provenance and least-privilege workflow controls. Resolve the time-bounded
+  mutable image inventory through issue #80. Installation, update, rollback,
+  recovery and promotion acceptance wait for the feature-complete image.
 - Prepare the release-acceptance record structure now, but do not claim
   representative provider/device/operator results before those checks run
   against the exact versioned-release preview digest.
