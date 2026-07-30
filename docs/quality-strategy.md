@@ -107,12 +107,19 @@ pass. Trusted publication then attaches and verifies digest-bound provenance
 and SBOM attestations. A versioned-release preview is eligible for stable
 acceptance only when this complete target path passes.
 
+Pull requests also receive a read-only dependency-diff review. Newly
+introduced high or critical vulnerabilities in any dependency scope and
+dependencies outside the approved SPDX licence policy block integration.
+
 ### Required behaviour
 
 - Superseded runs are cancelled where safe.
 - Pull requests have read-only permissions and never publish mutable release
   tags.
 - Third-party actions are pinned to reviewed immutable commits.
+- Dependency-change review uses read-only permissions, blocks newly introduced
+  high/critical vulnerabilities in every scope and enforces the approved SPDX
+  licence set.
 - Test data and OIDC identities are disposable.
 - Secrets are unavailable to untrusted pull-request code.
 - Build output is identified once, loaded into Compose for system tests, and

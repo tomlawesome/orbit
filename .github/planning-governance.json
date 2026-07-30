@@ -5,6 +5,7 @@
     ".github/orchestration-governance.json",
     ".github/planning-governance.json",
     ".github/pull_request_template.md",
+    ".github/dependency-review-config.yml",
     ".github/supply-chain-policy.json",
     "AGENTS.md",
     "Dockerfile",
