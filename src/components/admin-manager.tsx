@@ -80,6 +80,7 @@ export function AdminManager({ session }: AdminManagerProps) {
   const [operations, setOperations] = useState<Operations | null>(null);
   const [operationsError, setOperationsError] = useState("");
   const [operationsLoading, setOperationsLoading] = useState(true);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [operationsBusy, setOperationsBusy] = useState<string | null>(null);
   const [smtpTestState, setSmtpTestState] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [imapTestState, setImapTestState] = useState<"idle" | "sending" | "success" | "error">("idle");
@@ -97,6 +98,27 @@ export function AdminManager({ session }: AdminManagerProps) {
       setOperationsError(error instanceof Error ? error.message : "Operations could not be loaded");
     } finally {
       setOperationsLoading(false);
+    }
+  }
+
+  async function loadOlderAudit() {
+    if (!operations?.nextCursor || auditLoading) return;
+    setAuditLoading(true);
+    setOperationsError("");
+    try {
+      const response = await fetch(`/api/admin/operations?auditCursor=${encodeURIComponent(operations.nextCursor)}`, { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw await responseError(response, "Older audit history could not be loaded");
+      const payload = await response.json() as { operations?: Operations };
+      if (!payload.operations) throw new Error("Older audit history could not be loaded");
+      setOperations((current) => current ? {
+        ...current,
+        audit: [...current.audit, ...payload.operations!.audit],
+        nextCursor: payload.operations!.nextCursor,
+      } : payload.operations!);
+    } catch (error) {
+      setOperationsError(error instanceof Error ? error.message : "Older audit history could not be loaded");
+    } finally {
+      setAuditLoading(false);
     }
   }
 
@@ -260,7 +282,7 @@ export function AdminManager({ session }: AdminManagerProps) {
 
     <section>
       <div className="setting-heading"><h3>Recent audit history</h3><p>Security and data actions only. Content and credentials are never shown.</p></div>
-      {operations?.audit.length ? <ol className="admin-audit-list">{operations.audit.map((entry) => <li key={entry.id}><strong>{entry.actionLabel}</strong><span>{entry.actorName} · {entry.householdName}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ol> : <p className="member-message">No recent audit events.</p>}
+      {operations?.audit.length ? <><ol className="admin-audit-list">{operations.audit.map((entry) => <li key={entry.id}><strong>{entry.actionLabel}</strong><span>{entry.actorName} · {entry.householdName}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ol>{operations.nextCursor && <button type="button" className="admin-refresh" onClick={() => void loadOlderAudit()} disabled={auditLoading}>{auditLoading ? "Loading older history…" : "Load older history"}</button>}</> : <p className="member-message">No recent audit events.</p>}
     </section>
 
     <section>
