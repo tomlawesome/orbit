@@ -1,6 +1,6 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeJob, type OwnedPurgeState } from "@/server/documents/purge";
@@ -179,6 +179,8 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
           eq(documentCrypto.storageKey, state.storageKey),
         )).returning({ documentId: documentCrypto.documentId });
         if (deletedCrypto.length !== 1) throw new Error("Purge finalization lost crypto metadata");
+
+        await transaction.delete(documentDrafts).where(eq(documentDrafts.documentId, claimedJob.documentId));
 
         const [completedJob] = await transaction.update(documentJobs).set({
           status: "completed",

@@ -1,15 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
+import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentJobs, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
 import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
 import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
 import { POST as restoreDocumentRoute } from "@/app/api/documents/[documentId]/restore/route";
 import { GET as listDocuments, POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
+import { updateDocumentJob } from "@/server/admin-operations";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   createIntegrationFixture,
@@ -50,6 +51,14 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-lifecycle");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+    await getDb().insert(documentDrafts).values({
+      documentId,
+      householdId: fixture.household.id,
+      requestedByUserId: fixture.users.member.id,
+      extractedTextSha256: createHash("sha256").update("synthetic draft evidence").digest("hex"),
+      evidence: { excerpt: "synthetic draft evidence" },
+      proposal: { title: "Synthetic draft" },
+    });
 
     const downloaded = await downloadDocument(requestForSession(session, downloadUrl), documentContext(documentId));
     expect(downloaded.status).toBe(200);
@@ -101,6 +110,7 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documents).where(eq(documents.id, documentId));
     expect(terminal?.lifecycle).toBe("deleted");
     expect(await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    expect(await getDb().select().from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
     expect(await storage.ciphertextExists(cryptoBeforePurge!.storageKey)).toBe(false);
 
     const [job] = await getDb().select({ status: documentJobs.status, generation: documentJobs.generation })
@@ -178,6 +188,153 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documentJobs).where(eq(documentJobs.documentId, documentId)).orderBy(desc(documentJobs.generation)).limit(1);
     expect(document?.lifecycle).toBe("pending_deletion");
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
+  });
+
+  it("keeps a failed ciphertext purge recoverable through bounded administrator retry", async () => {
+    const fixture = await createIntegrationFixture("document-storage-delete-failure");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+    await getDb().insert(documentDrafts).values({
+      documentId,
+      householdId: fixture.household.id,
+      requestedByUserId: fixture.users.member.id,
+      extractedTextSha256: createHash("sha256").update("retryable draft evidence").digest("hex"),
+      evidence: { excerpt: "retryable draft evidence" },
+      proposal: { title: "Retryable draft" },
+    });
+    await deleteDocument(
+      requestForSession(session, downloadUrl, { method: "DELETE" }),
+      documentContext(documentId),
+    );
+    await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) })
+      .where(eq(documents.id, documentId));
+
+    const [crypto] = await getDb().select({ storageKey: documentCrypto.storageKey })
+      .from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+    const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+    const deleteFailure = vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext")
+      .mockRejectedValue(new Error("injected ciphertext delete outage"));
+    try {
+      await runDocumentMaintenanceCycle();
+
+      expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
+      expect(await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
+        .where(eq(documentCrypto.documentId, documentId))).toEqual([{ documentId }]);
+      expect(await getDb().select({ documentId: documentDrafts.documentId }).from(documentDrafts)
+        .where(eq(documentDrafts.documentId, documentId))).toEqual([{ documentId }]);
+      expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
+        .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "pending_deletion" }]);
+      expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts, lastError: documentJobs.lastError })
+        .from(documentJobs).where(eq(documentJobs.documentId, documentId)))
+        .toEqual([expect.objectContaining({ status: "retry", attempts: 1, lastError: "purge_failed" })]);
+      expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+        eq(auditLog.entityId, documentId),
+        eq(auditLog.action, "document_purged"),
+      ))).toHaveLength(0);
+
+      for (let attempt = 1; attempt < 5; attempt += 1) await runDocumentMaintenanceCycle();
+    } finally {
+      deleteFailure.mockRestore();
+    }
+
+    const [failedJob] = await getDb().select({
+      id: documentJobs.id,
+      status: documentJobs.status,
+      attempts: documentJobs.attempts,
+      lastError: documentJobs.lastError,
+    }).from(documentJobs).where(eq(documentJobs.documentId, documentId));
+    expect(failedJob).toMatchObject({ status: "failed", attempts: 5, lastError: "purge_failed" });
+    expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
+
+    await updateDocumentJob(fixture.users.admin.id, failedJob!.id, "retry", "failed");
+    await runDocumentMaintenanceCycle();
+
+    expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(false);
+    expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
+      .where(eq(documents.id, documentId))).toEqual([{ lifecycle: "deleted" }]);
+    expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto)
+      .where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+    expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts)
+      .where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
+    expect(await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
+      .from(documentJobs).where(eq(documentJobs.id, failedJob!.id)))
+      .toEqual([{ status: "completed", attempts: 1 }]);
+    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.entityId, documentId),
+      eq(auditLog.action, "document_purged"),
+    ))).toHaveLength(1);
+  });
+
+  it("serializes concurrent uploads at the instance quota boundary", async () => {
+    const fixture = await createIntegrationFixture("document-instance-quota-race");
+    const filler = await createIntegrationFixture("document-instance-quota-filler");
+    const quotaBytes = 25 * 1_048_576;
+    const previousHouseholdQuota = process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+    const previousInstanceQuota = process.env.DOCUMENT_INSTANCE_QUOTA_BYTES;
+    process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = String(quotaBytes);
+    process.env.DOCUMENT_INSTANCE_QUOTA_BYTES = String(quotaBytes);
+    resetDocumentConfigForTests();
+    try {
+      const [usage] = await getDb().select({
+        total: sql<number>`coalesce(sum(${documents.sizeBytes}), 0)`,
+      }).from(documents).where(notInArray(documents.lifecycle, ["deleted", "rejected"]));
+      const fillerBytes = quotaBytes - Number(usage.total) - syntheticPdf.length;
+      expect(fillerBytes).toBeGreaterThan(0);
+      await getDb().insert(documents).values({
+        id: randomUUID(),
+        householdId: filler.household.id,
+        itemId: filler.item.id,
+        uploadedByUserId: filler.users.member.id,
+        displayName: "quota-boundary-reservation.pdf",
+        mediaType: "application/pdf",
+        sizeBytes: fillerBytes,
+        contentSha256: createHash("sha256").update("quota-boundary-reservation").digest("hex"),
+        lifecycle: "quarantined",
+        scanStatus: "skipped",
+      });
+
+      const member = await fixture.session("member");
+      const secondOwner = await fixture.session("secondOwner");
+      const uploadAtBoundary = (
+        currentSession: Awaited<ReturnType<typeof fixture.session>>,
+        householdId: string,
+        itemId: string,
+        filename: string,
+      ) => uploadDocument(requestForSession(
+        currentSession,
+        `http://127.0.0.1:3000/api/households/${householdId}/items/${itemId}/documents`,
+        {
+          method: "POST",
+          headers: {
+            "content-length": String(syntheticPdf.length),
+            "content-type": "application/pdf",
+            "x-orbit-filename": encodeURIComponent(filename),
+          },
+          body: syntheticPdf,
+        },
+      ), itemDocumentsContext(householdId, itemId));
+
+      const responses = await Promise.all([
+        uploadAtBoundary(member, fixture.household.id, fixture.item.id, "quota-primary.pdf"),
+        uploadAtBoundary(secondOwner, fixture.secondHousehold.id, fixture.secondItem.id, "quota-secondary.pdf"),
+      ]);
+      expect(responses.map((response) => response.status).sort()).toEqual([201, 413]);
+      const denied = responses.find((response) => response.status === 413)!;
+      expect((await denied.json()).error).toEqual({
+        code: "document_instance_quota",
+        message: "Orbit document storage has reached its configured limit",
+      });
+      const [finalUsage] = await getDb().select({
+        total: sql<number>`coalesce(sum(${documents.sizeBytes}), 0)`,
+      }).from(documents).where(notInArray(documents.lifecycle, ["deleted", "rejected"]));
+      expect(Number(finalUsage.total)).toBe(quotaBytes);
+    } finally {
+      if (previousHouseholdQuota === undefined) delete process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES;
+      else process.env.DOCUMENT_HOUSEHOLD_QUOTA_BYTES = previousHouseholdQuota;
+      if (previousInstanceQuota === undefined) delete process.env.DOCUMENT_INSTANCE_QUOTA_BYTES;
+      else process.env.DOCUMENT_INSTANCE_QUOTA_BYTES = previousInstanceQuota;
+      resetDocumentConfigForTests();
+    }
   });
 
   it("uses a synthetic content hash without exposing fixture bytes in metadata", async () => {
