@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
 import { getNotificationWorkerConfig } from "./notification-worker";
 import { deriveImapRecipientAlias } from "./imap-recipient";
 
@@ -157,6 +157,26 @@ describe("IMAP ingestion configuration", () => {
       verifySmtp: async () => "smtp_unavailable",
       verifyImap: async () => "imap_unavailable",
     })).resolves.toMatchObject({ status: "provider_unavailable" });
+  });
+
+  it("keeps the process-local provider commitment stable, rotation-sensitive, and content-free", () => {
+    const environmentValues = {
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "provider-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test", SMTP_USER: "orbit", SMTP_PASSWORD: "smtp-password",
+    };
+    const config = getImapIngestionConfig(environment(environmentValues));
+    const smtp = getNotificationWorkerConfig(environment(environmentValues));
+    const commitment = imapProviderConfigCommitment(config, smtp);
+
+    expect(commitment).toMatch(/^[0-9a-f]{64}$/u);
+    expect(imapProviderConfigCommitment(config, smtp)).toBe(commitment);
+    expect(imapProviderConfigCommitment(
+      getImapIngestionConfig(environment({ ...environmentValues, IMAP_PASSWORD: "rotated-password" })),
+      smtp,
+    )).not.toBe(commitment);
+    expect(commitment).not.toContain(environmentValues.IMAP_PASSWORD);
+    expect(commitment).not.toContain(environmentValues.SMTP_PASSWORD);
   });
 
   it("reduces exceptional provider verification to a safe result and recovers on a later attempt", async () => {
