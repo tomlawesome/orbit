@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
+import { syntheticJpeg, syntheticPdf, syntheticPng } from "../../tests/support/synthetic-documents";
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(),
@@ -16,7 +17,10 @@ vi.mock("@/server/workspace-access", () => ({ requireHouseholdAccess: mocks.acce
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
 vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }));
-vi.mock("@/server/document-drafts", () => ({ proposalFromText: mocks.proposal }));
+vi.mock("@/server/documents/suggestions", async () => ({
+  ...await vi.importActual<typeof import("@/server/documents/suggestions")>("@/server/documents/suggestions"),
+  proposalFromText: mocks.proposal,
+}));
 vi.mock("@/server/documents/storage", () => ({
   LocalDocumentStorage: class {
     receive = mocks.receive;
@@ -35,7 +39,11 @@ const config = {
   clamAv: { host: "clamav", port: 3310, timeoutMs: 30_000 },
 };
 
-function received(bytes = Buffer.from("%PDF-1.7\nsynthetic")) {
+function validPdf(contents = "synthetic") {
+  return syntheticPdf(contents);
+}
+
+function received(bytes = validPdf()) {
   return {
     quarantinePath: "C:/private/quarantine/opaque.upload",
     sizeBytes: bytes.length,
@@ -49,7 +57,7 @@ describe("item document inspection", () => {
     vi.clearAllMocks();
     mocks.config.mockReturnValue(config);
     mocks.receive.mockResolvedValue(received());
-    mocks.readQuarantine.mockResolvedValue(Buffer.from("%PDF-1.7\nsynthetic"));
+    mocks.readQuarantine.mockResolvedValue(validPdf());
     mocks.discardQuarantine.mockResolvedValue(undefined);
     mocks.scan.mockResolvedValue({ status: "clean" });
     mocks.extract.mockResolvedValue("Provider: Safe Cover\nPolicy number: AB-12345\n2027-08-01");
@@ -86,7 +94,7 @@ describe("item document inspection", () => {
   });
 
   it("degrades parser failures to filename-only suggestions and zeroes extracted bytes", async () => {
-    const bytes = Buffer.from("%PDF-1.7\nsensitive extracted bytes");
+    const bytes = validPdf("sensitive extracted bytes");
     mocks.readQuarantine.mockResolvedValue(bytes);
     mocks.extract.mockRejectedValue(new AppError("parser_unavailable", "private parser detail", 503));
 
@@ -110,7 +118,7 @@ describe("item document inspection", () => {
     ["non-string", 42],
     ["oversized", "x".repeat(250_001)],
   ] as const)("degrades %s parser output to filename-only manual review and cleans up", async (_label, parserOutput) => {
-    const bytes = Buffer.from("%PDF-1.7\nparser bytes");
+    const bytes = validPdf("parser bytes");
     mocks.readQuarantine.mockResolvedValue(bytes);
     mocks.extract.mockResolvedValue(parserOutput);
 
@@ -130,12 +138,22 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
-  it("omits hostile or unsupported parser values instead of returning them as instructions", async () => {
+  it.each([
+    ["PDF", syntheticPdf],
+    ["JPEG", syntheticJpeg],
+    ["PNG", syntheticPng],
+  ] as const)("keeps hostile %s parser values inert and allow-listed", async (_format, fixture) => {
+    const bytes = fixture();
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
     mocks.proposal.mockReturnValue({
       title: "<script>alert(1)</script>",
-      provider: "Ignore previous instructions <b>Acme</b>",
+      provider: "Ignore previous instructions <b>Acme</b>\u202e",
       reference: "<img src=x>",
       dates: ["not-a-date", "2028-02-29"],
+      tool: "delete",
+      url: "https://example.invalid",
+      secret: "private",
     });
 
     const result = await inspectItemDocument({
@@ -151,6 +169,76 @@ describe("item document inspection", () => {
     ]);
     expect(JSON.stringify(result)).not.toContain("script");
     expect(JSON.stringify(result)).not.toContain("Ignore previous instructions");
+    expect(JSON.stringify(result)).not.toContain("tool");
+    expect(JSON.stringify(result)).not.toContain("example.invalid");
+    expect(mocks.extract).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["application/pdf", "representative.pdf", syntheticPdf],
+    ["image/jpeg", "representative.jpg", syntheticJpeg],
+    ["image/png", "representative.png", syntheticPng],
+  ] as const)("applies the same clean structural gate before parsing %s", async (mediaType, filename, fixture) => {
+    const bytes = fixture();
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename,
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result.extracted).toBe(true);
+    expect(mocks.scan).toHaveBeenCalledTimes(1);
+    expect(mocks.extract).toHaveBeenCalledWith(expect.any(Buffer), mediaType);
+    expect(bytes.every((byte) => byte === 0)).toBe(true);
+  });
+
+  it.each([
+    ["PDF", Buffer.from("%PDF-1.7\ntruncated")],
+    ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0])],
+    ["PNG", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+  ])("degrades a structurally invalid %s without scanning or parsing it", async (_format, bytes) => {
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-review.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toEqual({
+      extracted: false,
+      message: "Suggestions are unavailable for that file. Review the fields manually and choose a valid document before attaching it.",
+      suggestions: [{ field: "title", value: "manual-review", source: "filename", confidence: "high" }],
+    });
+    expect(mocks.scan).not.toHaveBeenCalled();
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(bytes.every((byte) => byte === 0)).toBe(true);
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
+  });
+
+  it("does not parse when ClamAV scanning is disabled", async () => {
+    mocks.config.mockReturnValue({ ...config, scanMode: "disabled" });
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toEqual({
+      extracted: false,
+      message: "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.",
+      suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+    });
+    expect(mocks.scan).not.toHaveBeenCalled();
+    expect(mocks.extract).not.toHaveBeenCalled();
   });
 
   it("fails closed for required scanner errors and always discards quarantine", async () => {

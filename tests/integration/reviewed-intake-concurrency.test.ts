@@ -7,6 +7,7 @@ import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { uploadItemDocument } from "@/server/document-repository";
 import { createIntegrationFixture } from "./support/fixtures";
+import { syntheticPdf } from "../support/synthetic-documents";
 
 function directInput(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, operationId: string) {
   return {
@@ -88,7 +89,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     const fixture = await createIntegrationFixture("reviewed-concurrent-mailbox");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({
-      bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nconcurrent mailbox attachment\n%%EOF"),
+      bytes: syntheticPdf("concurrent mailbox attachment"),
       filename: "concurrent-mailbox.pdf",
       declaredMediaType: "application/pdf",
       recipientUserId: fixture.users.member.id,
@@ -130,7 +131,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     const fixture = await createIntegrationFixture("reviewed-crash-replay");
     const targetItemId = randomUUID();
     await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Crash replay target", currency: "GBP" });
-    const bytes = Buffer.from("%PDF-1.7\n1 0 obj\nendobj\nstable crash replay\n%%EOF");
+    const bytes = syntheticPdf("stable crash replay");
     const receiptId = randomUUID();
     const held = await scanAndHoldImapAttachment({ bytes, filename: "crash-replay.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
     const available = await uploadItemDocument({
@@ -156,7 +157,7 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
   it("retries a purge failure after assignment without re-uploading the document", async () => {
     const fixture = await createIntegrationFixture("reviewed-purge-retry");
     const receiptId = randomUUID();
-    const held = await scanAndHoldImapAttachment({ bytes: Buffer.from("%PDF-1.7\n1 0 obj\nendobj\npurge retry\n%%EOF"), filename: "purge-retry.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+    const held = await scanAndHoldImapAttachment({ bytes: syntheticPdf("purge retry"), filename: "purge-retry.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
     const [receipt] = await getDb().insert(imapIngestionMessages).values({ id: receiptId, mailbox: "private", mailboxUidValidity: "purge", mailboxUid: 4, contentSha256: randomUUID().replaceAll("-", ""), recipientAliasSha256: "purge", userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending" }).returning({ id: imapIngestionMessages.id });
     await getDb().insert(imapIngestionAttachments).values({ id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType, sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey, ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored" });
     const input = { operationId: randomUUID(), source: { kind: "mailbox_draft" as const, receiptId: receipt.id, draftVersion: 1 }, householdId: fixture.household.id, sectionId: fixture.section.id, action: "create_separate" as const, item: { title: "Purge retry value", currency: "GBP", status: "active" }, attachmentIds: [held.id] };

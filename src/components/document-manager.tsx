@@ -21,6 +21,7 @@ interface UploadingDocument {
   progress: number;
 }
 interface CaptureReview { file: File; previewUrl: string; rotation: number }
+interface DraftReview { title: string; provider: string; reference: string }
 
 interface DocumentManagerProps {
   householdId: string;
@@ -58,6 +59,8 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
   const [failedUploads, setFailedUploads] = useState<File[]>([]);
   const [captureReview, setCaptureReview] = useState<CaptureReview | null>(null);
   const [draft, setDraft] = useState<{ id: string; proposal: { title: string; provider?: string; reference?: string }; evidence: { excerpt: string }; duplicates?: Array<{ itemId: string; title: string; reason: string }> } | null>(null);
+  const [draftReview, setDraftReview] = useState<DraftReview>({ title: "", provider: "", reference: "" });
+  const [draftApprovalBusy, setDraftApprovalBusy] = useState(false);
   const listUrl = `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`;
 
   const refresh = useCallback(async () => {
@@ -170,9 +173,57 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
 
   async function createDraft(document: ItemDocument) {
     setBusyDocumentId(document.id); setError("");
-    try { const response = await fetch(`/api/documents/${document.id}/draft`, { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrfToken } }); if (!response.ok) throw new Error(await responseMessage(response)); const payload = await response.json() as { draft: typeof draft }; setDraft(payload.draft); } catch (caught) { setError(caught instanceof Error ? caught.message : "Orbit could not prepare a draft."); } finally { setBusyDocumentId(null); }
+    try {
+      const response = await fetch(`/api/documents/${document.id}/draft`, { method: "POST", credentials: "same-origin", headers: { "X-CSRF-Token": csrfToken } });
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload = await response.json() as { draft: NonNullable<typeof draft> };
+      setDraft(payload.draft);
+      setDraftReview({
+        title: payload.draft.proposal.title,
+        provider: payload.draft.proposal.provider ?? "",
+        reference: payload.draft.proposal.reference ?? "",
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Orbit could not prepare a draft.");
+    } finally {
+      setBusyDocumentId(null);
+    }
   }
-  async function approveDraft(mode: "create" | "merge" | "attach", targetItemId?: string) { if (!draft) return; const title = window.prompt("Review the item title before creating it", draft.proposal.title); if (!title) return; const response = await fetch(`/api/document-drafts/${draft.id}/approve`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ sectionId, title, mode, targetItemId }) }); if (!response.ok) { setError(await responseMessage(response)); return; } setMessage(mode === "create" ? "Draft approved and item created." : "Document attached to the selected item."); setDraft(null); }
+  async function approveDraft(mode: "create" | "merge" | "attach", targetItemId?: string) {
+    if (!draft || draftApprovalBusy) return;
+    const title = draftReview.title.trim();
+    if (!title) {
+      setError("Review and enter an item title.");
+      return;
+    }
+    setDraftApprovalBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/document-drafts/${draft.id}/approve`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({
+          sectionId,
+          title,
+          provider: draftReview.provider.trim() || null,
+          reference: draftReview.reference.trim() || null,
+          mode,
+          targetItemId,
+        }),
+      });
+      if (!response.ok) {
+        setError(await responseMessage(response));
+        return;
+      }
+      setMessage(mode === "create" ? "Draft approved and item created." : "Document attached to the selected item.");
+      setDraft(null);
+    } catch {
+      setError("The reviewed draft could not be approved. Try again.");
+    } finally {
+      setDraftApprovalBusy(false);
+    }
+  }
 
   return (
     <section className="detail-section documents-section" aria-labelledby="documents-heading">
@@ -214,7 +265,18 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
           </li>)}
         </ul>
       )}
-      {draft && <section className="detail-action-panel"><h3>Review extracted draft</h3><p><strong>{draft.proposal.title}</strong>{draft.proposal.provider ? ` · ${draft.proposal.provider}` : ""}{draft.proposal.reference ? ` · ${draft.proposal.reference}` : ""}</p><p>{draft.evidence.excerpt.slice(0, 500)}</p>{draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}<footer><button type="button" onClick={() => setDraft(null)}>Discard</button><button type="button" onClick={() => void approveDraft("create")}>Create separate item</button></footer></section>}
+      {draft && <section className="detail-action-panel" aria-labelledby="document-draft-heading">
+        <h3 id="document-draft-heading">Review extracted draft</h3>
+        <p>Suggestions are untrusted document text. Check, edit or clear every field before approval.</p>
+        <label className="field field-wide"><span>Item title</span><input value={draftReview.title} maxLength={100} required onChange={(event) => setDraftReview((current) => ({ ...current, title: event.currentTarget.value }))} /></label>
+        <div className="field-grid">
+          <label className="field"><span>Provider</span><input value={draftReview.provider} maxLength={100} onChange={(event) => setDraftReview((current) => ({ ...current, provider: event.currentTarget.value }))} /></label>
+          <label className="field"><span>Reference</span><input value={draftReview.reference} maxLength={80} onChange={(event) => setDraftReview((current) => ({ ...current, reference: event.currentTarget.value }))} /></label>
+        </div>
+        {draft.evidence.excerpt && <p>Extracted evidence: {draft.evidence.excerpt.slice(0, 500)}</p>}
+        {draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}
+        <footer><button type="button" disabled={draftApprovalBusy} onClick={() => setDraft(null)}>Discard</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("create")}>{draftApprovalBusy ? "Approving…" : "Create separate item"}</button></footer>
+      </section>}
       {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo"><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
     </section>
   );

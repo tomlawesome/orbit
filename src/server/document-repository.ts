@@ -16,7 +16,11 @@ import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { detectDocumentMediaType, normalizedDocumentFilename } from "@/server/documents/validation";
+import {
+  detectDocumentMediaType,
+  normalizedDocumentFilename,
+  validateSupportedDocumentStructure,
+} from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
 
 export interface DocumentSummary {
@@ -277,6 +281,18 @@ export async function uploadItemDocument(input: {
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const displayName = normalizedDocumentFilename(input.filename, mediaType);
+    const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    try {
+      if (!validateSupportedDocumentStructure(validationBytes, mediaType)) {
+        throw new AppError(
+          "document_structure_invalid",
+          "Choose a structurally valid PDF, JPEG, or PNG document",
+          422,
+        );
+      }
+    } finally {
+      validationBytes.fill(0);
+    }
     await reserveDocumentMetadata({
       documentId,
       userId: input.userId,
@@ -390,6 +406,7 @@ export async function uploadItemDocument(input: {
     }
     throw error;
   } finally {
+    received.leadingBytes.fill(0);
     await storage.discardQuarantine(received.quarantinePath).catch(() => undefined);
   }
 }

@@ -3,10 +3,12 @@ import { NextRequest } from "next/server";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
+import { auditLog, documentCrypto, documentDrafts, documentJobs, documents, items } from "@/db/schema";
 import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
 import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
 import { POST as restoreDocumentRoute } from "@/app/api/documents/[documentId]/restore/route";
+import { POST as createDocumentDraftRoute } from "@/app/api/documents/[documentId]/draft/route";
+import { POST as approveDocumentDraftRoute } from "@/app/api/document-drafts/[draftId]/approve/route";
 import { GET as listDocuments, POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { runDocumentMaintenanceCycle } from "@/server/document-worker";
@@ -17,8 +19,9 @@ import {
   requestForSession,
   sessionHeaders,
 } from "./support/fixtures";
+import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
-const syntheticPdf = Buffer.from("%PDF-1.7\nsynthetic authenticated document\n");
+const syntheticPdf = createSyntheticPdf("synthetic authenticated document");
 
 function itemDocumentsContext(householdId: string, itemId: string) {
   return { params: Promise.resolve({ householdId, itemId }) };
@@ -26,6 +29,10 @@ function itemDocumentsContext(householdId: string, itemId: string) {
 
 function documentContext(documentId: string) {
   return { params: Promise.resolve({ documentId }) };
+}
+
+function draftContext(draftId: string) {
+  return { params: Promise.resolve({ draftId }) };
 }
 
 async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
@@ -188,6 +195,171 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documentJobs).where(eq(documentJobs.documentId, documentId)).orderBy(desc(documentJobs.generation)).limit(1);
     expect(document?.lifecycle).toBe("pending_deletion");
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
+  });
+
+  it("rejects structurally invalid supported uploads before durable metadata or scanning", async () => {
+    const fixture = await createIntegrationFixture("document-invalid-structure");
+    const session = await fixture.session("member");
+    const beforeDocuments = await getDb().select({ id: documents.id })
+      .from(documents).where(eq(documents.householdId, fixture.household.id));
+    const beforeAudits = await getDb().select({ id: auditLog.id })
+      .from(auditLog).where(eq(auditLog.householdId, fixture.household.id));
+    const malformed = [
+      { name: "truncated.pdf", type: "application/pdf", bytes: Buffer.from("%PDF-1.7\ntruncated") },
+      { name: "truncated.jpg", type: "image/jpeg", bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0]) },
+      { name: "truncated.png", type: "image/png", bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) },
+    ];
+
+    for (const fixtureDocument of malformed) {
+      const response = await uploadDocument(requestForSession(
+        session,
+        `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
+        {
+          method: "POST",
+          headers: {
+            "content-length": String(fixtureDocument.bytes.length),
+            "content-type": fixtureDocument.type,
+            "x-orbit-filename": encodeURIComponent(fixtureDocument.name),
+          },
+          body: fixtureDocument.bytes,
+        },
+      ), itemDocumentsContext(fixture.household.id, fixture.item.id));
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: {
+          code: "document_structure_invalid",
+          message: "Choose a structurally valid PDF, JPEG, or PNG document",
+        },
+      });
+    }
+
+    expect(await getDb().select({ id: documents.id })
+      .from(documents).where(eq(documents.householdId, fixture.household.id))).toEqual(beforeDocuments);
+    expect(await getDb().select({ id: auditLog.id })
+      .from(auditLog).where(eq(auditLog.householdId, fixture.household.id))).toEqual(beforeAudits);
+  });
+
+  it("applies only explicitly reviewed draft fields and sanitizes stored parser evidence", async () => {
+    const fixture = await createIntegrationFixture("document-explicit-draft-review");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    await getDb().update(items).set({ provider: "Old Provider", reference: "OLD-12345" })
+      .where(eq(items.id, fixture.item.id));
+    const createResponse = await createDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
+      documentContext(documentId),
+    );
+    expect(createResponse.status).toBe(200);
+    const created = await createResponse.json() as { draft: { id: string } };
+    await getDb().update(documentDrafts).set({
+      evidence: {
+        excerpt: "<script>fetch('https://example.invalid')</script>\u202e private parser sentinel",
+        characters: 9_999,
+        extracted: true,
+      },
+      proposal: {
+        title: "<img src=x>",
+        provider: "Parser\u202e Provider",
+        reference: "<PARSER-SECRET>",
+        tool: "delete",
+        householdId: "other-household",
+      },
+    }).where(eq(documentDrafts.id, created.draft.id));
+
+    const sanitizedResponse = await createDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
+      documentContext(documentId),
+    );
+    const sanitizedBody = await sanitizedResponse.json() as {
+      draft: { proposal: Record<string, unknown>; evidence: { excerpt: string; characters: number } };
+    };
+    expect(sanitizedBody.draft.proposal).toEqual({
+      title: "synthetic-policy",
+      provider: "Parser Provider",
+      dates: [],
+    });
+    expect(sanitizedBody.draft.proposal).not.toHaveProperty("reference");
+    expect(sanitizedBody.draft.proposal).not.toHaveProperty("tool");
+    expect(sanitizedBody.draft.proposal).not.toHaveProperty("householdId");
+    expect(sanitizedBody.draft.evidence.excerpt).not.toMatch(/[<>\u202e]/u);
+    expect(sanitizedBody.draft.evidence.characters).toBe(sanitizedBody.draft.evidence.excerpt.length);
+
+    const rejectedAuthority = await approveDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sectionId: fixture.section.id,
+          title: "Reviewed title",
+          provider: "Reviewed Provider",
+          reference: null,
+          mode: "merge",
+          targetItemId: fixture.item.id,
+          tool: "delete",
+          url: "https://example.invalid",
+          secret: "parser-controlled",
+        }),
+      }),
+      draftContext(created.draft.id),
+    );
+    expect(rejectedAuthority.status).toBe(422);
+    expect(await getDb().select({ provider: items.provider, reference: items.reference })
+      .from(items).where(eq(items.id, fixture.item.id)))
+      .toEqual([{ provider: "Old Provider", reference: "OLD-12345" }]);
+
+    const approval = await approveDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sectionId: fixture.section.id,
+          title: "Reviewed title",
+          provider: "Reviewed Provider",
+          reference: null,
+          mode: "merge",
+          targetItemId: fixture.item.id,
+        }),
+      }),
+      draftContext(created.draft.id),
+    );
+    expect(approval.status).toBe(200);
+    expect(await getDb().select({ provider: items.provider, reference: items.reference })
+      .from(items).where(eq(items.id, fixture.item.id)))
+      .toEqual([{ provider: "Reviewed Provider", reference: null }]);
+  });
+
+  it("serializes duplicate draft approval so one explicit write wins", async () => {
+    const fixture = await createIntegrationFixture("document-draft-approval-race");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const draftResponse = await createDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
+      documentContext(documentId),
+    );
+    const payload = await draftResponse.json() as { draft: { id: string } };
+    const approve = () => approveDocumentDraftRoute(
+      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${payload.draft.id}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sectionId: fixture.section.id,
+          title: "Concurrent reviewed draft",
+          provider: null,
+          reference: null,
+          mode: "create",
+        }),
+      }),
+      draftContext(payload.draft.id),
+    );
+
+    const responses = await Promise.all([approve(), approve()]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
+    expect(await getDb().select({ id: items.id }).from(items).where(and(
+      eq(items.householdId, fixture.household.id),
+      eq(items.title, "Concurrent reviewed draft"),
+    ))).toHaveLength(1);
+    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
+      eq(auditLog.entityId, payload.draft.id),
+      eq(auditLog.action, "document_draft_create"),
+    ))).toHaveLength(1);
   });
 
   it("keeps a failed ciphertext purge recoverable through bounded administrator retry", async () => {
