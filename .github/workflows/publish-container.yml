@@ -443,7 +443,7 @@ jobs:
       - name: Verify health endpoint
         run: |
           response="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
-          jq --exit-status '.status == "ok" and .service == "orbit"' <<< "${response}"
+          jq --exit-status '.status == "ready" and .service == "orbit"' <<< "${response}"
 
       - name: Verify non-root runtime and private secrets
         run: |
