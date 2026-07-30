@@ -95,7 +95,6 @@ describe("Tika adapter", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(init?.method).toBe("PUT");
     expect(init?.headers).toEqual({
-      Accept: "text/plain",
       "Content-Type": "application/pdf",
       "X-Tika-OCRskipOcr": "true",
       "X-Tika-Skip-Embedded": "true",

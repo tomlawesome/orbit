@@ -84,7 +84,6 @@ export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDoc
     const response = await fetch(new URL("/tika/text", config.tika.url), {
       method: "PUT",
       headers: {
-        Accept: "text/plain",
         "Content-Type": mediaType,
         "X-Tika-OCRskipOcr": "true",
         "X-Tika-Skip-Embedded": "true",
