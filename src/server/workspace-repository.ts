@@ -637,10 +637,14 @@ export async function addHouseholdMember(userId: string, householdId: string, me
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
+      disabledAt: users.disabledAt,
     }).from(users).leftJoin(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
     ).where(eq(users.id, userId)).limit(1);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
+    }
     if (!actor?.administrator && actor?.role !== "owner") {
       throw new AppError("owner_required", "Only the current household owner can add members", 403);
     }
@@ -661,15 +665,20 @@ export async function removeHouseholdMember(userId: string, householdId: string,
   await requireHouseholdAccess(userId, householdId);
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
+  let departed = false;
   await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
+      disabledAt: users.disabledAt,
     }).from(users).leftJoin(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
     ).where(eq(users.id, userId)).limit(1);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
+    }
     const [target] = await transaction.select({ role: memberships.role }).from(memberships)
       .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.userId, targetUserId)))
       .limit(1);
@@ -690,7 +699,9 @@ export async function removeHouseholdMember(userId: string, householdId: string,
       action: targetUserId === userId ? "member_left" : "member_removed",
       changes: { targetUserId },
     });
+    departed = targetUserId === userId;
   });
+  if (departed) return [];
   return listHouseholdMembers(userId, householdId);
 }
 
@@ -720,8 +731,8 @@ export async function transferHouseholdOwnership(
       .where(eq(memberships.householdId, validHouseholdId));
     const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
       .from(users).where(eq(users.id, userId)).limit(1);
-    if (actor?.disabledAt) {
-      throw new AppError("owner_required", "Only an active household owner can transfer ownership", 403);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
     }
     const plan = planOwnershipTransfer(
       householdMembers,
