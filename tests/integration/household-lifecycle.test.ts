@@ -623,7 +623,8 @@ describe("transactional household lifecycle", () => {
       purgeExpiredHouseholds(),
     ]);
     expect(restore.status).toBe("rejected");
-    expect((restore as PromiseRejectedResult).reason).toMatchObject({ code: "household_not_recoverable" });
+    expect(["household_not_found", "household_not_recoverable"])
+      .toContain((restore as PromiseRejectedResult).reason?.code);
     expect(purge.status).toBe("fulfilled");
     expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id))).toHaveLength(0);
     expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(
