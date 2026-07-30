@@ -774,7 +774,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
                 </section>
               </div>
             ) : settingsView === "members" ? (
-              <MemberManager householdId={household.id} session={session} />
+              <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
             ) : (
               <AdminManager session={session} />
             )}
