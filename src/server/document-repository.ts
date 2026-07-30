@@ -227,11 +227,43 @@ export async function uploadItemDocument(input: {
   filename: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  documentId?: string;
 }): Promise<DocumentSummary> {
   await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
   const config = getDocumentConfig();
   const storage = documentStorage();
-  const documentId = randomUUID();
+  const documentId = input.documentId ?? randomUUID();
+  if (input.documentId) {
+    const [existing] = await getDb().select({
+      id: documents.id,
+      itemId: documents.itemId,
+      householdId: documents.householdId,
+      displayName: documents.displayName,
+      mediaType: documents.mediaType,
+      sizeBytes: documents.sizeBytes,
+      lifecycle: documents.lifecycle,
+      scanStatus: documents.scanStatus,
+      availableAt: documents.availableAt,
+      deleteAfter: documents.deleteAfter,
+    }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
+    if (existing) {
+      if (existing.householdId !== input.householdId || existing.itemId !== input.itemId) {
+        throw new AppError("document_conflict", "That document identity is already in use", 409);
+      }
+      if (existing.lifecycle === "available") return toSummary(existing);
+      if (existing.lifecycle === "rejected") {
+        const [cryptoRecord] = await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
+          .where(eq(documentCrypto.documentId, input.documentId)).limit(1);
+        if (cryptoRecord) throw new AppError("document_conflict", "That document identity is already in use", 409);
+        const [removed] = await getDb().delete(documents)
+          .where(and(eq(documents.id, input.documentId), eq(documents.householdId, input.householdId), eq(documents.itemId, input.itemId), eq(documents.lifecycle, "rejected")))
+          .returning({ id: documents.id });
+        if (!removed) throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+      } else {
+        throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
+      }
+    }
+  }
   const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
   let metadataReserved = false;
@@ -370,7 +402,12 @@ export async function readDocumentDownload(
   if (crypto.keyId !== config.keyId) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
-  const ciphertext = await documentStorage().readCiphertext(crypto.storageKey, config.maxBytes + 64);
+  let ciphertext: Buffer;
+  try {
+    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, config.maxBytes + 64);
+  } catch {
+    throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
+  }
   const envelope: DocumentCryptoEnvelope = {
     envelopeVersion: crypto.envelopeVersion as 1,
     algorithm: "aes-256-gcm",
@@ -403,6 +440,9 @@ export async function requestDocumentDeletion(userId: string, documentId: string
   const config = getDocumentConfig();
   const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
   const updated = await getDb().transaction(async (transaction) => {
+    await transaction.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
+    );
     const [changed] = await transaction.update(documents).set({
       lifecycle: "pending_deletion",
       deleteAfter,
@@ -430,7 +470,6 @@ export async function restoreDocument(userId: string, documentId: string): Promi
   if (record.lifecycle !== "pending_deletion" || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
-  let storageMissing = false;
   const updated = await getDb().transaction(async (transaction) => {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
@@ -439,14 +478,25 @@ export async function restoreDocument(userId: string, documentId: string): Promi
       .from(documentCrypto)
       .where(eq(documentCrypto.documentId, documentId))
       .limit(1);
-    if (!crypto || !await documentStorage().ciphertextExists(crypto.storageKey)) {
-      storageMissing = true;
-      await transaction.update(documents).set({
-        lifecycle: "rejected",
-        failureCode: "storage_object_missing",
-        updatedAt: new Date(),
-      }).where(eq(documents.id, documentId));
-      return undefined;
+    const [purgeJob] = await transaction.select({ status: documentJobs.status })
+      .from(documentJobs)
+      .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")))
+      .orderBy(desc(documentJobs.generation))
+      .limit(1);
+    if (purgeJob?.status === "processing") {
+      throw new AppError("document_conflict", "That document is being removed; try again shortly", 409);
+    }
+    if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
+    let ciphertextExists = false;
+    try {
+      ciphertextExists = await documentStorage().ciphertextExists(crypto.storageKey);
+    } catch {
+      throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
+    }
+    if (!ciphertextExists) {
+      // Ciphertext may already be gone after a worker interruption. Keep the
+      // pending purge and its metadata so a valid retry can finalize it.
+      throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     }
     const [changed] = await transaction.update(documents).set({
       lifecycle: "available",
@@ -465,13 +515,10 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     }).where(and(
       eq(documentJobs.documentId, documentId),
       eq(documentJobs.kind, "purge"),
-      inArray(documentJobs.status, ["pending", "retry"]),
+      inArray(documentJobs.status, ["pending", "retry", "failed"]),
     ));
     return changed;
   });
-  if (storageMissing) {
-    throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
-  }
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated);

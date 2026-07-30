@@ -26,7 +26,7 @@ compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
-# Prepare the candidate image before touching a running deployment.
+# Prepare the selected application image before touching a running deployment.
 compose pull orbit-db
 compose pull orbit-clamav
 if [[ "$mode" == "--build" ]]; then
@@ -44,7 +44,7 @@ if [[ -n "$(compose ps --status running --quiet orbit-db)" ]]; then
 fi
 
 if ! compose up --detach --no-build --wait --wait-timeout 180; then
-  printf 'Orbit deploy: the candidate did not become healthy.\n' >&2
+  printf 'Orbit deploy: the application image did not become healthy.\n' >&2
   compose ps >&2 || true
   if [[ -n "$backup_path" ]]; then
     printf 'Recovery point: %s\n' "$backup_path" >&2

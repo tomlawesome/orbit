@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
 import type { HomeItem, HouseholdSection, ScheduleKind } from "@/lib/domain";
-import { workspaceItemSchema } from "@/lib/workspace";
+import { initialScheduleKind, workspaceItemSchema } from "@/lib/workspace";
 
 type ItemFieldErrors = Partial<Record<"title" | "sectionId" | "dueDate" | "costMinor", string>>;
 
@@ -11,8 +11,10 @@ interface ItemEditorProps {
   item?: HomeItem;
   sections: HouseholdSection[];
   currency: string;
+  householdId: string;
+  csrfToken: string;
   onClose(): void;
-  onSave(item: HomeItem): void;
+  onSave(item: HomeItem, document?: File): Promise<void> | void;
   onArchive?(item: HomeItem): void;
 }
 
@@ -21,22 +23,93 @@ function optionalValue(value: FormDataEntryValue | null): string | undefined {
   return trimmed || undefined;
 }
 
-export function ItemEditor({ item, sections, currency, onClose, onSave, onArchive }: ItemEditorProps) {
-  const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(item?.scheduleKind ?? "renewal");
+type InspectionPayload = {
+  suggestions?: Array<{ field: string; value: string; source: "filename" | "document_text"; confidence: "high" | "medium" | "low" }>;
+  message?: string;
+  error?: { message?: string };
+};
+
+export function ItemEditor({ item, sections, currency, householdId, csrfToken, onClose, onSave, onArchive }: ItemEditorProps) {
+  const newItemIdRef = useRef(item?.id ?? crypto.randomUUID());
+  const inspectionSequenceRef = useRef(0);
+  const inspectionAbortRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [scheduleKind, setScheduleKind] = useState<ScheduleKind | "none">(initialScheduleKind(item));
   const [errors, setErrors] = useState<ItemFieldErrors>({});
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [document, setDocument] = useState<File>();
+  const [inspectionMessage, setInspectionMessage] = useState("");
+  const [inspectionPending, setInspectionPending] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const visibleSections = sections.filter((section) => section.visible);
   const availableSections = visibleSections.length
     ? sections.filter((section) => section.visible || section.id === item?.sectionId)
     : sections;
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => () => {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+  }, []);
+
+  function closeEditor() {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
+    onClose();
+  }
+
+  function clearDocument(message = "") {
+    inspectionSequenceRef.current += 1;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
+    setInspectionPending(false);
+    setDocument(undefined);
+    setInspectionMessage(message);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function inspectDocument(file: File) {
+    inspectionAbortRef.current?.abort();
+    const sequence = ++inspectionSequenceRef.current;
+    const controller = new AbortController();
+    inspectionAbortRef.current = controller;
+    setDocument(file);
+    setInspectionPending(true);
+    setInspectionMessage("Inspecting document securely…");
+    try {
+      const response = await fetch(`/api/households/${householdId}/item-document-inspection`, {
+        method: "POST", credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken, "X-Orbit-Filename": encodeURIComponent(file.name), "X-Orbit-Declared-Bytes": String(file.size) },
+        body: file,
+        signal: controller.signal,
+      });
+      const payload = await response.json() as InspectionPayload;
+      if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not inspect that document");
+      if (sequence !== inspectionSequenceRef.current) return;
+      const form = formRef.current;
+      for (const suggestion of payload.suggestions ?? []) {
+        const control = form?.elements.namedItem(suggestion.field) as HTMLInputElement | HTMLSelectElement | null;
+        if (control && !control.value && suggestion.value) control.value = suggestion.value;
+      }
+      setInspectionPending(false);
+      setInspectionMessage(payload.message ?? "Document inspected. Review or change the suggested fields, then add the item.");
+    } catch (error) {
+      if (sequence !== inspectionSequenceRef.current || (error instanceof DOMException && error.name === "AbortError")) return;
+      setInspectionPending(false);
+      setDocument(undefined);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setInspectionMessage(error instanceof Error ? error.message : "Orbit could not inspect that document");
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const rawCost = optionalValue(formData.get("cost"));
     const rawRecurrence = optionalValue(formData.get("recurrenceMonths"));
     const candidate: HomeItem = {
-      id: item?.id ?? crypto.randomUUID(),
+      id: item?.id ?? newItemIdRef.current,
       sectionId: String(formData.get("sectionId") ?? ""),
       title: String(formData.get("title") ?? "").trim(),
       subtype: optionalValue(formData.get("subtype")),
@@ -67,22 +140,24 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
       });
       return;
     }
-    onSave(parsed.data);
+    if (inspectionPending) return;
+    setSubmitting(true);
+    try { await onSave(parsed.data, document); } catch (error) { setInspectionMessage(error instanceof Error ? error.message : "Orbit could not add this item"); } finally { setSubmitting(false); }
   }
 
   return (
     <>
-      <button className="editor-scrim" type="button" aria-label="Close item editor" onClick={onClose} />
+      <button className="editor-scrim" type="button" aria-label="Close item editor" onClick={closeEditor} />
       <aside className="item-editor" role="dialog" aria-modal="true" aria-labelledby="item-editor-title">
         <header className="editor-header">
           <div>
             <p>{item ? "Update your records" : "Add to your home"}</p>
             <h2 id="item-editor-title">{item ? "Edit item" : "Add an item"}</h2>
           </div>
-          <button type="button" aria-label="Close item editor" onClick={onClose}>×</button>
+          <button type="button" aria-label="Close item editor" onClick={closeEditor}>×</button>
         </header>
 
-        <form onSubmit={handleSubmit} noValidate>
+        <form ref={formRef} onSubmit={handleSubmit} noValidate>
           <div className="editor-body">
             <section className="form-section form-section-lead">
               <label className="field field-wide">
@@ -105,9 +180,20 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
               </div>
             </section>
 
+            {!item && <section className="form-section">
+              <div className="form-section-heading"><span>01</span><div><h3>Optional document</h3><p>Upload a document to inspect it and suggest editable fields. It is only stored with the item after you submit.</p></div></div>
+              <label className="field field-wide">
+                <span>Document</span>
+                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectDocument(file); }} />
+                {document && <small>{document.name} selected for attachment after you submit.</small>}
+                {document && !inspectionPending && <button type="button" onClick={() => clearDocument("Document selection cleared.")}>Remove document</button>}
+                {inspectionMessage && <small role="status">{inspectionMessage}</small>}
+              </label>
+            </section>}
+
             <section className="form-section">
               <div className="form-section-heading">
-                <span>01</span>
+                <span>02</span>
                 <div><h3>The essentials</h3><p>Useful details for finding and identifying this record.</p></div>
               </div>
               <div className="field-grid">
@@ -133,7 +219,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
 
             <section className="form-section">
               <div className="form-section-heading">
-                <span>02</span>
+                <span>03</span>
                 <div><h3>What happens next?</h3><p>Schedule a renewal or service and choose when Orbit should remind you.</p></div>
               </div>
               <div className="schedule-picker">
@@ -179,7 +265,7 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
 
             <section className="form-section">
               <div className="form-section-heading">
-                <span>03</span>
+                <span>04</span>
                 <div><h3>Notes</h3><p>Add the details you will want when the date comes around.</p></div>
               </div>
               <label className="field field-wide">
@@ -205,8 +291,8 @@ export function ItemEditor({ item, sections, currency, onClose, onSave, onArchiv
           <footer className="editor-footer">
             <span>{item ? "Changes are saved automatically." : "You can add more details later."}</span>
             <div>
-              <button type="button" onClick={onClose}>Cancel</button>
-              <button type="submit">{item ? "Save changes" : "Add item"}</button>
+              <button type="button" onClick={closeEditor}>Cancel</button>
+              <button type="submit" disabled={submitting || inspectionPending}>{inspectionPending ? "Inspecting document…" : submitting ? "Adding item…" : item ? "Save changes" : "Add item"}</button>
             </div>
           </footer>
         </form>

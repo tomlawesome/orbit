@@ -1,0 +1,21 @@
+# Optional mail-provider secrets. Keep this overlay out of ordinary deployments
+# until SMTP and IMAP have been configured in .env-orbit and all three host
+# files exist with private permissions.
+services:
+  orbit-app:
+    environment:
+      SMTP_PASSWORD_FILE: /run/orbit-secrets/orbit-smtp-password
+      IMAP_PASSWORD_FILE: /run/orbit-secrets/orbit-imap-password
+      IMAP_ALIAS_CURRENT_SECRET_FILE: /run/orbit-secrets/orbit-imap-alias-current-secret
+    secrets:
+      - orbit-smtp-password
+      - orbit-imap-password
+      - orbit-imap-alias-current-secret
+
+secrets:
+  orbit-smtp-password:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/smtp-password
+  orbit-imap-password:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/imap-password
+  orbit-imap-alias-current-secret:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/imap-alias-current-secret

@@ -1,4 +1,5 @@
-import { boolean, date, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
@@ -28,8 +29,23 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
-export const imapIngestionStatus = pgEnum("imap_ingestion_status", ["pending_review", "completed", "discarded", "quarantined", "failed"]);
+export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
+  "processing",
+  "pending_review",
+  "approving",
+  "recoverable",
+  "completed",
+  "discarded",
+  "expired",
+  "quarantined",
+  "failed",
+]);
 export const imapAttachmentStatus = pgEnum("imap_attachment_status", ["stored", "rejected", "assigned"]);
+export const imapRecipientAliasStatus = pgEnum("imap_recipient_alias_status", ["active", "legacy_inactive"]);
+export const imapNotificationKind = pgEnum("imap_notification_kind", ["receipt", "review_ready"]);
+export const reviewedIntakeOperationStatus = pgEnum("reviewed_intake_operation_status", ["processing", "pending_attachment", "completed", "recoverable", "failed"]);
+export const reviewedIntakeOperationSource = pgEnum("reviewed_intake_operation_source", ["direct_upload", "mailbox_draft"]);
+export const reviewedIntakeAttachmentState = pgEnum("reviewed_intake_attachment_state", ["not_requested", "pending", "attached"]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -317,14 +333,35 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   mailboxUid: integer("mailbox_uid").notNull(),
   contentSha256: text("content_sha256").notNull(),
   recipientAliasSha256: text("recipient_alias_sha256").notNull(),
+  recipientAliasGeneration: integer("recipient_alias_generation"),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   householdId: uuid("household_id").references(() => households.id, { onDelete: "set null" }),
+  /** Legacy prototype link. New receipt and approval code must never use it. */
   reviewItemId: uuid("review_item_id").references(() => items.id, { onDelete: "set null" }),
+  draftVersion: integer("draft_version").notNull().default(1),
+  proposal: jsonb("proposal").notNull().default({}),
+  fieldEvidence: jsonb("field_evidence").notNull().default({}),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  approvalOperationId: uuid("approval_operation_id"),
+  approvalResultId: uuid("approval_result_id"),
+  approvalRequestSha256: text("approval_request_sha256"),
+  approvedItemId: uuid("approved_item_id").references(() => items.id, { onDelete: "set null" }),
+  approvalStartedAt: timestamp("approval_started_at", { withTimezone: true }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  discardedAt: timestamp("discarded_at", { withTimezone: true }),
+  expiredAt: timestamp("expired_at", { withTimezone: true }),
   status: imapIngestionStatus("status").notNull(),
   attempts: integer("attempts").notNull().default(1),
   failureCode: text("failure_code"),
+  attachmentProcessingAttempts: integer("attachment_processing_attempts").notNull().default(0),
+  attachmentProcessingLockedAt: timestamp("attachment_processing_locked_at", { withTimezone: true }),
+  attachmentProcessingLeaseToken: uuid("attachment_processing_lease_token"),
+  attachmentProcessingNextAttemptAt: timestamp("attachment_processing_next_attempt_at", { withTimezone: true }),
+  attachmentProcessingFailureCode: text("attachment_processing_failure_code"),
   receiptStatus: deliveryStatus("receipt_status").notNull().default("processing"),
   receiptAttempts: integer("receipt_attempts").notNull().default(0),
+  receiptLockedAt: timestamp("receipt_locked_at", { withTimezone: true }),
+  receiptLeaseToken: uuid("receipt_lease_token"),
   receiptSentAt: timestamp("receipt_sent_at", { withTimezone: true }),
   receiptFailureCode: text("receipt_failure_code"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
@@ -332,9 +369,96 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("imap_message_mailbox_uid_unique").on(table.mailbox, table.mailboxUidValidity, table.mailboxUid),
-  uniqueIndex("imap_message_content_unique").on(table.contentSha256),
+  uniqueIndex("imap_message_approval_operation_unique").on(table.approvalOperationId),
+  uniqueIndex("imap_message_approval_result_unique").on(table.approvalResultId),
   index("imap_message_user_status_idx").on(table.userId, table.status, table.receivedAt),
   index("imap_message_household_status_idx").on(table.householdId, table.status, table.receivedAt),
+  index("imap_message_expiry_idx").on(table.status, table.expiresAt),
+  index("imap_message_approved_item_idx").on(table.approvedItemId),
+  index("imap_receipt_claim_idx").on(table.receiptStatus, table.receiptLockedAt, table.createdAt),
+  index("imap_message_recipient_content_idx").on(table.userId, table.contentSha256),
+  index("imap_attachment_processing_claim_idx").on(table.status, table.attachmentProcessingLockedAt, table.createdAt),
+]);
+
+/** Content-free, leased notification operations for private mailbox receipts. */
+export const imapNotificationDeliveries = pgTable("imap_notification_deliveries", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull().references(() => imapIngestionMessages.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: imapNotificationKind("kind").notNull(),
+  status: deliveryStatus("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  leaseToken: uuid("lease_token"),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  failureCode: text("failure_code"),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("imap_notification_message_kind_unique").on(table.messageId, table.kind),
+  index("imap_notification_claim_idx").on(table.status, table.nextAttemptAt, table.lockedAt),
+]);
+
+/** Generation-aware per-user aliases. Legacy prototype digests are retained
+ * only as explicitly inactive rows and are never eligible for lookup. */
+export const imapRecipientAliases = pgTable("imap_recipient_aliases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  generation: integer("generation").notNull(),
+  aliasSha256: text("alias_sha256").notNull(),
+  status: imapRecipientAliasStatus("status").notNull().default("active"),
+  activeUntil: timestamp("active_until", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("imap_recipient_alias_user_generation_unique").on(table.userId, table.generation),
+  uniqueIndex("imap_recipient_alias_active_digest_unique").on(table.generation, table.aliasSha256).where(sql`${table.status} = 'active'`),
+  index("imap_recipient_alias_user_status_idx").on(table.userId, table.status),
+  check("imap_recipient_alias_generation_valid", sql`${table.generation} > 0 OR ${table.status} = 'legacy_inactive'`),
+]);
+
+/** Database-authoritative singleton for monotonic alias rotation handover. */
+export const imapRecipientRotationState = pgTable("imap_recipient_rotation_state", {
+  id: integer("id").primaryKey().default(1),
+  currentGeneration: integer("current_generation").notNull(),
+  currentCommitment: text("current_commitment").notNull(),
+  previousGeneration: integer("previous_generation"),
+  previousExpiresAt: timestamp("previous_expires_at", { withTimezone: true }),
+  previousCommitment: text("previous_commitment"),
+  ...auditColumns,
+}, (table) => [
+  check("imap_recipient_rotation_state_singleton", sql`${table.id} = 1`),
+  check("imap_recipient_rotation_state_current_valid", sql`${table.currentGeneration} > 0`),
+  check("imap_recipient_rotation_state_previous_valid", sql`${table.previousGeneration} IS NULL OR (${table.previousGeneration} > 0 AND ${table.previousGeneration} <> ${table.currentGeneration})`),
+  check("imap_recipient_rotation_state_previous_pair", sql`(${table.previousGeneration} IS NULL) = (${table.previousExpiresAt} IS NULL) AND (${table.previousGeneration} IS NULL) = (${table.previousCommitment} IS NULL)`),
+]);
+
+/** Durable idempotency/result state for an explicit reviewed approval. This is
+ * an operation ledger, not a private mailbox draft aggregate. */
+export const reviewedIntakeOperations = pgTable("reviewed_intake_operations", {
+  id: uuid("id").primaryKey(),
+  actorUserId: uuid("actor_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  source: reviewedIntakeOperationSource("source").notNull(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  // Retained reviewed section UUID is audit metadata; section lifecycle must
+  // remain independently replaceable after an operation completes.
+  sectionId: uuid("section_id").notNull(),
+  action: text("action").notNull(),
+  targetItemId: uuid("target_item_id").references(() => items.id, { onDelete: "set null" }),
+  itemId: uuid("item_id").notNull(),
+  requestSha256: text("request_sha256").notNull(),
+  resultId: uuid("result_id").notNull(),
+  expectedDocument: boolean("expected_document").notNull().default(false),
+  attachmentState: reviewedIntakeAttachmentState("attachment_state").notNull().default("not_requested"),
+  documentId: uuid("document_id").references(() => documents.id, { onDelete: "set null" }),
+  status: reviewedIntakeOperationStatus("status").notNull(),
+  failureCode: text("failure_code"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("reviewed_intake_operation_result_unique").on(table.resultId),
+  index("reviewed_intake_operation_actor_idx").on(table.actorUserId, table.createdAt),
+  index("reviewed_intake_operation_item_idx").on(table.itemId),
 ]);
 
 /** Encrypted attachment bytes held until the recipient chooses a household, if needed. */
@@ -356,9 +480,37 @@ export const imapIngestionAttachments = pgTable("imap_ingestion_attachments", {
   keyId: text("key_id").notNull(),
   status: imapAttachmentStatus("status").notNull().default("stored"),
   assignedDocumentId: uuid("assigned_document_id").references(() => documents.id, { onDelete: "set null" }),
+  transferClaimToken: uuid("transfer_claim_token"),
+  transferClaimedAt: timestamp("transfer_claimed_at", { withTimezone: true }),
+  transferLeaseExpiresAt: timestamp("transfer_lease_expires_at", { withTimezone: true }),
+  purgePending: boolean("purge_pending").notNull().default(false),
+  purgeAttempts: integer("purge_attempts").notNull().default(0),
+  purgeFailureCode: text("purge_failure_code"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("imap_attachment_message_hash_unique").on(table.messageId, table.contentSha256),
   index("imap_attachment_message_status_idx").on(table.messageId, table.status),
+]);
+
+/** Durable bridge for the crash window after ciphertext is durable and before
+ * its attachment metadata row commits. It contains no plaintext or mail. */
+export const imapIngestionStagingObjects = pgTable("imap_ingestion_staging_objects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull(),
+  leaseToken: uuid("lease_token").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  purgeAttempts: integer("purge_attempts").notNull().default(0),
+  purgeFailureCode: text("purge_failure_code"),
+  ...auditColumns,
+}, (table) => [
+  foreignKey({
+    name: "imap_staging_objects_message_id_fk",
+    columns: [table.messageId],
+    foreignColumns: [imapIngestionMessages.id],
+  }).onDelete("cascade"),
+  index("imap_staging_object_message_status_idx").on(table.messageId, table.status),
+  index("imap_staging_object_created_idx").on(table.status, table.createdAt),
+  check("imap_staging_object_status_valid", sql`${table.status} IN ('pending', 'committed', 'purge_pending')`),
 ]);

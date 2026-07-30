@@ -49,9 +49,10 @@ application container locally:
 
 It then starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
-in the background and displays their status. Development and routine release
-candidates target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is
-added to a candidate only through an explicit release workflow request.
+in the background and displays their status. Development and routine preview
+images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
+only after a dedicated exact-image validation path is enabled for that
+architecture.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
@@ -193,11 +194,13 @@ docker compose --env-file .env-orbit \
   --profile processing --profile ai up -d
 ```
 
-The services have no published host ports: Tika and Ollama are reachable only
-on the private Compose network. The Ollama volume is persistent, local-only,
-uses no cloud models, and is bounded to 2 CPUs and 6 GiB by default. It does
-not download a model automatically. After the server reports healthy, pull the
-model selected above explicitly:
+The services have no published host ports. Tika is attached only to a dedicated
+internal processing network shared with Orbit, so it has no route to the
+database, sibling services on the default network, or external networks.
+Ollama remains reachable only on the private default Compose network. Its
+volume is persistent, local-only, uses no cloud models, and is bounded to 2
+CPUs and 6 GiB by default. It does not download a model automatically. After
+the server reports healthy, pull the model selected above explicitly:
 
 ```sh
 docker compose --env-file .env-orbit \
@@ -261,7 +264,7 @@ Orbit already includes:
   signed-out visitors;
 - production health checks, standalone Next.js output, a purpose-built browser
   favicon, and version-controlled migrations.
-- bounded PDF/JPEG/PNG/WebP uploads, ClamAV malware rejection, per-document
+- bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
   retention purge, and storage reconciliation.
 
@@ -299,6 +302,7 @@ generated PostgreSQL password file as the container.
 
 ```sh
 bash scripts/test-backend.sh
+pnpm test:coverage
 bash scripts/test-frontend.sh
 bash scripts/test-all.sh
 ```
@@ -308,6 +312,17 @@ The frontend script targets `http://127.0.0.1:3000` by default; set
 `ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
 suite when no browser target is running.
 
+The authenticated acceptance checks use a separate Compose overlay with a
+disposable local OIDC provider. It performs discovery, PKCE, code exchange and
+signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
+against disposable data:
+
+```sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
 
@@ -316,18 +331,19 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current suite contains 69 unit tests across authentication, environment
-and secret validation, database configuration, recurrence, preferences,
-notifications, workspace commands, document encryption/storage/scanning, and
-background workers. Playwright
-also verifies the signed-out privacy boundary in desktop and mobile Chromium
-and runs automated WCAG A/AA checks.
+The current measured suite and its known gaps are recorded in the
+[engineering baseline](docs/engineering-baseline.md). Playwright verifies
+signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
+profile for authenticated household-lifecycle acceptance. Coverage is
+diagnostic while the database/API integration baseline is established; it is
+not an arbitrary release percentage.
 
-Product directions intentionally deferred until after the initial completion
-pass are recorded in the [feature register](docs/feature-register.md). The
-current delivery phase, agreed architecture, unresolved decisions, test gates,
-and implementation order are maintained in the version-controlled
-[implementation plan](docs/implementation-plan.md).
+The [v1 charter](docs/v1-charter.md) defines the supported release,
+[architecture and ADRs](docs/architecture.md) record durable system decisions,
+and the [quality strategy](docs/quality-strategy.md) defines test and CI
+evidence. GitHub milestones and issues own delivery status. Product directions
+outside the stable contract remain in the
+[feature register](docs/feature-register.md).
 
 ## Configuration
 
@@ -384,9 +400,16 @@ and add a matching read-only secret mount to the Compose service.
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional ID-token claim containing the avatar URL. | `picture` |
 | `SMTP_HOST` / `SMTP_PORT` | Worker | SMTP server host and port. | `smtp.example.com` / `587` |
 | `SMTP_SECURITY` | Worker | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
-| `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/secrets/orbit-smtp-password` |
+| `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `IMAP_HOST` / `IMAP_PORT` | Worker | Dedicated inbound mailbox host and implicit-TLS port. The port is configurable; verified TLS is mandatory. | `imap.example.com` / `993` |
+| `IMAP_USER` / `IMAP_PASSWORD_FILE` | Worker | Dedicated least-privilege mailbox login and mounted password file. | `orbit@example.com` / `/run/orbit-secrets/orbit-imap-password` |
+| `IMAP_ALIAS_CURRENT_GENERATION` | Orbit | Positive current HMAC alias generation. | `2` |
+| `IMAP_ALIAS_CURRENT_SECRET_FILE` | Orbit | Runtime secret file for the current alias key; use a distinct file from the previous key. | `/run/orbit-secrets/orbit-imap-alias-current-secret` |
+| `IMAP_ALIAS_PREVIOUS_GENERATION` | Orbit | Optional previous HMAC alias generation during an explicit bounded rotation. | `1` |
+| `IMAP_ALIAS_PREVIOUS_SECRET_FILE` | Orbit | Runtime secret file for the previous alias key. | `/run/orbit-secrets/orbit-imap-alias-previous-secret` |
+| `IMAP_ALIAS_PREVIOUS_EXPIRES_AT` | Orbit | Explicit UTC expiry for the previous generation; omit all previous-generation settings for emergency invalidation. | `2026-08-15T00:00:00.000Z` |
 | `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
@@ -397,6 +420,23 @@ and add a matching read-only secret mount to the Compose service.
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 | `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
+
+### IMAP alias rotation
+
+For a key rotation within the same recipient domain, increment the generation,
+deploy the new key as current and the exact old current tuple as previous, and
+set an explicit UTC expiry no more than 90 days away. Replicas with stale or
+mismatched generation, key, domain, or trusted-header configuration fail
+closed. At expiry, current ingestion continues and the previous tuple is
+retired; omit all previous settings for immediate emergency invalidation. A
+recipient-domain change cannot preserve old-domain aliases in v1: use a new
+generation/current-only deployment, which invalidates the old domain at once.
+
+Use `docker-compose.mail.yml` only after the SMTP, IMAP, and current alias
+secret files exist. Add `docker-compose.mail-alias-rotation.yml` only for the
+bounded previous-key transition. The complete operator procedure and
+production-like acceptance boundary are documented in
+[Orbit administrator operations](docs/administrator-operations.md).
 
 For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
 and valid OIDC, SMTP, and VAPID credentials. Keep recovery bundles outside the
@@ -440,8 +480,8 @@ bash scripts/deploy-container.sh --build
 
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.
-See [Release candidates and stable promotion](docs/releasing.md) for the
-protected branch, test, manual-validation, and digest-promotion workflow.
+See [Gitflow previews and stable promotion](docs/releasing.md) for
+the protected branch, test, manual-validation, and digest-promotion workflow.
 
 ## Before the first real launch
 

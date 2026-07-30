@@ -4,7 +4,7 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-readonly environment_file=".env-orbit"
+readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
@@ -53,7 +53,7 @@ write_hmac() {
   # a command argument, environment variable, output, or temporary host file.
   compose run --rm --no-deps -T --entrypoint node orbit-app \
     /opt/orbit/scripts/recovery-crypto.mjs hmac /run/secrets/orbit-document-kek \
-    < "$input_path" > "$output_path"
+    < "$input_path" > "$output_path" 2>/dev/null
   [[ "$(tr -d '\r\n' < "$output_path")" =~ ^[A-Za-z0-9+/]{43}=$ ]] ||
     fail "Could not generate a valid bundle authentication tag."
 }
@@ -61,7 +61,7 @@ write_hmac() {
 document_kek_fingerprint() {
   local fingerprint
   fingerprint="$(compose run --rm --no-deps -T --entrypoint node orbit-app \
-    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek)"
+    /opt/orbit/scripts/recovery-crypto.mjs fingerprint /run/secrets/orbit-document-kek </dev/null 2>/dev/null)"
   [[ "$fingerprint" =~ ^[a-f0-9]{64}$ ]] || fail "Could not derive the document-key fingerprint."
   printf '%s' "$fingerprint"
 }
@@ -76,28 +76,41 @@ verify_hmac() {
 
 validate_document_archive() {
   local archive_path="$1" listing_path="$work_directory/document-archive-list"
-  tar -tf "$archive_path" > "$listing_path" || fail "Document archive is invalid."
-  if grep -Ev '^(\./|\./objects/|\./objects/[a-f0-9]{2}/|\./objects/[a-f0-9]{2}/[a-f0-9]{2}/|\./objects/[a-f0-9]{2}/[a-f0-9]{2}/[a-f0-9]{64}\.bin)$' "$listing_path" >/dev/null; then
+  tar -tf "$archive_path" > "$listing_path" 2>/dev/null || fail "Document archive is invalid."
+  while IFS= read -r entry; do
+    if [[ "$entry" == "." || "$entry" == "./" || "$entry" == "./objects" || "$entry" == "./objects/" ||
+      "$entry" =~ ^\./objects/[a-f0-9]{2}$ || "$entry" =~ ^\./objects/[a-f0-9]{2}/$ ||
+      "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}$ ||
+      "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}/$ ]]; then
+      continue
+    fi
+    if [[ "$entry" =~ ^\./objects/([a-f0-9]{2})/([a-f0-9]{2})/([a-f0-9]{64})\.bin$ ]]; then
+      [[ "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" == "${BASH_REMATCH[3]:0:4}" ]] ||
+        fail "Document archive contains a misplaced object."
+      continue
+    fi
     fail "Document archive contains an unexpected path."
-  fi
-  tar -tvf "$archive_path" | awk 'substr($1, 1, 1) !~ /[-d]/ { exit 1 }' ||
+  done < "$listing_path"
+  if ! tar -tvf "$archive_path" 2>/dev/null | awk 'substr($1, 1, 1) !~ /[-d]/ { exit 1 }' >/dev/null; then
     fail "Document archive contains a link or special file."
+  fi
 }
 
 validate_bundle() {
-  local bundle_path="$1" extracted
+  local bundle_path="$1" extracted contents
   [[ -f "$bundle_path" && ! -L "$bundle_path" ]] || fail "The bundle must be a regular, non-symbolic-link file."
   work_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-bundle-verify.XXXXXX")"
   extracted="$work_directory/extracted"
   mkdir "$extracted"
 
-  tar -tf "$bundle_path" | sort > "$work_directory/contents"
-  tar -tvf "$bundle_path" | awk 'substr($1, 1, 1) != "-" { exit 1 }' ||
+  contents="$(tar -tf "$bundle_path" 2>/dev/null)" || fail "Bundle archive is invalid."
+  printf '%s\n' "$contents" | sort > "$work_directory/contents"
+  tar -tvf "$bundle_path" 2>/dev/null | awk 'substr($1, 1, 1) != "-" { exit 1 }' ||
     fail "Bundle contains a link or special file."
   printf '%s\n' checksums.sha256 database.dump documents.tar.enc manifest manifest.hmac | sort > "$work_directory/expected"
   cmp --silent "$work_directory/expected" "$work_directory/contents" ||
     fail "Bundle does not contain the expected recovery files."
-  tar -xf "$bundle_path" -C "$extracted"
+  tar -xf "$bundle_path" -C "$extracted" 2>/dev/null || fail "Bundle archive is invalid."
 
   grep --quiet "^format_version=${bundle_format_version}$" "$extracted/manifest" ||
     fail "Unsupported bundle format."
@@ -107,10 +120,10 @@ validate_bundle() {
   verify_hmac "$work_directory/manifest-and-checksums" "$extracted/manifest.hmac"
   (cd "$extracted" && sha256sum --check --status checksums.sha256) ||
     fail "Bundle checksum validation failed."
-  compose exec -T orbit-db pg_restore --list < "$extracted/database.dump" >/dev/null ||
+  compose exec -T orbit-db pg_restore --list < "$extracted/database.dump" >/dev/null 2>/dev/null ||
     fail "The bundle database dump is invalid."
   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -pass "file:$document_kek_file" \
-    -in "$extracted/documents.tar.enc" -out "$extracted/documents.tar" ||
+    -in "$extracted/documents.tar.enc" -out "$extracted/documents.tar" 2>/dev/null ||
     fail "Document archive decryption failed."
   validate_document_archive "$extracted/documents.tar"
   printf '%s\n' "$extracted"

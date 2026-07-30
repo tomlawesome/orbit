@@ -129,7 +129,14 @@ export async function readPortableArchive(userId: string, archiveId: string): Pr
   const [archive] = await getDb().select().from(portableArchives)
     .where(and(eq(portableArchives.id, archiveId), gt(portableArchives.expiresAt, new Date()), isNull(portableArchives.purgedAt))).limit(1);
   if (!archive) throw new AppError("archive_not_found", "That export is not available", 404);
-  await requireHouseholdAccess(userId, archive.householdId);
+  try {
+    await requireHouseholdAccess(userId, archive.householdId);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "household_not_found") {
+      throw new AppError("archive_not_found", "That export is not available", 404);
+    }
+    throw error;
+  }
   const bytes = await storage().read(archive.storageKey, archive.sizeBytes);
   if (createHash("sha256").update(bytes).digest("hex") !== archive.contentSha256) {
     bytes.fill(0);
@@ -153,6 +160,19 @@ export async function purgeExpiredPortableArchives(): Promise<void> {
         .where(and(eq(portableArchives.id, archive.id), isNull(portableArchives.purgedAt))).returning({ id: portableArchives.id });
       if (changed) await transaction.insert(auditLog).values({ householdId: archive.householdId, actorUserId: null, entityType: "portable_archive", entityId: archive.id, action: "portable_archive_expired", changes: {} });
     });
+  }
+}
+
+/** Removes abandoned encrypted export files after a failed write or household purge. */
+export async function reconcilePortableArchiveStorage(): Promise<void> {
+  const records = await getDb().select({ storageKey: portableArchives.storageKey }).from(portableArchives)
+    .where(isNull(portableArchives.purgedAt));
+  const referenced = new Set(records.map((record) => record.storageKey));
+  const orphanBoundary = Date.now() - 24 * 60 * 60 * 1_000;
+  for (const object of await storage().list()) {
+    if (!referenced.has(object.storageKey) && object.modifiedAt.getTime() < orphanBoundary) {
+      await storage().delete(object.storageKey);
+    }
   }
 }
 

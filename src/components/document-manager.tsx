@@ -27,6 +27,7 @@ interface DocumentManagerProps {
   itemId: string;
   sectionId: string;
   csrfToken: string;
+  sectionNumber: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -45,7 +46,7 @@ async function responseMessage(response: Response): Promise<string> {
 }
 
 /** Keeps document transfers outside the offline workspace queue. */
-export function DocumentManager({ householdId, itemId, sectionId, csrfToken }: DocumentManagerProps) {
+export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sectionNumber }: DocumentManagerProps) {
   const inputId = useId();
   const cameraInputId = useId();
   const [documents, setDocuments] = useState<ItemDocument[]>([]);
@@ -175,7 +176,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken }: D
 
   return (
     <section className="detail-section documents-section" aria-labelledby="documents-heading">
-      <div className="detail-section-title"><span>Documents</span><h3 id="documents-heading">Files</h3></div>
+      <div className="detail-section-title"><span>{sectionNumber}</span><h3 id="documents-heading">Files</h3></div>
       <p className="documents-intro">Keep policies, receipts and photos with this item. Files upload directly and are not saved for offline sync.</p>
       <div className="document-actions">
         <label className="document-upload" htmlFor={inputId}>Add files</label>

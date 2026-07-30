@@ -113,6 +113,48 @@
       "when": 1785084000000,
       "tag": "0015_imap_smtp_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785085000000,
+      "tag": "0016_imap_receipt_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785086000000,
+      "tag": "0017_imap_recipient_alias_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785087000000,
+      "tag": "0018_private_review_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785088000000,
+      "tag": "0019_receipt_identity_and_alias_rotation",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785089000000,
+      "tag": "0020_imap_attachment_processing",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785090000000,
+      "tag": "0021_imap_notification_deliveries",
+      "breakpoints": true
     }
   ]
 }

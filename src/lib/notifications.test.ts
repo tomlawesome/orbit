@@ -43,6 +43,7 @@ describe("household notifications", () => {
       type: "item.snooze",
       householdId: "our-home",
       itemId: "car-insurance",
+      expectedVersion: 1,
       snoozedUntil: "2026-08-01",
       activity,
     });

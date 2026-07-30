@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createTestWorkspace } from "./test-workspace";
-import { activeHousehold, createEmptyWorkspace, createHousehold, reduceWorkspace, workspaceItemSchema } from "./workspace";
+import { activeHousehold, createEmptyWorkspace, createHousehold, initialScheduleKind, reduceWorkspace, workspaceCommandSchema, workspaceItemSchema } from "./workspace";
 
 describe("household workspace", () => {
   it("starts with no sample records and requires first-run setup", () => {
     const initial = createEmptyWorkspace();
     const household = activeHousehold(initial);
 
+    expect(initial.householdLanding).toBe("choose");
     expect(household.items).toEqual([]);
     expect(household.activities).toEqual([]);
     expect(household.onboardingComplete).toBe(false);
@@ -63,6 +64,7 @@ describe("household workspace", () => {
     const next = reduceWorkspace(initial, { type: "household.create", household });
 
     expect(next.activeHouseholdId).toBe("the-cottage");
+    expect(next.householdLanding).toBe("active");
     expect(activeHousehold(next).sections.map((section) => section.name)).toEqual(["Home", "Vehicles", "Devices", "Services"]);
     expect(activeHousehold(next).items).toEqual([]);
   });
@@ -97,6 +99,7 @@ describe("household workspace", () => {
       type: "item.archive",
       householdId: "local-home",
       itemId: item.id,
+      expectedVersion: 1,
       activity: {
         id: "activity-archive",
         itemId: item.id,
@@ -129,6 +132,7 @@ describe("household workspace", () => {
       type: "item.complete",
       householdId: "our-home",
       itemId: "car-insurance",
+      expectedVersion: 1,
       completedDate: "2026-07-25",
       nextDate: "2027-07-22",
       costMinor: 61000,
@@ -153,5 +157,39 @@ describe("household workspace", () => {
       status: "active",
       scheduleKind: "service",
     }).success).toBe(false);
+  });
+
+  it("preserves no-schedule state when editing an unscheduled item", () => {
+    expect(initialScheduleKind()).toBe("renewal");
+    expect(initialScheduleKind({ scheduleKind: "service" })).toBe("service");
+    expect(initialScheduleKind({ scheduleKind: undefined })).toBe("none");
+
+    const scheduleKind = initialScheduleKind({ scheduleKind: undefined });
+    expect(workspaceItemSchema.safeParse({
+      id: "unscheduled-item",
+      sectionId: "home",
+      title: "Unscheduled item",
+      currency: "GBP",
+      status: "active",
+      scheduleKind: scheduleKind === "none" ? undefined : scheduleKind,
+    }).success).toBe(true);
+  });
+
+  it("requires a positive expected version for item transitions", () => {
+    const command = {
+      type: "item.archive",
+      householdId: "household",
+      itemId: "item",
+      activity: {
+        id: "activity",
+        itemId: "item",
+        kind: "archived" as const,
+        occurredAt: "2026-07-25T10:00:00.000Z",
+      },
+    };
+
+    expect(workspaceCommandSchema.safeParse(command).success).toBe(false);
+    expect(workspaceCommandSchema.safeParse({ ...command, expectedVersion: 0 }).success).toBe(false);
+    expect(workspaceCommandSchema.safeParse({ ...command, expectedVersion: 1 }).success).toBe(true);
   });
 });

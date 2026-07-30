@@ -1,10 +1,10 @@
-name: Promote tested Orbit candidate
+name: Promote tested Orbit preview
 
 on:
   workflow_dispatch:
     inputs:
-      candidate_digest:
-        description: "Tested candidate digest, beginning sha256:"
+      preview_digest:
+        description: "Accepted release-branch preview digest, beginning sha256:"
         required: true
         type: string
       version:
@@ -43,11 +43,11 @@ jobs:
 
       - name: Validate promotion request
         env:
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+          PREVIEW_DIGEST: ${{ inputs.preview_digest }}
           VERSION: ${{ inputs.version }}
         run: |
-          [[ "${CANDIDATE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-            printf 'Candidate digest must be sha256 followed by 64 lowercase hexadecimal characters.\n' >&2
+          [[ "${PREVIEW_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'Preview digest must be sha256 followed by 64 lowercase hexadecimal characters.\n' >&2
             exit 1
           }
           [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -65,38 +65,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve and verify tested candidate
-        id: candidate
+      - name: Fetch protected integration ref
+        run: git fetch --no-tags origin +refs/heads/develop:refs/remotes/origin/develop
+
+      - name: Resolve and verify tested preview
+        id: preview
         env:
-          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+          PREVIEW_DIGEST: ${{ inputs.preview_digest }}
           VERSION: ${{ inputs.version }}
         run: |
           image="${REGISTRY}/${IMAGE_NAME,,}"
-          docker buildx imagetools inspect "${image}@${CANDIDATE_DIGEST}" >/dev/null
+          docker buildx imagetools inspect "${image}@${PREVIEW_DIGEST}" >/dev/null
           if docker buildx imagetools inspect "${image}:${VERSION}" >/dev/null 2>&1; then
             printf 'Stable tag %s already exists and will not be overwritten.\n' "${VERSION}" >&2
             exit 1
           fi
-          docker pull "${image}@${CANDIDATE_DIGEST}"
-          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${CANDIDATE_DIGEST}")"
-          [[ "${revision}" =~ ^[0-9a-f]{40}$ ]] || {
-            printf 'Candidate has no valid source-revision label.\n' >&2
-            exit 1
-          }
-          git merge-base --is-ancestor "${revision}" origin/main || {
-            printf 'Candidate revision %s has not been merged into main.\n' "${revision}" >&2
-            exit 1
-          }
-          git diff --quiet "${revision}^{tree}" "origin/main^{tree}" || {
-            printf 'Main no longer has the exact source tree used by this candidate; create and test a new candidate.\n' >&2
-            exit 1
-          }
-          printf 'digest=%s\n' "${CANDIDATE_DIGEST}" >> "${GITHUB_OUTPUT}"
+          docker pull "${image}@${PREVIEW_DIGEST}"
+          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${PREVIEW_DIGEST}")"
+          release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image}@${PREVIEW_DIGEST}")"
+          source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${PREVIEW_DIGEST}")"
+          ORBIT_PREVIEW_DIGEST="${PREVIEW_DIGEST}" \
+          ORBIT_STABLE_VERSION="${VERSION}" \
+          ORBIT_PREVIEW_STAGE="${release_stage}" \
+          ORBIT_PREVIEW_REVISION="${revision}" \
+          ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
+            node scripts/stable-promotion-policy.mjs
+          printf 'digest=%s\n' "${PREVIEW_DIGEST}" >> "${GITHUB_OUTPUT}"
           printf 'revision=%s\n' "${revision}" >> "${GITHUB_OUTPUT}"
+          printf 'source_branch=%s\n' "${source_branch}" >> "${GITHUB_OUTPUT}"
 
-      - name: Promote exact candidate digest
+      - name: Promote exact preview digest
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
+          DIGEST: ${{ steps.preview.outputs.digest }}
           VERSION: ${{ inputs.version }}
           UPDATE_LATEST: ${{ inputs.update_latest }}
         run: |
@@ -116,8 +116,9 @@ jobs:
 
       - name: Record stable promotion
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
-          REVISION: ${{ steps.candidate.outputs.revision }}
+          DIGEST: ${{ steps.preview.outputs.digest }}
+          REVISION: ${{ steps.preview.outputs.revision }}
+          SOURCE_BRANCH: ${{ steps.preview.outputs.source_branch }}
           VERSION: ${{ inputs.version }}
           UPDATE_LATEST: ${{ inputs.update_latest }}
         run: |
@@ -126,6 +127,7 @@ jobs:
             printf -- '- Version: `%s`\n' "${VERSION}"
             printf -- '- Digest: `%s`\n' "${DIGEST}"
             printf -- '- Source revision: `%s`\n' "${REVISION}"
+            printf -- '- Source branch: `%s`\n' "${SOURCE_BRANCH}"
             printf -- '- Updated `latest`: `%s`\n' "${UPDATE_LATEST}"
             printf '\nNo container rebuild occurred during promotion.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
