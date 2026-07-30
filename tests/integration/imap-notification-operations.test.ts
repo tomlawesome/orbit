@@ -63,14 +63,15 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
         userId: fixture.users.member.id, householdId: fixture.household.id, status: "pending_review" as const,
         expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "sent" as const,
       }))).returning({ id: imapIngestionMessages.id });
-      await getDb().insert(imapNotificationDeliveries).values(messages.map(({ id }) => ({
+      const deliveries = await getDb().insert(imapNotificationDeliveries).values(messages.map(({ id }) => ({
         messageId: id, userId: fixture.users.member.id, kind: "review_ready" as const,
-      })));
+      }))).returning({ id: imapNotificationDeliveries.id });
+      const deliveryIds = deliveries.map(({ id }) => id);
 
       const now = new Date();
       const [first, second] = await Promise.all([
-        claimImapNotificationsForTests(now, 2, messages.map(({ id }) => id)),
-        claimImapNotificationsForTests(now, 2, messages.map(({ id }) => id)),
+        claimImapNotificationsForTests(now, 2, deliveryIds),
+        claimImapNotificationsForTests(now, 2, deliveryIds),
       ]);
       const claimed = [...first, ...second];
       expect(claimed).toHaveLength(4);
@@ -79,7 +80,7 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
       const stale = claimed[0];
       await getDb().update(imapNotificationDeliveries).set({ lockedAt: new Date(now.getTime() - 11 * 60_000) })
         .where(eq(imapNotificationDeliveries.id, stale.id));
-      const replacement = (await claimImapNotificationsForTests(now, 1, messages.map(({ id }) => id)))[0];
+      const replacement = (await claimImapNotificationsForTests(now, 1, deliveryIds))[0];
       expect(replacement.id).toBe(stale.id);
       expect(replacement.leaseToken).not.toBe(stale.leaseToken);
       const fenced = await getDb().update(imapNotificationDeliveries).set({ status: "sent" })
@@ -93,7 +94,7 @@ describe("PostgreSQL mailbox notification lifecycle", () => {
       });
       expect((await getDb().select({ status: imapNotificationDeliveries.status }).from(imapNotificationDeliveries).where(eq(imapNotificationDeliveries.id, replacement.id)))[0]?.status).toBe("retry");
       await getDb().update(imapNotificationDeliveries).set({ nextAttemptAt: now }).where(eq(imapNotificationDeliveries.id, replacement.id));
-      const retryClaim = (await claimImapNotificationsForTests(now, 1, messages.map(({ id }) => id)))[0];
+      const retryClaim = (await claimImapNotificationsForTests(now, 1, deliveryIds))[0];
       await markImapNotificationFailureForTests({
         id: retryClaim.id, leaseToken: retryClaim.leaseToken, attempts: 2, maxAttempts: 2,
         category: "smtp_unavailable", now,
