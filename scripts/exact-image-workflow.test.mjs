@@ -65,4 +65,28 @@ describe("exact-image publication workflow", () => {
     expect(login).toBeGreaterThan(stop);
     expect(push).toBeGreaterThan(login);
   });
+
+  it("validates both supported mail secret overlays", () => {
+    expect(workflow).toContain(
+      "openssl rand -hex 32 > .orbit-secrets/smtp-password",
+    );
+    expect(workflow).toContain(
+      "SMTP_HOST=smtp.example.invalid",
+    );
+    expect(workflow).toContain(
+      "IMAP_HOST=imap.example.invalid",
+    );
+    expect(workflow).toContain(
+      "IMAP_ENABLED=false",
+    );
+    expect(workflow).toContain(
+      "-f docker-compose.yml -f docker-compose.mail.yml config --quiet",
+    );
+    expect(workflow).toContain(
+      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet",
+    );
+    expect(workflow).toContain(
+      "-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml up --detach --no-build --wait",
+    );
+  });
 });

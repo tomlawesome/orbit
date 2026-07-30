@@ -160,6 +160,20 @@ jobs:
       - name: Create isolated test configuration
         run: |
           bash scripts/configure.sh
+          openssl rand -hex 32 > .orbit-secrets/smtp-password
+          openssl rand -hex 32 > .orbit-secrets/imap-password
+          openssl rand -hex 32 > .orbit-secrets/imap-alias-current-secret
+          openssl rand -hex 32 > .orbit-secrets/imap-alias-previous-secret
+          chmod 600 .orbit-secrets/smtp-password .orbit-secrets/imap-password \
+            .orbit-secrets/imap-alias-current-secret \
+            .orbit-secrets/imap-alias-previous-secret
+          sed --in-place 's/^SMTP_HOST=.*/SMTP_HOST=smtp.example.invalid/' .env-orbit
+          sed --in-place 's/^SMTP_USER=.*/SMTP_USER=orbit@example.invalid/' .env-orbit
+          sed --in-place 's/^IMAP_HOST=.*/IMAP_HOST=imap.example.invalid/' .env-orbit
+          sed --in-place 's/^IMAP_USER=.*/IMAP_USER=orbit@example.invalid/' .env-orbit
+          sed --in-place 's/^IMAP_TLS_SERVER_NAME=.*/IMAP_TLS_SERVER_NAME=imap.example.invalid/' .env-orbit
+          sed --in-place 's/^IMAP_RECIPIENT_DOMAIN=.*/IMAP_RECIPIENT_DOMAIN=ingest.example.invalid/' .env-orbit
+          sed --in-place 's/^IMAP_ENABLED=.*/IMAP_ENABLED=false/' .env-orbit
           sed --in-place 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=orbit-smoke/' .env-orbit
           sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
 
@@ -230,6 +244,8 @@ jobs:
         run: |
           docker compose --env-file .env-orbit config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet
           docker compose --env-file .env-orbit \
             -f docker-compose.yml -f docker-compose.full.yml \
             --profile processing --profile ai config --quiet
@@ -246,7 +262,7 @@ jobs:
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml build orbit-oidc
 
       - name: Start application and database
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --detach --no-build --wait --wait-timeout 180
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml up --detach --no-build --wait --wait-timeout 180
 
       - name: Verify health endpoint
         run: |
@@ -298,16 +314,16 @@ jobs:
       - name: Show service diagnostics
         if: failure()
         run: |
-          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml ps
-          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml logs --no-color
-          app_container="$(docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml ps --quiet orbit-app)"
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml logs --no-color
+          app_container="$(docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps --quiet orbit-app)"
           if [[ -n "${app_container}" ]]; then
             docker inspect --format='{{json .State.Health}}' "${app_container}"
           fi
 
       - name: Stop smoke-test services
         if: always()
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 
       - name: Log in to GitHub Container Registry
         if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
