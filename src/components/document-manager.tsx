@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- camera previews use local blob URLs. */
 
 import { useCallback, useEffect, useId, useState, type ChangeEvent } from "react";
+import { FocusDialog } from "@/components/focus-dialog";
 
 export interface ItemDocument {
   id: string;
@@ -280,7 +281,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
         {draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}
         <footer><button type="button" disabled={draftApprovalBusy} onClick={() => setDraft(null)}>Discard</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("create")}>{draftApprovalBusy ? "Approving…" : "Create separate item"}</button></footer>
       </section>}
-      {captureReview && <div className="capture-review" role="dialog" aria-modal="true" aria-label="Review captured photo"><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></div>}
+      {captureReview && <><button type="button" className="capture-review-scrim" aria-label="Close captured photo review" onClick={closeCaptureReview} /><FocusDialog className="capture-review" aria-label="Review captured photo" onDismiss={closeCaptureReview}><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" data-dialog-initial-focus onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></FocusDialog></>}
     </section>
   );
 }

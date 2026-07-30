@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AdminManager } from "@/components/admin-manager";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
+import { FocusDialog } from "@/components/focus-dialog";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
@@ -551,13 +552,13 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
 
       <main className="main-shell">
         <header className="topbar">
-          <button className="mobile-menu" aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /><span /></button>
+          <button className="mobile-menu" data-settings-return-focus aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /><span /></button>
           <label className="search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${household.name.toLowerCase()}…`} /></label>
           <span className={`sync-state sync-${syncStatus}`} title={syncMessage || undefined}>
             <i />{syncStatus === "saving" ? "Saving" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
-          <button className="topbar-profile" onClick={() => setSettingsView("appearance")} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
+          <button className="topbar-profile" data-settings-return-focus onClick={() => setSettingsView("appearance")} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
         </header>
 
@@ -646,9 +647,9 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       {settingsView && (
         <>
           <button className="settings-scrim" aria-label="Close personalisation" onClick={() => setSettingsView(null)} />
-          <aside className="settings-drawer" role="dialog" aria-modal="true" aria-labelledby="personalise-title">
+          <FocusDialog className="settings-drawer" aria-labelledby="personalise-title" onDismiss={() => setSettingsView(null)} returnFocusFallback="[data-settings-return-focus]">
             <header>
-              <div><p>Make it yours</p><h2 id="personalise-title">Personalise Orbit</h2></div>
+              <div><p>Make it yours</p><h2 id="personalise-title" tabIndex={-1} data-dialog-initial-focus>Personalise Orbit</h2></div>
               <button aria-label="Close personalisation" onClick={() => setSettingsView(null)}>×</button>
             </header>
             <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
@@ -786,7 +787,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
                 {logoutBusy ? "Signing out…" : "Sign out securely"}
               </button>
             </footer>
-          </aside>
+          </FocusDialog>
         </>
       )}
 
