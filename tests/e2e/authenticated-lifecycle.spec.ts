@@ -362,11 +362,14 @@ test.describe("authenticated household lifecycle", () => {
     await expect(page.locator("article.item-card").filter({ has: page.getByRole("heading", { name: updatedTitle, exact: true }) })).toHaveCount(1, { timeout: 15_000 });
   });
 
-  test("proves member leave, owner/admin removal and ownership transfer journeys", async ({ page, browser, isMobile }) => {
+  test("proves member leave, owner/admin removal and ownership transfer journeys", async ({ page, browser, isMobile }, testInfo) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page, administrator);
-    const householdName = `Issue 94 membership ${Date.now()}`;
+    // Desktop and mobile projects share the disposable OIDC identities and
+    // database, so give each project a distinct durable household scenario.
+    const projectPartition = testInfo.project.name.replace(/[^a-z0-9]+/giu, "-").replace(/^-|-$/gu, "").toLowerCase();
+    const householdName = `Issue 94 membership ${projectPartition} ${Date.now()}`;
     await createManualHousehold(page, isMobile, householdName);
     const memberContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const memberPage = await memberContext.newPage();
