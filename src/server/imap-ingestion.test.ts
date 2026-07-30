@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapRecipientAlias, matchesImapRecipientAlias } from "./imap-ingestion";
+import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+import { getNotificationWorkerConfig } from "./notification-worker";
 import { deriveImapRecipientAlias } from "./imap-recipient";
 
 const temporaryDirectories: string[] = [];
@@ -60,6 +61,23 @@ describe("IMAP ingestion configuration", () => {
     }))).toMatchObject({ enabled: true });
   });
 
+  it("rejects plaintext or STARTTLS-only IMAP ports", () => {
+    expect(() => getImapIngestionConfig(environment({
+      IMAP_HOST: "imap.example.test", IMAP_PORT: "143", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test",
+    }))).toThrow("verified TLS");
+  });
+
+  it("preserves a configured mailbox while explicitly disabling polling", () => {
+    expect(getImapIngestionConfig(environment({
+      IMAP_ENABLED: "false",
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "test-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test",
+    }))).toMatchObject({ configured: true, enabled: false });
+  });
+
   it("loads distinct current and previous alias keys through runtime secret files", () => {
     const currentPath = secretFile("test-current-alias-secret-that-is-long-enough");
     const previousPath = secretFile("test-previous-alias-secret-that-is-long-enough");
@@ -114,5 +132,24 @@ describe("IMAP ingestion configuration", () => {
     expect(imapAttachmentRetryDelayMs(5)).toBe(16_000);
     expect(imapAttachmentRetryDelayMs(50)).toBe(900_000);
     expect(() => imapAttachmentRetryDelayMs(0)).toThrow("attempt is invalid");
+  });
+
+  it("requires both current provider preflights and invalidates readiness on credential rotation", async () => {
+    const environmentValues = {
+      IMAP_HOST: "imap.example.test", IMAP_USER: "orbit", IMAP_PASSWORD: "provider-password",
+      IMAP_RECIPIENT_DOMAIN: "ingest.example.test", IMAP_ALIAS_CURRENT_GENERATION: "1", IMAP_ALIAS_CURRENT_SECRET: "test-current-alias-secret-that-is-long-enough",
+      IMAP_TRUSTED_RECIPIENT_HEADER: "X-Original-To", SMTP_HOST: "smtp.example.test", SMTP_USER: "orbit", SMTP_PASSWORD: "smtp-password",
+    };
+    const config = getImapIngestionConfig(environment(environmentValues));
+    const smtp = getNotificationWorkerConfig(environment(environmentValues));
+    await expect(verifyImapIngestionProviders(config, smtp, {
+      verifySmtp: async () => "ready",
+      verifyImap: async () => "ready",
+    })).resolves.toMatchObject({ status: "available", smtp: "available", imap: "available" });
+    const rotated = getImapIngestionConfig(environment({ ...environmentValues, IMAP_PASSWORD: "rotated-provider-password" }));
+    await expect(verifyImapIngestionProviders(rotated, smtp, {
+      verifySmtp: async () => "smtp_unavailable",
+      verifyImap: async () => "imap_unavailable",
+    })).resolves.toMatchObject({ status: "provider_unavailable" });
   });
 });
