@@ -83,7 +83,12 @@
     "sol_review",
     "pr_open",
     "merged",
+    "trusted",
+    "reconciled",
     "blocked"
+  ],
+  "terminalDeliveryStages": [
+    "reconciled"
   ],
   "allowedTransitions": {
     "planned": [
@@ -112,14 +117,24 @@
       "merged",
       "blocked"
     ],
-    "merged": [],
+    "merged": [
+      "trusted",
+      "blocked"
+    ],
+    "trusted": [
+      "reconciled",
+      "blocked"
+    ],
+    "reconciled": [],
     "blocked": [
       "planned",
       "launch_pending",
       "active",
       "handback",
       "sol_review",
-      "pr_open"
+      "pr_open",
+      "merged",
+      "trusted"
     ]
   },
   "learning": {

@@ -143,6 +143,10 @@ export function validateOrchestrationPolicy(policy) {
     Array.isArray(policy.deliveryStages) && policy.deliveryStages.length > 0,
     "deliveryStages are required.",
   );
+  assert(
+    hasExactStrings(policy.terminalDeliveryStages, ["reconciled"]),
+    "reconciled must be the only terminal delivery stage.",
+  );
   assert(isObject(policy.allowedTransitions), "allowedTransitions are required.");
   for (const stage of policy.deliveryStages) {
     const transitions = policy.allowedTransitions[stage];
@@ -152,6 +156,15 @@ export function validateOrchestrationPolicy(policy) {
       `transitions for ${stage} contain an unknown stage.`,
     );
   }
+  assert(
+    policy.deliveryStages.includes("merged")
+      && policy.deliveryStages.includes("trusted")
+      && policy.deliveryStages.includes("reconciled")
+      && policy.allowedTransitions.merged.includes("trusted")
+      && policy.allowedTransitions.trusted.includes("reconciled")
+      && policy.allowedTransitions.reconciled.length === 0,
+    "delivery completion must progress from merged through trusted to reconciled.",
+  );
   assert(isObject(policy.learning), "learning policy is required.");
   assert(policy.learning.automaticCandidateCapture === true, "candidate capture must be enabled.");
   assert(policy.learning.automaticAdoption === false, "durable control adoption must require review.");
@@ -358,6 +371,30 @@ export function validateOperationalState(state, policy) {
     assert(isSha(delivery.baseSha), "accepted base SHA is required after planning.");
     assert(isNonEmptyString(delivery.branch), "delivery branch is required after planning.");
   }
+  assert(Array.isArray(delivery.dependencies), "delivery dependencies must be declared.");
+  const dependencyIssues = new Set();
+  for (const dependency of delivery.dependencies) {
+    assert(isObject(dependency), "each delivery dependency must be an object.");
+    assert(
+      Number.isInteger(dependency.issue) && dependency.issue > 0,
+      "each delivery dependency requires an issue.",
+    );
+    assert(!dependencyIssues.has(dependency.issue), `duplicate delivery dependency ${dependency.issue}.`);
+    dependencyIssues.add(dependency.issue);
+    assert(isTimestamp(dependency.observedAt), "each delivery dependency requires an observation timestamp.");
+    if (delivery.stage !== "planned") {
+      assert(
+        dependency.stage === "reconciled",
+        "dependencies must be reconciled before delivery advances.",
+      );
+    }
+  }
+  assert(Array.isArray(delivery.parentIssues), "delivery parent issues must be declared.");
+  assert(
+    delivery.parentIssues.every((issue) => Number.isInteger(issue) && issue > 0)
+      && new Set(delivery.parentIssues).size === delivery.parentIssues.length,
+    "delivery parent issues must be unique positive integers.",
+  );
 
   const taskStages = new Set(["launch_pending", "active", "handback", "sol_review"]);
   const protectedWriteStages = new Set(["launch_pending", "active", "handback", "sol_review", "pr_open"]);
@@ -419,6 +456,110 @@ export function validateOperationalState(state, policy) {
       Array.isArray(delivery.localCommits) && delivery.localCommits.length > 0
         && delivery.localCommits.every(isSha),
       `${delivery.stage} requires focused local commit SHAs.`,
+    );
+  }
+
+  const mergedStages = new Set(["merged", "trusted", "reconciled"]);
+  if (mergedStages.has(delivery.stage)) {
+    assert(isObject(delivery.merge), "merged delivery requires exact merge evidence.");
+    assert(
+      Number.isInteger(delivery.merge.pullRequest) && delivery.merge.pullRequest > 0,
+      "merge evidence requires a pull request.",
+    );
+    assert(isSha(delivery.merge.sha), "merge evidence requires an exact merge SHA.");
+    assert(isNonEmptyString(delivery.merge.targetBranch), "merge evidence requires a target branch.");
+    assert(isTimestamp(delivery.merge.observedAt), "merge evidence requires an observation timestamp.");
+  }
+
+  const trustedStages = new Set(["trusted", "reconciled"]);
+  if (trustedStages.has(delivery.stage)) {
+    assert(
+      isObject(delivery.trustedValidation),
+      "trusted delivery requires exact target-branch validation.",
+    );
+    assert(
+      delivery.trustedValidation.branch === delivery.merge.targetBranch
+        && delivery.trustedValidation.sha === delivery.merge.sha,
+      "trusted validation must match the exact merge SHA and target branch.",
+    );
+    assert(
+      delivery.trustedValidation.conclusion === "success",
+      "trusted target-branch validation must succeed.",
+    );
+    assert(
+      isTimestamp(delivery.trustedValidation.observedAt),
+      "trusted validation requires an observation timestamp.",
+    );
+    assert(
+      Array.isArray(delivery.trustedValidation.checks)
+        && delivery.trustedValidation.checks.length > 0,
+      "trusted validation requires successful check evidence.",
+    );
+    for (const check of delivery.trustedValidation.checks) {
+      assert(isObject(check), "each trusted check must be an object.");
+      assert(isNonEmptyString(check.name), "each trusted check requires a name.");
+      assert(Number.isInteger(check.runId) && check.runId > 0, "each trusted check requires a run ID.");
+      assert(check.conclusion === "success", "every trusted check must succeed.");
+    }
+  }
+
+  if (delivery.stage === "reconciled") {
+    assert(
+      remoteCapabilities.get("issue_write")?.status === "available",
+      "issue reconciliation requires an authenticated issue-write path.",
+    );
+    assert(isObject(delivery.reconciliation), "reconciled delivery requires reconciliation evidence.");
+    const issue = delivery.reconciliation.issue;
+    assert(isObject(issue), "reconciliation requires issue evidence.");
+    assert(issue.number === delivery.issue, "reconciliation issue must match delivery issue.");
+    assert(
+      issue.acceptanceChecklist === "reviewed_complete",
+      "acceptance checklist must be reviewed complete.",
+    );
+    assert(
+      Array.isArray(issue.closureEvidence)
+        && issue.closureEvidence.length > 0
+        && issue.closureEvidence.every(isNonEmptyString),
+      "reconciliation requires bounded closure evidence.",
+    );
+    assert(
+      issue.state === "closed" && issue.stateReason === "completed",
+      "reconciled delivery issue must be closed as completed.",
+    );
+    assert(isTimestamp(issue.observedAt), "issue reconciliation requires an observation timestamp.");
+    assert(
+      delivery.reconciliation.milestoneReevaluated === true,
+      "reconciliation must re-evaluate the milestone or wave gate.",
+    );
+    assert(Array.isArray(delivery.reconciliation.parents), "parent reconciliation outcomes are required.");
+    const parentOutcomes = new Map();
+    for (const parent of delivery.reconciliation.parents) {
+      assert(isObject(parent), "each parent reconciliation outcome must be an object.");
+      assert(
+        Number.isInteger(parent.issue) && parent.issue > 0,
+        "each parent reconciliation outcome requires an issue.",
+      );
+      assert(!parentOutcomes.has(parent.issue), `duplicate parent reconciliation ${parent.issue}.`);
+      assert(
+        parent.childOutcomeRecorded === true && parent.acceptanceReevaluated === true,
+        "parent reconciliation must record the child outcome and re-evaluate acceptance.",
+      );
+      assert(["open", "closed"].includes(parent.state), "parent reconciliation state is invalid.");
+      assert(isTimestamp(parent.observedAt), "parent reconciliation requires an observation timestamp.");
+      if (parent.state === "open") {
+        assert(
+          Array.isArray(parent.residualAcceptance)
+            && parent.residualAcceptance.length > 0
+            && parent.residualAcceptance.every(isNonEmptyString),
+          "an open parent requires precise residual acceptance.",
+        );
+      }
+      parentOutcomes.set(parent.issue, parent);
+    }
+    assert(
+      parentOutcomes.size === delivery.parentIssues.length
+        && delivery.parentIssues.every((parentIssue) => parentOutcomes.has(parentIssue)),
+      "every declared parent issue requires one reconciliation outcome.",
     );
   }
 
