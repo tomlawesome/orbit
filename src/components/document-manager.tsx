@@ -1,7 +1,6 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- camera previews use local blob URLs. */
 
-import { useCallback, useEffect, useId, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
 
 export interface ItemDocument {
@@ -21,7 +20,7 @@ interface UploadingDocument {
   name: string;
   progress: number;
 }
-interface CaptureReview { file: File; previewUrl: string; rotation: number }
+interface CaptureReview { file: File; bitmap: ImageBitmap; rotation: number }
 interface DraftReview { title: string; provider: string; reference: string }
 
 interface DocumentManagerProps {
@@ -36,6 +35,20 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function CapturedPhotoPreview({ bitmap, rotation }: Pick<CaptureReview, "bitmap" | "rotation">) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+  }, [bitmap]);
+
+  return <canvas ref={canvasRef} role="img" aria-label="Captured document preview" style={{ transform: `rotate(${rotation}deg)` }} />;
 }
 
 async function responseMessage(response: Response): Promise<string> {
@@ -84,7 +97,10 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     return () => window.clearTimeout(task);
   }, [refresh]);
 
-  useEffect(() => () => { if (captureReview) URL.revokeObjectURL(captureReview.previewUrl); }, [captureReview]);
+  useEffect(() => {
+    const bitmap = captureReview?.bitmap;
+    return () => bitmap?.close();
+  }, [captureReview?.bitmap]);
 
   function updateUpload(id: string, patch: Partial<UploadingDocument>) {
     setUploading((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
@@ -137,16 +153,24 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     for (const file of files) await upload(file);
   }
 
-  function selectCamera(event: ChangeEvent<HTMLInputElement>) {
+  async function selectCamera(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (!file.type.startsWith("image/")) { setError("Choose a photo from your camera."); return; }
-    setCaptureReview({ file, previewUrl: URL.createObjectURL(file), rotation: 0 });
+    if (file.type !== "image/jpeg" && file.type !== "image/png") {
+      setError("Choose a JPEG or PNG photo from your camera.");
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      setError("");
+      setCaptureReview({ file, bitmap, rotation: 0 });
+    } catch {
+      setError("Choose a valid JPEG or PNG photo from your camera.");
+    }
   }
 
   function closeCaptureReview() {
-    if (captureReview) URL.revokeObjectURL(captureReview.previewUrl);
     setCaptureReview(null);
   }
 
@@ -235,9 +259,9 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       <p className="documents-intro">Keep policies, receipts and photos with this item. Files upload directly and are not saved for offline sync.</p>
       <div className="document-actions">
         <label className="document-upload" htmlFor={inputId}>Add files</label>
-        <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/*" multiple onChange={selectFiles} />
+        <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={selectFiles} />
         <label className="document-upload document-camera" htmlFor={cameraInputId}>Take photo</label>
-        <input id={cameraInputId} className="visually-hidden" type="file" accept="image/*" capture="environment" onChange={selectCamera} />
+        <input id={cameraInputId} className="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectCamera(event)} />
       </div>
       <p className="document-live" aria-live="polite">{message}</p>
       {error && <p className="document-error" role="alert">{error}</p>}
@@ -281,7 +305,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
         {draft.duplicates?.map((candidate) => <p key={candidate.itemId}>Possible match: <strong>{candidate.title}</strong> ({candidate.reason}) <button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("merge", candidate.itemId)}>Merge reviewed fields</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("attach", candidate.itemId)}>Attach only</button></p>)}
         <footer><button type="button" disabled={draftApprovalBusy} onClick={() => setDraft(null)}>Discard</button><button type="button" disabled={draftApprovalBusy} onClick={() => void approveDraft("create")}>{draftApprovalBusy ? "Approving…" : "Create separate item"}</button></footer>
       </section>}
-      {captureReview && <><button type="button" className="capture-review-scrim" aria-label="Close captured photo review" onClick={closeCaptureReview} /><FocusDialog className="capture-review" aria-label="Review captured photo" onDismiss={closeCaptureReview}><img src={captureReview.previewUrl} alt="Captured document preview" style={{ transform: `rotate(${captureReview.rotation}deg)` }} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" data-dialog-initial-focus onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></FocusDialog></>}
+      {captureReview && <><button type="button" className="capture-review-scrim" aria-label="Close captured photo review" onClick={closeCaptureReview} /><FocusDialog className="capture-review" aria-label="Review captured photo" onDismiss={closeCaptureReview}><CapturedPhotoPreview bitmap={captureReview.bitmap} rotation={captureReview.rotation} /><p>Check the photo before uploading. Rotation only changes this preview; Orbit retains the original photo.</p><div><button type="button" data-dialog-initial-focus onClick={() => setCaptureReview((current) => current && { ...current, rotation: (current.rotation + 90) % 360 })}>Rotate</button><button type="button" onClick={closeCaptureReview}>Discard</button><button type="button" onClick={() => { const file = captureReview.file; closeCaptureReview(); void upload(file); }}>Upload photo</button></div></FocusDialog></>}
     </section>
   );
 }
