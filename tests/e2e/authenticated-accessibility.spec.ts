@@ -111,7 +111,7 @@ async function createFixture(page: Page, fixture: AccessibilityFixture) {
   });
   expect(itemResponse.ok()).toBeTruthy();
   await page.reload();
-  await expect(page.getByText(fixture.householdName, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: fixture.itemTitle, exact: true })).toBeVisible();
 }
 
 async function cleanupFixture(page: Page, fixture: AccessibilityFixture) {
@@ -184,7 +184,8 @@ async function openItemDetail(page: Page, fixture: AccessibilityFixture) {
 }
 
 async function openNotifications(page: Page) {
-  const trigger = page.getByRole("button", { name: /^Notifications(?:,|$)/ });
+  const trigger = page.locator("header.topbar")
+    .getByRole("button", { name: /^Notifications(?:,|$)/ });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Notifications" });
   await expect(dialog).toBeVisible();
