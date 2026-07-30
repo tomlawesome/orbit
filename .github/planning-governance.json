@@ -8,6 +8,8 @@
     "Dockerfile",
     "docker-compose.acceptance.yml",
     "docker-compose.full.yml",
+    "docker-compose.mail-alias-rotation.yml",
+    "docker-compose.mail.yml",
     "docker-compose.yml",
     "docs/administrator-operations.md",
     "docs/architecture.md",
