@@ -135,7 +135,12 @@ async function waitForReady() {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(new URL("/version", tikaUrl), { redirect: "error" });
-      if (response.ok) return;
+      if (response.ok) {
+        // The version resource can become reachable just before the forked
+        // parser worker has completed initialization.
+        await delay(5_000);
+        return;
+      }
     } catch {
       // The exact image is still starting.
     }
@@ -160,7 +165,11 @@ async function extract(fixture) {
       redirect: "error",
       signal: controller.signal,
     });
-    assert.equal(response.ok, true, `Tika rejected the ${fixture.mediaType} contract fixture`);
+    assert.equal(
+      response.ok,
+      true,
+      `Tika rejected the ${fixture.mediaType} contract fixture with HTTP ${response.status}`,
+    );
     assert.equal(response.redirected, false);
     assert.match(response.headers.get("content-type") ?? "", /^text\/plain(?:;|$)/iu);
     const bytes = Buffer.from(await response.arrayBuffer());

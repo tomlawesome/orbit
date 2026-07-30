@@ -418,8 +418,11 @@ jobs:
           docker inspect "${tika_id}" | jq --exit-status '
             .[0].Mounts
             | length >= 1
+            and any(.Destination == "/etc/orbit/tika-config.xml" and .RW == false)
             and all(.Destination == "/etc/orbit/tika-config.xml" or .Destination == "/tmp")
           '
+          docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
+            sh -c 'test -r /etc/orbit/tika-config.xml && test -w /tmp'
           tika_uid="$(docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
             sh -c "awk '/^Uid:/{print \$2}' /proc/1/status")"
           test "${tika_uid}" = "35002"
@@ -496,7 +499,7 @@ jobs:
 
       - name: Stop smoke-test services
         if: always()
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml --profile processing down --volumes --remove-orphans
 
       - name: Log in to GitHub Container Registry
         if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
