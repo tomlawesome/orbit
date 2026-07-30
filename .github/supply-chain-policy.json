@@ -20,6 +20,17 @@
       "reviewBy": "2026-10-30"
     }
   ],
+  "dependencyReviewActions": [
+    {
+      "name": "actions/dependency-review-action",
+      "version": "v5.0.0",
+      "commit": "a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+      "license": "MIT",
+      "source": "https://github.com/actions/dependency-review-action/releases/tag/v5.0.0",
+      "updateOwner": "Orbit maintainers",
+      "reviewBy": "2026-10-30"
+    }
+  ],
   "thresholds": {
     "sourceVulnerabilities": [
       "HIGH",

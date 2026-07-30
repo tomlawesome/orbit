@@ -146,7 +146,7 @@ evidence rather than starting with unproven mixed state.
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Implement and prove staged correspondence, durable rollback checkpoints, corrupt/wrong-key cases and interrupted recovery |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Build-once previews from `develop` and versioned release branches, source and exact-image supply-chain gates, digest-bound attestations, plus guarded no-rebuild promotion after exact protected merges | Prove the supply-chain path in protected CI and exercise release-preview acceptance plus stable promotion |
+| Release | Build-once previews from `develop` and versioned release branches, dependency-change licence review, source and exact-image supply-chain gates, verified digest-bound attestations, plus guarded no-rebuild promotion after exact protected merges | Exercise representative versioned-release acceptance plus stable promotion |
 | Rollback | Prior image and verified pre-update backup retained; no unproven database downgrade | Prove the ADR-0004 update and recovery decision points |
 
 ## Architecture decisions and open questions

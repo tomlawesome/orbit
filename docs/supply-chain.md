@@ -9,24 +9,28 @@ that policy and converts scanner output into bounded review evidence.
 
 Every pull request and trusted preview run performs these steps:
 
-1. A read-only job scans the checked-out repository for dependency
+1. A separate read-only dependency-review job compares pull-request dependency
+   changes with the base revision. Newly introduced high or critical
+   vulnerabilities in runtime, development or unknown scopes block the pull
+   request. Newly introduced dependencies must use an approved SPDX licence.
+2. A read-only job scans the checked-out repository for dependency
    vulnerabilities and secret patterns. Checkout credentials are not
    persisted. The raw secret-scan report is never uploaded and is deleted
    after a sanitized finding record is generated.
-2. Fast and PostgreSQL integration checks must pass along with the source
+3. Fast and PostgreSQL integration checks must pass along with the source
    policy before container validation can advance.
-3. CI builds one AMD64 production image, records its configuration identity,
+4. CI builds one AMD64 production image, records its configuration identity,
    then scans that local identity for vulnerabilities and generates an SPDX
    2.3 SBOM.
-4. The repository policy verifies that the vulnerability report and SBOM name
+5. The repository policy verifies that the vulnerability report and SBOM name
    the same image that enters Compose, recovery, privacy, browser and
    accessibility tests.
-5. Pull requests stop with read-only evidence. A trusted `develop` or
+6. Pull requests stop with read-only evidence. A trusted `develop` or
    versioned-release push may log in to GHCR only after every preceding gate
    passes.
-6. CI pushes that exact tested image without rebuilding, resolves the registry
+7. CI pushes that exact tested image without rebuilding, resolves the registry
    digest, pulls it back and verifies its configuration identity.
-7. GitHub mints short-lived OIDC provenance and SBOM attestations for the
+8. GitHub mints short-lived OIDC provenance and SBOM attestations for the
    resolved digest. CI immediately verifies both attestations before recording
    a deployable preview.
 
@@ -40,6 +44,17 @@ private runtime configuration or environment values.
 High and critical dependency or image vulnerabilities block publication.
 Every repository secret finding blocks regardless of its scanner severity.
 Lower-severity vulnerabilities remain visible in the retained evidence.
+
+Dependency changes are governed separately from the full source and image
+scans. `.github/dependency-review-config.yml` allows only the listed
+SPDX-compatible permissive or file-level reciprocal licences and blocks newly
+introduced high or critical vulnerabilities in every dependency scope.
+Dependencies that declare a licence outside the allow-list block
+automatically. Missing or ambiguous licence metadata is surfaced by the action
+and remains a manual review and release blocker until it is resolved. There
+are no advisory or package licence exemptions in the policy. Any future
+exemption must be narrow, justified, owned, time-bounded and linked to a
+tracking issue.
 
 A vulnerability exception is valid only when it identifies the finding,
 package and scope, names an owner, gives a rationale, links a tracking issue
@@ -73,6 +88,11 @@ the policy. It attaches provenance and the SPDX SBOM to the already pushed
 digest; it does not build or transform the image. Orbit maintainers own both
 tool updates and the policy review date. Licences, upstream release pages,
 versions and immutable identities are recorded beside that ownership.
+
+GitHub's `actions/dependency-review-action` is also pinned to the reviewed
+commit recorded in the policy. It runs only on the `pull_request` event with
+read-only contents access, does not persist checkout credentials and does not
+receive permission to comment, publish packages or mint OIDC tokens.
 
 The vulnerability database is intentionally refreshed by the pinned scanner
 at run time because vulnerability knowledge changes. Scanner version metadata
