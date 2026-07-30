@@ -9,6 +9,38 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+async function ensureSyntheticHousehold(page: Page) {
+  const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
+  const desktopSettings = page.getByRole("button", { name: "Open personalisation settings" });
+  const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
+  await expect(page.locator(".sync-state")).toHaveText("Synced", { timeout: 15_000 });
+  await expect.poll(async () => {
+    const [recoveryVisible, desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
+      recoveryHeading.isVisible(),
+      desktopSettings.isVisible(),
+      mobileNavigation.isVisible(),
+    ]);
+    return recoveryVisible || desktopSettingsVisible || mobileNavigationVisible;
+  }, { timeout: 15_000 }).toBe(true);
+  if (!await recoveryHeading.isVisible()) return;
+
+  const projectName = test.info().project.name.replace(/[^a-z0-9]+/gi, "-");
+  const householdName = `Operations ${projectName}`;
+  await page.getByRole("button", { name: "Create a new household" }).click();
+  const dialog = page.getByRole("dialog", { name: "Set up your space" });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await dialog.getByLabel("Household name").fill(householdName);
+  await dialog.getByRole("button", { name: "Create household" }).click();
+  await expect(dialog).toBeHidden({ timeout: 15_000 });
+  await expect.poll(async () => {
+    const [desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
+      desktopSettings.isVisible(),
+      mobileNavigation.isVisible(),
+    ]);
+    return desktopSettingsVisible || mobileNavigationVisible;
+  }, { timeout: 15_000 }).toBe(true);
+}
+
 function operationsPayload(audit: Array<Record<string, unknown>>, nextCursor: string | null, deliveries: Array<Record<string, unknown>> = []) {
   return {
     operations: {
@@ -96,10 +128,14 @@ test.describe("administrator operations evidence", () => {
     });
 
     await signIn(page);
-    if (await page.getByRole("button", { name: "Open navigation" }).isVisible().catch(() => false)) {
-      await page.getByRole("button", { name: "Open navigation" }).click();
+    await ensureSyntheticHousehold(page);
+    const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
+    if (await mobileNavigation.isVisible()) {
+      await mobileNavigation.click();
+      await page.getByRole("button", { name: "Personalise", exact: true }).click();
+    } else {
+      await page.getByRole("button", { name: "Open personalisation settings" }).click();
     }
-    await page.getByRole("button", { name: "Open personalisation settings" }).click();
     const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
     await expect(settings).toBeVisible();
     await settings.getByRole("tab", { name: "Admin" }).click();
