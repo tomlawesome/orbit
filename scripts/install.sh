@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 readonly repository_url="${ORBIT_REPOSITORY_URL:-https://github.com/tomlawesome/orbit.git}"
 readonly environment_file=".env-orbit"
-export ORBIT_IMAGE="${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}"
+build_locally=""
 
 fail() {
   printf 'Orbit installer: %s\n' "$*" >&2
@@ -30,23 +30,20 @@ else
   git clone "$repository_url" .
 fi
 
-bash scripts/configure.sh
-
 while true; do
   read -r -p "Build the Orbit application container locally? [Y/n] " build_choice </dev/tty ||
     fail "An interactive terminal is required."
 
   case "${build_choice,,}" in
     "" | y | yes)
-      compose pull orbit-db
-      compose build --pull orbit-app
+      export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
+      build_locally="true"
       break
       ;;
     n | no)
-      printf 'Pulling %s from GitHub Container Registry...\n' "$ORBIT_IMAGE"
-      compose pull orbit-db
-      compose pull orbit-app ||
-        fail "Could not pull $ORBIT_IMAGE. If it is private, authenticate with: docker login ghcr.io"
+      [[ "${ORBIT_IMAGE:-}" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
+        fail "Set ORBIT_IMAGE to the exact published registry digest before choosing the pull option."
+      build_locally="false"
       break
       ;;
     *)
@@ -54,6 +51,16 @@ while true; do
       ;;
   esac
 done
+
+bash scripts/configure.sh
+compose pull orbit-db
+if [[ "$build_locally" == "true" ]]; then
+  compose build --pull orbit-app
+else
+  printf 'Pulling %s from the configured registry...\n' "$ORBIT_IMAGE"
+  compose pull orbit-app ||
+    fail "Could not pull $ORBIT_IMAGE. If it is private, authenticate with its registry first."
+fi
 
 compose up -d --no-build --remove-orphans
 compose ps
