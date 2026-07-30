@@ -404,8 +404,8 @@ test.describe("authenticated household lifecycle", () => {
       await signIn(memberPage, member);
 
       const openMembers = async (targetPage: Page) => {
-        const closeSettings = targetPage.getByRole("button", { name: "Close personalisation" });
-        if (!(await closeSettings.isVisible())) {
+        const personalisation = targetPage.getByRole("dialog", { name: "Personalise Orbit", exact: true });
+        if (!(await personalisation.isVisible())) {
           const openNavigation = targetPage.getByRole("button", { name: "Open navigation" });
           if (await openNavigation.isVisible()) {
             await openMobileNavigationIfNeeded(targetPage);
@@ -414,7 +414,8 @@ test.describe("authenticated household lifecycle", () => {
             await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
           }
         }
-        await targetPage.getByRole("tab", { name: "Members" }).click();
+        await expect(personalisation).toBeVisible({ timeout: 15_000 });
+        await personalisation.getByRole("tab", { name: "Members" }).click();
       };
       const addMember = async () => {
         await openMembers(page);
@@ -424,8 +425,8 @@ test.describe("authenticated household lifecycle", () => {
       };
       const waitForMemberHousehold = async () => {
         await memberPage.reload();
-        await selectHouseholdByName(memberPage, householdName);
-        await expect(memberPage.getByText(householdName, { exact: true }).first()).toBeVisible();
+        const selectedWorkspace = await selectHouseholdByName(memberPage, householdName);
+        expect(selectedWorkspace.households.some((household) => household.id === selectedWorkspace.activeHouseholdId && household.name === householdName)).toBe(true);
       };
       const expectMemberRemoved = async () => {
         await memberPage.reload();
@@ -473,7 +474,7 @@ test.describe("authenticated household lifecycle", () => {
       page.once("dialog", (dialog) => dialog.accept());
       await transferRow.getByRole("button", { name: "Make owner" }).click();
       await expect(page.getByRole("status")).toContainText(`${member} is now the household owner.`);
-      await expect(page.getByText(householdName, { exact: true }).first()).toBeVisible();
+      await waitForActiveHousehold(page, householdName);
       await waitForMemberHousehold();
       await openMembers(memberPage);
       await expect(memberPage.getByText("Household owner", { exact: true })).toBeVisible();
