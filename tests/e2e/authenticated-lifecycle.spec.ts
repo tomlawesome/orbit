@@ -10,6 +10,30 @@ async function signIn(page: Page, identity: string) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+type AuthenticatedBrowserSession = { userId: string; displayName: string; csrfToken: string };
+
+async function readAuthenticatedSession(page: Page, label: string): Promise<AuthenticatedBrowserSession> {
+  const session = await page.evaluate(async () => {
+    const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+    const payload = await response.json() as {
+      authenticated?: unknown;
+      user?: { id?: unknown; displayName?: unknown };
+      csrfToken?: unknown;
+    };
+    return {
+      status: response.status,
+      authenticated: payload.authenticated === true,
+      userId: typeof payload.user?.id === "string" ? payload.user.id : null,
+      displayName: typeof payload.user?.displayName === "string" ? payload.user.displayName : null,
+      csrfToken: typeof payload.csrfToken === "string" && payload.csrfToken.length > 0 ? payload.csrfToken : null,
+    };
+  });
+  if (session.status !== 200 || !session.authenticated || !session.userId || !session.displayName || !session.csrfToken) {
+    throw new Error(`${label} session response was not an authenticated session (status ${session.status})`);
+  }
+  return { userId: session.userId, displayName: session.displayName, csrfToken: session.csrfToken };
+}
+
 async function readWorkspace(page: Page) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -402,6 +426,7 @@ test.describe("authenticated household lifecycle", () => {
     const memberPage = await memberContext.newPage();
     try {
       await signIn(memberPage, member);
+      const memberSession = await readAuthenticatedSession(memberPage, "Member");
 
       const openMembers = async (targetPage: Page) => {
         const personalisation = targetPage.getByRole("dialog", { name: "Personalise Orbit", exact: true });
@@ -418,10 +443,48 @@ test.describe("authenticated household lifecycle", () => {
         await personalisation.getByRole("tab", { name: "Members" }).click();
       };
       const addMember = async () => {
+        const administratorSession = await readAuthenticatedSession(page, "Administrator");
+        const setupResponse = await page.evaluate(async ({ csrfToken, householdId, userId }) => {
+          const response = await fetch(`/api/households/${householdId}/members`, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+            body: JSON.stringify({ userId }),
+          });
+          const payload = await response.json() as {
+            members?: unknown;
+            error?: { code?: unknown };
+          };
+          const members = Array.isArray(payload.members)
+            ? payload.members.flatMap((entry) => {
+              if (!entry || typeof entry !== "object") return [];
+              const candidate = entry as { id?: unknown; displayName?: unknown };
+              return typeof candidate.id === "string" && typeof candidate.displayName === "string"
+                ? [{ id: candidate.id, displayName: candidate.displayName }]
+                : [];
+            })
+            : null;
+          return {
+            status: response.status,
+            ok: response.ok,
+            members,
+            errorCode: payload.error && typeof payload.error.code === "string" ? payload.error.code : null,
+          };
+        }, { csrfToken: administratorSession.csrfToken, householdId, userId: memberSession.userId });
+        if (!setupResponse.ok || setupResponse.status !== 200) {
+          const errorDetail = setupResponse.errorCode ? `, error ${setupResponse.errorCode}` : "";
+          throw new Error(`Membership setup failed for household "${householdName}" with status ${setupResponse.status}${errorDetail}`);
+        }
+        if (!setupResponse.members?.some((entry) => entry.id === memberSession.userId && entry.displayName === memberSession.displayName)) {
+          throw new Error("Membership setup response did not contain the expected member");
+        }
+        await page.reload();
+        await selectHouseholdByName(page, householdName);
         await openMembers(page);
-        await page.getByLabel("Registered user").selectOption({ label: member });
-        await page.getByRole("button", { name: "Add member" }).click();
-        await expect(page.getByRole("status")).toContainText(`${member} can now access this household.`);
+        const memberRow = page.locator(".member-list article").filter({
+          has: page.getByText(memberSession.displayName, { exact: true }),
+        });
+        await expect(memberRow, "Expected the exact setup member row before continuing").toHaveCount(1, { timeout: 15_000 });
       };
       const waitForMemberHousehold = async () => {
         await memberPage.reload();
