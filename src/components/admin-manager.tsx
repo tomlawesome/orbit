@@ -17,7 +17,7 @@ interface AdminManagerProps {
 
 interface DocumentHealth {
   overall: "healthy" | "degraded";
-  encryption: { status: "ready" | "unavailable"; keyId: string | null };
+  encryption: { status: "ready" | "unavailable" };
   storage: { status: "ready" | "unavailable" };
   scanner: { status: "ready" | "disabled" | "unavailable"; mode: "required" | "disabled" | "unknown" };
   quota: { usedBytes: number; limitBytes: number };
