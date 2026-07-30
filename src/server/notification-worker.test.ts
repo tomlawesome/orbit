@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   categorizeProviderError,
   deliveryFailureState,
@@ -9,6 +12,20 @@ import {
   notificationRetryDelayMs,
   reminderIsSnoozed,
 } from "./notification-worker";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  temporaryDirectories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
+});
+
+function secretFile(value: string): string {
+  const directory = mkdtempSync(join(tmpdir(), "orbit-smtp-secret-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "password");
+  writeFileSync(path, `${value}\n`, { mode: 0o600 });
+  return path;
+}
 
 describe("notification worker scheduling", () => {
   it("honours both reminder rules and the recipient's selected channels", () => {
@@ -50,6 +67,29 @@ describe("notification worker scheduling", () => {
     } as NodeJS.ProcessEnv);
     expect(config.pollMilliseconds).toBe(30_000);
     expect(config.maxAttempts).toBe(5);
+  });
+
+  it("keeps SMTP providers independent and prefers a file-backed password", () => {
+    const config = getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      SMTP_HOST: "smtp.example.test",
+      SMTP_PORT: "587",
+      SMTP_SECURITY: "starttls",
+      SMTP_USER: "orbit",
+      SMTP_PASSWORD_FILE: secretFile("file-password"),
+      IMAP_HOST: "imap.example.test",
+    } as NodeJS.ProcessEnv);
+    expect(config.smtpUrl).toContain("file-password");
+    expect(config.smtpUrl).not.toContain("IMAP");
+  });
+
+  it("rejects an SMTP plaintext downgrade or mismatched security URL", () => {
+    expect(() => getNotificationWorkerConfig({
+      NODE_ENV: "test", SMTP_URL: "smtp://smtp.example.test:25", SMTP_SECURITY: "implicit_tls",
+    } as NodeJS.ProcessEnv)).toThrow("implicit TLS");
+    expect(() => getNotificationWorkerConfig({
+      NODE_ENV: "test", SMTP_URL: "smtps://smtp.example.test:465", SMTP_SECURITY: "starttls",
+    } as NodeJS.ProcessEnv)).toThrow("STARTTLS");
   });
 
   it("suppresses only reminders scheduled before the household snooze resume date", () => {
