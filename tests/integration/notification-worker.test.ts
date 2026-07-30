@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, type IntegrationFixture } from "./support/fixtures";
 import { getDb } from "@/db";
 import * as schema from "@/db/schema";
@@ -15,6 +15,7 @@ import {
 } from "@/server/notification-worker";
 import {
   dueEvents,
+  households,
   memberships,
   notificationDeliveries,
   pushSubscriptions,
@@ -22,6 +23,7 @@ import {
   userPreferences,
   users,
 } from "@/db/schema";
+import { requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -103,6 +105,25 @@ function deterministicLeaseToken(sequence: number): string {
   return `00000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
+async function waitForAdvisoryLockWaiter(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await getDb().execute(sql<{ waiting: number }>`
+      select count(*)::int as waiting
+      from pg_locks
+      where locktype = 'advisory' and granted = false
+    `);
+    if (Number(rows[0]?.waiting) > 0) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Household deletion did not wait for the notification lifecycle lock");
+}
+
 function openIndependentDatabase() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is required for notification worker integration tests");
@@ -111,6 +132,131 @@ function openIndependentDatabase() {
 }
 
 describe("notification worker PostgreSQL contracts", () => {
+  it("does not materialize or dispatch reminders for a household scheduled for deletion", async () => {
+    const hiddenFixture = await ownerOnlyFixture("worker-hidden-household");
+    const hiddenEventId = await seedEvent(hiddenFixture, { pushEnabled: false });
+    await requestHouseholdDeletion(
+      hiddenFixture.users.owner.id,
+      hiddenFixture.household.id,
+      hiddenFixture.household.name,
+    );
+    let providerCalls = 0;
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(1),
+    });
+    expect(await getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.eventId, hiddenEventId)))
+      .toHaveLength(0);
+    expect(providerCalls).toBe(0);
+
+    const queuedFixture = await ownerOnlyFixture("worker-queued-hidden-household");
+    const queuedEventId = await seedEvent(queuedFixture, { pushEnabled: false });
+    await getDb().insert(notificationDeliveries).values({
+      householdId: queuedFixture.household.id,
+      eventId: queuedEventId,
+      userId: queuedFixture.users.owner.id,
+      channel: "email",
+      scheduledFor: cycleTime,
+    });
+    await requestHouseholdDeletion(
+      queuedFixture.users.owner.id,
+      queuedFixture.household.id,
+      queuedFixture.household.name,
+    );
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(2),
+    });
+    expect(await deliveryForEvent(queuedEventId)).toMatchObject({
+      status: "cancelled",
+      leaseToken: null,
+      lastError: "household_pending_deletion",
+    });
+    expect(providerCalls).toBe(0);
+
+    await restoreHousehold(queuedFixture.users.owner.id, queuedFixture.household.id);
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(3),
+    });
+    expect(await deliveryForEvent(queuedEventId)).toMatchObject({
+      status: "sent",
+      leaseToken: null,
+      lastError: null,
+    });
+    expect(providerCalls).toBe(1);
+  });
+
+  it("does not dispatch when household deletion wins the pre-provider lifecycle lock", async () => {
+    const fixture = await ownerOnlyFixture("worker-deletion-before-dispatch");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    let providerCalls = 0;
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(4),
+      beforeProviderDispatch: async () => {
+        await requestHouseholdDeletion(
+          fixture.users.owner.id,
+          fixture.household.id,
+          fixture.household.name,
+        );
+      },
+    });
+
+    expect(await deliveryForEvent(eventId)).toMatchObject({
+      status: "cancelled",
+      leaseToken: null,
+      lastError: "household_pending_deletion",
+    });
+    expect(providerCalls).toBe(0);
+  });
+
+  it("holds the lifecycle lock through provider dispatch before deletion can commit", async () => {
+    const fixture = await ownerOnlyFixture("worker-dispatch-before-deletion");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    const providerStarted = deferred<void>();
+    const releaseProvider = deferred<void>();
+    let providerCalls = 0;
+    const cycle = runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(async () => {
+        providerCalls += 1;
+        providerStarted.resolve();
+        await releaseProvider.promise;
+      }),
+      nextLeaseToken: () => deterministicLeaseToken(5),
+    });
+
+    await providerStarted.promise;
+    const deletion = requestHouseholdDeletion(
+      fixture.users.owner.id,
+      fixture.household.id,
+      fixture.household.name,
+    );
+    await waitForAdvisoryLockWaiter();
+    expect(await getDb().select({ deletionRequestedAt: households.deletionRequestedAt })
+      .from(households).where(eq(households.id, fixture.household.id)))
+      .toEqual([{ deletionRequestedAt: null }]);
+
+    releaseProvider.resolve();
+    await Promise.all([cycle, deletion]);
+
+    expect(await deliveryForEvent(eventId)).toMatchObject({
+      status: "sent",
+      leaseToken: null,
+      lastError: null,
+    });
+    expect(await getDb().select({ deletionRequestedAt: households.deletionRequestedAt })
+      .from(households).where(eq(households.id, fixture.household.id)))
+      .toEqual([{ deletionRequestedAt: expect.any(Date) }]);
+    expect(providerCalls).toBe(1);
+  });
+
   it("materializes one row per channel and keeps concurrent cycles exclusive", async () => {
     const fixture = await ownerOnlyFixture("worker-concurrency");
     const db = getDb();
@@ -235,22 +381,25 @@ describe("notification worker PostgreSQL contracts", () => {
       leaseToken: deterministicLeaseToken(14),
     }).returning({ id: notificationDeliveries.id });
     const newerLease = deterministicLeaseToken(15);
+    let staleProviderCalls = 0;
     await runNotificationCycle(workerConfig(), {
       now: () => staleNow,
-      providers: fakeProviders(async () => {
+      providers: fakeProviders(() => { staleProviderCalls += 1; }),
+      beforeProviderDispatch: async () => {
         await getDb().update(notificationDeliveries).set({
           status: "processing",
           lockedAt: staleNow,
           leaseToken: newerLease,
           attempts: 2,
         }).where(eq(notificationDeliveries.id, staleDelivery.id));
-      }),
+      },
       nextLeaseToken: () => deterministicLeaseToken(16),
     });
     const staleCompletion = await deliveryForEvent(staleEventId);
     expect(staleCompletion?.status).toBe("processing");
     expect(staleCompletion?.leaseToken).toBe(newerLease);
     expect(staleCompletion?.sentAt).toBeNull();
+    expect(staleProviderCalls).toBe(0);
 
     const staleFailureFixture = await ownerOnlyFixture("worker-stale-failure");
     const staleFailureEventId = await seedEvent(staleFailureFixture, { pushEnabled: false });
@@ -266,23 +415,28 @@ describe("notification worker PostgreSQL contracts", () => {
       leaseToken: deterministicLeaseToken(17),
     }).returning({ id: notificationDeliveries.id });
     const newerFailureLease = deterministicLeaseToken(18);
+    let staleFailureProviderCalls = 0;
     await runNotificationCycle(workerConfig(), {
       now: () => staleNow,
-      providers: fakeProviders(async () => {
+      providers: fakeProviders(() => {
+        staleFailureProviderCalls += 1;
+        throw { code: "ETIMEDOUT", message: "private provider detail" };
+      }),
+      beforeProviderDispatch: async () => {
         await getDb().update(notificationDeliveries).set({
           status: "processing",
           lockedAt: staleNow,
           leaseToken: newerFailureLease,
           attempts: 2,
         }).where(eq(notificationDeliveries.id, staleFailureDelivery.id));
-        throw { code: "ETIMEDOUT", message: "private provider detail" };
-      }),
+      },
       nextLeaseToken: () => deterministicLeaseToken(19),
     });
     const staleFailure = await deliveryForEvent(staleFailureEventId);
     expect(staleFailure?.status).toBe("processing");
     expect(staleFailure?.leaseToken).toBe(newerFailureLease);
     expect(staleFailure?.lastError).toBeNull();
+    expect(staleFailureProviderCalls).toBe(0);
   });
 
   it("does not dispatch a lease reclaimed after the cycle starts", async () => {
