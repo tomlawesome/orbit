@@ -40,6 +40,35 @@ mutations, define hard stop conditions, require a result file, and tell Luna
 exactly when to hand control back for Sol review. Handoff files are local
 coordination state and are not committed.
 
+## Orchestration and retained learning
+
+Before any delivery mutation, read and obey
+`docs/orchestration-runbook.md` and
+`.github/orchestration-governance.json`. Run
+`pnpm orchestration:check` when dependencies are available.
+
+Model authority is a preflight gate, not a review-time correction. All
+orchestration—including task launch, monitoring, sequencing, reconciliation,
+blocker classification, handback acceptance and retained-learning
+promotion—proceeds only under Sol Extra High. Terra may read protected
+planning for orientation or perform separately bounded mechanical analysis,
+but it cannot operate the delivery loop, make status or next-action decisions,
+or materially create, edit, approve, restructure or publish protected
+planning. Luna performs bounded implementation and hands control back to Sol.
+
+A successful asynchronous task-creation response establishes
+`launch_pending`. Omission from a partial, limited, paginated, stale or
+differently shaped task list never proves creation failure. Confirm the real
+task ID, requested model, worktree and state through a full task listing,
+direct task read or bounded task wait before advancing or retrying creation.
+
+Capture operational contradictions as safe local candidate lessons. Durable
+controls are recorded in `docs/orchestration-controls.json` only after the
+evidence, issue, model-authority, regression-test, protected-PR and CI gates in
+the orchestration runbook pass. Automation must never self-adopt product,
+architecture, security, model-governance, repository-setting, protected
+planning or release-policy changes.
+
 ## Delivery workflow
 
 - Start from an issue with a user outcome, acceptance criteria, non-goals,
