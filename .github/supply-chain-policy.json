@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "scanner": {
+    "name": "Trivy",
+    "version": "0.72.0",
+    "image": "aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada",
+    "license": "Apache-2.0",
+    "source": "https://github.com/aquasecurity/trivy/releases/tag/v0.72.0",
+    "updateOwner": "Orbit maintainers",
+    "reviewBy": "2026-10-30"
+  },
+  "attestationActions": [
+    {
+      "name": "actions/attest",
+      "version": "v4.2.1",
+      "commit": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+      "license": "MIT",
+      "source": "https://github.com/actions/attest/releases/tag/v4.2.1",
+      "updateOwner": "Orbit maintainers",
+      "reviewBy": "2026-10-30"
+    }
+  ],
+  "thresholds": {
+    "sourceVulnerabilities": [
+      "HIGH",
+      "CRITICAL"
+    ],
+    "sourceSecrets": [
+      "UNKNOWN",
+      "LOW",
+      "MEDIUM",
+      "HIGH",
+      "CRITICAL"
+    ],
+    "imageVulnerabilities": [
+      "HIGH",
+      "CRITICAL"
+    ]
+  },
+  "exceptions": [],
+  "mutableImageReferences": [
+    {
+      "reference": "node:22-alpine",
+      "locations": [
+        "Dockerfile",
+        "tests/oidc/Dockerfile"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "Digest pinning must preserve the supported AMD64 build and disposable OIDC acceptance path.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    },
+    {
+      "reference": "postgres:17-alpine",
+      "locations": [
+        "docker-compose.yml"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "The database image requires a reviewed digest update and backup/restore compatibility path.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    },
+    {
+      "reference": "ghcr.io/tomlawesome/orbit:latest",
+      "locations": [
+        "docker-compose.yml"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "The convenience default remains tag-based while release documentation requires deployments and acceptance evidence to record digests.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    },
+    {
+      "reference": "clamav/clamav:1.4.5-debian",
+      "locations": [
+        "docker-compose.yml"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "The scanner service requires a reviewed digest update with malware-detection acceptance.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    },
+    {
+      "reference": "apache/tika:3.2.2.0-full",
+      "locations": [
+        "docker-compose.yml"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "The parser service requires a reviewed digest update with document-processing isolation checks.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    },
+    {
+      "reference": "ollama/ollama:0.32.2",
+      "locations": [
+        "docker-compose.full.yml"
+      ],
+      "owner": "Orbit maintainers",
+      "rationale": "The optional AI profile needs a separately reviewed large-image digest and compatibility check.",
+      "expiresOn": "2026-08-31",
+      "trackingIssue": 80
+    }
+  ]
+}
