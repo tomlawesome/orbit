@@ -116,6 +116,16 @@ a child title. Re-evaluate the milestone or wave gate after those parent
 updates. A dependent delivery remains `planned` until every declared
 dependency is `reconciled`.
 
+After reconciliation, perform a bounded repository-hygiene pass. Confirm that
+the pull request is no longer open, no generated build/test artifact or local
+coordination file entered the tracked tree, and the short-lived remote head is
+eligible for deletion. Delete a remote branch only after recording its exact
+head SHA and merged or independently proven superseding outcome, and only with
+the required explicit authority for destructive remote state. Preserve
+`main`, `develop`, active `release/*` and `hotfix/*` branches, active task
+branches, and any unreviewed unique commit. Local worktrees remain until their
+commits and result handoffs have been accepted or safely retained.
+
 GitHub closing keywords apply only through the repository's default-branch
 semantics. A merge to another integration branch does not replace explicit
 issue reconciliation. A merge response, issue mutation or other remote action
