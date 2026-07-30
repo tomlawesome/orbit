@@ -97,16 +97,15 @@ test.describe("online-only private workspace policy", () => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.skip(isMobile, "One browser profile proves the storage boundary.");
 
-    await page.goto("/");
+    await signIn(page);
+    const householdName = await activeHouseholdName(page);
+    await expect(page.getByText(householdName, { exact: true }).first()).toBeVisible();
+
     await seedLegacyWorkspaceCache(page);
     expect(await legacyWorkspaceCacheExists(page)).toBe(true);
-
-    await page.getByRole("link", { name: "Sign in securely" }).click();
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
-    await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+    await page.reload();
     await expect.poll(() => legacyWorkspaceCacheExists(page)).toBe(false);
 
-    const householdName = await activeHouseholdName(page);
     await seedLegacyWorkspaceCache(page);
     expect(await legacyWorkspaceCacheExists(page)).toBe(true);
 
