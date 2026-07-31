@@ -198,7 +198,7 @@ test.describe("document-assisted item intake", () => {
       if (route.request().method() === "POST") {
         attempts += 1;
         if (attempts === 1) {
-          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unreachable", message: "Document upload is not possible because the malware scanner cannot be reached. Uploads stay blocked until the scanner is running." } }) });
         } else {
           await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ document: { id: "22222222-2222-4222-8222-222222222222" } }) });
         }
