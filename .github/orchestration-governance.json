@@ -1,19 +1,37 @@
 {
   "schemaVersion": 1,
+  "humanApprovalIdentifier": "Human",
+  "pipelines": {
+    "codex": {
+      "orchestration": "Sol Extra High",
+      "implementation": "Luna Extra High",
+      "mechanicalAnalysis": "Terra Medium"
+    },
+    "claude": {
+      "orchestration": "Claude Opus Extra High",
+      "implementation": "Claude Sonnet Extra High",
+      "mechanicalAnalysis": "Claude Sonnet Extra High"
+    }
+  },
   "modelAuthority": {
     "orchestration": [
-      "Sol Extra High"
+      "Sol Extra High",
+      "Claude Opus Extra High"
     ],
     "protectedPlanning": [
-      "Sol Extra High"
+      "Sol Extra High",
+      "Claude Opus Extra High"
     ],
     "implementation": [
-      "Luna Extra High"
+      "Luna Extra High",
+      "Claude Sonnet Extra High"
     ],
     "mechanicalAnalysis": [
       "Terra Medium",
       "Luna Extra High",
-      "Sol Extra High"
+      "Sol Extra High",
+      "Claude Sonnet Extra High",
+      "Claude Opus Extra High"
     ]
   },
   "protectedDecisionClasses": [

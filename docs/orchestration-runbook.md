@@ -52,14 +52,17 @@ authentication material in chat.
 
 All orchestration—including task launch, monitoring, sequencing,
 reconciliation, blocker classification, handback acceptance, delivery
-decisions and retained-learning promotion—is a hard **Sol Extra High** gate.
+decisions and retained-learning promotion—is a hard **orchestration tier**
+gate: Sol Extra High under Codex, Claude Opus Extra High under Claude.
 Protected planning, architecture, security, release, repository-setting,
-product-scope and model-governance work has the same gate. Terra may read for
-orientation or perform explicitly bounded mechanical analysis outside the
+product-scope and model-governance work has the same gate. A mechanical-analysis
+tier may read for orientation or perform explicitly bounded analysis outside the
 orchestration role, but it cannot operate the delivery loop or make status and
-next-action decisions. Luna Extra High remains the default for bounded
-implementation and returns control to Sol for review and delivery. A different
-implementation model requires fresh user approval under `AGENTS.md`.
+next-action decisions. The active pipeline's implementation tier remains the
+default for bounded implementation and returns control to its orchestration tier
+for review and delivery. A different implementation model requires fresh user
+approval under `AGENTS.md`. Cross-pipeline conduct, including branch namespaces,
+attribution and precedence on shared work, is defined in `AGENTS.md`.
 
 ## Launch receipt and task-state protocol
 
@@ -99,8 +102,10 @@ heartbeat reconciles, in order:
 8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
-`sol_review` requires independent diff, test, privacy, credential, dependency
-and protected-path review. `pr_open` requires a pushed short-lived branch and
+`sol_review` is the orchestration-review stage for whichever pipeline is active;
+its identifier is retained for state-machine compatibility. It requires
+independent diff, test, privacy, credential, dependency and protected-path
+review. `pr_open` requires a pushed short-lived branch and
 linked issue. `merged` requires the exact protected merge SHA, pull request and
 target branch, but it is not terminal completion. `trusted` requires successful
 target-branch checks for that exact merge SHA. `reconciled` is the only

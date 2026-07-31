@@ -86,6 +86,21 @@
       "issue": 92,
       "pullRequest": 93,
       "approvedByModel": "Sol Extra High"
+    },
+    {
+      "id": "ORCH-007",
+      "status": "adopted",
+      "decisionClass": "model_governance",
+      "summary": "Derive agent authority from declared pipeline tiers rather than hardcoded model names, and accept one planning attestation per authority including an explicit human-owner value.",
+      "automaticPromotion": false,
+      "evidence": [
+        "The orchestration validator asserted single-model equality for orchestration, protected planning and implementation, so a second pipeline could not be admitted without editing validator source.",
+        "The planning gate accepted one hardcoded model attestation, leaving no truthful attestation for Claude-authored or human-authored protected planning while forbidding false attestation.",
+        "A Claude review of the authenticated sign-in flow found and fixed an exploitable open redirect under issue 110, evidencing independent review value from a second pipeline."
+      ],
+      "issue": 113,
+      "pullRequest": 114,
+      "approvedByModel": "Human"
     }
   ]
 }
