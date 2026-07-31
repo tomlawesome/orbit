@@ -755,7 +755,12 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .detail-facts dd { margin: 8px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(10px + var(--text-bump)); font-weight: 750; }
 .documents-intro, .document-empty, .document-live { margin: 0 0 13px; color: var(--muted); font-size: calc(9px + var(--text-bump)); line-height: 1.55; }
 .document-live:empty { display: none; }
-.document-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.document-dropzone { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 12px; margin-bottom: 12px; border: 2px dashed var(--line); border-radius: 12px; background: color-mix(in srgb, var(--paper) 92%, var(--ink)); transition: border-color 120ms ease, background-color 120ms ease; }
+.document-dropzone.dragging { border-color: var(--forest); border-style: solid; background: color-mix(in srgb, var(--mint) 30%, var(--paper)); }
+.document-dropzone-hint { margin: 0; font-size: calc(8px + var(--text-bump)); color: color-mix(in srgb, var(--ink) 72%, transparent); text-align: center; }
+.document-dropzone:focus-within { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .document-dropzone { transition: none; } }
+.document-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .document-upload, .document-controls a, .document-controls button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: calc(8px + var(--text-bump)); font-weight: 800; text-decoration: none; cursor: pointer; }
 .document-upload { color: #fff; border-color: var(--forest); background: var(--forest); }
 .document-camera { color: var(--forest); border-color: color-mix(in srgb, var(--forest) 32%, var(--line)); background: color-mix(in srgb, var(--mint) 24%, var(--paper)); }
