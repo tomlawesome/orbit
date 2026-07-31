@@ -416,9 +416,21 @@ jobs:
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet
-          docker compose --env-file .env-orbit \
-            -f docker-compose.yml -f docker-compose.full.yml \
-            --profile processing --profile ai config --quiet
+          docker compose --env-file .env-orbit --profile processing --profile ai config --quiet
+
+          # Optional services must be selectable by configuration alone, so
+          # that an operator never needs a different compose command. This
+          # proves Compose honours COMPOSE_PROFILES from the environment file:
+          # without it the optional services are absent, with it they appear.
+          selection_env="$(mktemp)"
+          cp .env-orbit "${selection_env}"
+          docker compose --env-file "${selection_env}" config --format json \
+            | jq --exit-status '(.services | has("orbit-ollama") or has("orbit-tika")) | not' > /dev/null
+          printf 'COMPOSE_PROFILES=processing,ai\n' >> "${selection_env}"
+          docker compose --env-file "${selection_env}" config --format json \
+            | jq --exit-status '.services | has("orbit-ollama") and has("orbit-tika")' > /dev/null
+          rm -f "${selection_env}"
+
           processing_config="$(docker compose --env-file .env-orbit \
             --profile processing config --format json)"
           jq --exit-status '
