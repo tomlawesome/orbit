@@ -8,8 +8,46 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+/**
+ * Recognises the errors Playwright raises when an evaluate races a navigation.
+ *
+ * Navigation happens here by design: the journey reloads and signs out, and the
+ * assertions read private storage on either side of both.
+ */
+function isNavigationRace(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Execution context was destroyed")
+    || message.includes("Cannot find context")
+    || message.includes("Target closed")
+    || message.includes("Target crashed");
+}
+
+/**
+ * Runs an evaluation that may race a navigation, retrying until the page
+ * settles.
+ *
+ * This never converts a failure into a result. An unreadable context is not
+ * evidence that private storage was purged, so exhausting the attempts throws
+ * rather than returning a value that would silently pass the assertion.
+ */
+async function evaluateAcrossNavigation<T>(page: Page, describe: string, work: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      if (!isNavigationRace(error)) throw error;
+      lastError = error;
+      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    }
+  }
+  throw new Error(
+    `${describe} could not be read: the page kept navigating. Last error: ${String(lastError)}`,
+  );
+}
+
 async function seedLegacyWorkspaceCache(page: Page) {
-  await page.evaluate(async () => {
+  await evaluateAcrossNavigation(page, "Legacy workspace cache seeding", () => page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open("orbit-workspace", 1);
       request.onupgradeneeded = () => {
@@ -36,11 +74,13 @@ async function seedLegacyWorkspaceCache(page: Page) {
         transaction.onerror = () => reject(transaction.error);
       };
     });
-  });
+  }));
 }
 
 async function legacyWorkspaceCacheExists(page: Page) {
-  return page.evaluate(async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"));
+  return evaluateAcrossNavigation(page, "Legacy workspace cache presence", () => page.evaluate(
+    async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"),
+  ));
 }
 
 async function activeHouseholdName(page: Page): Promise<string> {
