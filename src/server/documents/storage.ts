@@ -3,7 +3,6 @@ import {
   mkdir,
   open,
   readdir,
-  readFile,
   rename,
   rm,
   stat,
@@ -105,11 +104,16 @@ export class LocalDocumentStorage {
   }
 
   async readQuarantine(path: string, maximumBytes: number): Promise<Buffer> {
-    const details = await stat(path);
-    if (!details.isFile() || details.size < 1 || details.size > maximumBytes) {
-      throw new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+    const handle = await open(path, "r");
+    try {
+      const details = await handle.stat();
+      if (!details.isFile() || details.size < 1 || details.size > maximumBytes) {
+        throw new AppError("document_quarantine_invalid", "The quarantined document is invalid", 422);
+      }
+      return await handle.readFile();
+    } finally {
+      await handle.close();
     }
-    return readFile(path);
   }
 
   async discardQuarantine(path: string): Promise<void> {
@@ -144,11 +148,16 @@ export class LocalDocumentStorage {
 
   async readCiphertext(storageKey: string, maximumBytes: number): Promise<Buffer> {
     const path = this.objectPath(storageKey);
-    const details = await stat(path);
-    if (!details.isFile() || details.size < 1 || details.size > maximumBytes) {
-      throw new Error("Encrypted document storage object is invalid");
+    const handle = await open(path, "r");
+    try {
+      const details = await handle.stat();
+      if (!details.isFile() || details.size < 1 || details.size > maximumBytes) {
+        throw new Error("Encrypted document storage object is invalid");
+      }
+      return await handle.readFile();
+    } finally {
+      await handle.close();
     }
-    return readFile(path);
   }
 
   async ciphertextExists(storageKey: string): Promise<boolean> {
