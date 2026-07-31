@@ -291,14 +291,23 @@ async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
 
 async function rejectInterruptedDocuments(): Promise<void> {
   const staleBoundary = new Date(Date.now() - 60 * 60 * 1_000);
-  await getDb().update(documents).set({
+  const rejected = await getDb().update(documents).set({
     lifecycle: "rejected",
     failureCode: "processing_interrupted",
     updatedAt: new Date(),
   }).where(and(
     inArray(documents.lifecycle, ["receiving", "validating", "quarantined", "scanning", "encrypting"]),
     lt(documents.updatedAt, staleBoundary),
-  ));
+  )).returning({ id: documents.id });
+  // A document stranded mid-pipeline is the visible symptom of a processor
+  // outage, so each one is recorded rather than only counted.
+  for (const document of rejected) {
+    log.warn("document.lifecycle", {
+      document: document.id,
+      state: "rejected",
+      reason: "processing_interrupted",
+    });
+  }
 }
 
 export async function reconcileDocumentStorage(): Promise<void> {
@@ -435,9 +444,11 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
     await reconcilePortableArchiveStorage();
   }
   const jobs = await claimExpiredPurgeJobs();
+  if (jobs.length > 0) log.info("document.job", { kind: "purge", outcome: "claimed", count: jobs.length });
   for (const job of jobs) {
     try {
       await processPurgeJob(job);
+      log.info("document.job", { document: job.documentId, kind: "purge", outcome: "completed" });
     } catch (error) {
       await failJob(job, error);
     }
