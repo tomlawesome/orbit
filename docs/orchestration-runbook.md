@@ -168,6 +168,23 @@ An adopted control requires:
 Future tasks and heartbeats read the adopted-control ledger during preflight,
 so accepted learning is applied without depending on chat memory.
 
+## Wave concurrency
+
+Disjoint file ownership is necessary but not sufficient grounds to run slices
+concurrently. Disjoint files prevent merge conflicts; they do not prevent
+revalidation churn, and they do not establish whether a sibling landing first
+would invalidate a slice's premises.
+
+Each slice therefore records a concurrency assessment in the implementation
+plan. A slice is concurrent when a sibling landing first requires at most a
+rebase, and sequenced when it would force rework. A sequenced slice waits for a
+later wave rather than running in parallel and being rewritten.
+
+While the target branch requires up-to-date branches, keep at most two pull
+requests in flight regardless of assessment. Every merge leaves every other open
+pull request behind its base and forces a full revalidation, so concurrency
+beyond that costs more than it returns.
+
 ## Circuit breakers and limits
 
 Stop the affected action and preserve evidence when:
