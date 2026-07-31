@@ -318,6 +318,12 @@ export async function uploadItemDocument(input: {
       const scanMs = Date.now() - scanStartedAt;
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
+        // Distinguish "cannot reach the scanner" from "the scanner answered
+        // with a failure" so an operator knows whether to check connectivity or
+        // the scanner itself. Neither message discloses host, port or provider
+        // text, per the bounded-diagnostics rule.
+        const unreachable = scan.status === "error"
+          && (scan.reason === "unavailable" || scan.reason === "timeout");
         // `scan.reason` is a fixed enumeration from the scanner adapter, never
         // provider text, so it is safe to record.
         log.warn("document.scan", {
@@ -341,10 +347,19 @@ export async function uploadItemDocument(input: {
           infected ? "document_rejected_malware" : "document_rejected_scanner",
           { itemId: input.itemId },
         );
+        if (infected) {
+          throw new AppError(
+            "document_malware_detected",
+            "Orbit rejected that document because malware was detected",
+            422,
+          );
+        }
         throw new AppError(
-          infected ? "document_malware_detected" : "document_scanner_unavailable",
-          infected ? "Orbit rejected that document because malware was detected" : "Document scanning is temporarily unavailable",
-          infected ? 422 : 503,
+          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
+          unreachable
+            ? "Document upload is not possible because the malware scanner cannot be reached. Uploads stay blocked until the scanner is running."
+            : "Document upload is not possible because the malware scanner reported a failure. Uploads stay blocked until the scanner is healthy.",
+          503,
         );
       }
       log.info("document.scan", { document: documentId, outcome: "clean", ms: scanMs });
