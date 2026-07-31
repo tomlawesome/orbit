@@ -55,7 +55,8 @@ done
 bash scripts/configure.sh
 compose pull orbit-db
 if [[ "$build_locally" == "true" ]]; then
-  compose build --pull orbit-app
+  # Building needs the source overlay; the base file has no build context.
+  compose -f docker-compose.yml -f docker-compose.build.yml build --pull orbit-app
 else
   printf 'Pulling %s from the configured registry...\n' "$ORBIT_IMAGE"
   compose pull orbit-app ||
