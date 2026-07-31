@@ -127,7 +127,7 @@
       "indexDigest": "sha256:c3886c198155aa7d45a29851100cc16f5d6ea6777d635ddd0597fe95874161af",
       "platform": "linux/amd64",
       "locations": [
-        "docker-compose.full.yml"
+        "docker-compose.yml"
       ],
       "source": "https://github.com/ollama/ollama",
       "registry": "https://hub.docker.com/r/ollama/ollama",
@@ -138,5 +138,19 @@
       "reviewBy": "2026-10-30"
     }
   ],
-  "mutableImageReferences": []
+  "mutableImageReferences": [],
+  "deploymentImageReferences": {
+    "rule": "A deployment must run an immutable digest. A mutable tag may be resolved to a digest; it may never be deployed.",
+    "assignmentPattern": "ORBIT_IMAGE",
+    "acceptedForms": [
+      "registry/repository@sha256:<64 hex>",
+      "explicitly local build tag"
+    ],
+    "localBuildTagPrefix": "orbit-local:",
+    "scripts": [
+      "scripts/install.sh",
+      "scripts/configure.sh",
+      "scripts/deploy-container.sh"
+    ]
+  }
 }
