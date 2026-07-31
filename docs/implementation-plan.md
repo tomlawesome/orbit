@@ -125,8 +125,11 @@ Delivery uses a rolling-wave model:
 1. Sol Extra High maintains the portfolio-level risk order, dependencies,
    release gates and durable architecture decisions.
 2. Only the next two to four implementable issues are made decision-complete.
-3. Bounded implementations default to Luna Extra High. Independent issues may
-   run concurrently only in isolated worktrees with disjoint file ownership.
+3. Bounded implementations default to the active pipeline's implementation
+   tier. Independent issues may run concurrently only in isolated worktrees
+   with disjoint file ownership **and** a recorded assessment that a sibling
+   landing first requires at most a rebase. While the target branch requires
+   up-to-date branches, keep at most two pull requests in flight.
 4. Sol Extra High reviews architecture and security consequences, then
    integrates protected pull requests sequentially. A later concurrent branch
    rebases onto the accepted earlier result before final validation.
@@ -234,20 +237,54 @@ remain required before stable v1.
 The critical path is the reported silent-upload defect. Observability is
 deliberately delivered before any corrective change, because the cause was a
 hypothesis drawn from reading the code rather than a fact established from
-evidence. Each wave's slices own disjoint files, so they may run concurrently
-in isolated worktrees; slices in a later wave assume the earlier wave is
-accepted.
+evidence. Slices in a later wave assume the earlier wave is accepted.
+
+Each slice records a **concurrency assessment**, because disjoint file
+ownership alone is not sufficient grounds to run work in parallel. Disjoint
+files prevent merge conflicts; they do not prevent revalidation churn, and they
+do not say whether a sibling landing first would invalidate a slice's premises.
+Assess each slice as one of:
+
+- **concurrent** — a sibling landing first requires at most a rebase, so the
+  work in progress stays valid; or
+- **sequenced** — a sibling landing first would change the slice's premises and
+  force rework, so it waits for a later wave.
+
+Because the `develop` ruleset requires branches to be up to date, every merge
+leaves every other open pull request behind and forces a full revalidation.
+Keep at most two pull requests in flight regardless of assessment; concurrency
+beyond that costs more in revalidation than it returns.
+
+## Current position
+
+This section is the rolling commentary. It names where delivery actually is, so
+the next action is never inferred from memory. Update it whenever a slice
+changes state.
+
+- **Current wave:** v1.1 Wave 1, incomplete.
+- **Next slice:** merge the drop zone, then reconcile Wave 1 as a unit.
+- **In flight:** [#129 — accessible drop zone](https://github.com/tomlawesome/orbit/pull/129), green and parked pending the process batch.
+- **Blocked:** [#134 — skip validation for non-executable changes](https://github.com/tomlawesome/orbit/issues/134) cannot reconcile until a documentation-only pull request records the skip path.
+- **Preceding Wave 2:** a process batch agreed with the repository owner —
+  ORCH-008 acceptance evidence (delivered), the register entry (delivered), CI
+  path filtering (delivered), this slice, and
+  [#133 — harden the private-storage journey](https://github.com/tomlawesome/orbit/issues/133).
+- **Deviation on record:** [#124 — scanner failure attribution](https://github.com/tomlawesome/orbit/pull/124),
+  a Wave 2 slice, was merged while all three Wave 1 issues were still open. It
+  is trusted on `develop`, but it was delivered out of wave order.
 
 ### Wave 1 — diagnostic instrument and independent improvements
 
 - [#118 — bounded document lifecycle and processor diagnostics](https://github.com/tomlawesome/orbit/issues/118)
   owns `src/lib/logger.ts` and the document server paths. Critical path: it is
-  the instrument every later document slice reasons from.
+  the instrument every later document slice reasons from. **Concurrent** —
+  nothing else in this wave reads its output.
 - [#119 — accessible drop zone](https://github.com/tomlawesome/orbit/issues/119)
-  owns `src/components/document-manager.tsx`. Independent of the document
-  server paths.
+  owns `src/components/document-manager.tsx`. **Concurrent** — presentation
+  only, unaffected by server-side diagnostics landing first.
 - [#120 — patched esbuild across transitive tooling](https://github.com/tomlawesome/orbit/issues/120)
-  owns `pnpm-workspace.yaml`. Independent of application code.
+  owns `pnpm-workspace.yaml`. **Concurrent** — a lockfile change reconciles by
+  regeneration, never by rework.
 
 ### Wave 2 — corrective and structural change
 
@@ -255,20 +292,25 @@ accepted.
   depends on #118, whose records identify where an upload stops. Scanning stays
   fail-closed and the default deployment keeps ClamAV installed and enabled;
   what changes is that the requirement becomes verifiable and its failure
-  explicit.
+  explicit. **Sequenced** — designing the correction before the diagnostics
+  land means designing it from a hypothesis.
 - Settings and administration promoted to routes, under
   [#116](https://github.com/tomlawesome/orbit/issues/116). Owns `src/app` route
-  segments and `dashboard.tsx`.
+  segments and `dashboard.tsx`. **Concurrent** with the document work, which
+  shares no files with it.
 - Supply-chain policy amendment and deploy-compose separation, under
-  [#117](https://github.com/tomlawesome/orbit/issues/117). Independent of one
-  another; both precede the installer rewrite.
+  [#117](https://github.com/tomlawesome/orbit/issues/117). **Concurrent** with
+  each other; both **sequenced** before the installer rewrite, which cannot be
+  written against a policy and a compose layout that have not settled.
 
 ### Wave 3 — dependent experience and deployment
 
 - Account menu exposing settings, administration and sign out. Depends on the
   route promotion, because the menu's destinations must exist first.
+  **Sequenced** — building it against dialogs would be discarded work.
 - Non-interactive installer resolving a published release digest. Depends on
-  both Wave 2 deployment slices.
+  both Wave 2 deployment slices. **Sequenced** — its behaviour is defined by
+  the amended supply-chain policy and the separated compose layout.
 
 Later waves are refined only after the current wave's evidence changes the
 baseline, following the rolling-wave rule above.
