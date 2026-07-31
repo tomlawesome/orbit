@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
-import { z } from "zod";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -15,7 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { defaultSections } from "@/lib/domain";
+import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import {
   itemActivitySchema,
   workspaceSchema,
@@ -23,69 +22,15 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
-import { isInstanceAdministrator } from "@/server/authorization";
 import { planOwnershipTransfer } from "@/server/household-ownership";
-
-const uuidSchema = z.uuid();
-
-function validUuid(value: string): boolean {
-  return uuidSchema.safeParse(value).success;
-}
-
-function requireUuid(value: string, field: string): string {
-  if (!validUuid(value)) throw new AppError("invalid_identifier", `${field} is not a valid identifier`, 422);
-  return value;
-}
-
-function sectionSlug(name: string, id: string): string {
-  const normalized = name.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_-]+/g, "-");
-  return `${normalized || "section"}-${id.slice(0, 8)}`;
-}
-
-async function membershipRole(userId: string, householdId: string): Promise<"owner" | "member"> {
-  const [membership] = await getDb()
-    .select({ role: memberships.role })
-    .from(memberships)
-    .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId)))
-    .limit(1);
-  if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
-  return membership.role;
-}
-
-async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false): Promise<void> {
-  requireUuid(householdId, "Household");
-  if (await isInstanceAdministrator(userId)) return;
-  const role = await membershipRole(userId, householdId);
-  if (ownerOnly && role !== "owner") {
-    throw new AppError("owner_required", "Only a household owner can make this change", 403);
-  }
-}
-
-async function createInitialHousehold(userId: string, sessionId: string): Promise<string> {
-  const householdId = randomUUID();
-  await getDb().transaction(async (transaction) => {
-    await transaction.insert(households).values({
-      id: householdId,
-      name: "My home",
-      timezone: "Europe/London",
-      defaultCurrency: "GBP",
-      setupCompleted: false,
-    });
-    await transaction.insert(memberships).values({ householdId, userId, role: "owner" });
-    await transaction.insert(sections).values(defaultSections.map((section, position) => ({
-      id: randomUUID(),
-      householdId,
-      slug: section.id,
-      name: section.name,
-      icon: section.icon,
-      accent: section.accent,
-      position,
-      visible: section.visible,
-    })));
-    await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
-  });
-  return householdId;
-}
+import {
+  acquireActiveHouseholdLock,
+  requireHouseholdAccess,
+  requireUuid,
+  sectionSlug,
+  validUuid,
+} from "@/server/workspace-access";
+import { isInstanceAdministrator } from "@/server/authorization";
 
 /**
  * Reconstructs the normalized database rows into the UI's versioned workspace
@@ -99,18 +44,35 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     timezone: households.timezone,
     currency: households.defaultCurrency,
     onboardingComplete: households.setupCompleted,
+    deletionRequestedAt: households.deletionRequestedAt,
+    deleteAfter: households.deleteAfter,
   };
   const householdRows = administrator
-    ? await getDb().select(householdSelection).from(households).orderBy(asc(households.createdAt))
+    ? await getDb().select(householdSelection).from(households).where(isNull(households.deletionRequestedAt)).orderBy(asc(households.createdAt))
     : await getDb().select(householdSelection)
       .from(memberships)
       .innerJoin(households, eq(households.id, memberships.householdId))
-      .where(eq(memberships.userId, userId))
+      .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt)))
       .orderBy(asc(households.createdAt));
 
+  const recoverableHouseholds = administrator
+    ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
+    : await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households)
+      .leftJoin(memberships, and(eq(memberships.householdId, households.id), eq(memberships.userId, userId)))
+      .where(and(
+        isNotNull(households.deletionRequestedAt),
+        sql`${households.deleteAfter} > now()`,
+        or(eq(memberships.role, "owner"), eq(households.deletionRequestedByUserId, userId)),
+      )).orderBy(asc(households.deleteAfter));
+
   if (!householdRows.length) {
-    const initialId = await createInitialHousehold(userId, sessionId);
-    return readWorkspace(userId, sessionId, initialId);
+    return workspaceSchema.parse({
+      version: 1,
+      householdLanding: "choose",
+      activeHouseholdId: null,
+      households: [],
+      recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
+    });
   }
 
   const householdIds = householdRows.map((household) => household.id);
@@ -122,7 +84,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(sections)
       .where(and(inArray(sections.householdId, householdIds), isNull(sections.archivedAt)))
       .orderBy(asc(sections.position)),
-    getDb().select().from(items).where(inArray(items.householdId, householdIds)).orderBy(desc(items.updatedAt)),
+    getDb().select().from(items).where(and(inArray(items.householdId, householdIds), eq(items.requiresReview, false))).orderBy(desc(items.updatedAt)),
     getDb().select().from(dueEvents)
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),
@@ -151,6 +113,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
 
   const activitiesByHousehold = new Map<string, ItemActivity[]>();
   for (const entry of activityRows) {
+    // Instance-wide audit records have no household and never appear here.
+    if (!entry.householdId) continue;
     const candidate = itemActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
     if (!candidate.success) continue;
     const current = activitiesByHousehold.get(entry.householdId) ?? [];
@@ -160,7 +124,9 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
 
   return workspaceSchema.parse({
     version: 1,
+    householdLanding: "active",
     activeHouseholdId,
+    recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
@@ -200,6 +166,8 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           && member.role === "owner"
         )),
         onboardingComplete: household.onboardingComplete,
+        deletionRequestedAt: household.deletionRequestedAt?.toISOString(),
+        deleteAfter: household.deleteAfter?.toISOString(),
         sections: sectionRows.filter((section) => section.householdId === household.id).map((section) => ({
           id: section.id,
           name: section.name,
@@ -232,6 +200,13 @@ export async function applyWorkspaceCommand(
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
+      const [recoverableName] = await transaction.select({ id: households.id }).from(households)
+        .where(and(
+          isNotNull(households.deletionRequestedAt),
+          sql`${households.deleteAfter} > now()`,
+          sql`lower(${households.name}) = lower(${command.household.name.trim()})`,
+        )).limit(1);
+      if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
       await transaction.insert(households).values({
         id: householdId,
         name: command.household.name,
@@ -268,9 +243,10 @@ export async function applyWorkspaceCommand(
   const householdId = command.householdId;
 
   await getDb().transaction(async (transaction) => {
-    const recordActivity = async (itemId: string, activity: ItemActivity) => {
+    await acquireActiveHouseholdLock(transaction, householdId);
+    const recordActivity = async (itemId: string, activity: ItemActivity, requireInsert = false) => {
       const entityId = requireUuid(itemId, "Item");
-      await transaction.insert(auditLog).values({
+      const values = {
         id: validUuid(activity.id) ? activity.id : randomUUID(),
         householdId,
         actorUserId: userId,
@@ -279,7 +255,17 @@ export async function applyWorkspaceCommand(
         action: activity.kind,
         changes: { activity },
         createdAt: new Date(activity.occurredAt),
-      }).onConflictDoNothing();
+      };
+      if (requireInsert) {
+        const [inserted] = await transaction.insert(auditLog).values(values)
+          .onConflictDoNothing({ target: auditLog.id })
+          .returning({ id: auditLog.id });
+        if (!inserted) {
+          throw new AppError("version_conflict", "This completion identity is already in use", 409);
+        }
+        return;
+      }
+      await transaction.insert(auditLog).values(values).onConflictDoNothing();
     };
 
     if (command.type === "household.activate") {
@@ -462,21 +448,64 @@ export async function applyWorkspaceCommand(
 
     const itemId = requireUuid(command.itemId, "Item");
     const [current] = await transaction.select().from(items)
-      .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+      .where(and(eq(items.id, itemId), eq(items.householdId, householdId)))
+      .for("update")
+      .limit(1);
     if (!current) throw new AppError("item_not_found", "That item is not available", 404);
+
+    if (command.type === "item.complete") {
+      // The completion key is the idempotency boundary. Lock it before reading
+      // so a replay or cross-item reuse cannot race the first completion.
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:item-completion:${command.activity.id}`}, 0))`);
+      const [existingCompletion] = await transaction.select({ householdId: dueEvents.householdId, itemId: dueEvents.itemId })
+        .from(dueEvents)
+        .where(eq(dueEvents.completionKey, command.activity.id))
+        .for("update")
+        .limit(1);
+      if (existingCompletion) {
+        if (existingCompletion.householdId !== householdId || existingCompletion.itemId !== itemId) {
+          throw new AppError("version_conflict", "This completion was already used for another item", 409);
+        }
+        return;
+      }
+      if (validUuid(command.activity.id)) {
+        const [existingAudit] = await transaction.select({ id: auditLog.id })
+          .from(auditLog)
+          .where(eq(auditLog.id, command.activity.id))
+          .for("update")
+          .limit(1);
+        if (existingAudit) {
+          throw new AppError("version_conflict", "This completion identity is already in use", 409);
+        }
+      }
+    }
+
+    if (current.version !== command.expectedVersion) {
+      throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
+    }
 
     if (command.type === "item.archive") {
       await transaction.update(items).set({ status: "archived", version: sql`${items.version} + 1`, updatedAt: new Date() })
-        .where(eq(items.id, itemId));
+        .where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
 
     if (command.type === "item.complete") {
       const [currentEvent] = await transaction.select().from(dueEvents)
-        .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).orderBy(asc(dueEvents.dueDate)).limit(1);
+        .where(and(
+          eq(dueEvents.householdId, householdId),
+          eq(dueEvents.itemId, itemId),
+          isNull(dueEvents.completedAt),
+        ))
+        .orderBy(asc(dueEvents.dueDate))
+        .for("update")
+        .limit(1);
+      if (!currentEvent) {
+        throw new AppError("version_conflict", "This item has no active scheduled event", 409);
+      }
       let nextEventId: string | undefined;
-      if (command.nextDate && currentEvent) {
+      if (command.nextDate) {
         nextEventId = randomUUID();
         await transaction.insert(dueEvents).values({
           id: nextEventId,
@@ -494,18 +523,17 @@ export async function applyWorkspaceCommand(
           nextEventId,
         }).where(eq(dueEvents.id, currentEvent.id));
       }
-      const kind = currentEvent?.kind ?? (current.serviceDate ? "service" : current.renewalDate ? "renewal" : undefined);
       await transaction.update(items).set({
         costMinor: command.costMinor ?? current.costMinor,
         status: "active",
         snoozedUntil: null,
         recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,
-        ...itemDates(command.nextDate ? kind : undefined, command.nextDate),
+        ...itemDates(command.nextDate ? currentEvent.kind : undefined, command.nextDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       if (!command.nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, command.activity, true);
       return;
     }
 
@@ -517,7 +545,7 @@ export async function applyWorkspaceCommand(
         ...itemDates(kind, command.dueDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       const [event] = await transaction.select({ id: dueEvents.id }).from(dueEvents)
         .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).limit(1);
       if (event) {
@@ -534,7 +562,7 @@ export async function applyWorkspaceCommand(
         snoozedUntil: command.snoozedUntil,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
@@ -544,7 +572,7 @@ export async function applyWorkspaceCommand(
         status: command.status,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
-      }).where(eq(items.id, itemId));
+      }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
       return;
     }
@@ -592,7 +620,10 @@ export async function listRegisteredUserCandidates(userId: string, householdId: 
     displayName: users.displayName,
     avatarUrl: users.avatarUrl,
   }).from(users)
-    .where(memberIds.length ? notInArray(users.id, memberIds) : sql`true`)
+    .where(and(
+      isNull(users.disabledAt),
+      memberIds.length ? notInArray(users.id, memberIds) : sql`true`,
+    ))
     .orderBy(asc(users.displayName))
     .limit(500);
 }
@@ -602,22 +633,25 @@ export async function addHouseholdMember(userId: string, householdId: string, me
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
   await getDb().transaction(async (transaction) => {
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
-    );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
+      disabledAt: users.disabledAt,
     }).from(users).leftJoin(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
     ).where(eq(users.id, userId)).limit(1);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
+    }
     if (!actor?.administrator && actor?.role !== "owner") {
       throw new AppError("owner_required", "Only the current household owner can add members", 403);
     }
-    const [registered] = await transaction.select({ id: users.id }).from(users)
+    const [registered] = await transaction.select({ id: users.id, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
     if (!registered) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
+    if (registered.disabledAt) throw new AppError("account_disabled", "That Orbit account is disabled", 409);
     await transaction.insert(memberships).values({
       householdId: validHouseholdId,
       userId: targetUserId,
@@ -628,33 +662,46 @@ export async function addHouseholdMember(userId: string, householdId: string, me
 }
 
 export async function removeHouseholdMember(userId: string, householdId: string, memberUserId: string): Promise<HouseholdMember[]> {
-  await requireHouseholdAccess(userId, householdId, true);
+  await requireHouseholdAccess(userId, householdId);
   const validHouseholdId = requireUuid(householdId, "Household");
   const targetUserId = requireUuid(memberUserId, "Member");
+  let departed = false;
   await getDb().transaction(async (transaction) => {
-    await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
-    );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const [actor] = await transaction.select({
       role: memberships.role,
       administrator: users.isInstanceAdmin,
+      disabledAt: users.disabledAt,
     }).from(users).leftJoin(
       memberships,
       and(eq(memberships.userId, users.id), eq(memberships.householdId, validHouseholdId)),
     ).where(eq(users.id, userId)).limit(1);
-    if (!actor?.administrator && actor?.role !== "owner") {
-      throw new AppError("owner_required", "Only the current household owner can remove members", 403);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
     }
     const [target] = await transaction.select({ role: memberships.role }).from(memberships)
       .where(and(eq(memberships.householdId, validHouseholdId), eq(memberships.userId, targetUserId)))
       .limit(1);
     if (!target) throw new AppError("member_not_found", "That member is not part of this household", 404);
     if (target.role === "owner") throw new AppError("owner_protected", "The household owner cannot be removed", 409);
+    if (!actor?.administrator && actor?.role !== "owner" && targetUserId !== userId) {
+      throw new AppError("owner_required", "Only the current household owner can remove other members", 403);
+    }
     await transaction.delete(memberships).where(and(
       eq(memberships.householdId, validHouseholdId),
       eq(memberships.userId, targetUserId),
     ));
+    await transaction.insert(auditLog).values({
+      householdId: validHouseholdId,
+      actorUserId: userId,
+      entityType: "membership",
+      entityId: validHouseholdId,
+      action: targetUserId === userId ? "member_left" : "member_removed",
+      changes: { targetUserId },
+    });
+    departed = targetUserId === userId;
   });
+  if (departed) return [];
   return listHouseholdMembers(userId, householdId);
 }
 
@@ -673,14 +720,20 @@ export async function transferHouseholdOwnership(
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:household-owner:${validHouseholdId}`}, 0))`,
+      sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`,
     );
+    await acquireActiveHouseholdLock(transaction, validHouseholdId);
     const householdMembers = await transaction.select({
       userId: memberships.userId,
       role: memberships.role,
-    }).from(memberships).where(eq(memberships.householdId, validHouseholdId));
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin })
+      disabledAt: users.disabledAt,
+    }).from(memberships).innerJoin(users, eq(users.id, memberships.userId))
+      .where(eq(memberships.householdId, validHouseholdId));
+    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
       .from(users).where(eq(users.id, userId)).limit(1);
+    if (!actor || actor.disabledAt) {
+      throw new AppError("household_not_found", "That household is not available", 404);
+    }
     const plan = planOwnershipTransfer(
       householdMembers,
       userId,

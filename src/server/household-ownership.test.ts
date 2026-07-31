@@ -30,4 +30,14 @@ describe("household ownership transfer", () => {
       "Ownership can only be transferred",
     );
   });
+
+  it("rejects a disabled target before planning a transfer", () => {
+    const disabledMembers = members.map((member) => (
+      member.userId === "member" ? { ...member, disabledAt: new Date("2026-01-01T00:00:00Z") } : member
+    ));
+
+    expect(() => planOwnershipTransfer(disabledMembers, "owner", "member", false)).toThrowError(
+      expect.objectContaining({ code: "account_disabled", status: 409 }),
+    );
+  });
 });

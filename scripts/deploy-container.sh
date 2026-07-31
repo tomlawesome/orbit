@@ -20,12 +20,24 @@ fail() {
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 
+if [[ "$mode" == "--build" ]]; then
+  export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
+else
+  configured_image="${ORBIT_IMAGE:-$(sed -n 's/^ORBIT_IMAGE=//p' "$environment_file" | tail -n 1)}"
+  [[ "$configured_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
+    fail "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest."
+  export ORBIT_IMAGE="$configured_image"
+fi
+
+bash scripts/configure.sh
+
 compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
-# Prepare the candidate image before touching a running deployment.
+# Prepare the selected application image before touching a running deployment.
 compose pull orbit-db
+compose pull orbit-clamav
 if [[ "$mode" == "--build" ]]; then
   bash scripts/build-container.sh
 else
@@ -41,7 +53,7 @@ if [[ -n "$(compose ps --status running --quiet orbit-db)" ]]; then
 fi
 
 if ! compose up --detach --no-build --wait --wait-timeout 180; then
-  printf 'Orbit deploy: the candidate did not become healthy.\n' >&2
+  printf 'Orbit deploy: the application image did not become healthy.\n' >&2
   compose ps >&2 || true
   if [[ -n "$backup_path" ]]; then
     printf 'Recovery point: %s\n' "$backup_path" >&2

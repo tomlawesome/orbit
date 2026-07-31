@@ -39,19 +39,21 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scrip
 
 The installer downloads Orbit into the current directory, creates the
 Orbit-specific `.env-orbit` configuration when needed, generates independent
-256-bit session and PostgreSQL secrets, and asks whether to build the
+256-bit session, PostgreSQL, and document-encryption secrets, and asks whether to build the
 application container locally:
 
 - answer **Y/Yes** (or press Enter) to pull current base images and build
   the `orbit-app` service from source;
-- answer **N/No** to pull `ghcr.io/tomlawesome/orbit:latest` from GitHub
-  Container Registry instead.
+- answer **N/No** only after setting `ORBIT_IMAGE` to an exact published
+  `registry/repository@sha256:...` digest. Orbit deliberately has no implicit
+  `latest` deployment default.
 
-It then starts the `orbit` application container and the official
-`orbit-postgres` PostgreSQL container in the background and displays their
-status. Development images target 64-bit x86 (`linux/amd64`) for faster
-iteration. Versioned releases support both `linux/amd64` and `linux/arm64`;
-ARM64 images can also be published with the manual workflow when required.
+It then starts the `orbit` application container, the official
+`orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
+in the background and displays their status. Development and routine preview
+images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
+only after a dedicated exact-image validation path is enabled for that
+architecture.
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
@@ -94,15 +96,16 @@ become urgent.
   across Orbit After Dark, Verdant, Coast, Berry, and Ember colourways, three
   in-app text sizes, and traditional or theme-matched due-date heat maps.
 - **A complete record of care** — item details, schedule history, activity
-  timelines, archived records, reminders, and notification state.
-- **Useful even when disconnected** — an installable PWA with IndexedDB
-  snapshots, queued offline changes, explicit sync state, an offline shell, and
-  service-worker push handling.
+  timelines, archived records, reminders, notification state, and encrypted
+  supporting documents.
+- **Installable without private offline storage** — a PWA shell and
+  service-worker push handling, while authenticated workspace data remains
+  server-authoritative and changes are never queued for later replay.
 - **Private by design** — provider-neutral OIDC, opaque server-side sessions,
   PKCE, signed token validation, same-origin enforcement, CSRF protection, and
   authenticated household APIs.
 
-## One app. One standard database.
+## One app. Standard supporting services.
 
 Orbit deliberately keeps the operational footprint small:
 
@@ -111,23 +114,32 @@ flowchart LR
     browser["Browser or installed PWA"]
     orbit["orbit application container"]
     postgres[("orbit-postgres")]
+    documents[("encrypted document volume")]
+    scanner["official ClamAV scanner"]
     identity["OIDC identity provider"]
     delivery["SMTP and Web Push providers"]
 
     browser <-->|HTTPS| orbit
     orbit <-->|PostgreSQL| postgres
+    orbit -->|ciphertext only| documents
+    orbit -->|quarantined stream| scanner
     orbit <-->|OpenID Connect| identity
     orbit -->|Notifications| delivery
 ```
 
 - `orbit` is the complete Orbit application: interface, authenticated
   APIs, versioned migrations, and notification scheduler. It can be built from
-  source or pulled as `ghcr.io/tomlawesome/orbit:latest`.
-- `orbit-postgres` is the unmodified official `postgres:17-alpine` image with a
-  persistent volume.
+  source or pulled only when `ORBIT_IMAGE` names an exact registry digest.
+- `orbit-postgres` is the digest-pinned official PostgreSQL 17 Alpine image
+  with a persistent volume.
+- `orbit-clamav` is the official scanner image. It receives only quarantined
+  file streams over the private Compose network and has no published host port,
+  database credentials, document volume, or Orbit secrets.
 
-There is no custom PostgreSQL image and no separate backend container to
-maintain.
+There is no custom PostgreSQL image and no separate Orbit frontend/backend pair
+to maintain. ClamAV is enabled by default and normally needs approximately
+4 GiB of memory; administrators can explicitly disable it, but Orbit displays a
+persistent warning and marks subsequently uploaded files as unscanned.
 
 ## Run with Docker
 
@@ -138,14 +150,17 @@ bash scripts/configure.sh
 ```
 
 This creates `.env-orbit` plus the private `.orbit-secrets` directory without
-starting containers. Configure your OIDC provider in `.env-orbit`. SMTP and
-VAPID values are required when you are ready to exercise email and browser-push
-delivery.
+starting containers. It also runs the selected Orbit image once, with only a
+key-generation command, to generate and persist Orbit's VAPID Web Push key
+pair on first setup: the private key stays in `.orbit-secrets` and only the
+public key is written to `.env-orbit`. Configure your OIDC provider in
+`.env-orbit`. SMTP is required when you are ready to exercise email delivery.
 
 ### 2. Start Orbit
 
 ```sh
-docker compose --env-file .env-orbit up --build
+ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
+  docker compose --env-file .env-orbit up --build
 ```
 
 Open `http://<docker-host-ip>:3000` from another device, or
@@ -159,6 +174,47 @@ to the public internet.
 
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
+
+### Optional local processing stack
+
+The standard stack includes private ClamAV scanning. Tika OCR/text extraction
+and Ollama are deliberately separate because they increase host memory and are
+never needed for normal operation. To start both optional services, add this to
+`.env-orbit` before starting them:
+
+```sh
+TIKA_URL=http://orbit-tika:9998
+# Choose a local model only after checking its size, licence and host capacity.
+OLLAMA_MODEL=<a-local-model-name>
+```
+
+Then launch the full local stack:
+
+```sh
+docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.full.yml \
+  --profile processing --profile ai up -d
+```
+
+The services have no published host ports. Tika is attached only to a dedicated
+internal processing network shared with Orbit, so it has no route to the
+database, sibling services on the default network, or external networks.
+Ollama remains reachable only on the private default Compose network. Its
+volume is persistent, local-only, uses no cloud models, and is bounded to 2
+CPUs and 6 GiB by default. It does not download a model automatically. After
+the server reports healthy, pull the model selected above explicitly:
+
+```sh
+docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.full.yml \
+  exec orbit-ollama sh -ec 'test -n "$ORBIT_OLLAMA_MODEL"; ollama pull "$ORBIT_OLLAMA_MODEL"'
+```
+
+This prepares the optional infrastructure only. Current Orbit releases use
+Tika for bounded review evidence; they do not send document text to Ollama or
+permit it to create or update household data. Stop and remove the optional
+containers with the same Compose arguments followed by `down`; omit `--volumes`
+to retain downloaded models.
 
 > [!IMPORTANT]
 > Keep `APP_URL`, the address used in the browser, and the OIDC callback host
@@ -210,17 +266,22 @@ Orbit already includes:
   signed-out visitors;
 - production health checks, standalone Next.js output, a purpose-built browser
   favicon, and version-controlled migrations.
+- bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
+  AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
+  retention purge, and storage reconciliation.
 
-For authenticated users, Orbit retains a user-scoped IndexedDB snapshot and
-synchronises user-scoped queued offline changes. Production images contain no
-sample household items or seeded fake records.
+Orbit does not retain authenticated workspace snapshots or queued changes in
+app-controlled browser storage. It purges the legacy preview-build IndexedDB
+database before session bootstrap and local logout, and its service worker
+excludes API and authentication responses. Production images contain no sample
+household items or seeded fake records.
 
 ## Local development
 
 ### Requirements
 
 - Node.js 22 or later
-- pnpm 10
+- pnpm 11
 - PostgreSQL 17, or Docker for the database only
 
 ### Start the development stack
@@ -245,6 +306,7 @@ generated PostgreSQL password file as the container.
 
 ```sh
 bash scripts/test-backend.sh
+pnpm test:coverage
 bash scripts/test-frontend.sh
 bash scripts/test-all.sh
 ```
@@ -254,6 +316,17 @@ The frontend script targets `http://127.0.0.1:3000` by default; set
 `ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
 suite when no browser target is running.
 
+The authenticated acceptance checks use a separate Compose overlay with a
+disposable local OIDC provider. It performs discovery, PKCE, code exchange and
+signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
+against disposable data:
+
+```sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
 
@@ -262,17 +335,19 @@ bash scripts/install-test-browser.sh
 bash scripts/test-frontend.sh
 ```
 
-The current suite contains 51 unit tests across authentication, environment
-and secret validation, database configuration, recurrence, preferences,
-notifications, workspace commands, and the notification worker. Playwright
-also verifies the signed-out privacy boundary in desktop and mobile Chromium
-and runs automated WCAG A/AA checks.
+The current measured suite and its known gaps are recorded in the
+[engineering baseline](docs/engineering-baseline.md). Playwright verifies
+signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
+profile for authenticated household-lifecycle acceptance. Coverage is
+diagnostic while the database/API integration baseline is established; it is
+not an arbitrary release percentage.
 
-Product directions intentionally deferred until after the initial completion
-pass are recorded in the [feature register](docs/feature-register.md). The
-current delivery phase, agreed architecture, unresolved decisions, test gates,
-and implementation order are maintained in the version-controlled
-[implementation plan](docs/implementation-plan.md).
+The [v1 charter](docs/v1-charter.md) defines the supported release,
+[architecture and ADRs](docs/architecture.md) record durable system decisions,
+and the [quality strategy](docs/quality-strategy.md) defines test and CI
+evidence. GitHub milestones and issues own delivery status. Product directions
+outside the stable contract remain in the
+[feature register](docs/feature-register.md).
 
 ## Configuration
 
@@ -291,11 +366,25 @@ and add a matching read-only secret mount to the Compose service.
 | Variable | Used by | Purpose | Example value |
 | --- | --- | --- | --- |
 | `APP_URL` | Orbit | Canonical browser origin used for cookies and request validation. Use HTTPS except on loopback. | `https://orbit.example.com` |
+| `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack overrides this to `/run/secrets/...`. | `.orbit-secrets/session-secret` |
 | `SESSION_TTL_SECONDS` | Orbit | Login-session lifetime in seconds. | `604800` |
+| `DOCUMENTS_ROOT` | Orbit | Durable encrypted-document root inside the container. | `/var/lib/orbit/documents` |
+| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Ephemeral plaintext quarantine; Compose supplies a private `tmpfs`. | `/tmp/orbit-document-quarantine` |
+| `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
+| `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file under `/run/secrets`. | `.orbit-secrets/document-kek` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Maximum bytes accepted for one document. | `26214400` |
+| `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Maximum retained document bytes for one household. | `5368709120` |
+| `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Maximum retained document bytes for the instance. | `21474836480` |
+| `DOCUMENT_RETENTION_DAYS` | Orbit | Soft-delete interval before irreversible document purge. | `30` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` fails closed when ClamAV is unavailable; `disabled` is an explicit warned bypass. | `required` |
+| `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
+| `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
+| `CLAMAV_TIMEOUT_MS` | Orbit | Maximum malware-scan duration per upload. | `30000` |
+| `CLAMAV_MEMORY_LIMIT` | Compose | Memory limit assigned to the scanner container. | `4g` |
 | `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
 | `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
 | `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
@@ -314,10 +403,19 @@ and add a matching read-only secret mount to the Compose service.
 | `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | ID-token claim indicating whether the email is verified. | `email_verified` |
 | `OIDC_NAME_CLAIM` | Orbit | ID-token claim used as the registered user’s display name. | `name` |
 | `OIDC_AVATAR_CLAIM` | Orbit | Optional ID-token claim containing the avatar URL. | `picture` |
-| `SMTP_URL` | Worker | SMTP or SMTPS connection URL for email reminders. Leave empty when using `SMTP_URL_FILE`. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
-| `SMTP_URL_FILE` | Worker | File containing the SMTP connection URL. | `/run/secrets/orbit-smtp-url` |
+| `SMTP_HOST` / `SMTP_PORT` | Worker | SMTP server host and port. | `smtp.example.com` / `587` |
+| `SMTP_SECURITY` | Worker | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
+| `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
+| `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
-| `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. | `mailto:admin@example.com` |
+| `IMAP_HOST` / `IMAP_PORT` | Worker | Dedicated inbound mailbox host and implicit-TLS port. The port is configurable; verified TLS is mandatory. | `imap.example.com` / `993` |
+| `IMAP_USER` / `IMAP_PASSWORD_FILE` | Worker | Dedicated least-privilege mailbox login and mounted password file. | `orbit@example.com` / `/run/orbit-secrets/orbit-imap-password` |
+| `IMAP_ALIAS_CURRENT_GENERATION` | Orbit | Positive current HMAC alias generation. | `2` |
+| `IMAP_ALIAS_CURRENT_SECRET_FILE` | Orbit | Runtime secret file for the current alias key; use a distinct file from the previous key. | `/run/orbit-secrets/orbit-imap-alias-current-secret` |
+| `IMAP_ALIAS_PREVIOUS_GENERATION` | Orbit | Optional previous HMAC alias generation during an explicit bounded rotation. | `1` |
+| `IMAP_ALIAS_PREVIOUS_SECRET_FILE` | Orbit | Runtime secret file for the previous alias key. | `/run/orbit-secrets/orbit-imap-alias-previous-secret` |
+| `IMAP_ALIAS_PREVIOUS_EXPIRES_AT` | Orbit | Explicit UTC expiry for the previous generation; omit all previous-generation settings for emergency invalidation. | `2026-08-15T00:00:00.000Z` |
+| `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
 | `VAPID_PRIVATE_KEY_FILE` | Worker | File containing the private VAPID key. | `/run/secrets/orbit-vapid-private-key` |
@@ -328,24 +426,52 @@ and add a matching read-only secret mount to the Compose service.
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 | `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
-For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
-and valid OIDC, SMTP, and VAPID credentials. Back up the PostgreSQL volume and
-the `.orbit-secrets` directory before storing real household data.
+### IMAP alias rotation
 
-Create a validated, private PostgreSQL backup with:
+For a key rotation within the same recipient domain, increment the generation,
+deploy the new key as current and the exact old current tuple as previous, and
+set an explicit UTC expiry no more than 90 days away. Replicas with stale or
+mismatched generation, key, domain, or trusted-header configuration fail
+closed. At expiry, current ingestion continues and the previous tuple is
+retired; omit all previous settings for immediate emergency invalidation. A
+recipient-domain change cannot preserve old-domain aliases in v1: use a new
+generation/current-only deployment, which invalidates the old domain at once.
+
+Use `docker-compose.mail.yml` only after the SMTP, IMAP, and current alias
+secret files exist. Add `docker-compose.mail-alias-rotation.yml` only for the
+bounded previous-key transition. The complete operator procedure and
+production-like acceptance boundary are documented in
+[Orbit administrator operations](docs/administrator-operations.md).
+
+For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
+and valid OIDC, SMTP, and VAPID credentials. Keep recovery bundles outside the
+Docker host before storing real household data.
+
+Create a validated ordinary backup containing the PostgreSQL database and an
+encrypted document-volume archive:
 
 ```sh
 bash scripts/backup.sh
 ```
 
-Restore one transactionally while Orbit is stopped with:
+The ordinary backup deliberately excludes the document key and is useful only
+with the matching local key. Restore it transactionally while Orbit is stopped:
 
 ```sh
-bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.dump
+bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 ```
 
-Portable exports and future attached document files are separate from this
-database disaster-recovery backup.
+Create a separately stored, passphrase-protected recovery bundle when the
+backup must remain recoverable after loss of the host:
+
+```sh
+bash scripts/export-recovery-bundle.sh backups/orbit-YYYYMMDD-HHMMSS.tar
+bash scripts/import-recovery-bundle.sh backups/orbit-recovery-YYYYMMDD-HHMMSS.tar
+```
+
+The recovery-key envelope uses authenticated AES-256-GCM with scrypt. Neither
+the document key nor recovery passphrase is printed, placed in an environment
+variable, or passed as a process argument.
 
 Build or deploy the Compose application through the same guarded scripts used
 by CI:
@@ -359,6 +485,8 @@ bash scripts/deploy-container.sh --build
 
 See [Authentication and Authentik setup](docs/authentication.md) for provider
 configuration, endpoint behaviour, security details, and troubleshooting.
+See [Gitflow previews and stable promotion](docs/releasing.md) for
+the protected branch, test, manual-validation, and digest-promotion workflow.
 
 ## Before the first real launch
 

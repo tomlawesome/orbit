@@ -1,203 +1,232 @@
 # Orbit implementation plan
 
-This document is the version-controlled source of truth for active delivery
-work. Longer-term product directions remain in the
-[deferred feature register](feature-register.md). Decisions that affect an
-active phase must be recorded here or in a more focused document under
-`docs/`; they must not depend on a particular Codex task or local assistant
-memory.
+## Source-of-truth boundaries
 
-## Planning conventions
+This file defines delivery order and working policy. It does not repeat live
+feature status.
 
-- Keep only one active implementation phase.
-- Record agreed architecture before writing migrations or production data.
-- Mark completed work with the merge commit or pull request.
-- Move newly proposed product work to the feature register rather than
-  expanding the active phase silently.
-- Preserve Orbit's supported deployment shape: one Orbit application container
-  plus standard PostgreSQL. Established security or processing services may be
-  separate, replaceable containers.
-- Every phase must preserve household isolation, signed-out privacy,
-  auditability, backup/restore, and local-only document processing.
+- Product and release requirements: [v1 charter](v1-charter.md).
+- Current capability evidence and gaps:
+  [engineering baseline](engineering-baseline.md).
+- System boundaries and durable decisions:
+  [architecture](architecture.md) and [ADRs](adr/README.md).
+- Tests, CI and definition of done:
+  [quality strategy](quality-strategy.md).
+- Detailed product direction: [feature register](feature-register.md).
+- Priority, ownership and delivery status: GitHub milestones and issues.
 
-## Current baseline
+Historical consolidation and handover status files were removed after their
+accepted decisions were incorporated here, in the architecture baseline, or in
+focused security/operations documents. Git history remains the historical
+record.
 
-The operational hardening and CI-gating pass is complete as of pull request
-[#1](https://github.com/tomlawesome/orbit/pull/1), merged as `5d6bbc8`.
+## Governance
 
-`main` now requires:
+Broad planning and systems decisions are protected Sol Extra High work under
+the root `AGENTS.md` and `.github/planning-governance.json`. Bounded
+implementation subagents default to Luna Extra High. A different subagent model
+requires fresh, explicit user approval before use.
 
-- a pull request;
-- successful `Static and unit checks`;
-- successful `Compose smoke test`;
-- resolved review conversations;
-- protection from force-push and deletion.
+Every implementable issue must define:
 
-Static analysis and unit tests run before container, browser, accessibility,
-and privacy checks. Pull-request runs never publish images. ARM64 publishing is
-reserved for versioned releases or an explicit manual request.
+- the user or operator outcome;
+- measurable acceptance criteria and explicit non-goals;
+- security, privacy and authorization considerations;
+- tests to write or characterize before implementation;
+- migration, compatibility, deployment, backup and documentation impact;
+- evidence required before closure.
 
-## Active phase: secure document management
+Work uses short-lived `codex/` branches created from and normally merged into
+protected `develop`. Versioned `release/*` branches move accepted release
+source through `main` and back to `develop`; `hotfix/*` branches start from
+`main` and merge into both. Long-lived consolidation branches are retired after
+their accepted changes reach `develop`.
 
-**Register entry:** `ORB-FUT-003`  
-**Status:** Planned; implementation not started  
-**Goal:** Attach durable, private, malware-scanned and encrypted documents to
-household items before adding email ingestion or automated extraction.
+## Delivery structure
 
-### Architecture
+### v1 Engineering Baseline
 
-1. Add a provider-neutral document storage interface.
-2. Implement a persistent local-volume provider first.
-3. Preserve an S3-compatible provider boundary without implementing S3 during
-   this phase.
-4. Store document metadata and lifecycle state in PostgreSQL.
-5. Use established ClamAV as a separate default scanner service; do not build
-   antivirus into the Orbit image.
-6. Keep parsing, OCR, and semantic extraction out of this phase.
+The initial baseline is issues
+[#10](https://github.com/tomlawesome/orbit/issues/10),
+[#11](https://github.com/tomlawesome/orbit/issues/11),
+[#12](https://github.com/tomlawesome/orbit/issues/12), and
+[#13](https://github.com/tomlawesome/orbit/issues/13).
 
-### Document lifecycle
+It establishes:
 
-```text
-receiving -> validating -> quarantined -> scanning -> encrypting -> available
-                  |              |           |
-                  +--------------+-----------+-> rejected
+- the focused self-hosted v1 contract;
+- an evidence-backed capability and API audit;
+- current architecture, trust boundaries and ADRs;
+- a risk-based quality and CI strategy;
+- issue and pull-request templates;
+- protected planning-model governance;
+- diagnostic coverage collection;
+- a small, risk-ordered GitHub roadmap.
 
-available -> pending_deletion -> deleted
-```
+### v1.0 roadmap
 
-State transitions must be explicit, transactional where possible, idempotent,
-and recoverable after container restarts. A reconciliation job handles
-interrupted uploads, missing blobs, and orphaned storage objects.
+The roadmap contains ten outcome-level epics:
 
-### Envelope encryption
+1. [identity, sessions, and authorization](https://github.com/tomlawesome/orbit/issues/14);
+2. [household and account lifecycle](https://github.com/tomlawesome/orbit/issues/15);
+3. [core items, schedules, and reminders](https://github.com/tomlawesome/orbit/issues/16);
+4. [secure documents and reviewed intake](https://github.com/tomlawesome/orbit/issues/17);
+5. [data integrity, migrations, backup, and recovery](https://github.com/tomlawesome/orbit/issues/18);
+6. [administration and observability](https://github.com/tomlawesome/orbit/issues/19);
+7. [accessible, responsive, and offline-safe experience](https://github.com/tomlawesome/orbit/issues/20);
+8. [CI, supply chain, release, and operator acceptance](https://github.com/tomlawesome/orbit/issues/21);
+9. [reviewed mail and document ingestion](https://github.com/tomlawesome/orbit/issues/22);
+10. [maintainability and bounded module seams](https://github.com/tomlawesome/orbit/issues/23).
 
-Application-level document encryption is required from the first production
-document; it is not deferred work.
+Only work close to delivery is decomposed. Later epics are refined when their
+acceptance criteria can be based on the current implementation rather than a
+speculative backlog.
 
-- Generate an independent random data-encryption key for every document.
-- Use a reviewed authenticated encryption construction, initially
-  AES-256-GCM.
-- Validate and malware-scan plaintext while it is quarantined, then encrypt it
-  before final durable storage.
-- Wrap each data-encryption key with an instance key-encryption key.
-- Store ciphertext in the document volume.
-- Store only the wrapped data key and versioned cryptographic metadata in
-  PostgreSQL.
-- Supply the instance key through a dedicated secret file. Never store it in
-  PostgreSQL or `.env-orbit`.
-- Version the envelope format, algorithms, and key identifiers from the first
-  release.
-- Rotate the instance key by rewrapping document keys rather than re-encrypting
-  all document bytes.
-- Treat key backup and recovery as a mandatory part of backup/restore.
+The completed first decomposed group is
+[#24](https://github.com/tomlawesome/orbit/issues/24) through
+[#28](https://github.com/tomlawesome/orbit/issues/28). GitHub owns its live
+status and closure evidence.
 
-This protects copied document volumes and database backups. It does not claim
-to protect plaintext from a fully compromised running Orbit instance.
+The active decomposed group is:
 
-### Upload and storage security
+- [#40 — conflict-safe item transitions and the manual item journey](https://github.com/tomlawesome/orbit/issues/40);
+- [#41 — deterministic reminder scheduling and bounded delivery](https://github.com/tomlawesome/orbit/issues/41);
+- [#42 — recoverable document purge and the secure document lifecycle](https://github.com/tomlawesome/orbit/issues/42);
+- [#43 — optional document-assisted editable item creation](https://github.com/tomlawesome/orbit/issues/43).
 
-- Stream uploads with bounded memory and request time.
-- Use generated opaque storage identifiers and prevent path traversal.
-- Inspect content instead of trusting filenames or supplied media types.
-- Start with a deliberately narrow supported set such as PDF, JPEG, PNG, and
-  WebP.
-- Apply configurable per-file, per-household, and instance storage limits.
-- Reject executables, archives, MIME mismatches, decompression bombs, and
-  unsupported active content.
-- Keep unfinished and unscanned files unavailable to users.
-- If ClamAV is unavailable, remain quarantined and fail closed.
-- Never give scanner services database credentials, Orbit secrets, Docker
-  socket access, or unrestricted host access.
+The remaining Wave 2 identity evidence stays within
+[#14](https://github.com/tomlawesome/orbit/issues/14) because it closes the
+existing identity outcome rather than introducing a new delivery slice.
 
-### Authorization and delivery
+GitHub milestone assignment is administrative metadata rather than a second
+status source: issues #10–#13 and this baseline pull request belong to `v1
+Engineering Baseline`; v1 roadmap and implementation issues belong to `v1.0`.
 
-- Require authentication and current household permission for every document
-  operation.
-- Recheck authorization when opening every byte stream.
-- Do not issue public or reusable document URLs.
-- Default downloads to safe attachment headers rather than inline rendering.
-- Do not reveal document existence, identifiers, metadata, or error
-  distinctions to signed-out or unauthorized callers.
-- Audit upload, scan result, download, attachment, deletion, restoration,
-  retention purge, and key-rotation events without logging document contents.
+## Rolling planning and delegation
 
-### Product scope
+Delivery uses a rolling-wave model:
 
-- Upload documents while creating or editing an item.
-- Display bounded progress and clear validation/scan states.
-- List document name, type, size, upload time, and safe operational state.
-- Download, remove, and—where policy permits—restore documents.
-- Support mobile file selection and camera capture without compromising the
-  compact PWA layout.
-- Give administrators scanner, storage, quota, reconciliation, and key-version
-  health without exposing document content.
+1. Sol Extra High maintains the portfolio-level risk order, dependencies,
+   release gates and durable architecture decisions.
+2. Only the next two to four implementable issues are made decision-complete.
+3. Bounded implementations default to Luna Extra High. Independent issues may
+   run concurrently only in isolated worktrees with disjoint file ownership.
+4. Sol Extra High reviews architecture and security consequences, then
+   integrates protected pull requests sequentially. A later concurrent branch
+   rebases onto the accepted earlier result before final validation.
+5. The next wave is refined only after the current wave's evidence changes the
+   baseline. Terra may perform bounded read-only or mechanical audits, but may
+   not replace Sol architecture work or Luna feature implementation.
 
-### Backup and retention
+This avoids both a stale hundred-issue backlog and repeated high-cost planning
+inside implementation. Handoffs must name permitted paths, protected paths,
+test obligations, hard stop conditions and the evidence required for Sol
+review.
 
-- Back up metadata and encrypted bytes consistently.
-- Keep the key-encryption key outside ordinary database and document-volume
-  backups, with an explicit recovery procedure.
-- Verify restored document hashes and encryption metadata before availability.
-- Test restoration with mixed document states.
-- Implement a bounded soft-delete window followed by irreversible purge once
-  the owner confirms the retention default.
+## Risk-ordered delivery waves
 
-### Test requirements
+### Wave 1 — operational data safety
 
-- Unit tests for state transitions, storage keys, validation, envelope
-  encryption, authentication failure, and key wrapping/rotation.
-- Authorization tests across households, roles, removed members, and signed-out
-  callers.
-- Tests for malicious names, traversal, MIME mismatch, oversized input,
-  truncated input, unsupported content, scanner outage, malware detection, and
-  interrupted processing.
-- Container integration using ClamAV's standard antivirus test signature.
-- Backup/restore round trip with byte hashes and encryption metadata.
-- Playwright upload, state display, download, deletion, mobile capture, and
-  signed-out privacy checks.
-- Existing static, unit, Compose, browser, accessibility, and privacy gates
-  remain required.
+- Completed issue #27 proves fresh migrations, the supported baseline upgrade,
+  migration idempotency and failure recording.
+- Completed issue #28 proves corrupt, wrong-key, mismatched-object and
+  interrupted recovery behaviour.
 
-### Delivery sequence
+The architecture is planned jointly under
+[ADR-0004](adr/0004-supported-upgrades-and-recoverable-restore.md). The two
+implementations were integrated in dependency order: #27 established the
+upgrade floor and rollback contract before #28's final recovery validation.
+Their accepted pull requests and protected workflow runs are the live closure
+evidence in GitHub.
 
-1. Write the threat model and confirm the unresolved policies below.
-2. Add schema migrations and the document lifecycle model.
-3. Implement and test the versioned encryption and storage interfaces.
-4. Add bounded quarantined uploads and content validation.
-5. Add the ClamAV adapter and default Compose service.
-6. Add authorized download, deletion, retention, and audit behaviour.
-7. Add item and mobile document interfaces.
-8. Extend backup, restore, reconciliation, health, and key-rotation tooling.
-9. Complete security, integration, browser, and accessibility testing.
-10. Deliver through a focused PR and the protected GitHub workflow.
+### Wave 2 — core authenticated vertical journeys
 
-### Decisions required before implementation
+The first implementation phase may run three disjoint Luna Extra High tasks in
+isolated worktrees:
 
-The owner should confirm these values before migrations or public APIs make
-them expensive to change:
+- #40 owns item state transitions, persistence and the authenticated manual
+  item journey;
+- #41 owns reminder materialization, claims, leases and provider contracts;
+- #42 owns document purge ordering, recovery and the authenticated secure
+  document lifecycle.
 
-- initial maximum file size;
-- initial instance/household quotas;
-- exact supported file formats;
-- default soft-delete retention period;
-- whether administrators may explicitly disable malware scanning;
-- key backup/recovery UX and the behaviour when the key is unavailable;
-- document-volume location and container ownership model.
+Sol Extra High integrates the resulting branches sequentially, with #40 first
+where shared workspace or browser fixtures overlap. Each later branch rebases
+onto the accepted release line and reruns its authoritative checks before
+merge.
 
-Recommended starting points are 25 MiB per file, PDF/JPEG/PNG/WebP, 30-day
-soft deletion, ClamAV enabled by default with fail-closed quarantine, and
-administrator-visible recovery guidance rather than automatic key export.
+Issue #43 is planned now but implementation starts only after #40 and #42 are
+accepted. A document is optional for each item, but the document-assisted
+workflow is required v1 scope. Suggestions extend the manual editor and secure
+document lifecycle; they never replace manual entry or persist an item before
+explicit submission.
 
-## Following phases
+In parallel, issue #14 closes successful atomic session refresh, logout and
+OIDC failure-route contracts. Representative Authentik or equivalent
+acceptance is then recorded against a digest-pinned preview using sanitized
+product/version and outcome evidence only. Production authentication remains
+provider-neutral; a provider-specific code path or security-policy change
+requires Sol Extra High review before implementation proceeds.
 
-After secure documents are complete:
+### Wave 3 — lifecycle, administration and operations
 
-1. `ORB-FUT-004` administrator operations and job visibility, where not already
-   delivered by the document phase.
-2. `ORB-FUT-002` mobile/PWA information-density improvements.
-3. `ORB-FUT-006` data portability, including encrypted document archives.
-4. `ORB-FUT-007` refined mobile document capture.
-5. `ORB-FUT-001` intelligent IMAP ingestion and outbound SMTP.
+- Complete issue #22 after #43 establishes the shared editable draft and review
+  contract. Dedicated-mailbox messages and attachments enter that same private
+  flow with authenticated identity, idempotent receipt, hostile-MIME bounds,
+  quarantine, bounded retry and explicit user approval. Mail receipt never
+  creates, attaches or merges an item automatically. ADR-0005 preserves the
+  prototype's essential hidden-until-reviewed behaviour using a private
+  user-owned ingestion draft rather than an archived household item. Deliver it
+  as sequential vertical slices: shared approval contract; receipt/identity
+  foundation; hostile attachment staging; IMAP review journey; then SMTP and
+  administration acceptance.
+- Complete issue #15 retention and purge behaviour after document lifecycle
+  evidence exists.
+- Complete issue #19 administration, redaction, degraded dependency and
+  corrective-action evidence against established failure states.
+- Continue issue #21 supply-chain reporting independently, but defer update,
+  rollback, operator acceptance and stable-promotion closure until Waves 1 and
+  2 are complete.
+- Treat issue #23 as a guardrail applied at demonstrated seams, not a
+  behaviour-neutral refactor project.
 
-Email ingestion must not precede secure storage, malware scanning, review,
-duplicate handling, and administrative job visibility.
+### Wave 4 — experience and release acceptance
+
+- Deliver issue #20 — Accessible, responsive, and offline-safe UX through
+  #87 — Authenticated accessibility and responsive UX and #88 — Remove private
+  workspace caching. V1 keeps an installable shell and push handling but makes
+  private workspace data online-authoritative; it purges legacy preview
+  storage and never queues failed changes. Execute page-specific assertions
+  only against stable item, document, mailbox and administration journeys.
+- Complete issue #21's protected CI evidence for dependency/secret policy,
+  SPDX output, exact-image vulnerability scanning, verified digest-bound
+  provenance and least-privilege workflow controls. Resolve the time-bounded
+  mutable image inventory through issue #80. Installation, update, rollback,
+  recovery and promotion acceptance wait for the feature-complete image.
+- Prepare the release-acceptance record structure now, but do not claim
+  representative provider/device/operator results before those checks run
+  against the exact versioned-release preview digest.
+- Cut a semantic versioned release branch only when all stable-v1 blockers are
+  closed, then accept and promote its exact preview digest.
+
+Issue #22 begins only after the manual item and document-assisted review
+contracts are accepted, but its dedicated-mailbox ingestion and review journey
+remain required before stable v1.
+
+## Pull-request lifecycle
+
+1. Select a ready issue and confirm its acceptance cases.
+2. Add a failing or characterization test at the cheapest effective layer.
+3. Implement the smallest vertical change.
+4. Run static, unit, relevant integration and targeted browser checks.
+5. Review the diff for security, data, dependency, migration and operational
+   surprises.
+6. Open a focused pull request linked to the issue.
+7. Merge only after required checks pass and conversations are resolved.
+8. Record any required preview or manual evidence before closing the issue.
+
+Previews provide ongoing deployment evidence while v1 is incomplete. Once the
+release scope is feature-complete, [the release policy](releasing.md) requires
+a versioned release branch, testing and deployment by immutable digest, merging
+the accepted source into both protected `main` and `develop`, and promotion
+without rebuilding.

@@ -1,9 +1,14 @@
-# Orbit deferred feature register
+# Orbit product direction register
 
-This register captures agreed product directions that are intentionally deferred
-until the initial completion pass is finished. Entries describe the intended
-outcome and important constraints; they are not commitments to a particular
-implementation.
+This register captures detailed possible or agreed product directions that do
+not belong in the concise release charter. An entry may be deferred or promoted
+into a release contract; its roadmap disposition makes that explicit. Entries
+describe intended outcomes and constraints, not implementation status or
+permission to expand an active issue.
+
+The [v1 charter](v1-charter.md) defines the release contract, the
+[engineering baseline](engineering-baseline.md) records dated evidence, and
+GitHub milestones/issues own live delivery status.
 
 ## Register conventions
 
@@ -14,24 +19,25 @@ Each entry records:
 - **Dependencies:** foundations that must exist before implementation.
 - **Decision status:** whether material architecture choices remain open.
 
-Changes should be delivered behind migrations and feature flags where partial
-deployment could expose unfinished behaviour. Every feature must preserve
-household isolation, signed-out privacy, auditability, and the supported
-deployment shape of one Orbit container plus standard PostgreSQL. Optional
-document or AI processors may be separate, administrator-selected services;
-they are opt-in deployment profiles rather than required parts of the core
-stack. Durable orchestration remains in Orbit's existing internal worker and
-PostgreSQL queues. Orbit must not require access to the Docker socket.
+Existing candidate code does not make a direction complete. Inclusion in the
+v1 contract requires a scoped issue, acceptance evidence, and any necessary ADR
+or threat-model update. Changes should use migrations and feature flags where
+partial deployment could expose unfinished behaviour. Every feature must
+preserve household isolation, signed-out privacy, auditability, and the
+supported deployment shape in ADR-0001. Orbit must not require access to the
+Docker socket.
 
-## ORB-FUT-001 — Intelligent email and document ingestion
+## ORB-FUT-001 — Reviewed email and document ingestion
 
-**Status:** Deferred
-**Priority:** High
-**Phase:** 5 — after secure document storage, parsing, extraction, and review
+**Roadmap disposition:** Required for the stable v1 gate
+**Priority:** Required core workflow
+**Phase:** 3 — after secure document storage, parsing, extraction, and review
 **Dependencies:** ORB-FUT-003, ORB-FUT-004
-**Decision status:** Architecture choices remain open
-**Objective:** Let a registered user forward household documents to Orbit and
-turn them into reviewed items with the original documents retained.
+**Decision status:** v1 architecture accepted in
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)
+**Objective:** Let a registered user forward household documents to Orbit, or
+upload them directly, and turn them into reviewed items with the original
+documents retained. Both sources use one editable draft-and-approval flow.
 
 ### Intended experience
 
@@ -80,9 +86,10 @@ Before creating an item, Orbit should rank possible matches using:
 - overlapping effective, expiry, renewal or service dates;
 - similarity to existing item titles and attached documents.
 
-Potential matches must produce a comparison screen with explicit choices to
-create a separate item, merge new information, or attach the documents without
-changing existing fields. Orbit must not silently merge uncertain records.
+Potential matches must produce a comparison screen. For v1 the explicit
+choices are to create a separate item or attach the documents without changing
+existing fields. Field-level merge remains deferred; if introduced later it
+must be separately reviewed and must never silently merge uncertain records.
 
 ### Security and privacy requirements
 
@@ -90,7 +97,10 @@ changing existing fields. Orbit must not silently merge uncertain records.
   spoofed. Provider authentication results, a dedicated forwarding address or
   token, and user confirmation should form the trust boundary.
 - Treat message bodies and documents as hostile input, including possible
-  prompt injection. Extraction must not grant documents access to application
+  prompt injection. This applies to every supported direct-upload format—PDF,
+  JPEG, and PNG—as well as mailbox PDFs and any text recovered through
+  OCR. ClamAV, parsers, and OCR reduce different risks but do not make content
+  trustworthy. Extraction must not grant documents access to application
   tools, secrets or unrelated records.
 - Apply message, attachment-count and decompressed-size limits; reject unsafe
   MIME types and archive bombs; and scan retained files for malware.
@@ -110,24 +120,28 @@ changing existing fields. Orbit must not silently merge uncertain records.
   and technical classifications only—never message bodies, subjects, extracted
   text, sensitive filenames, prompts, or model responses.
 
-### Architecture decisions required
+### Architecture decisions
 
-- IMAP polling versus IDLE, including reconnect and mailbox-cursor behaviour.
-- Separate IMAP and SMTP hosts, credentials and TLS requirements.
-- Dedicated per-instance mailbox versus unique per-user forwarding addresses.
-- Local-volume versus object-storage document backend, with a replaceable
-  storage interface.
-- OCR/document parsing service and structured extraction provider. These are
-  separate replaceable HTTP adapters; either may be local or remote.
-- Supported document types, maximum sizes and retention defaults.
-- Behaviour when the sender belongs to multiple households.
-- Instance-wide dedicated mailbox versus multiple administrator-managed
-  mailboxes. The safest first release uses one dedicated instance mailbox.
-- File-backed deployment configuration versus application-managed encrypted
-  mailbox credentials.
-- Whether SMTP must already be configured before IMAP ingestion is enabled.
-  The first implementation treats outbound SMTP as a prerequisite for receipts
-  and review notifications.
+[ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md) defines the v1
+boundary:
+
+- one dedicated instance mailbox using bounded polling and verified TLS;
+- a provider-preserved envelope-recipient header plus versioned HMAC per-user
+  aliases, with visible mail headers excluded from identity;
+- private user-owned encrypted staging rather than hidden household items;
+- transient direct-upload inspection and one source-aware approval contract;
+- PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
+  parts, safely rejected malformed PDF claims, five processing attempts, and
+  30-day pending-draft retention; direct upload separately retains PDF, JPEG,
+  and PNG support under the same hostile-content and indirect-injection
+  boundary;
+- explicit create-separate or attach-to-existing duplicate outcomes, without
+  automatic or field-level merge;
+- separate secret-backed SMTP configuration as an IMAP enablement prerequisite.
+
+Storage, scanner, and parser implementations remain replaceable through their
+existing interfaces. A sender with multiple households chooses the destination
+during review; receipt never guesses it.
 
 ### Safest implementation sequence
 
@@ -160,7 +174,7 @@ the reviewed draft.
 
 ## ORB-FUT-002 — Mobile and installed-PWA information density
 
-**Status:** Deferred
+**Roadmap disposition:** Basic responsive/accessibility quality is v1; enhanced PWA density remains future work
 **Priority:** High
 **Phase:** 2 — independent mobile polish
 **Dependencies:** Browser test coverage
@@ -195,7 +209,7 @@ desktop presentation.
 
 ## ORB-FUT-003 — Secure document-management foundation
 
-**Status:** Deferred
+**Roadmap disposition:** Core v1 capability with incomplete acceptance evidence
 **Priority:** Critical foundation
 **Phase:** 1
 **Dependencies:** Backup/restore hardening
@@ -252,14 +266,24 @@ foundation, not a deferred enhancement.
 
 ### Processing-service direction
 
-- **Baseline parser:** Apache Tika Server's official full container is the
-  conservative option for broad text/metadata extraction and Tesseract OCR.
-- **Advanced parser:** Docling Serve is an optional administrator-selected
-  adapter for richer layout and structured document conversion. Its CPU image
-  is materially larger, so it is not part of Orbit's default stack.
-- **Local semantic extraction:** Ollama is a possible optional provider because
-  its HTTP API supports schema-constrained structured outputs. Orbit also
-  supports a remote provider through the same narrow extraction interface.
+- **Default stack:** no parser, OCR, or model service is required. Orbit stays
+  as one application container plus PostgreSQL and its existing document
+  protection profile.
+- **First real-document trial:** an administrator may opt into one Apache Tika
+  full container. Orbit restricts it to bounded PDF/JPEG/PNG text and metadata
+  extraction; Tesseract OCR and embedded recursion are disabled even though
+  their binaries may exist in the pinned image. Output remains editable review
+  evidence, never an automatic write. Enabling OCR requires separate review
+  and bounded acceptance evidence.
+- **Advanced parser:** Docling Serve is a replacement parser, not a companion
+  to Tika. It is considered only if representative documents prove that Tika's
+  layout or table handling is insufficient; its large image excludes it from
+  the default stack.
+- **Local semantic extraction:** Ollama remains an optional later provider for
+  schema-constrained draft fields after text extraction. It is neither OCR nor
+  a default container. `docker-compose.full.yml` now supplies an opt-in,
+  private local service for evaluation, but Orbit has no Ollama client yet and
+  must not infer or write household data from a model response.
 - All images are pinned to reviewed release tags, isolated on an internal
   egress-denied network, configured with request/page/size limits, CPU/memory
   quotas and timeouts, and updated independently of Orbit. Supported releases
@@ -268,13 +292,16 @@ foundation, not a deferred enhancement.
 
 ## ORB-FUT-004 — Administrator operations and job visibility
 
-**Status:** Deferred
+**Roadmap disposition:** Core v1 operations capability with incomplete acceptance evidence
 **Priority:** High
 **Phase:** 1
 **Dependencies:** Existing administrator authorization
 **Decision status:** Product direction agreed
 **Objective:** Make background work diagnosable without exposing secrets or
 document contents in logs.
+
+The binding implementation and security contract is recorded in
+[administrator operations](administrator-operations.md).
 
 ### Scope
 
@@ -296,7 +323,7 @@ document contents in logs.
 
 ## ORB-FUT-005 — Account and household lifecycle
 
-**Status:** Partially delivered
+**Roadmap disposition:** Core v1 lifecycle capability with incomplete acceptance evidence
 **Priority:** Medium
 **Phase:** 2
 **Dependencies:** Export and backup tooling
@@ -308,7 +335,12 @@ Ownership transfer to an existing household member is delivered. Remaining
 scope includes:
 
 - administrator account disable/enable with immediate session revocation;
-- user departure from households they do not own;
+  **delivered** — disabled accounts cannot sign in or retain an Orbit session,
+  remain available to administrators for safe re-enablement, and cannot be used
+  to leave the instance without an active administrator;
+- user departure from households they do not own; **delivered** — members can
+  leave their own household, while owners remain protected from leaving it
+  ownerless;
 - protection against leaving any household without an owner;
 - protected household deletion with typed confirmation and a retention window;
 - rules for identities removed or renamed by the OIDC provider;
@@ -320,7 +352,7 @@ scope includes:
 
 ## ORB-FUT-006 — Data portability
 
-**Status:** Deferred
+**Roadmap disposition:** Portable export/import is post-v1; disaster-recovery backup/restore remains v1
 **Priority:** Medium
 **Phase:** 2
 **Dependencies:** ORB-FUT-003 for document-inclusive archives
@@ -340,7 +372,7 @@ being locked to Orbit.
 
 ## ORB-FUT-007 — Mobile document capture
 
-**Status:** Deferred
+**Roadmap disposition:** Basic mobile upload is v1; enhanced capture workflow is post-v1
 **Priority:** Medium
 **Phase:** 3
 **Dependencies:** ORB-FUT-002, ORB-FUT-003
@@ -358,7 +390,7 @@ phone quick and readable.
 
 ## ORB-FUT-008 — CI and release-host portability
 
-**Status:** Deferred fallback
+**Roadmap disposition:** Contingency only; GitHub-hosted validation remains the supported v1 path
 **Priority:** Low
 **Phase:** Operational, if GitHub-hosted validation becomes constrained
 **Dependencies:** Portable test scripts and container build
@@ -382,7 +414,58 @@ This option should only be activated if GitHub availability, policy, storage,
 or runner constraints provide a material reason. Standard GitHub-hosted runners
 for the public repository remain the simpler default.
 
-## Recently delivered hardening foundations
+## ORB-FUT-009 — Structured provider contact information
+
+**Roadmap disposition:** Deferred until after v1
+**Priority:** Medium
+**Phase:** Post-v1 product enrichment
+**Dependencies:** ORB-FUT-001 and a reviewed contact-data model
+**Decision status:** Storage and presentation model requires a decision
+**Objective:** Keep useful provider contact details with an item so household
+members can quickly find the correct support channel.
+
+### Intended direction
+
+- Allow manual entry of labelled support telephone numbers, email addresses,
+  business or registered addresses, and websites.
+- Propose the same structured fields from supported document and email
+  ingestion sources, with bounded source evidence and confidence.
+- Require explicit review before extracted contact details are saved. Every
+  proposed value remains editable or removable.
+- Treat telephone numbers, addresses, email addresses, URLs, display labels,
+  metadata, and OCR-derived text as hostile data. Extraction cannot initiate a
+  call, message, navigation, lookup, or write.
+- Present external links and contact actions with safe schemes, clear
+  destinations, and no embedded credentials or automatic requests.
+- Decide separately whether details belong to an individual item, a reusable
+  provider record, or both before implementation.
+
+## ORB-FUT-010 — AI-assisted item summaries and notes
+
+**Roadmap disposition:** Deferred until after v1
+**Priority:** Medium
+**Phase:** Post-v1 product enrichment
+**Dependencies:** ORB-FUT-001 and proven indirect-injection controls
+**Decision status:** Summary lifecycle and model-provider contract require a
+decision
+**Objective:** Help users understand an item quickly through a concise summary
+and useful notes without allowing generated text to become authoritative.
+
+### Intended direction
+
+- Provide a manually editable summary and notes section independently of
+  whether AI assistance is configured.
+- Optionally propose a concise summary or notes from the minimum necessary,
+  user-authorized item and document evidence.
+- Show provenance and make generated content visibly distinguishable until the
+  user explicitly accepts, edits, or discards it.
+- Treat source content and model output as hostile, fallible suggestions. The
+  model receives no tools, secrets, unrelated records, ambient network access,
+  authority decisions, or automatic write capability.
+- Never infer missing contractual facts or silently replace user-authored
+  notes. Regeneration must not erase prior accepted content.
+
+## Foundations every future direction must preserve
 
 - Per-user email and browser-push reminder preferences.
 - Atomic household ownership transfer with an audit record.
