@@ -7,9 +7,47 @@ const tikaAdapter = readFileSync(new URL("../src/server/documents/tika.ts", impo
 const exactProcessorTest = readFileSync(new URL("./test-tika-processor.mjs", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/publish-container.yml", import.meta.url), "utf8");
 
+/**
+ * Extracts one service block.
+ *
+ * Slicing to the next top-level key would swallow every service declared after
+ * the target, so a sibling's `volumes:` could fail an isolation assertion that
+ * is about this service alone. The block ends at the next sibling service.
+ */
+function serviceBlock(name) {
+  const start = compose.indexOf(`  ${name}:`);
+  if (start < 0) throw new Error(`Service ${name} is not declared`);
+  const rest = compose.slice(start + 1);
+  const nextSibling = rest.search(/\n {2}[a-z][a-z0-9-]*:\n|\n[a-z]/u);
+  return nextSibling < 0 ? rest : rest.slice(0, nextSibling);
+}
+
+describe("service block extraction", () => {
+  it("stops at the next sibling service", () => {
+    // Proves the isolation assertions below are about Tika alone. orbit-ollama
+    // declares volumes; if the block leaked into it, that assertion would fail
+    // for the wrong reason and could later be relaxed to compensate.
+    const tika = serviceBlock("orbit-tika");
+    expect(tika).toContain("orbit-tika");
+    expect(tika).not.toContain("orbit-ollama");
+    expect(tika).not.toContain("orbit-clamav");
+  });
+
+  it("still sees a violation inside the target service", () => {
+    // Guards against the extraction being narrowed until assertions pass
+    // vacuously: a service that genuinely declares volumes must show them.
+    expect(serviceBlock("orbit-ollama")).toMatch(/\n\s+volumes:/u);
+    expect(serviceBlock("orbit-app")).toMatch(/\n\s+secrets:/u);
+  });
+
+  it("refuses to silently return nothing for an absent service", () => {
+    expect(() => serviceBlock("orbit-does-not-exist")).toThrow(/is not declared/u);
+  });
+});
+
 describe("hostile document processor contract", () => {
   it("keeps Tika non-root, read-only, capability-free and isolated", () => {
-    const tika = compose.slice(compose.indexOf("  orbit-tika:"), compose.indexOf("\nnetworks:"));
+    const tika = serviceBlock("orbit-tika");
     expect(tika).toContain('user: "35002:35002"');
     expect(tika).toContain("read_only: true");
     expect(tika).toContain("TIKA_CONFIG: /etc/orbit/tika-config.xml");
