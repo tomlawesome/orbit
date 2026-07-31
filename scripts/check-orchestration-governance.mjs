@@ -544,6 +544,30 @@ export function validateOperationalState(state, policy) {
       issue.acceptanceChecklist === "reviewed_complete",
       "acceptance checklist must be reviewed complete.",
     );
+    // A summary flag can be asserted from memory. Requiring each criterion to
+    // be itemised with its own evidence makes "reviewed complete" auditable
+    // rather than assertable, and fails closed when the itemisation is absent.
+    assert(
+      Array.isArray(issue.acceptanceCriteria) && issue.acceptanceCriteria.length > 0,
+      "reconciliation must itemise every acceptance criterion.",
+    );
+    for (const criterion of issue.acceptanceCriteria) {
+      assert(isObject(criterion), "each acceptance criterion must be an object.");
+      assert(
+        isNonEmptyString(criterion.criterion),
+        "each acceptance criterion must record the criterion it accounts for.",
+      );
+      assert(
+        criterion.met === true,
+        "every acceptance criterion must be met before reconciliation.",
+      );
+      assert(
+        Array.isArray(criterion.evidence)
+          && criterion.evidence.length > 0
+          && criterion.evidence.every(isNonEmptyString),
+        "each acceptance criterion requires its own evidence.",
+      );
+    }
     assert(
       Array.isArray(issue.closureEvidence)
         && issue.closureEvidence.length > 0
