@@ -24,16 +24,42 @@ import {
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
 
+/**
+ * Lifecycles a user may see listed against an item.
+ *
+ * `deleted` is deliberately absent: a purged document must stay invisible, so
+ * this list must never become a way to observe removed content.
+ */
+export const listableDocumentLifecycles = [
+  "receiving",
+  "validating",
+  "quarantined",
+  "scanning",
+  "encrypting",
+  "available",
+  "pending_deletion",
+  "rejected",
+] as const;
+
+export type ListableDocumentLifecycle = typeof listableDocumentLifecycles[number];
+
+/** Lifecycles whose content can actually be opened. */
+const openableDocumentLifecycles: readonly string[] = ["available", "pending_deletion"];
+
 export interface DocumentSummary {
   id: string;
   itemId: string | null;
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  lifecycle: "available" | "pending_deletion";
-  scanStatus: "clean" | "skipped";
+  lifecycle: ListableDocumentLifecycle;
+  scanStatus: string;
   availableAt: string | null;
   deleteAfter: string | null;
+  /** Whether the document's content can be downloaded or drafted from yet. */
+  ready: boolean;
+  /** Bounded failure reason for a rejected document; never provider text. */
+  failureCode: string | null;
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
@@ -110,7 +136,8 @@ async function requireDocumentAccess(userId: string, documentId: string) {
   return record;
 }
 
-function toSummary(record: {
+/** Exported for tests: the visibility boundary is the security-relevant part. */
+export function toSummary(record: {
   id: string;
   itemId: string | null;
   displayName: string;
@@ -120,11 +147,11 @@ function toSummary(record: {
   scanStatus: string;
   availableAt: Date | null;
   deleteAfter: Date | null;
+  failureCode?: string | null;
 }): DocumentSummary {
-  if (
-    (record.lifecycle !== "available" && record.lifecycle !== "pending_deletion")
-    || (record.scanStatus !== "clean" && record.scanStatus !== "skipped")
-  ) {
+  // A purged document must never reach a user-visible list, so an unexpected
+  // lifecycle fails loudly rather than being rendered.
+  if (!(listableDocumentLifecycles as readonly string[]).includes(record.lifecycle)) {
     throw new Error("Document is not in a user-visible state");
   }
   return {
@@ -133,10 +160,12 @@ function toSummary(record: {
     displayName: record.displayName,
     mediaType: record.mediaType,
     sizeBytes: record.sizeBytes,
-    lifecycle: record.lifecycle,
+    lifecycle: record.lifecycle as ListableDocumentLifecycle,
     scanStatus: record.scanStatus,
     availableAt: record.availableAt?.toISOString() ?? null,
     deleteAfter: record.deleteAfter?.toISOString() ?? null,
+    ready: openableDocumentLifecycles.includes(record.lifecycle),
+    failureCode: record.failureCode ?? null,
   };
 }
 
@@ -174,12 +203,16 @@ export async function listItemDocuments(
       scanStatus: documents.scanStatus,
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
+      failureCode: documents.failureCode,
     })
     .from(documents)
     .where(and(
       eq(documents.householdId, householdId),
       eq(documents.itemId, itemId),
-      inArray(documents.lifecycle, ["available", "pending_deletion"]),
+      // Widened beyond the openable states so an upload in progress, or one
+      // that was rejected, is visible rather than indistinguishable from an
+      // upload that never happened. Authorisation above is unchanged.
+      inArray(documents.lifecycle, [...listableDocumentLifecycles]),
     ))
     .orderBy(desc(documents.createdAt));
   return rows.map(toSummary);
@@ -428,6 +461,8 @@ export async function uploadItemDocument(input: {
       scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
       availableAt: now.toISOString(),
       deleteAfter: null,
+      ready: true,
+      failureCode: null,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
