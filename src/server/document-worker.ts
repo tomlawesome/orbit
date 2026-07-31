@@ -1,6 +1,7 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
+import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeJob, type OwnedPurgeState } from "@/server/documents/purge";
@@ -266,8 +267,16 @@ async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
   const safeCode = error instanceof Error && /key|secret/i.test(error.message)
     ? "key_unavailable"
     : "purge_failed";
+  const exhausted = current.attempts >= 5;
+  log.warn("document.job", {
+    document: job.documentId,
+    kind: "purge",
+    outcome: exhausted ? "failed" : "retry",
+    reason: safeCode,
+    attempts: current.attempts,
+  });
   await getDb().update(documentJobs).set({
-    status: current.attempts >= 5 ? "failed" : "retry",
+    status: exhausted ? "failed" : "retry",
     lockedAt: null,
     leaseExpiresAt: null,
     leaseToken: null,
@@ -449,7 +458,9 @@ export function startDocumentWorker(pollMilliseconds = 60_000): void {
     } catch {
       workerState.__orbitDocumentWorkerLastErrorAt = new Date().toISOString();
       workerState.__orbitDocumentWorkerLastErrorCode = "maintenance_cycle_failed";
-      console.error("Orbit document maintenance cycle failed");
+      // The cause is deliberately not logged: it may carry storage paths or
+      // provider text. The health endpoint exposes the bounded failure code.
+      log.error("document.worker", { outcome: "cycle_failed" });
     } finally {
       workerState.__orbitDocumentWorkerRunning = false;
       setTimeout(poll, pollMilliseconds).unref();
