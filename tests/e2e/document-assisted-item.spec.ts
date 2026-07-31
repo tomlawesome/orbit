@@ -209,7 +209,7 @@ test.describe("document-assisted item intake", () => {
 
     await submitAddItem(page, editor, isMobile);
     await expect(editor).toBeVisible();
-    await expect(editor.getByRole("status")).toContainText("temporarily unavailable");
+    await expect(editor.getByRole("status")).toContainText("malware scanner cannot be reached");
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(true);
     await submitAddItem(page, editor, isMobile);
