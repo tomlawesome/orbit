@@ -1,11 +1,24 @@
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const MAX_EXTRACTED_BYTES = MAX_EXTRACTED_CHARACTERS * 4;
 
-function parserUnavailable(): AppError {
+/**
+ * Fixed failure vocabulary. The parser handles hostile documents, so its own
+ * output and any caught error text must never reach a log record.
+ */
+type ParserFailure =
+  | "unreachable"
+  | "rejected"
+  | "unexpected_content_type"
+  | "oversized_response"
+  | "undecodable_response";
+
+function parserUnavailable(reason: ParserFailure): AppError {
+  log.warn("document.parse", { outcome: "error", reason });
   return new AppError("parser_unavailable", "Document processing is unavailable", 503);
 }
 
@@ -42,7 +55,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
       if (result.done) break;
       if (!(result.value instanceof Uint8Array) || result.value.byteLength > MAX_EXTRACTED_BYTES - totalBytes) {
         await cancelReader(reader);
-        throw parserUnavailable();
+        throw parserUnavailable("oversized_response");
       }
       if (result.value.byteLength === 0) continue;
       chunks.push(result.value);
@@ -50,7 +63,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
     }
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw parserUnavailable();
+    throw parserUnavailable("unreachable");
   } finally {
     try {
       reader.releaseLock();
@@ -63,7 +76,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
     const bytes = Buffer.concat(chunks, totalBytes);
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes).slice(0, MAX_EXTRACTED_CHARACTERS);
   } catch {
-    throw parserUnavailable();
+    throw parserUnavailable("undecodable_response");
   }
 }
 
@@ -80,6 +93,7 @@ export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDoc
   if (!config.tika.url) throw new AppError("parser_disabled", "Document processing is not enabled", 409);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.tika.timeoutMs);
+  const startedAt = Date.now();
   try {
     const response = await fetch(new URL("/tika", config.tika.url), {
       method: "PUT",
@@ -93,14 +107,17 @@ export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDoc
       redirect: "error",
       signal: controller.signal,
     });
-    if (!response.ok || response.type === "opaqueredirect" || response.redirected) throw parserUnavailable();
+    if (!response.ok || response.type === "opaqueredirect" || response.redirected) throw parserUnavailable("rejected");
     if (!hasPlainTextContentType(response) || !hasAcceptableContentLength(response) || !response.body) {
-      throw parserUnavailable();
+      throw parserUnavailable("unexpected_content_type");
     }
-    return await readBoundedText(response.body);
+    const text = await readBoundedText(response.body);
+    // Character count only. Extracted text is hostile content and never logged.
+    log.info("document.parse", { outcome: "extracted", characters: text.length, ms: Date.now() - startedAt });
+    return text;
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw parserUnavailable();
+    throw parserUnavailable("unreachable");
   } finally {
     clearTimeout(timer);
   }
