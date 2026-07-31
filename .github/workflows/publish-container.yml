@@ -21,6 +21,36 @@ env:
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
 
 jobs:
+  # Classifies a pull request as executable or not so that container and browser
+  # validation can be skipped for changes that cannot affect runtime behaviour.
+  #
+  # The classification is an allowlist of provably non-executable paths: any
+  # unrecognised path, and every push event, is treated as executable. The gate
+  # is applied at job level rather than through a workflow-level `paths:` filter,
+  # because a required check that never runs leaves a pull request pending
+  # forever under the branch ruleset, whereas a skipped job reports a result.
+  changes:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      executable: ${{ steps.classify.outputs.executable }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          ORBIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/classify-changed-paths.mjs
+
   fast:
     name: Static and unit checks
     runs-on: ubuntu-latest
@@ -128,8 +158,11 @@ jobs:
   integration:
     name: PostgreSQL service and API integration
     needs:
+      - changes
       - fast
       - supply_chain_source
+    # Skipped rather than filtered out, so the required check still reports.
+    if: needs.changes.outputs.executable == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -173,10 +206,11 @@ jobs:
   smoke:
     name: Compose smoke test
     needs:
+      - changes
       - fast
       - supply_chain_source
       - integration
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.executable == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
