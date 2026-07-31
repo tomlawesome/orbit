@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { evaluateAcrossNavigation } from "../support/navigation-safe";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -9,45 +10,19 @@ async function signIn(page: Page) {
 }
 
 /**
- * Recognises the errors Playwright raises when an evaluate races a navigation.
- *
- * Navigation happens here by design: the journey reloads and signs out, and the
- * assertions read private storage on either side of both.
+ * Reads page state tolerantly of the navigations this journey performs by
+ * design. The retry itself is proven in `tests/support/navigation-safe.test.ts`.
  */
-function isNavigationRace(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Execution context was destroyed")
-    || message.includes("Cannot find context")
-    || message.includes("Target closed")
-    || message.includes("Target crashed");
-}
-
-/**
- * Runs an evaluation that may race a navigation, retrying until the page
- * settles.
- *
- * This never converts a failure into a result. An unreadable context is not
- * evidence that private storage was purged, so exhausting the attempts throws
- * rather than returning a value that would silently pass the assertion.
- */
-async function evaluateAcrossNavigation<T>(page: Page, describe: string, work: () => Promise<T>): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    try {
-      return await work();
-    } catch (error) {
-      if (!isNavigationRace(error)) throw error;
-      lastError = error;
-      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-    }
-  }
-  throw new Error(
-    `${describe} could not be read: the page kept navigating. Last error: ${String(lastError)}`,
-  );
+function acrossNavigation<T>(page: Page, describe: string, work: () => Promise<T>): Promise<T> {
+  return evaluateAcrossNavigation({
+    describe,
+    work,
+    settle: () => page.waitForLoadState("domcontentloaded").catch(() => undefined),
+  });
 }
 
 async function seedLegacyWorkspaceCache(page: Page) {
-  await evaluateAcrossNavigation(page, "Legacy workspace cache seeding", () => page.evaluate(async () => {
+  await acrossNavigation(page, "Legacy workspace cache seeding", () => page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open("orbit-workspace", 1);
       request.onupgradeneeded = () => {
@@ -78,7 +53,7 @@ async function seedLegacyWorkspaceCache(page: Page) {
 }
 
 async function legacyWorkspaceCacheExists(page: Page) {
-  return evaluateAcrossNavigation(page, "Legacy workspace cache presence", () => page.evaluate(
+  return acrossNavigation(page, "Legacy workspace cache presence", () => page.evaluate(
     async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"),
   ));
 }
