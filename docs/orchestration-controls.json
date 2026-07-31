@@ -101,6 +101,35 @@
       "issue": 113,
       "pullRequest": 114,
       "approvedByModel": "Human"
+    },
+    {
+      "id": "ORCH-008",
+      "status": "adopted",
+      "decisionClass": "protected_planning",
+      "summary": "Require a reconciled delivery to itemise every acceptance criterion with its own evidence, so a reviewed-complete claim is auditable rather than asserted from memory.",
+      "automaticPromotion": false,
+      "evidence": [
+        "The v1.1 wave plan was held only in conversation, contradicting the repository-is-source-of-truth rule in AGENTS.md.",
+        "Issue 118 was reported complete while three of its own acceptance criteria were unmet, because completion was judged from remembered scope rather than the recorded issue.",
+        "The prior check accepted a single self-asserted acceptanceChecklist enum with closure evidence unlinked to individual criteria."
+      ],
+      "issue": 127,
+      "pullRequest": 131,
+      "approvedByModel": "Claude Opus Extra High"
+    },
+    {
+      "id": "ORCH-009",
+      "status": "adopted",
+      "decisionClass": "protected_planning",
+      "summary": "Justify wave concurrency by reconciliation cost as well as disjoint file ownership, record the assessment per slice, and cap in-flight pull requests while the target branch requires up-to-date branches.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Five pull requests were opened concurrently on the basis of disjoint file ownership; each merge forced the remainder behind, requiring serial update-and-revalidate cycles that found no defect.",
+        "The implementation plan recorded file ownership but no reconciliation cost, presenting disjointness as sufficient grounds for concurrency."
+      ],
+      "issue": 132,
+      "pullRequest": 136,
+      "approvedByModel": "Claude Opus Extra High"
     }
   ]
 }
