@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, open: vi.fn(actual.open) };
+});
+
 import { LocalDocumentStorage } from "./storage";
 
 const temporaryRoots: string[] = [];
@@ -21,6 +28,43 @@ afterEach(async () => {
 });
 
 describe("local document storage", () => {
+  it("validates and reads quarantine content through one open handle", async () => {
+    const storage = new LocalDocumentStorage("unused-objects-root", "unused-quarantine-root");
+    const bytes = Buffer.from("quarantine content");
+    const handle = {
+      stat: vi.fn().mockResolvedValue({ isFile: () => true, size: bytes.length }),
+      readFile: vi.fn().mockResolvedValue(bytes),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as FileHandle;
+    const openMock = vi.mocked(open).mockResolvedValueOnce(handle);
+
+    await expect(storage.readQuarantine("quarantine-path", 1_024)).resolves.toEqual(bytes);
+
+    expect(openMock).toHaveBeenCalledWith("quarantine-path", "r");
+    expect(handle.stat).toHaveBeenCalledTimes(1);
+    expect(handle.readFile).toHaveBeenCalledTimes(1);
+    expect(handle.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates and reads ciphertext through one open handle", async () => {
+    const storage = new LocalDocumentStorage("objects-root", "unused-quarantine-root");
+    const key = "a".repeat(64);
+    const bytes = Buffer.from("ciphertext content");
+    const handle = {
+      stat: vi.fn().mockResolvedValue({ isFile: () => true, size: bytes.length }),
+      readFile: vi.fn().mockResolvedValue(bytes),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as FileHandle;
+    const openMock = vi.mocked(open).mockResolvedValueOnce(handle);
+
+    await expect(storage.readCiphertext(key, 1_024)).resolves.toEqual(bytes);
+
+    expect(openMock).toHaveBeenCalledWith(join("objects-root", "objects", "aa", "aa", `${key}.bin`), "r");
+    expect(handle.stat).toHaveBeenCalledTimes(1);
+    expect(handle.readFile).toHaveBeenCalledTimes(1);
+    expect(handle.close).toHaveBeenCalledTimes(1);
+  });
+
   it("streams an upload to private quarantine and verifies its declared size", async () => {
     const { storage } = await createStorage();
     const bytes = Buffer.from("%PDF-1.7\nprivate policy");
