@@ -102,6 +102,22 @@ GitHub milestone assignment is administrative metadata rather than a second
 status source: issues #10–#13 and this baseline pull request belong to `v1
 Engineering Baseline`; v1 roadmap and implementation issues belong to `v1.0`.
 
+### v1.1 roadmap
+
+The `v1.1` milestone contains three outcome-level epics:
+
+1. [document processing observability and visible failure](https://github.com/tomlawesome/orbit/issues/115);
+2. [desktop-first navigation and settings](https://github.com/tomlawesome/orbit/issues/116);
+3. [prebuilt-container installation as the supported default](https://github.com/tomlawesome/orbit/issues/117).
+
+These epics cite `ORB-FUT-*` feature-register entries rather than `V1-*`
+charter requirements, because the v1 charter is the v1 contract and is not
+reopened for post-v1 direction.
+
+This roadmap is the single shared plan. Both agent pipelines read and update it;
+neither maintains a private plan, because a second plan would become a second
+source of truth and diverge.
+
 ## Rolling planning and delegation
 
 Delivery uses a rolling-wave model:
@@ -212,6 +228,50 @@ requires Sol Extra High review before implementation proceeds.
 Issue #22 begins only after the manual item and document-assisted review
 contracts are accepted, but its dedicated-mailbox ingestion and review journey
 remain required before stable v1.
+
+## v1.1 delivery waves
+
+The critical path is the reported silent-upload defect. Observability is
+deliberately delivered before any corrective change, because the cause was a
+hypothesis drawn from reading the code rather than a fact established from
+evidence. Each wave's slices own disjoint files, so they may run concurrently
+in isolated worktrees; slices in a later wave assume the earlier wave is
+accepted.
+
+### Wave 1 — diagnostic instrument and independent improvements
+
+- [#118 — bounded document lifecycle and processor diagnostics](https://github.com/tomlawesome/orbit/issues/118)
+  owns `src/lib/logger.ts` and the document server paths. Critical path: it is
+  the instrument every later document slice reasons from.
+- [#119 — accessible drop zone](https://github.com/tomlawesome/orbit/issues/119)
+  owns `src/components/document-manager.tsx`. Independent of the document
+  server paths.
+- [#120 — patched esbuild across transitive tooling](https://github.com/tomlawesome/orbit/issues/120)
+  owns `pnpm-workspace.yaml`. Independent of application code.
+
+### Wave 2 — corrective and structural change
+
+- [#123 — explicit malware scanner failure attribution](https://github.com/tomlawesome/orbit/issues/123)
+  depends on #118, whose records identify where an upload stops. Scanning stays
+  fail-closed and the default deployment keeps ClamAV installed and enabled;
+  what changes is that the requirement becomes verifiable and its failure
+  explicit.
+- Settings and administration promoted to routes, under
+  [#116](https://github.com/tomlawesome/orbit/issues/116). Owns `src/app` route
+  segments and `dashboard.tsx`.
+- Supply-chain policy amendment and deploy-compose separation, under
+  [#117](https://github.com/tomlawesome/orbit/issues/117). Independent of one
+  another; both precede the installer rewrite.
+
+### Wave 3 — dependent experience and deployment
+
+- Account menu exposing settings, administration and sign out. Depends on the
+  route promotion, because the menu's destinations must exist first.
+- Non-interactive installer resolving a published release digest. Depends on
+  both Wave 2 deployment slices.
+
+Later waves are refined only after the current wave's evidence changes the
+baseline, following the rolling-wave rule above.
 
 ## Pull-request lifecycle
 
