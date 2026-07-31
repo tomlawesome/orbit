@@ -266,6 +266,8 @@ async function stubDocumentReview(page: Page, fixture: AccessibilityFixture) {
             scanStatus: "clean",
             availableAt: new Date().toISOString(),
             deleteAfter: null,
+            ready: true,
+            failureCode: null,
           }],
         }),
       });
