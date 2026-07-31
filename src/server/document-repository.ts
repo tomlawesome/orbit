@@ -12,6 +12,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -306,12 +307,27 @@ export async function uploadItemDocument(input: {
     });
     metadataReserved = true;
 
+    log.info("document.lifecycle", { document: documentId, state: "quarantined", bytes: received.sizeBytes });
+
     if (config.scanMode === "required") {
       await getDb().update(documents).set({ lifecycle: "scanning", updatedAt: new Date() })
         .where(and(eq(documents.id, documentId), eq(documents.lifecycle, "quarantined")));
+      log.info("document.lifecycle", { document: documentId, state: "scanning" });
+      const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Date.now() - scanStartedAt;
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
+        // `scan.reason` is a fixed enumeration from the scanner adapter, never
+        // provider text, so it is safe to record.
+        log.warn("document.scan", {
+          document: documentId,
+          outcome: infected ? "infected" : "error",
+          reason: infected ? "malware_detected" : scan.reason,
+          host: config.clamAv.host,
+          port: config.clamAv.port,
+          ms: scanMs,
+        });
         await getDb().update(documents).set({
           lifecycle: "rejected",
           scanStatus: infected ? "infected" : "error",
@@ -331,12 +347,15 @@ export async function uploadItemDocument(input: {
           infected ? 422 : 503,
         );
       }
+      log.info("document.scan", { document: documentId, outcome: "clean", ms: scanMs });
       await getDb().update(documents).set({ scanStatus: "clean", lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     } else {
+      log.info("document.scan", { document: documentId, outcome: "skipped", reason: "scan_mode_disabled" });
       await getDb().update(documents).set({ lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     }
+    log.info("document.lifecycle", { document: documentId, state: "encrypting" });
 
     const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
@@ -383,6 +402,7 @@ export async function uploadItemDocument(input: {
         },
       });
     });
+    log.info("document.lifecycle", { document: documentId, state: "available", bytes: received.sizeBytes });
     return {
       id: documentId,
       itemId: input.itemId,
