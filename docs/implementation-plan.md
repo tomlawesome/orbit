@@ -261,17 +261,54 @@ This section is the rolling commentary. It names where delivery actually is, so
 the next action is never inferred from memory. Update it whenever a slice
 changes state.
 
-- **Current wave:** v1.1 Wave 1, incomplete.
-- **Next slice:** merge the drop zone, then reconcile Wave 1 as a unit.
-- **In flight:** [#129 — accessible drop zone](https://github.com/tomlawesome/orbit/pull/129), green and parked pending the process batch.
-- **Blocked:** [#134 — skip validation for non-executable changes](https://github.com/tomlawesome/orbit/issues/134) cannot reconcile until a documentation-only pull request records the skip path.
-- **Preceding Wave 2:** a process batch agreed with the repository owner —
-  ORCH-008 acceptance evidence (delivered), the register entry (delivered), CI
-  path filtering (delivered), this slice, and
-  [#133 — harden the private-storage journey](https://github.com/tomlawesome/orbit/issues/133).
-- **Deviation on record:** [#124 — scanner failure attribution](https://github.com/tomlawesome/orbit/pull/124),
+- **Current wave:** v1.1 Wave 2, beginning. Wave 1 is complete and reviewed.
+- **Next slice:** [#138 — settings and administration as dedicated routes](https://github.com/tomlawesome/orbit/issues/138).
+- **In flight:** nothing.
+- **Blocked:** nothing.
+- **Open question awaiting the repository owner:** whether the installer may
+  resolve a release tag to a digest automatically, recorded on
+  [#140 — installer-resolved release digests](https://github.com/tomlawesome/orbit/issues/140).
+  Work proceeds on the assumption that it may, because the deployed artifact
+  stays digest-pinned; if that is wrong, #140 is withdrawn and
+  [#143 — non-interactive installer](https://github.com/tomlawesome/orbit/issues/143) changes shape.
+
+### Wave 1 completion review
+
+Wave 1 delivered the diagnostic instrument every later document slice reasons
+from, plus two independent improvements. Every slice is closed as completed
+with itemised per-criterion evidence, and every delivering merge is trusted on
+`develop`.
+
+| Slice | Delivered by | Trusted at |
+| --- | --- | --- |
+| [#118 — document lifecycle and processor diagnostics](https://github.com/tomlawesome/orbit/issues/118) | #122, #125 | `b7d82d0`, `a931c0c` |
+| [#119 — accessible drop zone](https://github.com/tomlawesome/orbit/issues/119) | #129 | `6835666` |
+| [#120 — patched esbuild](https://github.com/tomlawesome/orbit/issues/120) | #121 | `64b4bde` |
+
+What Wave 1 deliberately did **not** deliver, so nothing later is assumed done:
+documents in a non-available state are still invisible in the item list; the
+settings and administration surfaces are unchanged; and nothing in the
+installation epic was touched.
+
+Deviations recorded rather than absorbed:
+
+- [#124 — scanner failure attribution](https://github.com/tomlawesome/orbit/pull/124),
   a Wave 2 slice, was merged while all three Wave 1 issues were still open. It
   is trusted on `develop`, but it was delivered out of wave order.
+- [#118](https://github.com/tomlawesome/orbit/issues/118) was first reported
+  complete while three of its own acceptance criteria were unmet. That is the
+  primary evidence behind ORCH-008.
+- [#133 — private-storage navigation races](https://github.com/tomlawesome/orbit/issues/133)
+  was first fixed without the reproduction its own test-first plan required.
+  The proof was added before merge rather than deferred.
+- [#132](https://github.com/tomlawesome/orbit/issues/132) cites a later green
+  `develop` state rather than an exact-SHA run, because its own merge hit the
+  navigation-race flake later fixed by #137.
+
+A process batch agreed with the repository owner ran between Wave 1 and Wave 2:
+ORCH-008 acceptance evidence, the ORB-FUT-011 register entry, CI path
+filtering, ORCH-009 wave costing, and the navigation-race fix. All are
+delivered and trusted.
 
 ### Wave 1 — diagnostic instrument and independent improvements
 
