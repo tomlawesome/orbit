@@ -160,8 +160,13 @@ public key is written to `.env-orbit`. Configure your OIDC provider in
 
 ```sh
 ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
-  docker compose --env-file .env-orbit up --build
+  docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
+
+Building from source needs the `docker-compose.build.yml` overlay. The base
+compose file describes a deployment, which has a published image but no source
+tree, so the build context lives in the overlay rather than the base file.
 
 Open `http://<docker-host-ip>:3000` from another device, or
 [http://127.0.0.1:3000](http://127.0.0.1:3000) on the Docker host. The health

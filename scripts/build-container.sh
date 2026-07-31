@@ -26,8 +26,12 @@ docker compose version >/dev/null 2>&1 || {
 }
 export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 
+# The build context lives in an overlay, because the base compose file
+# describes a deployment that has no source tree.
+readonly build_files=(-f docker-compose.yml -f docker-compose.build.yml)
+
 if [[ -n "$pull_option" ]]; then
-  docker compose --env-file "$environment_file" build --pull orbit-app
+  docker compose --env-file "$environment_file" "${build_files[@]}" build --pull orbit-app
 else
-  docker compose --env-file "$environment_file" build orbit-app
+  docker compose --env-file "$environment_file" "${build_files[@]}" build orbit-app
 fi
