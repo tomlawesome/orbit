@@ -114,11 +114,22 @@ export async function inspectItemDocument(input: {
       }
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
       if (scan.status !== "clean") {
-        const infected = scan.status === "infected";
+        if (scan.status === "infected") {
+          throw new AppError(
+            "document_malware_detected",
+            "Orbit rejected that document because malware was detected",
+            422,
+          );
+        }
+        // Attribute the failure exactly as the upload path does, so both
+        // scanner-dependent journeys report the same actionable cause.
+        const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
         throw new AppError(
-          infected ? "document_malware_detected" : "document_scanner_unavailable",
-          infected ? "Orbit rejected that document because malware was detected" : "Document scanning is temporarily unavailable",
-          infected ? 422 : 503,
+          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
+          unreachable
+            ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
+            : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
+          503,
         );
       }
       let text = "";
