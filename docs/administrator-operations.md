@@ -52,6 +52,44 @@ non-cacheable. A degraded optional category is actionable independently and
 does not disclose configuration values, provider identity, private content, or
 raw dependency errors.
 
+## Container log diagnostics
+
+`ORBIT_LOG_LEVEL` selects operational verbosity: `error`, `warn`, `info` or
+`debug`. It defaults to `info`, which reports document lifecycle progress
+without debug noise. An unreadable value falls back to `info` rather than
+disabling logging.
+
+Records are one line each and greppable directly from `docker compose logs
+orbit-app`. They are bounded by construction: failure reasons come from fixed
+enumerations rather than provider text, and document content, extracted text,
+display names, mailbox recipients and alias material are never recorded. A
+document is identified only by its opaque identifier.
+
+To follow one document through upload:
+
+```text
+docker compose logs -f orbit-app | grep document.
+```
+
+Expect `document.lifecycle` records progressing `quarantined`, `scanning`,
+`encrypting`, `available`, and one `document.scan` record carrying the scanner
+outcome and duration.
+
+A stalled or failed upload is diagnosed from the last record reached:
+
+| Last record | Meaning | Action |
+| --- | --- | --- |
+| `document.lifecycle state=scanning` with no following record | The scanner did not answer within `CLAMAV_TIMEOUT_MS` | Check `orbit-clamav` health |
+| `document.scan outcome=error reason=unavailable` | The scanner refused or dropped the connection | Check `orbit-clamav` is running and reachable on the document-processing network |
+| `document.scan outcome=infected` | Malware was detected; the document is rejected by design | No action |
+| `document.worker outcome=cycle_failed` | A maintenance cycle failed | Consult `/api/admin/documents/health` for the bounded failure code |
+
+Scanning is fail-closed while `DOCUMENT_SCAN_MODE` is `required`, so an
+unavailable scanner rejects uploads rather than storing unscanned content.
+`orbit-clamav` has a 180-second health start period and downloads signature
+databases on first run, so uploads attempted during initial startup fail until
+it becomes healthy.
+
 ## Corrective actions
 
 All mutations require CSRF validation, administrator authorization, an exact
