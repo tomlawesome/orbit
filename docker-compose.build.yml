@@ -1,0 +1,16 @@
+# Source-build overlay.
+#
+# The base compose file describes a deployment: a published image, compose
+# assets and configuration, with no source tree present. This overlay adds the
+# build context back for developers working from a checkout.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build orbit-app
+#
+# Set ORBIT_IMAGE to the local tag you want the build to produce, so the
+# deployment reference stays explicit rather than implied.
+services:
+  orbit-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
