@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
 import { carriesFiles, leavesDropZone } from "@/components/document-drop";
+import { awaitingProgress, progressDescription } from "@/components/document-state";
 
 export interface ItemDocument {
   id: string;
@@ -10,11 +11,15 @@ export interface ItemDocument {
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  lifecycle: "available" | "pending_deletion";
-  scanStatus: "clean" | "skipped";
-  availableAt: string;
+  lifecycle: string;
+  scanStatus: string;
+  availableAt: string | null;
   deleteAfter: string | null;
+  /** Whether the content can be opened yet. */
+  ready: boolean;
+  failureCode: string | null;
 }
+
 
 interface UploadingDocument {
   id: string;
@@ -103,6 +108,15 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     const bitmap = captureReview?.bitmap;
     return () => bitmap?.close();
   }, [captureReview?.bitmap]);
+
+  useEffect(() => {
+    // A document can still be processing when the list is read, most often
+    // through mailbox ingestion. Poll only while something is genuinely in
+    // progress; rejected is terminal, so it never keeps the timer alive.
+    if (!documents.some(awaitingProgress)) return;
+    const timer = window.setTimeout(() => void refresh(), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [documents, refresh]);
 
   useEffect(() => {
     // Without this the browser navigates away from Orbit when a file is
@@ -325,21 +339,33 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
 
       {loading ? <p className="document-empty">Loading documents…</p> : documents.length === 0 ? <p className="document-empty">No documents attached yet.</p> : (
         <ul className="document-list" aria-label="Attached documents">
-          {documents.map((document) => <li key={document.id} className="document-row">
-            <div className="document-summary">
-              <strong>{document.displayName}</strong>
-              <span>{formatBytes(document.sizeBytes)} · {document.mediaType}</span>
-              {document.scanStatus === "skipped" && <small className="document-warning">Virus scan was skipped for this file.</small>}
-              {document.lifecycle === "pending_deletion" && <small className="document-pending">Scheduled for deletion{document.deleteAfter ? ` on ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(document.deleteAfter))}` : ""}.</small>}
-            </div>
-            <div className="document-controls">
-              {document.lifecycle === "available" && <a href={`/api/documents/${encodeURIComponent(document.id)}/download`}>Download</a>}
-              {document.lifecycle === "available" && <button type="button" disabled={busyDocumentId === document.id} onClick={() => void createDraft(document)}>Review as draft</button>}
-              <button type="button" disabled={busyDocumentId === document.id} onClick={() => void mutate(document, document.lifecycle === "available" ? "delete" : "restore")}>
-                {busyDocumentId === document.id ? "Working…" : document.lifecycle === "available" ? "Delete" : "Restore"}
-              </button>
-            </div>
-          </li>)}
+          {documents.map((document) => {
+            const progress = progressDescription(document);
+            const rejected = document.lifecycle === "rejected";
+            return (
+              <li key={document.id} className={progress ? "document-row not-ready" : "document-row"}>
+                <div className="document-summary">
+                  <strong>{document.displayName}</strong>
+                  <span>{formatBytes(document.sizeBytes)} · {document.mediaType}</span>
+                  {document.scanStatus === "skipped" && <small className="document-warning">Virus scan was skipped for this file.</small>}
+                  {document.lifecycle === "pending_deletion" && <small className="document-pending">Scheduled for deletion{document.deleteAfter ? ` on ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(document.deleteAfter))}` : ""}.</small>}
+                  {progress && <small className={rejected ? "document-warning" : "document-pending"} role="status">{progress}</small>}
+                </div>
+                <div className="document-controls">
+                  {/* Actions are offered only where they can succeed. A document
+                      still processing has nothing to download, and a rejected one
+                      never will. */}
+                  {document.ready && document.lifecycle === "available" && <a href={`/api/documents/${encodeURIComponent(document.id)}/download`}>Download</a>}
+                  {document.ready && document.lifecycle === "available" && <button type="button" disabled={busyDocumentId === document.id} onClick={() => void createDraft(document)}>Review as draft</button>}
+                  {document.ready && (
+                    <button type="button" disabled={busyDocumentId === document.id} onClick={() => void mutate(document, document.lifecycle === "available" ? "delete" : "restore")}>
+                      {busyDocumentId === document.id ? "Working…" : document.lifecycle === "available" ? "Delete" : "Restore"}
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
       {draft && <section className="detail-action-panel" aria-labelledby="document-draft-heading">
