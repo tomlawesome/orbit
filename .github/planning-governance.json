@@ -1,6 +1,14 @@
 {
-  "requiredPlanningModel": "Sol Extra High",
-  "requiredAttestation": "Planning-Model: Sol Extra High",
+  "planningAuthorities": [
+    "Sol Extra High",
+    "Claude Opus Extra High",
+    "Human"
+  ],
+  "acceptedAttestations": [
+    "Planning-Model: Sol Extra High",
+    "Planning-Model: Claude Opus Extra High",
+    "Planning-Model: Human"
+  ],
   "protectedFiles": [
     ".github/orchestration-governance.json",
     ".github/planning-governance.json",

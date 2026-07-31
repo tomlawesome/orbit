@@ -38,6 +38,19 @@ function readJson(urlOrPath) {
 export function validateOrchestrationPolicy(policy) {
   assert(isObject(policy), "policy must be an object.");
   assert(policy.schemaVersion === 1, "unsupported policy schema version.");
+  assert(
+    isNonEmptyString(policy.humanApprovalIdentifier),
+    "humanApprovalIdentifier is required.",
+  );
+  assert(isObject(policy.pipelines), "pipelines are required.");
+  const pipelines = Object.entries(policy.pipelines);
+  assert(pipelines.length > 0, "at least one agent pipeline must be declared.");
+  for (const [name, tiers] of pipelines) {
+    assert(isObject(tiers), `pipelines.${name} must be an object.`);
+    for (const role of ["orchestration", "implementation", "mechanicalAnalysis"]) {
+      assert(isNonEmptyString(tiers[role]), `pipelines.${name}.${role} must name a model.`);
+    }
+  }
   assert(isObject(policy.modelAuthority), "modelAuthority is required.");
   for (const role of ["orchestration", "protectedPlanning", "implementation", "mechanicalAnalysis"]) {
     assert(
@@ -45,20 +58,35 @@ export function validateOrchestrationPolicy(policy) {
       `modelAuthority.${role} must be a non-empty string array.`,
     );
   }
+  // Authority is derived from the declared pipelines, so admitting a pipeline is
+  // a data change while authority can never widen to an undeclared model.
+  const tierSets = pipelines.map(([, tiers]) => tiers);
+  const roster = new Set(tierSets.flatMap((tiers) => Object.values(tiers)));
+  for (const role of ["orchestration", "protectedPlanning", "implementation", "mechanicalAnalysis"]) {
+    assert(
+      policy.modelAuthority[role].every((model) => roster.has(model)),
+      `modelAuthority.${role} names a model outside the declared pipeline roster.`,
+    );
+  }
+  const orchestrationModels = tierSets.map((tiers) => tiers.orchestration);
   assert(
-    policy.modelAuthority.orchestration.length === 1
-      && policy.modelAuthority.orchestration[0] === "Sol Extra High",
-    "orchestration must be reserved to Sol Extra High.",
+    hasExactStrings(policy.modelAuthority.orchestration, orchestrationModels),
+    "orchestration must be reserved to each pipeline's declared orchestration model.",
   );
   assert(
-    policy.modelAuthority.protectedPlanning.length === 1
-      && policy.modelAuthority.protectedPlanning[0] === "Sol Extra High",
-    "protected planning must be reserved to Sol Extra High.",
+    hasExactStrings(policy.modelAuthority.protectedPlanning, orchestrationModels),
+    "protected planning must be reserved to each pipeline's declared orchestration model.",
   );
   assert(
-    policy.modelAuthority.implementation.length === 1
-      && policy.modelAuthority.implementation[0] === "Luna Extra High",
-    "bounded implementation must default to Luna Extra High.",
+    hasExactStrings(
+      policy.modelAuthority.implementation,
+      tierSets.map((tiers) => tiers.implementation),
+    ),
+    "bounded implementation must be reserved to each pipeline's declared implementation model.",
+  );
+  assert(
+    tierSets.every((tiers) => policy.modelAuthority.mechanicalAnalysis.includes(tiers.mechanicalAnalysis)),
+    "mechanical analysis must authorize each pipeline's declared analysis model.",
   );
   assert(
     Array.isArray(policy.protectedDecisionClasses)
@@ -620,8 +648,9 @@ export function validateAdoptedControls(ledger, policy) {
       );
       if (policy.protectedDecisionClasses.includes(control.decisionClass)) {
         assert(
-          control.approvedByModel === "Sol Extra High",
-          `${control.id} protected adoption requires Sol Extra High approval.`,
+          policy.modelAuthority.protectedPlanning.includes(control.approvedByModel)
+            || control.approvedByModel === policy.humanApprovalIdentifier,
+          `${control.id} protected adoption requires approval by a protected-planning authority or ${policy.humanApprovalIdentifier}.`,
         );
       }
     }

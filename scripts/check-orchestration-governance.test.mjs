@@ -12,11 +12,30 @@ const SHA = "90e240a51bed89bf19d50d0819601de19a3ecc8d";
 function validPolicy() {
   return {
     schemaVersion: 1,
+    humanApprovalIdentifier: "Human",
+    pipelines: {
+      codex: {
+        orchestration: "Sol Extra High",
+        implementation: "Luna Extra High",
+        mechanicalAnalysis: "Terra Medium",
+      },
+      claude: {
+        orchestration: "Claude Opus Extra High",
+        implementation: "Claude Sonnet Extra High",
+        mechanicalAnalysis: "Claude Sonnet Extra High",
+      },
+    },
     modelAuthority: {
-      orchestration: ["Sol Extra High"],
-      protectedPlanning: ["Sol Extra High"],
-      implementation: ["Luna Extra High"],
-      mechanicalAnalysis: ["Terra Medium", "Luna Extra High", "Sol Extra High"],
+      orchestration: ["Sol Extra High", "Claude Opus Extra High"],
+      protectedPlanning: ["Sol Extra High", "Claude Opus Extra High"],
+      implementation: ["Luna Extra High", "Claude Sonnet Extra High"],
+      mechanicalAnalysis: [
+        "Terra Medium",
+        "Luna Extra High",
+        "Sol Extra High",
+        "Claude Sonnet Extra High",
+        "Claude Opus Extra High",
+      ],
     },
     protectedDecisionClasses: [
       "architecture",
@@ -285,6 +304,39 @@ describe("orchestration governance", () => {
     );
   });
 
+  it("grants each pipeline's orchestration tier equivalent authority", () => {
+    const state = activeState();
+    state.actor.model = "Claude Opus Extra High";
+    state.delivery.branch = "claude/issue-113-dual-pipeline-governance";
+    state.delivery.task.requestedModel = "Claude Sonnet Extra High";
+    state.delivery.task.launchReceipt.requestedModel = "Claude Sonnet Extra High";
+    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
+  });
+
+  it("rejects an implementation tier acting as orchestration in either pipeline", () => {
+    const state = activeState();
+    state.actor.model = "Claude Sonnet Extra High";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Claude Sonnet Extra High is not authorized for orchestration/u,
+    );
+  });
+
+  it("rejects authority widened to a model outside the declared pipeline roster", () => {
+    const policy = validPolicy();
+    policy.modelAuthority.orchestration.push("Some Unlisted Model");
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /names a model outside the declared pipeline roster/u,
+    );
+  });
+
+  it("requires orchestration authority to track the declared pipelines exactly", () => {
+    const policy = validPolicy();
+    policy.modelAuthority.orchestration = ["Sol Extra High"];
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /orchestration must be reserved to each pipeline's declared orchestration model/u,
+    );
+  });
+
   it("requires an authoritative active-task observation after launch", () => {
     const state = activeState();
     state.delivery.task.authoritativeStatus = null;
@@ -485,6 +537,30 @@ describe("orchestration governance", () => {
     };
     expect(() => validateOperationalState(activeState(), validPolicy())).not.toThrow();
     expect(() => validateAdoptedControls(controls, validPolicy())).not.toThrow();
+  });
+
+  it("accepts protected adoption approved by a human owner or either orchestration tier", () => {
+    const ledgerWith = (approvedByModel) => ({
+      schemaVersion: 1,
+      controls: [
+        {
+          id: "ORCH-TEST",
+          status: "adopted",
+          decisionClass: "model_governance",
+          summary: "Admit a second agent pipeline with equivalent authority tiers.",
+          automaticPromotion: false,
+          evidence: ["owner-directed policy change", "protected pull request with passing checks"],
+          issue: 113,
+          pullRequest: 114,
+          approvedByModel,
+        },
+      ],
+    });
+    expect(() => validateAdoptedControls(ledgerWith("Human"), validPolicy())).not.toThrow();
+    expect(() => validateAdoptedControls(ledgerWith("Claude Opus Extra High"), validPolicy()))
+      .not.toThrow();
+    expect(() => validateAdoptedControls(ledgerWith("Claude Sonnet Extra High"), validPolicy()))
+      .toThrow(/requires approval by a protected-planning authority or Human/u);
   });
 
   it("validates the repository policy, ledger, and example state together", () => {
