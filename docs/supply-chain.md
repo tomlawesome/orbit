@@ -126,10 +126,29 @@ The application image is different: it does not have a repository-owned stable
 digest until a release is accepted. Compose therefore requires `ORBIT_IMAGE`
 explicitly. Pull deployments accept a full `registry/repository@sha256:...`
 identity; local build scripts supply a revision-specific local tag for the
-image they build from the checked-out source. There is no implicit `latest`
-deployment default. A `latest` tag may still be published during an explicitly
-approved stable promotion, but it is a convenience pointer rather than
-deployment or acceptance evidence.
+image they build from the checked-out source. A `latest` tag may still be
+published during an explicitly approved stable promotion, but it is a
+convenience pointer rather than deployment or acceptance evidence.
+
+### Resolving a tag is not deploying one
+
+The rule this enforces is that **a deployment runs an immutable digest**. A
+mutable tag may therefore be *resolved* to a digest, provided the resolved
+digest is what gets recorded and deployed. It may never itself be deployed.
+
+This distinction matters because the earlier expression of the rule — that no
+deployment script may name a mutable reference at all — also forbade automating
+the resolution, which forced an operator to discover a digest by hand before
+installing. Automating that lookup does not weaken the guarantee: what runs is
+still an immutable, attested artifact, and the digest is still recorded. What
+changes is only who performs the lookup. [ADR-0008](adr/0008-installer-resolved-release-digests.md)
+records the decision.
+
+Enforcement follows the property rather than the wording: every assignment of
+`ORBIT_IMAGE` in a deployment script must produce either a
+`registry/repository@sha256:...` identity or an explicitly local build tag.
+Naming a tag in order to resolve it is permitted; assigning one as the
+deployment reference is not.
 
 ## Updating pinned images
 
