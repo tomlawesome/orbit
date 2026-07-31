@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { evaluateAcrossNavigation } from "../support/navigation-safe";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -8,8 +9,20 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+/**
+ * Reads page state tolerantly of the navigations this journey performs by
+ * design. The retry itself is proven in `tests/support/navigation-safe.test.ts`.
+ */
+function acrossNavigation<T>(page: Page, describe: string, work: () => Promise<T>): Promise<T> {
+  return evaluateAcrossNavigation({
+    describe,
+    work,
+    settle: () => page.waitForLoadState("domcontentloaded").catch(() => undefined),
+  });
+}
+
 async function seedLegacyWorkspaceCache(page: Page) {
-  await page.evaluate(async () => {
+  await acrossNavigation(page, "Legacy workspace cache seeding", () => page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open("orbit-workspace", 1);
       request.onupgradeneeded = () => {
@@ -36,11 +49,13 @@ async function seedLegacyWorkspaceCache(page: Page) {
         transaction.onerror = () => reject(transaction.error);
       };
     });
-  });
+  }));
 }
 
 async function legacyWorkspaceCacheExists(page: Page) {
-  return page.evaluate(async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"));
+  return acrossNavigation(page, "Legacy workspace cache presence", () => page.evaluate(
+    async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"),
+  ));
 }
 
 async function activeHouseholdName(page: Page): Promise<string> {
