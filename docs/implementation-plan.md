@@ -261,16 +261,61 @@ This section is the rolling commentary. It names where delivery actually is, so
 the next action is never inferred from memory. Update it whenever a slice
 changes state.
 
-- **Current wave:** v1.1 Wave 2, beginning. Wave 1 is complete and reviewed.
-- **Next slice:** [#138 — settings and administration as dedicated routes](https://github.com/tomlawesome/orbit/issues/138).
+- **Current wave:** v1.1 Wave 2, substantially delivered but **not complete**.
+  One slice is deferred pending an owner decision, so the wave cannot be
+  reviewed as finished.
+- **Next slice:** none may start. [#138 — settings and administration as
+  dedicated routes](https://github.com/tomlawesome/orbit/issues/138) is the
+  next in sequence and is blocked on a decision below. The remaining Wave 3
+  slices depend on it.
 - **In flight:** nothing.
-- **Blocked:** nothing.
-- **Open question awaiting the repository owner:** whether the installer may
-  resolve a release tag to a digest automatically, recorded on
-  [#140 — installer-resolved release digests](https://github.com/tomlawesome/orbit/issues/140).
-  Work proceeds on the assumption that it may, because the deployed artifact
-  stays digest-pinned; if that is wrong, #140 is withdrawn and
-  [#143 — non-interactive installer](https://github.com/tomlawesome/orbit/issues/143) changes shape.
+- **Delivered in Wave 2:** [#141 — deploy-compose separation](https://github.com/tomlawesome/orbit/issues/141),
+  [#139 — optional services by configuration](https://github.com/tomlawesome/orbit/issues/139),
+  [#140 — installer-resolved release digests](https://github.com/tomlawesome/orbit/issues/140),
+  [#146 — visible document lifecycle states](https://github.com/tomlawesome/orbit/issues/146),
+  and, from Wave 3 ahead of sequence because its dependencies completed early,
+  [#143 — non-interactive installer](https://github.com/tomlawesome/orbit/issues/143).
+
+### Decisions reserved to the repository owner
+
+Recorded together because each is easy to miss on an individual issue, and each
+is currently proceeding on an assumption rather than an answer.
+
+1. **How an administration route enforces authority.** A server component
+   reading the session through `next/headers`, which is genuine server-side
+   refusal but introduces a session-reading pattern the codebase does not have
+   and arguably needs an ADR; or a client route over already-gated APIs, which
+   protects the data but not the route. Recorded on #138. **No assumption
+   made — the slice is deferred rather than guessed at.** It also carries a
+   judgement about how the interface should feel, which tests cannot settle.
+2. **Whether the installer may resolve a tag to a digest automatically.**
+   Recorded on #140 before implementation and never answered. Work proceeded on
+   the assumption that it may, because the deployed artifact stays digest-pinned.
+   If that is wrong, ADR-0008 and #140 are revertible together and #143 changes
+   shape.
+3. **Whether to enable repository auto-merge or a merge queue.** Recorded on
+   #131. Not enabled; merging remains manual and serial. A merge queue, not
+   auto-merge, is the tool that would actually address it.
+
+### Delivered without execution evidence
+
+Named so nothing is assumed validated:
+
+- **The installer has never been run.** Docker is unavailable on the authoring
+  machine and no CI job executes `install.sh`. Its shape is tested; its
+  behaviour is not. The install path should not be advertised until a real run
+  against a published preview digest is performed. Recorded on #143.
+- **Every compose change was first executed by CI**, not locally, for the same
+  reason. Each passed first time, but the caveat stands on #141 and #139.
+
+### Withdrawn during delivery
+
+- **Convergence without a manual refresh**, acceptance criterion 4 of #146. A
+  five-second poll was implemented and removed on a hypothesis that later proved
+  wrong. It now belongs to
+  [#150 — converge the item view when processing finishes](https://github.com/tomlawesome/orbit/issues/150),
+  with the failure recorded so the next attempt starts from evidence. The poll
+  may in fact have been acceptable.
 
 ### Wave 1 completion review
 
