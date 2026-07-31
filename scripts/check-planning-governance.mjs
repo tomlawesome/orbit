@@ -13,10 +13,17 @@ export function isProtectedPlanningPath(path, configuredPolicy = policy) {
     || configuredPolicy.protectedPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
 
-export function hasPlanningAttestation(body, configuredPolicy = policy) {
-  return String(body ?? "")
+/** Returns the accepted attestation present in the body, or null when none is. */
+export function matchedPlanningAttestation(body, configuredPolicy = policy) {
+  const lines = String(body ?? "")
     .split(/\r?\n/u)
-    .some((line) => line.trim() === configuredPolicy.requiredAttestation);
+    .map((line) => line.trim());
+  return configuredPolicy.acceptedAttestations
+    .find((attestation) => lines.includes(attestation)) ?? null;
+}
+
+export function hasPlanningAttestation(body, configuredPolicy = policy) {
+  return matchedPlanningAttestation(body, configuredPolicy) !== null;
 }
 
 function changedFilesFromGit(base, head) {
@@ -45,18 +52,18 @@ function main() {
     return;
   }
 
-  if (!hasPlanningAttestation(process.env.ORBIT_PR_BODY)) {
+  const attestation = matchedPlanningAttestation(process.env.ORBIT_PR_BODY);
+  if (!attestation) {
     console.error("Planning governance: protected planning files changed:");
     for (const path of protectedChanges) console.error(`- ${path}`);
-    console.error(
-      `Add the exact PR-body attestation: ${policy.requiredAttestation}`,
-    );
+    console.error("Add exactly one of these PR-body attestation lines:");
+    for (const accepted of policy.acceptedAttestations) console.error(`- ${accepted}`);
     process.exitCode = 1;
     return;
   }
 
   console.log(
-    `Planning governance: accepted ${policy.requiredPlanningModel} attestation for ${protectedChanges.length} protected file(s).`,
+    `Planning governance: accepted "${attestation}" for ${protectedChanges.length} protected file(s).`,
   );
 }
 
