@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
 import { carriesFiles, leavesDropZone } from "@/components/document-drop";
-import { awaitingProgress, progressDescription } from "@/components/document-state";
+import { progressDescription } from "@/components/document-state";
 
 export interface ItemDocument {
   id: string;
@@ -108,15 +108,6 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     const bitmap = captureReview?.bitmap;
     return () => bitmap?.close();
   }, [captureReview?.bitmap]);
-
-  useEffect(() => {
-    // A document can still be processing when the list is read, most often
-    // through mailbox ingestion. Poll only while something is genuinely in
-    // progress; rejected is terminal, so it never keeps the timer alive.
-    if (!documents.some(awaitingProgress)) return;
-    const timer = window.setTimeout(() => void refresh(), 5_000);
-    return () => window.clearTimeout(timer);
-  }, [documents, refresh]);
 
   useEffect(() => {
     // Without this the browser navigates away from Orbit when a file is
