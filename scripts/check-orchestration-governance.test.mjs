@@ -277,6 +277,13 @@ function reconciledState() {
     issue: {
       number: 74,
       acceptanceChecklist: "reviewed_complete",
+      acceptanceCriteria: [
+        {
+          criterion: "Launch receipts remain launch-pending until authoritatively confirmed.",
+          met: true,
+          evidence: ["Regression test for the absent-from-list case.", "Merged PR #75."],
+        },
+      ],
       closureEvidence: [
         "PR #75 merged at the recorded SHA.",
         "Trusted develop validation passed for the same SHA.",
@@ -457,6 +464,42 @@ describe("orchestration governance", () => {
     state.delivery.reconciliation.issue.acceptanceChecklist = "reviewed_incomplete";
     expect(() => validateOperationalState(state, validPolicy())).toThrow(
       /acceptance checklist must be reviewed complete/u,
+    );
+  });
+
+  it("rejects a reviewed-complete claim that itemises no acceptance criterion", () => {
+    const state = reconciledState();
+    delete state.delivery.reconciliation.issue.acceptanceCriteria;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /must itemise every acceptance criterion/u,
+    );
+  });
+
+  it("rejects an empty itemisation rather than treating it as complete", () => {
+    const state = reconciledState();
+    state.delivery.reconciliation.issue.acceptanceCriteria = [];
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /must itemise every acceptance criterion/u,
+    );
+  });
+
+  it("rejects reconciliation while any itemised criterion is unmet", () => {
+    const state = reconciledState();
+    state.delivery.reconciliation.issue.acceptanceCriteria.push({
+      criterion: "Parser interactions are recorded.",
+      met: false,
+      evidence: ["not yet implemented"],
+    });
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /every acceptance criterion must be met/u,
+    );
+  });
+
+  it("rejects an itemised criterion asserted without its own evidence", () => {
+    const state = reconciledState();
+    state.delivery.reconciliation.issue.acceptanceCriteria[0].evidence = [];
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /each acceptance criterion requires its own evidence/u,
     );
   });
 
