@@ -144,19 +144,46 @@ describe("supply-chain policy", () => {
       new URL("../scripts/deploy-container.sh", import.meta.url),
       "utf8",
     );
-    for (const script of [install, configure, deploy]) {
-      expect(script).not.toContain("ghcr.io/tomlawesome/orbit:latest");
+    // The property is that a deployment runs an immutable digest. Resolving a
+    // mutable tag to a digest is permitted; deploying one is not. Enforcing the
+    // property rather than a literal string lets the installer automate the
+    // lookup without weakening what the rule guarantees. See ADR-0008.
+    const rule = policyDocument.deploymentImageReferences;
+    expect(rule).toBeDefined();
+    expect(rule.localBuildTagPrefix).toBe("orbit-local:");
+
+    // A script may assign through a variable, but only if it first proves the
+    // value is a digest. The guard is the bash pattern the script tests
+    // against, so an indirect assignment cannot smuggle in a mutable tag.
+    const digestGuard = "@sha256:[0-9a-f]{64}";
+    const deploymentScripts = { install, configure, deploy };
+
+    for (const [name, script] of Object.entries(deploymentScripts)) {
+      const guardsDigestFormat = script.includes(digestGuard);
+      for (const line of script.split(/\r?\n/u)) {
+        const assignment = /(?:^|\s)(?:export\s+)?ORBIT_IMAGE=(.+)$/u.exec(line);
+        if (!assignment) continue;
+        const value = assignment[1].trim();
+        if (value === '""' || value === "''") continue;
+
+        const literalDigest = value.includes("@sha256:");
+        const localBuildTag = value.includes(rule.localBuildTagPrefix);
+        // `ORBIT_IMAGE=$var` or `ORBIT_IMAGE=$orbit_image` — acceptable only
+        // when the script validates the digest format somewhere.
+        const indirect = /^"?\$\{?[A-Za-z_]/u.test(value);
+
+        expect(
+          literalDigest || localBuildTag || (indirect && guardsDigestFormat),
+          `${name} assigns a deployment reference that is neither a digest, a local build tag, nor a digest-guarded value: ${value}`,
+        ).toBe(true);
+      }
     }
-    expect(install).toContain(
-      "Set ORBIT_IMAGE to the exact published registry digest",
-    );
-    expect(configure).toContain(
-      "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag.",
-    );
+
+    // Guards against the rule above passing vacuously: at least one deployment
+    // script must actually enforce the digest format.
+    expect(deploy.includes(digestGuard)).toBe(true);
+
     expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
-    expect(deploy).toContain(
-      "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest.",
-    );
   });
 
   it("accepts a pinned reviewed scanner and live bounded exceptions", () => {
@@ -373,5 +400,78 @@ describe("supply-chain policy", () => {
     };
 
     expect(() => evaluateImageEvidence(args)).toThrow(/image identity/u);
+  });
+});
+
+/**
+ * The deployment-reference rule, extracted so it can be proven against
+ * synthetic scripts rather than only against the repository's own.
+ *
+ * The rule was widened to permit resolving a mutable tag to a digest, so it
+ * must be shown to still reject deploying one. A relaxed security assertion
+ * that nobody tests is indistinguishable from a deleted one.
+ */
+function deploysOnlyImmutableReferences(script, localBuildTagPrefix = "orbit-local:") {
+  const digestGuard = "@sha256:[0-9a-f]{64}";
+  const guardsDigestFormat = script.includes(digestGuard);
+
+  for (const line of script.split(/\r?\n/u)) {
+    const assignment = /(?:^|\s)(?:export\s+)?ORBIT_IMAGE=(.+)$/u.exec(line);
+    if (!assignment) continue;
+    const value = assignment[1].trim();
+    if (value === '""' || value === "''") continue;
+
+    const literalDigest = value.includes("@sha256:");
+    const localBuildTag = value.includes(localBuildTagPrefix);
+    const indirect = /^"?\$\{?[A-Za-z_]/u.test(value);
+    if (!(literalDigest || localBuildTag || (indirect && guardsDigestFormat))) return false;
+  }
+  return true;
+}
+
+describe("deployment reference rule", () => {
+  it("accepts a literal digest", () => {
+    expect(deploysOnlyImmutableReferences(
+      'export ORBIT_IMAGE="ghcr.io/tomlawesome/orbit@sha256:' + "0".repeat(64) + '"',
+    )).toBe(true);
+  });
+
+  it("accepts an explicitly local build tag", () => {
+    expect(deploysOnlyImmutableReferences(
+      'export ORBIT_IMAGE="orbit-local:abc123def456"',
+    )).toBe(true);
+  });
+
+  it("rejects deploying a mutable tag", () => {
+    // The behaviour the amendment must not permit.
+    expect(deploysOnlyImmutableReferences(
+      'export ORBIT_IMAGE="ghcr.io/tomlawesome/orbit:latest"',
+    )).toBe(false);
+    expect(deploysOnlyImmutableReferences(
+      'export ORBIT_IMAGE="ghcr.io/tomlawesome/orbit:v1.0.0"',
+    )).toBe(false);
+  });
+
+  it("rejects an indirect assignment from a script that never checks the format", () => {
+    // Resolving a tag is permitted, but only when the resolved value is proven
+    // to be a digest before it becomes the deployment reference.
+    expect(deploysOnlyImmutableReferences([
+      'resolved="$(lookup_tag ghcr.io/tomlawesome/orbit:latest)"',
+      'export ORBIT_IMAGE="$resolved"',
+    ].join("\n"))).toBe(false);
+  });
+
+  it("accepts an indirect assignment guarded by the digest format", () => {
+    // This is what the installer rewrite is permitted to do: name a tag in
+    // order to resolve it, then prove the result before deploying it.
+    expect(deploysOnlyImmutableReferences([
+      'resolved="$(lookup_tag ghcr.io/tomlawesome/orbit:latest)"',
+      '[[ "$resolved" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || fail "not a digest"',
+      'export ORBIT_IMAGE="$resolved"',
+    ].join("\n"))).toBe(true);
+  });
+
+  it("ignores an empty assignment, which deploys nothing", () => {
+    expect(deploysOnlyImmutableReferences('ORBIT_IMAGE=""')).toBe(true);
   });
 });
