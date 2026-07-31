@@ -389,9 +389,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Validate the deployment asset set without a source tree
+        run: |
+          # Proves the base compose file describes a deployment truthfully: an
+          # operator who fetched only deployment assets has no Dockerfile and no
+          # source, so a build declaration there would describe something absent.
+          deployment="$(mktemp -d)"
+          cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
+          cp .env-orbit "${deployment}/"
+          mkdir -p "${deployment}/config"
+          cp config/tika-config.xml "${deployment}/config/"
+          [[ ! -e "${deployment}/Dockerfile" ]] || {
+            printf 'The deployment asset set must not contain a Dockerfile.\n' >&2
+            exit 1
+          }
+          docker compose --project-directory "${deployment}" --env-file "${deployment}/.env-orbit" \
+            -f "${deployment}/docker-compose.yml" config --quiet
+          docker compose --project-directory "${deployment}" --env-file "${deployment}/.env-orbit" \
+            -f "${deployment}/docker-compose.yml" -f "${deployment}/docker-compose.mail.yml" config --quiet
+          rm -rf "${deployment}"
+
       - name: Validate Compose configuration
         run: |
           docker compose --env-file .env-orbit config --quiet
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet
