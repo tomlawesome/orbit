@@ -31,29 +31,43 @@
 
 ## Quick start
 
-From an empty directory on a Linux host with Git and Docker Compose v2:
+From an empty directory on a Linux host with Docker Compose v2 and `curl`:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-The installer downloads Orbit into the current directory, creates the
-Orbit-specific `.env-orbit` configuration when needed, generates independent
-256-bit session, PostgreSQL, and document-encryption secrets, and asks whether to build the
-application container locally:
+The installer takes no interactive input, so the same command works in a
+terminal, over SSH without a TTY, in CI and from cloud-init. Git is not
+required and the repository is not cloned: a deployment needs compose assets
+and a published image, not source or tests.
 
-- answer **Y/Yes** (or press Enter) to pull current base images and build
-  the `orbit-app` service from source;
-- answer **N/No** only after setting `ORBIT_IMAGE` to an exact published
-  `registry/repository@sha256:...` digest. Orbit deliberately has no implicit
-  `latest` deployment default.
+It resolves the published image to an immutable digest, reads the exact source
+revision recorded in that image, and fetches its deployment assets from that
+same revision — so a compose file cannot drift from the image it configures. The
+resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
+that digest is what runs. A tag is only ever read to resolve it; a mutable
+reference is never deployed.
 
-It then starts the `orbit` application container, the official
+It then creates the Orbit-specific `.env-orbit` configuration when needed,
+generates independent 256-bit session, PostgreSQL, and document-encryption
+secrets, and starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
 in the background and displays their status. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
 only after a dedicated exact-image validation path is enabled for that
 architecture.
+
+### Building from source instead
+
+Building is a developer workflow rather than an installation choice, so the
+installer does not offer it. Clone the repository and build explicitly:
+
+```bash
+git clone https://github.com/tomlawesome/orbit.git && cd orbit
+bash scripts/configure.sh
+bash scripts/build-container.sh
+```
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
