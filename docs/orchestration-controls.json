@@ -116,6 +116,20 @@
       "issue": 127,
       "pullRequest": 131,
       "approvedByModel": "Claude Opus Extra High"
+    },
+    {
+      "id": "ORCH-009",
+      "status": "adopted",
+      "decisionClass": "protected_planning",
+      "summary": "Justify wave concurrency by reconciliation cost as well as disjoint file ownership, record the assessment per slice, and cap in-flight pull requests while the target branch requires up-to-date branches.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Five pull requests were opened concurrently on the basis of disjoint file ownership; each merge forced the remainder behind, requiring serial update-and-revalidate cycles that found no defect.",
+        "The implementation plan recorded file ownership but no reconciliation cost, presenting disjointness as sufficient grounds for concurrency."
+      ],
+      "issue": 132,
+      "pullRequest": 136,
+      "approvedByModel": "Claude Opus Extra High"
     }
   ]
 }
