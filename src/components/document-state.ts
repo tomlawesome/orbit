@@ -9,8 +9,23 @@
 
 export interface DocumentProgress {
   lifecycle: string;
-  ready: boolean;
-  failureCode: string | null;
+  /** Absent in payloads produced before readiness was reported. */
+  ready?: boolean;
+  failureCode?: string | null;
+}
+
+/** Lifecycles whose content can be opened; mirrors the server's boundary. */
+const openableLifecycles = ["available", "pending_deletion"];
+
+/**
+ * Whether a document's content can be opened.
+ *
+ * Readiness is derived from the lifecycle when the field is absent, so a
+ * payload that predates the field cannot make an available document look
+ * stuck and hide its actions.
+ */
+export function isReady(document: DocumentProgress): boolean {
+  return document.ready ?? openableLifecycles.includes(document.lifecycle);
 }
 
 const rejectionReasons: Record<string, string> = {
@@ -22,7 +37,7 @@ const rejectionReasons: Record<string, string> = {
 };
 
 export function progressDescription(document: DocumentProgress): string | null {
-  if (document.ready) return null;
+  if (isReady(document)) return null;
 
   if (document.lifecycle === "rejected") {
     const known = document.failureCode ? rejectionReasons[document.failureCode] : undefined;
@@ -41,7 +56,7 @@ export function progressDescription(document: DocumentProgress): string | null {
   return "Processing…";
 }
 
-/** Whether a document should keep the list polling for convergence. */
+/** Whether a document is still expected to change state. */
 export function awaitingProgress(document: DocumentProgress): boolean {
-  return !document.ready && document.lifecycle !== "rejected";
+  return !isReady(document) && document.lifecycle !== "rejected";
 }

@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { awaitingProgress, progressDescription } from "./document-state";
+import { awaitingProgress, isReady, progressDescription } from "./document-state";
 
 const document = (overrides: Partial<Parameters<typeof progressDescription>[0]> = {}) => ({
   lifecycle: "available",
   ready: true,
   failureCode: null,
   ...overrides,
+});
+
+describe("readiness derivation", () => {
+  it("derives readiness from the lifecycle when the field is absent", () => {
+    // A payload predating the readiness field must not make an available
+    // document look stuck. Treating a missing field as "not ready" hid the
+    // document's actions entirely, and a browser journey waited ninety seconds
+    // for a button that never rendered.
+    expect(isReady({ lifecycle: "available" })).toBe(true);
+    expect(isReady({ lifecycle: "pending_deletion" })).toBe(true);
+    expect(isReady({ lifecycle: "scanning" })).toBe(false);
+    expect(isReady({ lifecycle: "rejected" })).toBe(false);
+  });
+
+  it("prefers the reported field over the derivation", () => {
+    expect(isReady({ lifecycle: "available", ready: false })).toBe(false);
+    expect(isReady({ lifecycle: "scanning", ready: true })).toBe(true);
+  });
+
+  it("shows no progress text for an available document lacking the field", () => {
+    expect(progressDescription({ lifecycle: "available" })).toBe(null);
+  });
 });
 
 describe("document progress description", () => {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
 import { carriesFiles, leavesDropZone } from "@/components/document-drop";
-import { progressDescription } from "@/components/document-state";
+import { isReady, progressDescription } from "@/components/document-state";
 
 export interface ItemDocument {
   id: string;
@@ -15,9 +15,9 @@ export interface ItemDocument {
   scanStatus: string;
   availableAt: string | null;
   deleteAfter: string | null;
-  /** Whether the content can be opened yet. */
-  ready: boolean;
-  failureCode: string | null;
+  /** Whether the content can be opened yet; derived when absent. */
+  ready?: boolean;
+  failureCode?: string | null;
 }
 
 
@@ -332,6 +332,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
         <ul className="document-list" aria-label="Attached documents">
           {documents.map((document) => {
             const progress = progressDescription(document);
+            const ready = isReady(document);
             const rejected = document.lifecycle === "rejected";
             return (
               <li key={document.id} className={progress ? "document-row not-ready" : "document-row"}>
@@ -346,9 +347,9 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
                   {/* Actions are offered only where they can succeed. A document
                       still processing has nothing to download, and a rejected one
                       never will. */}
-                  {document.ready && document.lifecycle === "available" && <a href={`/api/documents/${encodeURIComponent(document.id)}/download`}>Download</a>}
-                  {document.ready && document.lifecycle === "available" && <button type="button" disabled={busyDocumentId === document.id} onClick={() => void createDraft(document)}>Review as draft</button>}
-                  {document.ready && (
+                  {ready && document.lifecycle === "available" && <a href={`/api/documents/${encodeURIComponent(document.id)}/download`}>Download</a>}
+                  {ready && document.lifecycle === "available" && <button type="button" disabled={busyDocumentId === document.id} onClick={() => void createDraft(document)}>Review as draft</button>}
+                  {ready && (
                     <button type="button" disabled={busyDocumentId === document.id} onClick={() => void mutate(document, document.lifecycle === "available" ? "delete" : "restore")}>
                       {busyDocumentId === document.id ? "Working…" : document.lifecycle === "available" ? "Delete" : "Restore"}
                     </button>
