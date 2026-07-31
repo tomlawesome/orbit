@@ -249,9 +249,35 @@ describe("item document inspection", () => {
       householdId: "household-id",
       filename: "policy.pdf",
       body: new ReadableStream<Uint8Array>(),
-    })).rejects.toMatchObject({ code: "document_scanner_unavailable", status: 503 });
+    })).rejects.toMatchObject({ code: "document_scanner_unreachable", status: 503 });
     expect(mocks.extract).not.toHaveBeenCalled();
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("distinguishes a scanner that answered with a failure from one that cannot be reached", async () => {
+    mocks.scan.mockResolvedValue({ status: "error", reason: "scanner" });
+
+    await expect(inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    })).rejects.toMatchObject({ code: "document_scanner_failed", status: 503 });
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("attributes the scanner failure without disclosing host, port or provider text", async () => {
+    mocks.scan.mockResolvedValue({ status: "error", reason: "timeout" });
+
+    const failure = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    }).catch((error: unknown) => error as { message: string });
+
+    expect(failure.message).toContain("malware scanner");
+    expect(failure.message).not.toMatch(/clamav|3310|localhost|127\.0\.0\.1|timeout/iu);
   });
 
   it("fails closed for infected scanner results without exposing the signature", async () => {
