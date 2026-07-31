@@ -9,6 +9,7 @@ tmp
 .agents/handoffs/
 .agents/orchestration-state.json
 .agents/worktrees/
+.claude/
 backups/
 coverage
 playwright-report/
