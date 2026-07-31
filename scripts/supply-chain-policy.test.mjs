@@ -161,6 +161,8 @@ describe("supply-chain policy", () => {
     for (const [name, script] of Object.entries(deploymentScripts)) {
       const guardsDigestFormat = script.includes(digestGuard);
       for (const line of script.split(/\r?\n/u)) {
+        // A shell pattern comparison is not an assignment.
+        if (/\[\[|==/u.test(line)) continue;
         const assignment = /(?:^|\s)(?:export\s+)?ORBIT_IMAGE=(.+)$/u.exec(line);
         if (!assignment) continue;
         const value = assignment[1].trim();
@@ -416,6 +418,8 @@ function deploysOnlyImmutableReferences(script, localBuildTagPrefix = "orbit-loc
   const guardsDigestFormat = script.includes(digestGuard);
 
   for (const line of script.split(/\r?\n/u)) {
+    // A shell pattern comparison is not an assignment.
+    if (/\[\[|==/u.test(line)) continue;
     const assignment = /(?:^|\s)(?:export\s+)?ORBIT_IMAGE=(.+)$/u.exec(line);
     if (!assignment) continue;
     const value = assignment[1].trim();
