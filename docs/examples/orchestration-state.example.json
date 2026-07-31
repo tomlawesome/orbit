@@ -153,7 +153,25 @@
         ],
         "state": "closed",
         "stateReason": "completed",
-        "observedAt": "2026-07-30T07:25:00.000Z"
+        "observedAt": "2026-07-30T07:25:00.000Z",
+        "acceptanceCriteria": [
+          {
+            "criterion": "Launch receipts remain launch-pending until an authoritative task observation confirms state.",
+            "met": true,
+            "evidence": [
+              "Regression test covering the absent-from-list case.",
+              "Merged PR #77 with passing protected checks."
+            ]
+          },
+          {
+            "criterion": "Adopted controls require evidence, an issue, review, tests and a protected pull request.",
+            "met": true,
+            "evidence": [
+              "Control ledger entries ORCH-001 through ORCH-005.",
+              "Trusted target-branch validation for the exact merge SHA."
+            ]
+          }
+        ]
       },
       "parents": [],
       "milestoneReevaluated": true
