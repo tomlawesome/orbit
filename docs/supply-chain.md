@@ -63,6 +63,51 @@ validator fails closed on stale or malformed exceptions. Exceptions do not
 change scanner output; they make a narrow, reviewable publication decision for
 a known vulnerability.
 
+### Sharp/libvips v1 licence decision
+
+The v1 release comparison against the older `main` branch reports the
+platform packages introduced by the `sharp` 0.35.0 update because their
+published metadata includes `LGPL-3.0-or-later`. The older branch already
+contains the corresponding `sharp` 0.34.5/libvips 1.2.4 package family.
+Reverting is not an acceptable resolution: GitHub advisory
+`GHSA-f88m-g3jw-g9cj` identifies inherited high-severity libvips
+vulnerabilities in `sharp` versions before 0.35.0 and identifies 0.35.0 as
+patched.
+
+The exception in `.github/dependency-review-config.yml` therefore excludes
+only the exact `@img` platform-package PURLs for `sharp` 0.35.0 and libvips
+1.3.0 from the licence check. It does not add LGPL to the repository-wide
+allow-list and does not carry forward to a later package version. Issue
+[#107](https://github.com/tomlawesome/orbit/issues/107) owns the evidence and
+requires re-review by 2026-10-31. The owner is `tomlawesome`.
+
+`sharp` is Apache-2.0 licensed; its prebuilt platform packages carry the
+separately licensed libvips shared library. A distributed Orbit container must
+retain the upstream licence and copyright material and must keep the
+corresponding libvips source location available so recipients can exercise the
+rights granted by the LGPL. The upstream sources and licence texts are
+maintained in the
+[sharp](https://github.com/lovell/sharp),
+[sharp-libvips](https://github.com/lovell/sharp-libvips), and
+[libvips](https://github.com/libvips/libvips) repositories. Any change to
+static linking, the packaged binaries, or their licence metadata requires a
+new review rather than relying on this decision.
+
+The same release comparison could not infer licences for four updated direct
+package declarations. Their installed, versioned package manifests were
+manually checked on 2026-07-31:
+
+| Package | Version | Declared licence |
+| --- | --- | --- |
+| `drizzle-orm` | 0.45.2 | Apache-2.0 |
+| `eslint-config-next` | 16.2.11 | MIT |
+| `next` | 16.2.11 | MIT |
+| `nodemailer` | 9.0.3 | MIT-0 |
+
+These declarations are already inside the global allow-list and require no
+package exception. Dependency, secret, exact-image vulnerability, SBOM,
+provenance and protected-promotion gates remain unchanged.
+
 Validate the current policy locally with:
 
 ```text

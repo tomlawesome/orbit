@@ -53,7 +53,40 @@ describe("dependency change review", () => {
     expect(config).toContain("  - MIT");
     expect(config).toContain("  - Apache-2.0");
     expect(config).not.toContain("allow-ghsas:");
-    expect(config).not.toContain("allow-dependencies-licenses:");
+  });
+
+  it("allows only the governed version-bound sharp licence exception", () => {
+    const [globalConfig, dependencyLicenseAllowList] = config.split(
+      "allow-dependencies-licenses:",
+    );
+    expect(dependencyLicenseAllowList).toBeDefined();
+    const allowedDependencyPurls = [
+      ...(dependencyLicenseAllowList ?? "").matchAll(/^  - (\S+)$/gmu),
+    ].map((match) => match[1]);
+
+    expect(allowedDependencyPurls).toEqual([
+      "pkg:npm/@img/sharp-libvips-darwin-arm64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-darwin-x64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-arm@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-arm64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-ppc64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-riscv64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-s390x@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linux-x64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linuxmusl-arm64@1.3.0",
+      "pkg:npm/@img/sharp-libvips-linuxmusl-x64@1.3.0",
+      "pkg:npm/@img/sharp-wasm32@0.35.0",
+      "pkg:npm/@img/sharp-win32-arm64@0.35.0",
+      "pkg:npm/@img/sharp-win32-ia32@0.35.0",
+      "pkg:npm/@img/sharp-win32-x64@0.35.0",
+    ]);
+    for (const purl of allowedDependencyPurls) {
+      expect(purl).toMatch(
+        /^(?:pkg:npm\/@img\/sharp-libvips-[^@/]+@1\.3\.0|pkg:npm\/@img\/sharp-(?:wasm32|win32-arm64|win32-ia32|win32-x64)@0\.35\.0)$/u,
+      );
+    }
+
+    expect(globalConfig).not.toContain("LGPL-3.0-or-later");
   });
 
   it("pins every third-party action to an immutable commit", () => {
