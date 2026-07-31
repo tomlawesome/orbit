@@ -10,29 +10,17 @@ import { createSession, deleteSessionToken } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
-function logCallbackFailure(error: unknown, authError: AuthError): void {
-  const cause = authError.cause instanceof Error ? authError.cause : error instanceof Error ? error : undefined;
-  const details = cause as (Error & { code?: unknown; claim?: unknown; reason?: unknown }) | undefined;
-
-  // Deliberately exclude tokens, authorization codes, claims, and request data.
+function logCallbackFailure(authError: AuthError): void {
+  // Deliberately log only bounded metadata; causes can contain provider data.
   console.error("Orbit authentication callback failed", {
     code: authError.code,
     status: authError.status,
-    cause: details
-      ? {
-          name: details.name,
-          code: typeof details.code === "string" ? details.code : undefined,
-          claim: typeof details.claim === "string" ? details.claim : undefined,
-          reason: typeof details.reason === "string" ? details.reason : undefined,
-          message: details.message.replace(/[\r\n\t]/g, " ").slice(0, 300),
-        }
-      : undefined,
   });
 }
 
 function callbackFailure(error: unknown, config: AuthConfig): NextResponse {
   const authError = asAuthError(error);
-  logCallbackFailure(error, authError);
+  logCallbackFailure(authError);
   const target = new URL("/auth/error", config.appUrl);
   target.searchParams.set("code", authError.code);
   const response = NextResponse.redirect(target, 303);
@@ -68,6 +56,9 @@ export async function GET(request: NextRequest) {
     const metadata = await discoverProvider(config);
     const identity = await completeAuthorization(config, metadata, code, transaction);
     const user = await provisionIdentity(identity);
+    if (user.disabledAt) {
+      throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
+    }
 
     // A successful login always replaces the browser's previous session.
     await deleteSessionToken(request.cookies.get(sessionCookieName(config))?.value);

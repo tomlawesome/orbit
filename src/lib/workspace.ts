@@ -7,6 +7,7 @@ import {
   sectionIcons,
   type HomeItem,
   type HouseholdSection,
+  type ScheduleKind,
 } from "@/lib/domain";
 
 export const WORKSPACE_VERSION = 1;
@@ -52,6 +53,10 @@ export const workspaceItemSchema = z.object({
   }
 });
 
+export function initialScheduleKind(item?: Pick<HomeItem, "scheduleKind">): ScheduleKind | "none" {
+  return item ? item.scheduleKind ?? "none" : "renewal";
+}
+
 export const itemActivitySchema = z.object({
   id: z.string().min(1).max(100),
   itemId: z.string().min(1).max(100),
@@ -80,6 +85,8 @@ export const householdWorkspaceSchema = z.object({
   memberCount: z.number().int().positive(),
   canManage: z.boolean().default(false),
   onboardingComplete: z.boolean().default(true),
+  deletionRequestedAt: z.iso.datetime().optional(),
+  deleteAfter: z.iso.datetime().optional(),
   sections: z.array(workspaceSectionSchema).min(1).max(12),
   items: z.array(workspaceItemSchema).max(500),
   activities: z.array(itemActivitySchema).max(5_000).default([]),
@@ -87,10 +94,19 @@ export const householdWorkspaceSchema = z.object({
   dismissedNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
 });
 
+export const recoverableHouseholdSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().trim().min(1).max(60),
+  deleteAfter: z.iso.datetime(),
+});
+
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
-  activeHouseholdId: z.string().min(1),
-  households: z.array(householdWorkspaceSchema).min(1).max(500),
+  /** The server decides whether the user may enter a household or must choose one. */
+  householdLanding: z.enum(["active", "choose"]).default("active"),
+  activeHouseholdId: z.string().min(1).nullable(),
+  households: z.array(householdWorkspaceSchema).max(500),
+  recoverableHouseholds: z.array(recoverableHouseholdSchema).max(500).default([]),
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
@@ -111,20 +127,21 @@ export type WorkspaceCommand =
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
   | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
-  | { type: "item.archive"; householdId: string; itemId: string; activity: ItemActivity }
+  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivity }
   | {
       type: "item.complete";
       householdId: string;
       itemId: string;
+      expectedVersion: number;
       completedDate: string;
       nextDate?: string;
       costMinor?: number;
       notes?: string;
       activity: ItemActivity;
     }
-  | { type: "item.reschedule"; householdId: string; itemId: string; dueDate: string; activity: ItemActivity }
-  | { type: "item.snooze"; householdId: string; itemId: string; snoozedUntil: string; activity: ItemActivity }
-  | { type: "item.status"; householdId: string; itemId: string; status: "active" | "cancelled"; activity: ItemActivity }
+  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivity }
+  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivity }
+  | { type: "item.status"; householdId: string; itemId: string; expectedVersion: number; status: "active" | "cancelled"; activity: ItemActivity }
   | { type: "notification.read"; householdId: string; notificationId: string }
   | { type: "notification.dismiss"; householdId: string; notificationId: string }
   | { type: "notification.read-all"; householdId: string; notificationIds: string[] };
@@ -163,12 +180,14 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.archive"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     activity: itemActivitySchema,
   }),
   z.object({
     type: z.literal("item.complete"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     completedDate: calendarDate,
     nextDate: calendarDate.optional(),
     costMinor: z.number().int().min(0).max(100_000_000).optional(),
@@ -179,6 +198,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.reschedule"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     dueDate: calendarDate,
     activity: itemActivitySchema,
   }),
@@ -186,6 +206,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.snooze"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     snoozedUntil: calendarDate,
     activity: itemActivitySchema,
   }),
@@ -193,6 +214,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("item.status"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
+    expectedVersion: z.number().int().positive(),
     status: z.enum(["active", "cancelled"]),
     activity: itemActivitySchema,
   }),
@@ -240,7 +262,9 @@ export function createHousehold(input: {
 export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState {
   return workspaceSchema.parse({
     version: WORKSPACE_VERSION,
+    householdLanding: "choose",
     activeHouseholdId: "local-home",
+    recoverableHouseholds: [],
     households: [{
       id: "local-home",
       name: "My home",
@@ -288,6 +312,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       if (state.households.some((household) => household.id === command.household.id)) return state;
       return workspaceSchema.parse({
         ...state,
+        householdLanding: "active",
         activeHouseholdId: command.household.id,
         households: [...state.households, command.household],
       });

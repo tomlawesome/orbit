@@ -19,13 +19,14 @@ interface Candidate {
 interface MemberManagerProps {
   householdId: string;
   session: WorkspaceSession;
+  refreshWorkspace(): Promise<void>;
 }
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
-export function MemberManager({ householdId, session }: MemberManagerProps) {
+export function MemberManager({ householdId, session, refreshWorkspace }: MemberManagerProps) {
   const [members, setMembers] = useState<Member[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [message, setMessage] = useState("");
@@ -80,6 +81,8 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
   }
 
   async function remove(member: Member) {
+    const leaving = member.id === session.user.id;
+    if (leaving && !window.confirm("Leave this household? You will no longer be able to see its items.")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -93,7 +96,8 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
       if (!response.ok || !payload.members) throw new Error(payload.error?.message || "Member could not be removed");
       setMembers(payload.members);
       setCandidates(payload.candidates ?? []);
-      setMessage(`${member.displayName} was removed from this household.`);
+      setMessage(leaving ? "You left this household." : `${member.displayName} was removed from this household.`);
+      if (leaving) window.location.reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Member could not be removed");
     } finally {
@@ -116,8 +120,12 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
       if (!response.ok || !payload.members) throw new Error(payload.error?.message || "Ownership could not be transferred");
       setMembers(payload.members);
       setCandidates(payload.candidates ?? []);
-      setMessage(`${member.displayName} is now the household owner.`);
-      window.location.reload();
+      try {
+        await refreshWorkspace();
+        setMessage(`${member.displayName} is now the household owner.`);
+      } catch {
+        setMessage("Ownership changed, but Orbit could not refresh permissions. Reload Orbit.");
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ownership could not be transferred");
     } finally {
@@ -147,6 +155,11 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
                   <button type="button" disabled={busy} onClick={() => remove(member)}>Remove</button>
                 </span>
               )}
+              {!isOwner && member.id === session.user.id && member.role !== "owner" && (
+                <span className="member-actions">
+                  <button type="button" disabled={busy} onClick={() => remove(member)}>Leave household</button>
+                </span>
+              )}
             </article>
           ))}
         </div>
@@ -167,9 +180,9 @@ export function MemberManager({ householdId, session }: MemberManagerProps) {
             </label>
             <button type="submit" disabled={busy || !candidates.length}>{busy ? "Adding…" : "Add member"}</button>
           </form>
-          {message && <p className="member-message" role="status">{message}</p>}
         </section>
       )}
+      {message && <p className="member-message" role="status">{message}</p>}
     </div>
   );
 }

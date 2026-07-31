@@ -12,7 +12,15 @@ export async function register() {
   }
 
   if (process.env.WORKER_ENABLED === "true") {
-    const { startNotificationWorker } = await import("@/server/notification-worker");
+    const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }] = await Promise.all([
+      import("@/server/notification-worker"),
+      import("@/server/document-worker"),
+      import("@/server/imap-ingestion"),
+      import("@/server/imap-receipt-worker"),
+    ]);
     startNotificationWorker();
+    startDocumentWorker();
+    startImapIngestionWorker();
+    startImapReceiptWorker();
   }
 }

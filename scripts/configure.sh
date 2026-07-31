@@ -68,6 +68,15 @@ ensure_secrets_directory() {
     fail "Could not restrict ${secrets_directory} permissions."
 }
 
+persist_orbit_image() {
+  local orbit_image="${ORBIT_IMAGE:-}"
+  [[ -n "$orbit_image" ]] || return 0
+  if [[ ! "$orbit_image" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$orbit_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
+    fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
+  fi
+  sed -i "s|^ORBIT_IMAGE=.*|ORBIT_IMAGE=$orbit_image|" "$environment_file"
+}
+
 ensure_secret_file() {
   local path="$1" existing_value secret
 
@@ -77,8 +86,8 @@ ensure_secret_file() {
     existing_value="$(tr -d '\r\n' < "$path")"
     [[ "$existing_value" =~ ^[0-9a-fA-F]{64}$ ]] ||
       fail "${path} does not contain a valid 256-bit hexadecimal secret."
-    chmod 644 "$path" ||
-      fail "Could not set container-readable permissions on ${path}."
+    chmod 600 "$path" ||
+      fail "Could not restrict permissions on ${path}."
     unset existing_value
     return
   fi
@@ -87,17 +96,58 @@ ensure_secret_file() {
   temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit secret file."
   printf '%s\n' "$secret" > "$temporary_file"
-  chmod 644 "$temporary_file" ||
-    fail "Could not set container-readable permissions on the Orbit secret."
+  chmod 600 "$temporary_file" ||
+    fail "Could not restrict permissions on the Orbit secret."
   mv -- "$temporary_file" "$path"
   temporary_file=""
   unset secret
   printf 'Generated %s.\n' "$path"
 }
 
+ensure_vapid_keys() {
+  local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key orbit_image bootstrap_image
+  if [[ -s "$private_key_file" ]]; then
+    chmod 600 "$private_key_file"
+    return
+  fi
+  command -v docker >/dev/null 2>&1 || fail "Docker is required to generate VAPID keys."
+  orbit_image="${ORBIT_IMAGE:-}"
+  generated=""
+  if [[ -n "$orbit_image" ]]; then
+    if [[ ! "$orbit_image" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$orbit_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
+      fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
+    fi
+    if docker image inspect "$orbit_image" >/dev/null 2>&1 ||
+      { [[ "$orbit_image" =~ @sha256: ]] && docker pull "$orbit_image" >/dev/null; }; then
+      generated="$(docker run --rm --entrypoint node "$orbit_image" /opt/orbit/scripts/generate-vapid.mjs 2>/dev/null || true)"
+    fi
+  fi
+  if [[ -z "$generated" ]]; then
+    printf 'Building the Orbit bootstrap image to generate VAPID keys.\n'
+    bootstrap_image="orbit-vapid-bootstrap:$(git rev-parse --short=12 HEAD)"
+    docker build --target runner --tag "$bootstrap_image" . >/dev/null || fail "Could not build the Orbit bootstrap image."
+    generated="$(docker run --rm --entrypoint node "$bootstrap_image" /opt/orbit/scripts/generate-vapid.mjs)" || fail "Could not generate VAPID keys."
+  fi
+  public_key="$(printf '%s\n' "$generated" | sed -n 's/^public=//p')"
+  private_key="$(printf '%s\n' "$generated" | sed -n 's/^private=//p')"
+  [[ -n "$public_key" && -n "$private_key" ]] || fail "VAPID key generation returned invalid values."
+  temporary_file="$(mktemp "$secrets_directory/.vapid.installing.XXXXXX")"
+  printf '%s\n' "$private_key" > "$temporary_file"
+  chmod 600 "$temporary_file"
+  mv -- "$temporary_file" "$private_key_file"
+  temporary_file=""
+  sed -i "s|^VAPID_PUBLIC_KEY=.*|VAPID_PUBLIC_KEY=$public_key|" "$environment_file"
+  sed -i "s|^VAPID_PRIVATE_KEY_FILE=.*|VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key|" "$environment_file"
+  printf 'Generated VAPID push keys.\n'
+}
+
 ensure_environment_file
+persist_orbit_image
 ensure_secrets_directory
 ensure_secret_file "$secrets_directory/session-secret"
 ensure_secret_file "$secrets_directory/postgres-password"
+# A 32-byte hexadecimal KEK is generated only when absent and is never printed.
+ensure_secret_file "$secrets_directory/document-kek"
+ensure_vapid_keys
 
 printf 'Orbit configuration is ready. Existing values were preserved.\n'

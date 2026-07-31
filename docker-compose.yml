@@ -3,7 +3,7 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
@@ -20,29 +20,111 @@ services:
       retries: 10
   orbit-app:
     container_name: orbit
-    image: ${ORBIT_IMAGE:-ghcr.io/tomlawesome/orbit:latest}
+    image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
     build: .
     restart: unless-stopped
     env_file: .env-orbit
     environment:
       POSTGRES_HOST: orbit-db
-      POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
-      SESSION_SECRET_FILE: /run/secrets/orbit-session-secret
+      POSTGRES_PASSWORD_FILE: /run/orbit-secrets/orbit-postgres-password
+      SESSION_SECRET_FILE: /run/orbit-secrets/orbit-session-secret
+      DOCUMENT_KEK_FILE: /run/orbit-secrets/orbit-document-kek
+      VAPID_PRIVATE_KEY_FILE: /run/orbit-secrets/orbit-vapid-private-key
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
+    volumes:
+      - orbit-documents-data:/var/lib/orbit/documents
+    tmpfs:
+      - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
+      - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
     secrets:
       - orbit-postgres-password
       - orbit-session-secret
+      - orbit-document-kek
+      - orbit-vapid-private-key
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - default
+      - orbit-document-processing
     ports: ["${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000"]
     depends_on:
       orbit-db:
         condition: service_healthy
+  # ClamAV remains independent of Orbit startup: document operations must fail
+  # closed when it is unavailable, while the rest of the application stays up.
+  orbit-clamav:
+    container_name: orbit-clamav
+    image: clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6
+    restart: unless-stopped
+    networks:
+      # clamd shares only the hostile-document channel with Orbit. A separate
+      # egress network lets FreshClam update signatures without a route to
+      # PostgreSQL or other default-network services.
+      - orbit-document-processing
+      - orbit-malware-signature-updates
+    volumes:
+      - orbit-clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
+    # Keep malware scanning bounded on small hosts. Raise these limits only
+    # alongside documented upload-size and scanner-capacity requirements.
+    cpus: "1.0"
+    mem_limit: ${CLAMAV_MEMORY_LIMIT:-4g}
+    pids_limit: 256
+  # Optional local-only document parser/OCR. Enable explicitly with:
+  # docker compose --profile processing up -d
+  orbit-tika:
+    container_name: orbit-tika
+    image: apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8
+    profiles: ["processing"]
+    restart: unless-stopped
+    user: "35002:35002"
+    read_only: true
+    environment:
+      TIKA_CONFIG: /etc/orbit/tika-config.xml
+    command: ["-c", "/etc/orbit/tika-config.xml"]
+    configs:
+      - source: orbit-tika-config
+        target: /etc/orbit/tika-config.xml
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,uid=35002,gid=35002,mode=0700,size=256m
+    # The parser accepts hostile documents. Keep it reachable from Orbit while
+    # denying access to the database, sibling services and external networks.
+    networks:
+      - orbit-document-processing
+    cpus: "1.0"
+    mem_limit: ${TIKA_MEMORY_LIMIT:-1g}
+    pids_limit: 256
+
+networks:
+  orbit-document-processing:
+    internal: true
+  orbit-malware-signature-updates:
 
 volumes:
   orbit-db-data:
+  orbit-documents-data:
+  orbit-clamav-data:
+
+configs:
+  orbit-tika-config:
+    file: ./config/tika-config.xml
 
 secrets:
   orbit-postgres-password:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/postgres-password
   orbit-session-secret:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/session-secret
+  orbit-document-kek:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
+  orbit-vapid-private-key:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key

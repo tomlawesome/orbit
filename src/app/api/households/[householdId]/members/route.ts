@@ -56,7 +56,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const { householdId } = await context.params;
     const { userId } = removeMemberSchema.parse(await request.json());
     const members = await removeHouseholdMember(session.user.id, householdId, userId);
-    const candidates = await listRegisteredUserCandidates(session.user.id, householdId);
+    const candidates = userId === session.user.id
+      ? []
+      : await listRegisteredUserCandidates(session.user.id, householdId);
     return NextResponse.json({ members, candidates }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return appErrorResponse(error);

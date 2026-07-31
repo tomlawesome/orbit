@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
+import { DocumentManager } from "@/components/document-manager";
+import { FocusDialog } from "@/components/focus-dialog";
 import { suggestNextDate, type HomeItem, type HouseholdSection } from "@/lib/domain";
 import type { ItemActivity } from "@/lib/workspace";
 
@@ -17,6 +19,8 @@ interface ItemDetailProps {
   section?: HouseholdSection;
   activities: ItemActivity[];
   today: string;
+  householdId: string;
+  csrfToken: string;
   onClose(): void;
   onEdit(): void;
   onComplete(input: CompletionInput): void;
@@ -87,6 +91,8 @@ export function ItemDetail({
   section,
   activities,
   today,
+  householdId,
+  csrfToken,
   onClose,
   onEdit,
   onComplete,
@@ -134,12 +140,12 @@ export function ItemDetail({
   return (
     <>
       <button className="editor-scrim" type="button" aria-label="Close item details" onClick={onClose} />
-      <aside className="item-detail" role="dialog" aria-modal="true" aria-labelledby="item-detail-title">
+      <FocusDialog className="item-detail" aria-labelledby="item-detail-title" onDismiss={onClose}>
         <header className="detail-header">
           <span className={`detail-icon accent-${section?.accent ?? "sage"}`}><Icon name={section?.icon ?? "calendar"} /></span>
           <div>
             <p>{section?.name ?? "Household item"}</p>
-            <h2 id="item-detail-title">{item.title}</h2>
+            <h2 id="item-detail-title" tabIndex={-1} data-dialog-initial-focus>{item.title}</h2>
             <span className={`detail-status detail-status-${item.status}`}>{item.status}</span>
           </div>
           <button type="button" aria-label="Close item details" onClick={onClose}>×</button>
@@ -224,8 +230,10 @@ export function ItemDetail({
             </section>
           )}
 
+          <DocumentManager householdId={householdId} itemId={item.id} sectionId={item.sectionId} csrfToken={csrfToken} sectionNumber={item.notes ? "03" : "02"} />
+
           <section className="detail-section">
-            <div className="detail-section-title"><span>{item.notes ? "03" : "02"}</span><h3>Activity</h3></div>
+            <div className="detail-section-title"><span>{item.notes ? "04" : "03"}</span><h3>Activity</h3></div>
             <div className="activity-timeline">
               {itemActivities.map((activity) => (
                 <article key={activity.id}>
@@ -252,7 +260,7 @@ export function ItemDetail({
             </section>
           )}
         </div>
-      </aside>
+      </FocusDialog>
     </>
   );
 }
