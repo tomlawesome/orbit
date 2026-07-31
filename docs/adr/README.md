@@ -22,3 +22,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0005: Private reviewed ingestion and mailbox staging](0005-reviewed-ingestion-and-mailbox-staging.md)
 - [ADR-0006: Online-authoritative private workspace](0006-online-authoritative-private-workspace.md)
 - [ADR-0007: Dual-pipeline agent governance](0007-dual-pipeline-agent-governance.md)
+- [ADR-0008: Installer-resolved release digests](0008-installer-resolved-release-digests.md)

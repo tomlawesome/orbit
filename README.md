@@ -193,13 +193,22 @@ TIKA_URL=http://orbit-tika:9998
 OLLAMA_MODEL=<a-local-model-name>
 ```
 
-Then launch the full local stack:
+Select the optional services in `.env-orbit`:
 
 ```sh
-docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.full.yml \
-  --profile processing --profile ai up -d
+COMPOSE_PROFILES=processing,ai
 ```
+
+Then launch the full local stack with the ordinary command:
+
+```sh
+docker compose --env-file .env-orbit up -d
+```
+
+Selection lives in configuration rather than in the command, so enabling or
+disabling an optional service later is a one-line edit rather than a different
+command to remember. Leave `COMPOSE_PROFILES` empty for the standard
+deployment, which runs neither the parser nor the model server.
 
 The services have no published host ports. Tika is attached only to a dedicated
 internal processing network shared with Orbit, so it has no route to the
@@ -211,7 +220,6 @@ the server reports healthy, pull the model selected above explicitly:
 
 ```sh
 docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.full.yml \
   exec orbit-ollama sh -ec 'test -n "$ORBIT_OLLAMA_MODEL"; ollama pull "$ORBIT_OLLAMA_MODEL"'
 ```
 
