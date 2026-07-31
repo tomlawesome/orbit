@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
+import { carriesFiles, leavesDropZone } from "@/components/document-drop";
 
 export interface ItemDocument {
   id: string;
@@ -75,6 +76,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
   const [draft, setDraft] = useState<{ id: string; proposal: { title: string; provider?: string; reference?: string }; evidence: { excerpt: string }; duplicates?: Array<{ itemId: string; title: string; reason: string }> } | null>(null);
   const [draftReview, setDraftReview] = useState<DraftReview>({ title: "", provider: "", reference: "" });
   const [draftApprovalBusy, setDraftApprovalBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const listUrl = `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`;
 
   const refresh = useCallback(async () => {
@@ -101,6 +103,20 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     const bitmap = captureReview?.bitmap;
     return () => bitmap?.close();
   }, [captureReview?.bitmap]);
+
+  useEffect(() => {
+    // Without this the browser navigates away from Orbit when a file is
+    // dropped anywhere outside the zone, silently discarding unsaved work.
+    const ignoreStrayFileDrop = (event: globalThis.DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes("Files")) event.preventDefault();
+    };
+    window.addEventListener("dragover", ignoreStrayFileDrop);
+    window.addEventListener("drop", ignoreStrayFileDrop);
+    return () => {
+      window.removeEventListener("dragover", ignoreStrayFileDrop);
+      window.removeEventListener("drop", ignoreStrayFileDrop);
+    };
+  }, []);
 
   function updateUpload(id: string, patch: Partial<UploadingDocument>) {
     setUploading((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
@@ -150,6 +166,28 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
   async function selectFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    for (const file of files) await upload(file);
+  }
+
+  function onDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!carriesFiles(event.dataTransfer?.types)) return;
+    // Preventing the default is what makes this element a valid drop target.
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDragging(true);
+  }
+
+  function onDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (leavesDropZone(event.currentTarget.contains(event.relatedTarget as Node | null))) {
+      setDragging(false);
+    }
+  }
+
+  async function onDrop(event: DragEvent<HTMLDivElement>) {
+    if (!carriesFiles(event.dataTransfer?.types)) return;
+    event.preventDefault();
+    setDragging(false);
+    const files = Array.from(event.dataTransfer.files);
     for (const file of files) await upload(file);
   }
 
@@ -257,11 +295,22 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     <section className="detail-section documents-section" aria-labelledby="documents-heading">
       <div className="detail-section-title"><span>{sectionNumber}</span><h3 id="documents-heading">Files</h3></div>
       <p className="documents-intro">Keep policies, receipts and photos with this item. Files upload directly and are not saved for offline sync.</p>
-      <div className="document-actions">
-        <label className="document-upload" htmlFor={inputId}>Add files</label>
-        <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={selectFiles} />
-        <label className="document-upload document-camera" htmlFor={cameraInputId}>Take photo</label>
-        <input id={cameraInputId} className="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectCamera(event)} />
+      <div
+        className={dragging ? "document-dropzone dragging" : "document-dropzone"}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={(event) => void onDrop(event)}
+        data-testid="document-dropzone"
+      >
+        <p className="document-dropzone-hint">
+          {dragging ? "Release to upload" : "Drag files here, or choose them below."}
+        </p>
+        <div className="document-actions">
+          <label className="document-upload" htmlFor={inputId}>Add files</label>
+          <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={selectFiles} />
+          <label className="document-upload document-camera" htmlFor={cameraInputId}>Take photo</label>
+          <input id={cameraInputId} className="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectCamera(event)} />
+        </div>
       </div>
       <p className="document-live" aria-live="polite">{message}</p>
       {error && <p className="document-error" role="alert">{error}</p>}
