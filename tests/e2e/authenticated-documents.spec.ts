@@ -229,4 +229,59 @@ test.describe("authenticated document lifecycle", () => {
       }
     }
   });
+
+  test("uploads a dropped file and ignores a drag carrying no files", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.skip(isMobile, "Dragging a file from the desktop has no mobile equivalent.");
+
+    await signIn(page, administrator);
+    const workspace = newDisposableWorkspace();
+    let journeyFailed = false;
+    try {
+      await createDisposableWorkspace(page, workspace);
+      await page.goto("/");
+      const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
+      await itemCard.locator(".item-main").click();
+
+      const dropZone = page.getByTestId("document-dropzone");
+      await expect(dropZone).toBeVisible();
+
+      // A drag carrying only text must leave the zone inert, so that dragging
+      // selected text across the page never begins an upload.
+      const textTransfer = await page.evaluateHandle(() => {
+        const transfer = new DataTransfer();
+        transfer.setData("text/plain", "not a file");
+        return transfer;
+      });
+      await dropZone.dispatchEvent("dragover", { dataTransfer: textTransfer });
+      await expect(dropZone).not.toHaveClass(/dragging/);
+      await dropZone.dispatchEvent("drop", { dataTransfer: textTransfer });
+      await expect(page.getByRole("listitem")).toHaveCount(0);
+
+      const droppedName = "dropped-document.pdf";
+      const fileTransfer = await page.evaluateHandle(({ name, bytes }) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([Uint8Array.from(bytes)], name, { type: "application/pdf" }));
+        return transfer;
+      }, { name: droppedName, bytes: Array.from(syntheticPdf) });
+
+      await dropZone.dispatchEvent("dragover", { dataTransfer: fileTransfer });
+      await expect(dropZone).toHaveClass(/dragging/);
+      await dropZone.dispatchEvent("drop", { dataTransfer: fileTransfer });
+      await expect(dropZone).not.toHaveClass(/dragging/);
+
+      const droppedRow = page.getByRole("listitem").filter({ hasText: droppedName });
+      await expect(droppedRow).toBeVisible({ timeout: 15_000 });
+      await expect(droppedRow).toContainText("application/pdf");
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
+    } finally {
+      try {
+        await cleanupDisposableWorkspace(page, workspace);
+      } catch (cleanupError) {
+        if (!journeyFailed) throw cleanupError;
+      }
+    }
+  });
 });
