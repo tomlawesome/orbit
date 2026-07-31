@@ -100,7 +100,6 @@ describe("supply-chain policy", () => {
       "Dockerfile",
       "tests/oidc/Dockerfile",
       "docker-compose.yml",
-      "docker-compose.full.yml",
       "scripts/test-integration.mjs",
     ];
     const discovered = new Map();
