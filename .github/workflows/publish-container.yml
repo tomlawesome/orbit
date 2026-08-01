@@ -24,14 +24,14 @@ env:
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
 
 jobs:
-  # Classifies a pull request as executable or not so that container and browser
-  # validation can be skipped for changes that cannot affect runtime behaviour.
+  # Selects the cheapest pull-request lane that still exercises every changed
+  # boundary: fast, real PostgreSQL integration, or exact-image system tests.
   #
-  # The classification is an allowlist of provably non-executable paths: any
-  # unrecognised path, and every push event, is treated as executable. The gate
-  # is applied at job level rather than through a workflow-level `paths:` filter,
-  # because a required check that never runs leaves a pull request pending
-  # forever under the branch ruleset, whereas a skipped job reports a result.
+  # Classification is fail-safe: an unknown path, unreadable comparison, changed
+  # production dependency graph, workflow/deployment boundary, and every push
+  # event selects the broad system lane. Gates remain at job level rather than
+  # using workflow path filters, because required skipped jobs report a terminal
+  # result instead of leaving a pull request pending forever.
   changes:
     name: Classify changed paths
     runs-on: ubuntu-latest
@@ -39,13 +39,24 @@ jobs:
     permissions:
       contents: read
     outputs:
-      executable: ${{ steps.classify.outputs.executable }}
+      risk: ${{ steps.classify.outputs.risk }}
+      build: ${{ steps.classify.outputs.build }}
+      integration: ${{ steps.classify.outputs.integration }}
+      system: ${{ steps.classify.outputs.system }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+
+      # The classifier uses pnpm's lockfile-only graph reader. It never installs
+      # dependencies or executes package lifecycle scripts.
+      - name: Set up pnpm graph reader
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.9.0
+          run_install: false
 
       - name: Classify changed paths
         id: classify
@@ -56,6 +67,8 @@ jobs:
 
   fast:
     name: Static and unit checks
+    needs:
+      - changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -95,6 +108,10 @@ jobs:
         env:
           ORBIT_TEST_COVERAGE: "true"
         run: bash scripts/test-backend.sh
+
+      - name: Build production application
+        if: needs.changes.outputs.build == 'true'
+        run: pnpm build
 
       - name: Upload diagnostic coverage
         if: success()
@@ -165,7 +182,7 @@ jobs:
       - fast
       - supply_chain_source
     # Skipped rather than filtered out, so the required check still reports.
-    if: needs.changes.outputs.executable == 'true'
+    if: needs.changes.outputs.integration == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -213,7 +230,7 @@ jobs:
       - fast
       - supply_chain_source
       - integration
-    if: github.event_name == 'pull_request' && needs.changes.outputs.executable == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.system == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
