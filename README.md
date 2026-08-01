@@ -161,14 +161,23 @@ persistent warning and marks subsequently uploaded files as unscanned.
 
 ```sh
 bash scripts/configure.sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --check
 ```
 
-This creates `.env-orbit` plus the private `.orbit-secrets` directory without
-starting containers. It also runs the selected Orbit image once, with only a
-key-generation command, to generate and persist Orbit's VAPID Web Push key
-pair on first setup: the private key stays in `.orbit-secrets` and only the
-public key is written to `.env-orbit`. Configure your OIDC provider in
-`.env-orbit`. SMTP is required when you are ready to exercise email delivery.
+The first, non-interactive command creates `.env-orbit` plus the private
+`.orbit-secrets` directory without starting containers. It also runs the
+selected Orbit image once, with only a key-generation command, to generate and
+persist Orbit's VAPID Web Push key pair on first setup: the private key stays
+in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
+explicit `--init` step then records the public HTTPS Orbit origin, full OIDC
+issuer URL, and client ID, and derives the exact callback URL. It never asks
+for or invents the provider's client secret; add that credential locally using
+the secret guidance in
+[authentication setup](docs/authentication.md). The value-free `--check`
+reports whether required settings and optional setting groups are complete
+without printing their contents. For non-interactive installation or upgrade,
+plain `bash scripts/configure.sh` preserves the existing configuration.
 
 ### 2. Start Orbit
 
@@ -182,7 +191,9 @@ Building from source needs the `docker-compose.build.yml` overlay. The base
 compose file describes a deployment, which has a published image but no source
 tree, so the build context lives in the overlay rather than the base file.
 
-Open `http://<docker-host-ip>:3000` from another device, or
+For a deployed instance, open the HTTPS origin recorded in `APP_URL`; the
+reverse proxy must route that origin to Orbit's published port. Plain HTTP is
+supported only for loopback development, such as
 [http://127.0.0.1:3000](http://127.0.0.1:3000) on the Docker host. The health
 endpoint is available at `/api/health`.
 
@@ -382,6 +393,12 @@ All supported runtime variables are documented in
 [`.env-orbit.example`](.env-orbit.example). Sensitive settings accept either
 their direct variable or the corresponding `_FILE` variable. Do not configure
 both forms for the same setting.
+
+The persistent `.env-orbit` copy is arranged by required, installer-managed,
+ordinary, optional, and advanced groups. Keep optional examples commented
+until the whole related group is configured, then run
+`bash scripts/configure.sh --check` before starting or updating Orbit. The
+check reports only field names and readiness states, never values.
 
 Examples below demonstrate the expected shape. Generate real secrets; do not
 copy placeholder secret values into a public deployment.
