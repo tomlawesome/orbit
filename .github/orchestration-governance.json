@@ -138,6 +138,15 @@
     ],
     "rejectInstalledMetadataAsMountProof": true,
     "rejectOwnershipOrPublicReadAsWriteProof": true,
+    "mergeFailureDiagnosis": {
+      "requiredEvidence": [
+        "target_head_ancestry",
+        "merge_state"
+      ],
+      "nonAncestorClassification": "branch_out_of_date",
+      "mergeErrorAloneProvesAccessFailure": false,
+      "credentialRequestAllowedBeforeStateDiagnosis": false
+    },
     "failClosedBeforeDependentLaunch": true,
     "secretsInChat": false
   },
