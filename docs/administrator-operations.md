@@ -136,6 +136,31 @@ returns configuration or provider response text. Push tests, when added, target
 only the requesting administrator's current subscription and cannot select an
 arbitrary recipient.
 
+## Deployment configuration readiness
+
+Run guided setup once from the persistent deployment directory, then check the
+configuration before every first start or material provider change:
+
+```sh
+bash scripts/configure.sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --check
+```
+
+The first command is the non-interactive bootstrap and upgrade path: it creates
+missing generated secrets and preserves existing operator settings. Guided
+setup then atomically records the public HTTPS Orbit origin, complete OIDC
+issuer, client ID, and derived callback URL. It does not collect provider
+credentials.
+
+The readiness check validates required settings, direct-versus-file secret
+ambiguity, and partially configured optional groups. Its output contains only
+field names and readiness categories; it does not print values. A failed check
+is an administrator action and must be resolved before deployment. Keep the
+persistent `.env-orbit` file mode `0600`, edit credentials through a private
+local editor or secret manager, and never put them in command arguments,
+terminal history, issue text, or logs.
+
 ## Mailbox provider operation
 
 Mailbox ingestion is optional. An installation that does not use mail runs the
