@@ -785,7 +785,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .document-picker-surface { width: 100%; min-height: 82px; padding: 8px 12px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font: inherit; cursor: pointer; }
 .document-picker-surface:hover { background: color-mix(in srgb, var(--mint) 13%, transparent); }
 .document-picker-surface:focus-visible, .document-upload:focus-visible, .document-controls a:focus-visible, .document-controls button:focus-visible { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
-.document-picker-label { color: var(--forest); font-size: calc(9px + var(--text-bump)); font-weight: 850; }
+.document-picker-label { font-size: calc(9px + var(--text-bump)); font-weight: 850; }
 .document-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .document-upload, .document-controls a, .document-controls button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: calc(8px + var(--text-bump)); font-weight: 800; text-decoration: none; cursor: pointer; }
 .document-upload { color: #fff; border-color: var(--forest); background: var(--forest); }
