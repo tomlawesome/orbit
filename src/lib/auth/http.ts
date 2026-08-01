@@ -14,7 +14,7 @@ export function authErrorResponse(error: unknown): NextResponse {
 
   if (authError.code === "auth_not_configured") reportAuthConfiguration("invalid");
   if (authError.code === "discovery_failed") reportAuthProviderDiscoveryFailure();
-  if (authError.code === "token_exchange_failed") reportAuthTokenExchangeFailure();
+  if (authError.code === "token_exchange_failed") reportAuthTokenExchangeFailure(authError.tokenExchangeReason ?? "provider_rejected");
 
   return NextResponse.json(
     { error: { code: authError.code, message: authError.message } },
