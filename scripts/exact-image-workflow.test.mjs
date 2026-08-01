@@ -199,4 +199,91 @@ describe("exact-image publication workflow", () => {
     expect(workflow.toLowerCase()).not.toContain("release candidate");
     expect(workflow.toLowerCase()).not.toContain("release-candidate");
   });
+
+  it("validates exact-image installer workflow sequence and configuration", () => {
+    // Sequence: installer steps ordered after smoke-test stop, before GHCR login.
+    const stop = workflow.indexOf("- name: Stop smoke-test services");
+    const registryStart = workflow.indexOf("- name: Start disposable installer registry");
+    const targetPrepare = workflow.indexOf("- name: Prepare empty installer target and Git guard");
+    const installerRun = workflow.indexOf("- name: Run installer against the disposable registry");
+    const installerVerify = workflow.indexOf("- name: Verify exact-image installer evidence");
+    const cleanup = workflow.indexOf("- name: Clean up installer validation resources");
+    const login = workflow.indexOf("- name: Log in to GitHub Container Registry");
+
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(registryStart).toBeGreaterThan(stop);
+    expect(targetPrepare).toBeGreaterThan(registryStart);
+    expect(installerRun).toBeGreaterThan(targetPrepare);
+    expect(installerVerify).toBeGreaterThan(installerRun);
+    expect(cleanup).toBeGreaterThan(installerVerify);
+    expect(login).toBeGreaterThan(cleanup);
+
+    // Registry pinning and configuration.
+    const registryStep = workflow.slice(registryStart, targetPrepare);
+    expect(registryStep).toContain(
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
+    );
+    expect(registryStep).toContain("--publish 127.0.0.1:5000:5000");
+    expect(registryStep).toContain('local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"');
+    expect(registryStep).toContain('[[ "${source_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(registryStep).toContain("docker tag");
+    expect(registryStep).toContain("docker push");
+    expect(registryStep).not.toContain("docker build");
+    expect(registryStep).toContain('registry_id="$(');
+    expect(registryStep).toContain('[[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]]');
+
+    const prepareStep = workflow.slice(targetPrepare, installerRun);
+    expect(prepareStep).toContain('mktemp -d "${RUNNER_TEMP}/orbit-installer-target.XXXXXX"');
+    expect(prepareStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
+    expect(prepareStep).toContain("orbit-installer-git-guard.XXXXXX");
+    expect(prepareStep).toContain("git-was-invoked");
+
+    // Image mirroring: ${IMAGE_NAME} in local registry, ORBIT_REPOSITORY env var.
+    expect(registryStep).toContain("127.0.0.1:5000/${IMAGE_NAME}");
+
+    // Installer input validation: stdin from /dev/null, TTY assertion, Git guard.
+    const installerStep = workflow.slice(installerRun, installerVerify);
+    expect(installerStep).toContain("ORBIT_REGISTRY: 127.0.0.1:5000");
+    expect(installerStep).toContain("ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}");
+    expect(installerStep).toContain("exec < /dev/null");
+    expect(installerStep).toContain("[[ ! -t 0 ]]");
+    expect(installerStep).toContain("PATH=\"${GIT_GUARD_DIR}:${PATH}\"");
+    expect(installerStep).toContain('bash "${GITHUB_WORKSPACE}/scripts/install.sh"');
+
+    // Image digest requirements.
+    expect(installerVerify).toBeGreaterThanOrEqual(0);
+    const verifyStep = workflow.slice(installerVerify, cleanup);
+    expect(verifyStep).toContain("ORBIT_IMAGE=127.0.0.1:5000/${IMAGE_NAME}@sha256:");
+    expect(verifyStep).toContain("[[ \"${digest}\" =~ ^[0-9a-f]{64}$ ]]");
+    expect(verifyStep).toContain('[[ "${resolved_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(verifyStep).toContain('[[ "${running_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(verifyStep).toContain('[[ "${revision_label}" == "${GITHUB_SHA}" ]]');
+    expect(verifyStep).toContain("org.opencontainers.image.revision");
+
+    // Fetched assets validation: docker-compose.yml and scripts/configure.sh match.
+    expect(verifyStep).toContain("docker-compose.yml");
+    expect(verifyStep).toContain("scripts/configure.sh");
+    expect(verifyStep).toContain("cmp --silent");
+
+    // Absence of source/build markers.
+    expect(verifyStep).toContain(".git");
+    expect(verifyStep).toContain("Dockerfile");
+    expect(verifyStep).toContain("package.json");
+    expect(verifyStep).toContain("pnpm-lock.yaml");
+
+    // Ready health response.
+    expect(verifyStep).toContain("curl");
+    expect(verifyStep).toContain("/api/health");
+    expect(verifyStep).toContain(".status == \"ready\"");
+    expect(verifyStep).toContain(".service == \"orbit\"");
+
+    const cleanupSection = workflow.slice(cleanup, login);
+    expect(cleanupSection).toContain("if: always()");
+    expect(cleanupSection).toContain("${RUNNER_TEMP}");
+    expect(cleanupSection).toContain("! -L");
+    expect(cleanupSection).toContain("down --volumes --remove-orphans");
+    expect(cleanupSection).toContain('docker rm --force "${REGISTRY_ID}"');
+    expect(cleanupSection).toContain("current_registry_id=");
+    expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
+  });
 });
