@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { syntheticJpeg, syntheticPdf, syntheticPng } from "../../tests/support/synthetic-documents";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +12,13 @@ const mocks = vi.hoisted(() => ({
   extract: vi.fn(),
   proposal: vi.fn(),
   config: vi.fn(),
+}));
+
+const OPERATION_ID = "22222222-2222-4222-8222-222222222222";
+
+vi.mock("node:crypto", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:crypto")>(),
+  randomUUID: () => OPERATION_ID,
 }));
 
 vi.mock("@/server/workspace-access", () => ({ requireHouseholdAccess: mocks.access }));
@@ -91,6 +99,71 @@ describe("item document inspection", () => {
     expect(result).not.toHaveProperty("proposal");
     expect(mocks.access).toHaveBeenCalledWith("member-user", "household-id");
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("logs a bounded scan attempt and clean outcome with the ephemeral operation reference, never the filename, and reuses it for parsing", async () => {
+    const infoSpy = vi.spyOn(log, "info");
+    const hostileFilename = "<script>alert(document.cookie)</script> secret-policy.pdf";
+
+    await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: hostileFilename,
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    const scanCalls = infoSpy.mock.calls.filter(([event]) => event === "document.scan");
+    expect(scanCalls).toHaveLength(2);
+    expect(scanCalls[0][1]).toEqual({ document: OPERATION_ID, outcome: "attempt" });
+    expect(scanCalls[1][1]).toMatchObject({ document: OPERATION_ID, outcome: "clean" });
+    const cleanMs = (scanCalls[1][1] as { ms: number }).ms;
+    expect(Number.isInteger(cleanMs)).toBe(true);
+    expect(cleanMs).toBeGreaterThanOrEqual(0);
+
+    expect(mocks.extract).toHaveBeenCalledWith(expect.any(Buffer), "application/pdf", OPERATION_ID);
+    expect(mocks.receive.mock.calls[0]?.[1]).toBe(OPERATION_ID);
+
+    const serializedCalls = JSON.stringify(infoSpy.mock.calls);
+    expect(serializedCalls).not.toContain("script");
+    expect(serializedCalls).not.toContain("cookie");
+    expect(serializedCalls).not.toContain("secret-policy");
+  });
+
+  it("logs a bounded scan failure without host, port or provider text", async () => {
+    const warnSpy = vi.spyOn(log, "warn");
+    mocks.scan.mockResolvedValue({ status: "error", reason: "unavailable" });
+
+    await expect(inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    })).rejects.toMatchObject({ code: "document_scanner_unreachable" });
+
+    const scanCalls = warnSpy.mock.calls.filter(([event]) => event === "document.scan");
+    expect(scanCalls).toHaveLength(1);
+    const fields = scanCalls[0][1] as Record<string, unknown>;
+    expect(fields).toMatchObject({ document: OPERATION_ID, outcome: "error", reason: "unavailable" });
+    expect(Number.isInteger(fields.ms)).toBe(true);
+    expect(fields).not.toHaveProperty("host");
+    expect(fields).not.toHaveProperty("port");
+  });
+
+  it("logs an infected scan outcome without exposing the scanner's signature", async () => {
+    const warnSpy = vi.spyOn(log, "warn");
+    mocks.scan.mockResolvedValue({ status: "infected", signature: "Eicar-Test-Signature" });
+
+    await expect(inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "malware.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    })).rejects.toMatchObject({ code: "document_malware_detected" });
+
+    const scanCalls = warnSpy.mock.calls.filter(([event]) => event === "document.scan");
+    expect(scanCalls).toHaveLength(1);
+    expect(scanCalls[0][1]).toMatchObject({ document: OPERATION_ID, outcome: "infected", reason: "malware_detected" });
+    expect(JSON.stringify(scanCalls[0][1])).not.toContain("Eicar");
   });
 
   it("degrades parser failures to filename-only suggestions and zeroes extracted bytes", async () => {
@@ -192,7 +265,7 @@ describe("item document inspection", () => {
 
     expect(result.extracted).toBe(true);
     expect(mocks.scan).toHaveBeenCalledTimes(1);
-    expect(mocks.extract).toHaveBeenCalledWith(expect.any(Buffer), mediaType);
+    expect(mocks.extract).toHaveBeenCalledWith(expect.any(Buffer), mediaType, OPERATION_ID);
     expect(bytes.every((byte) => byte === 0)).toBe(true);
   });
 
