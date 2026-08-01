@@ -6,7 +6,7 @@
  * actionable condition. It deliberately does not stop the process: document
  * operations fail closed while the rest of the application stays available.
  */
-async function reportScannerReadiness(): Promise<void> {
+export async function reportScannerReadiness(): Promise<void> {
   const [{ getDocumentConfig }, { pingClamAv }, { log }] = await Promise.all([
     import("@/server/documents/config"),
     import("@/server/documents/scanner"),
@@ -28,13 +28,11 @@ async function reportScannerReadiness(): Promise<void> {
 
   const ready = await pingClamAv(config.clamAv);
   if (ready) {
-    log.info("document.scanner", { state: "ready", host: config.clamAv.host, port: config.clamAv.port });
+    log.info("document.scanner", { state: "ready" });
     return;
   }
   log.error("document.scanner", {
     state: "unreachable",
-    host: config.clamAv.host,
-    port: config.clamAv.port,
     impact: "document_upload_blocked",
   });
 }

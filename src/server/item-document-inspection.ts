@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -93,7 +94,9 @@ export async function inspectItemDocument(input: {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
   const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-  const received = await storage.receive(input.body, randomUUID(), config.maxBytes, input.declaredBytes);
+  // Ephemeral opaque reference for this pre-attachment inspection only; never persisted.
+  const operationId = randomUUID();
+  const received = await storage.receive(input.body, operationId, config.maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
@@ -112,9 +115,21 @@ export async function inspectItemDocument(input: {
           suggestions: buildSuggestions(input.filename, undefined),
         };
       }
+      log.info("document.scan", { document: operationId, outcome: "attempt" });
+      const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
       if (scan.status !== "clean") {
-        if (scan.status === "infected") {
+        const infected = scan.status === "infected";
+        // `scan.reason` is a fixed enumeration from the scanner adapter, never
+        // provider text or the scanner's virus signature, so it is safe to record.
+        log.warn("document.scan", {
+          document: operationId,
+          outcome: infected ? "infected" : "error",
+          reason: infected ? "malware_detected" : scan.reason,
+          ms: scanMs,
+        });
+        if (infected) {
           throw new AppError(
             "document_malware_detected",
             "Orbit rejected that document because malware was detected",
@@ -132,12 +147,13 @@ export async function inspectItemDocument(input: {
           503,
         );
       }
+      log.info("document.scan", { document: operationId, outcome: "clean", ms: scanMs });
       let text = "";
       let extracted = false;
       let message: string | undefined;
       let proposal: unknown;
       try {
-        const parsedText = await extractTextWithTika(bytes, mediaType);
+        const parsedText = await extractTextWithTika(bytes, mediaType, operationId);
         if (typeof parsedText !== "string" || parsedText.length > MAX_EXTRACTED_CHARACTERS) throw new Error("parser_output_invalid");
         text = parsedText;
         extracted = true;

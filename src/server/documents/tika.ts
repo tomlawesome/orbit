@@ -17,8 +17,12 @@ type ParserFailure =
   | "oversized_response"
   | "undecodable_response";
 
-function parserUnavailable(reason: ParserFailure): AppError {
-  log.warn("document.parse", { outcome: "error", reason });
+function elapsedMilliseconds(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
+}
+
+function parserUnavailable(document: string, startedAt: number, reason: ParserFailure): AppError {
+  log.warn("document.parse", { document, outcome: "error", reason, ms: elapsedMilliseconds(startedAt) });
   return new AppError("parser_unavailable", "Document processing is unavailable", 503);
 }
 
@@ -45,7 +49,7 @@ async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): Pr
   }
 }
 
-async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string> {
+async function readBoundedText(body: ReadableStream<Uint8Array>, document: string, startedAt: number): Promise<string> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
@@ -55,7 +59,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
       if (result.done) break;
       if (!(result.value instanceof Uint8Array) || result.value.byteLength > MAX_EXTRACTED_BYTES - totalBytes) {
         await cancelReader(reader);
-        throw parserUnavailable("oversized_response");
+        throw parserUnavailable(document, startedAt, "oversized_response");
       }
       if (result.value.byteLength === 0) continue;
       chunks.push(result.value);
@@ -63,7 +67,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
     }
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw parserUnavailable("unreachable");
+    throw parserUnavailable(document, startedAt, "unreachable");
   } finally {
     try {
       reader.releaseLock();
@@ -76,7 +80,7 @@ async function readBoundedText(body: ReadableStream<Uint8Array>): Promise<string
     const bytes = Buffer.concat(chunks, totalBytes);
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes).slice(0, MAX_EXTRACTED_CHARACTERS);
   } catch {
-    throw parserUnavailable("undecodable_response");
+    throw parserUnavailable(document, startedAt, "undecodable_response");
   }
 }
 
@@ -88,12 +92,17 @@ export interface TikaHealth {
  * Sends document bytes directly to the private Tika service. No URL, Orbit
  * credential, or database access is ever given to the parser service.
  */
-export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<string> {
+export async function extractTextWithTika(
+  bytes: Buffer,
+  mediaType: SupportedDocumentMediaType,
+  document: string,
+): Promise<string> {
   const config = getDocumentConfig();
   if (!config.tika.url) throw new AppError("parser_disabled", "Document processing is not enabled", 409);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.tika.timeoutMs);
   const startedAt = Date.now();
+  log.info("document.parse", { document, outcome: "attempt" });
   try {
     const response = await fetch(new URL("/tika", config.tika.url), {
       method: "PUT",
@@ -107,17 +116,19 @@ export async function extractTextWithTika(bytes: Buffer, mediaType: SupportedDoc
       redirect: "error",
       signal: controller.signal,
     });
-    if (!response.ok || response.type === "opaqueredirect" || response.redirected) throw parserUnavailable("rejected");
-    if (!hasPlainTextContentType(response) || !hasAcceptableContentLength(response) || !response.body) {
-      throw parserUnavailable("unexpected_content_type");
+    if (!response.ok || response.type === "opaqueredirect" || response.redirected) {
+      throw parserUnavailable(document, startedAt, "rejected");
     }
-    const text = await readBoundedText(response.body);
+    if (!hasPlainTextContentType(response) || !hasAcceptableContentLength(response) || !response.body) {
+      throw parserUnavailable(document, startedAt, "unexpected_content_type");
+    }
+    const text = await readBoundedText(response.body, document, startedAt);
     // Character count only. Extracted text is hostile content and never logged.
-    log.info("document.parse", { outcome: "extracted", characters: text.length, ms: Date.now() - startedAt });
+    log.info("document.parse", { document, outcome: "extracted", characters: text.length, ms: elapsedMilliseconds(startedAt) });
     return text;
   } catch (error) {
     if (error instanceof AppError) throw error;
-    throw parserUnavailable("unreachable");
+    throw parserUnavailable(document, startedAt, "unreachable");
   } finally {
     clearTimeout(timer);
   }
