@@ -83,7 +83,7 @@ describe("authentication operational diagnostics", () => {
 
     expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
       state: "invalid",
-      reason: "invalid_response",
+      reason: "token_exchange_failed",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
