@@ -160,18 +160,20 @@ persistent warning and marks subsequently uploaded files as unscanned.
 ### 1. Create the runtime configuration
 
 ```sh
+bash scripts/configure.sh
 bash scripts/configure.sh --init
 bash scripts/configure.sh --check
 ```
 
-This creates `.env-orbit` plus the private `.orbit-secrets` directory without
-starting containers. It also runs the selected Orbit image once, with only a
-key-generation command, to generate and persist Orbit's VAPID Web Push key
-pair on first setup: the private key stays in `.orbit-secrets` and only the
-public key is written to `.env-orbit`. Guided setup records the public HTTPS
-Orbit origin, full OIDC issuer URL, and client ID, then derives the exact
-callback URL. It never asks for or invents the provider's client secret; add
-that credential locally using the secret guidance in
+The first, non-interactive command creates `.env-orbit` plus the private
+`.orbit-secrets` directory without starting containers. It also runs the
+selected Orbit image once, with only a key-generation command, to generate and
+persist Orbit's VAPID Web Push key pair on first setup: the private key stays
+in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
+explicit `--init` step then records the public HTTPS Orbit origin, full OIDC
+issuer URL, and client ID, and derives the exact callback URL. It never asks
+for or invents the provider's client secret; add that credential locally using
+the secret guidance in
 [authentication setup](docs/authentication.md). The value-free `--check`
 reports whether required settings and optional setting groups are complete
 without printing their contents. For non-interactive installation or upgrade,
