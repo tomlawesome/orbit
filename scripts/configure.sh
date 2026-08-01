@@ -7,6 +7,9 @@ cd "$repo_dir"
 readonly environment_file=".env-orbit"
 readonly environment_example=".env-orbit.example"
 readonly secrets_directory=".orbit-secrets"
+readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
+readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
+readonly maximum_secret_bytes=65536
 temporary_file=""
 
 fail() {
@@ -15,7 +18,7 @@ fail() {
 }
 
 usage() {
-  printf 'Usage: %s [--check|--init]\n' "$0" >&2
+  printf 'Usage: %s [--check|--init|--set-oidc-secret]\n' "$0" >&2
 }
 
 cleanup() {
@@ -372,6 +375,67 @@ ensure_secret_file() {
   printf 'Generated %s.\n' "$path"
 }
 
+# Creates a zero-byte, mode-0600 placeholder only when no OIDC client secret
+# file exists yet: the protected Compose secret declaration requires a host
+# source to exist even before an operator runs --set-oidc-secret. An existing
+# regular file is preserved byte-for-byte; a symlink or other non-regular path
+# is refused rather than silently followed or replaced.
+ensure_oidc_secret_placeholder() {
+  if [[ -e "$oidc_secret_file" ]]; then
+    [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" ]] ||
+      fail "Refusing to use ${oidc_secret_file} because it is not a regular file."
+    chmod 600 "$oidc_secret_file" ||
+      fail "Could not restrict permissions on ${oidc_secret_file}."
+    return
+  fi
+
+  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
+    fail "Could not create a temporary Orbit secret file."
+  chmod 600 "$temporary_file" ||
+    fail "Could not restrict permissions on the OIDC client secret placeholder."
+  mv -- "$temporary_file" "$oidc_secret_file"
+  temporary_file=""
+}
+
+# Reads the OIDC client secret once from standard input, never from an
+# argument, and never prints, logs or exports it. The secret is written
+# atomically to a mode-0600 file, and only after that write succeeds are the
+# matching environment variables persisted; update_managed_keys never
+# receives the secret value itself, only the fixed empty direct value and the
+# fixed canonical runtime file path.
+set_oidc_secret() {
+  local secret secret_bytes
+
+  IFS= read -r -s -p '' secret || true
+  [[ -n "$secret" ]] ||
+    fail "Could not read a non-empty OIDC client secret from standard input."
+  secret_bytes="$(printf '%s' "$secret" | wc -c | tr -d '[:space:]')"
+  [[ "$secret_bytes" =~ ^[0-9]+$ ]] ||
+    fail "Could not determine the OIDC client secret size."
+  [[ "$secret_bytes" -le "$maximum_secret_bytes" ]] ||
+    fail "The OIDC client secret exceeds the ${maximum_secret_bytes}-byte maximum."
+  unset secret_bytes
+
+  ensure_environment_file
+  ensure_secrets_directory
+
+  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
+    fail "Could not create a temporary Orbit secret file."
+  printf '%s' "$secret" > "$temporary_file"
+  unset secret
+  chmod 600 "$temporary_file" ||
+    fail "Could not restrict permissions on the OIDC client secret."
+  mv -- "$temporary_file" "$oidc_secret_file" ||
+    fail "Could not persist the OIDC client secret."
+  temporary_file=""
+
+  update_managed_keys \
+    OIDC_CLIENT_SECRET "" \
+    OIDC_CLIENT_SECRET_FILE "$oidc_secret_file_path"
+
+  printf 'Orbit saved the OIDC client secret to %s.\n' "$oidc_secret_file"
+}
+
 ensure_vapid_keys() {
   local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key orbit_image bootstrap_image
   if [[ -s "$private_key_file" ]]; then
@@ -475,17 +539,6 @@ run_check() {
     return 1
   }
 
-  report_required() {
-    local label="$1"
-    shift
-    if exactly_one_set "$@"; then
-      printf 'ready %s\n' "$label"
-    else
-      printf 'missing %s\n' "$label"
-      overall_status=1
-    fi
-  }
-
   report_required_bool() {
     local label="$1" ready="$2"
     if [[ "$ready" == 1 ]]; then
@@ -577,11 +630,25 @@ run_check() {
     callback_ready=1
   fi
 
+  # Direct-only stays ready for upgrade compatibility. File-backed is ready
+  # only when the configured path is exactly the canonical runtime path and
+  # the host file it names is non-empty, regular and not a symlink; direct-
+  # plus-file, missing, empty, symlinked or non-canonical settings all report
+  # missing without disclosing the configured value.
+  local oidc_secret_ready=0
+  if is_set OIDC_CLIENT_SECRET && ! is_set OIDC_CLIENT_SECRET_FILE; then
+    oidc_secret_ready=1
+  elif ! is_set OIDC_CLIENT_SECRET && is_set OIDC_CLIENT_SECRET_FILE \
+    && [[ "${values[OIDC_CLIENT_SECRET_FILE]}" == "$oidc_secret_file_path" ]] \
+    && [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" && -s "$oidc_secret_file" ]]; then
+    oidc_secret_ready=1
+  fi
+
   report_required_bool APP_URL "$app_url_ready"
   report_required_bool ORBIT_IMAGE "$image_ready"
   report_required_bool OIDC_ISSUER "$issuer_ready"
   report_required_bool OIDC_CLIENT_ID "$client_id_ready"
-  report_required OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE
+  report_required_bool OIDC_CLIENT_SECRET "$oidc_secret_ready"
   report_required_bool OIDC_CALLBACK_URL "$callback_ready"
   report_optional processing "$processing_ready" "$processing_present"
   report_optional ai "$ai_ready" "$ai_present"
@@ -614,6 +681,14 @@ case "${1:-}" in
     guided_init
     exit 0
     ;;
+  --set-oidc-secret)
+    if [[ $# -ne 1 ]]; then
+      usage
+      exit 2
+    fi
+    set_oidc_secret
+    exit 0
+    ;;
   *)
     usage
     exit 2
@@ -627,6 +702,7 @@ ensure_secret_file "$secrets_directory/session-secret"
 ensure_secret_file "$secrets_directory/postgres-password"
 # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
 ensure_secret_file "$secrets_directory/document-kek"
+ensure_oidc_secret_placeholder
 ensure_vapid_keys
 
 printf 'Orbit configuration is ready. Existing values were preserved.\n'
