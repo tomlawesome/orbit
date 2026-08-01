@@ -111,6 +111,32 @@ Pull requests also receive a read-only dependency-diff review. Newly
 introduced high or critical vulnerabilities in any dependency scope and
 dependencies outside the approved SPDX licence policy block integration.
 
+### Risk-proportional pull-request lanes
+
+Every pull request runs planning governance, lint, type checking, the complete
+unit suite, source dependency and secret policy, dependency-diff review, and
+CodeQL. A production application build is additionally required for executable
+changes and dependency snapshots. Higher-cost checks are selected by a
+deterministic repository script according to the boundary changed:
+
+| Lane | Additional evidence | Typical eligible change |
+| --- | --- | --- |
+| `fast` | universal checks; also a production build for dependency snapshots | documentation; governance or policy controls with their regression tests; unit-only tests; lockfile/workspace-only maintenance when a lockfile-only comparison proves the production dependency graph is unchanged |
+| `integration` | two isolated real-PostgreSQL service/API runs | ordinary server, domain, repository and API behaviour, plus integration fixtures |
+| `system` | PostgreSQL plus the complete exact-image Compose, vulnerability, malware, recovery, browser/accessibility and installer sequence | UI, authentication, private storage, document/mail/provider boundaries, migrations, production dependencies, deployment assets, workflows and every unrecognised path |
+
+Classification is an allowlist and fails to `system` when the diff is empty,
+unreadable or unknown, or when production-dependency equivalence cannot be
+proven. Required jobs are conditionally skipped at job level so they still
+report terminal check results; workflow-level path filters are not used.
+
+This proportionality applies only to pull requests. Every accepted push to
+`develop` and `release/**` runs the complete exact-image system and publication
+path, so integration and release evidence is never inferred from a cheaper
+pull-request lane. Until a forge-native combined-state queue is available,
+only one system-lane pull request is admitted to protected CI at a time while
+independent implementation and local validation continue concurrently.
+
 ### Required behaviour
 
 - Superseded runs are cancelled where safe.
