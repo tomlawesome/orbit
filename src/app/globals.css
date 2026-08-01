@@ -758,6 +758,24 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 /* Deliberately no opacity: dimming a row multiplies its text against the
    background and drops contrast below the WCAG AA threshold. The state is
    carried by the border and a full-contrast status line instead. */
+/* Administration is a page, not a dialog: it uses the available width instead
+   of a dialog-sized column, so it reads as a distinct place rather than a
+   panel over the workspace. */
+/* The tint lives on the outer page only. AdminManager's colours are calibrated
+   against var(--paper), the same surface the settings drawer gave it, so the
+   content area must keep that background: tinting behind it dropped existing
+   foreground colours below the WCAG AA contrast threshold. */
+.admin-page { min-height: 100dvh; padding: 32px 20px 64px; background: var(--canvas); }
+.admin-page-inner { max-width: 1100px; margin: 0 auto; padding: 28px 30px 32px; display: flex; flex-direction: column; gap: 20px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 16px; }
+.admin-page-header p { margin: 0 0 4px; font-size: calc(8px + var(--text-bump)); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--ink) 65%, transparent); }
+.admin-page-header h1 { margin: 0; font-size: calc(18px + var(--text-bump)); }
+.admin-page-refusal { margin: 0; max-width: 60ch; font-size: calc(9px + var(--text-bump)); line-height: 1.6; }
+.admin-page-status { margin: 0; font-size: calc(9px + var(--text-bump)); }
+.admin-page-back { align-self: flex-start; min-height: 34px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); font-weight: 800; text-decoration: none; }
+.admin-page-back:focus-visible { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
+.settings-admin-link { margin: 0 0 12px; }
+.settings-admin-link a { min-height: 34px; padding: 0 11px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); text-decoration: none; font: inherit; font-size: calc(8px + var(--text-bump)); font-weight: 800; }
+.settings-admin-link a:focus-visible { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
 .document-row.not-ready { border-style: dashed; }
 .document-dropzone { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 12px; margin-bottom: 12px; border: 2px dashed var(--line); border-radius: 12px; background: color-mix(in srgb, var(--paper) 92%, var(--ink)); transition: border-color 120ms ease, background-color 120ms ease; }
 .document-dropzone.dragging { border-color: var(--forest); border-style: solid; background: color-mix(in srgb, var(--mint) 30%, var(--paper)); }
