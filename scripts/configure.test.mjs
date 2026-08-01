@@ -281,14 +281,15 @@ describe("configure.sh", () => {
 
   it("never discloses configured values in --check mode, only fixed categories and names", () => {
     const initial = [
-      "APP_URL=https://orbit.example.com",
-      "OIDC_ISSUER=https://auth.example.com/application/o/orbit/",
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=super-secret-client-id",
       "OIDC_CLIENT_SECRET=super-secret-client-secret-value",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
       "SMTP_HOST=smtp.example.com",
       "SMTP_USER=orbit@example.com",
       "SMTP_PASSWORD=super-secret-smtp-password",
-      "IMAP_HOST=imap.example.com",
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
@@ -298,20 +299,21 @@ describe("configure.sh", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("super-secret");
     expect(result.stdout).not.toContain("smtp.example.com");
-    expect(result.stdout).not.toContain("imap.example.com");
-    expect(result.stdout).not.toContain("orbit.example.com");
-    expect(result.stdout).not.toContain("auth.example.com");
+    expect(result.stdout).not.toContain("orbit.configure-test.internal");
+    expect(result.stdout).not.toContain("auth.configure-test.internal");
 
     const lines = result.stdout.split("\n").filter(Boolean);
     for (const line of lines) {
       expect(line).toMatch(/^(ready|missing|optional) [A-Za-z_]+$/);
     }
     expect(lines).toContain("ready APP_URL");
+    expect(lines).toContain("ready ORBIT_IMAGE");
     expect(lines).toContain("ready OIDC_ISSUER");
     expect(lines).toContain("ready OIDC_CLIENT_ID");
     expect(lines).toContain("ready OIDC_CLIENT_SECRET");
+    expect(lines).toContain("ready OIDC_CALLBACK_URL");
     expect(lines).toContain("ready mail");
-    expect(lines).toContain("missing imap");
+    expect(lines).toContain("optional imap");
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional push");
@@ -322,13 +324,14 @@ describe("configure.sh", () => {
 
     const result = runConfigure(targetDir, ["--check"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status).not.toBe(0);
     const lines = result.stdout.split("\n").filter(Boolean);
     expect(lines).toContain("missing APP_URL");
     expect(lines).toContain("missing ORBIT_IMAGE");
     expect(lines).toContain("missing OIDC_ISSUER");
     expect(lines).toContain("missing OIDC_CLIENT_ID");
     expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+    expect(lines).toContain("missing OIDC_CALLBACK_URL");
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional mail");
@@ -336,8 +339,117 @@ describe("configure.sh", () => {
     expect(lines).toContain("optional push");
   });
 
+  it("treats the historical loopback default and documented example.com placeholders as missing", () => {
+    const initial = [
+      "APP_URL=http://127.0.0.1:3000",
+      "OIDC_ISSUER=https://auth.example.com/application/o/orbit/",
+      "OIDC_CALLBACK_URL=http://127.0.0.1:3000/api/auth/callback",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).not.toBe(0);
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing APP_URL");
+    expect(lines).toContain("missing OIDC_ISSUER");
+    expect(lines).toContain("missing OIDC_CALLBACK_URL");
+  });
+
+  it("rejects a callback URL that does not match the derived APP_URL callback", () => {
+    const initial = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET=test-client-secret",
+      "OIDC_CALLBACK_URL=https://wrong-host.configure-test.internal/api/auth/callback",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain("wrong-host");
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("ready APP_URL");
+    expect(lines).toContain("missing OIDC_CALLBACK_URL");
+  });
+
+  it("rejects a mutable image tag and whitespace-only client identity", () => {
+    const initial = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit:latest",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=   ",
+      "OIDC_CLIENT_SECRET=test-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).not.toBe(0);
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing ORBIT_IMAGE");
+    expect(lines).toContain("missing OIDC_CLIENT_ID");
+    expect(result.stdout).not.toContain("latest");
+  });
+
+  it("exits zero for a complete required configuration with all optional groups untouched", () => {
+    const initial = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET=test-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).toBe(0);
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("optional processing");
+    expect(lines).toContain("optional ai");
+    expect(lines).toContain("optional mail");
+    expect(lines).toContain("optional imap");
+    expect(lines).toContain("optional push");
+  });
+
+  it("exits non-zero when an optional group is partially configured even with a complete required set", () => {
+    const initial = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET=test-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "SMTP_HOST=smtp.example.com",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).not.toBe(0);
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing mail");
+  });
+
   it("reports inbound mail ready only when its complete trust boundary and outbound mail are configured", () => {
     const initial = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET=test-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
       "IMAP_ENABLED=true",
       "SMTP_HOST=smtp.example.com",
       "SMTP_USER=orbit@example.com",
@@ -375,7 +487,7 @@ describe("configure.sh", () => {
 
     const result = runConfigure(targetDir, ["--check"]);
 
-    expect(result.status).toBe(0);
+    expect(result.status).not.toBe(0);
     expect(result.stdout).toContain("missing OIDC_CLIENT_SECRET\n");
     expect(result.stdout).toContain("missing mail\n");
     expect(result.stdout).not.toContain("private-");
@@ -389,6 +501,176 @@ describe("configure.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Usage:");
     expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+  });
+
+  describe("--init guided configuration", () => {
+    const validAppUrl = "https://orbit.guided-test.internal";
+    const validIssuer = "https://auth.guided-test.internal/application/o/orbit/";
+    const validClientId = "guided-test-client-id";
+
+    it("derives and atomically writes all four values from a complete environment set without printing them", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain(validClientId);
+      expect(result.stdout).not.toContain("orbit.guided-test.internal");
+
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("UNRELATED_KEY=keep-me");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain(`OIDC_ISSUER=${validIssuer}`);
+      expect(updated).toContain(`OIDC_CLIENT_ID=${validClientId}`);
+      expect(updated).toContain(`OIDC_CALLBACK_URL=${validAppUrl}/api/auth/callback`);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("normalizes one harmless trailing slash from the public Orbit origin", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: `${validAppUrl}/`,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain(`APP_URL=${validAppUrl}\n`);
+      expect(updated).toContain(`OIDC_CALLBACK_URL=${validAppUrl}/api/auth/callback\n`);
+    });
+
+    it("refuses a partial non-interactive environment input set without mutating the file", () => {
+      const initial = "APP_URL=https://old.guided-test.internal\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).not.toContain("orbit.guided-test.internal");
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("refuses non-TTY guided mode when no complete environment input set is supplied", () => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"]);
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it.each([
+      ["http://orbit.guided-test.internal", "non-HTTPS scheme"],
+      ["https://127.0.0.1:3000", "loopback address"],
+      ["https://orbit.example.com", "documented example.com placeholder"],
+      ["https://user:pass@orbit.guided-test.internal", "embedded credentials"],
+      ["https://orbit.guided-test.internal/app", "path component"],
+      ["https://orbit.guided-test.internal?x=1", "query component"],
+      ["https://orbit.guided-test.internal#frag", "fragment component"],
+      ["https://", "malformed hostless value"],
+      ["https://orbit.guided-test.internal\t", "trailing control character"],
+      ["https://orbit.guided-test.internal:70000", "out-of-range port"],
+    ])("refuses an invalid APP_URL %s (%s) without mutation", (badAppUrl) => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: badAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it.each([
+      ["http://auth.guided-test.internal/o/orbit/", "non-HTTPS scheme"],
+      ["https://127.0.0.1/o/orbit/", "loopback address"],
+      ["https://auth.example.com/o/orbit/", "documented example.com placeholder"],
+      ["https://user:pass@auth.guided-test.internal/o/orbit/", "embedded credentials"],
+      ["https://auth.guided-test.internal/o/orbit/?x=1", "query component"],
+      ["https://auth.guided-test.internal/o/orbit/#frag", "fragment component"],
+      ["https://", "malformed hostless value"],
+      ["https://auth.guided-test.internal:70000/o/orbit/", "out-of-range port"],
+    ])("refuses an invalid OIDC_ISSUER %s (%s) without mutation", (badIssuer) => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: badIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("collapses duplicate managed keys during a guided write while preserving unrelated lines byte-for-byte", () => {
+      const initial = [
+        "# Custom comment retained exactly",
+        "CUSTOM_OPERATOR_VALUE=some value with spaces and = signs==",
+        "APP_URL=https://old.guided-test.internal",
+        "APP_URL=https://another-old.guided-test.internal",
+        "OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/",
+        "OIDC_CLIENT_ID=old-client-id",
+        "OIDC_CALLBACK_URL=https://old.guided-test.internal/api/auth/callback",
+        "TRAILING_KEY=also-keep",
+        "",
+      ].join("\n");
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("# Custom comment retained exactly");
+      expect(updated).toContain("CUSTOM_OPERATOR_VALUE=some value with spaces and = signs==");
+      expect(updated).toContain("TRAILING_KEY=also-keep");
+      expect(updated.match(/^APP_URL=.*$/gm)).toEqual([`APP_URL=${validAppUrl}`]);
+      expect(updated.match(/^OIDC_ISSUER=.*$/gm)).toEqual([`OIDC_ISSUER=${validIssuer}`]);
+      expect(updated.match(/^OIDC_CLIENT_ID=.*$/gm)).toEqual([`OIDC_CLIENT_ID=${validClientId}`]);
+      expect(updated.match(/^OIDC_CALLBACK_URL=.*$/gm)).toEqual([
+        `OIDC_CALLBACK_URL=${validAppUrl}/api/auth/callback`,
+      ]);
+    });
+
+    it("removes the guided atomic update file when securing it fails, leaving the original unchanged", () => {
+      const initial = "APP_URL=https://old.guided-test.internal\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+        ORBIT_TEST_FAIL_UPDATE_CHMOD: "1",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Could not secure the temporary Orbit environment file");
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
   });
 
   it("leaves no temporary files behind after success or a later failure", () => {
