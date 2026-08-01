@@ -9,7 +9,15 @@ import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 
-type ClaimedDocumentJob = OwnedPurgeJob;
+interface ClaimedDocumentJob extends OwnedPurgeJob {
+  /** The job's status immediately before this claim; distinguishes an expired-lease reclaim from a fresh pending/retry claim. */
+  previousStatus: "pending" | "retry" | "processing";
+}
+
+/** Pure classification of a claim outcome from the pre-claim status, kept separate from the SQL for direct testability. */
+export function purgeClaimOutcome(previousStatus: "pending" | "retry" | "processing"): "claimed" | "reclaimed" {
+  return previousStatus === "processing" ? "reclaimed" : "claimed";
+}
 
 interface OwnedPurgeRecord {
   householdId: string;
@@ -50,8 +58,8 @@ export function getDocumentWorkerHealth(): DocumentWorkerHealth {
 
 async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> {
   const rows = await getDb().execute(sql<ClaimedDocumentJob>`
-    with claimable as (
-      select job.id
+    with claimable as materialized (
+      select job.id, job.status as previous_status
       from document_jobs job
       inner join documents document on document.id = job.document_id
       where job.kind = 'purge'
@@ -65,22 +73,27 @@ async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocumentJob[]> 
       order by document.delete_after
       for update of job skip locked
       limit ${limit}
+    ), claimed as (
+      update document_jobs as job
+      set status = 'processing',
+          attempts = job.attempts + 1,
+          locked_at = now(),
+          lease_expires_at = now() + interval '10 minutes',
+          lease_token = gen_random_uuid(),
+          updated_at = now()
+      from claimable
+      where job.id = claimable.id
+      returning job.id, job.document_id, job.generation, job.lease_token
     )
-    update document_jobs as job
-    set status = 'processing',
-        attempts = job.attempts + 1,
-        locked_at = now(),
-        lease_expires_at = now() + interval '10 minutes',
-        lease_token = gen_random_uuid(),
-        updated_at = now()
-    from claimable
-    where job.id = claimable.id
-    returning job.id, job.document_id as "documentId", job.generation, job.lease_token as "leaseToken"
+    select claimed.id, claimed.document_id as "documentId", claimed.generation,
+      claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"
+    from claimed
+    inner join claimable on claimable.id = claimed.id
   `);
   return rows as unknown as ClaimedDocumentJob[];
 }
 
-async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
+async function processPurgeJob(job: ClaimedDocumentJob): Promise<"completed" | "stale"> {
   const config = getDocumentConfig();
   const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
   const outcome = await processOwnedPurge(job, {
@@ -213,7 +226,9 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<void> {
       });
     },
   });
+  if (outcome === "completed") log.info("document.lifecycle", { document: job.documentId, state: "deleted" });
   if (outcome === "stale") await completeStalePurgeClaim(job);
+  return outcome;
 }
 
 async function completeStalePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
@@ -270,6 +285,7 @@ async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
   const exhausted = current.attempts >= 5;
   log.warn("document.job", {
     document: job.documentId,
+    job: job.id,
     kind: "purge",
     outcome: exhausted ? "failed" : "retry",
     reason: safeCode,
@@ -332,8 +348,8 @@ export async function reconcileDocumentStorage(): Promise<void> {
       // remain user-visible. Pending purges retain their durable evidence for
       // the job retry path instead of being rewritten as a new rejection.
       if (record.lifecycle === "pending_deletion") continue;
-      await getDb().transaction(async (transaction) => {
-        const [rejected] = await transaction.update(documents).set({
+      const rejected = await getDb().transaction(async (transaction) => {
+        const [changed] = await transaction.update(documents).set({
           lifecycle: "rejected",
           failureCode: "crypto_metadata_missing",
           updatedAt: new Date(),
@@ -341,7 +357,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
           eq(documents.id, record.documentId),
           eq(documents.lifecycle, "available"),
         )).returning({ id: documents.id });
-        if (!rejected) return;
+        if (!changed) return false;
         await transaction.insert(auditLog).values({
           householdId: record.householdId,
           actorUserId: null,
@@ -350,7 +366,11 @@ export async function reconcileDocumentStorage(): Promise<void> {
           action: "document_crypto_missing",
           changes: { itemId: record.itemId },
         });
+        return true;
       });
+      if (rejected) {
+        log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "crypto_metadata_missing" });
+      }
       continue;
     }
     let ciphertextExists = false;
@@ -358,8 +378,8 @@ export async function reconcileDocumentStorage(): Promise<void> {
       ciphertextExists = await storage.ciphertextExists(record.storageKey);
     } catch {
       if (record.lifecycle === "pending_deletion") continue;
-      await getDb().transaction(async (transaction) => {
-        const [rejected] = await transaction.update(documents).set({
+      const rejected = await getDb().transaction(async (transaction) => {
+        const [changed] = await transaction.update(documents).set({
           lifecycle: "rejected",
           failureCode: "storage_object_invalid",
           updatedAt: new Date(),
@@ -367,7 +387,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
           eq(documents.id, record.documentId),
           eq(documents.lifecycle, "available"),
         )).returning({ id: documents.id });
-        if (!rejected) return;
+        if (!changed) return false;
         await transaction.insert(auditLog).values({
           householdId: record.householdId,
           actorUserId: null,
@@ -376,14 +396,18 @@ export async function reconcileDocumentStorage(): Promise<void> {
           action: "document_storage_invalid",
           changes: { itemId: record.itemId },
         });
+        return true;
       });
+      if (rejected) {
+        log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "storage_object_invalid" });
+      }
       continue;
     }
     if (ciphertextExists) continue;
     // A pending purge may have removed ciphertext before its finalization
     // transaction. Preserve that durable retry evidence for the next claim.
     if (record.lifecycle === "pending_deletion") continue;
-    await reconcileMissingDocument(record, {
+    const reconciliationOutcome = await reconcileMissingDocument(record, {
       withDocumentLock: async (documentId, work) => getDb().transaction(async (transaction) => {
         await transaction.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${documentId}`}, 0))`,
@@ -421,6 +445,9 @@ export async function reconcileDocumentStorage(): Promise<void> {
         });
       }),
     });
+    if (reconciliationOutcome === "rejected") {
+      log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "storage_object_missing" });
+    }
   }
 
   const orphanBoundary = Date.now() - 24 * 60 * 60 * 1_000;
@@ -444,11 +471,11 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
     await reconcilePortableArchiveStorage();
   }
   const jobs = await claimExpiredPurgeJobs();
-  if (jobs.length > 0) log.info("document.job", { kind: "purge", outcome: "claimed", count: jobs.length });
   for (const job of jobs) {
+    log.info("document.job", { document: job.documentId, job: job.id, kind: "purge", outcome: purgeClaimOutcome(job.previousStatus) });
     try {
-      await processPurgeJob(job);
-      log.info("document.job", { document: job.documentId, kind: "purge", outcome: "completed" });
+      const outcome = await processPurgeJob(job);
+      log.info("document.job", { document: job.documentId, job: job.id, kind: "purge", outcome });
     } catch (error) {
       await failJob(job, error);
     }

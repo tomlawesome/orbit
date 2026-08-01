@@ -377,9 +377,10 @@ export async function uploadItemDocument(input: {
       await getDb().update(documents).set({ lifecycle: "scanning", updatedAt: new Date() })
         .where(and(eq(documents.id, documentId), eq(documents.lifecycle, "quarantined")));
       log.info("document.lifecycle", { document: documentId, state: "scanning" });
+      log.info("document.scan", { document: documentId, outcome: "attempt" });
       const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
-      const scanMs = Date.now() - scanStartedAt;
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
         // Distinguish "cannot reach the scanner" from "the scanner answered
@@ -388,22 +389,22 @@ export async function uploadItemDocument(input: {
         // text, per the bounded-diagnostics rule.
         const unreachable = scan.status === "error"
           && (scan.reason === "unavailable" || scan.reason === "timeout");
+        const failureCode = infected ? "malware_detected" : `scanner_${scan.reason}`;
         // `scan.reason` is a fixed enumeration from the scanner adapter, never
         // provider text, so it is safe to record.
         log.warn("document.scan", {
           document: documentId,
           outcome: infected ? "infected" : "error",
           reason: infected ? "malware_detected" : scan.reason,
-          host: config.clamAv.host,
-          port: config.clamAv.port,
           ms: scanMs,
         });
         await getDb().update(documents).set({
           lifecycle: "rejected",
           scanStatus: infected ? "infected" : "error",
-          failureCode: infected ? "malware_detected" : `scanner_${scan.reason}`,
+          failureCode,
           updatedAt: new Date(),
         }).where(eq(documents.id, documentId));
+        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
         await recordDocumentAudit(
           input.householdId,
           documentId,
@@ -498,12 +499,17 @@ export async function uploadItemDocument(input: {
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
     if (metadataReserved && !(error instanceof AppError && error.code.startsWith("document_malware"))) {
-      await getDb().update(documents).set({
+      const failureCode = error instanceof AppError ? error.code : "processing_failed";
+      const rejected = await getDb().update(documents).set({
         lifecycle: "rejected",
-        failureCode: error instanceof AppError ? error.code : "processing_failed",
+        failureCode,
         updatedAt: new Date(),
       }).where(and(eq(documents.id, documentId), notInArray(documents.lifecycle, ["available", "rejected"])))
-        .catch(() => undefined);
+        .returning({ id: documents.id })
+        .catch(() => []);
+      if (rejected.length > 0) {
+        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
+      }
     }
     throw error;
   } finally {
@@ -583,6 +589,7 @@ export async function requestDocumentDeletion(userId: string, documentId: string
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  log.info("document.lifecycle", { document: documentId, state: "pending_deletion" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_deletion_requested", {
     itemId: record.itemId,
     deleteAfter: deleteAfter.toISOString(),
@@ -646,6 +653,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  log.info("document.lifecycle", { document: documentId, state: "available" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated, config.scanMode);
 }

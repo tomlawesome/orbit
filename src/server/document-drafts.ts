@@ -98,7 +98,7 @@ export async function createDocumentDraft(userId: string, documentId: string) {
       && detected === record.mediaType
       && validateSupportedDocumentStructure(download.bytes, detected)) {
       try {
-        text = await extractTextWithTika(download.bytes, detected);
+        text = await extractTextWithTika(download.bytes, detected, documentId);
         extracted = true;
       } catch {
         text = "";
