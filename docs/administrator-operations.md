@@ -144,6 +144,7 @@ configuration before every first start or material provider change:
 ```sh
 bash scripts/configure.sh
 bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
@@ -151,15 +152,20 @@ The first command is the non-interactive bootstrap and upgrade path: it creates
 missing generated secrets and preserves existing operator settings. Guided
 setup then atomically records the public HTTPS Orbit origin, complete OIDC
 issuer, client ID, and derived callback URL. It does not collect provider
-credentials.
+credentials. The separate secret step reads the OIDC client secret silently,
+stores it atomically at `.orbit-secrets/oidc-client-secret` with mode `0600`,
+and records only `/run/orbit-secrets/orbit-oidc-client-secret` in
+`.env-orbit`. Do not provide the secret on the command line or through a
+literal shell pipeline.
 
 The readiness check validates required settings, direct-versus-file secret
 ambiguity, and partially configured optional groups. Its output contains only
 field names and readiness categories; it does not print values. A failed check
 is an administrator action and must be resolved before deployment. Keep the
-persistent `.env-orbit` file mode `0600`, edit credentials through a private
-local editor or secret manager, and never put them in command arguments,
-terminal history, issue text, or logs.
+persistent `.env-orbit` file mode `0600`; direct and file-backed forms are
+mutually exclusive. Ordinary configuration and recognised upgrades preserve
+the OIDC secret file. Never put credentials in command arguments, terminal
+history, issue text, chat, or logs.
 
 ## Mailbox provider operation
 

@@ -44,6 +44,7 @@ services:
       - orbit-session-secret
       - orbit-document-kek
       - orbit-vapid-private-key
+      - orbit-oidc-client-secret
     security_opt:
       - no-new-privileges:true
     networks:
@@ -171,3 +172,5 @@ secrets:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
   orbit-vapid-private-key:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key
+  orbit-oidc-client-secret:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/oidc-client-secret
