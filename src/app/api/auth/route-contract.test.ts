@@ -35,6 +35,8 @@ type CallbackMocks = {
   provisionIdentity: ReturnType<typeof vi.fn>;
   createSession: ReturnType<typeof vi.fn>;
   deleteSessionToken: ReturnType<typeof vi.fn>;
+  reportAuthProviderDiscoveryFailure: ReturnType<typeof vi.fn>;
+  reportAuthTokenExchangeFailure: ReturnType<typeof vi.fn>;
 };
 
 async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/route").GET; mocks: CallbackMocks }> {
@@ -46,6 +48,8 @@ async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/rou
     provisionIdentity: vi.fn(),
     createSession: vi.fn(),
     deleteSessionToken: vi.fn(),
+    reportAuthProviderDiscoveryFailure: vi.fn(),
+    reportAuthTokenExchangeFailure: vi.fn(),
   };
   vi.doMock("@/lib/env", () => ({ getAuthConfig: () => config }));
   vi.doMock("@/lib/auth/oidc", () => ({
@@ -55,6 +59,11 @@ async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/rou
     discoverProvider: mocks.discoverProvider,
   }));
   vi.doMock("@/lib/auth/provision", () => ({ provisionIdentity: mocks.provisionIdentity }));
+  vi.doMock("@/lib/auth/observability", () => ({
+    reportAuthConfiguration: vi.fn(),
+    reportAuthProviderDiscoveryFailure: mocks.reportAuthProviderDiscoveryFailure,
+    reportAuthTokenExchangeFailure: mocks.reportAuthTokenExchangeFailure,
+  }));
   vi.doMock("@/lib/auth/session", () => ({
     createSession: mocks.createSession,
     deleteSessionToken: mocks.deleteSessionToken,
@@ -155,6 +164,8 @@ describe("authentication callback and login route contracts", () => {
     ]);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(credentialSentinel);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(identitySentinel);
+    expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
+    expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
   });
 
   it("rejects a mismatched transaction state without creating a session", async () => {
@@ -187,10 +198,18 @@ describe("authentication callback and login route contracts", () => {
         502,
         { cause: new Error(credentialSentinel) },
       ));
+    } else if (failureCode === "token_exchange_failed") {
+      mocks.discoverProvider.mockResolvedValue(providerMetadata);
+      mocks.completeAuthorization.mockRejectedValue(new mocks.AuthError(
+        "token_exchange_failed",
+        "The provider response could not be validated",
+        502,
+        { cause: new Error(`${credentialSentinel}:${identitySentinel}`), tokenExchangeReason: "invalid_grant" },
+      ));
     } else {
       mocks.discoverProvider.mockResolvedValue(providerMetadata);
       mocks.completeAuthorization.mockRejectedValue(new mocks.AuthError(
-        failureCode as "token_exchange_failed" | "provider_error",
+        "provider_error",
         "The provider response could not be validated",
         502,
         { cause: new Error(`${credentialSentinel}:${identitySentinel}`) },
@@ -209,6 +228,37 @@ describe("authentication callback and login route contracts", () => {
     ]);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(credentialSentinel);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(identitySentinel);
+    if (failureCode === "discovery_failed") {
+      expect(mocks.reportAuthProviderDiscoveryFailure).toHaveBeenCalledOnce();
+      expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
+    } else if (failureCode === "token_exchange_failed") {
+      expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledOnce();
+      expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledWith("invalid_grant");
+      expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
+    } else {
+      expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
+      expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
+    }
+  });
+
+  it("falls back to provider_rejected when a token exchange failure lacks a typed reason", async () => {
+    const { GET, mocks } = await loadCallbackRoute();
+    const sealed = await transactionCookie();
+    mocks.discoverProvider.mockResolvedValue(providerMetadata);
+    mocks.completeAuthorization.mockRejectedValue(new mocks.AuthError(
+      "token_exchange_failed",
+      "The authorization code could not be exchanged",
+      502,
+    ));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await GET(callbackRequest("?code=authorization-code-sentinel&state=expected-state", sealed));
+
+    expectCallbackFailure(response, "token_exchange_failed");
+    expect(mocks.provisionIdentity).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledOnce();
+    expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledWith("provider_rejected");
   });
 
   it("returns a bounded no-store login error when discovery fails", async () => {
