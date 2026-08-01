@@ -89,7 +89,7 @@
     },
     {
       "id": "ORCH-007",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "model_governance",
       "summary": "Derive agent authority from declared pipeline tiers rather than hardcoded model names, and accept one planning attestation per authority including an explicit human-owner value.",
       "automaticPromotion": false,
@@ -100,7 +100,9 @@
       ],
       "issue": 113,
       "pullRequest": 114,
-      "approvedByModel": "Human"
+      "approvedByModel": "Human",
+      "retiredByIssue": 189,
+      "retirementReason": "ADR-0009 restores Sol-only orchestration and replaces peer pipelines with qualification-gated implementation routing."
     },
     {
       "id": "ORCH-008",
@@ -144,6 +146,21 @@
       "issue": 158,
       "pullRequest": 159,
       "approvedByModel": "Claude Opus Extra High"
+    },
+    {
+      "id": "ORCH-011",
+      "status": "adopted",
+      "decisionClass": "model_governance",
+      "summary": "Keep orchestration with Sol Extra High and route bounded implementation by exact provider, model and task-class capability; stop evaluation by pass five, avoid heuristic session-token caps, and intervene only on task-appropriate evidence of stalled progress.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Claude produced useful bounded implementation but its temporary peer-pipeline authority resulted in project-management and governance changes that required Sol audit and repair.",
+        "Representative hidden-case benchmarks distinguished a correct Mistral Medium 3.5 High implementation from lower Mistral profiles that failed correctness checks, proving that provider name or nominal tier is not sufficient qualification.",
+        "A heuristic local token cap interrupted correct work and an administrative handback while the provider panel later reported only about EUR 0.09 used from a EUR 25.50 allowance, showing that the local cumulative-token counter did not represent billed capacity or capability."
+      ],
+      "issue": 189,
+      "pullRequest": 191,
+      "approvedByModel": "Sol Extra High"
     }
   ]
 }

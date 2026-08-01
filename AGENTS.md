@@ -5,82 +5,70 @@ The repository is the source of truth; chat history is not.
 
 ## Model governance
 
-Orbit recognises two peer agent pipelines with equivalent authority tiers. Each
-pipeline declares its tiers in `.github/orchestration-governance.json`, and
-authority is derived from those declarations rather than hardcoded, so admitting
-a pipeline is a reviewed data change.
+**Sol Extra High is Orbit's sole orchestration and protected-planning
+authority.** Sol owns product planning, architecture, security decisions,
+roadmaps, ADRs, release policy, repository settings, delivery sequencing,
+integration, publication and release. Only Sol may materially create, edit,
+approve or restructure the protected planning paths listed in
+`.github/planning-governance.json`.
 
-| Role | Codex | Claude |
-| --- | --- | --- |
-| Orchestration and protected planning | Sol Extra High | Claude Opus Extra High |
-| Bounded implementation | Luna Extra High | Claude Sonnet Extra High |
-| Mechanical analysis | Terra Medium | Claude Sonnet Extra High |
-
-Broad product planning, architecture, security-model, systems-design, roadmap,
-ADR, release-policy, and engineering-baseline work is reserved for an
-**orchestration tier**: Sol Extra High or Claude Opus Extra High. Only an
-orchestration tier may materially create, edit, approve, or restructure the
-protected planning files listed in `.github/planning-governance.json`.
-
-Implementation agents and separate implementation tasks use the **implementation
-tier** of the active pipeline: Luna Extra High under Codex, Claude Sonnet Extra
-High under Claude. A different model may be used only after the user gives
-fresh, explicit approval for that invocation. Lower-capability models may read
-protected planning and implement bounded issues, tests, migrations, and
-feature documentation, but must not edit the protected planning set.
-
-Pull requests that modify protected planning files must contain exactly one
-accepted attestation line from `.github/planning-governance.json`:
-`Planning-Model: Sol Extra High`, `Planning-Model: Claude Opus Extra High`, or
-`Planning-Model: Human` when a human owner authored or directed the change. The
-CI check verifies the attestation and protected paths. This is a governance
-control, not cryptographic proof of model identity; authors must never make a
-false attestation, and must never attest as a pipeline, tier or authority that
+Human-owner protected planning remains valid when it is genuinely human
+authored or directed. Pull requests that change protected planning must contain
+exactly one accepted attestation line from the planning policy:
+`Planning-Model: Sol Extra High` or `Planning-Model: Human`. This is a
+governance control, not cryptographic proof; never attest as an authority that
 did not do the work.
 
-When the active pipeline's implementation tier is unavailable in the current
-subagent pool, the orchestration tier must use that pipeline's task launcher,
-when available, to create a separate user-visible task on the implementation
-tier automatically. Start it in a dedicated worktree from the exact accepted
-base, give it the bounded handoff, and let it make focused local commits without
-pushing or changing GitHub state. The orchestration tier retains architecture,
-security decisions, integration review, protected CI, and delivery sequencing;
-it must inspect and integrate the implementation result before publication.
+Bounded implementation is routed by demonstrated task-class capability and
+cost, in this order:
 
-Do not ask the user to switch the current task manually merely because the
-implementation tier is absent from the subagent pool. Manual switching is a
-fallback only when the separate-task launcher is also unavailable or has failed
-with a genuine hard block. In either path, write the bounded prompt under
-`.agents/handoffs/`. The prompt must name permitted and protected paths, forbid
-unapproved remote mutations, define hard stop conditions, require a result file,
-and tell the implementation agent exactly when to hand control back for
-orchestration review. Handoff files are local coordination state and are not
+1. a local Ollama host and exact model qualified for the task class;
+2. a qualified Mistral model as the primary paid provider;
+3. a qualified Claude model as the paid fallback; and
+4. Luna Extra High only when the preceding providers are unqualified,
+   unsuitable, unreachable or out of capacity.
+
+A theoretical model size, successful toy prompt or provider subscription is not
+qualification. Representative evidence must cover correctness, hidden edge
+cases, path and instruction scope, result honesty and context fit.
+Qualification records the exact provider, model and task class, plus the exact
+host for local Ollama. Cost, latency, resource use and provider capacity inform
+routing and circuit breakers; crossing a heuristic local limit does not
+disqualify otherwise correct work unless the task has an explicit budget. An
+unqualified model receives no real Orbit implementation work. Select the
+lowest-cost model that has actually passed the relevant gate.
+
+For each model and representative task class, stop qualification as soon as
+the result is satisfactory and never exceed five passes. A model that has not
+reached basic acceptance by pass three is unsuitable for that task class.
+Passes four and five may only fine-tune already acceptable behavior.
+
+Every delegated implementation uses an exact accepted base, a dedicated clean
+worktree, least-privilege tools, an explicit changed-path allowlist, bounded
+scope, a required result handback and independent Sol validation. Do not impose
+routine token, price or turn quotas: completion and correctness govern the
+task. Detect a genuine runaway from task- and model-appropriate time to first
+useful output or time since meaningful progress, with a reasonable
+benefit-of-the-doubt buffer. Slow useful work is not stalled.
+Delegated providers may not plan, orchestrate, make architecture or security
+decisions, integrate, publish, release, access GitHub or approve their own work.
+They make focused local changes and return control to Sol.
+
+Claude is an implementation resource, not a peer project-management pipeline.
+Claude Opus-class secondary review may be useful, but each invocation requires
+fresh user approval and its output is advisory evidence for Sol; it grants no
+planning, security, approval or delivery authority. Historical controls
+approved under the superseded dual-pipeline policy remain evidence only where
+the orchestration policy explicitly enumerates their pull requests.
+
+When Luna is the evidenced last resort and is absent from the current subagent
+pool, Sol uses the task launcher, when available, to create a separate
+user-visible Luna Extra High task in a dedicated worktree from the exact
+accepted base. In every delegated path, write the bounded prompt under
+`.agents/handoffs/`; name permitted and protected paths, forbid remote
+mutations, define hard stops, require a result file, and state when control
+returns to Sol. Handoff files are local coordination state and are not
 committed.
-
-## Cross-pipeline conduct
-
-Both pipelines work in one repository, so provenance and boundaries must stay
-unambiguous.
-
-- Branch namespaces are reserved: Codex uses `codex/`, Claude uses `claude/`.
-  Never push to the other pipeline's namespace.
-- Every pull request identifies the authoring pipeline. Preserve commit
-  authorship; never rewrite another pipeline's authorship or attestation.
-- Do not force-push, rebase, amend, reopen, close or delete another pipeline's
-  branch or pull request. Request the change through an issue or pull-request
-  comment and let that pipeline, or the user, act on it.
-- Reviewing across pipelines is expected and encouraged. Report findings as
-  issues or pull-request review comments, or as a fix branch in your own
-  namespace; do not commit a fix onto the reviewed branch.
-- When both pipelines hold open work on the same issue or overlapping paths,
-  the earlier-opened pull request holds precedence. The later one narrows its
-  scope, rebases, or waits, and records that coordination in the issue.
-- A handoff between pipelines is explicit. The receiving pipeline confirms the
-  issue, accepted base SHA, permitted paths and stop conditions before it
-  mutates anything, exactly as for a handoff inside one pipeline.
-- Neither pipeline may change the other's authority, tiers, or the protected
-  path set on its own. Model-governance changes follow the protected issue and
-  pull-request path with a valid attestation.
 
 ## Orchestration and retained learning
 
@@ -92,12 +80,12 @@ Before any delivery mutation, read and obey
 Model authority is a preflight gate, not a review-time correction. All
 orchestration—including task launch, monitoring, sequencing, reconciliation,
 blocker classification, handback acceptance and retained-learning
-promotion—proceeds only under an orchestration tier. A mechanical-analysis tier
-may read protected planning for orientation or perform separately bounded
-analysis, but it cannot operate the delivery loop, make status or next-action
-decisions, or materially create, edit, approve, restructure or publish protected
-planning. An implementation tier performs bounded implementation and hands
-control back to its orchestration tier.
+promotion—proceeds only under Sol Extra High. Terra may read protected planning
+for orientation or perform separately bounded mechanical analysis, but it
+cannot operate the delivery loop, make status or next-action decisions, or
+materially create, edit, approve, restructure or publish protected planning.
+Implementation providers perform only their bounded slice and hand control back
+to Sol.
 
 A successful asynchronous task-creation response establishes
 `launch_pending`. Omission from a partial, limited, paginated, stale or
