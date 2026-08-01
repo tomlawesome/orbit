@@ -14,6 +14,10 @@ fail() {
   exit 1
 }
 
+usage() {
+  printf 'Usage: %s [--check]\n' "$0" >&2
+}
+
 cleanup() {
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
 }
@@ -68,13 +72,46 @@ ensure_secrets_directory() {
     fail "Could not restrict ${secrets_directory} permissions."
 }
 
+# Reusable atomic updater for installer-managed keys in $environment_file. It
+# rewrites the first active "KEY=..." assignment in place, drops any further
+# duplicate active assignments for the same key, and appends the assignment
+# at the end of the file when none was present. Every other line, including
+# comments, is copied through byte-for-byte.
+update_managed_key() {
+  local key="$1" value="$2" line replaced=0 temp
+
+  temp="$(mktemp "$PWD/.env-orbit.updating.XXXXXX")" ||
+    fail "Could not create a temporary Orbit environment file."
+  temporary_file="$temp"
+  chmod 600 "$temp" ||
+    fail "Could not secure the temporary Orbit environment file."
+
+  {
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "${key}="* ]]; then
+        if [[ "$replaced" == 0 ]]; then
+          printf '%s=%s\n' "$key" "$value"
+          replaced=1
+        fi
+        continue
+      fi
+      printf '%s\n' "$line"
+    done < "$environment_file"
+    [[ "$replaced" == 1 ]] || printf '%s=%s\n' "$key" "$value"
+  } > "$temp"
+
+  mv -- "$temp" "$environment_file" ||
+    fail "Could not persist ${key} in ${environment_file}."
+  temporary_file=""
+}
+
 persist_orbit_image() {
   local orbit_image="${ORBIT_IMAGE:-}"
   [[ -n "$orbit_image" ]] || return 0
   if [[ ! "$orbit_image" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$orbit_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
     fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
   fi
-  sed -i "s|^ORBIT_IMAGE=.*|ORBIT_IMAGE=$orbit_image|" "$environment_file"
+  update_managed_key ORBIT_IMAGE "$orbit_image"
 }
 
 ensure_secret_file() {
@@ -136,10 +173,167 @@ ensure_vapid_keys() {
   chmod 600 "$temporary_file"
   mv -- "$temporary_file" "$private_key_file"
   temporary_file=""
-  sed -i "s|^VAPID_PUBLIC_KEY=.*|VAPID_PUBLIC_KEY=$public_key|" "$environment_file"
-  sed -i "s|^VAPID_PRIVATE_KEY_FILE=.*|VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key|" "$environment_file"
+  update_managed_key VAPID_PUBLIC_KEY "$public_key"
+  update_managed_key VAPID_PRIVATE_KEY_FILE "/run/orbit-secrets/orbit-vapid-private-key"
   printf 'Generated VAPID push keys.\n'
 }
+
+# Non-mutating readiness summary: fixed "ready"/"missing"/"optional" category
+# words and variable names only. Values are never read into output.
+run_check() {
+  [[ -f "$environment_example" && ! -L "$environment_example" ]] ||
+    fail "${environment_example} is missing."
+
+  local source_path=""
+  if [[ -e "$environment_file" ]]; then
+    [[ -f "$environment_file" && ! -L "$environment_file" ]] ||
+      fail "Refusing to use ${environment_file} because it is not a regular file."
+    source_path="$environment_file"
+  fi
+
+  local -A values=()
+  local line key value
+  if [[ -n "$source_path" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      values["$key"]="$value"
+    done < "$source_path"
+  fi
+
+  is_set() { [[ -n "${values[$1]:-}" ]]; }
+
+  any_set() {
+    local name
+    for name in "$@"; do
+      is_set "$name" && return 0
+    done
+    return 1
+  }
+
+  all_set() {
+    local name
+    for name in "$@"; do
+      is_set "$name" || return 1
+    done
+    return 0
+  }
+
+  exactly_one_set() {
+    local name count=0
+    for name in "$@"; do
+      if is_set "$name"; then
+        count=$((count + 1))
+      fi
+    done
+    [[ "$count" == 1 ]]
+  }
+
+  profile_enabled() {
+    local requested="$1" profile
+    local -a configured_profiles=()
+    IFS=',' read -r -a configured_profiles <<< "${values[COMPOSE_PROFILES]:-}"
+    for profile in "${configured_profiles[@]}"; do
+      profile="${profile//[[:space:]]/}"
+      [[ "$profile" == "$requested" ]] && return 0
+    done
+    return 1
+  }
+
+  report_required() {
+    local label="$1"
+    shift
+    if exactly_one_set "$@"; then
+      printf 'ready %s\n' "$label"
+    else
+      printf 'missing %s\n' "$label"
+    fi
+  }
+
+  report_optional() {
+    local label="$1" ready="$2" present="$3"
+    if [[ "$ready" == 1 ]]; then
+      printf 'ready %s\n' "$label"
+    elif [[ "$present" == 1 ]]; then
+      printf 'missing %s\n' "$label"
+    else
+      printf 'optional %s\n' "$label"
+    fi
+  }
+
+  local processing_present=0 processing_ready=0
+  if profile_enabled processing || is_set TIKA_URL; then processing_present=1; fi
+  if profile_enabled processing && is_set TIKA_URL; then processing_ready=1; fi
+
+  local ai_present=0 ai_ready=0
+  if profile_enabled ai || is_set OLLAMA_MODEL; then ai_present=1; fi
+  if profile_enabled ai && is_set OLLAMA_MODEL; then ai_ready=1; fi
+
+  local mail_present=0 mail_ready=0
+  if any_set SMTP_HOST SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_URL SMTP_URL_FILE; then
+    mail_present=1
+  fi
+  if exactly_one_set SMTP_URL SMTP_URL_FILE && ! any_set SMTP_HOST SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE; then
+    mail_ready=1
+  elif all_set SMTP_HOST SMTP_USER \
+    && exactly_one_set SMTP_PASSWORD SMTP_PASSWORD_FILE \
+    && ! any_set SMTP_URL SMTP_URL_FILE; then
+    mail_ready=1
+  fi
+
+  local imap_present=0 imap_ready=0
+  if any_set IMAP_HOST IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE \
+    IMAP_RECIPIENT_DOMAIN IMAP_ALIAS_CURRENT_GENERATION \
+    IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE \
+    IMAP_TRUSTED_RECIPIENT_HEADER; then
+    imap_present=1
+  fi
+  if [[ "${values[IMAP_ENABLED]:-false}" == true ]]; then imap_present=1; fi
+  if [[ "${values[IMAP_ENABLED]:-false}" == true ]] \
+    && all_set IMAP_HOST IMAP_USER IMAP_RECIPIENT_DOMAIN \
+      IMAP_ALIAS_CURRENT_GENERATION IMAP_TRUSTED_RECIPIENT_HEADER \
+    && exactly_one_set IMAP_PASSWORD IMAP_PASSWORD_FILE \
+    && exactly_one_set IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE \
+    && [[ "$mail_ready" == 1 ]]; then
+    imap_ready=1
+  fi
+
+  local push_present=0 push_ready=0
+  if is_set VAPID_SUBJECT; then push_present=1; fi
+  if is_set VAPID_SUBJECT && is_set VAPID_PUBLIC_KEY \
+    && exactly_one_set VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE; then
+    push_ready=1
+  fi
+
+  report_required APP_URL APP_URL
+  report_required ORBIT_IMAGE ORBIT_IMAGE
+  report_required OIDC_ISSUER OIDC_ISSUER
+  report_required OIDC_CLIENT_ID OIDC_CLIENT_ID
+  report_required OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE
+  report_optional processing "$processing_ready" "$processing_present"
+  report_optional ai "$ai_ready" "$ai_present"
+  report_optional mail "$mail_ready" "$mail_present"
+  report_optional imap "$imap_ready" "$imap_present"
+  report_optional push "$push_ready" "$push_present"
+}
+
+case "${1:-}" in
+  "")
+    ;;
+  --check)
+    if [[ $# -ne 1 ]]; then
+      usage
+      exit 2
+    fi
+    run_check
+    exit 0
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 
 ensure_environment_file
 persist_orbit_image
