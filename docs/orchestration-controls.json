@@ -161,6 +161,21 @@
       "issue": 189,
       "pullRequest": 191,
       "approvedByModel": "Sol Extra High"
+    },
+    {
+      "id": "ORCH-012",
+      "status": "adopted",
+      "decisionClass": "model_governance",
+      "summary": "Prefer the cheapest qualified idle implementation capacity, but permit the next qualified provider to take a separate ready issue when the cheaper provider is occupied and exact disjoint paths, satisfied dependencies, a material throughput benefit, bounded revalidation and the two-pull-request cap are evidenced.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Strict provider serialization left independently paid and qualified implementation capacity idle even when a separate ready issue could progress without overlapping files or changing the active task's premises.",
+        "ORCH-009 showed that five concurrent pull requests created repeated rebase-and-revalidation waste, so beneficial provider concurrency retains the existing cap of two in-flight pull requests and sequential Sol integration.",
+        "Mistral Medium 3.5 High produced the correct bounded architecture for issue #185 while independent governance work proceeded on disjoint paths, demonstrating useful throughput without transferring orchestration or integration authority."
+      ],
+      "issue": 193,
+      "pullRequest": 195,
+      "approvedByModel": "Sol Extra High"
     }
   ]
 }
