@@ -9,6 +9,24 @@
 const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
 
+/**
+ * Validates authentication configuration in the Node runtime without making
+ * startup or public health depend on private runtime configuration.
+ */
+export async function reportAuthConfigurationReadiness(): Promise<void> {
+  const [{ getAuthConfig }, { reportAuthConfiguration }] = await Promise.all([
+    import("@/lib/env"),
+    import("@/lib/auth/observability"),
+  ]);
+
+  try {
+    getAuthConfig();
+    reportAuthConfiguration("ready");
+  } catch {
+    reportAuthConfiguration("invalid");
+  }
+}
+
 type ClamAvOptions = { host: string; port: number; timeoutMs: number };
 
 function retryScannerReadiness(
@@ -93,6 +111,8 @@ export async function reportScannerReadiness(): Promise<void> {
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  void reportAuthConfigurationReadiness().catch(() => undefined);
 
   if (process.env.MIGRATE_ON_START === "true") {
     // Keep database and filesystem dependencies out of the Edge instrumentation bundle.
