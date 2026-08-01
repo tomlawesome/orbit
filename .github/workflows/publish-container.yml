@@ -272,15 +272,21 @@ jobs:
           chmod 600 .orbit-secrets/smtp-password .orbit-secrets/imap-password \
             .orbit-secrets/imap-alias-current-secret \
             .orbit-secrets/imap-alias-previous-secret
-          sed --in-place 's/^SMTP_HOST=.*/SMTP_HOST=smtp.example.invalid/' .env-orbit
-          sed --in-place 's/^SMTP_USER=.*/SMTP_USER=orbit@example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_HOST=.*/IMAP_HOST=imap.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_USER=.*/IMAP_USER=orbit@example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_TLS_SERVER_NAME=.*/IMAP_TLS_SERVER_NAME=imap.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_RECIPIENT_DOMAIN=.*/IMAP_RECIPIENT_DOMAIN=ingest.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_ENABLED=.*/IMAP_ENABLED=false/' .env-orbit
-          sed --in-place 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=orbit-smoke/' .env-orbit
-          sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
+          # Ephemeral fixture overrides are appended deliberately: dotenv uses
+          # the final assignment, so this remains valid whether an operator
+          # setting is active, commented, or omitted from the example file.
+          {
+            printf '%s\n' \
+              'SMTP_HOST=smtp.example.invalid' \
+              'SMTP_USER=orbit@example.invalid' \
+              'IMAP_HOST=imap.example.invalid' \
+              'IMAP_USER=orbit@example.invalid' \
+              'IMAP_TLS_SERVER_NAME=imap.example.invalid' \
+              'IMAP_RECIPIENT_DOMAIN=ingest.example.invalid' \
+              'IMAP_ENABLED=false' \
+              'OIDC_CLIENT_ID=orbit-smoke' \
+              'OIDC_CLIENT_SECRET=orbit-smoke-only-secret'
+          } >> .env-orbit
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
