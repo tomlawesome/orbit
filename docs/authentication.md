@@ -19,26 +19,39 @@ Run the guided configuration from the persistent deployment directory:
 ```sh
 bash scripts/configure.sh
 bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
 The plain command safely bootstraps any missing installer-managed files and is
 idempotent on an existing deployment. Guided setup asks for the public Orbit
 origin, the provider's complete issuer URL, and the client ID. It derives the
-callback URL and writes all four values
-atomically. It deliberately does not collect a client secret. Add that secret
-with a private local editor, never as a shell argument or chat message, and
-keep `.env-orbit` mode `0600`. The resulting production settings have this
+callback URL and writes all four values atomically. The secret command then
+reads the provider credential silently from standard input, writes it
+atomically to `.orbit-secrets/oidc-client-secret` with mode `0600`, and selects
+only the canonical runtime file path in `.env-orbit`. The credential is never
+accepted as a command argument, printed, or written to the environment file.
+Run it directly in a private terminal; do not pipe a literal secret from shell
+history or paste it into chat. The resulting production settings have this
 shape:
 
 ```env
 APP_URL=https://orbit.your-domain.tld
 OIDC_ISSUER=https://sso.your-domain.tld/application/o/orbit/
 OIDC_CLIENT_ID=your-authentik-client-id
-OIDC_CLIENT_SECRET=your-authentik-client-secret
+OIDC_CLIENT_SECRET=
+OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret
 OIDC_CALLBACK_URL=https://orbit.your-domain.tld/api/auth/callback
 OIDC_SCOPES=openid profile email
 ```
+
+The supported Compose deployment mounts the persistent host file read-only,
+copies it into Orbit's private runtime tmpfs with Orbit-user ownership and mode
+`0400`, and exposes only the runtime path to the application. Existing
+direct-value configuration remains readable for upgrade compatibility, but
+direct and file-backed forms are mutually exclusive. Re-running the secret
+command safely replaces the file; ordinary configuration and recognised
+upgrades preserve it.
 
 The issuer, including its path and trailing slash, must exactly match the `issuer` value in Authentik's discovery document. The callback must exactly match the strict redirect URI. Keep `APP_URL`, `OIDC_CALLBACK_URL`, and the address used in the browser consistent; `localhost` and `127.0.0.1` are different hosts.
 
@@ -121,7 +134,10 @@ await fetch("/api/auth/session/refresh", {
 - Run `bash scripts/configure.sh --check` first. It identifies missing or
   inconsistent configuration by field name without displaying values.
 - `auth_not_configured`: verify every required authentication field and ensure
-  exactly one direct or `_FILE` form is configured for each secret.
+  exactly one direct or `_FILE` form is configured for each secret. For the
+  supported OIDC path, rerun `bash scripts/configure.sh --set-oidc-secret` and
+  then the value-free readiness check; a missing, empty, non-regular or
+  symbolic-link secret is rejected without displaying its contents.
 - `discovery_failed`: compare `OIDC_ISSUER` exactly with the provider discovery document and confirm every advertised endpoint uses HTTPS.
 - `invalid_state`: restart sign-in without reusing a callback URL; also check that the browser host did not change during the flow.
 - `invalid_id_token`: select an asymmetric signing key, confirm the configured client ID, and check server clock accuracy.

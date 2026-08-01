@@ -162,6 +162,7 @@ persistent warning and marks subsequently uploaded files as unscanned.
 ```sh
 bash scripts/configure.sh
 bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
@@ -172,12 +173,14 @@ persist Orbit's VAPID Web Push key pair on first setup: the private key stays
 in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
 explicit `--init` step then records the public HTTPS Orbit origin, full OIDC
 issuer URL, and client ID, and derives the exact callback URL. It never asks
-for or invents the provider's client secret; add that credential locally using
-the secret guidance in
+for or invents the provider's client secret. The dedicated secret step reads
+that credential silently and persists it in the private `.orbit-secrets`
+directory; only its runtime file path is recorded in `.env-orbit`. See
 [authentication setup](docs/authentication.md). The value-free `--check`
 reports whether required settings and optional setting groups are complete
 without printing their contents. For non-interactive installation or upgrade,
-plain `bash scripts/configure.sh` preserves the existing configuration.
+plain `bash scripts/configure.sh` preserves the existing configuration and
+secret file.
 
 ### 2. Start Orbit
 
