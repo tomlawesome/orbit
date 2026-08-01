@@ -27,6 +27,7 @@ async function openInbox(page: Page) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: "Personalise", exact: true }).click();
   }
+  await expect(page).toHaveURL(/\/settings$/);
   await page.getByRole("tab", { name: "Inbox" }).click();
   await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
 }
