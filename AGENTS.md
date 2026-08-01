@@ -19,14 +19,23 @@ exactly one accepted attestation line from the planning policy:
 governance control, not cryptographic proof; never attest as an authority that
 did not do the work.
 
-Bounded implementation is routed by demonstrated task-class capability and
-cost, in this order:
+Bounded implementation prefers the cheapest qualified idle capacity, in this
+cost order:
 
 1. a local Ollama host and exact model qualified for the task class;
 2. a qualified Mistral model as the primary paid provider;
 3. a qualified Claude model as the paid fallback; and
-4. Luna Extra High only when the preceding providers are unqualified,
-   unsuitable, unreachable or out of capacity.
+4. Luna Extra High as the last-resort implementation provider.
+
+This is a cost preference, not a strict serialization gate. A higher-cost
+qualified provider may implement a second independent ready issue while a
+cheaper provider is already occupied when Sol records a material throughput
+benefit, satisfied dependencies, exact disjoint path ownership and at most
+rebase-and-revalidation reconciliation. The projected total must remain within
+the repository cap of two in-flight pull requests. Do not use concurrency to
+escalate the same task, duplicate work or bypass the least-cost qualified model
+within one task. Unqualified, unsuitable, unreachable or exhausted providers
+remain ordinary fallback reasons.
 
 A theoretical model size, successful toy prompt or provider subscription is not
 qualification. Representative evidence must cover correctness, hidden edge
@@ -53,6 +62,14 @@ benefit-of-the-doubt buffer. Slow useful work is not stalled.
 Delegated providers may not plan, orchestrate, make architecture or security
 decisions, integrate, publish, release, access GitHub or approve their own work.
 They make focused local changes and return control to Sol.
+
+When provider concurrency is used, the task state records the occupied cheaper
+provider and its independent issue, task identity, qualification evidence and
+allowed paths; the selected issue and allowed paths; dependency state; sibling
+landing impact; expected throughput benefit; and projected in-flight pull
+requests. Overlapping paths, premise-changing siblings, unbounded
+reconciliation, duplicated issues, authority expansion or a projected third
+pull request require sequencing instead.
 
 Claude is an implementation resource, not a peer project-management pipeline.
 Claude Opus-class secondary review may be useful, but each invocation requires
