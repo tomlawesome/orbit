@@ -25,6 +25,12 @@ function isSha(value) {
   return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
 }
 
+function isRepositoryPath(value) {
+  return isNonEmptyString(value)
+    && !value.startsWith("/")
+    && !value.split("/").includes("..");
+}
+
 function hasExactStrings(value, expected) {
   return Array.isArray(value)
     && value.length === expected.length
@@ -110,6 +116,30 @@ export function validateOrchestrationPolicy(policy) {
       && routing.evaluationPasses.stopEarlyWhenSatisfied === true,
     "model evaluation must stop by pass five, require basic acceptance by pass three, and reserve passes four and five for fine tuning.",
   );
+  const providerSelection = routing.providerSelection;
+  const providerConcurrency = providerSelection?.concurrency;
+  assert(
+    isObject(providerSelection)
+      && providerSelection.mode === "cheapest_qualified_idle_capacity_first"
+      && providerSelection.strictSerialFallback === false
+      && providerSelection.withinTaskLeastCostQualified === true
+      && isObject(providerConcurrency)
+      && providerConcurrency.allowed === true
+      && providerConcurrency.reason === "occupied_beneficial_concurrency"
+      && providerConcurrency.requiresCheaperProviderOccupied === true
+      && providerConcurrency.requiresIndependentIssue === true
+      && providerConcurrency.requiresDisjointPaths === true
+      && providerConcurrency.requiresSatisfiedDependencies === true
+      && providerConcurrency.requiresRecordedThroughputBenefit === true
+      && providerConcurrency.prohibitsDuplicateTask === true
+      && providerConcurrency.prohibitsAuthorityExpansion === true
+      && providerConcurrency.maximumInFlightPullRequests === 2
+      && hasExactStrings(providerConcurrency.siblingLandingImpacts, [
+        "rebase_only",
+        "rebase_and_revalidate",
+      ]),
+    "provider selection must permit bounded cost-aware concurrency while preserving least-cost within-task routing.",
+  );
   assert(Array.isArray(routing.providers), "implementation providers are required.");
   const providerIds = routing.providers.map((provider) => provider?.id);
   assert(
@@ -139,6 +169,7 @@ export function validateOrchestrationPolicy(policy) {
       "unsuitable_task_class",
       "unreachable",
       "capacity_exhausted",
+      "occupied_beneficial_concurrency",
     ]),
     "implementation fallback reasons are incomplete.",
   );
@@ -328,7 +359,7 @@ function validateActor(actor, policy) {
   );
 }
 
-function validateImplementationTask(task, policy) {
+function validateImplementationTask(task, policy, issue) {
   const routing = policy.implementationRouting;
   assert(isObject(task), "implementation task state is required.");
   assert(isNonEmptyString(task.provider), "implementation provider is required.");
@@ -370,6 +401,83 @@ function validateImplementationTask(task, policy) {
       "every earlier implementation provider requires ordered, evidenced fallback status.",
     );
   }
+
+  const concurrencyReason = routing.providerSelection.concurrency.reason;
+  const concurrentlyOccupied = task.skippedProviders.filter(
+    (skipped) => skipped.reason === concurrencyReason,
+  );
+  if (concurrentlyOccupied.length === 0) {
+    assert(
+      task.concurrencyAssessment === undefined,
+      "a concurrency assessment requires an occupied cheaper provider.",
+    );
+    return;
+  }
+
+  const assessment = task.concurrencyAssessment;
+  assert(isObject(assessment), "beneficial provider concurrency requires an assessment.");
+  assert(
+    Array.isArray(assessment.selectedAllowedPaths)
+      && assessment.selectedAllowedPaths.length > 0
+      && assessment.selectedAllowedPaths.every(isRepositoryPath)
+      && new Set(assessment.selectedAllowedPaths).size === assessment.selectedAllowedPaths.length,
+    "beneficial provider concurrency requires unique selected-task paths.",
+  );
+  assert(
+    Array.isArray(assessment.occupiedTasks)
+      && assessment.occupiedTasks.length === concurrentlyOccupied.length,
+    "every occupied cheaper provider requires one concurrent task record.",
+  );
+
+  const selectedPaths = new Set(assessment.selectedAllowedPaths);
+  const occupiedPaths = new Set();
+  for (const [index, occupied] of assessment.occupiedTasks.entries()) {
+    assert(
+      isObject(occupied)
+        && occupied.provider === concurrentlyOccupied[index].provider
+        && Number.isInteger(occupied.issue)
+        && occupied.issue > 0
+        && isNonEmptyString(occupied.taskId)
+        && isNonEmptyString(occupied.qualificationEvidenceId)
+        && Array.isArray(occupied.allowedPaths)
+        && occupied.allowedPaths.length > 0
+        && occupied.allowedPaths.every(isRepositoryPath)
+        && new Set(occupied.allowedPaths).size === occupied.allowedPaths.length,
+      "each occupied cheaper provider requires exact task, qualification and path evidence.",
+    );
+    assert(
+      occupied.issue !== issue,
+      "concurrent implementation must own an independent issue.",
+    );
+    for (const path of occupied.allowedPaths) {
+      assert(
+        !selectedPaths.has(path) && !occupiedPaths.has(path),
+        "concurrent implementation paths must be disjoint.",
+      );
+      occupiedPaths.add(path);
+    }
+  }
+
+  const concurrencyPolicy = routing.providerSelection.concurrency;
+  assert(
+    assessment.dependenciesSatisfied === true,
+    "concurrent implementation requires satisfied dependencies.",
+  );
+  assert(
+    concurrencyPolicy.siblingLandingImpacts.includes(assessment.siblingLandingImpact),
+    "concurrent sibling impact must remain bounded.",
+  );
+  assert(
+    isNonEmptyString(assessment.expectedThroughputBenefit),
+    "beneficial provider concurrency requires a recorded throughput benefit.",
+  );
+  assert(
+    Number.isInteger(assessment.projectedInFlightPullRequests)
+      && assessment.projectedInFlightPullRequests >= 2
+      && assessment.projectedInFlightPullRequests === assessment.occupiedTasks.length + 1
+      && assessment.projectedInFlightPullRequests <= concurrencyPolicy.maximumInFlightPullRequests,
+    "projected in-flight pull requests must match the concurrent task set and remain within the cap.",
+  );
 }
 
 function validateLaunchReceipt(receipt, policy, task, baseSha) {
@@ -594,7 +702,7 @@ export function validateOperationalState(state, policy) {
     );
   }
   if (delivery.task !== undefined) {
-    validateImplementationTask(delivery.task, policy);
+    validateImplementationTask(delivery.task, policy, delivery.issue);
   }
   if (taskStages.has(delivery.stage)) {
     assert(isObject(delivery.task), `${delivery.stage} delivery requires task state.`);
@@ -620,7 +728,9 @@ export function validateOperationalState(state, policy) {
       delivery.task.authoritativeStatus.status === "active",
       "active delivery requires an active authoritative task observation.",
     );
-    assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active task requires threadId.");
+    if (delivery.task.authoritativeStatus.source !== "bounded_wrapper") {
+      assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active Luna task requires threadId.");
+    }
     assert(isNonEmptyString(delivery.task.authoritativeStatus.worktree), "active task requires worktree.");
   }
 
