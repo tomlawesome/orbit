@@ -3,9 +3,8 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
 overrides:
-  # drizzle-kit reaches esbuild 0.18.20 through the deprecated @esbuild-kit/*
-  # packages, which are superseded by the tsx dependency it already declares.
-  # That resolution carries the development-server request-exposure advisory.
-  esbuild: '>=0.25.0'
+  # Security floor: esbuild >=0.25.0 avoids GHSA-67mh-4wv8-2f99.
+  # Compatibility ceiling: <0.26.0 is the narrow bound for deprecated core-utils.
+  '@esbuild-kit/core-utils>esbuild': '>=0.25.0 <0.26.0'
   postcss: 8.5.18
   sharp: 0.35.0
