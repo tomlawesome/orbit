@@ -44,6 +44,16 @@ for source_path in "$source_directory"/*; do
       fail "could not determine a secret's size"
       ;;
   esac
+  # The protected Compose secret declaration requires a host source for
+  # orbit-oidc-client-secret even when the operator has not run
+  # `configure.sh --set-oidc-secret`, so configure.sh leaves a zero-byte
+  # placeholder in that case. Skip only that exact placeholder, and only when
+  # OIDC_CLIENT_SECRET_FILE does not select it; once that variable selects the
+  # file, an empty secret is a startup failure like any other.
+  if [ "$secret_name" = "orbit-oidc-client-secret" ] && [ "$secret_size" -eq 0 ] &&
+    [ -z "${OIDC_CLIENT_SECRET_FILE:-}" ]; then
+    continue
+  fi
   [ "$secret_size" -gt 0 ] ||
     fail "refusing an empty secret"
   [ "$secret_size" -le "$maximum_secret_bytes" ] ||

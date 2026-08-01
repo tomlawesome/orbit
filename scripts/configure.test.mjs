@@ -91,11 +91,12 @@ function makeFixture(envOrbitContent) {
   return targetDir;
 }
 
-function runConfigure(targetDir, args = [], envOverrides = {}) {
+function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined) {
   const binDir = makeFakeBin();
   return spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
+    input,
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
@@ -493,6 +494,67 @@ describe("configure.sh", () => {
     expect(result.stdout).not.toContain("private-");
   });
 
+  it("reports OIDC_CLIENT_SECRET_FILE ready only for the canonical path backed by a non-empty, regular, non-symlink host file", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("ready OIDC_CLIENT_SECRET");
+    expect(result.stdout).not.toContain("configured-secret-value");
+  });
+
+  it("reports OIDC_CLIENT_SECRET_FILE as missing when the configured path is not the canonical runtime path", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/some-other-path\n";
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+  });
+
+  it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is absent", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+  });
+
+  it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is empty", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "");
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+  });
+
+  it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is a symlink", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-elsewhere-"));
+    writeFileSync(join(elsewhere, "oidc-client-secret"), "configured-secret-value");
+    symlinkSync(join(elsewhere, "oidc-client-secret"), join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    const lines = result.stdout.split("\n").filter(Boolean);
+    expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+  });
+
   it("rejects an unrecognised argument with a concise usage message", () => {
     const targetDir = makeFixture(undefined);
 
@@ -501,6 +563,130 @@ describe("configure.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Usage:");
     expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+  });
+
+  it("creates a zero-byte, mode-0600 OIDC client secret placeholder when absent", () => {
+    const targetDir = makeFixture(undefined);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    const path = join(targetDir, ".orbit-secrets", "oidc-client-secret");
+    expect(readFileSync(path, "utf8")).toBe("");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("preserves an existing OIDC client secret file byte-for-byte on an ordinary run", () => {
+    const targetDir = makeFixture(undefined);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "existing-oidc-secret-value");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o640);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    const path = join(targetDir, ".orbit-secrets", "oidc-client-secret");
+    expect(readFileSync(path, "utf8")).toBe("existing-oidc-secret-value");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it("rejects a symlinked OIDC client secret file on an ordinary run", () => {
+    const targetDir = makeFixture(undefined);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-elsewhere-"));
+    writeFileSync(join(elsewhere, "oidc-client-secret"), "not-safe");
+    symlinkSync(join(elsewhere, "oidc-client-secret"), join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to use");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  describe("--set-oidc-secret", () => {
+    it("reads the secret from standard input, persists it atomically with mode 0600, and switches to the canonical file-backed path without printing it", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "super-secret-oidc-value\n");
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toContain("super-secret-oidc-value");
+
+      const secretPath = join(targetDir, ".orbit-secrets", "oidc-client-secret");
+      expect(readFileSync(secretPath, "utf8")).toBe("super-secret-oidc-value");
+      expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("UNRELATED_KEY=keep-me");
+      expect(updated).toMatch(/^OIDC_CLIENT_SECRET=$/m);
+      expect(updated).toContain("OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret");
+      expect(updated).not.toContain("super-secret-oidc-value");
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("accepts terminal-style input with a trailing newline without persisting the newline", () => {
+      const targetDir = makeFixture(undefined);
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "terminal-input-value\n");
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe(
+        "terminal-input-value",
+      );
+    });
+
+    it("rejects empty standard input without creating an environment file or secret", () => {
+      const targetDir = makeFixture(undefined);
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "\n");
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("non-empty OIDC client secret");
+      expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+      expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+    });
+
+    it("rejects a secret larger than the 65,536-byte bound", () => {
+      const targetDir = makeFixture(undefined);
+      const oversized = "a".repeat(65537);
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, `${oversized}\n`);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("exceeds the 65536-byte maximum");
+      expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+    });
+
+    it("applies the 65,536-byte bound to multibyte input rather than character count", () => {
+      const targetDir = makeFixture(undefined);
+      const oversized = "é".repeat(32769);
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, `${oversized}\n`);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("exceeds the 65536-byte maximum");
+      expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+    });
+
+    it("replaces an existing OIDC client secret file and leaves no staging leftovers", () => {
+      const targetDir = makeFixture("OIDC_CLIENT_SECRET=old-direct-value\n");
+      mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+      writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "old-secret-value");
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "new-secret-value\n");
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe(
+        "new-secret-value",
+      );
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toMatch(/^OIDC_CLIENT_SECRET=$/m);
+      expect(updated).not.toContain("old-direct-value");
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
   });
 
   describe("--init guided configuration", () => {
