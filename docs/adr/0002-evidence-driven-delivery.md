@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-27
+**Delegation clause superseded by:** [ADR-0009](0009-sol-owned-bounded-agent-delegation.md)
 
 ## Context
 
@@ -26,8 +27,10 @@ requirement to its implementation and release evidence.
   `main` and `develop`. Channel semantics are defined in
   [ADR-0003](0003-gitflow-preview-and-stable-channels.md).
 - Protected planning is authored or materially changed only by Sol Extra High.
-  Bounded implementation subagents default to Luna Extra High; a different
-  model requires fresh user approval.
+  Current bounded-implementation selection and authority are governed by
+  [ADR-0009](0009-sol-owned-bounded-agent-delegation.md), which supersedes this
+  ADR's original Luna-default delegation clause without changing the delivery
+  and immutable-promotion decisions above.
 
 ## Consequences
 
