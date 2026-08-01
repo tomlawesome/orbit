@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     error: vi.fn(),
     info: vi.fn(),
   },
+  registerNode: vi.fn(),
 }));
 
 vi.mock("@/server/documents/config", () => ({
@@ -29,15 +31,74 @@ vi.mock("@/lib/logger", () => ({
   log: mocks.log,
 }));
 
-import { reportAuthConfigurationReadiness, reportScannerReadiness } from "./instrumentation";
 import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 
-describe("scanner readiness diagnostics", () => {
+describe("instrumentation runtime boundary", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetAuthObservabilityForTests();
+  });
+
+  afterEach(() => {
+    vi.doUnmock("./instrumentation-node");
+    vi.resetModules();
+    resetAuthObservabilityForTests();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns immediately without loading Node implementation when not in Node runtime", async () => {
+    vi.stubEnv("NEXT_RUNTIME", "edge");
+
+    vi.doMock("./instrumentation-node", () => ({
+      registerNode: mocks.registerNode,
+    }));
+
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(mocks.registerNode).not.toHaveBeenCalled();
+  });
+
+  it("loads and executes Node implementation when in Node runtime", async () => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+
+    vi.doMock("./instrumentation-node", () => ({
+      registerNode: mocks.registerNode,
+    }));
+
+    const { register } = await import("./instrumentation");
+
+    await register();
+
+    expect(mocks.registerNode).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Edge entry free of static imports", () => {
+    const source = readFileSync(new URL("./instrumentation.ts", import.meta.url), "utf8");
+    const staticImports = source.match(/^\s*import\s+(?!\()[^;]+;\s*$/gmu) ?? [];
+
+    expect(staticImports).toEqual([]);
+    expect(source).not.toContain("@/");
+  });
+});
+
+describe("scanner readiness diagnostics", () => {
+  let reportAuthConfigurationReadinessNode: () => Promise<void>;
+  let reportScannerReadinessNode: () => Promise<void>;
+
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mocks.config.scanMode = "required";
     resetAuthObservabilityForTests();
+    vi.doUnmock("./instrumentation-node");
+    vi.resetModules();
+
+    const nodeModule = await import("./instrumentation-node");
+    reportAuthConfigurationReadinessNode = nodeModule.reportAuthConfigurationReadiness;
+    reportScannerReadinessNode = nodeModule.reportScannerReadiness;
   });
 
   afterEach(() => {
@@ -48,7 +109,7 @@ describe("scanner readiness diagnostics", () => {
   it("reports ready authentication configuration without delaying startup", async () => {
     mocks.getAuthConfig.mockReturnValue({});
 
-    await expect(reportAuthConfigurationReadiness()).resolves.toBeUndefined();
+    await expect(reportAuthConfigurationReadinessNode()).resolves.toBeUndefined();
 
     expect(mocks.log.info).toHaveBeenCalledWith("auth.configuration", { state: "ready" });
     expect(mocks.log.info).toHaveBeenCalledTimes(1);
@@ -61,7 +122,7 @@ describe("scanner readiness diagnostics", () => {
       throw new Error(`OIDC_CLIENT_SECRET ${secret} failed validation`);
     });
 
-    await expect(reportAuthConfigurationReadiness()).resolves.toBeUndefined();
+    await expect(reportAuthConfigurationReadinessNode()).resolves.toBeUndefined();
 
     expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
       state: "invalid",
@@ -74,7 +135,7 @@ describe("scanner readiness diagnostics", () => {
   it("reports readiness without disclosing scanner connection details", async () => {
     mocks.pingClamAv.mockResolvedValue(true);
 
-    await reportScannerReadiness();
+    await reportScannerReadinessNode();
 
     expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(mocks.config.clamAv.host);
@@ -84,7 +145,7 @@ describe("scanner readiness diagnostics", () => {
   it("reports a failed first ping as starting and temporarily blocks uploads", async () => {
     mocks.pingClamAv.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    await reportScannerReadiness();
+    await reportScannerReadinessNode();
 
     expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
       state: "starting",
@@ -103,7 +164,7 @@ describe("scanner readiness diagnostics", () => {
   it("reports unreachable only after the bounded startup window is exhausted", async () => {
     mocks.pingClamAv.mockResolvedValue(false);
 
-    await reportScannerReadiness();
+    await reportScannerReadinessNode();
 
     expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
       state: "starting",
@@ -124,7 +185,7 @@ describe("scanner readiness diagnostics", () => {
   it("treats a thrown ping as a temporary startup failure", async () => {
     mocks.pingClamAv.mockRejectedValueOnce(new Error("private scanner details")).mockResolvedValueOnce(true);
 
-    await reportScannerReadiness();
+    await reportScannerReadinessNode();
 
     expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
       state: "starting",
@@ -140,7 +201,7 @@ describe("scanner readiness diagnostics", () => {
   it("does not probe a scanner when scanning is disabled", async () => {
     mocks.config.scanMode = "disabled";
 
-    await reportScannerReadiness();
+    await reportScannerReadinessNode();
 
     expect(mocks.pingClamAv).not.toHaveBeenCalled();
     expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
