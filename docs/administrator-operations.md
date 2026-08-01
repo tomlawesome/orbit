@@ -79,19 +79,24 @@ A stalled or failed upload is diagnosed from the last record reached:
 
 | Last record | Meaning | Action |
 | --- | --- | --- |
-| `document.scanner state=unreachable` at startup | Scanning is required but no scanner answered | Start `orbit-clamav`; uploads stay blocked until it is reachable |
+| `document.scanner state=starting` | The independently starting scanner is still inside its 180-second initialisation window | Allow the stack to finish booting; uploads remain temporarily blocked |
+| `document.scanner state=unreachable` | The scanner did not answer before its bounded startup window expired | Check that `orbit-clamav` is running and healthy; uploads stay blocked until it is reachable |
 | `document.lifecycle state=scanning` with no following record | The scanner did not answer within `CLAMAV_TIMEOUT_MS` | Check `orbit-clamav` health |
 | `document.scan outcome=error reason=unavailable` | The scanner refused or dropped the connection | Check `orbit-clamav` is running and reachable on the document-processing network |
 | `document.scan outcome=infected` | Malware was detected; the document is rejected by design | No action |
 | `document.worker outcome=cycle_failed` | A maintenance cycle failed | Consult `/api/admin/documents/health` for the bounded failure code |
 
-Orbit probes the scanner once at startup when `DOCUMENT_SCAN_MODE` is
-`required`, recording `document.scanner` as `ready` or `unreachable`. The probe
-never stops the process: document operations fail closed while the rest of the
-application stays available. An upload blocked this way returns HTTP `503` with
-either `document_scanner_unreachable` or `document_scanner_failed`, which
-distinguish a scanner that cannot be contacted from one that answered with a
-failure. Neither message discloses the configured host, port or provider text.
+Orbit probes the scanner at startup when `DOCUMENT_SCAN_MODE` is `required`.
+If the first probe does not answer, Orbit records `document.scanner` as
+`starting` and retries in the background for the scanner's bounded 180-second
+initialisation window. A successful retry records `ready`; only exhaustion of
+that window records `unreachable` as an error. The probes never stop the
+process: document operations fail closed while the rest of the application
+stays available. An upload blocked this way returns HTTP `503` with either
+`document_scanner_unreachable` or `document_scanner_failed`, which distinguish
+a scanner that cannot be contacted from one that answered with a failure.
+Neither message nor startup record discloses the configured host, port or
+provider text.
 
 Scanning is fail-closed while `DOCUMENT_SCAN_MODE` is `required`, so an
 unavailable scanner rejects uploads rather than storing unscanned content.
