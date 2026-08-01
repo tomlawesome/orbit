@@ -782,11 +782,14 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .document-dropzone-hint { margin: 0; font-size: calc(8px + var(--text-bump)); color: color-mix(in srgb, var(--ink) 72%, transparent); text-align: center; }
 .document-dropzone:focus-within { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .document-dropzone { transition: none; } }
+.document-picker-surface { width: 100%; min-height: 82px; padding: 8px 12px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font: inherit; cursor: pointer; }
+.document-picker-surface:hover { background: color-mix(in srgb, var(--mint) 13%, transparent); }
+.document-picker-surface:focus-visible, .document-upload:focus-visible, .document-controls a:focus-visible, .document-controls button:focus-visible { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
+.document-picker-label { font-size: calc(9px + var(--text-bump)); font-weight: 850; }
 .document-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .document-upload, .document-controls a, .document-controls button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: calc(8px + var(--text-bump)); font-weight: 800; text-decoration: none; cursor: pointer; }
 .document-upload { color: #fff; border-color: var(--forest); background: var(--forest); }
 .document-camera { color: var(--forest); border-color: color-mix(in srgb, var(--forest) 32%, var(--line)); background: color-mix(in srgb, var(--mint) 24%, var(--paper)); }
-.document-upload:focus-within, .document-controls a:focus-visible, .document-controls button:focus-visible { outline: 3px solid color-mix(in srgb, var(--mint) 68%, var(--forest)); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .document-error { margin: 0 0 12px; padding: 9px 10px; border-radius: 9px; color: #9d263b; background: color-mix(in srgb, var(--coral) 18%, var(--paper)); font-size: calc(8px + var(--text-bump)); font-weight: 700; }
 .document-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
