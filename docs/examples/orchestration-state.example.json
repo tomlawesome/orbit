@@ -102,7 +102,33 @@
     "dependencies": [],
     "parentIssues": [],
     "task": {
+      "provider": "luna",
       "requestedModel": "Luna Extra High",
+      "taskClass": "bounded-implementation",
+      "qualification": {
+        "status": "qualified",
+        "provider": "luna",
+        "model": "Luna Extra High",
+        "taskClass": "bounded-implementation",
+        "evidenceId": "repository-governance-baseline"
+      },
+      "skippedProviders": [
+        {
+          "provider": "ollama",
+          "reason": "unqualified",
+          "evidenceId": "global-registry:ollama"
+        },
+        {
+          "provider": "mistral",
+          "reason": "unqualified",
+          "evidenceId": "global-registry:mistral"
+        },
+        {
+          "provider": "claude",
+          "reason": "capacity_exhausted",
+          "evidenceId": "provider:claude"
+        }
+      ],
       "launchReceipt": {
         "source": "create_thread",
         "clientThreadId": "client-new-thread:example",

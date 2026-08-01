@@ -1,38 +1,118 @@
 {
   "schemaVersion": 1,
   "humanApprovalIdentifier": "Human",
-  "pipelines": {
-    "codex": {
-      "orchestration": "Sol Extra High",
-      "implementation": "Luna Extra High",
-      "mechanicalAnalysis": "Terra Medium"
-    },
-    "claude": {
-      "orchestration": "Claude Opus Extra High",
-      "implementation": "Claude Sonnet Extra High",
-      "mechanicalAnalysis": "Claude Sonnet Extra High"
-    }
-  },
   "modelAuthority": {
     "orchestration": [
-      "Sol Extra High",
-      "Claude Opus Extra High"
+      "Sol Extra High"
     ],
     "protectedPlanning": [
-      "Sol Extra High",
-      "Claude Opus Extra High"
-    ],
-    "implementation": [
-      "Luna Extra High",
-      "Claude Sonnet Extra High"
+      "Sol Extra High"
     ],
     "mechanicalAnalysis": [
       "Terra Medium",
       "Luna Extra High",
-      "Sol Extra High",
-      "Claude Sonnet Extra High",
-      "Claude Opus Extra High"
+      "Sol Extra High"
     ]
+  },
+  "implementationRouting": {
+    "qualificationRequired": true,
+    "qualificationIdentity": [
+      "provider",
+      "model",
+      "taskClass"
+    ],
+    "qualificationCriteria": [
+      "correctness",
+      "hidden_edge_cases",
+      "scope_compliance",
+      "result_honesty",
+      "context_fit"
+    ],
+    "routingSignals": [
+      "cost",
+      "latency",
+      "resource_use",
+      "capacity"
+    ],
+    "resourceLimits": {
+      "circuitBreakerOnly": true,
+      "overrunDisqualifiesCorrectWork": false,
+      "routineSessionTokenCaps": false,
+      "stallMonitoring": {
+        "signals": [
+          "time_to_first_useful_output",
+          "time_since_meaningful_progress"
+        ],
+        "taskAndModelAppropriate": true,
+        "benefitOfDoubtBuffer": true,
+        "slowUsefulProgressIsNotStalled": true
+      }
+    },
+    "evaluationPasses": {
+      "maximum": 5,
+      "basicAcceptanceBy": 3,
+      "fineTuningOnly": [
+        4,
+        5
+      ],
+      "stopEarlyWhenSatisfied": true
+    },
+    "providers": [
+      {
+        "id": "ollama",
+        "requiresExactHost": true,
+        "requiresExactModel": true
+      },
+      {
+        "id": "mistral",
+        "requiresExactHost": false,
+        "requiresExactModel": true
+      },
+      {
+        "id": "claude",
+        "requiresExactHost": false,
+        "requiresExactModel": true
+      },
+      {
+        "id": "luna",
+        "requiresExactHost": false,
+        "requiresExactModel": true,
+        "lastResort": true
+      }
+    ],
+    "fallbackReasons": [
+      "unqualified",
+      "unsuitable_task_class",
+      "unreachable",
+      "capacity_exhausted"
+    ],
+    "isolation": {
+      "exactBase": true,
+      "dedicatedWorktree": true,
+      "leastPrivilegeTools": true,
+      "pathAllowlist": true,
+      "runawayMonitoring": true,
+      "requiredResult": true,
+      "solReview": true
+    },
+    "delegatedAuthorities": [
+      "implementation"
+    ],
+    "prohibitedAuthorities": [
+      "orchestration",
+      "protected_planning",
+      "architecture",
+      "security",
+      "integration",
+      "publication",
+      "release"
+    ]
+  },
+  "secondaryReview": {
+    "provider": "claude",
+    "minimumModel": "Claude Opus Extra High",
+    "freshUserApprovalRequired": true,
+    "authority": "advisory_only"
   },
   "protectedDecisionClasses": [
     "architecture",
@@ -45,6 +125,7 @@
   ],
   "taskStatusSources": [
     "create_thread",
+    "bounded_wrapper",
     "list_threads_full",
     "read_thread",
     "wait_threads"
@@ -167,6 +248,20 @@
       "repository_settings",
       "security",
       "protected_planning"
+    ],
+    "legacyProtectedApprovals": [
+      {
+        "model": "Claude Opus Extra High",
+        "pullRequest": 131
+      },
+      {
+        "model": "Claude Opus Extra High",
+        "pullRequest": 136
+      },
+      {
+        "model": "Claude Opus Extra High",
+        "pullRequest": 159
+      }
     ]
   }
 }

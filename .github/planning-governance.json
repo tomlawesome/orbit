@@ -1,12 +1,10 @@
 {
   "planningAuthorities": [
     "Sol Extra High",
-    "Claude Opus Extra High",
     "Human"
   ],
   "acceptedAttestations": [
     "Planning-Model: Sol Extra High",
-    "Planning-Model: Claude Opus Extra High",
     "Planning-Model: Human"
   ],
   "protectedFiles": [
