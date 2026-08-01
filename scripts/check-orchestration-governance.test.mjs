@@ -13,29 +13,84 @@ function validPolicy() {
   return {
     schemaVersion: 1,
     humanApprovalIdentifier: "Human",
-    pipelines: {
-      codex: {
-        orchestration: "Sol Extra High",
-        implementation: "Luna Extra High",
-        mechanicalAnalysis: "Terra Medium",
-      },
-      claude: {
-        orchestration: "Claude Opus Extra High",
-        implementation: "Claude Sonnet Extra High",
-        mechanicalAnalysis: "Claude Sonnet Extra High",
-      },
-    },
     modelAuthority: {
-      orchestration: ["Sol Extra High", "Claude Opus Extra High"],
-      protectedPlanning: ["Sol Extra High", "Claude Opus Extra High"],
-      implementation: ["Luna Extra High", "Claude Sonnet Extra High"],
-      mechanicalAnalysis: [
-        "Terra Medium",
-        "Luna Extra High",
-        "Sol Extra High",
-        "Claude Sonnet Extra High",
-        "Claude Opus Extra High",
+      orchestration: ["Sol Extra High"],
+      protectedPlanning: ["Sol Extra High"],
+      mechanicalAnalysis: ["Terra Medium", "Luna Extra High", "Sol Extra High"],
+    },
+    implementationRouting: {
+      qualificationRequired: true,
+      qualificationIdentity: ["provider", "model", "taskClass"],
+      qualificationCriteria: [
+        "correctness",
+        "hidden_edge_cases",
+        "scope_compliance",
+        "result_honesty",
+        "context_fit",
       ],
+      routingSignals: ["cost", "latency", "resource_use", "capacity"],
+      resourceLimits: {
+        circuitBreakerOnly: true,
+        overrunDisqualifiesCorrectWork: false,
+        routineSessionTokenCaps: false,
+        stallMonitoring: {
+          signals: [
+            "time_to_first_useful_output",
+            "time_since_meaningful_progress",
+          ],
+          taskAndModelAppropriate: true,
+          benefitOfDoubtBuffer: true,
+          slowUsefulProgressIsNotStalled: true,
+        },
+      },
+      evaluationPasses: {
+        maximum: 5,
+        basicAcceptanceBy: 3,
+        fineTuningOnly: [4, 5],
+        stopEarlyWhenSatisfied: true,
+      },
+      providers: [
+        { id: "ollama", requiresExactHost: true, requiresExactModel: true },
+        { id: "mistral", requiresExactHost: false, requiresExactModel: true },
+        { id: "claude", requiresExactHost: false, requiresExactModel: true },
+        {
+          id: "luna",
+          requiresExactHost: false,
+          requiresExactModel: true,
+          lastResort: true,
+        },
+      ],
+      fallbackReasons: [
+        "unqualified",
+        "unsuitable_task_class",
+        "unreachable",
+        "capacity_exhausted",
+      ],
+      isolation: {
+        exactBase: true,
+        dedicatedWorktree: true,
+        leastPrivilegeTools: true,
+        pathAllowlist: true,
+        runawayMonitoring: true,
+        requiredResult: true,
+        solReview: true,
+      },
+      delegatedAuthorities: ["implementation"],
+      prohibitedAuthorities: [
+        "orchestration",
+        "protected_planning",
+        "architecture",
+        "security",
+        "integration",
+        "publication",
+        "release",
+      ],
+    },
+    secondaryReview: {
+      provider: "claude",
+      minimumModel: "Claude Opus Extra High",
+      freshUserApprovalRequired: true,
+      authority: "advisory_only",
     },
     protectedDecisionClasses: [
       "architecture",
@@ -46,7 +101,13 @@ function validPolicy() {
       "security",
       "protected_planning",
     ],
-    taskStatusSources: ["create_thread", "list_threads_full", "read_thread", "wait_threads"],
+    taskStatusSources: [
+      "create_thread",
+      "bounded_wrapper",
+      "list_threads_full",
+      "read_thread",
+      "wait_threads",
+    ],
     remoteAccessPreflight: {
       connectorMountProof: "live_connector_call",
       sshRefProof: "ssh_exact_ref_read",
@@ -114,6 +175,11 @@ function validPolicy() {
         "repository_settings",
         "security",
         "protected_planning",
+      ],
+      legacyProtectedApprovals: [
+        { model: "Claude Opus Extra High", pullRequest: 131 },
+        { model: "Claude Opus Extra High", pullRequest: 136 },
+        { model: "Claude Opus Extra High", pullRequest: 159 },
       ],
     },
   };
@@ -224,7 +290,21 @@ function activeState() {
       dependencies: [],
       parentIssues: [],
       task: {
+        provider: "luna",
         requestedModel: "Luna Extra High",
+        taskClass: "bounded-implementation",
+        qualification: {
+          status: "qualified",
+          provider: "luna",
+          model: "Luna Extra High",
+          taskClass: "bounded-implementation",
+          evidenceId: "repository-governance-baseline",
+        },
+        skippedProviders: [
+          { provider: "ollama", reason: "unqualified", evidenceId: "global-registry:ollama" },
+          { provider: "mistral", reason: "unqualified", evidenceId: "global-registry:mistral" },
+          { provider: "claude", reason: "capacity_exhausted", evidenceId: "provider:claude" },
+        ],
         launchReceipt: {
           source: "create_thread",
           clientThreadId: "client-new-thread:fake-launch-receipt",
@@ -311,36 +391,124 @@ describe("orchestration governance", () => {
     );
   });
 
-  it("grants each pipeline's orchestration tier equivalent authority", () => {
+  it("rejects Claude orchestration and protected-planning authority", () => {
     const state = activeState();
     state.actor.model = "Claude Opus Extra High";
-    state.delivery.branch = "claude/issue-113-dual-pipeline-governance";
-    state.delivery.task.requestedModel = "Claude Sonnet Extra High";
-    state.delivery.task.launchReceipt.requestedModel = "Claude Sonnet Extra High";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Claude Opus Extra High is not authorized for orchestration/u,
+    );
+  });
+
+  it("rejects a routing order that does not put qualified local Ollama first and Luna last", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.providers = [
+      policy.implementationRouting.providers[1],
+      policy.implementationRouting.providers[0],
+      policy.implementationRouting.providers[2],
+      policy.implementationRouting.providers[3],
+    ];
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /implementation provider order/u,
+    );
+  });
+
+  it("rejects an implementation selection without exact qualification evidence", () => {
+    const state = activeState();
+    state.delivery.task.qualification.status = "pending";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /qualified implementation evidence/u,
+    );
+  });
+
+  it("rejects policy that disqualifies correct work solely for a resource-limit overrun", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.resourceLimits.overrunDisqualifiesCorrectWork = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /resource limits must remain circuit breakers/u,
+    );
+  });
+
+  it("rejects heuristic session-token caps as routine implementation controls", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.resourceLimits.routineSessionTokenCaps = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /routine token caps must remain disabled/u,
+    );
+  });
+
+  it("requires time-based stall monitoring to include a benefit-of-the-doubt buffer", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.resourceLimits.stallMonitoring.benefitOfDoubtBuffer = false;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /stall monitoring must be time-based, task-appropriate, and buffered/u,
+    );
+  });
+
+  it("rejects model evaluation beyond the five-pass qualification boundary", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.evaluationPasses.maximum = 6;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /model evaluation must stop by pass five/u,
+    );
+  });
+
+  it("requires evidence for every cheaper provider skipped before a fallback", () => {
+    const state = activeState();
+    state.delivery.task.skippedProviders = state.delivery.task.skippedProviders.slice(1);
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /earlier implementation provider/u,
+    );
+  });
+
+  it("retains implementation qualification evidence through reconciliation", () => {
+    const state = reconciledState();
+    delete state.delivery.task.qualification;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /qualified implementation evidence/u,
+    );
+  });
+
+  it("requires an exact host identity for qualified local Ollama work", () => {
+    const state = activeState();
+    state.delivery.task = {
+      ...state.delivery.task,
+      provider: "ollama",
+      requestedModel: "qwen2.5-coder:14b-instruct-q4_K_M",
+      skippedProviders: [],
+      qualification: {
+        status: "qualified",
+        provider: "ollama",
+        model: "qwen2.5-coder:14b-instruct-q4_K_M",
+        taskClass: "bounded-implementation",
+        evidenceId: "global-registry:ollama-desktop",
+      },
+    };
+    state.delivery.task.launchReceipt.requestedModel = state.delivery.task.requestedModel;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /exact host identity/u,
+    );
+
+    state.delivery.task.host = "192.168.254.246";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /non-Luna implementation must use a bounded wrapper receipt/u,
+    );
+    state.delivery.task.launchReceipt = {
+      source: "bounded_wrapper",
+      runId: "ollama-evaluation-run",
+      requestedModel: state.delivery.task.requestedModel,
+      baseSha: SHA,
+      observedAt: "2026-07-30T06:30:00.000Z",
+    };
+    state.delivery.task.authoritativeStatus.source = "bounded_wrapper";
+    state.delivery.task.authoritativeStatus.runId = "ollama-evaluation-run";
     expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
   });
 
-  it("rejects an implementation tier acting as orchestration in either pipeline", () => {
-    const state = activeState();
-    state.actor.model = "Claude Sonnet Extra High";
-    expect(() => validateOperationalState(state, validPolicy())).toThrow(
-      /Claude Sonnet Extra High is not authorized for orchestration/u,
-    );
-  });
-
-  it("rejects authority widened to a model outside the declared pipeline roster", () => {
+  it("requires Sol to remain the only orchestration and protected-planning model", () => {
     const policy = validPolicy();
-    policy.modelAuthority.orchestration.push("Some Unlisted Model");
+    policy.modelAuthority.orchestration.push("Claude Opus Extra High");
     expect(() => validateOrchestrationPolicy(policy)).toThrow(
-      /names a model outside the declared pipeline roster/u,
-    );
-  });
-
-  it("requires orchestration authority to track the declared pipelines exactly", () => {
-    const policy = validPolicy();
-    policy.modelAuthority.orchestration = ["Sol Extra High"];
-    expect(() => validateOrchestrationPolicy(policy)).toThrow(
-      /orchestration must be reserved to each pipeline's declared orchestration model/u,
+      /orchestration must remain reserved to Sol Extra High/u,
     );
   });
 
@@ -582,8 +750,8 @@ describe("orchestration governance", () => {
     expect(() => validateAdoptedControls(controls, validPolicy())).not.toThrow();
   });
 
-  it("accepts protected adoption approved by a human owner or either orchestration tier", () => {
-    const ledgerWith = (approvedByModel) => ({
+  it("accepts current Sol or human approval and only enumerated historical Claude approvals", () => {
+    const ledgerWith = (approvedByModel, pullRequest = 114) => ({
       schemaVersion: 1,
       controls: [
         {
@@ -594,14 +762,20 @@ describe("orchestration governance", () => {
           automaticPromotion: false,
           evidence: ["owner-directed policy change", "protected pull request with passing checks"],
           issue: 113,
-          pullRequest: 114,
+          pullRequest,
           approvedByModel,
         },
       ],
     });
     expect(() => validateAdoptedControls(ledgerWith("Human"), validPolicy())).not.toThrow();
-    expect(() => validateAdoptedControls(ledgerWith("Claude Opus Extra High"), validPolicy()))
+    expect(() => validateAdoptedControls(ledgerWith("Sol Extra High"), validPolicy()))
       .not.toThrow();
+    expect(() => validateAdoptedControls(
+      ledgerWith("Claude Opus Extra High", 131),
+      validPolicy(),
+    )).not.toThrow();
+    expect(() => validateAdoptedControls(ledgerWith("Claude Opus Extra High"), validPolicy()))
+      .toThrow(/requires approval by a protected-planning authority or Human/u);
     expect(() => validateAdoptedControls(ledgerWith("Claude Sonnet Extra High"), validPolicy()))
       .toThrow(/requires approval by a protected-planning authority or Human/u);
   });

@@ -1,6 +1,6 @@
 # ADR-0007: Dual-pipeline agent governance
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0009](0009-capability-routed-implementation.md)
 **Date:** 2026-07-31
 
 ## Context
