@@ -12,6 +12,7 @@ import {
   readlinkSync,
   readdirSync,
   readFileSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -465,6 +466,21 @@ describe("install.sh", () => {
     expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
       "fake content for docker-compose.yml\n",
     );
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("retains an existing OIDC client secret file, byte-for-byte and mode 0600, on a recognised upgrade", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "existing-oidc-client-secret-value");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    const secretPath = join(targetDir, ".orbit-secrets", "oidc-client-secret");
+    expect(readFileSync(secretPath, "utf8")).toBe("existing-oidc-client-secret-value");
+    expect(statSync(secretPath).mode & 0o777).toBe(0o600);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
