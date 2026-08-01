@@ -67,7 +67,7 @@ describe("authentication HTTP diagnostics", () => {
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(providerUrl);
   });
 
-  it("reports token exchange failure with one coarse reason without exposing exchange details", () => {
+  it("reports token exchange failure using its closed internal reason without exposing exchange details", () => {
     const sensitiveDetails = [
       "https://provider.example.invalid/token",
       "client-id-sentinel",
@@ -81,7 +81,7 @@ describe("authentication HTTP diagnostics", () => {
       "token_exchange_failed",
       "The authorization code could not be exchanged",
       502,
-      { cause: new Error(sensitiveDetails.join(" ")) },
+      { cause: new Error(sensitiveDetails.join(" ")), tokenExchangeReason: "invalid_grant" },
     );
 
     const first = authErrorResponse(error);
@@ -91,12 +91,29 @@ describe("authentication HTTP diagnostics", () => {
     expect(second.status).toBe(502);
     expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
       state: "invalid",
-      reason: "token_exchange_failed",
+      reason: "invalid_grant",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
     const records = JSON.stringify(mocks.log.error.mock.calls);
     for (const value of sensitiveDetails) expect(records).not.toContain(value);
+  });
+
+  it("falls back to provider_rejected when a token exchange failure lacks a typed reason", () => {
+    const error = new AuthError(
+      "token_exchange_failed",
+      "The authorization code could not be exchanged",
+      502,
+    );
+
+    authErrorResponse(error);
+
+    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+      state: "invalid",
+      reason: "provider_rejected",
+      impact: "sign_in_blocked",
+    });
+    expect(mocks.log.error).toHaveBeenCalledTimes(1);
   });
 
   it("does not report an ordinary signed-out 401", () => {

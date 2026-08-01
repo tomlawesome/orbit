@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 
 function logCallbackFailure(authError: AuthError): void {
   if (authError.code === "discovery_failed") reportAuthProviderDiscoveryFailure();
-  if (authError.code === "token_exchange_failed") reportAuthTokenExchangeFailure();
+  if (authError.code === "token_exchange_failed") reportAuthTokenExchangeFailure(authError.tokenExchangeReason ?? "provider_rejected");
   // Deliberately log only bounded metadata; causes can contain provider data.
   console.error("Orbit authentication callback failed", {
     code: authError.code,

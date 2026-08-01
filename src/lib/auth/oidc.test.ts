@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../env";
+import type { TokenExchangeReason } from "./errors";
 import {
   createAuthorizationUrl,
   completeAuthorization,
@@ -173,10 +174,10 @@ describe("OIDC discovery and provider failure contracts", () => {
   });
 
   it.each([
-    ["HTTP failure", () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 })],
-    ["timeout", () => Promise.reject(new DOMException("The operation was aborted", "TimeoutError"))],
-    ["invalid body", () => new Response(JSON.stringify({ access_token: "opaque-token-sentinel" }), { status: 200 })],
-  ])("maps token endpoint %s to a bounded error", async (_label, responseFactory) => {
+    ["HTTP failure", () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }), "invalid_grant"],
+    ["timeout", () => Promise.reject(new DOMException("The operation was aborted", "TimeoutError")), "unreachable"],
+    ["invalid body", () => new Response(JSON.stringify({ access_token: "opaque-token-sentinel" }), { status: 200 }), "invalid_response"],
+  ])("maps token endpoint %s to a bounded error with reason %s", async (_label, responseFactory, reason) => {
     const issuer = uniqueIssuer();
     const providerMetadata = {
       ...metadata,
@@ -193,6 +194,7 @@ describe("OIDC discovery and provider failure contracts", () => {
       code: "token_exchange_failed",
       status: 502,
       message: "The authorization code could not be exchanged",
+      tokenExchangeReason: reason,
     });
   });
 
@@ -255,5 +257,112 @@ describe("OIDC discovery and provider failure contracts", () => {
       status: 502,
       message: "The OpenID profile could not be validated",
     });
+  });
+});
+
+const standardTokenExchangeReasons: TokenExchangeReason[] = [
+  "invalid_request",
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+];
+
+async function expectTokenExchangeReason(
+  responseFactory: () => Response | Promise<Response>,
+  reason: TokenExchangeReason,
+): Promise<void> {
+  const issuer = uniqueIssuer();
+  const providerMetadata = { ...metadata, issuer, token_endpoint: `${issuer}token` };
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(responseFactory));
+  await expect(completeAuthorization({ ...config, issuer }, providerMetadata, "authorization-code-sentinel", {
+    state: "state",
+    nonce: "nonce",
+    codeVerifier: "verifier",
+    returnTo: "/",
+  })).rejects.toMatchObject({
+    code: "token_exchange_failed",
+    status: 502,
+    message: "The authorization code could not be exchanged",
+    tokenExchangeReason: reason,
+  });
+}
+
+describe("token exchange internal reason classification", () => {
+  it.each(standardTokenExchangeReasons)("maps a non-2xx allowlisted %s error to its typed reason", async (reason) => {
+    await expectTokenExchangeReason(
+      () => new Response(JSON.stringify({ error: reason, error_description: "hostile-description-sentinel" }), { status: 400 }),
+      reason,
+    );
+  });
+
+  it.each([
+    ["an unknown string", { error: "totally_unexpected_error_value" }],
+    ["an object", { error: { message: "nested-error-sentinel" } }],
+    ["an array", { error: ["invalid_grant"] }],
+    ["null", { error: null }],
+    ["a number", { error: 400 }],
+    ["absent", {}],
+    ["hostile keys alongside it", {
+      error: "invalid_grant\r\nSet-Cookie: session=stolen-sentinel",
+      error_description: "hostile-description-sentinel",
+      error_uri: "https://attacker.example.invalid/hostile-sentinel",
+      client_secret: "leaked-secret-sentinel",
+    }],
+    ["padded whitespace", { error: " invalid_grant " }],
+  ])("maps a non-2xx response with %s error to provider_rejected", async (_label, body) => {
+    await expectTokenExchangeReason(() => new Response(JSON.stringify(body), { status: 400 }), "provider_rejected");
+  });
+
+  it("never places hostile provider content into the thrown error's message or cause", async () => {
+    const hostileBody = {
+      error: "invalid_grant\r\nSet-Cookie: session=stolen-sentinel",
+      error_description: "hostile-description-sentinel",
+      error_uri: "https://attacker.example.invalid/hostile-sentinel",
+      access_token: "leaked-access-token-sentinel",
+    };
+    const issuer = uniqueIssuer();
+    const providerMetadata = { ...metadata, issuer, token_endpoint: `${issuer}token` };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(hostileBody), { status: 400 })));
+
+    let thrown: unknown;
+    try {
+      await completeAuthorization({ ...config, issuer }, providerMetadata, "authorization-code-sentinel", {
+        state: "state",
+        nonce: "nonce",
+        codeVerifier: "verifier",
+        returnTo: "/",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({ code: "token_exchange_failed", tokenExchangeReason: "provider_rejected" });
+    const serialized = JSON.stringify(thrown, Object.getOwnPropertyNames(thrown as object));
+    expect(serialized).not.toContain("stolen-sentinel");
+    expect(serialized).not.toContain("hostile-description-sentinel");
+    expect(serialized).not.toContain("hostile-sentinel");
+    expect(serialized).not.toContain("leaked-access-token-sentinel");
+  });
+
+  it.each([
+    ["network rejection", () => Promise.reject(new Error("token-network-sentinel"))],
+    ["timeout", () => Promise.reject(new DOMException("The operation was aborted", "TimeoutError"))],
+  ])("maps a %s to unreachable", async (_label, responseFactory) => {
+    await expectTokenExchangeReason(responseFactory, "unreachable");
+  });
+
+  it("maps an invalid JSON body to invalid_response", async () => {
+    await expectTokenExchangeReason(() => new Response("{", { status: 400 }), "invalid_response");
+  });
+
+  it("maps an invalid successful token payload to invalid_response", async () => {
+    await expectTokenExchangeReason(
+      () => new Response(JSON.stringify({ access_token: "opaque-token-sentinel" }), { status: 200 }),
+      "invalid_response",
+    );
   });
 });

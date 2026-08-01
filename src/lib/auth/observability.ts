@@ -1,7 +1,8 @@
 import { log } from "@/lib/logger";
+import type { TokenExchangeReason } from "@/lib/auth/errors";
 
 type AuthConfigurationState = "ready" | "invalid";
-type AuthProviderFailureReason = "discovery_failed" | "token_exchange_failed";
+type AuthProviderFailureReason = "discovery_failed" | TokenExchangeReason;
 
 let authConfigurationReported = false;
 const reportedAuthProviderFailures = new Set<AuthProviderFailureReason>();
@@ -27,9 +28,9 @@ export function reportAuthProviderDiscoveryFailure(): void {
   reportAuthProviderFailure("discovery_failed");
 }
 
-/** Emits one fixed token-exchange failure record for this process. */
-export function reportAuthTokenExchangeFailure(): void {
-  reportAuthProviderFailure("token_exchange_failed");
+/** Emits one fixed token-exchange failure record per closed reason for this process. */
+export function reportAuthTokenExchangeFailure(reason: TokenExchangeReason): void {
+  reportAuthProviderFailure(reason);
 }
 
 function reportAuthProviderFailure(reason: AuthProviderFailureReason): void {
