@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   config: {
@@ -29,7 +29,12 @@ import { reportScannerReadiness } from "./instrumentation";
 describe("scanner readiness diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     mocks.config.scanMode = "required";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reports readiness without disclosing scanner connection details", async () => {
@@ -42,17 +47,60 @@ describe("scanner readiness diagnostics", () => {
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(String(mocks.config.clamAv.port));
   });
 
-  it("reports an unavailable scanner without disclosing scanner connection details", async () => {
+  it("reports a failed first ping as starting and temporarily blocks uploads", async () => {
+    mocks.pingClamAv.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await reportScannerReadiness();
+
+    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+      state: "starting",
+      impact: "document_upload_blocked",
+    });
+    expect(mocks.log.error).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mocks.pingClamAv).toHaveBeenCalledTimes(2);
+    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(mocks.config.clamAv.host);
+    expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(String(mocks.config.clamAv.port));
+  });
+
+  it("reports unreachable only after the bounded startup window is exhausted", async () => {
     mocks.pingClamAv.mockResolvedValue(false);
 
     await reportScannerReadiness();
+
+    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+      state: "starting",
+      impact: "document_upload_blocked",
+    });
+
+    await vi.advanceTimersByTimeAsync(180_000);
 
     expect(mocks.log.error).toHaveBeenCalledWith("document.scanner", {
       state: "unreachable",
       impact: "document_upload_blocked",
     });
+    expect(mocks.log.error).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(mocks.config.clamAv.host);
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(String(mocks.config.clamAv.port));
+  });
+
+  it("treats a thrown ping as a temporary startup failure", async () => {
+    mocks.pingClamAv.mockRejectedValueOnce(new Error("private scanner details")).mockResolvedValueOnce(true);
+
+    await reportScannerReadiness();
+
+    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+      state: "starting",
+      impact: "document_upload_blocked",
+    });
+    expect(mocks.log.error).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
   });
 
   it("does not probe a scanner when scanning is disabled", async () => {

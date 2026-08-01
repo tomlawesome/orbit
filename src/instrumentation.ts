@@ -6,6 +6,44 @@
  * actionable condition. It deliberately does not stop the process: document
  * operations fail closed while the rest of the application stays available.
  */
+const SCANNER_STARTUP_WINDOW_MS = 180_000;
+const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
+
+type ClamAvOptions = { host: string; port: number; timeoutMs: number };
+
+function retryScannerReadiness(
+  pingClamAv: (options: ClamAvOptions) => Promise<boolean>,
+  clamAv: ClamAvOptions,
+  onReady: () => void,
+  onUnreachable: () => void,
+): void {
+  const deadline = Date.now() + SCANNER_STARTUP_WINDOW_MS;
+
+  const retry = async (): Promise<void> => {
+    let ready = false;
+    try {
+      ready = await pingClamAv(clamAv);
+    } catch {
+      // A startup ping failure is expected while the scanner is initialising.
+    }
+
+    if (ready) {
+      onReady();
+      return;
+    }
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      onUnreachable();
+      return;
+    }
+
+    setTimeout(retry, Math.min(SCANNER_READINESS_RETRY_INTERVAL_MS, remainingMs)).unref();
+  };
+
+  setTimeout(retry, SCANNER_READINESS_RETRY_INTERVAL_MS).unref();
+}
+
 export async function reportScannerReadiness(): Promise<void> {
   const [{ getDocumentConfig }, { pingClamAv }, { log }] = await Promise.all([
     import("@/server/documents/config"),
@@ -26,15 +64,31 @@ export async function reportScannerReadiness(): Promise<void> {
     return;
   }
 
-  const ready = await pingClamAv(config.clamAv);
+  let ready = false;
+  try {
+    ready = await pingClamAv(config.clamAv);
+  } catch {
+    // A startup ping failure is expected while the scanner is initialising.
+  }
+
   if (ready) {
     log.info("document.scanner", { state: "ready" });
     return;
   }
-  log.error("document.scanner", {
-    state: "unreachable",
+
+  log.info("document.scanner", {
+    state: "starting",
     impact: "document_upload_blocked",
   });
+  retryScannerReadiness(
+    pingClamAv,
+    config.clamAv,
+    () => log.info("document.scanner", { state: "ready" }),
+    () => log.error("document.scanner", {
+      state: "unreachable",
+      impact: "document_upload_blocked",
+    }),
+  );
 }
 
 export async function register() {
