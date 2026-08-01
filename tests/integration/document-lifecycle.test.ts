@@ -11,8 +11,9 @@ import { POST as createDocumentDraftRoute } from "@/app/api/documents/[documentI
 import { POST as approveDocumentDraftRoute } from "@/app/api/document-drafts/[draftId]/approve/route";
 import { GET as listDocuments, POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import { updateDocumentJob } from "@/server/admin-operations";
-import { runDocumentMaintenanceCycle } from "@/server/document-worker";
+import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   createIntegrationFixture,
@@ -21,7 +22,66 @@ import {
 } from "./support/fixtures";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(),
+}));
+
 const syntheticPdf = createSyntheticPdf("synthetic authenticated document");
+
+/** Captures rendered `orbit`-prefixed log lines without disturbing other console output shape. */
+function captureLogLines() {
+  const lines: string[] = [];
+  const record = (line: unknown) => { lines.push(String(line)); };
+  const logSpy = vi.spyOn(console, "log").mockImplementation(record);
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(record);
+  return {
+    lines,
+    restore: () => {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+    },
+  };
+}
+
+function parseLogLine(line: string): { level: string; event: string; fields: Record<string, string> } {
+  const [, level, , event, ...rest] = line.split(" ");
+  const fields: Record<string, string> = {};
+  for (const token of rest) {
+    const separatorIndex = token.indexOf("=");
+    if (separatorIndex === -1) continue;
+    fields[token.slice(0, separatorIndex)] = token.slice(separatorIndex + 1);
+  }
+  return { level, event, fields };
+}
+
+async function uploadWithFilename(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, filename: string) {
+  const session = await fixture.session("member");
+  const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
+  const response = await uploadDocument(requestForSession(session, url, {
+    method: "POST",
+    headers: {
+      "content-length": String(syntheticPdf.length),
+      "content-type": "application/pdf",
+      "x-orbit-filename": encodeURIComponent(filename),
+    },
+    body: syntheticPdf,
+  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+  return { session, response };
+}
+
+async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.DOCUMENT_SCAN_MODE;
+  process.env.DOCUMENT_SCAN_MODE = "required";
+  resetDocumentConfigForTests();
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
+    else process.env.DOCUMENT_SCAN_MODE = previous;
+    resetDocumentConfigForTests();
+  }
+}
 
 function itemDocumentsContext(householdId: string, itemId: string) {
   return { params: Promise.resolve({ householdId, itemId }) };
@@ -386,6 +446,7 @@ describe("authenticated encrypted document lifecycle", () => {
     const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
     const deleteFailure = vi.spyOn(LocalDocumentStorage.prototype, "deleteCiphertext")
       .mockRejectedValue(new Error("injected ciphertext delete outage"));
+    const capture = captureLogLines();
     try {
       await runDocumentMaintenanceCycle();
 
@@ -403,10 +464,12 @@ describe("authenticated encrypted document lifecycle", () => {
         eq(auditLog.entityId, documentId),
         eq(auditLog.action, "document_purged"),
       ))).toHaveLength(0);
+      expect(capture.lines.join("\n")).not.toContain("injected ciphertext delete outage");
 
       for (let attempt = 1; attempt < 5; attempt += 1) await runDocumentMaintenanceCycle();
     } finally {
       deleteFailure.mockRestore();
+      capture.restore();
     }
 
     const [failedJob] = await getDb().select({
@@ -416,10 +479,24 @@ describe("authenticated encrypted document lifecycle", () => {
       lastError: documentJobs.lastError,
     }).from(documentJobs).where(eq(documentJobs.documentId, documentId));
     expect(failedJob).toMatchObject({ status: "failed", attempts: 5, lastError: "purge_failed" });
+    const jobRecords = capture.lines.map(parseLogLine).filter((entry) =>
+      entry.event === "document.job" && entry.fields.document === documentId,
+    );
+    expect(jobRecords.some((entry) => entry.fields.outcome === "retry" && entry.fields.job === failedJob?.id)).toBe(true);
+    expect(jobRecords.some((entry) => entry.fields.outcome === "failed" && entry.fields.job === failedJob?.id)).toBe(true);
     expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
 
     await updateDocumentJob(fixture.users.admin.id, failedJob!.id, "retry", "failed");
-    await runDocumentMaintenanceCycle();
+    const completionCapture = captureLogLines();
+    try {
+      await runDocumentMaintenanceCycle();
+    } finally {
+      completionCapture.restore();
+    }
+    const completed = completionCapture.lines.map(parseLogLine).find((entry) =>
+      entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "completed",
+    );
+    expect(completed?.fields.job).toBe(failedJob?.id);
 
     expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(false);
     expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
@@ -515,5 +592,194 @@ describe("authenticated encrypted document lifecycle", () => {
     const [record] = await getDb().select({ contentSha256: documents.contentSha256 }).from(documents).where(eq(documents.id, documentId));
     expect(record?.contentSha256).toBe(createHash("sha256").update(syntheticPdf).digest("hex"));
     expect(record?.contentSha256).not.toContain(syntheticPdf.toString("utf8"));
+  });
+
+  it("emits bounded scan and lifecycle diagnostics for a clean required-mode upload without filenames, host or port", async () => {
+    const fixture = await createIntegrationFixture("document-scan-clean-diagnostics");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+    const capture = captureLogLines();
+    try {
+      await withRequiredScanMode(async () => {
+        const hostileFilename = "<script>alert(1)</script> confidential-report.pdf";
+        const { response } = await uploadWithFilename(fixture, hostileFilename);
+        expect(response.status).toBe(201);
+        const payload = await response.json() as { document: { id: string } };
+        const documentId = payload.document.id;
+
+        const records = capture.lines.map(parseLogLine);
+        const scanAttempt = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "attempt");
+        const scanClean = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "clean");
+        expect(scanAttempt?.fields.document).toBe(documentId);
+        expect(scanClean?.fields.document).toBe(documentId);
+        expect(scanClean?.fields.ms).toMatch(/^\d+$/u);
+        expect(scanClean?.fields).not.toHaveProperty("host");
+        expect(scanClean?.fields).not.toHaveProperty("port");
+
+        const lifecycleStates = records
+          .filter((entry) => entry.event === "document.lifecycle" && entry.fields.document === documentId)
+          .map((entry) => entry.fields.state);
+        expect(lifecycleStates).toEqual(["quarantined", "scanning", "encrypting", "available"]);
+
+        const combined = capture.lines.join("\n");
+        expect(combined).not.toContain("script");
+        expect(combined).not.toContain("confidential-report");
+        expect(combined).not.toContain(fixture.household.name);
+      });
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("emits a bounded scanner-error diagnostic and rejected lifecycle record without host, port or leaked text", async () => {
+    const fixture = await createIntegrationFixture("document-scan-error-diagnostics");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    const capture = captureLogLines();
+    try {
+      await withRequiredScanMode(async () => {
+        const { response } = await uploadWithFilename(fixture, "policy.pdf");
+        expect(response.status).toBe(503);
+        expect((await response.json() as { error: { code: string } }).error.code).toBe("document_scanner_unreachable");
+
+        const records = capture.lines.map(parseLogLine);
+        const scanError = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "error");
+        expect(scanError?.fields.reason).toBe("unavailable");
+        expect(scanError?.fields.ms).toMatch(/^\d+$/u);
+        expect(scanError?.fields).not.toHaveProperty("host");
+        expect(scanError?.fields).not.toHaveProperty("port");
+
+        const rejectedLifecycle = records.find((entry) => entry.event === "document.lifecycle" && entry.fields.state === "rejected");
+        expect(rejectedLifecycle?.fields.reason).toBe("scanner_unavailable");
+        expect(rejectedLifecycle?.fields.document).toBe(scanError?.fields.document);
+
+        const [stored] = await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode })
+          .from(documents).where(eq(documents.id, scanError!.fields.document));
+        expect(stored).toMatchObject({ lifecycle: "rejected", failureCode: "scanner_unavailable" });
+      });
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("keeps the scanner's virus signature out of every emitted record for an infected upload", async () => {
+    const fixture = await createIntegrationFixture("document-scan-infected-diagnostics");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "infected", signature: "Eicar-Test-Signature" });
+    const capture = captureLogLines();
+    try {
+      await withRequiredScanMode(async () => {
+        const { response } = await uploadWithFilename(fixture, "malware.pdf");
+        expect(response.status).toBe(422);
+        expect((await response.json() as { error: { code: string } }).error.code).toBe("document_malware_detected");
+
+        const combined = capture.lines.join("\n");
+        expect(combined).not.toContain("Eicar");
+
+        const records = capture.lines.map(parseLogLine);
+        const infectedScan = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "infected");
+        expect(infectedScan?.fields.reason).toBe("malware_detected");
+        const rejectedLifecycle = records.find((entry) => entry.event === "document.lifecycle" && entry.fields.state === "rejected");
+        expect(rejectedLifecycle?.fields.reason).toBe("malware_detected");
+      });
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("records bounded lifecycle and job diagnostics across delete, restore and purge", async () => {
+    const fixture = await createIntegrationFixture("document-worker-diagnostics");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+
+    const capture = captureLogLines();
+    try {
+      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+      expect(capture.lines.map(parseLogLine).some((entry) =>
+        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "pending_deletion",
+      )).toBe(true);
+
+      await restoreDocumentRoute(requestForSession(session, downloadUrl + "/restore", { method: "POST" }), documentContext(documentId));
+      expect(capture.lines.map(parseLogLine).some((entry) =>
+        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "available",
+      )).toBe(true);
+
+      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+      const [purgeJob] = await getDb().select({ id: documentJobs.id })
+        .from(documentJobs)
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")))
+        .orderBy(desc(documentJobs.generation))
+        .limit(1);
+      await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
+
+      capture.lines.length = 0;
+      await runDocumentMaintenanceCycle();
+      const cycleRecords = capture.lines.map(parseLogLine);
+      const claimed = cycleRecords.find((entry) =>
+        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "claimed",
+      );
+      const completed = cycleRecords.find((entry) =>
+        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "completed",
+      );
+      expect(claimed?.fields.job).toBe(purgeJob?.id);
+      expect(completed?.fields.job).toBe(purgeJob?.id);
+      expect(cycleRecords.some((entry) =>
+        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "deleted",
+      )).toBe(true);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("reclaims a job whose processing lease already expired, distinct from a fresh claim", async () => {
+    const fixture = await createIntegrationFixture("document-worker-reclaim-diagnostics");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+    const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
+    await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+    const [purgeJob] = await getDb().select({ id: documentJobs.id })
+      .from(documentJobs)
+      .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")))
+      .orderBy(desc(documentJobs.generation))
+      .limit(1);
+    await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
+    await getDb().update(documentJobs).set({
+      status: "processing",
+      lockedAt: new Date(Date.now() - 20 * 60 * 1_000),
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+      leaseToken: randomUUID(),
+    }).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")));
+
+    const capture = captureLogLines();
+    try {
+      await runDocumentMaintenanceCycle();
+      const records = capture.lines.map(parseLogLine);
+      const reclaimed = records.find((entry) =>
+        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "reclaimed",
+      );
+      expect(reclaimed?.fields.job).toBe(purgeJob?.id);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it("emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing", async () => {
+    const fixture = await createIntegrationFixture("document-reconciliation-diagnostics");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+    const [crypto] = await getDb().select({ storageKey: documentCrypto.storageKey })
+      .from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+    const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+    await storage.deleteCiphertext(crypto!.storageKey);
+
+    const capture = captureLogLines();
+    try {
+      await reconcileDocumentStorage();
+      const records = capture.lines.map(parseLogLine);
+      const rejected = records.find((entry) =>
+        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "rejected",
+      );
+      expect(rejected?.fields.reason).toBe("storage_object_missing");
+    } finally {
+      capture.restore();
+    }
+
+    const [stored] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
+    expect(stored?.lifecycle).toBe("rejected");
   });
 });
