@@ -5,8 +5,8 @@ issues track delivery work; ADRs do not contain changing implementation status.
 
 ## Governance
 
-- New or materially revised ADRs are protected planning work and require an
-  orchestration tier under the repository `AGENTS.md`.
+- New or materially revised ADRs are protected planning work and require Sol
+  Extra High under the repository `AGENTS.md`.
 - Use the next four-digit number and a short lowercase filename.
 - State the context, decision, consequences, alternatives, and supersession
   relationship.
@@ -23,3 +23,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0006: Online-authoritative private workspace](0006-online-authoritative-private-workspace.md)
 - [ADR-0007: Dual-pipeline agent governance](0007-dual-pipeline-agent-governance.md)
 - [ADR-0008: Installer-resolved release digests](0008-installer-resolved-release-digests.md)
+- [ADR-0009: Sol-governed, capability-routed implementation](0009-capability-routed-implementation.md)
