@@ -11,15 +11,35 @@ export type AuthErrorCode =
   | "session_required"
   | "csrf_failed";
 
+/**
+ * Closed internal diagnostic reasons for a token-exchange failure.
+ * These are never exposed to the browser.
+ */
+export type TokenExchangeReason =
+  | "invalid_request"
+  | "invalid_client"
+  | "invalid_grant"
+  | "unauthorized_client"
+  | "unsupported_grant_type"
+  | "invalid_scope"
+  | "server_error"
+  | "temporarily_unavailable"
+  | "provider_rejected"
+  | "unreachable"
+  | "invalid_response";
+
 export class AuthError extends Error {
+  public readonly tokenExchangeReason?: TokenExchangeReason;
+
   constructor(
     public readonly code: AuthErrorCode,
     message: string,
     public readonly status = 400,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { tokenExchangeReason?: TokenExchangeReason },
   ) {
     super(message, options);
     this.name = "AuthError";
+    this.tokenExchangeReason = options?.tokenExchangeReason;
   }
 }
 

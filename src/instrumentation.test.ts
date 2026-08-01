@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     scanMode: "required",
     clamAv: { host: "private-scanner.internal", port: 3310, timeoutMs: 30_000 },
   },
+  getAuthConfig: vi.fn(),
   pingClamAv: vi.fn(),
   log: {
     error: vi.fn(),
@@ -20,21 +21,54 @@ vi.mock("@/server/documents/scanner", () => ({
   pingClamAv: mocks.pingClamAv,
 }));
 
+vi.mock("@/lib/env", () => ({
+  getAuthConfig: mocks.getAuthConfig,
+}));
+
 vi.mock("@/lib/logger", () => ({
   log: mocks.log,
 }));
 
-import { reportScannerReadiness } from "./instrumentation";
+import { reportAuthConfigurationReadiness, reportScannerReadiness } from "./instrumentation";
+import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 
 describe("scanner readiness diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mocks.config.scanMode = "required";
+    resetAuthObservabilityForTests();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    resetAuthObservabilityForTests();
+  });
+
+  it("reports ready authentication configuration without delaying startup", async () => {
+    mocks.getAuthConfig.mockReturnValue({});
+
+    await expect(reportAuthConfigurationReadiness()).resolves.toBeUndefined();
+
+    expect(mocks.log.info).toHaveBeenCalledWith("auth.configuration", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledTimes(1);
+    expect(mocks.log.error).not.toHaveBeenCalled();
+  });
+
+  it("reports invalid authentication configuration without throwing or exposing validation details", async () => {
+    const secret = "startup-client-secret-sentinel";
+    mocks.getAuthConfig.mockImplementation(() => {
+      throw new Error(`OIDC_CLIENT_SECRET ${secret} failed validation`);
+    });
+
+    await expect(reportAuthConfigurationReadiness()).resolves.toBeUndefined();
+
+    expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
+      state: "invalid",
+      impact: "sign_in_blocked",
+    });
+    expect(mocks.log.error).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(secret);
   });
 
   it("reports readiness without disclosing scanner connection details", async () => {

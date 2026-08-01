@@ -65,18 +65,30 @@ const urgencyPaletteLabels = {
   themed: { name: "Theme matched", detail: "Urgency colours adapt to your colourway" },
 } as const;
 
-function AuthenticationGate({ loading, error }: { loading: boolean; error?: string }) {
+function AuthenticationGate({
+  loading,
+  loadingMessage,
+  error,
+  onRetry,
+}: {
+  loading: boolean;
+  loadingMessage?: string;
+  error?: string;
+  onRetry?: () => void;
+}) {
+  const message = loading ? loadingMessage : error;
   return (
     <main className="authentication-gate">
       <section>
         <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
         <p className="eyebrow">Everything in your orbit, on track</p>
-        <h1>{loading ? "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
-        <p role={error ? "alert" : undefined}>
-          {loading
+        <h1>{loading ? loadingMessage ? "Orbit is starting…" : "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
+        <p role={message ? "alert" : undefined}>
+          {message ?? (loading
             ? "Orbit is confirming your session."
-            : error ?? "Your household information is private and is only available after authentication."}
+            : "Your household information is private and is only available after authentication.")}
         </p>
+        {!loading && error && onRetry && <button className="wizard-primary" type="button" onClick={onRetry}>Try again <Icon name="chevron" /></button>}
         {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
       </section>
     </main>
@@ -112,7 +124,9 @@ export function Dashboard() {
     return (
       <AuthenticationGate
         loading={workspaceState.syncStatus === "loading"}
+        loadingMessage={workspaceState.syncStatus === "loading" ? workspaceState.syncMessage || undefined : undefined}
         error={workspaceState.syncStatus === "error" ? workspaceState.syncMessage : undefined}
+        onRetry={workspaceState.syncStatus === "error" ? workspaceState.retryInitialization : undefined}
       />
     );
   }

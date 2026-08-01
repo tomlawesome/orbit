@@ -47,3 +47,51 @@ test("the authentication boundary fits the mobile viewport", async ({ page, isMo
   }));
   expect(viewport.scrollWidth).toBe(viewport.clientWidth);
 });
+
+test("confirmed degraded readiness shows startup wording and then recovers", async ({ page }) => {
+  let healthChecks = 0;
+  await page.route("**/api/health", async (route) => {
+    healthChecks += 1;
+    const ready = healthChecks > 1;
+    await route.fulfill({
+      status: ready ? 200 : 503,
+      contentType: "application/json",
+      body: JSON.stringify({ status: ready ? "ready" : "degraded", service: "orbit" }),
+    });
+  });
+  await page.route("**/api/auth/session", (route) => route.fulfill({
+    status: 401,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "session_required", message: "Authentication is required" } }),
+  }));
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Orbit is starting…" })).toBeVisible();
+  await expect(page.getByText("Orbit is starting. Please wait while the service becomes ready.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
+  expect(healthChecks).toBeGreaterThanOrEqual(2);
+});
+
+test("missing authentication configuration shows fixed administrator guidance", async ({ page }) => {
+  const hostileProviderDetail = "provider-secret-sentinel.invalid/private-tenant";
+  await page.route("**/api/health", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ status: "ready", service: "orbit" }),
+  }));
+  await page.route("**/api/auth/session", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({
+      error: { code: "auth_not_configured", message: hostileProviderDetail },
+    }),
+  }));
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Orbit could not open safely." })).toBeVisible();
+  await expect(page.getByText("Orbit sign-in is not configured. Ask your administrator to configure authentication, then try again.")).toBeVisible();
+  await expect(page.getByText(hostileProviderDetail)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Try again/ })).toBeVisible();
+});
