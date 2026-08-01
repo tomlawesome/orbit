@@ -43,8 +43,36 @@ export const listableDocumentLifecycles = [
 
 export type ListableDocumentLifecycle = typeof listableDocumentLifecycles[number];
 
-/** Lifecycles whose content can actually be opened. */
-const openableDocumentLifecycles: readonly string[] = ["available", "pending_deletion"];
+export type DocumentContentOperation = "summary" | "download" | "draft" | "restore";
+
+/**
+ * The single content-readiness boundary for document operations.
+ *
+ * Scan mode is intentionally required and unknown values fail closed. The
+ * operation also supplies its own lifecycle boundary: content reads and draft
+ * creation require `available`, while restore is only valid during retention.
+ */
+export function isDocumentContentReady(
+  record: { lifecycle: string; scanStatus: string },
+  scanMode: string,
+  operation: DocumentContentOperation,
+): boolean {
+  const scanReady = record.scanStatus === "clean"
+    || (record.scanStatus === "skipped" && scanMode === "disabled");
+  if (!scanReady) return false;
+
+  switch (operation) {
+    case "summary":
+      return record.lifecycle === "available" || record.lifecycle === "pending_deletion";
+    case "download":
+    case "draft":
+      return record.lifecycle === "available";
+    case "restore":
+      return record.lifecycle === "pending_deletion";
+    default:
+      return false;
+  }
+}
 
 export interface DocumentSummary {
   id: string;
@@ -148,7 +176,7 @@ export function toSummary(record: {
   availableAt: Date | null;
   deleteAfter: Date | null;
   failureCode?: string | null;
-}): DocumentSummary {
+}, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
   if (!(listableDocumentLifecycles as readonly string[]).includes(record.lifecycle)) {
@@ -164,7 +192,7 @@ export function toSummary(record: {
     scanStatus: record.scanStatus,
     availableAt: record.availableAt?.toISOString() ?? null,
     deleteAfter: record.deleteAfter?.toISOString() ?? null,
-    ready: openableDocumentLifecycles.includes(record.lifecycle),
+    ready: isDocumentContentReady(record, scanMode, "summary"),
     failureCode: record.failureCode ?? null,
   };
 }
@@ -192,6 +220,7 @@ export async function listItemDocuments(
   itemId: string,
 ): Promise<DocumentSummary[]> {
   await requireHouseholdAndItemAccess(userId, householdId, itemId);
+  const config = getDocumentConfig();
   const rows = await getDb()
     .select({
       id: documents.id,
@@ -215,7 +244,7 @@ export async function listItemDocuments(
       inArray(documents.lifecycle, [...listableDocumentLifecycles]),
     ))
     .orderBy(desc(documents.createdAt));
-  return rows.map(toSummary);
+  return rows.map((row) => toSummary(row, config.scanMode));
 }
 
 async function reserveDocumentMetadata(input: {
@@ -295,7 +324,7 @@ export async function uploadItemDocument(input: {
       if (existing.householdId !== input.householdId || existing.itemId !== input.itemId) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
-      if (existing.lifecycle === "available") return toSummary(existing);
+      if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
       if (existing.lifecycle === "rejected") {
         const [cryptoRecord] = await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
           .where(eq(documentCrypto.documentId, input.documentId)).limit(1);
@@ -461,7 +490,7 @@ export async function uploadItemDocument(input: {
       scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
       availableAt: now.toISOString(),
       deleteAfter: null,
-      ready: true,
+      ready: isDocumentContentReady({ lifecycle: "available", scanStatus: config.scanMode === "disabled" ? "skipped" : "clean" }, config.scanMode, "summary"),
       failureCode: null,
     };
   } catch (error) {
@@ -486,13 +515,13 @@ export async function readDocumentDownload(
   documentId: string,
 ): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
   const record = await requireDocumentAccess(userId, documentId);
-  if (record.lifecycle !== "available" || !record.itemId) {
+  const config = getDocumentConfig();
+  if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
   const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId)).limit(1);
   if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
 
-  const config = getDocumentConfig();
   if (crypto.keyId !== config.keyId) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
@@ -556,12 +585,13 @@ export async function requestDocumentDeletion(userId: string, documentId: string
     itemId: record.itemId,
     deleteAfter: deleteAfter.toISOString(),
   });
-  return toSummary(updated);
+  return toSummary(updated, config.scanMode);
 }
 
 export async function restoreDocument(userId: string, documentId: string): Promise<DocumentSummary> {
   const record = await requireDocumentAccess(userId, documentId);
-  if (record.lifecycle !== "pending_deletion" || !record.deleteAfter || record.deleteAfter <= new Date()) {
+  const config = getDocumentConfig();
+  if (!isDocumentContentReady(record, config.scanMode, "restore") || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
   const updated = await getDb().transaction(async (transaction) => {
@@ -615,5 +645,5 @@ export async function restoreDocument(userId: string, documentId: string): Promi
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
-  return toSummary(updated);
+  return toSummary(updated, config.scanMode);
 }
