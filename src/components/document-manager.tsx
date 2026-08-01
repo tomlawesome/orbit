@@ -70,6 +70,8 @@ async function responseMessage(response: Response): Promise<string> {
 export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sectionNumber }: DocumentManagerProps) {
   const inputId = useId();
   const cameraInputId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<ItemDocument[]>([]);
   const [uploading, setUploading] = useState<UploadingDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,6 +174,14 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     for (const file of files) await upload(file);
+  }
+
+  function openFilePicker() {
+    inputRef.current?.click();
+  }
+
+  function openCameraPicker() {
+    cameraInputRef.current?.click();
   }
 
   function onDragOver(event: DragEvent<HTMLDivElement>) {
@@ -307,14 +317,18 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
         onDrop={(event) => void onDrop(event)}
         data-testid="document-dropzone"
       >
-        <p className="document-dropzone-hint">
-          {dragging ? "Release to upload" : "Drag files here, or choose them below."}
-        </p>
+        <button type="button" className="document-picker-surface" aria-label="Add files" onClick={openFilePicker}>
+          <span className="document-dropzone-hint">
+            {dragging ? "Release to upload" : "Drag files here, or choose them below."}
+          </span>
+          <span className="document-picker-label">Add files</span>
+        </button>
+        <label className="visually-hidden" htmlFor={inputId}>Add files</label>
+        <input ref={inputRef} id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={selectFiles} />
         <div className="document-actions">
-          <label className="document-upload" htmlFor={inputId}>Add files</label>
-          <input id={inputId} className="visually-hidden" type="file" accept="application/pdf,image/jpeg,image/png" multiple onChange={selectFiles} />
-          <label className="document-upload document-camera" htmlFor={cameraInputId}>Take photo</label>
-          <input id={cameraInputId} className="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectCamera(event)} />
+          <button type="button" className="document-upload document-camera" onClick={openCameraPicker}>Take photo</button>
+          <label className="visually-hidden" htmlFor={cameraInputId}>Take photo</label>
+          <input ref={cameraInputRef} id={cameraInputId} className="visually-hidden" type="file" accept="image/jpeg,image/png" capture="environment" onChange={(event) => void selectCamera(event)} />
         </div>
       </div>
       <p className="document-live" aria-live="polite">{message}</p>
