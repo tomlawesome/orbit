@@ -369,6 +369,28 @@ export async function createBaselineMigrationDirectory(migrationsFolder: string)
   };
 }
 
+export async function createMigrationDirectoryThroughTag(migrationsFolder: string, tag: string): Promise<TemporaryMigrationDirectory> {
+  const sourceFolder = resolve(process.cwd(), migrationsFolder);
+  const sourceJournal = await readJournalDefinition(sourceFolder);
+  const cutoffIndex = sourceJournal.entries.findIndex((entry) => entry.tag === tag);
+  if (cutoffIndex === -1) throw new Error(`Migration tag not found in journal: ${tag}`);
+  const includedEntries = sourceJournal.entries.slice(0, cutoffIndex + 1);
+
+  const targetFolder = await mkdtemp(join(tmpdir(), "orbit-through-tag-migrations-"));
+  await mkdir(join(targetFolder, "meta"), { recursive: true });
+  for (const entry of includedEntries) {
+    await cp(join(sourceFolder, `${entry.tag}.sql`), join(targetFolder, `${entry.tag}.sql`));
+  }
+  await writeFile(join(targetFolder, "meta", "_journal.json"), JSON.stringify({
+    ...sourceJournal,
+    entries: includedEntries,
+  }, null, 2) + "\n");
+  return {
+    path: targetFolder,
+    cleanup: () => rm(targetFolder, { recursive: true, force: true }),
+  };
+}
+
 export async function createInvalidMigrationDirectory(migrationsFolder: string): Promise<TemporaryMigrationDirectory & { failedTag: string }> {
   const sourceFolder = resolve(process.cwd(), migrationsFolder);
   const targetFolder = await mkdtemp(join(tmpdir(), "orbit-invalid-migrations-"));
@@ -407,7 +429,9 @@ export async function runMigrationsWithActionableError(databaseUrl: string, migr
   } catch (error) {
     const applied = new Set(await readAppliedMigrationHashesForUrl(databaseUrl));
     const failed = (await migrationDefinitions(migrationsFolder)).find((migration) => !applied.has(migration.hash));
-    const detail = error instanceof Error ? error.message.split(/\r?\n/u, 1)[0].slice(0, 300) : "unknown migration error";
+    const cause = error instanceof Error && "cause" in error ? error.cause : undefined;
+    const detailSource = cause instanceof Error ? cause.message : error instanceof Error ? error.message : "unknown migration error";
+    const detail = detailSource.split(/\r?\n/u, 1)[0].slice(0, 300);
     throw new Error(`Migration ${failed?.tag ?? "unknown"} failed: ${detail}`);
   }
 }
