@@ -127,11 +127,13 @@ Delivery uses a rolling-wave model:
 1. Sol Extra High maintains the portfolio-level risk order, dependencies,
    release gates and durable architecture decisions.
 2. Only the next two to four implementable issues are made decision-complete.
-3. Bounded implementations use the first qualified provider in the repository's
-   capability-and-cost order. Independent issues may run concurrently only in
-   isolated worktrees with disjoint file ownership **and** a recorded assessment
-   that a sibling landing first requires at most a rebase. While the target
-   branch requires up-to-date branches, keep at most two pull requests in flight.
+3. Bounded implementations use the cheapest qualified idle capacity in the
+   repository's capability-and-cost order. A higher-cost qualified provider may
+   take a second independent ready issue while cheaper capacity is occupied when
+   the task state records the throughput benefit, exact disjoint paths, satisfied
+   dependencies and at-most-rebase-and-revalidation impact. This never permits
+   duplicate work or same-task escalation. While the target branch requires
+   up-to-date branches, keep at most two pull requests in flight.
 4. Sol Extra High reviews architecture and security consequences, then
    integrates protected pull requests sequentially. A later concurrent branch
    rebases onto the accepted earlier result before final validation.
