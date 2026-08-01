@@ -59,12 +59,15 @@ orientation or perform explicitly bounded mechanical analysis outside the
 orchestration role, but it cannot operate the delivery loop or make status and
 next-action decisions.
 
-Bounded implementation follows the capability-gated order in `AGENTS.md` and
-`.github/orchestration-governance.json`. The task state records the selected
-provider, exact model, task class, qualification evidence, exact host for local
-Ollama, and an evidenced reason for every cheaper provider skipped. Every
-provider returns control to Sol for review and delivery. Claude Opus-class
-secondary review requires fresh user approval and remains advisory only.
+Bounded implementation follows the cheapest-qualified-idle-capacity preference
+in `AGENTS.md` and `.github/orchestration-governance.json`. The task state
+records the selected provider, exact model, task class, qualification evidence,
+exact host for local Ollama, and an evidenced reason for every cheaper provider
+skipped. A cheaper provider already occupied by an independent task is an
+accepted reason only when the provider-concurrency evidence in the Wave
+concurrency section is complete. Every provider returns control to Sol for
+review and delivery. Claude Opus-class secondary review requires fresh user
+approval and remains advisory only.
 Correctness, hidden-edge, scope, handback honesty and context-fit evidence
 determine qualification. Cost, latency, resource observations and current
 capacity inform routing. Routine token, price and turn caps are not task or
@@ -201,6 +204,25 @@ While the target branch requires up-to-date branches, keep at most two pull
 requests in flight regardless of assessment. Every merge leaves every other open
 pull request behind its base and forces a full revalidation, so concurrency
 beyond that costs more than it returns.
+
+Provider cost order does not force otherwise independent work to serialize.
+When the cheapest qualified provider is already active, Sol may select the next
+qualified provider for another ready issue only when the task record proves:
+
+- the occupied cheaper provider's exact task, qualification evidence, issue
+  and allowed paths;
+- a different selected issue with exact disjoint allowed paths and satisfied
+  dependencies;
+- that either sibling landing first requires no more than a rebase and
+  revalidation, never a change of premises or redesign;
+- a concrete throughput benefit from starting now rather than waiting; and
+- no more than two projected in-flight pull requests.
+
+Concurrency never justifies escalating or duplicating the same task, using an
+unqualified model, overlapping paths, broadening delegated authority or
+opening a third pull request. Within each task, use the least-cost model already
+qualified for that task class. Sol still reviews and integrates handbacks
+sequentially.
 
 ## Investigating a delivery failure
 

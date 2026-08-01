@@ -49,6 +49,24 @@ function validPolicy() {
         fineTuningOnly: [4, 5],
         stopEarlyWhenSatisfied: true,
       },
+      providerSelection: {
+        mode: "cheapest_qualified_idle_capacity_first",
+        strictSerialFallback: false,
+        withinTaskLeastCostQualified: true,
+        concurrency: {
+          allowed: true,
+          reason: "occupied_beneficial_concurrency",
+          requiresCheaperProviderOccupied: true,
+          requiresIndependentIssue: true,
+          requiresDisjointPaths: true,
+          requiresSatisfiedDependencies: true,
+          requiresRecordedThroughputBenefit: true,
+          prohibitsDuplicateTask: true,
+          prohibitsAuthorityExpansion: true,
+          maximumInFlightPullRequests: 2,
+          siblingLandingImpacts: ["rebase_only", "rebase_and_revalidate"],
+        },
+      },
       providers: [
         { id: "ollama", requiresExactHost: true, requiresExactModel: true },
         { id: "mistral", requiresExactHost: false, requiresExactModel: true },
@@ -65,6 +83,7 @@ function validPolicy() {
         "unsuitable_task_class",
         "unreachable",
         "capacity_exhausted",
+        "occupied_beneficial_concurrency",
       ],
       isolation: {
         exactBase: true,
@@ -378,6 +397,64 @@ function reconciledState() {
   return state;
 }
 
+function concurrentProviderState() {
+  const state = activeState();
+  state.delivery.issue = 157;
+  state.delivery.branch = "codex/issue-157-concurrency-test";
+  state.delivery.task = {
+    provider: "claude",
+    requestedModel: "Claude Sonnet",
+    taskClass: "bounded-ordinary-implementation",
+    qualification: {
+      status: "qualified",
+      provider: "claude",
+      model: "Claude Sonnet",
+      taskClass: "bounded-ordinary-implementation",
+      evidenceId: "global-registry:claude-sonnet",
+    },
+    skippedProviders: [
+      { provider: "ollama", reason: "unqualified", evidenceId: "global-registry:ollama" },
+      {
+        provider: "mistral",
+        reason: "occupied_beneficial_concurrency",
+        evidenceId: "run:mistral-issue-185",
+      },
+    ],
+    concurrencyAssessment: {
+      selectedAllowedPaths: ["scripts/concurrency-contract.test.mjs"],
+      occupiedTasks: [
+        {
+          provider: "mistral",
+          issue: 185,
+          taskId: "bounded-wrapper:mistral-issue-185",
+          qualificationEvidenceId: "global-registry:mistral-medium-high",
+          allowedPaths: ["src/instrumentation.ts", "src/instrumentation-node.ts"],
+        },
+      ],
+      dependenciesSatisfied: true,
+      siblingLandingImpact: "rebase_and_revalidate",
+      expectedThroughputBenefit: "The independent test slice progresses while Mistral owns the instrumentation slice.",
+      projectedInFlightPullRequests: 2,
+    },
+    launchReceipt: {
+      source: "bounded_wrapper",
+      runId: "claude-issue-157",
+      requestedModel: "Claude Sonnet",
+      baseSha: SHA,
+      observedAt: "2026-07-30T06:30:00.000Z",
+    },
+    authoritativeStatus: {
+      source: "bounded_wrapper",
+      runId: "claude-issue-157",
+      status: "active",
+      worktree: "/tmp/orbit-issue-157-claude",
+      baseSha: SHA,
+      observedAt: "2026-07-30T06:40:00.000Z",
+    },
+  };
+  return state;
+}
+
 describe("orchestration governance", () => {
   it("accepts the canonical authority, transition, and learning policy", () => {
     expect(() => validateOrchestrationPolicy(validPolicy())).not.toThrow();
@@ -409,6 +486,78 @@ describe("orchestration governance", () => {
     ];
     expect(() => validateOrchestrationPolicy(policy)).toThrow(
       /implementation provider order/u,
+    );
+  });
+
+  it("rejects strict provider serialization when qualified capacity can run beneficially in parallel", () => {
+    const policy = validPolicy();
+    policy.implementationRouting.providerSelection.strictSerialFallback = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /provider selection must permit bounded cost-aware concurrency/u,
+    );
+  });
+
+  it("accepts an evidenced higher-cost provider for a disjoint issue while cheaper capacity is occupied", () => {
+    expect(() => validateOperationalState(concurrentProviderState(), validPolicy())).not.toThrow();
+  });
+
+  it("rejects beneficial-concurrency routing without the occupied-task assessment", () => {
+    const state = concurrentProviderState();
+    delete state.delivery.task.concurrencyAssessment;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /beneficial provider concurrency requires an assessment/u,
+    );
+  });
+
+  it("rejects provider concurrency whose changed paths overlap", () => {
+    const state = concurrentProviderState();
+    state.delivery.task.concurrencyAssessment.selectedAllowedPaths = ["src/instrumentation.ts"];
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /concurrent implementation paths must be disjoint/u,
+    );
+  });
+
+  it("rejects provider concurrency for the same issue", () => {
+    const state = concurrentProviderState();
+    state.delivery.task.concurrencyAssessment.occupiedTasks[0].issue = state.delivery.issue;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /concurrent implementation must own an independent issue/u,
+    );
+  });
+
+  it("rejects provider concurrency when a sibling would change the selected slice's premises", () => {
+    const state = concurrentProviderState();
+    state.delivery.task.concurrencyAssessment.siblingLandingImpact = "premises_change";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /concurrent sibling impact must remain bounded/u,
+    );
+  });
+
+  it("rejects provider concurrency beyond the two-pull-request integration cap", () => {
+    const state = concurrentProviderState();
+    state.delivery.task.concurrencyAssessment.projectedInFlightPullRequests = 3;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /projected in-flight pull requests must match the concurrent task set and remain within the cap/u,
+    );
+  });
+
+  it("rejects a projected pull-request count that understates the concurrent task set", () => {
+    const state = concurrentProviderState();
+    state.delivery.task.skippedProviders.unshift({
+      provider: "ollama",
+      reason: "occupied_beneficial_concurrency",
+      evidenceId: "run:ollama-issue-184",
+    });
+    state.delivery.task.skippedProviders.splice(1, 1);
+    state.delivery.task.concurrencyAssessment.occupiedTasks.unshift({
+      provider: "ollama",
+      issue: 184,
+      taskId: "bounded-wrapper:ollama-issue-184",
+      qualificationEvidenceId: "global-registry:ollama-desktop",
+      allowedPaths: ["scripts/ollama-contract.mjs"],
+    });
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /projected in-flight pull requests must match the concurrent task set and remain within the cap/u,
     );
   });
 
