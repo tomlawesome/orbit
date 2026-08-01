@@ -148,8 +148,9 @@ test.describe("online-only private workspace policy", () => {
     });
 
     await page.getByRole("button", { name: "Open personalisation settings" }).click();
+    await expect(page).toHaveURL(/\/settings$/);
     await page.getByRole("tab", { name: "Household" }).click();
-    const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
+    const settings = page.locator(".settings-page");
     await settings.getByLabel("Household name").fill(rejectedName);
     await settings.getByRole("button", { name: "Save household" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "could not save" })).toBeVisible();
