@@ -244,6 +244,7 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
 
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("tab", { name: "Members" }).click();
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
       await page.getByLabel("Registered user").selectOption({ label: member });
@@ -290,6 +291,7 @@ test.describe("authenticated household lifecycle", () => {
       // workspace and reopen settings before using a settings tab again.
       await page.goto("/");
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("tab", { name: "Household" }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();
@@ -448,8 +450,8 @@ test.describe("authenticated household lifecycle", () => {
       const memberSession = await readAuthenticatedSession(memberPage, "Member");
 
       const openMembers = async (targetPage: Page) => {
-        const personalisation = targetPage.getByRole("dialog", { name: "Personalise Orbit", exact: true });
-        if (!(await personalisation.isVisible())) {
+        const settingsPage = targetPage.locator(".settings-page");
+        if (!(await settingsPage.isVisible())) {
           const openNavigation = targetPage.getByRole("button", { name: "Open navigation" });
           if (await openNavigation.isVisible()) {
             await openMobileNavigationIfNeeded(targetPage);
@@ -458,8 +460,9 @@ test.describe("authenticated household lifecycle", () => {
             await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
           }
         }
-        await expect(personalisation).toBeVisible({ timeout: 15_000 });
-        await personalisation.getByRole("tab", { name: "Members" }).click();
+        await expect(targetPage).toHaveURL(/\/settings$/);
+        await expect(settingsPage).toBeVisible({ timeout: 15_000 });
+        await settingsPage.getByRole("tab", { name: "Members" }).click();
       };
       const addMember = async () => {
         const administratorSession = await readAuthenticatedSession(page, "Administrator");
