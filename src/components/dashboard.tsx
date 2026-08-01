@@ -659,8 +659,16 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
               {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
               {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
-              {session.user.isInstanceAdmin && <a className="settings-tab-link" href="/admin">Admin</a>}
             </div>
+
+            {/* Outside the tablist deliberately: a tablist requires every child
+                to be a tab, and this navigates to a route rather than switching
+                a panel. Nesting it broke that ARIA contract. */}
+            {session.user.isInstanceAdmin && (
+              <nav className="settings-admin-link" aria-label="Instance administration">
+                <a href="/admin">Administration</a>
+              </nav>
+            )}
 
             {settingsView === "appearance" ? (
               <div className="settings-content">
