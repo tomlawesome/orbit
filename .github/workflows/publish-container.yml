@@ -12,8 +12,11 @@ on:
       - "release/**"
 
 concurrency:
-  group: orbit-container-${{ github.ref }}
-  cancel-in-progress: true
+  group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
+  # Cancel only a superseded pull-request commit. A push must never cancel the
+  # validation of an earlier merge: the delivery model requires trusted evidence
+  # for that exact merge SHA, and a cancelled run leaves it permanently without.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
