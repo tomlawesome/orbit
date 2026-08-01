@@ -27,13 +27,13 @@ describe("planning governance", () => {
     expect(isProtectedPlanningPath("src/server/example.ts")).toBe(false);
   });
 
-  it("accepts an exact, standalone attestation from any planning authority", () => {
+  it("accepts exactly one standalone attestation from Sol or a human owner", () => {
     expect(hasPlanningAttestation("Planning-Model: Sol Extra High")).toBe(true);
-    expect(hasPlanningAttestation("Planning-Model: Claude Opus Extra High")).toBe(true);
     expect(hasPlanningAttestation("Planning-Model: Human")).toBe(true);
   });
 
-  it("rejects implementation-tier, unknown, and non-standalone attestations", () => {
+  it("rejects Claude, implementation-tier, unknown, and non-standalone attestations", () => {
+    expect(hasPlanningAttestation("Planning-Model: Claude Opus Extra High")).toBe(false);
     expect(hasPlanningAttestation("Planning-Model: Luna Extra High")).toBe(false);
     expect(hasPlanningAttestation("Planning-Model: Claude Sonnet Extra High")).toBe(false);
     expect(hasPlanningAttestation("Planning-Model: Not applicable")).toBe(false);
@@ -42,7 +42,30 @@ describe("planning governance", () => {
     expect(hasPlanningAttestation(null)).toBe(false);
   });
 
-  it("reports which attestation satisfied the gate", () => {
+  it("rejects duplicate and conflicting accepted attestations", () => {
+    expect(
+      hasPlanningAttestation(
+        "Planning-Model: Sol Extra High\nPlanning-Model: Sol Extra High",
+      ),
+    ).toBe(false);
+    expect(
+      hasPlanningAttestation(
+        "Planning-Model: Sol Extra High\nPlanning-Model: Human",
+      ),
+    ).toBe(false);
+    expect(
+      matchedPlanningAttestation(
+        "Planning-Model: Human\nPlanning-Model: Human",
+      ),
+    ).toBe(null);
+    expect(
+      hasPlanningAttestation(
+        "Planning-Model: Sol Extra High\nPlanning-Model: Not applicable",
+      ),
+    ).toBe(false);
+  });
+
+  it("reports the sole attestation that satisfied the gate", () => {
     expect(matchedPlanningAttestation("intro\nPlanning-Model: Human\noutro"))
       .toBe("Planning-Model: Human");
     expect(matchedPlanningAttestation("Planning-Model: Terra Medium")).toBe(null);
