@@ -1,40 +1,129 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
-/**
- * Paths that provably cannot alter runtime behaviour, the container image, or
- * any validated journey.
- *
- * This is deliberately an allowlist. Anything not matched here — including any
- * path added in future — is treated as executable and runs the full validation
- * set, so the failure mode of an incomplete list is wasted time, never skipped
- * validation.
- *
- * Workflow files are absent on purpose: a change to CI must validate itself.
- */
-const nonExecutablePatterns = [
+export const CI_RISK = Object.freeze({
+  FAST: "fast",
+  INTEGRATION: "integration",
+  SYSTEM: "system",
+});
+
+const riskRank = new Map([
+  [CI_RISK.FAST, 0],
+  [CI_RISK.INTEGRATION, 1],
+  [CI_RISK.SYSTEM, 2],
+]);
+
+const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"]);
+
+const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
   /^\.github\/pull_request_template\.md$/u,
+  /^\.github\/(?:orchestration-governance|planning-governance|supply-chain-policy)\.json$/u,
+  /^\.github\/dependency-review-config\.yml$/u,
   /^[^/]+\.md$/u,
   /^\.gitignore$/u,
   /^LICENSE$/u,
+  /^scripts\/(?:check-(?:orchestration|planning)-governance|supply-chain-policy|stable-promotion-policy)(?:\.test)?\.mjs$/u,
+  /^scripts\/[^/]*(?:policy|workflow)\.test\.mjs$/u,
+  /^src\/.*\.test\.[cm]?[jt]sx?$/u,
 ];
 
-export function isNonExecutablePath(path) {
-  const normalized = String(path).replaceAll("\\", "/").trim();
-  if (normalized.length === 0) return true;
-  return nonExecutablePatterns.some((pattern) => pattern.test(normalized));
+const systemPatterns = [
+  /^\.github\/workflows\//u,
+  /^Dockerfile$/u,
+  /^docker-compose(?:\.[^/]+)?\.ya?ml$/u,
+  /^config\//u,
+  /^package\.json$/u,
+  /^playwright\.config\.[cm]?[jt]s$/u,
+  /^public\//u,
+  /^drizzle\//u,
+  /^tests\/e2e\//u,
+  /^src\/instrumentation(?:\.test)?\.[cm]?[jt]s$/u,
+  /^src\/app\/api\/(?:auth|admin|documents?|health|imap|portable-archives|push)(?:\/|$)/u,
+  /^src\/app\/(?!api\/)/u,
+  /^src\/components\//u,
+  /^src\/lib\/(?:auth|env|notifications|offline-policy|preview-workspace|runtime-secret|private-browser-storage)(?:[./-]|$)/u,
+  /^src\/server\/(?:document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
+  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|prepare-standalone|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start)\.[^.]+$/u,
+];
+
+const integrationPatterns = [
+  /^src\/app\/api\//u,
+  /^src\/(?:db|lib|server)\//u,
+  /^tests\/integration\//u,
+  /^scripts\/test-integration\.mjs$/u,
+];
+
+function normalizePath(path) {
+  return String(path ?? "").replaceAll("\\", "/").trim();
 }
 
+function matchesAny(path, patterns) {
+  return patterns.some((pattern) => pattern.test(path));
+}
+
+/**
+ * Returns the cheapest lane that still exercises the boundary affected by a
+ * single path. Classification is deliberately allowlisted: unknown paths and
+ * dependency snapshots without a proven production-graph comparison run the
+ * broad exact-image system lane.
+ */
+export function pathRisk(path, { productionDependencyGraphChanged } = {}) {
+  const normalized = normalizePath(path);
+  if (normalized.length === 0) return CI_RISK.SYSTEM;
+
+  if (dependencySnapshotPaths.has(normalized)) {
+    return productionDependencyGraphChanged === false ? CI_RISK.FAST : CI_RISK.SYSTEM;
+  }
+  if (matchesAny(normalized, fastPatterns)) return CI_RISK.FAST;
+  if (matchesAny(normalized, systemPatterns)) return CI_RISK.SYSTEM;
+  if (matchesAny(normalized, integrationPatterns)) return CI_RISK.INTEGRATION;
+  return CI_RISK.SYSTEM;
+}
+
+export function classifyCiRisk(changedPaths, options = {}) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return CI_RISK.SYSTEM;
+
+  let selected = CI_RISK.FAST;
+  for (const path of changedPaths) {
+    const candidate = pathRisk(path, options);
+    if (riskRank.get(candidate) > riskRank.get(selected)) selected = candidate;
+  }
+  return selected;
+}
+
+export function ciRequirements(changedPaths, options = {}) {
+  const risk = classifyCiRisk(changedPaths, options);
+  const dependencySnapshotChanged = Array.isArray(changedPaths)
+    && changedPaths.some((path) => dependencySnapshotPaths.has(normalizePath(path)));
+  return {
+    risk,
+    build: risk !== CI_RISK.FAST || dependencySnapshotChanged,
+    integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
+    system: risk === CI_RISK.SYSTEM,
+  };
+}
+
+/** Compatibility helper retained for existing callers and tests. */
+export function isNonExecutablePath(path) {
+  return pathRisk(path, { productionDependencyGraphChanged: false }) === CI_RISK.FAST;
+}
+
+/** Compatibility helper retained for existing callers and tests. */
 export function requiresExecutableValidation(changedPaths) {
-  // An empty diff is treated as executable: it means the comparison produced
-  // nothing usable, which is not evidence that the change is inert.
-  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
-  return changedPaths.some((path) => !isNonExecutablePath(path));
+  return classifyCiRisk(changedPaths) !== CI_RISK.FAST;
 }
 
 function changedFilesFromGit(base, head) {
@@ -47,34 +136,117 @@ function changedFilesFromGit(base, head) {
     .filter(Boolean);
 }
 
+function assertCommitSha(value, name) {
+  if (!/^[0-9a-f]{40}$/u.test(value ?? "")) {
+    throw new Error(`${name} is not an exact commit SHA`);
+  }
+}
+
+function writeSnapshotFile(ref, path, targetRoot) {
+  const content = execFileSync("git", ["show", `${ref}:${path}`], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
+  const target = join(targetRoot, path);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content, { encoding: "utf8", mode: 0o600 });
+}
+
+function productionGraphAt(ref) {
+  const snapshotRoot = mkdtempSync(join(tmpdir(), "orbit-production-graph-"));
+  try {
+    for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+      writeSnapshotFile(ref, path, snapshotRoot);
+    }
+    const output = execFileSync(
+      "pnpm",
+      ["list", "--prod", "--depth", "Infinity", "--json", "--lockfile-only", "--dir", snapshotRoot],
+      {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        env: { ...process.env, CI: "true", NO_COLOR: "1" },
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    const graph = JSON.parse(output);
+    const identities = new Set();
+
+    function collect(value) {
+      if (Array.isArray(value)) {
+        for (const entry of value) collect(entry);
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+      if (typeof value.from === "string" && typeof value.version === "string") {
+        identities.add(`${value.from}@${value.version}|${value.resolved ?? ""}`);
+      }
+      for (const child of Object.values(value)) collect(child);
+    }
+
+    collect(graph);
+    return [...identities].sort();
+  } finally {
+    rmSync(snapshotRoot, { recursive: true, force: true });
+  }
+}
+
+export function productionDependencyGraphChanged(base, head) {
+  assertCommitSha(base, "ORBIT_BASE_SHA");
+  assertCommitSha(head, "ORBIT_HEAD_SHA");
+  const baseGraph = productionGraphAt(base);
+  const headGraph = productionGraphAt(head);
+  return JSON.stringify(baseGraph) !== JSON.stringify(headGraph);
+}
+
 function main() {
   const base = process.env.ORBIT_BASE_SHA;
   const head = process.env.ORBIT_HEAD_SHA;
 
-  let executable = true;
+  let risk = CI_RISK.SYSTEM;
   let reason = "no pull-request comparison available";
+  let changedPaths = [];
+  let graphChanged;
 
   if (base && head) {
     try {
-      const changedPaths = changedFilesFromGit(base, head);
-      executable = requiresExecutableValidation(changedPaths);
-      reason = executable
-        ? "an executable path changed"
-        : `only non-executable paths changed (${changedPaths.length})`;
+      assertCommitSha(base, "ORBIT_BASE_SHA");
+      assertCommitSha(head, "ORBIT_HEAD_SHA");
+      changedPaths = changedFilesFromGit(base, head);
+      if (changedPaths.some((path) => dependencySnapshotPaths.has(normalizePath(path)))) {
+        graphChanged = productionDependencyGraphChanged(base, head);
+      }
+      risk = classifyCiRisk(changedPaths, { productionDependencyGraphChanged: graphChanged });
+      reason = `${changedPaths.length} changed path(s)`;
       for (const path of changedPaths) {
-        console.log(`${isNonExecutablePath(path) ? "skip" : "run "} ${path}`);
+        console.log(`${pathRisk(path, { productionDependencyGraphChanged: graphChanged }).padEnd(11)} ${path}`);
       }
     } catch (error) {
-      // Fail safe: an unreadable comparison must never skip validation.
-      executable = true;
-      reason = "the change comparison could not be read";
-      console.error(`Path classification fell back to full validation: ${String(error?.message ?? error)}`);
+      risk = CI_RISK.SYSTEM;
+      reason = "the change comparison or dependency graph could not be proven";
+      console.error(`CI risk classification fell back to system validation: ${String(error?.message ?? error)}`);
     }
   }
 
-  console.log(`Path classification: executable=${executable} (${reason}).`);
+  const requirements = ciRequirements(changedPaths, {
+    productionDependencyGraphChanged: graphChanged,
+  });
+  // A comparison failure above leaves risk at system even if changedPaths is
+  // empty, so preserve that fail-safe result instead of recomputing it.
+  const build = risk === CI_RISK.SYSTEM || requirements.build;
+  const integration = risk === CI_RISK.SYSTEM || requirements.integration;
+  const system = risk === CI_RISK.SYSTEM || requirements.system;
+  console.log(
+    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} (${reason}).`,
+  );
+  if (graphChanged !== undefined) {
+    console.log(`Production dependency graph changed: ${graphChanged}.`);
+  }
+
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `executable=${executable}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `risk=${risk}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `build=${build}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
   }
 }
 
