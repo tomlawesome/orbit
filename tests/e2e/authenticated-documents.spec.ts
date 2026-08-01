@@ -298,8 +298,8 @@ test.describe("authenticated document lifecycle", () => {
       await itemCard.locator(".item-main").click();
 
       const dropZone = page.getByTestId("document-dropzone");
-      const pickerSurface = dropZone.getByRole("button", { name: "Add files", exact: true });
-      const cameraButton = dropZone.getByRole("button", { name: "Take photo", exact: true });
+      const pickerSurface = dropZone.locator("button.document-picker-surface");
+      const cameraButton = dropZone.locator("button.document-camera");
       const fileInputs = dropZone.locator('input[type="file"]');
       const primaryInput = fileInputs.nth(0);
       const cameraInput = fileInputs.nth(1);
