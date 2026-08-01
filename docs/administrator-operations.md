@@ -142,14 +142,16 @@ Run guided setup once from the persistent deployment directory, then check the
 configuration before every first start or material provider change:
 
 ```sh
+bash scripts/configure.sh
 bash scripts/configure.sh --init
 bash scripts/configure.sh --check
 ```
 
-Guided setup atomically records the public HTTPS Orbit origin, complete OIDC
+The first command is the non-interactive bootstrap and upgrade path: it creates
+missing generated secrets and preserves existing operator settings. Guided
+setup then atomically records the public HTTPS Orbit origin, complete OIDC
 issuer, client ID, and derived callback URL. It does not collect provider
-credentials. Plain `bash scripts/configure.sh` remains the non-interactive
-installer and upgrade path and preserves existing operator settings.
+credentials.
 
 The readiness check validates required settings, direct-versus-file secret
 ambiguity, and partially configured optional groups. Its output contains only

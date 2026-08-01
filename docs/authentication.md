@@ -17,12 +17,15 @@ In the Authentik Admin interface:
 Run the guided configuration from the persistent deployment directory:
 
 ```sh
+bash scripts/configure.sh
 bash scripts/configure.sh --init
 bash scripts/configure.sh --check
 ```
 
-Guided setup asks for the public Orbit origin, the provider's complete issuer
-URL, and the client ID. It derives the callback URL and writes all four values
+The plain command safely bootstraps any missing installer-managed files and is
+idempotent on an existing deployment. Guided setup asks for the public Orbit
+origin, the provider's complete issuer URL, and the client ID. It derives the
+callback URL and writes all four values
 atomically. It deliberately does not collect a client secret. Add that secret
 with a private local editor, never as a shell argument or chat message, and
 keep `.env-orbit` mode `0600`. The resulting production settings have this
