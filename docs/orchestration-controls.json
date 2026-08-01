@@ -130,6 +130,20 @@
       "issue": 132,
       "pullRequest": 136,
       "approvedByModel": "Claude Opus Extra High"
+    },
+    {
+      "id": "ORCH-010",
+      "status": "adopted",
+      "decisionClass": "protected_planning",
+      "summary": "Investigate a delivery failure as a fault class: identify the shape of the mistake, sweep the whole change for other instances, and correct them together rather than one validation cycle at a time.",
+      "automaticPromotion": false,
+      "evidence": [
+        "Pull request 155 failed four times across five validation cycles on one fault class: changing an element's role or context while leaving everything that assumed the old one in place. A single sweep after the first failure would have found all four.",
+        "Issue 146 had three defects corrected one at a time, including a hypothesis that proved wrong and removed working behaviour before the real cause was found."
+      ],
+      "issue": 158,
+      "pullRequest": 159,
+      "approvedByModel": "Claude Opus Extra High"
     }
   ]
 }
