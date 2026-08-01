@@ -173,35 +173,28 @@ test.describe("administrator operations evidence", () => {
     let journeyFailed = false;
     try {
       createdHousehold = await ensureSyntheticHousehold(page);
-      const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
-      if (await mobileNavigation.isVisible()) {
-        await mobileNavigation.click();
-        await page.getByRole("button", { name: "Personalise", exact: true }).click();
-      } else {
-        await page.getByRole("button", { name: "Open personalisation settings" }).click();
-      }
-      const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
-      await expect(settings).toBeVisible();
-      await settings.getByRole("tab", { name: "Admin" }).click();
-      await expect(settings.getByRole("heading", { name: "Operations" })).toBeVisible();
-      await expect(settings.getByText("provider_unavailable", { exact: true })).toBeVisible();
-      await expect(settings.getByText("Household ownership transferred", { exact: true })).toHaveCount(25);
-      await expect(settings.getByText("synthetic-secret-must-not-render", { exact: true })).toHaveCount(0);
-      await expect(settings.getByText("synthetic-key-id", { exact: true })).toHaveCount(0);
+      await page.goto("/admin");
+      const administration = page.locator(".admin-page");
+      await expect(administration).toBeVisible();
+      await expect(administration.getByRole("heading", { name: "Operations" })).toBeVisible();
+      await expect(administration.getByText("provider_unavailable", { exact: true })).toBeVisible();
+      await expect(administration.getByText("Household ownership transferred", { exact: true })).toHaveCount(25);
+      await expect(administration.getByText("synthetic-secret-must-not-render", { exact: true })).toHaveCount(0);
+      await expect(administration.getByText("synthetic-key-id", { exact: true })).toHaveCount(0);
 
       page.once("dialog", async (dialog) => {
         expect(dialog.message()).toContain("duplicate");
         await dialog.accept();
       });
-      await settings.getByRole("button", { name: "Retry", exact: true }).click();
+      await administration.getByRole("button", { name: "Retry", exact: true }).click();
       await expect(page.getByText("Job queued for retry.", { exact: true })).toBeVisible();
-      await expect(settings.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      await expect(administration.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
       await expect(page.locator("body")).not.toContainText("synthetic-secret-must-not-render");
       await expect(page.locator("body")).not.toContainText("synthetic-key-id");
 
-      await settings.getByRole("button", { name: "Load older history" }).click();
-      await expect(settings.getByText("Account disabled", { exact: true })).toBeVisible();
-      await expect(settings.getByRole("button", { name: "Load older history" })).toHaveCount(0);
+      await administration.getByRole("button", { name: "Load older history" }).click();
+      await expect(administration.getByText("Account disabled", { exact: true })).toBeVisible();
+      await expect(administration.getByRole("button", { name: "Load older history" })).toHaveCount(0);
     } catch (error) {
       journeyFailed = true;
       throw error;
