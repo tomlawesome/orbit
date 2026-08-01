@@ -43,6 +43,13 @@ dependent work:
 6. fail closed before dependent implementation starts or advances when no
    authenticated pull-request and protected-merge path is available.
 
+Before classifying a protected-merge failure as a connector or credential
+failure, prove whether the target branch is an ancestor of the pull-request
+head and read the current merge state. A non-ancestor head is
+`branch_out_of_date`: update it from the accepted target and revalidate. A
+merge error alone is not access evidence and must not trigger a request for new
+or broader authentication.
+
 Repository ownership, an administrator label, a public read, installed
 connector files or successful SSH fetch do not prove issue, pull-request,
 Actions or protected-merge write authority. A successful write endpoint or a
