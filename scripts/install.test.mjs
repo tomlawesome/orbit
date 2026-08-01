@@ -202,45 +202,46 @@ function makeFullExistingDeployment(targetDir) {
 }
 
 function snapshotPath(path) {
-  let stats;
+  let descriptor;
   try {
-    stats = lstatSync(path);
+    // Open before inspecting. Subsequent file reads use this descriptor, so a
+    // pathname replacement cannot redirect the snapshot after a type check.
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
     if (error.code === "ENOENT") {
       return null;
     }
+    if (error.code === "ELOOP") {
+      const target = readlinkSync(path);
+      const linkStats = lstatSync(path);
+      return { mode: linkStats.mode & 0o7777, type: "symlink", target };
+    }
     throw error;
   }
-  const snapshot = { mode: stats.mode & 0o7777 };
-  if (stats.isSymbolicLink()) {
-    return { ...snapshot, type: "symlink", target: readlinkSync(path) };
-  }
-  if (stats.isDirectory()) {
-    return {
-      ...snapshot,
-      type: "directory",
-      entries: readdirSync(path)
-        .sort()
-        .map((entry) => [entry, snapshotPath(join(path, entry))]),
-    };
-  }
-  if (stats.isFile()) {
-    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const openedStats = fstatSync(descriptor);
-      if (!openedStats.isFile()) {
-        return { mode: openedStats.mode & 0o7777, type: "other" };
-      }
+
+  try {
+    const stats = fstatSync(descriptor);
+    const snapshot = { mode: stats.mode & 0o7777 };
+    if (stats.isDirectory()) {
       return {
-        mode: openedStats.mode & 0o7777,
+        ...snapshot,
+        type: "directory",
+        entries: readdirSync(path)
+          .sort()
+          .map((entry) => [entry, snapshotPath(join(path, entry))]),
+      };
+    }
+    if (stats.isFile()) {
+      return {
+        ...snapshot,
         type: "file",
         content: readFileSync(descriptor, "utf8"),
       };
-    } finally {
-      closeSync(descriptor);
     }
+    return { ...snapshot, type: "other" };
+  } finally {
+    closeSync(descriptor);
   }
-  return { ...snapshot, type: "other" };
 }
 
 function managedSnapshot(targetDir) {
@@ -256,6 +257,15 @@ function targetEntries(targetDir) {
 
 function stagingLeftovers(targetDir) {
   return readdirSync(targetDir).filter((name) => name.startsWith(".orbit-install-staging"));
+}
+
+function readOptionalFile(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
 }
 
 function runInstall(targetDir, envOverrides = {}) {
@@ -278,7 +288,7 @@ function runInstall(targetDir, envOverrides = {}) {
       ...envOverrides,
     },
   });
-  const calls = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+  const calls = readOptionalFile(logPath);
   return { ...result, calls };
 }
 
