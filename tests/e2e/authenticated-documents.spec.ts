@@ -284,4 +284,62 @@ test.describe("authenticated document lifecycle", () => {
       }
     }
   });
+
+  test("opens the full picker surface from pointer and keyboard while keeping camera capture separate", async ({ page }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+
+    await signIn(page, administrator);
+    const workspace = newDisposableWorkspace();
+    let journeyFailed = false;
+    try {
+      await createDisposableWorkspace(page, workspace);
+      await page.goto("/");
+      const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
+      await itemCard.locator(".item-main").click();
+
+      const dropZone = page.getByTestId("document-dropzone");
+      const pickerSurface = dropZone.locator("button.document-picker-surface");
+      const cameraButton = dropZone.locator("button.document-camera");
+      const fileInputs = dropZone.locator('input[type="file"]');
+      const primaryInput = fileInputs.nth(0);
+      const cameraInput = fileInputs.nth(1);
+
+      await expect(pickerSurface).toBeVisible();
+      await expect(cameraButton).toBeVisible();
+      await pickerSurface.focus();
+      await expect(pickerSurface).toBeFocused();
+      await expect(primaryInput).toHaveAccessibleName("Add files");
+      await expect(primaryInput).toHaveAttribute("multiple", "");
+      await expect(primaryInput).toHaveAttribute("accept", "application/pdf,image/jpeg,image/png");
+      await expect(cameraInput).toHaveAccessibleName("Take photo");
+      await expect(cameraInput).toHaveAttribute("capture", "environment");
+      await expect(pickerSurface.locator("button, input, select, textarea, a")).toHaveCount(0);
+
+      async function expectGeneralPicker(trigger: () => Promise<void>) {
+        const [chooser] = await Promise.all([page.waitForEvent("filechooser"), trigger()]);
+        expect(chooser.isMultiple()).toBe(true);
+        expect(await chooser.element().getAttribute("accept")).toBe("application/pdf,image/jpeg,image/png");
+        expect(await chooser.element().getAttribute("capture")).toBeNull();
+      }
+
+      // The blank part of the primary surface is still the picker target.
+      await expectGeneralPicker(() => pickerSurface.click({ position: { x: 8, y: 8 } }));
+      await expectGeneralPicker(() => pickerSurface.press("Enter"));
+      await expectGeneralPicker(() => pickerSurface.press("Space"));
+
+      const [cameraChooser] = await Promise.all([page.waitForEvent("filechooser"), cameraButton.click()]);
+      expect(cameraChooser.isMultiple()).toBe(false);
+      expect(await cameraChooser.element().getAttribute("accept")).toBe("image/jpeg,image/png");
+      expect(await cameraChooser.element().getAttribute("capture")).toBe("environment");
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
+    } finally {
+      try {
+        await cleanupDisposableWorkspace(page, workspace);
+      } catch (cleanupError) {
+        if (!journeyFailed) throw cleanupError;
+      }
+    }
+  });
 });
