@@ -48,9 +48,11 @@ export type DocumentContentOperation = "summary" | "download" | "draft" | "resto
 /**
  * The single content-readiness boundary for document operations.
  *
- * Scan mode is intentionally required and unknown values fail closed. The
- * operation also supplies its own lifecycle boundary: content reads and draft
- * creation require `available`, while restore is only valid during retention.
+ * A genuinely `clean` scan is always ready. `skipped` is ready only when the
+ * runtime scan mode is explicitly `disabled`; any other or unknown scan mode
+ * value must not authorize a `skipped` scan status. The operation also
+ * supplies its own lifecycle boundary: content reads and draft creation
+ * require `available`, while restore is only valid during retention.
  */
 export function isDocumentContentReady(
   record: { lifecycle: string; scanStatus: string },
