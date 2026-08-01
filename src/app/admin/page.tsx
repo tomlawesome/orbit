@@ -49,9 +49,13 @@ export default function AdminPage() {
   return (
     <main className="admin-page">
       <div className="admin-page-inner">
+        {/* This heading must not contain, or be contained by, any heading
+            rendered inside AdminManager. Playwright matches accessible names by
+            substring, so an overlap makes every existing administration
+            assertion ambiguous. Guarded by admin-page-headings.test.mjs. */}
         <header className="admin-page-header">
           <p>Administration</p>
-          <h1>Instance operations</h1>
+          <h1>Manage this Orbit instance</h1>
         </header>
         <AdminManager session={session} />
         <Link className="admin-page-back" href="/">Return to Orbit</Link>
