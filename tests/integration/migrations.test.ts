@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BASELINE_MIGRATION_TAG,
@@ -8,6 +9,7 @@ import {
   EXPECTED_TABLE_COLUMNS,
   createBaselineMigrationDirectory,
   createInvalidMigrationDirectory,
+  createMigrationDirectoryThroughTag,
   createMigrationTestDatabase,
   loadMigrationFixture,
   readAppliedMigrationHashes,
@@ -19,6 +21,26 @@ import {
   runMigrationsWithActionableError,
   verifyMigrationPrefix,
 } from "./support/migration-fixture";
+
+type MigrationTestClient = Awaited<ReturnType<typeof createMigrationTestDatabase>>["client"];
+
+async function insertFixtureHousehold(client: MigrationTestClient, id: string): Promise<void> {
+  await client.unsafe(`INSERT INTO "households" (id, name) VALUES ($1, $2)`, [id, "Synthetic readiness household"]);
+}
+
+async function insertFixtureDocument(client: MigrationTestClient, params: {
+  householdId: string;
+  lifecycle: string;
+  scanStatus: string;
+  displayName: string;
+  contentSha256: string;
+}): Promise<void> {
+  await client.unsafe(
+    `INSERT INTO "documents" ("household_id", "display_name", "media_type", "size_bytes", "content_sha256", "lifecycle", "scan_status")
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [params.householdId, params.displayName, "application/pdf", 128, params.contentSha256, params.lifecycle, params.scanStatus],
+  );
+}
 
 const databases: Array<Awaited<ReturnType<typeof createMigrationTestDatabase>>> = [];
 const temporaryDirectories: Array<{ cleanup(): Promise<void> }> = [];
@@ -133,5 +155,112 @@ describe("PostgreSQL migration evidence", () => {
     expect((failure as Error).message.length).toBeLessThan(500);
     expect((failure as Error).message).not.toContain("fixture-document");
     expect(await readAppliedMigrationHashes(database.client)).toEqual(beforeFailure);
+  });
+
+  it("installs the document readiness invariant and enforces it for openable lifecycles", async () => {
+    const database = await createMigrationTestDatabase("readiness");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const [constraintRow] = await database.client.unsafe(`
+      SELECT pg_get_constraintdef(c.oid) AS definition
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE c.conname = 'document_openable_scan_status_valid' AND t.relname = 'documents'
+    `);
+    expect(constraintRow?.definition).toContain("lifecycle");
+    expect(constraintRow?.definition).toContain("scan_status");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+
+    const rejectedCombinations = [
+      { lifecycle: "available", scanStatus: "pending" },
+      { lifecycle: "available", scanStatus: "error" },
+      { lifecycle: "available", scanStatus: "infected" },
+      { lifecycle: "pending_deletion", scanStatus: "pending" },
+      { lifecycle: "pending_deletion", scanStatus: "error" },
+      { lifecycle: "pending_deletion", scanStatus: "infected" },
+    ];
+    for (const [index, combination] of rejectedCombinations.entries()) {
+      await expect(insertFixtureDocument(database.client, {
+        householdId,
+        ...combination,
+        displayName: `fixture-rejected-${index}.pdf`,
+        contentSha256: `${index}`.repeat(64).slice(0, 64),
+      })).rejects.toThrow(/document_openable_scan_status_valid/);
+    }
+
+    const acceptedCombinations = [
+      { lifecycle: "available", scanStatus: "clean" },
+      { lifecycle: "available", scanStatus: "skipped" },
+      { lifecycle: "receiving", scanStatus: "pending" },
+    ];
+    for (const [index, combination] of acceptedCombinations.entries()) {
+      await expect(insertFixtureDocument(database.client, {
+        householdId,
+        ...combination,
+        displayName: `fixture-accepted-${index}.pdf`,
+        contentSha256: `a${index}`.repeat(32).slice(0, 64),
+      })).resolves.toBeUndefined();
+    }
+  });
+
+  it("stops the readiness migration before touching an existing unsafe row, without exposing document data", async () => {
+    const database = await createMigrationTestDatabase("readiness-legacy");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0021_imap_notification_deliveries");
+    temporaryDirectories.push(throughTagDirectory);
+
+    await runMigrations(database.url, throughTagDirectory.path);
+    const beforeAttempt = await readAppliedMigrationHashes(database.client);
+
+    const householdId = randomUUID();
+    const legacyDisplayName = "fixture-legacy-unsafe-document.pdf";
+    const legacyHash = "9".repeat(64);
+    await insertFixtureHousehold(database.client, householdId);
+    await insertFixtureDocument(database.client, {
+      householdId,
+      lifecycle: "available",
+      scanStatus: "pending",
+      displayName: legacyDisplayName,
+      contentSha256: legacyHash,
+    });
+
+    let failure: unknown;
+    try {
+      await runMigrationsWithActionableError(database.url, "drizzle");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toMatch(/Migration 0022_document_readiness_invariant failed:/);
+    expect(message).toContain("document_openable_scan_status_valid");
+    expect(message).toContain("1 row");
+    expect(message.length).toBeLessThan(500);
+    expect(message).not.toContain(legacyDisplayName);
+    expect(message).not.toContain(legacyHash);
+
+    expect(await readAppliedMigrationHashes(database.client)).toEqual(beforeAttempt);
+    const [constraintRow] = await database.client.unsafe(`
+      SELECT c.conname
+      FROM pg_constraint c
+      JOIN pg_class t ON t.oid = c.conrelid
+      WHERE c.conname = 'document_openable_scan_status_valid' AND t.relname = 'documents'
+    `);
+    expect(constraintRow).toBeUndefined();
+
+    const legacyRows = await database.client.unsafe(
+      `SELECT "lifecycle", "scan_status", "display_name", "content_sha256" FROM "documents" WHERE "household_id" = $1`,
+      [householdId],
+    );
+    expect(legacyRows).toEqual([{
+      lifecycle: "available",
+      scan_status: "pending",
+      display_name: legacyDisplayName,
+      content_sha256: legacyHash,
+    }]);
   });
 });
