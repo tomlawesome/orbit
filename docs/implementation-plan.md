@@ -164,8 +164,8 @@ evidence in GitHub.
 
 ### Wave 2 — core authenticated vertical journeys
 
-The first implementation phase may run three disjoint Luna Extra High tasks in
-isolated worktrees:
+The first implementation phase used three disjoint Luna Extra High tasks in
+isolated worktrees under the governance then in force:
 
 - #40 owns item state transitions, persistence and the authenticated manual
   item journey;

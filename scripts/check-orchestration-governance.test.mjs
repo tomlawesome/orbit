@@ -786,14 +786,21 @@ describe("orchestration governance", () => {
       new URL("../docs/implementation-plan.md", import.meta.url),
       "utf8",
     );
+    const deliveryAdr = readFileSync(
+      new URL("../docs/adr/0002-evidence-driven-delivery.md", import.meta.url),
+      "utf8",
+    );
     const template = readFileSync(
       new URL("../.github/pull_request_template.md", import.meta.url),
       "utf8",
     );
-    const combined = `${agents}\n${runbook}\n${implementationPlan}\n${template}`;
+    const combined = `${agents}\n${runbook}\n${implementationPlan}\n${deliveryAdr}\n${template}`;
 
     expect(combined).not.toMatch(/peer agent pipeline|equivalent authority tiers/iu);
     expect(combined).not.toContain("Planning-Model: Claude Opus Extra High");
+    expect(combined).not.toMatch(/implementation subagents default to Luna Extra High/iu);
+    expect(implementationPlan).not.toContain("may run three disjoint Luna Extra High tasks");
+    expect(deliveryAdr).toContain("ADR-0009");
     expect(agents).toContain("sole automated orchestration");
     expect(agents).toContain("Claude Haiku");
     expect(agents).toContain("Claude Sonnet");
