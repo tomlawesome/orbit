@@ -16,7 +16,7 @@
     "AGENTS.md",
     "Dockerfile",
     "docker-compose.acceptance.yml",
-    "docker-compose.full.yml",
+    "docker-compose.build.yml",
     "docker-compose.mail-alias-rotation.yml",
     "docker-compose.mail.yml",
     "docker-compose.yml",

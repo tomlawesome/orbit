@@ -224,6 +224,24 @@ export function validateOrchestrationPolicy(policy) {
     access.rejectOwnershipOrPublicReadAsWriteProof === true,
     "repository ownership or public reads must not prove write capability.",
   );
+  const mergeDiagnosis = access.mergeFailureDiagnosis;
+  assert(isObject(mergeDiagnosis), "protected-merge failure diagnosis policy is required.");
+  assert(
+    hasExactStrings(mergeDiagnosis.requiredEvidence, ["target_head_ancestry", "merge_state"]),
+    "protected-merge diagnosis requires exact target/head ancestry and merge-state evidence.",
+  );
+  assert(
+    mergeDiagnosis.nonAncestorClassification === "branch_out_of_date",
+    "a non-ancestor pull-request head must be classified as branch_out_of_date.",
+  );
+  assert(
+    mergeDiagnosis.mergeErrorAloneProvesAccessFailure === false,
+    "a merge error alone must not prove connector or credential failure.",
+  );
+  assert(
+    mergeDiagnosis.credentialRequestAllowedBeforeStateDiagnosis === false,
+    "credential requests must wait for delivery-state diagnosis.",
+  );
   assert(
     access.failClosedBeforeDependentLaunch === true,
     "dependent delivery must fail closed without a protected write path.",

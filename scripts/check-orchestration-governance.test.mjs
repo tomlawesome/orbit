@@ -105,6 +105,12 @@ function validPolicy() {
       writeEvidenceKinds: ["authenticated_write_capability", "endpoint_write_success"],
       rejectInstalledMetadataAsMountProof: true,
       rejectOwnershipOrPublicReadAsWriteProof: true,
+      mergeFailureDiagnosis: {
+        requiredEvidence: ["target_head_ancestry", "merge_state"],
+        nonAncestorClassification: "branch_out_of_date",
+        mergeErrorAloneProvesAccessFailure: false,
+        credentialRequestAllowedBeforeStateDiagnosis: false,
+      },
       failClosedBeforeDependentLaunch: true,
       secretsInChat: false,
     },
@@ -512,6 +518,22 @@ describe("orchestration governance", () => {
     pullRequestWrite.evidenceKind = "repository_owner_or_public_read";
     expect(() => validateOperationalState(state, validPolicy())).toThrow(
       /protected write capability requires authenticated write evidence/u,
+    );
+  });
+
+  it("requires ancestry and merge-state evidence before diagnosing protected-merge access", () => {
+    const policy = validPolicy();
+    policy.remoteAccessPreflight.mergeFailureDiagnosis.requiredEvidence = ["merge_error"];
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /protected-merge diagnosis requires exact target\/head ancestry and merge-state evidence/u,
+    );
+  });
+
+  it("does not let an out-of-date branch trigger a credential request", () => {
+    const policy = validPolicy();
+    policy.remoteAccessPreflight.mergeFailureDiagnosis.credentialRequestAllowedBeforeStateDiagnosis = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /credential requests must wait for delivery-state diagnosis/u,
     );
   });
 

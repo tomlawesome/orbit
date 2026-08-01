@@ -60,6 +60,11 @@ Before any delivery mutation, read and obey
 `.github/orchestration-governance.json`. Run
 `pnpm orchestration:check` when dependencies are available.
 
+Before attributing a protected-merge error to credentials or connector access,
+prove target/head ancestry and read the current merge state. Treat a
+non-ancestor head as an out-of-date delivery branch, and never request new or
+broader authentication from a merge error alone.
+
 Model authority is a preflight gate, not a review-time correction. All
 orchestration—including task launch, monitoring, sequencing, reconciliation,
 blocker classification, handback acceptance and retained-learning
