@@ -286,6 +286,10 @@ test.describe("authenticated household lifecycle", () => {
       await signIn(memberPage, member);
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
+      // Administration is now a route, so the journey must return to the
+      // workspace and reopen settings before using a settings tab again.
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open personalisation settings" }).click();
       await page.getByRole("tab", { name: "Household" }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();
