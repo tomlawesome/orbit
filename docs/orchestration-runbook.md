@@ -52,32 +52,50 @@ authentication material in chat.
 
 All orchestration—including task launch, monitoring, sequencing,
 reconciliation, blocker classification, handback acceptance, delivery
-decisions and retained-learning promotion—is a hard **orchestration tier**
-gate: Sol Extra High under Codex, Claude Opus Extra High under Claude.
+decisions and retained-learning promotion—is a hard **Sol Extra High** gate.
 Protected planning, architecture, security, release, repository-setting,
-product-scope and model-governance work has the same gate. A mechanical-analysis
-tier may read for orientation or perform explicitly bounded analysis outside the
+product-scope and model-governance work has the same gate. Terra may read for
+orientation or perform explicitly bounded mechanical analysis outside the
 orchestration role, but it cannot operate the delivery loop or make status and
-next-action decisions. The active pipeline's implementation tier remains the
-default for bounded implementation and returns control to its orchestration tier
-for review and delivery. A different implementation model requires fresh user
-approval under `AGENTS.md`. Cross-pipeline conduct, including branch namespaces,
-attribution and precedence on shared work, is defined in `AGENTS.md`.
+next-action decisions.
+
+Bounded implementation follows the capability-gated order in `AGENTS.md` and
+`.github/orchestration-governance.json`. The task state records the selected
+provider, exact model, task class, qualification evidence, exact host for local
+Ollama, and an evidenced reason for every cheaper provider skipped. Every
+provider returns control to Sol for review and delivery. Claude Opus-class
+secondary review requires fresh user approval and remains advisory only.
+Correctness, hidden-edge, scope, handback honesty and context-fit evidence
+determine qualification. Cost, latency, resource observations and current
+capacity inform routing. Routine token, price and turn caps are not task or
+capability controls. Detect a genuine stall from task- and model-appropriate
+time to first useful output or time since meaningful progress, and include a
+reasonable benefit-of-the-doubt buffer before intervening. Slow useful work is
+not stalled.
+
+Qualification and tuning stop as soon as a model is satisfactory and never
+exceed five passes for one representative task class. Basic acceptance is
+required by pass three; passes four and five may only fine-tune an already
+acceptable result.
 
 ## Launch receipt and task-state protocol
 
-Task creation is asynchronous. A successful creation response is a launch
-receipt, not proof that the task is already queryable.
+Luna task creation is asynchronous. A successful creation response is a launch
+receipt, not proof that the task is already queryable. Local Ollama, Mistral and
+Claude runs instead use an approved bounded wrapper whose receipt records a
+local run ID; it grants no remote or orchestration authority.
 
-1. Record the requested model, exact base SHA, creation source, timestamp and
-   returned `threadId` or `clientThreadId`.
+1. Record the provider, exact model, task class, qualification evidence, exact
+   base SHA, source and timestamp. A Luna receipt records `threadId` or
+   `clientThreadId`; a wrapper receipt records its bounded `runId`.
 2. Move from `planned` to `launch_pending`.
-3. Resolve a client task to its real task ID through a full task listing.
+3. For Luna, resolve a client task to its real task ID through a full task listing.
    Do not pass a client ID to tools that require a real task ID.
-4. Confirm the task through a full list, direct read or wait response. Record
+4. Confirm Luna through a full list, direct read or wait response. Record
    its real task ID, worktree, status and observation time.
-5. Move to `active` only when that authoritative observation matches the
-   requested model, repository, worktree and accepted base.
+5. Confirm a wrapper run through its bounded status/result channel. Move to
+   `active` only when the authoritative observation matches the provider,
+   model, worktree and accepted base.
 6. Use direct reads only for diagnosis. Use bounded task waits for ordinary
    monitoring and handback.
 
@@ -102,8 +120,7 @@ heartbeat reconciles, in order:
 8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
-`sol_review` is the orchestration-review stage for whichever pipeline is active;
-its identifier is retained for state-machine compatibility. It requires
+`sol_review` is the Sol-owned orchestration-review stage. It requires
 independent diff, test, privacy, credential, dependency and protected-path
 review. `pr_open` requires a pushed short-lived branch and
 linked issue. `merged` requires the exact protected merge SHA, pull request and
