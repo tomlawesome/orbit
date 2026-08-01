@@ -38,8 +38,9 @@ pull request must identify its required `main`/`develop` merge pair.
 Leave the next line unchanged for implementation-only pull requests. If this
 pull request changes a path protected by `.github/planning-governance.json`,
 replace `Not applicable` with the authority that did the planning work:
-`Sol Extra High`, `Claude Opus Extra High`, or `Human` when a human owner
-authored or directed the change. Never attest as an authority that did not do
-the work.
+`Sol Extra High`, or `Human` when a human owner authored or directed the
+change. A protected change must contain exactly one standalone
+`Planning-Model:` line; zero, duplicate, conflicting, unsupported or ambiguous
+attestations fail. Never attest as an authority that did not do the work.
 
 Planning-Model: Not applicable

@@ -42,51 +42,106 @@ export function validateOrchestrationPolicy(policy) {
     isNonEmptyString(policy.humanApprovalIdentifier),
     "humanApprovalIdentifier is required.",
   );
-  assert(isObject(policy.pipelines), "pipelines are required.");
-  const pipelines = Object.entries(policy.pipelines);
-  assert(pipelines.length > 0, "at least one agent pipeline must be declared.");
-  for (const [name, tiers] of pipelines) {
-    assert(isObject(tiers), `pipelines.${name} must be an object.`);
-    for (const role of ["orchestration", "implementation", "mechanicalAnalysis"]) {
-      assert(isNonEmptyString(tiers[role]), `pipelines.${name}.${role} must name a model.`);
-    }
-  }
+  assert(policy.humanApprovalIdentifier === "Human", "human approval identifier must remain Human.");
+  assert(policy.pipelines === undefined, "peer agent pipelines are not permitted.");
   assert(isObject(policy.modelAuthority), "modelAuthority is required.");
-  for (const role of ["orchestration", "protectedPlanning", "implementation", "mechanicalAnalysis"]) {
+  const solOnlyRoles = [
+    "orchestration",
+    "protectedPlanning",
+    "architecture",
+    "security",
+    "deliverySequencing",
+    "integration",
+    "publication",
+    "reconciliation",
+    "release",
+  ];
+  for (const role of [...solOnlyRoles, "implementation", "mechanicalAnalysis"]) {
     assert(
       Array.isArray(policy.modelAuthority[role]) && policy.modelAuthority[role].every(isNonEmptyString),
       `modelAuthority.${role} must be a non-empty string array.`,
     );
   }
-  // Authority is derived from the declared pipelines, so admitting a pipeline is
-  // a data change while authority can never widen to an undeclared model.
-  const tierSets = pipelines.map(([, tiers]) => tiers);
-  const roster = new Set(tierSets.flatMap((tiers) => Object.values(tiers)));
-  for (const role of ["orchestration", "protectedPlanning", "implementation", "mechanicalAnalysis"]) {
+  for (const role of solOnlyRoles) {
     assert(
-      policy.modelAuthority[role].every((model) => roster.has(model)),
-      `modelAuthority.${role} names a model outside the declared pipeline roster.`,
+      hasExactStrings(policy.modelAuthority[role], ["Sol Extra High"]),
+      `${role} must be reserved to Sol Extra High.`,
     );
   }
-  const orchestrationModels = tierSets.map((tiers) => tiers.orchestration);
   assert(
-    hasExactStrings(policy.modelAuthority.orchestration, orchestrationModels),
-    "orchestration must be reserved to each pipeline's declared orchestration model.",
+    hasExactStrings(policy.modelAuthority.implementation, [
+      "Claude Haiku",
+      "Claude Sonnet",
+      "Luna Extra High",
+    ]),
+    "bounded implementation models must be Claude Haiku, Claude Sonnet, and Luna Extra High.",
   );
   assert(
-    hasExactStrings(policy.modelAuthority.protectedPlanning, orchestrationModels),
-    "protected planning must be reserved to each pipeline's declared orchestration model.",
+    hasExactStrings(policy.modelAuthority.mechanicalAnalysis, [
+      "Terra Medium",
+      "Claude Haiku",
+      "Claude Sonnet",
+      "Luna Extra High",
+      "Sol Extra High",
+    ]),
+    "mechanical analysis authority is incomplete.",
   );
+  const delegation = policy.implementationDelegation;
+  assert(isObject(delegation), "implementationDelegation is required.");
   assert(
-    hasExactStrings(
-      policy.modelAuthority.implementation,
-      tierSets.map((tiers) => tiers.implementation),
-    ),
-    "bounded implementation must be reserved to each pipeline's declared implementation model.",
+    delegation.preferredProvider === "claude",
+    "Claude must be the preferred implementation provider.",
   );
+  assert(isObject(delegation.taskClasses), "delegated implementation task classes are required.");
   assert(
-    tierSets.every((tiers) => policy.modelAuthority.mechanicalAnalysis.includes(tiers.mechanicalAnalysis)),
-    "mechanical analysis must authorize each pipeline's declared analysis model.",
+    Object.keys(delegation.taskClasses).length === 2
+      && delegation.taskClasses.mechanical_implementation === "Claude Haiku"
+      && delegation.taskClasses.bounded_implementation === "Claude Sonnet",
+    "delegated implementation must use the least suitable Claude tier for each task class.",
+  );
+  assert(isObject(delegation.fallback), "implementation fallback policy is required.");
+  assert(delegation.fallback.model === "Luna Extra High", "Luna Extra High must be the fallback model.");
+  assert(
+    hasExactStrings(delegation.fallback.allowedReasons, [
+      "claude_unavailable",
+      "claude_capacity_exhausted",
+    ]),
+    "Luna fallback reasons must be limited to Claude unavailability or exhausted capacity.",
+  );
+  const constraints = delegation.constraints;
+  assert(isObject(constraints), "delegated implementation constraints are required.");
+  const prohibitedCapabilities = {
+    protectedPlanningWriteAllowed: "write protected planning",
+    scopeExpansionAllowed: "expand scope",
+    deliveryManagementAllowed: "manage delivery",
+    remoteMutationAllowed: "mutate remote state",
+    credentialsAllowed: "receive credentials",
+    gitAllowed: "use Git",
+    shellAllowed: "use shell tools",
+    browserAllowed: "use browser tools",
+    mcpAllowed: "use MCP tools",
+  };
+  for (const [capability, description] of Object.entries(prohibitedCapabilities)) {
+    assert(
+      constraints[capability] === false,
+      `delegated implementation must not ${description}.`,
+    );
+  }
+  assert(
+    hasExactStrings(constraints.allowedTools, ["Read", "Edit", "Write", "Glob", "Grep"]),
+    "delegated implementation tool allowlist is invalid.",
+  );
+  const advisoryReview = delegation.advisoryReview;
+  assert(isObject(advisoryReview), "advisory review policy is required.");
+  assert(advisoryReview.model === "Claude Opus", "Opus-class advisory model is required.");
+  assert(
+    advisoryReview.freshUserApprovalRequired === true,
+    "Opus review requires fresh task-specific user approval.",
+  );
+  assert(advisoryReview.advisoryOnly === true, "Opus review must remain advisory only.");
+  assert(
+    advisoryReview.authorityTransferAllowed === false,
+    "Opus review must not transfer authority.",
   );
   assert(
     Array.isArray(policy.protectedDecisionClasses)
@@ -96,7 +151,14 @@ export function validateOrchestrationPolicy(policy) {
   );
   assert(
     Array.isArray(policy.taskStatusSources)
-      && ["create_thread", "list_threads_full", "read_thread", "wait_threads"]
+      && [
+        "claude_wrapper",
+        "local_result_handoff",
+        "create_thread",
+        "list_threads_full",
+        "read_thread",
+        "wait_threads",
+      ]
         .every((source) => policy.taskStatusSources.includes(source)),
     "task status sources are incomplete.",
   );
@@ -233,14 +295,53 @@ function validateActor(actor, policy) {
 function validateLaunchReceipt(receipt, policy, requestedModel, baseSha) {
   assert(isObject(receipt), "task launch receipt is required.");
   assert(policy.taskStatusSources.includes(receipt.source), "unknown launch receipt source.");
-  assert(receipt.source === "create_thread", "task launch receipts must come from create_thread.");
   assert(
-    isNonEmptyString(receipt.threadId) || isNonEmptyString(receipt.clientThreadId),
-    "task launch receipt requires threadId or clientThreadId.",
+    ["create_thread", "claude_wrapper"].includes(receipt.source),
+    "task launch receipt source is invalid.",
   );
+  if (receipt.source === "create_thread") {
+    assert(
+      isNonEmptyString(receipt.threadId) || isNonEmptyString(receipt.clientThreadId),
+      "Codex task launch receipt requires threadId or clientThreadId.",
+    );
+  } else {
+    assert(isNonEmptyString(receipt.localTaskId), "Claude wrapper receipt requires localTaskId.");
+  }
   assert(receipt.requestedModel === requestedModel, "launch receipt model does not match requested model.");
   assert(receipt.baseSha === baseSha, "launch receipt base does not match accepted delivery base.");
   assert(isTimestamp(receipt.observedAt), "task launch receipt requires an observation timestamp.");
+}
+
+function validateImplementationSelection(task, policy) {
+  const delegation = policy.implementationDelegation;
+  assert(
+    Object.hasOwn(delegation.taskClasses, task.taskClass),
+    "delegated task requires a recognized implementation task class.",
+  );
+  if (task.requestedModel === delegation.fallback.model) {
+    assert(
+      delegation.fallback.allowedReasons.includes(task.fallbackReason),
+      "Luna fallback requires an allowed reason proving Claude unavailability or exhausted capacity.",
+    );
+    assert(
+      task.launchReceipt.source === "create_thread",
+      "Luna fallback must use the Codex task launcher.",
+    );
+    return;
+  }
+  const preferredModel = delegation.taskClasses[task.taskClass];
+  assert(
+    task.requestedModel === preferredModel,
+    `${task.taskClass} must use preferred model ${preferredModel}.`,
+  );
+  assert(
+    task.launchReceipt.source === "claude_wrapper",
+    "preferred Claude implementation must use the bounded Claude wrapper.",
+  );
+  assert(
+    task.fallbackReason === undefined,
+    "preferred Claude implementation must not record a fallback reason.",
+  );
 }
 
 function validateAuthoritativeTaskStatus(status, policy) {
@@ -249,6 +350,22 @@ function validateAuthoritativeTaskStatus(status, policy) {
   assert(status.source !== "create_thread", "create_thread is a receipt, not authoritative task status.");
   assert(isNonEmptyString(status.status), "task status is required.");
   assert(isTimestamp(status.observedAt), "task status requires an observation timestamp.");
+}
+
+function validateTaskStatusRoute(task, status, policy, stage) {
+  const claudeModels = Object.values(policy.implementationDelegation.taskClasses);
+  if (claudeModels.includes(task.requestedModel)) {
+    const expectedSource = stage === "active" ? "claude_wrapper" : "local_result_handoff";
+    assert(
+      status.source === expectedSource,
+      `Claude ${stage} requires ${expectedSource}.`,
+    );
+  } else {
+    assert(
+      !["claude_wrapper", "local_result_handoff"].includes(status.source),
+      `Luna ${stage} must use an authoritative Codex task source.`,
+    );
+  }
 }
 
 function validateRemoteAccessPreflight(preflight, policy) {
@@ -439,6 +556,8 @@ export function validateOperationalState(state, policy) {
   }
   if (taskStages.has(delivery.stage)) {
     assert(isObject(delivery.task), `${delivery.stage} delivery requires task state.`);
+  }
+  if (isObject(delivery.task)) {
     assert(
       policy.modelAuthority.implementation.includes(delivery.task.requestedModel),
       `requested task model ${String(delivery.task.requestedModel)} is not authorized for implementation.`,
@@ -449,6 +568,7 @@ export function validateOperationalState(state, policy) {
       delivery.task.requestedModel,
       delivery.baseSha,
     );
+    validateImplementationSelection(delivery.task, policy);
   }
 
   if (delivery.stage === "active") {
@@ -457,6 +577,12 @@ export function validateOperationalState(state, policy) {
       "active delivery requires authoritative task status.",
     );
     validateAuthoritativeTaskStatus(delivery.task.authoritativeStatus, policy);
+    validateTaskStatusRoute(
+      delivery.task,
+      delivery.task.authoritativeStatus,
+      policy,
+      delivery.stage,
+    );
     assert(
       delivery.task.authoritativeStatus.baseSha === delivery.baseSha,
       "task base does not match accepted delivery base.",
@@ -465,12 +591,25 @@ export function validateOperationalState(state, policy) {
       delivery.task.authoritativeStatus.status === "active",
       "active delivery requires an active authoritative task observation.",
     );
-    assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active task requires threadId.");
+    if (delivery.task.authoritativeStatus.source === "claude_wrapper") {
+      assert(
+        isNonEmptyString(delivery.task.authoritativeStatus.localTaskId),
+        "active Claude task requires localTaskId.",
+      );
+    } else {
+      assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active task requires threadId.");
+    }
     assert(isNonEmptyString(delivery.task.authoritativeStatus.worktree), "active task requires worktree.");
   }
 
   if (delivery.stage === "handback" || delivery.stage === "sol_review") {
     validateAuthoritativeTaskStatus(delivery.task.authoritativeStatus, policy);
+    validateTaskStatusRoute(
+      delivery.task,
+      delivery.task.authoritativeStatus,
+      policy,
+      delivery.stage,
+    );
     assert(
       delivery.task.authoritativeStatus.baseSha === delivery.baseSha,
       "task base does not match accepted delivery base.",
@@ -671,12 +810,27 @@ export function validateAdoptedControls(ledger, policy) {
         `${control.id} requires a pull request.`,
       );
       if (policy.protectedDecisionClasses.includes(control.decisionClass)) {
+        const currentlyApproved = policy.modelAuthority.protectedPlanning.includes(
+          control.approvedByModel,
+        ) || control.approvedByModel === policy.humanApprovalIdentifier;
+        const explicitlyRatified = policy.modelAuthority.protectedPlanning.includes(
+          control.ratifiedByModel,
+        );
         assert(
-          policy.modelAuthority.protectedPlanning.includes(control.approvedByModel)
-            || control.approvedByModel === policy.humanApprovalIdentifier,
-          `${control.id} protected adoption requires approval by a protected-planning authority or ${policy.humanApprovalIdentifier}.`,
+          currentlyApproved || explicitlyRatified,
+          `${control.id} protected adoption requires current Sol Extra High or Human approval.`,
         );
       }
+    }
+    if (control.status === "retired" && policy.protectedDecisionClasses.includes(control.decisionClass)) {
+      assert(
+        isObject(control.retirement)
+          && Number.isInteger(control.retirement.issue)
+          && control.retirement.issue > 0
+          && isNonEmptyString(control.retirement.reason)
+          && control.retirement.approvedByModel === "Sol Extra High",
+        `${control.id} retired protected control requires retirement evidence approved by Sol Extra High.`,
+      );
     }
   }
 }
