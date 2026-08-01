@@ -185,6 +185,26 @@ requests in flight regardless of assessment. Every merge leaves every other open
 pull request behind its base and forces a full revalidation, so concurrency
 beyond that costs more than it returns.
 
+## Investigating a delivery failure
+
+A required check halts at the first blocker, so its output is never the complete
+fault list. Later instances of the same mistake stay invisible until the earlier
+one is corrected.
+
+Investigate a failure as a **fault class**, not a single instance. Identify the
+general shape of the mistake, then inspect the whole change for other places
+that shape occurs, and correct all of them together. Record the identified class
+and the scope swept in the pull request, so a reviewer sees what was checked
+rather than inferring it.
+
+Correcting only the reported instance converts one review pass into one
+validation cycle per instance, and each cycle establishes nothing except that
+another instance exists.
+
+A hypothesis is not a diagnosis. Where a correction rests on an unproven cause,
+say so, and prefer evidence that distinguishes causes over a change that merely
+makes the symptom disappear.
+
 ## Circuit breakers and limits
 
 Stop the affected action and preserve evidence when:
