@@ -13,29 +13,53 @@ function validPolicy() {
   return {
     schemaVersion: 1,
     humanApprovalIdentifier: "Human",
-    pipelines: {
-      codex: {
-        orchestration: "Sol Extra High",
-        implementation: "Luna Extra High",
-        mechanicalAnalysis: "Terra Medium",
-      },
-      claude: {
-        orchestration: "Claude Opus Extra High",
-        implementation: "Claude Sonnet Extra High",
-        mechanicalAnalysis: "Claude Sonnet Extra High",
-      },
-    },
     modelAuthority: {
-      orchestration: ["Sol Extra High", "Claude Opus Extra High"],
-      protectedPlanning: ["Sol Extra High", "Claude Opus Extra High"],
-      implementation: ["Luna Extra High", "Claude Sonnet Extra High"],
+      orchestration: ["Sol Extra High"],
+      protectedPlanning: ["Sol Extra High"],
+      architecture: ["Sol Extra High"],
+      security: ["Sol Extra High"],
+      deliverySequencing: ["Sol Extra High"],
+      integration: ["Sol Extra High"],
+      publication: ["Sol Extra High"],
+      reconciliation: ["Sol Extra High"],
+      release: ["Sol Extra High"],
+      implementation: ["Claude Haiku", "Claude Sonnet", "Luna Extra High"],
       mechanicalAnalysis: [
         "Terra Medium",
+        "Claude Haiku",
+        "Claude Sonnet",
         "Luna Extra High",
         "Sol Extra High",
-        "Claude Sonnet Extra High",
-        "Claude Opus Extra High",
       ],
+    },
+    implementationDelegation: {
+      preferredProvider: "claude",
+      taskClasses: {
+        mechanical_implementation: "Claude Haiku",
+        bounded_implementation: "Claude Sonnet",
+      },
+      fallback: {
+        model: "Luna Extra High",
+        allowedReasons: ["claude_unavailable", "claude_capacity_exhausted"],
+      },
+      constraints: {
+        protectedPlanningWriteAllowed: false,
+        scopeExpansionAllowed: false,
+        deliveryManagementAllowed: false,
+        remoteMutationAllowed: false,
+        credentialsAllowed: false,
+        gitAllowed: false,
+        shellAllowed: false,
+        browserAllowed: false,
+        mcpAllowed: false,
+        allowedTools: ["Read", "Edit", "Write", "Glob", "Grep"],
+      },
+      advisoryReview: {
+        model: "Claude Opus",
+        freshUserApprovalRequired: true,
+        advisoryOnly: true,
+        authorityTransferAllowed: false,
+      },
     },
     protectedDecisionClasses: [
       "architecture",
@@ -46,7 +70,14 @@ function validPolicy() {
       "security",
       "protected_planning",
     ],
-    taskStatusSources: ["create_thread", "list_threads_full", "read_thread", "wait_threads"],
+    taskStatusSources: [
+      "claude_wrapper",
+      "local_result_handoff",
+      "create_thread",
+      "list_threads_full",
+      "read_thread",
+      "wait_threads",
+    ],
     remoteAccessPreflight: {
       connectorMountProof: "live_connector_call",
       sshRefProof: "ssh_exact_ref_read",
@@ -224,18 +255,19 @@ function activeState() {
       dependencies: [],
       parentIssues: [],
       task: {
-        requestedModel: "Luna Extra High",
+        requestedModel: "Claude Sonnet",
+        taskClass: "bounded_implementation",
         launchReceipt: {
-          source: "create_thread",
-          clientThreadId: "client-new-thread:fake-launch-receipt",
-          requestedModel: "Luna Extra High",
+          source: "claude_wrapper",
+          localTaskId: "claude-issue-74-example",
+          requestedModel: "Claude Sonnet",
           baseSha: SHA,
           observedAt: "2026-07-30T06:30:00.000Z",
         },
         authoritativeStatus: {
-          source: "list_threads_full",
+          source: "claude_wrapper",
           status: "active",
-          threadId: "019fb1bd-b148-79f1-982f-23a3c8695090",
+          localTaskId: "claude-issue-74-example",
           worktree: "C:\\fake\\orbit-worktree",
           baseSha: SHA,
           observedAt: "2026-07-30T06:40:00.000Z",
@@ -311,36 +343,119 @@ describe("orchestration governance", () => {
     );
   });
 
-  it("grants each pipeline's orchestration tier equivalent authority", () => {
+  it("rejects Opus-class Claude as an orchestration authority", () => {
     const state = activeState();
-    state.actor.model = "Claude Opus Extra High";
-    state.delivery.branch = "claude/issue-113-dual-pipeline-governance";
-    state.delivery.task.requestedModel = "Claude Sonnet Extra High";
-    state.delivery.task.launchReceipt.requestedModel = "Claude Sonnet Extra High";
-    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
-  });
-
-  it("rejects an implementation tier acting as orchestration in either pipeline", () => {
-    const state = activeState();
-    state.actor.model = "Claude Sonnet Extra High";
+    state.actor.model = "Claude Opus";
     expect(() => validateOperationalState(state, validPolicy())).toThrow(
-      /Claude Sonnet Extra High is not authorized for orchestration/u,
+      /Claude Opus is not authorized for orchestration/u,
     );
   });
 
-  it("rejects authority widened to a model outside the declared pipeline roster", () => {
-    const policy = validPolicy();
-    policy.modelAuthority.orchestration.push("Some Unlisted Model");
-    expect(() => validateOrchestrationPolicy(policy)).toThrow(
-      /names a model outside the declared pipeline roster/u,
+  it("rejects Claude implementation models acting as orchestration", () => {
+    const state = activeState();
+    state.actor.model = "Claude Sonnet";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Claude Sonnet is not authorized for orchestration/u,
     );
   });
 
-  it("requires orchestration authority to track the declared pipelines exactly", () => {
+  it("requires every protected automated authority to remain Sol Extra High", () => {
     const policy = validPolicy();
-    policy.modelAuthority.orchestration = ["Sol Extra High"];
+    policy.modelAuthority.integration.push("Claude Opus");
     expect(() => validateOrchestrationPolicy(policy)).toThrow(
-      /orchestration must be reserved to each pipeline's declared orchestration model/u,
+      /integration must be reserved to Sol Extra High/u,
+    );
+  });
+
+  it("requires Claude to be the preferred bounded implementation provider", () => {
+    const policy = validPolicy();
+    policy.implementationDelegation.preferredProvider = "codex";
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /Claude must be the preferred implementation provider/u,
+    );
+  });
+
+  it("requires wrapper and handoff status sources for preferred Claude work", () => {
+    const policy = validPolicy();
+    policy.taskStatusSources = policy.taskStatusSources.filter(
+      (source) => source !== "claude_wrapper",
+    );
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /task status sources are incomplete/u,
+    );
+  });
+
+  it("uses the least suitable Claude tier for each bounded task class", () => {
+    const mechanical = activeState();
+    mechanical.delivery.task.taskClass = "mechanical_implementation";
+    mechanical.delivery.task.requestedModel = "Claude Haiku";
+    mechanical.delivery.task.launchReceipt.requestedModel = "Claude Haiku";
+    expect(() => validateOperationalState(mechanical, validPolicy())).not.toThrow();
+
+    const mismatched = activeState();
+    mismatched.delivery.task.taskClass = "mechanical_implementation";
+    expect(() => validateOperationalState(mismatched, validPolicy())).toThrow(
+      /mechanical_implementation must use preferred model Claude Haiku/u,
+    );
+  });
+
+  it("requires Claude completion to return through the local result handoff", () => {
+    const state = activeState();
+    state.delivery.stage = "handback";
+    state.delivery.previousStage = "active";
+    state.delivery.resultPath = ".agents/results/issue-74.md";
+    state.delivery.localCommits = [SHA];
+    state.delivery.task.authoritativeStatus.source = "local_result_handoff";
+    state.delivery.task.authoritativeStatus.status = "complete";
+    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
+
+    state.delivery.task.authoritativeStatus.source = "wait_threads";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Claude handback requires local_result_handoff/u,
+    );
+  });
+
+  it("permits Luna only for an evidenced Claude availability or capacity fallback", () => {
+    const state = activeState();
+    state.delivery.task.requestedModel = "Luna Extra High";
+    state.delivery.task.launchReceipt.requestedModel = "Luna Extra High";
+    state.delivery.task.launchReceipt.source = "create_thread";
+    state.delivery.task.launchReceipt.clientThreadId = "client-new-thread:fake-launch-receipt";
+    delete state.delivery.task.launchReceipt.localTaskId;
+    state.delivery.task.authoritativeStatus.source = "list_threads_full";
+    state.delivery.task.authoritativeStatus.threadId = "019fb1bd-b148-79f1-982f-23a3c8695090";
+    delete state.delivery.task.authoritativeStatus.localTaskId;
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Luna fallback requires an allowed reason/u,
+    );
+
+    state.delivery.task.fallbackReason = "claude_capacity_exhausted";
+    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
+
+    state.delivery.task.fallbackReason = "user_preference";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /Luna fallback requires an allowed reason/u,
+    );
+  });
+
+  it("keeps Opus review advisory, task-approved, and authority-neutral", () => {
+    const policy = validPolicy();
+    expect(policy.implementationDelegation.advisoryReview).toEqual({
+      model: "Claude Opus",
+      freshUserApprovalRequired: true,
+      advisoryOnly: true,
+      authorityTransferAllowed: false,
+    });
+    expect(policy.modelAuthority.orchestration).not.toContain("Claude Opus");
+    expect(policy.modelAuthority.protectedPlanning).not.toContain("Claude Opus");
+    expect(() => validateOrchestrationPolicy(policy)).not.toThrow();
+  });
+
+  it("keeps delegated Claude implementation isolated from protected and remote tools", () => {
+    const policy = validPolicy();
+    policy.implementationDelegation.constraints.remoteMutationAllowed = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /delegated implementation must not mutate remote state/u,
     );
   });
 
@@ -582,8 +697,8 @@ describe("orchestration governance", () => {
     expect(() => validateAdoptedControls(controls, validPolicy())).not.toThrow();
   });
 
-  it("accepts protected adoption approved by a human owner or either orchestration tier", () => {
-    const ledgerWith = (approvedByModel) => ({
+  it("accepts protected adoption only from Sol, a human owner, or explicit Sol ratification", () => {
+    const ledgerWith = (approvedByModel, ratifiedByModel) => ({
       schemaVersion: 1,
       controls: [
         {
@@ -596,14 +711,73 @@ describe("orchestration governance", () => {
           issue: 113,
           pullRequest: 114,
           approvedByModel,
+          ...(ratifiedByModel ? { ratifiedByModel } : {}),
         },
       ],
     });
     expect(() => validateAdoptedControls(ledgerWith("Human"), validPolicy())).not.toThrow();
+    expect(() => validateAdoptedControls(ledgerWith("Sol Extra High"), validPolicy())).not.toThrow();
     expect(() => validateAdoptedControls(ledgerWith("Claude Opus Extra High"), validPolicy()))
-      .not.toThrow();
-    expect(() => validateAdoptedControls(ledgerWith("Claude Sonnet Extra High"), validPolicy()))
-      .toThrow(/requires approval by a protected-planning authority or Human/u);
+      .toThrow(/requires current Sol Extra High or Human approval/u);
+    expect(
+      () => validateAdoptedControls(
+        ledgerWith("Claude Opus Extra High", "Sol Extra High"),
+        validPolicy(),
+      ),
+    ).not.toThrow();
+  });
+
+  it("requires retired protected controls to preserve provenance and record Sol retirement", () => {
+    const controls = {
+      schemaVersion: 1,
+      controls: [{
+        id: "ORCH-TEST",
+        status: "retired",
+        decisionClass: "model_governance",
+        summary: "Historic peer-pipeline control retained as superseded evidence.",
+        automaticPromotion: false,
+        evidence: ["historic policy", "superseding owner decision"],
+        issue: 113,
+        pullRequest: 114,
+        approvedByModel: "Human",
+        retirement: {
+          issue: 173,
+          reason: "Superseded by Sol-owned orchestration with bounded Claude delegation.",
+          approvedByModel: "Sol Extra High",
+        },
+      }],
+    };
+    expect(() => validateAdoptedControls(controls, validPolicy())).not.toThrow();
+    delete controls.controls[0].retirement;
+    expect(() => validateAdoptedControls(controls, validPolicy())).toThrow(
+      /retired protected control requires retirement evidence/u,
+    );
+  });
+
+  it("keeps protected governance prose aligned with Sol-owned delegation", () => {
+    const agents = readFileSync(new URL("../AGENTS.md", import.meta.url), "utf8");
+    const runbook = readFileSync(
+      new URL("../docs/orchestration-runbook.md", import.meta.url),
+      "utf8",
+    );
+    const implementationPlan = readFileSync(
+      new URL("../docs/implementation-plan.md", import.meta.url),
+      "utf8",
+    );
+    const template = readFileSync(
+      new URL("../.github/pull_request_template.md", import.meta.url),
+      "utf8",
+    );
+    const combined = `${agents}\n${runbook}\n${implementationPlan}\n${template}`;
+
+    expect(combined).not.toMatch(/peer agent pipeline|equivalent authority tiers/iu);
+    expect(combined).not.toContain("Planning-Model: Claude Opus Extra High");
+    expect(agents).toContain("sole automated orchestration");
+    expect(agents).toContain("Claude Haiku");
+    expect(agents).toContain("Claude Sonnet");
+    expect(agents).toContain("Luna Extra High");
+    expect(runbook).toContain("fresh task-specific user approval");
+    expect(template).toContain("exactly one");
   });
 
   it("validates the repository policy, ledger, and example state together", () => {

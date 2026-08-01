@@ -52,30 +52,43 @@ authentication material in chat.
 
 All orchestration—including task launch, monitoring, sequencing,
 reconciliation, blocker classification, handback acceptance, delivery
-decisions and retained-learning promotion—is a hard **orchestration tier**
-gate: Sol Extra High under Codex, Claude Opus Extra High under Claude.
-Protected planning, architecture, security, release, repository-setting,
-product-scope and model-governance work has the same gate. A mechanical-analysis
-tier may read for orientation or perform explicitly bounded analysis outside the
-orchestration role, but it cannot operate the delivery loop or make status and
-next-action decisions. The active pipeline's implementation tier remains the
-default for bounded implementation and returns control to its orchestration tier
-for review and delivery. A different implementation model requires fresh user
-approval under `AGENTS.md`. Cross-pipeline conduct, including branch namespaces,
-attribution and precedence on shared work, is defined in `AGENTS.md`.
+decisions and retained-learning promotion—is a hard **Sol Extra High** gate.
+Protected planning, architecture, security, integration, publication, release,
+repository-setting, product-scope and model-governance work has the same gate.
+Delegated models may read protected planning for orientation but cannot operate
+the delivery loop, make status or next-action decisions, mutate GitHub or edit
+protected planning.
+
+Use Claude as the preferred bounded implementation resource. Select Claude
+Haiku for mechanical implementation and Claude Sonnet for substantive bounded
+implementation, then invoke the approved isolated wrapper with the exact base,
+path allowlist, result path and hard stops. Use Luna Extra High only when Claude
+is unavailable or capacity-exhausted, and record that fallback reason. Sol
+reviews and integrates every handback. Opus-class secondary review requires
+fresh task-specific user approval and remains advisory evidence only.
 
 ## Launch receipt and task-state protocol
 
-Task creation is asynchronous. A successful creation response is a launch
-receipt, not proof that the task is already queryable.
+Both delegated routes require a launch receipt. A Claude wrapper receipt records
+the requested model, task class, exact base, safe local task identifier and
+observation time. Its authoritative active observation comes from the wrapper;
+its completed handback comes from the required local result file and focused
+diff. The Luna fallback uses the asynchronous Codex task protocol below.
 
-1. Record the requested model, exact base SHA, creation source, timestamp and
-   returned `threadId` or `clientThreadId`.
+A successful Codex task-creation response is a launch receipt, not proof that
+the task is already queryable.
+
+1. Record the requested model, task class, exact base SHA, creation source,
+   timestamp and route-specific identifier: `localTaskId` for Claude or the
+   returned `threadId`/`clientThreadId` for Luna.
 2. Move from `planned` to `launch_pending`.
-3. Resolve a client task to its real task ID through a full task listing.
+3. For a Codex task, resolve a client task to its real task ID through a full
+   task listing.
    Do not pass a client ID to tools that require a real task ID.
-4. Confirm the task through a full list, direct read or wait response. Record
-   its real task ID, worktree, status and observation time.
+4. Confirm a Luna task through a full list, direct read or wait response. For
+   Claude, record the wrapper's authoritative active state and require the
+   configured local result handoff before completion. Record the worktree,
+   status and observation time in either route.
 5. Move to `active` only when that authoritative observation matches the
    requested model, repository, worktree and accepted base.
 6. Use direct reads only for diagnosis. Use bounded task waits for ordinary
@@ -102,10 +115,9 @@ heartbeat reconciles, in order:
 8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
-`sol_review` is the orchestration-review stage for whichever pipeline is active;
-its identifier is retained for state-machine compatibility. It requires
-independent diff, test, privacy, credential, dependency and protected-path
-review. `pr_open` requires a pushed short-lived branch and
+`sol_review` is the mandatory Sol acceptance stage. It requires independent
+diff, test, privacy, credential, dependency and protected-path review of every
+delegated handback. `pr_open` requires a pushed short-lived branch and
 linked issue. `merged` requires the exact protected merge SHA, pull request and
 target branch, but it is not terminal completion. `trusted` requires successful
 target-branch checks for that exact merge SHA. `reconciled` is the only

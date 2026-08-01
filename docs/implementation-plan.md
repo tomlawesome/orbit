@@ -23,9 +23,11 @@ record.
 ## Governance
 
 Broad planning and systems decisions are protected Sol Extra High work under
-the root `AGENTS.md` and `.github/planning-governance.json`. Bounded
-implementation subagents default to Luna Extra High. A different subagent model
-requires fresh, explicit user approval before use.
+the root `AGENTS.md` and `.github/planning-governance.json`. Claude is preferred
+for bounded implementation, using Haiku for mechanical work and Sonnet for
+substantive slices. Luna Extra High is used only when Claude is unavailable or
+capacity-exhausted. Opus-class secondary review requires fresh task-specific
+user approval and remains advisory.
 
 Every implementable issue must define:
 
@@ -114,9 +116,10 @@ These epics cite `ORB-FUT-*` feature-register entries rather than `V1-*`
 charter requirements, because the v1 charter is the v1 contract and is not
 reopened for post-v1 direction.
 
-This roadmap is the single shared plan. Both agent pipelines read and update it;
-neither maintains a private plan, because a second plan would become a second
-source of truth and diverge.
+This roadmap is the single shared plan. Sol owns and updates it; delegated
+implementation may read the relevant bounded context but does not maintain a
+private plan, because a second plan would become a second source of truth and
+diverge.
 
 ## Rolling planning and delegation
 
@@ -125,17 +128,18 @@ Delivery uses a rolling-wave model:
 1. Sol Extra High maintains the portfolio-level risk order, dependencies,
    release gates and durable architecture decisions.
 2. Only the next two to four implementable issues are made decision-complete.
-3. Bounded implementations default to the active pipeline's implementation
-   tier. Independent issues may run concurrently only in isolated worktrees
-   with disjoint file ownership **and** a recorded assessment that a sibling
-   landing first requires at most a rebase. While the target branch requires
-   up-to-date branches, keep at most two pull requests in flight.
+3. Bounded implementations use the least suitable Claude tier by default, with
+   Luna Extra High only as an availability or capacity fallback. Independent
+   issues may run concurrently only in isolated worktrees with disjoint file
+   ownership **and** a recorded assessment that a sibling landing first
+   requires at most a rebase. While the target branch requires up-to-date
+   branches, keep at most two pull requests in flight.
 4. Sol Extra High reviews architecture and security consequences, then
    integrates protected pull requests sequentially. A later concurrent branch
    rebases onto the accepted earlier result before final validation.
 5. The next wave is refined only after the current wave's evidence changes the
    baseline. Terra may perform bounded read-only or mechanical audits, but may
-   not replace Sol architecture work or Luna feature implementation.
+   not replace Sol architecture work or bounded implementation.
 
 This avoids both a stale hundred-issue backlog and repeated high-cost planning
 inside implementation. Handoffs must name permitted paths, protected paths,

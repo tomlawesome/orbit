@@ -13,13 +13,16 @@ export function isProtectedPlanningPath(path, configuredPolicy = policy) {
     || configuredPolicy.protectedPrefixes.some((prefix) => normalized.startsWith(prefix));
 }
 
-/** Returns the accepted attestation present in the body, or null when none is. */
+/** Returns the sole accepted attestation, or null for missing or ambiguous bodies. */
 export function matchedPlanningAttestation(body, configuredPolicy = policy) {
   const lines = String(body ?? "")
     .split(/\r?\n/u)
     .map((line) => line.trim());
-  return configuredPolicy.acceptedAttestations
-    .find((attestation) => lines.includes(attestation)) ?? null;
+  const declaredAttestations = lines.filter((line) => line.startsWith("Planning-Model:"));
+  if (declaredAttestations.length !== 1) return null;
+  return configuredPolicy.acceptedAttestations.includes(declaredAttestations[0])
+    ? declaredAttestations[0]
+    : null;
 }
 
 export function hasPlanningAttestation(body, configuredPolicy = policy) {
@@ -56,7 +59,7 @@ function main() {
   if (!attestation) {
     console.error("Planning governance: protected planning files changed:");
     for (const path of protectedChanges) console.error(`- ${path}`);
-    console.error("Add exactly one of these PR-body attestation lines:");
+    console.error("Add exactly one standalone PR-body attestation line, with no duplicate or conflicting Planning-Model line:");
     for (const accepted of policy.acceptedAttestations) console.error(`- ${accepted}`);
     process.exitCode = 1;
     return;

@@ -89,7 +89,7 @@
     },
     {
       "id": "ORCH-007",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "model_governance",
       "summary": "Derive agent authority from declared pipeline tiers rather than hardcoded model names, and accept one planning attestation per authority including an explicit human-owner value.",
       "automaticPromotion": false,
@@ -100,7 +100,12 @@
       ],
       "issue": 113,
       "pullRequest": 114,
-      "approvedByModel": "Human"
+      "approvedByModel": "Human",
+      "retirement": {
+        "issue": 173,
+        "reason": "Superseded by Sol-owned orchestration with bounded, least-privilege Claude implementation and advisory-only approved review.",
+        "approvedByModel": "Sol Extra High"
+      }
     },
     {
       "id": "ORCH-008",
@@ -115,7 +120,8 @@
       ],
       "issue": 127,
       "pullRequest": 131,
-      "approvedByModel": "Claude Opus Extra High"
+      "approvedByModel": "Claude Opus Extra High",
+      "ratifiedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-009",
@@ -129,7 +135,8 @@
       ],
       "issue": 132,
       "pullRequest": 136,
-      "approvedByModel": "Claude Opus Extra High"
+      "approvedByModel": "Claude Opus Extra High",
+      "ratifiedByModel": "Sol Extra High"
     },
     {
       "id": "ORCH-010",
@@ -143,7 +150,8 @@
       ],
       "issue": 158,
       "pullRequest": 159,
-      "approvedByModel": "Claude Opus Extra High"
+      "approvedByModel": "Claude Opus Extra High",
+      "ratifiedByModel": "Sol Extra High"
     }
   ]
 }

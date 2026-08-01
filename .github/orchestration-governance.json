@@ -1,38 +1,84 @@
 {
   "schemaVersion": 1,
   "humanApprovalIdentifier": "Human",
-  "pipelines": {
-    "codex": {
-      "orchestration": "Sol Extra High",
-      "implementation": "Luna Extra High",
-      "mechanicalAnalysis": "Terra Medium"
-    },
-    "claude": {
-      "orchestration": "Claude Opus Extra High",
-      "implementation": "Claude Sonnet Extra High",
-      "mechanicalAnalysis": "Claude Sonnet Extra High"
-    }
-  },
   "modelAuthority": {
     "orchestration": [
-      "Sol Extra High",
-      "Claude Opus Extra High"
+      "Sol Extra High"
     ],
     "protectedPlanning": [
-      "Sol Extra High",
-      "Claude Opus Extra High"
+      "Sol Extra High"
+    ],
+    "architecture": [
+      "Sol Extra High"
+    ],
+    "security": [
+      "Sol Extra High"
+    ],
+    "deliverySequencing": [
+      "Sol Extra High"
+    ],
+    "integration": [
+      "Sol Extra High"
+    ],
+    "publication": [
+      "Sol Extra High"
+    ],
+    "reconciliation": [
+      "Sol Extra High"
+    ],
+    "release": [
+      "Sol Extra High"
     ],
     "implementation": [
-      "Luna Extra High",
-      "Claude Sonnet Extra High"
+      "Claude Haiku",
+      "Claude Sonnet",
+      "Luna Extra High"
     ],
     "mechanicalAnalysis": [
       "Terra Medium",
+      "Claude Haiku",
+      "Claude Sonnet",
       "Luna Extra High",
-      "Sol Extra High",
-      "Claude Sonnet Extra High",
-      "Claude Opus Extra High"
+      "Sol Extra High"
     ]
+  },
+  "implementationDelegation": {
+    "preferredProvider": "claude",
+    "taskClasses": {
+      "mechanical_implementation": "Claude Haiku",
+      "bounded_implementation": "Claude Sonnet"
+    },
+    "fallback": {
+      "model": "Luna Extra High",
+      "allowedReasons": [
+        "claude_unavailable",
+        "claude_capacity_exhausted"
+      ]
+    },
+    "constraints": {
+      "protectedPlanningWriteAllowed": false,
+      "scopeExpansionAllowed": false,
+      "deliveryManagementAllowed": false,
+      "remoteMutationAllowed": false,
+      "credentialsAllowed": false,
+      "gitAllowed": false,
+      "shellAllowed": false,
+      "browserAllowed": false,
+      "mcpAllowed": false,
+      "allowedTools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Glob",
+        "Grep"
+      ]
+    },
+    "advisoryReview": {
+      "model": "Claude Opus",
+      "freshUserApprovalRequired": true,
+      "advisoryOnly": true,
+      "authorityTransferAllowed": false
+    }
   },
   "protectedDecisionClasses": [
     "architecture",
@@ -44,6 +90,8 @@
     "protected_planning"
   ],
   "taskStatusSources": [
+    "claude_wrapper",
+    "local_result_handoff",
     "create_thread",
     "list_threads_full",
     "read_thread",

@@ -102,19 +102,20 @@
     "dependencies": [],
     "parentIssues": [],
     "task": {
-      "requestedModel": "Luna Extra High",
+      "requestedModel": "Claude Sonnet",
+      "taskClass": "bounded_implementation",
       "launchReceipt": {
-        "source": "create_thread",
-        "clientThreadId": "client-new-thread:example",
-        "requestedModel": "Luna Extra High",
+        "source": "claude_wrapper",
+        "localTaskId": "claude-issue-74-example",
+        "requestedModel": "Claude Sonnet",
         "baseSha": "90e240a51bed89bf19d50d0819601de19a3ecc8d",
         "observedAt": "2026-07-30T06:30:00.000Z"
       },
       "authoritativeStatus": {
-        "source": "list_threads_full",
+        "source": "local_result_handoff",
         "status": "complete",
-        "threadId": "example-thread-id",
-        "worktree": "C:\\example\\orbit-worktree",
+        "localTaskId": "claude-issue-74-example",
+        "worktree": "/tmp/orbit-claude-74",
         "baseSha": "90e240a51bed89bf19d50d0819601de19a3ecc8d",
         "observedAt": "2026-07-30T06:55:00.000Z"
       }
