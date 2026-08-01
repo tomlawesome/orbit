@@ -13,6 +13,7 @@ import {
   documents,
   externalIdentities,
   households,
+  imapRecipientRotationState,
   items,
   memberships,
   portableArchives,
@@ -93,6 +94,7 @@ export function requestWithoutSession(
 export async function cleanupIntegrationEnvironment(): Promise<void> {
   resetAuthConfigForTests();
   resetDocumentConfigForTests();
+  await getDb().delete(imapRecipientRotationState);
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),

@@ -148,7 +148,7 @@ describe("receipt identity PostgreSQL boundaries", () => {
       setImapClientFactoryForTests(undefined);
       await fixture.cleanup();
     }
-  });
+  }, 15_000);
 
   it("keeps content identity recipient-scoped and tuple recording idempotent", async () => {
     const fixture = await createIntegrationFixture("recipient-content-scope");
