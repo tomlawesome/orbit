@@ -177,6 +177,7 @@ export const documents = pgTable("documents", {
 }, (table) => [
   index("document_household_item_created_idx").on(table.householdId, table.itemId, table.createdAt),
   index("document_household_lifecycle_created_idx").on(table.householdId, table.lifecycle, table.createdAt),
+  check("document_openable_scan_status_valid", sql`${table.lifecycle} NOT IN ('available', 'pending_deletion') OR ${table.scanStatus} IN ('clean', 'skipped')`),
 ]);
 
 /** Envelope-encryption metadata for one document; no plaintext key is persisted. */
