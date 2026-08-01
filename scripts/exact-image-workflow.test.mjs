@@ -20,6 +20,38 @@ function jobBlock(job, nextJob) {
 }
 
 describe("exact-image publication workflow", () => {
+  it("selects fail-safe risk lanes while keeping required checks reportable", () => {
+    const changes = jobBlock("changes", "fast");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "publish_preview");
+
+    expect(changes).toContain("risk: ${{ steps.classify.outputs.risk }}");
+    expect(changes).toContain("build: ${{ steps.classify.outputs.build }}");
+    expect(changes).toContain("integration: ${{ steps.classify.outputs.integration }}");
+    expect(changes).toContain("system: ${{ steps.classify.outputs.system }}");
+    expect(changes).toContain("Set up pnpm graph reader");
+    expect(changes).toContain("run_install: false");
+    const fast = jobBlock("fast", "supply_chain_source");
+    expect(fast).toContain("- changes");
+    expect(fast).toContain("if: needs.changes.outputs.build == 'true'");
+    expect(fast).toContain("run: pnpm build");
+    expect(integration).toContain("if: needs.changes.outputs.integration == 'true'");
+    expect(smoke).toContain(
+      "if: github.event_name == 'pull_request' && needs.changes.outputs.system == 'true'",
+    );
+    expect(workflow).not.toContain("paths:");
+    expect(workflow).not.toContain("paths-ignore:");
+  });
+
+  it("keeps every integration-branch push on the complete publication path", () => {
+    const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
+
+    expect(preview).toContain("github.event_name == 'push'");
+    expect(preview).not.toContain("needs.changes.outputs.risk");
+    expect(preview).not.toContain("needs.changes.outputs.system");
+    expect(preview).toContain("steps: *container_validation_steps");
+  });
+
   it("gates integration and publication on a read-only source supply-chain scan", () => {
     const supplyChain = jobBlock("supply_chain_source", "integration");
     const integration = jobBlock("integration", "smoke");
