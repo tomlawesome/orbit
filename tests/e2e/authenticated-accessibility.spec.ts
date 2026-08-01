@@ -395,9 +395,9 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await expect(page.getByRole("region", { name: "Check every value before saving" })).toBeVisible();
       await expectNoAxeViolations(page, ".imap-review");
-      await settings.getByRole("tab", { name: "Admin" }).click();
+      await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
-      await expectNoAxeViolations(page, ".settings-drawer");
+      await expectNoAxeViolations(page, ".admin-page");
     });
   });
 
