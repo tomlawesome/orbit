@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { AdminManager } from "@/components/admin-manager";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { FocusDialog } from "@/components/focus-dialog";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
@@ -49,7 +48,7 @@ const DEFAULT_THEME: ThemePreference = {
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 const NOTICE_DURATION_MS = 10_000;
 
-type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
+type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
@@ -660,8 +659,16 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
               {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
               {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
               <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
-              {session.user.isInstanceAdmin && <button role="tab" aria-selected={settingsView === "administration"} className={settingsView === "administration" ? "active" : ""} onClick={() => setSettingsView("administration")}>Admin</button>}
             </div>
+
+            {/* Outside the tablist deliberately: a tablist requires every child
+                to be a tab, and this navigates to a route rather than switching
+                a panel. Nesting it broke that ARIA contract. */}
+            {session.user.isInstanceAdmin && (
+              <nav className="settings-admin-link" aria-label="Instance administration">
+                <a href="/admin">Administration</a>
+              </nav>
+            )}
 
             {settingsView === "appearance" ? (
               <div className="settings-content">
@@ -773,10 +780,8 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
                   <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
                 </section>
               </div>
-            ) : settingsView === "members" ? (
-              <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
             ) : (
-              <AdminManager session={session} />
+              <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
             )}
             <footer className="settings-session-actions">
               <div>

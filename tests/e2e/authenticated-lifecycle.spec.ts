@@ -253,10 +253,10 @@ test.describe("authenticated household lifecycle", () => {
       await memberPage.reload();
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
       await memberPage.getByRole("button", { name: "Open personalisation settings" }).click();
-      await expect(memberPage.getByRole("tab", { name: "Admin" })).toHaveCount(0);
+      await expect(memberPage.getByRole("link", { name: "Administration" })).toHaveCount(0);
       await expect(memberPage.getByRole("tab", { name: "Household" })).toHaveCount(0);
 
-      await page.getByRole("tab", { name: "Admin" }).click();
+      await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Instance administrators" })).toBeVisible();
       const memberAdminRow = page.locator(".admin-list article").filter({ hasText: member });
       await expect(memberAdminRow).toHaveCount(1);
@@ -273,7 +273,7 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage).toHaveURL(/\/auth\/error\?code=account_disabled/);
       await expect(memberPage.getByText("This Orbit account has been disabled by an administrator.")).toBeVisible();
 
-      await page.getByRole("tab", { name: "Admin" }).click();
+      await page.goto("/admin");
       const disabledMemberRow = page.locator(".admin-list article").filter({ hasText: member });
       await expect(disabledMemberRow.getByRole("button", { name: "Enable account" })).toBeVisible();
       page.once("dialog", (dialog) => dialog.accept());
@@ -286,6 +286,10 @@ test.describe("authenticated household lifecycle", () => {
       await signIn(memberPage, member);
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
+      // Administration is now a route, so the journey must return to the
+      // workspace and reopen settings before using a settings tab again.
+      await page.goto("/");
+      await page.getByRole("button", { name: "Open personalisation settings" }).click();
       await page.getByRole("tab", { name: "Household" }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();
