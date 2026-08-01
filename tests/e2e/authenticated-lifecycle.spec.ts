@@ -253,7 +253,7 @@ test.describe("authenticated household lifecycle", () => {
       await memberPage.reload();
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
       await memberPage.getByRole("button", { name: "Open personalisation settings" }).click();
-      await expect(memberPage.getByRole("link", { name: "Admin" })).toHaveCount(0);
+      await expect(memberPage.getByRole("link", { name: "Administration" })).toHaveCount(0);
       await expect(memberPage.getByRole("tab", { name: "Household" })).toHaveCount(0);
 
       await page.goto("/admin");
