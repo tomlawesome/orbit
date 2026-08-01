@@ -1,10 +1,14 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readlinkSync,
   readdirSync,
   readFileSync,
@@ -221,7 +225,20 @@ function snapshotPath(path) {
     };
   }
   if (stats.isFile()) {
-    return { ...snapshot, type: "file", content: readFileSync(path, "utf8") };
+    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const openedStats = fstatSync(descriptor);
+      if (!openedStats.isFile()) {
+        return { mode: openedStats.mode & 0o7777, type: "other" };
+      }
+      return {
+        mode: openedStats.mode & 0o7777,
+        type: "file",
+        content: readFileSync(descriptor, "utf8"),
+      };
+    } finally {
+      closeSync(descriptor);
+    }
   }
   return { ...snapshot, type: "other" };
 }
