@@ -114,10 +114,14 @@ async function waitForActiveHousehold(page: Page, name: string): Promise<Durable
 }
 
 async function openMobileNavigationIfNeeded(page: Page) {
-  const closeNavigation = page.getByRole("button", { name: "Close navigation" });
-  if (await closeNavigation.isVisible()) return;
+  const householdPicker = page.locator("button.household-picker");
   const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  await expect.poll(
+    async () => (await householdPicker.isVisible()) || (await openNavigation.isVisible()),
+    { timeout: 15_000 },
+  ).toBe(true);
   if (await openNavigation.isVisible()) await openNavigation.click();
+  await expect(householdPicker).toBeVisible({ timeout: 15_000 });
 }
 
 async function selectHouseholdByName(page: Page, name: string): Promise<DurableWorkspace> {
@@ -125,6 +129,7 @@ async function selectHouseholdByName(page: Page, name: string): Promise<DurableW
   const target = workspace.households.find((household) => household.name === name);
   if (!target) throw new Error(`Expected household "${name}" to be available for selection`);
 
+  if (new URL(page.url()).pathname === "/settings") await page.goto("/");
   await openMobileNavigationIfNeeded(page);
   const householdPicker = page.locator("button.household-picker");
   await expect(householdPicker, `Expected the household picker before selecting "${name}"`).toBeVisible({ timeout: 15_000 });

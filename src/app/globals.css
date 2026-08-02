@@ -77,7 +77,7 @@ button { color: inherit; }
   --sidebar-glow: rgb(221 136 61 / 22%); --hero-start: #2d2e2a; --hero-end: #4a4840; --focus-ink: #4e2713; --focus-muted: #813e1c;
 }
 :is(.app-frame, .settings-page)[data-theme="after-dark"] {
-  --ink: #1b1b31; --muted: #66667e; --canvas: #f2f1f9; --paper: #fff; --forest: #6255ed; --forest-2: #4c40c9;
+  --ink: #1b1b31; --muted: #626278; --canvas: #f2f1f9; --paper: #fff; --forest: #6255ed; --forest-2: #4c40c9;
   --mint: #dffaf7; --coral: #ff4fa3; --coral-dark: #a72168; --sun: #22e7d3; --line: #deddf0; --sidebar: #12132c;
   --sidebar-glow: rgb(113 92 255 / 32%); --hero-start: #171833; --hero-end: #30266e; --focus-ink: #401137; --focus-muted: #4d1542;
 }

@@ -48,6 +48,7 @@ const DEFAULT_THEME: ThemePreference = {
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 const NOTICE_DURATION_MS = 10_000;
 const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
+const THEME_SESSION_HYDRATED_KEY = "orbit:theme-session-user:v1";
 
 type DashboardMode = "workspace" | "settings";
 type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery";
@@ -218,6 +219,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
 
   useEffect(() => {
     if (!session) return;
+    if (sessionStorage.getItem(THEME_SESSION_HYDRATED_KEY) === session.user.id) return;
     storePreference(THEME_STORAGE_KEY, {
       mode: session.user.themeMode,
       colourway: session.user.themeId,
@@ -226,6 +228,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
       emailNotifications: session.user.emailNotifications,
       pushNotifications: session.user.pushNotifications,
     });
+    sessionStorage.setItem(THEME_SESSION_HYDRATED_KEY, session.user.id);
   }, [session]);
 
   useEffect(() => {
@@ -587,6 +590,10 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
           <h1 ref={settingsHeadingRef} tabIndex={-1}>Settings</h1>
         </header>
 
+        {syncStatus === "error" && syncMessage && (
+          <div className="sync-error-banner" role="alert">{syncMessage}</div>
+        )}
+
         <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
           <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
           <button role="tab" aria-selected={settingsView === "data"} className={settingsView === "data" ? "active" : ""} onClick={() => setSettingsView("data")}>Your data</button>
@@ -712,7 +719,15 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     }
 
     if (settingsView === "household" && household.canManage) {
-      return <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />;
+      return (
+        <HouseholdSettings
+          key={household.id}
+          household={household}
+          onSave={updateHousehold}
+          onRemoved={() => router.replace("/")}
+          csrfToken={session.csrfToken}
+        />
+      );
     }
 
     if (settingsView === "sections" && household.canManage) {
