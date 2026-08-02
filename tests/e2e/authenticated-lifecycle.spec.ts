@@ -250,7 +250,7 @@ test.describe("authenticated household lifecycle", () => {
 
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
       await expect(page).toHaveURL(/\/settings$/);
-      await page.getByRole("tab", { name: "Members" }).click();
+      await page.getByRole("link", { name: "Members", exact: true }).click();
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
       await page.getByLabel("Registered user").selectOption({ label: member });
       await page.getByRole("button", { name: "Add member" }).click();
@@ -260,7 +260,12 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
       await memberPage.getByRole("button", { name: "Open personalisation settings" }).click();
       await expect(memberPage.getByRole("link", { name: "Administration" })).toHaveCount(0);
-      await expect(memberPage.getByRole("tab", { name: "Household" })).toHaveCount(0);
+      await expect(memberPage.getByRole("link", { name: "Household", exact: true })).toHaveCount(0);
+      await expect(memberPage.getByRole("region", { name: "Household", exact: true })).toHaveCount(0);
+      await expect(memberPage.getByRole("link", { name: "Sections", exact: true })).toHaveCount(0);
+      await expect(memberPage.getByRole("region", { name: "Sections", exact: true })).toHaveCount(0);
+      await expect(memberPage.getByRole("tablist")).toHaveCount(0);
+      await expect(memberPage.getByRole("tab")).toHaveCount(0);
 
       await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Instance administrators" })).toBeVisible();
@@ -293,11 +298,11 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
 
       // Administration is now a route, so the journey must return to the
-      // workspace and reopen settings before using a settings tab again.
+      // workspace and reopen settings before using a settings section again.
       await page.goto("/");
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
       await expect(page).toHaveURL(/\/settings$/);
-      await page.getByRole("tab", { name: "Household" }).click();
+      await page.getByRole("link", { name: "Household", exact: true }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();
       await expect(page.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
@@ -465,9 +470,9 @@ test.describe("authenticated household lifecycle", () => {
             await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
           }
         }
-        await expect(targetPage).toHaveURL(/\/settings$/);
+        await expect(targetPage).toHaveURL(/\/settings(?:#settings-members)?$/);
         await expect(settingsPage).toBeVisible({ timeout: 15_000 });
-        await settingsPage.getByRole("tab", { name: "Members" }).click();
+        await settingsPage.getByRole("link", { name: "Members", exact: true }).click();
       };
       const addMember = async () => {
         const administratorSession = await readAuthenticatedSession(page, "Administrator");
