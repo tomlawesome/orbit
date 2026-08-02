@@ -265,7 +265,7 @@ test.describe("document-assisted item intake", () => {
       });
     });
 
-    const fileInput = editor.getByLabel("Document", { exact: true });
+    const fileInput = editor.locator('input[type="file"][accept="application/pdf,image/jpeg,image/png"]');
     await fileInput.setInputFiles({
       name: "invalid.pdf",
       mimeType: "application/pdf",
