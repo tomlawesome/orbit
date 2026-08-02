@@ -439,9 +439,6 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .settings-drawer > header p { margin: 0 0 6px; color: var(--coral-dark); font-size: calc(8px + var(--text-bump)); font-weight: 850; letter-spacing: 1.4px; text-transform: uppercase; }
 .settings-drawer > header h2 { margin: 0; font-size: calc(23px + var(--text-bump)); letter-spacing: -.9px; }
 .settings-drawer > header button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: transparent; font-size: calc(22px + var(--text-bump)); line-height: 1; cursor: pointer; }
-.settings-tabs { margin: 27px 0 8px; padding: 4px; border-radius: 12px; background: var(--canvas); display: grid; grid-template-columns: repeat(auto-fit, minmax(78px, 1fr)); }
-.settings-tabs button { min-height: 37px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: calc(10px + var(--text-bump)); font-weight: 750; cursor: pointer; }
-.settings-tabs button.active { color: var(--ink); background: var(--paper); box-shadow: 0 5px 15px rgb(0 0 0 / 7%); }
 .settings-content > section { padding: 25px 0; border-bottom: 1px solid var(--line); }
 .settings-session-actions { margin-top: 24px; padding: 18px 0 4px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .settings-session-actions div { display: grid; gap: 4px; }
@@ -1208,18 +1205,84 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
   letter-spacing: -.9px;
 }
 
-.settings-page .settings-tabs {
-  margin: 0;
-  padding: 4px;
-  border-radius: 12px;
-  background: var(--canvas);
+.settings-layout {
+  width: min(100%, 1180px);
+  margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  grid-template-columns: minmax(170px, 220px) minmax(0, 760px);
+  align-items: start;
+  justify-content: center;
+  gap: clamp(28px, 6vw, 88px);
 }
 
-.settings-page .settings-content > section {
+.settings-section-nav-column {
+  position: sticky;
+  top: 24px;
+}
+
+.settings-section-nav {
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  display: grid;
+  gap: 3px;
+}
+
+.settings-section-nav a {
+  padding: 10px 11px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: calc(10px + var(--text-bump));
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.settings-section-nav a:hover {
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-page .settings-content > .settings-section-region {
+  padding: 0 0 32px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 24px;
+}
+
+.settings-page .settings-section-region + .settings-section-region {
+  padding-top: 32px;
+}
+
+.settings-section-region > h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: calc(22px + var(--text-bump));
+  letter-spacing: -.45px;
+  scroll-margin-top: 24px;
+}
+
+.settings-section-region > h2:focus {
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px #17172b;
+}
+
+.settings-section-region > section {
   padding: 25px 0;
   border-bottom: 1px solid var(--line);
+}
+
+.settings-section-region > .settings-content {
+  margin-top: 8px;
+}
+
+.settings-page .settings-admin-link {
+  width: min(100%, 1180px);
+  margin: 0 auto;
 }
 
 .settings-page .settings-session-actions {
@@ -1291,5 +1354,32 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
   .settings-page h1 {
     text-align: center;
     font-size: calc(28px + var(--text-bump));
+  }
+
+  .settings-layout {
+    width: 100%;
+    display: block;
+  }
+
+  .settings-section-nav-column {
+    position: static;
+    margin-bottom: 8px;
+  }
+
+  .settings-section-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-page .settings-content > .settings-section-region {
+    scroll-margin-top: 16px;
+  }
+
+  .settings-section-region > h2 {
+    scroll-margin-top: 16px;
+  }
+
+  .settings-page .settings-session-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

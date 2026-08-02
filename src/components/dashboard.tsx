@@ -51,12 +51,30 @@ const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
 const THEME_SESSION_HYDRATED_KEY = "orbit:theme-session-user:v1";
 
 type DashboardMode = "workspace" | "settings";
-type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
+const settingsSectionIds = {
+  appearance: "settings-appearance",
+  data: "settings-data",
+  inbox: "settings-inbox",
+  recovery: "settings-recovery",
+  household: "settings-household",
+  sections: "settings-sections",
+  members: "settings-members",
+} as const;
+
 function visibleSettingsTrigger(): "desktop-profile" | "mobile-menu" {
   return window.matchMedia("(min-width: 821px)").matches ? "desktop-profile" : "mobile-menu";
+}
+
+function focusSettingsSection(sectionId: string) {
+  window.setTimeout(() => {
+    const heading = document.getElementById(sectionId)?.querySelector<HTMLElement>("h2");
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: "start" });
+  }, 0);
 }
 
 const customSectionAccents: SectionAccent[] = ["coral", "sage", "blue", "sand", "plum"];
@@ -153,7 +171,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
-  const [settingsView, setSettingsView] = useState<SettingsView>("appearance");
   const settingsHeadingRef = useRef<HTMLHeadingElement>(null);
   const [query, setQuery] = useState("");
   const [itemFilter, setItemFilter] = useState<ItemFilter>("all");
@@ -244,18 +261,21 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     router.push("/settings?open=inbox");
   }, [mode, router]);
 
-  // Handle ?open=inbox in settings mode
+  // Focus the settings heading on route entry, or the requested section when
+  // the route carries a same-page destination.
   useEffect(() => {
     if (mode !== "settings") return;
-    if (new URLSearchParams(window.location.search).get("open") !== "inbox") return;
-    const timer = window.setTimeout(() => setSettingsView("inbox"), 0);
-    return () => window.clearTimeout(timer);
-  }, [mode]);
-
-  // Focus settings h1 on route entry in settings mode
-  useEffect(() => {
-    if (mode !== "settings") return;
-    const timer = window.setTimeout(() => settingsHeadingRef.current?.focus(), 50);
+    const requestedSection = new URLSearchParams(window.location.search).get("open") === "inbox"
+      ? settingsSectionIds.inbox
+      : window.location.hash.slice(1);
+    const settingsSectionIdValues = Object.values(settingsSectionIds);
+    const sectionId = settingsSectionIdValues.includes(requestedSection as (typeof settingsSectionIdValues)[number])
+      ? requestedSection
+      : null;
+    const timer = window.setTimeout(() => {
+      if (sectionId) focusSettingsSection(sectionId);
+      else settingsHeadingRef.current?.focus();
+    }, 50);
     return () => window.clearTimeout(timer);
   }, [mode]);
 
@@ -594,26 +614,26 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
           <div className="sync-error-banner" role="alert">{syncMessage}</div>
         )}
 
-        <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
-          <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
-          <button role="tab" aria-selected={settingsView === "data"} className={settingsView === "data" ? "active" : ""} onClick={() => setSettingsView("data")}>Your data</button>
-          <button role="tab" aria-selected={settingsView === "inbox"} className={settingsView === "inbox" ? "active" : ""} onClick={() => setSettingsView("inbox")}>Inbox</button>
-          {workspace.recoverableHouseholds.length > 0 && <button role="tab" aria-selected={settingsView === "recovery"} className={settingsView === "recovery" ? "active" : ""} onClick={() => setSettingsView("recovery")}>Removed</button>}
-          {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
-          {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
-          <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
-        </div>
-
-        {/* Outside the tablist deliberately: a tablist requires every child
-            to be a tab, and this navigates to a route rather than switching
-            a panel. Nesting it broke that ARIA contract. */}
         {session.user.isInstanceAdmin && (
           <nav className="settings-admin-link" aria-label="Instance administration">
             <a href="/admin">Administration</a>
           </nav>
         )}
 
-        {renderSettingsContent()}
+        <div className="settings-layout">
+          <aside className="settings-section-nav-column">
+            <nav className="settings-section-nav" aria-label="Settings sections">
+              <a href={`#${settingsSectionIds.appearance}`} onClick={() => focusSettingsSection(settingsSectionIds.appearance)}>Appearance</a>
+              <a href={`#${settingsSectionIds.data}`} onClick={() => focusSettingsSection(settingsSectionIds.data)}>Your data</a>
+              <a href={`#${settingsSectionIds.inbox}`} onClick={() => focusSettingsSection(settingsSectionIds.inbox)}>Inbox</a>
+              {workspace.recoverableHouseholds.length > 0 && <a href={`#${settingsSectionIds.recovery}`} onClick={() => focusSettingsSection(settingsSectionIds.recovery)}>Removed</a>}
+              {household.canManage && <a href={`#${settingsSectionIds.household}`} onClick={() => focusSettingsSection(settingsSectionIds.household)}>Household</a>}
+              {household.canManage && <a href={`#${settingsSectionIds.sections}`} onClick={() => focusSettingsSection(settingsSectionIds.sections)}>Sections</a>}
+              <a href={`#${settingsSectionIds.members}`} onClick={() => focusSettingsSection(settingsSectionIds.members)}>Members</a>
+            </nav>
+          </aside>
+          {renderSettingsContent()}
+        </div>
 
         <footer className="settings-session-actions">
           <div>
@@ -629,9 +649,10 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   }
 
   function renderSettingsContent() {
-    if (settingsView === "appearance") {
-      return (
-        <div className="settings-content">
+    return (
+      <div className="settings-content">
+        <section className="settings-section-region" id={settingsSectionIds.appearance} aria-labelledby={`${settingsSectionIds.appearance}-heading`}>
+          <h2 id={`${settingsSectionIds.appearance}-heading`} tabIndex={-1}>Appearance</h2>
           <section>
             <div className="setting-heading"><h3>Display mode</h3><p>Use your device setting or choose a consistent mode.</p></div>
             <div className="mode-picker">
@@ -702,69 +723,78 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
               </button>
             </div>
           </section>
-        </div>
-      );
-    }
+        </section>
 
-    if (settingsView === "data") {
-      return <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />;
-    }
+        <section className="settings-section-region" id={settingsSectionIds.data} aria-labelledby={`${settingsSectionIds.data}-heading`}>
+          <h2 id={`${settingsSectionIds.data}-heading`} tabIndex={-1}>Your data</h2>
+          <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
+        </section>
 
-    if (settingsView === "inbox") {
-      return <ImapInbox csrfToken={session.csrfToken} />;
-    }
+        <section className="settings-section-region" id={settingsSectionIds.inbox} aria-labelledby={`${settingsSectionIds.inbox}-heading`}>
+          <h2 id={`${settingsSectionIds.inbox}-heading`} tabIndex={-1}>Inbox</h2>
+          <ImapInbox csrfToken={session.csrfToken} />
+        </section>
 
-    if (settingsView === "recovery") {
-      return <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />;
-    }
-
-    if (settingsView === "household" && household.canManage) {
-      return (
-        <HouseholdSettings
-          key={household.id}
-          household={household}
-          onSave={updateHousehold}
-          onRemoved={() => router.replace("/")}
-          csrfToken={session.csrfToken}
-        />
-      );
-    }
-
-    if (settingsView === "sections" && household.canManage) {
-      return (
-        <div className="settings-content">
-          <section>
-            <div className="setting-heading section-heading"><div><h3>{household.name}&apos;s sections</h3><p>Rename, reorder or hide the areas this household uses.</p></div><button onClick={addSection} disabled={sections.length >= 12}><Icon name="plus" /> Add</button></div>
-            <div className="section-editor">
-              {sections.map((section, index) => {
-                const itemCount = activeItems.filter((item) => item.sectionId === section.id).length;
-                return (
-                  <article key={section.id}>
-                    <button className={`section-drag accent-${section.accent}`} aria-label={`Change colour for ${section.name}`} title="Change section colour" onClick={() => cycleSectionAccent(section.id)}><Icon name={section.icon} /></button>
-                    <div>
-                      <input aria-label={`Name for ${section.name}`} maxLength={30} value={section.name} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name: event.target.value || "Untitled section" } : entry))} />
-                      <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small>
-                    </div>
-                    <select aria-label={`Icon for ${section.name}`} value={section.icon} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, icon: event.target.value as SectionIcon } : entry))}>
-                      {customSectionIcons.map((icon) => <option key={icon} value={icon}>{icon}</option>)}
-                    </select>
-                    <div className="order-buttons">
-                      <button aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => moveSection(section.id, -1)}>↑</button>
-                      <button aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => moveSection(section.id, 1)}>↓</button>
-                    </div>
-                    <label className="visibility-toggle"><input type="checkbox" checked={section.visible} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, visible: event.target.checked } : entry))} /><span /><em>{section.visible ? "Shown" : "Hidden"}</em></label>
-                  </article>
-                );
-              })}
-            </div>
-            <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
+        {workspace.recoverableHouseholds.length > 0 && (
+          <section className="settings-section-region" id={settingsSectionIds.recovery} aria-labelledby={`${settingsSectionIds.recovery}-heading`}>
+            <h2 id={`${settingsSectionIds.recovery}-heading`} tabIndex={-1}>Removed</h2>
+            <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />
           </section>
-        </div>
-      );
-    }
+        )}
 
-    // Default to members
-    return <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />;
+        {household.canManage && (
+          <section className="settings-section-region" id={settingsSectionIds.household} aria-labelledby={`${settingsSectionIds.household}-heading`}>
+            <h2 id={`${settingsSectionIds.household}-heading`} tabIndex={-1}>Household</h2>
+            <HouseholdSettings
+              key={household.id}
+              household={household}
+              onSave={updateHousehold}
+              onRemoved={() => router.replace("/")}
+              csrfToken={session.csrfToken}
+            />
+          </section>
+        )}
+
+        {household.canManage && (
+          <section className="settings-section-region" id={settingsSectionIds.sections} aria-labelledby={`${settingsSectionIds.sections}-heading`}>
+            <h2 id={`${settingsSectionIds.sections}-heading`} tabIndex={-1}>Sections</h2>
+            <div className="settings-content">
+              <section>
+                <div className="setting-heading section-heading"><div><h3>{household.name}&apos;s sections</h3><p>Rename, reorder or hide the areas this household uses.</p></div><button onClick={addSection} disabled={sections.length >= 12}><Icon name="plus" /> Add</button></div>
+                <div className="section-editor">
+                  {sections.map((section, index) => {
+                    const itemCount = activeItems.filter((item) => item.sectionId === section.id).length;
+                    return (
+                      <article key={section.id}>
+                        <button className={`section-drag accent-${section.accent}`} aria-label={`Change colour for ${section.name}`} title="Change section colour" onClick={() => cycleSectionAccent(section.id)}><Icon name={section.icon} /></button>
+                        <div>
+                          <input aria-label={`Name for ${section.name}`} maxLength={30} value={section.name} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name: event.target.value || "Untitled section" } : entry))} />
+                          <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small>
+                        </div>
+                        <select aria-label={`Icon for ${section.name}`} value={section.icon} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, icon: event.target.value as SectionIcon } : entry))}>
+                          {customSectionIcons.map((icon) => <option key={icon} value={icon}>{icon}</option>)}
+                        </select>
+                        <div className="order-buttons">
+                          <button aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => moveSection(section.id, -1)}>↑</button>
+                          <button aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => moveSection(section.id, 1)}>↓</button>
+                        </div>
+                        <label className="visibility-toggle"><input type="checkbox" checked={section.visible} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, visible: event.target.checked } : entry))} /><span /><em>{section.visible ? "Shown" : "Hidden"}</em></label>
+                      </article>
+                    );
+                  })}
+                </div>
+                <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
+              </section>
+            </div>
+          </section>
+        )}
+
+        <section className="settings-section-region" id={settingsSectionIds.members} aria-labelledby={`${settingsSectionIds.members}-heading`}>
+          <h2 id={`${settingsSectionIds.members}-heading`} tabIndex={-1}>Members</h2>
+          <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
+        </section>
+      </div>
+    );
   }
 
   return (
