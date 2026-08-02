@@ -9,13 +9,14 @@ import {
   safeDocumentFilenameTitle,
   safeDocumentPlainText,
 } from "@/server/documents/suggestions";
-import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
+import { classifyDocumentStructure, detectDocumentMediaType, type DocumentStructureReason } from "@/server/documents/validation";
 import { extractTextWithTika } from "@/server/documents/tika";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
-const invalidStructureRecoveryMessage = "Suggestions are unavailable for that file. Review the fields manually and choose a valid document before attaching it.";
+const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
+const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -43,6 +44,8 @@ export interface ItemDocumentInspectionResult {
   extracted: boolean;
   suggestions: ItemDocumentSuggestion[];
   message?: string;
+  attachmentDisposition: "attachable" | "rejected";
+  reason: DocumentStructureReason;
 }
 
 const allowedSuggestionFields = new Set<ItemDocumentSuggestionField>(itemDocumentSuggestionFields);
@@ -101,18 +104,25 @@ export async function inspectItemDocument(input: {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      if (!validateSupportedDocumentStructure(bytes, mediaType)) {
+      const structureReason = classifyDocumentStructure(bytes, mediaType);
+      if (structureReason !== "supported_structure") {
+        log.info("document.inspection", { outcome: "rejected", reason: structureReason });
         return {
           extracted: false,
-          message: invalidStructureRecoveryMessage,
-          suggestions: buildSuggestions(input.filename, undefined),
+          message: structureReason === "prohibited_content" ? prohibitedContentMessage : unsupportedStructureMessage,
+          suggestions: [],
+          attachmentDisposition: "rejected",
+          reason: structureReason,
         };
       }
+      log.info("document.inspection", { outcome: "attachable", reason: structureReason });
       if (config.scanMode !== "required") {
         return {
           extracted: false,
           message: parserRecoveryMessage,
           suggestions: buildSuggestions(input.filename, undefined),
+          attachmentDisposition: "attachable",
+          reason: structureReason,
         };
       }
       log.info("document.scan", { document: operationId, outcome: "attempt" });
@@ -166,6 +176,8 @@ export async function inspectItemDocument(input: {
       return {
         extracted,
         suggestions: buildSuggestions(input.filename, proposal),
+        attachmentDisposition: "attachable",
+        reason: structureReason,
         ...(message ? { message } : {}),
       };
     } finally {
