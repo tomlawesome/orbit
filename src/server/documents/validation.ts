@@ -325,8 +325,10 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
   throw new AppError("document_type_unsupported", "Choose a PDF, JPEG, or PNG document", 415);
 }
 
-/** Performs cheap bounded container checks without rendering or decompressing. */
-export function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): boolean {
+export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "prohibited_content";
+
+/** Classifies document structure with explicit reason, without widening compatibility. */
+export function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): DocumentStructureReason {
   if (mediaType === "application/pdf") {
     const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
     const content = bytes.toString("latin1");
@@ -337,16 +339,27 @@ export function validateSupportedDocumentStructure(bytes: Buffer, mediaType: Sup
       : "";
     const hasClassicXref = validateClassicPdfXref(xrefSection, content);
     const hasXrefStream = validatePdfXrefStream(xrefSection, bytes.length);
-    return bytes.length >= 24
+    const hasProhibitedFeature = unsafePdfFeature.test(content);
+    const isValidStructure = bytes.length >= 24
       && /^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
       && !bytes.subarray(0, 512).includes(0)
       && Boolean(startXref)
       && /\bobj\b/u.test(content)
-      && (hasClassicXref || hasXrefStream)
-      && !unsafePdfFeature.test(content);
+      && (hasClassicXref || hasXrefStream);
+
+    if (hasProhibitedFeature) return "prohibited_content";
+    if (!isValidStructure) return "unsupported_structure";
+    return "supported_structure";
   }
-  if (mediaType === "image/jpeg") return validateJpegStructure(bytes);
-  return validatePngStructure(bytes);
+  if (mediaType === "image/jpeg") {
+    return validateJpegStructure(bytes) ? "supported_structure" : "unsupported_structure";
+  }
+  return validatePngStructure(bytes) ? "supported_structure" : "unsupported_structure";
+}
+
+/** Performs cheap bounded container checks without rendering or decompressing. */
+export function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): boolean {
+  return classifyDocumentStructure(bytes, mediaType) === "supported_structure";
 }
 
 export function normalizedDocumentFilename(input: string, mediaType: SupportedDocumentMediaType): string {

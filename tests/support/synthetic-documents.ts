@@ -21,6 +21,19 @@ export function syntheticPdf(contents = "Synthetic Orbit document") {
   return Buffer.from(value);
 }
 
+export function syntheticPdfWithXrefStream() {
+  let value = "%PDF-1.7\n";
+  value += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+  value += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+  value += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n";
+  const xrefOffset = Buffer.byteLength(value);
+  const xrefEntries = "11111111111111111111";
+  value += `4 0 obj\n<< /Type /XRef /Size 5 /Root 1 0 R /Length ${Buffer.byteLength(xrefEntries)} /W [1 2 1] /Index [0 5] >>\nstream\n`;
+  value += `${xrefEntries}\nendstream\nendobj\n`;
+  value += `startxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(value);
+}
+
 export function syntheticPng() {
   return Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
