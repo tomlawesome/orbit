@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   extract: vi.fn(),
   proposal: vi.fn(),
   config: vi.fn(),
+  classifyStructure: vi.fn(),
 }));
 
 const OPERATION_ID = "22222222-2222-4222-8222-222222222222";
@@ -28,6 +29,10 @@ vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }
 vi.mock("@/server/documents/suggestions", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/suggestions")>("@/server/documents/suggestions"),
   proposalFromText: mocks.proposal,
+}));
+vi.mock("@/server/documents/validation", async () => ({
+  ...await vi.importActual<typeof import("@/server/documents/validation")>("@/server/documents/validation"),
+  classifyDocumentStructure: mocks.classifyStructure,
 }));
 vi.mock("@/server/documents/storage", () => ({
   LocalDocumentStorage: class {
@@ -67,6 +72,7 @@ describe("item document inspection", () => {
     mocks.receive.mockResolvedValue(received());
     mocks.readQuarantine.mockResolvedValue(validPdf());
     mocks.discardQuarantine.mockResolvedValue(undefined);
+    mocks.classifyStructure.mockReturnValue("supported_structure");
     mocks.scan.mockResolvedValue({ status: "clean" });
     mocks.extract.mockResolvedValue("Provider: Safe Cover\nPolicy number: AB-12345\n2027-08-01");
     mocks.proposal.mockReturnValue({
@@ -94,11 +100,28 @@ describe("item document inspection", () => {
         { field: "reference", value: "AB-12345", source: "document_text", confidence: "medium" },
         { field: "dueDate", value: "2027-08-01", source: "document_text", confidence: "medium" },
       ],
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
     });
     expect(result).not.toHaveProperty("text");
     expect(result).not.toHaveProperty("proposal");
     expect(mocks.access).toHaveBeenCalledWith("member-user", "household-id");
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("logs document.inspection with fixed outcome and reason for supported structure", async () => {
+    const infoSpy = vi.spyOn(log, "info");
+
+    await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event === "document.inspection");
+    expect(inspectionCalls).toHaveLength(1);
+    expect(inspectionCalls[0][1]).toEqual({ outcome: "attachable", reason: "supported_structure" });
   });
 
   it("logs a bounded scan attempt and clean outcome with the ephemeral operation reference, never the filename, and reuses it for parsing", async () => {
@@ -182,6 +205,8 @@ describe("item document inspection", () => {
       extracted: false,
       message: "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.",
       suggestions: [{ field: "title", value: "policy", source: "filename", confidence: "high" }],
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
     });
     expect(bytes.every((byte) => byte === 0)).toBe(true);
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
@@ -206,6 +231,8 @@ describe("item document inspection", () => {
       extracted: false,
       message: "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.",
       suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
     });
     expect(bytes.every((byte) => byte === 0)).toBe(true);
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
@@ -270,12 +297,13 @@ describe("item document inspection", () => {
   });
 
   it.each([
-    ["PDF", Buffer.from("%PDF-1.7\ntruncated")],
-    ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0])],
-    ["PNG", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
-  ])("degrades a structurally invalid %s without scanning or parsing it", async (_format, bytes) => {
+    ["PDF", Buffer.from("%PDF-1.7\ntruncated"), "unsupported_structure"],
+    ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "unsupported_structure"],
+    ["PNG", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "unsupported_structure"],
+  ])("degrades a structurally invalid %s without scanning or parsing it", async (_format, bytes, reason) => {
     mocks.receive.mockResolvedValue(received(bytes));
     mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure" | "prohibited_content");
 
     const result = await inspectItemDocument({
       userId: "member-user",
@@ -286,8 +314,10 @@ describe("item document inspection", () => {
 
     expect(result).toEqual({
       extracted: false,
-      message: "Suggestions are unavailable for that file. Review the fields manually and choose a valid document before attaching it.",
-      suggestions: [{ field: "title", value: "manual-review", source: "filename", confidence: "high" }],
+      message: "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.",
+      suggestions: [],
+      attachmentDisposition: "rejected",
+      reason,
     });
     expect(mocks.scan).not.toHaveBeenCalled();
     expect(mocks.extract).not.toHaveBeenCalled();
@@ -309,6 +339,8 @@ describe("item document inspection", () => {
       extracted: false,
       message: "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.",
       suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
     });
     expect(mocks.scan).not.toHaveBeenCalled();
     expect(mocks.extract).not.toHaveBeenCalled();
@@ -371,6 +403,40 @@ describe("item document inspection", () => {
     expect(error).not.toHaveProperty("signature");
     expect(mocks.extract).not.toHaveBeenCalled();
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
+  it("returns rejected disposition and prohibited_content reason for PDF with embedded files", async () => {
+    const infoSpy = vi.spyOn(log, "info");
+    const bytes = syntheticPdf("/EmbeddedFile");
+    mocks.receive.mockResolvedValue(received(bytes));
+    mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.classifyStructure.mockReturnValue("prohibited_content");
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "embedded-file.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toEqual({
+      extracted: false,
+      message: "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.",
+      suggestions: [],
+      attachmentDisposition: "rejected",
+      reason: "prohibited_content",
+    });
+
+    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event === "document.inspection");
+    expect(inspectionCalls).toHaveLength(1);
+    expect(inspectionCalls[0][1]).toEqual({ outcome: "rejected", reason: "prohibited_content" });
+    expect(JSON.stringify(inspectionCalls)).not.toContain(OPERATION_ID);
+    expect(JSON.stringify(inspectionCalls)).not.toContain("embedded-file");
+
+    expect(mocks.scan).not.toHaveBeenCalled();
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(bytes.every((byte) => byte === 0)).toBe(true);
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
   });
 
   it("authorizes before receiving any bytes", async () => {

@@ -24,10 +24,25 @@ function optionalValue(value: FormDataEntryValue | null): string | undefined {
   return trimmed || undefined;
 }
 
+type InspectionReason = "supported_structure" | "unsupported_structure" | "prohibited_content";
+
+function getRejectionMessage(reason: InspectionReason | undefined): string {
+  switch (reason) {
+    case "prohibited_content":
+      return "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
+    case "unsupported_structure":
+      return "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
+    default:
+      return "Orbit could not confirm that this document can be attached. Choose another document.";
+  }
+}
+
 type InspectionPayload = {
   suggestions?: Array<{ field: string; value: string; source: "filename" | "document_text"; confidence: "high" | "medium" | "low" }>;
   message?: string;
   error?: { message?: string };
+  attachmentDisposition?: "attachable" | "rejected";
+  reason?: InspectionReason;
 };
 
 export function ItemEditor({ item, sections, currency, householdId, csrfToken, onClose, onSave, onArchive }: ItemEditorProps) {
@@ -88,6 +103,12 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
       const payload = await response.json() as InspectionPayload;
       if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not inspect that document");
       if (sequence !== inspectionSequenceRef.current) return;
+
+      if (payload.attachmentDisposition !== "attachable" || payload.reason !== "supported_structure") {
+        clearDocument(getRejectionMessage(payload.reason));
+        return;
+      }
+
       const form = formRef.current;
       for (const suggestion of payload.suggestions ?? []) {
         const control = form?.elements.namedItem(suggestion.field) as HTMLInputElement | HTMLSelectElement | null;
@@ -97,10 +118,7 @@ export function ItemEditor({ item, sections, currency, householdId, csrfToken, o
       setInspectionMessage(payload.message ?? "Document inspected. Review or change the suggested fields, then add the item.");
     } catch (error) {
       if (sequence !== inspectionSequenceRef.current || (error instanceof DOMException && error.name === "AbortError")) return;
-      setInspectionPending(false);
-      setDocument(undefined);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      setInspectionMessage(error instanceof Error ? error.message : "Orbit could not inspect that document");
+      clearDocument(error instanceof Error ? error.message : "Orbit could not inspect that document");
     }
   }
 
