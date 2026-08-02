@@ -470,7 +470,7 @@ test.describe("authenticated household lifecycle", () => {
             await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
           }
         }
-        await expect(targetPage).toHaveURL(/\/settings$/);
+        await expect(targetPage).toHaveURL(/\/settings(?:#settings-members)?$/);
         await expect(settingsPage).toBeVisible({ timeout: 15_000 });
         await settingsPage.getByRole("link", { name: "Members", exact: true }).click();
       };
