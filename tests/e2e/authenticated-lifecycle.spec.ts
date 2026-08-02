@@ -114,10 +114,14 @@ async function waitForActiveHousehold(page: Page, name: string): Promise<Durable
 }
 
 async function openMobileNavigationIfNeeded(page: Page) {
-  const closeNavigation = page.getByRole("button", { name: "Close navigation" });
-  if (await closeNavigation.isVisible()) return;
+  const householdPicker = page.locator("button.household-picker");
   const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  await expect.poll(
+    async () => (await householdPicker.isVisible()) || (await openNavigation.isVisible()),
+    { timeout: 15_000 },
+  ).toBe(true);
   if (await openNavigation.isVisible()) await openNavigation.click();
+  await expect(householdPicker).toBeVisible({ timeout: 15_000 });
 }
 
 async function selectHouseholdByName(page: Page, name: string): Promise<DurableWorkspace> {
@@ -125,6 +129,7 @@ async function selectHouseholdByName(page: Page, name: string): Promise<DurableW
   const target = workspace.households.find((household) => household.name === name);
   if (!target) throw new Error(`Expected household "${name}" to be available for selection`);
 
+  if (new URL(page.url()).pathname === "/settings") await page.goto("/");
   await openMobileNavigationIfNeeded(page);
   const householdPicker = page.locator("button.household-picker");
   await expect(householdPicker, `Expected the household picker before selecting "${name}"`).toBeVisible({ timeout: 15_000 });
@@ -244,6 +249,7 @@ test.describe("authenticated household lifecycle", () => {
       await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
 
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("tab", { name: "Members" }).click();
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
       await page.getByLabel("Registered user").selectOption({ label: member });
@@ -290,6 +296,7 @@ test.describe("authenticated household lifecycle", () => {
       // workspace and reopen settings before using a settings tab again.
       await page.goto("/");
       await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("tab", { name: "Household" }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
       await page.getByRole("button", { name: "Remove household" }).click();
@@ -448,8 +455,8 @@ test.describe("authenticated household lifecycle", () => {
       const memberSession = await readAuthenticatedSession(memberPage, "Member");
 
       const openMembers = async (targetPage: Page) => {
-        const personalisation = targetPage.getByRole("dialog", { name: "Personalise Orbit", exact: true });
-        if (!(await personalisation.isVisible())) {
+        const settingsPage = targetPage.locator(".settings-page");
+        if (!(await settingsPage.isVisible())) {
           const openNavigation = targetPage.getByRole("button", { name: "Open navigation" });
           if (await openNavigation.isVisible()) {
             await openMobileNavigationIfNeeded(targetPage);
@@ -458,8 +465,9 @@ test.describe("authenticated household lifecycle", () => {
             await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
           }
         }
-        await expect(personalisation).toBeVisible({ timeout: 15_000 });
-        await personalisation.getByRole("tab", { name: "Members" }).click();
+        await expect(targetPage).toHaveURL(/\/settings$/);
+        await expect(settingsPage).toBeVisible({ timeout: 15_000 });
+        await settingsPage.getByRole("tab", { name: "Members" }).click();
       };
       const addMember = async () => {
         const administratorSession = await readAuthenticatedSession(page, "Administrator");

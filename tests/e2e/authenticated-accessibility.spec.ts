@@ -161,9 +161,10 @@ async function openSettings(page: Page) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: "Personalise", exact: true }).click();
   }
-  const dialog = page.getByRole("dialog", { name: "Personalise Orbit" });
-  await expect(dialog).toBeVisible();
-  return dialog;
+  await expect(page).toHaveURL(/\/settings$/);
+  const settingsPage = page.locator(".settings-page");
+  await expect(settingsPage).toBeVisible();
+  return settingsPage;
 }
 
 async function openItemEditor(page: Page) {
@@ -336,12 +337,15 @@ async function expectCoreSurfacesFit(
 ) {
   const settings = await openSettings(page);
   await expectNoHorizontalOverflow(page, `${context}/settings`);
-  await expectInsideViewport(page, ".settings-drawer", `${context} settings drawer`);
+  await expectInsideViewport(page, ".settings-page", `${context} settings page`);
   await page.keyboard.press("Escape");
-  await expect(settings).toBeHidden();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(settings).not.toBeVisible();
   if ((page.viewportSize()?.width ?? 0) <= 820) {
     await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
     await expect(page.locator(".sidebar")).toHaveCSS("visibility", "hidden");
+  } else {
+    await expect(page.getByRole("button", { name: "Open personalisation settings" })).toBeFocused();
   }
 
   const editor = await openItemEditor(page);
@@ -388,10 +392,10 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
 
       await stubMailboxReview(page, fixture);
       const settings = await openSettings(page);
-      await expectNoAxeViolations(page, ".settings-drawer");
+      await expectNoAxeViolations(page, ".settings-page");
       await settings.getByRole("tab", { name: "Inbox" }).click();
       await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
-      await expectNoAxeViolations(page, ".settings-drawer");
+      await expectNoAxeViolations(page, ".settings-page");
       await page.getByRole("button", { name: "Review", exact: true }).click();
       await expect(page.getByRole("region", { name: "Check every value before saving" })).toBeVisible();
       await expectNoAxeViolations(page, ".imap-review");
@@ -409,11 +413,21 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       const settingsTrigger = page.getByRole("button", { name: "Open personalisation settings" });
       await settingsTrigger.focus();
       await settingsTrigger.click();
-      const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
-      await expect(settings.getByRole("heading", { name: "Personalise Orbit" })).toBeFocused();
+      await expect(page).toHaveURL(/\/settings$/);
+      const settingsHeading = page.getByRole("heading", { name: "Settings" });
+      await expect(settingsHeading).toBeFocused();
       await page.keyboard.press("Shift+Tab");
-      expect(await settings.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+      const returnButton = page.getByRole("button", { name: /Return to Orbit/ });
+      expect(await returnButton.evaluate((element) => element.contains(document.activeElement) || element === document.activeElement)).toBe(true);
       await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(/\/$/);
+      await expect(settingsTrigger).toBeFocused();
+
+      await page.goto("/settings");
+      await expect(settingsHeading).toBeFocused();
+      await page.getByRole("tab", { name: "Inbox" }).focus();
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL(/\/$/);
       await expect(settingsTrigger).toBeFocused();
 
       const addTrigger = page.locator("button.add-button:visible");
@@ -509,6 +523,20 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
             page,
             `${viewport.name}/${preference.mode}/${preference.colourway}`,
           );
+          if (viewport.name === "desktop") {
+            const workspaceThemeTokens = await page.locator(".app-frame").evaluate((element) => {
+              const style = window.getComputedStyle(element);
+              return ["--canvas", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
+            });
+            const settings = await openSettings(page);
+            const settingsThemeTokens = await settings.evaluate((element) => {
+              const style = window.getComputedStyle(element);
+              return ["--canvas", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
+            });
+            expect(settingsThemeTokens).toEqual(workspaceThemeTokens);
+            await page.keyboard.press("Escape");
+            await expect(page).toHaveURL(/\/$/);
+          }
         }
       }
     });

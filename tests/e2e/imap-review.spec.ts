@@ -20,13 +20,8 @@ async function readWorkspace(page: Page) {
 }
 
 async function openInbox(page: Page) {
-  const settings = page.getByRole("button", { name: "Open personalisation settings" });
-  if (await settings.isVisible()) {
-    await settings.click();
-  } else {
-    await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByRole("button", { name: "Personalise", exact: true }).click();
-  }
+  await page.goto("/settings");
+  await expect(page).toHaveURL(/\/settings$/);
   await page.getByRole("tab", { name: "Inbox" }).click();
   await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
 }
