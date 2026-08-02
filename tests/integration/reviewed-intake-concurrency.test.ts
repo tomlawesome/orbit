@@ -119,11 +119,53 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
       approveReviewedIntake(fixture.users.member.id, input),
       approveReviewedIntake(fixture.users.member.id, input),
     ]);
-    expect(first).toMatchObject({ outcome: "approved", attachmentState: "attached" });
-    expect(second).toMatchObject({ outcome: "approved", attachmentState: "attached", itemId: first.itemId, approvalResultId: first.approvalResultId });
-    expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.itemId, first.itemId))).toHaveLength(1);
-    expect(await getDb().select({ id: imapIngestionAttachments.id, assignedDocumentId: imapIngestionAttachments.assignedDocumentId }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id))).toEqual([{ id: held.id, assignedDocumentId: held.id }]);
-    expect(await getDb().select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.entityType, "reviewed_intake"), eq(auditLog.entityId, first.approvalResultId)))).toHaveLength(1);
+    // Both calls must identify the same item and approval result.
+    expect(first.itemId).toBe(second.itemId);
+    expect(first.approvalResultId).toBe(second.approvalResultId);
+    // At least one call is approved and no outcome is outside approved | partial_success.
+    expect([first.outcome, second.outcome] as string[]).toEqual(expect.arrayContaining(["approved"]));
+    expect(first.outcome).toMatch(/^(approved|partial_success)$/);
+    expect(second.outcome).toMatch(/^(approved|partial_success)$/);
+    // Every approved result reports the attachment as attached; partial_success reports it pending.
+    if (first.outcome === "approved") {
+      expect(first.attachmentState).toBe("attached");
+      expect(first.attachedAttachmentIds).toContain(held.id);
+    } else {
+      expect(first.attachmentState).toBe("pending");
+      expect(first.pendingAttachmentIds).toContain(held.id);
+    }
+    if (second.outcome === "approved") {
+      expect(second.attachmentState).toBe("attached");
+      expect(second.attachedAttachmentIds).toContain(held.id);
+    } else {
+      expect(second.attachmentState).toBe("pending");
+      expect(second.pendingAttachmentIds).toContain(held.id);
+    }
+    // Final durable state: exactly one document for the item.
+    const itemDocuments = await getDb().select({ id: documents.id }).from(documents).where(eq(documents.itemId, first.itemId));
+    expect(itemDocuments).toHaveLength(1);
+    // The staged attachment is assigned to that document and is no longer transfer-claimed or purge-pending.
+    const [attachment] = await getDb().select({ id: imapIngestionAttachments.id, assignedDocumentId: imapIngestionAttachments.assignedDocumentId, transferClaimToken: imapIngestionAttachments.transferClaimToken, purgePending: imapIngestionAttachments.purgePending }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
+    expect(attachment.assignedDocumentId).toBe(itemDocuments[0].id);
+    expect(attachment.transferClaimToken).toBeNull();
+    expect(attachment.purgePending).toBe(false);
+    // The mailbox receipt records the same completed operation, result, and item without a failure.
+    const [completedReceipt] = await getDb().select({ status: imapIngestionMessages.status, approvalOperationId: imapIngestionMessages.approvalOperationId, approvalResultId: imapIngestionMessages.approvalResultId, approvedItemId: imapIngestionMessages.approvedItemId, failureCode: imapIngestionMessages.failureCode }).from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id));
+    expect(completedReceipt).toMatchObject({
+      status: "completed",
+      approvalOperationId: input.operationId,
+      approvalResultId: first.approvalResultId,
+      approvedItemId: first.itemId,
+      failureCode: null,
+    });
+    // Exactly one reviewed-intake result audit exists and records the final approved outcome.
+    const audits = await getDb().select({ id: auditLog.id, entityType: auditLog.entityType, entityId: auditLog.entityId, action: auditLog.action }).from(auditLog).where(and(eq(auditLog.entityType, "reviewed_intake"), eq(auditLog.entityId, first.approvalResultId)));
+    expect(audits).toHaveLength(1);
+    expect(audits[0].action).toBe("reviewed_intake_approved");
+    // Note: caller-local partial_success is legitimate when the non-owning concurrent caller's
+    // bounded wait (40 x 50 ms) for the attachment claimer expires before the owner completes,
+    // but final durable partial state is not: once both calls settle, the attachment must be
+    // assigned and no longer transfer-claimed or purge-pending, with exactly one audit recording approved.
     await fixture.cleanup();
   });
 
