@@ -566,7 +566,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .member-list article > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .member-list strong { overflow: hidden; text-overflow: ellipsis; font-size: calc(10px + var(--text-bump)); white-space: nowrap; }
 .member-list small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; font-size: calc(8px + var(--text-bump)); white-space: nowrap; }
-.member-list b { padding: 3px 6px; border-radius: 10px; color: var(--forest); background: color-mix(in srgb, var(--forest) 10%, transparent); font-size: calc(7px + var(--text-bump)); text-transform: uppercase; }
+.member-list b { padding: 3px 6px; border-radius: 10px; color: var(--ink); background: color-mix(in srgb, var(--forest) 10%, transparent); font-size: calc(7px + var(--text-bump)); text-transform: uppercase; }
 .member-list button { min-height: 29px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--coral-dark); background: transparent; font-size: calc(8px + var(--text-bump)); font-weight: 750; cursor: pointer; }
 .member-actions { display: flex; gap: 6px; }
 .member-actions button:first-child { color: var(--forest); }
