@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { FocusDialog } from "@/components/focus-dialog";
 import { carriesFiles, leavesDropZone } from "@/components/document-drop";
-import { isReady, progressDescription } from "@/components/document-state";
+import { convergenceDecision, convergenceDelayMs, isReady, progressDescription } from "@/components/document-state";
 
 export interface ItemDocument {
   id: string;
@@ -86,20 +86,130 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
   const [dragging, setDragging] = useState(false);
   const listUrl = `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`;
 
+  const loadDocuments = useCallback(async (signal?: AbortSignal): Promise<ItemDocument[]> => {
+    const response = await fetch(listUrl, { credentials: "same-origin", cache: "no-store", signal });
+    if (!response.ok) throw new Error(await responseMessage(response));
+    const payload = await response.json() as { documents: ItemDocument[] };
+    return payload.documents;
+  }, [listUrl]);
+
+  // Background convergence owns its own budget, timer and request. Foreground
+  // handlers only hand it the documents a completed request returned, so the
+  // decision never reads a stale render's state.
+  const convergenceRef = useRef<{ url: string; schedule: (documents: ItemDocument[]) => void } | null>(null);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(listUrl, { credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) throw new Error(await responseMessage(response));
-      const payload = await response.json() as { documents: ItemDocument[] };
-      setDocuments(payload.documents);
+      const loaded = await loadDocuments();
+      setDocuments(loaded);
+      // An upload, deletion, restore or retry can itself return a document that
+      // is still processing, so a foreground result is eligible for
+      // convergence; it never spends or restores budget.
+      const convergence = convergenceRef.current;
+      if (convergence?.url === listUrl) convergence.schedule(loaded);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Documents could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [listUrl]);
+  }, [listUrl, loadDocuments]);
+
+  useEffect(() => {
+    // One lifecycle per item identity: the budget, the pending timer and the
+    // in-flight request all belong to this effect and die with it, so an
+    // unmount, an identity change or a replacement cannot leave a timer
+    // running, update state after an await, or schedule anything later.
+    const lifecycle = {
+      attempts: 0,
+      timer: undefined as number | undefined,
+      controller: undefined as AbortController | undefined,
+      documents: [] as ItemDocument[],
+      reportedError: "",
+      active: true,
+    };
+
+    function clearTimer() {
+      if (lifecycle.timer === undefined) return;
+      window.clearTimeout(lifecycle.timer);
+      lifecycle.timer = undefined;
+    }
+
+    function schedule(documents: ItemDocument[]) {
+      clearTimer();
+      // These documents are fresher than any convergence request still in
+      // flight, which keeps convergence requests from overlapping.
+      lifecycle.controller?.abort();
+      lifecycle.controller = undefined;
+      if (!lifecycle.active) return;
+      lifecycle.documents = documents;
+      const decision = convergenceDecision({
+        documents,
+        attempts: lifecycle.attempts,
+        hidden: window.document.hidden,
+      });
+      if (decision !== "request") return;
+      lifecycle.timer = window.setTimeout(() => void converge(), convergenceDelayMs);
+    }
+
+    async function converge() {
+      lifecycle.timer = undefined;
+      // A hidden page issues no request; showing it again resumes from here
+      // with the budget untouched.
+      if (!lifecycle.active || lifecycle.controller || window.document.hidden) return;
+      const controller = new AbortController();
+      lifecycle.controller = controller;
+      lifecycle.attempts += 1;
+      try {
+        const loaded = await loadDocuments(controller.signal);
+        if (lifecycle.controller === controller) lifecycle.controller = undefined;
+        if (!lifecycle.active || controller.signal.aborted) return;
+        // Convergence never touches `loading`, so the list is never replaced by
+        // "Loading documents…" behind the reader's back.
+        setDocuments(loaded);
+        if (lifecycle.reportedError) {
+          // A recovered request clears only the message it reported, so an
+          // upload or deletion failure the reader has not resolved survives.
+          const reported = lifecycle.reportedError;
+          lifecycle.reportedError = "";
+          setError((current) => current === reported ? "" : current);
+        }
+        schedule(loaded);
+      } catch (caught) {
+        if (lifecycle.controller === controller) lifecycle.controller = undefined;
+        if (!lifecycle.active || controller.signal.aborted) return;
+        const failure = caught instanceof Error ? caught.message : "Documents could not be loaded.";
+        lifecycle.reportedError = failure;
+        setError(failure);
+        // The failure spent an attempt; whatever budget is left still applies
+        // to the documents the last completed request returned.
+        schedule(lifecycle.documents);
+      }
+    }
+
+    function onVisibilityChange() {
+      if (window.document.hidden) {
+        clearTimer();
+        lifecycle.controller?.abort();
+        lifecycle.controller = undefined;
+        return;
+      }
+      if (lifecycle.timer !== undefined || lifecycle.controller) return;
+      schedule(lifecycle.documents);
+    }
+
+    convergenceRef.current = { url: listUrl, schedule };
+    window.document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      lifecycle.active = false;
+      clearTimer();
+      lifecycle.controller?.abort();
+      lifecycle.controller = undefined;
+      window.document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (convergenceRef.current?.schedule === schedule) convergenceRef.current = null;
+    };
+  }, [listUrl, loadDocuments]);
 
   useEffect(() => {
     const task = window.setTimeout(() => void refresh(), 0);
