@@ -22,7 +22,7 @@ async function readWorkspace(page: Page) {
 async function openInbox(page: Page) {
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings$/);
-  await page.getByRole("tab", { name: "Inbox" }).click();
+  await page.getByRole("link", { name: "Inbox", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
 }
 

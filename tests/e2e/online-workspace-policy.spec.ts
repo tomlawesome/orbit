@@ -149,7 +149,7 @@ test.describe("online-only private workspace policy", () => {
 
     await page.getByRole("button", { name: "Open personalisation settings" }).click();
     await expect(page).toHaveURL(/\/settings$/);
-    await page.getByRole("tab", { name: "Household" }).click();
+    await page.getByRole("link", { name: "Household", exact: true }).click();
     const settings = page.locator(".settings-page");
     await settings.getByLabel("Household name").fill(rejectedName);
     await settings.getByRole("button", { name: "Save household" }).click();
@@ -159,7 +159,7 @@ test.describe("online-only private workspace policy", () => {
     await page.unroute("**/api/workspace/commands");
     await page.reload();
     expect(await activeHouseholdName(page)).toBe(originalName);
-    await page.getByRole("tab", { name: "Household" }).click();
+    await page.getByRole("link", { name: "Household", exact: true }).click();
     await expect(settings.getByLabel("Household name")).toHaveValue(originalName);
     await expect(page.getByText(rejectedName, { exact: true })).toHaveCount(0);
     expect(await legacyWorkspaceCacheExists(page)).toBe(false);
