@@ -393,7 +393,13 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await stubMailboxReview(page, fixture);
       const settings = await openSettings(page);
       await expectNoAxeViolations(page, ".settings-page");
-      await settings.getByRole("tab", { name: "Inbox" }).click();
+      await expect(settings.getByRole("tablist")).toHaveCount(0);
+      await expect(settings.getByRole("tab")).toHaveCount(0);
+      for (const sectionName of ["Appearance", "Your data", "Inbox", "Household", "Sections", "Members"]) {
+        await expect(settings.getByRole("region", { name: sectionName, exact: true })).toBeVisible();
+      }
+      await expect(settings.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
+      await settings.getByRole("link", { name: "Inbox", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
       await expectNoAxeViolations(page, ".settings-page");
       await page.getByRole("button", { name: "Review", exact: true }).click();
@@ -425,7 +431,11 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
 
       await page.goto("/settings");
       await expect(settingsHeading).toBeFocused();
-      await page.getByRole("tab", { name: "Inbox" }).focus();
+      const inboxLink = page.getByRole("link", { name: "Inbox", exact: true });
+      await inboxLink.focus();
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(/\/settings#settings-inbox$/);
+      await expect(page.getByRole("heading", { name: "Inbox", exact: true, level: 2 })).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(page).toHaveURL(/\/$/);
       await expect(settingsTrigger).toBeFocused();
@@ -474,6 +484,15 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expect(notifications.trigger).toBeFocused();
       await expect(notifications.trigger).toHaveCSS("outline-style", "solid");
       await expect(notifications.trigger).toHaveCSS("outline-width", "3px");
+    });
+  });
+
+  test("opens the Inbox section and focuses its heading from a deep link", async ({ page }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    await withFixture(page, async () => {
+      await page.goto("/settings?open=inbox");
+      await expect(page).toHaveURL(/\/settings\?open=inbox$/);
+      await expect(page.getByRole("heading", { name: "Inbox", exact: true, level: 2 })).toBeFocused();
     });
   });
 

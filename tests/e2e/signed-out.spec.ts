@@ -27,7 +27,7 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
 
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
-  await expect(page.locator(".settings-page, .settings-tabs, .settings-content")).toHaveCount(0);
+  await expect(page.locator(".settings-page, .settings-section-nav, .settings-content")).toHaveCount(0);
 });
 
 test("the signed-out boundary has no automated WCAG A or AA violations", async ({ page }) => {
