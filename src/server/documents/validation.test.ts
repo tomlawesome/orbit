@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyDocumentStructure,
   detectDocumentMediaType,
   normalizedDocumentFilename,
   validateSupportedDocumentStructure,
 } from "./validation";
-import { syntheticJpeg, syntheticPdf, syntheticPng } from "../../../tests/support/synthetic-documents";
+import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 
 const validPdf = syntheticPdf();
 const validPng = syntheticPng();
@@ -26,6 +27,42 @@ function forgedPdfObjectOffset(): Buffer {
   value += `startxref\n${xrefOffset}\n%%EOF\n`;
   return Buffer.from(value);
 }
+
+describe("structural document classification", () => {
+  it.each([
+    [validPdf, "application/pdf", "supported_structure"],
+    [syntheticPdfWithXrefStream(), "application/pdf", "supported_structure"],
+    [validJpeg, "image/jpeg", "supported_structure"],
+    [validPng, "image/png", "supported_structure"],
+  ] as const)("classifies supported %s as supported_structure", (bytes, mediaType, expected) => {
+    expect(classifyDocumentStructure(bytes, mediaType)).toBe(expected);
+    expect(validateSupportedDocumentStructure(bytes, mediaType)).toBe(true);
+  });
+
+  it.each([
+    [syntheticPdf("/EmbeddedFile"), "application/pdf", "prohibited_content"],
+    [syntheticPdf("/JavaScript"), "application/pdf", "prohibited_content"],
+    [syntheticPdf("/XFA"), "application/pdf", "prohibited_content"],
+  ] as const)("classifies PDF with prohibited feature %s as prohibited_content", (bytes, mediaType, expected) => {
+    expect(classifyDocumentStructure(bytes, mediaType)).toBe(expected);
+    expect(validateSupportedDocumentStructure(bytes, mediaType)).toBe(false);
+  });
+
+  it.each([
+    [Buffer.from("%PDF-1.7\nheader only"), "application/pdf", "unsupported_structure"],
+    [forgedPdfXref(), "application/pdf", "unsupported_structure"],
+    [forgedPdfObjectOffset(), "application/pdf", "unsupported_structure"],
+    [Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1"), "application/pdf", "unsupported_structure"],
+    [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "unsupported_structure"],
+    [validJpeg.subarray(0, -2), "image/jpeg", "unsupported_structure"],
+    [Buffer.from(validJpeg.map((value, index) => index === 6 ? 0 : value)), "image/jpeg", "unsupported_structure"],
+    [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png", "unsupported_structure"],
+    [Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]), "image/png", "unsupported_structure"],
+  ] as const)("classifies unsupported %s as unsupported_structure", (bytes, mediaType, expected) => {
+    expect(classifyDocumentStructure(bytes, mediaType)).toBe(expected);
+    expect(validateSupportedDocumentStructure(bytes, mediaType)).toBe(false);
+  });
+});
 
 describe("document content validation", () => {
   it.each([
