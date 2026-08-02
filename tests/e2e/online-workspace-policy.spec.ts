@@ -158,7 +158,9 @@ test.describe("online-only private workspace policy", () => {
 
     await page.unroute("**/api/workspace/commands");
     await page.reload();
-    await expect(page.getByText(originalName, { exact: true }).first()).toBeVisible();
+    expect(await activeHouseholdName(page)).toBe(originalName);
+    await page.getByRole("tab", { name: "Household" }).click();
+    await expect(settings.getByLabel("Household name")).toHaveValue(originalName);
     await expect(page.getByText(rejectedName, { exact: true })).toHaveCount(0);
     expect(await legacyWorkspaceCacheExists(page)).toBe(false);
   });
