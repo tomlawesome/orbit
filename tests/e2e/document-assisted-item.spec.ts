@@ -284,7 +284,7 @@ test.describe("document-assisted item intake", () => {
     });
 
     await expect(editor.getByText("valid.pdf selected for attachment after you submit.")).toBeVisible({ timeout: 15_000 });
-    await expect(editor.getByRole("button", { name: "Remove document" })).toBeVisible();
+    await expect(fileInput.locator("..").getByRole("button", { name: "Remove document" })).toBeVisible();
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(false);
     expect(callCount).toBe(2);
