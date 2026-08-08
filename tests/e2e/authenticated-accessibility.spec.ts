@@ -363,6 +363,7 @@ async function expectCoreSurfacesFit(
   const notifications = await openNotifications(page);
   await expectNoHorizontalOverflow(page, `${context}/notifications`);
   await expectInsideViewport(page, ".notification-center", `${context} notification centre`);
+  await expect(notifications.dialog.getByRole("heading", { name: "Notifications" })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(notifications.dialog).toBeHidden();
 }
