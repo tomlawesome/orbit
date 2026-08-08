@@ -92,10 +92,13 @@ validate_document_archive() {
     fail 'preflight/archive failed; the document archive is invalid.'
   fi
   while IFS= read -r entry; do
-    if [[ "$entry" == '.' || "$entry" == './' || "$entry" == './objects' || "$entry" == './objects/' ||
+    if [[ "$entry" == '.' || "$entry" == './' || "$entry" == './objects' || "$entry" == './objects/' || "$entry" == './staging' || "$entry" == './staging/' ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}$ || "$entry" =~ ^\./objects/[a-f0-9]{2}/$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}/$ ]]; then
+      continue
+    fi
+    if [[ "$entry" =~ ^\./staging/([a-f0-9]{64})\.bin$ ]]; then
       continue
     fi
     if [[ "$entry" =~ ^\./objects/([a-f0-9]{2})/([a-f0-9]{2})/([a-f0-9]{64})\.bin$ ]]; then
@@ -206,6 +209,7 @@ validate_correspondence() {
   local visible_report="$report_directory/visible.tsv"
   local attachment_report="$report_directory/attachments.tsv"
   local staging_report="$report_directory/staging.tsv"
+  local document_stage_report="$report_directory/document-stage.tsv"
   local transient_report="$report_directory/transient"
   local document_id attachment_id storage_key ciphertext_size lifecycle key_id actual_size relative_path object_key object_count
   declare -A referenced_objects=()
@@ -225,7 +229,10 @@ validate_correspondence() {
     'SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
     "$staging_report" || return 1
   query_report "$database_name" \
-    'SELECT count(*)::text FROM documents WHERE lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''scanning'\'', '\''encrypting'\'');' \
+    'SELECT s.document_id::text, s.storage_key, s.status, s.ciphertext_size::text FROM document_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
+    "$document_stage_report" || return 1
+  query_report "$database_name" \
+    'SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''encrypting'\'') OR (d.lifecycle = '\''scanning'\'' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));' \
     "$transient_report" || return 1
   [[ "$(tr -d '[:space:]' < "$transient_report")" == "0" ]] ||
     return 1
@@ -275,6 +282,17 @@ validate_correspondence() {
     fi
   done < "$staging_report"
 
+  while IFS='|' read -r document_id storage_key lifecycle ciphertext_size; do
+    [[ -n "$document_id" ]] || continue
+    [[ "$document_id" =~ ^[0-9a-f-]{36}$ && "$storage_key" =~ ^[a-f0-9]{64}$ && "$ciphertext_size" =~ ^[1-9][0-9]*$ && "$lifecycle" =~ ^(pending|purge_pending)$ ]] || return 1
+    [[ -z "${referenced_objects[$storage_key]+present}" ]] || return 1
+    local document_stage_path="$documents_root/staging/${storage_key}.bin"
+    [[ -f "$document_stage_path" && ! -L "$document_stage_path" ]] || return 1
+    actual_size="$(stat -c '%s' -- "$document_stage_path" 2>/dev/null)" || return 1
+    [[ "$actual_size" == "$ciphertext_size" ]] || return 1
+    referenced_objects["$storage_key"]=1
+  done < "$document_stage_report"
+
   while IFS='|' read -r document_id lifecycle storage_key ciphertext_size; do
     [[ -n "$document_id" ]] || continue
     [[ "$storage_key" =~ ^[a-f0-9]{64}$ && "$ciphertext_size" =~ ^[1-9][0-9]*$ ]] ||
@@ -296,6 +314,16 @@ validate_correspondence() {
     [[ "$object_count" == "1" ]] ||
       return 1
   done < <(find "$documents_root/objects" -type f -printf '%P|%s\n' 2>/dev/null)
+  while IFS='|' read -r relative_path actual_size; do
+    [[ -n "$relative_path" ]] || continue
+    [[ "$relative_path" =~ ^([a-f0-9]{64})\.bin$ ]] || return 1
+    object_key="${BASH_REMATCH[1]}"
+    [[ -n "${referenced_objects[$object_key]+present}" ]] || return 1
+    object_count="${stored_counts[$object_key]:-0}"
+    object_count=$((object_count + 1))
+    stored_counts["$object_key"]="$object_count"
+    [[ "$object_count" == "1" ]] || return 1
+  done < <(find "$documents_root/staging" -type f -printf '%P|%s\n' 2>/dev/null)
 
   for storage_key in "${!referenced_objects[@]}"; do
     [[ "${stored_counts[$storage_key]:-0}" == "1" ]] ||
@@ -554,6 +582,12 @@ restore_active_database() {
     < "$dump_path" >/dev/null 2>&1
 }
 
+reset_scan_recovery_leases() {
+  compose exec -T orbit-db sh -c \
+    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="BEGIN; UPDATE document_jobs AS job SET status = '\''failed'\'', completed_at = NULL, locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, last_error = COALESCE(job.last_error, '\''scanner_failed'\''), updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = '\''scan'\'' AND job.status IN ('\''pending'\'', '\''retry'\'', '\''processing'\'') AND job.attempts >= 5 AND document.lifecycle = '\''scanning'\'' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = '\''pending'\''); UPDATE document_jobs AS job SET status = '\''pending'\'', next_attempt_at = now(), locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, completed_at = NULL, updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = '\''scan'\'' AND job.status IN ('\''pending'\'', '\''retry'\'', '\''processing'\'') AND job.attempts < 5 AND document.lifecycle = '\''scanning'\'' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = '\''pending'\''); COMMIT;"' \
+    sh >/dev/null 2>&1
+}
+
 validate_checkpoint_key() {
   [[ -f "$checkpoint_directory/document-kek" && ! -L "$checkpoint_directory/document-kek" ]] || return 1
   [[ "$(tr -d '\r\n' < "$checkpoint_directory/document-kek")" =~ ^[0-9a-fA-F]{64}$ ]]
@@ -584,6 +618,7 @@ validate_active_correspondence() {
   local visible_report="$report_directory/visible.tsv"
   local attachment_report="$report_directory/attachments.tsv"
   local staging_report="$report_directory/staging.tsv"
+  local document_stage_report="$report_directory/document-stage.tsv"
   local transient_report="$report_directory/transient"
   if ! query_active_report \
     'SELECT c.document_id::text, c.storage_key, c.ciphertext_size::text, COALESCE(d.lifecycle::text, '\''<missing-document>'\'') FROM document_crypto c LEFT JOIN documents d ON d.id = c.document_id ORDER BY c.storage_key;' \
@@ -606,17 +641,22 @@ validate_active_correspondence() {
     return 1
   fi
   if ! query_active_report \
-    'SELECT count(*)::text FROM documents WHERE lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''scanning'\'', '\''encrypting'\'');' \
+    'SELECT s.document_id::text, s.storage_key, s.status, s.ciphertext_size::text FROM document_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
+    "$document_stage_report"; then
+    return 1
+  fi
+  if ! query_active_report \
+    'SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''encrypting'\'') OR (d.lifecycle = '\''scanning'\'' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));' \
     "$transient_report"; then
     return 1
   fi
-  if ! validate_correspondence_reports "$temporary_directory/active-documents" "$crypto_report" "$visible_report" "$attachment_report" "$staging_report" "$transient_report" active; then
+  if ! validate_correspondence_reports "$temporary_directory/active-documents" "$crypto_report" "$visible_report" "$attachment_report" "$staging_report" "$document_stage_report" "$transient_report" active; then
     return 1
   fi
 }
 
 validate_correspondence_reports() {
-  local documents_root="$1" crypto_report="$2" visible_report="$3" attachment_report="$4" staging_report="$5" transient_report="$6" category="$7"
+  local documents_root="$1" crypto_report="$2" visible_report="$3" attachment_report="$4" staging_report="$5" document_stage_report="$6" transient_report="$7" category="$8"
   local document_id attachment_id storage_key ciphertext_size lifecycle key_id actual_size relative_path object_key object_count
   declare -A referenced_objects=()
   declare -A stored_counts=()
@@ -654,6 +694,16 @@ validate_correspondence_reports() {
       referenced_objects["$storage_key"]=1
     fi
   done < "$staging_report"
+  while IFS='|' read -r document_id storage_key lifecycle ciphertext_size; do
+    [[ -n "$document_id" ]] || continue
+    [[ "$document_id" =~ ^[0-9a-f-]{36}$ && "$storage_key" =~ ^[a-f0-9]{64}$ && "$ciphertext_size" =~ ^[1-9][0-9]*$ && "$lifecycle" =~ ^(pending|purge_pending)$ ]] || return 1
+    [[ -z "${referenced_objects[$storage_key]+present}" ]] || return 1
+    local document_stage_path="$documents_root/staging/${storage_key}.bin"
+    [[ -f "$document_stage_path" && ! -L "$document_stage_path" ]] || return 1
+    actual_size="$(stat -c '%s' -- "$document_stage_path" 2>/dev/null)" || return 1
+    [[ "$actual_size" == "$ciphertext_size" ]] || return 1
+    referenced_objects["$storage_key"]=1
+  done < "$document_stage_report"
   while IFS='|' read -r document_id lifecycle storage_key ciphertext_size; do
     [[ -n "$document_id" ]] || continue
     [[ "$storage_key" =~ ^[a-f0-9]{64}$ && "$ciphertext_size" =~ ^[1-9][0-9]*$ ]] ||
@@ -670,6 +720,16 @@ validate_correspondence_reports() {
     stored_counts["$object_key"]="$object_count"
     [[ "$object_count" == "1" ]] || return 1
   done < <(find "$documents_root/objects" -type f -printf '%P|%s\n' 2>/dev/null)
+  while IFS='|' read -r relative_path actual_size; do
+    [[ -n "$relative_path" ]] || continue
+    [[ "$relative_path" =~ ^([a-f0-9]{64})\.bin$ ]] || return 1
+    object_key="${BASH_REMATCH[1]}"
+    [[ -n "${referenced_objects[$object_key]+present}" ]] || return 1
+    object_count="${stored_counts[$object_key]:-0}"
+    object_count=$((object_count + 1))
+    stored_counts["$object_key"]="$object_count"
+    [[ "$object_count" == "1" ]] || return 1
+  done < <(find "$documents_root/staging" -type f -printf '%P|%s\n' 2>/dev/null)
   for storage_key in "${!referenced_objects[@]}"; do
     [[ "${stored_counts[$storage_key]:-0}" == "1" ]] || return 1
   done
@@ -862,6 +922,7 @@ if [[ "${ORBIT_RESTORE_TEST_MODE:-false}" == true && "${ORBIT_RESTORE_TEST_FAILU
   fail 'cutover/test-failure requested; prior state will be restored.'
 fi
 restore_active_database "$extracted_directory/database.dump" || fail 'cutover/database failed; the staged PostgreSQL archive was rejected transactionally.'
+reset_scan_recovery_leases || fail 'cutover/recovery-jobs failed; recoverable scanner jobs could not be safely requeued.'
 write_journal database-restored || fail 'cutover/journal failed; the database-restored recovery state could not be durably published.'
 validate_active_correspondence || fail 'cutover/correspondence failed; active database and documents do not correspond.'
 start_and_wait_for_health || fail 'cutover/health failed; Orbit did not become healthy after restore.'

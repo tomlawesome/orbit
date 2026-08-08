@@ -24,3 +24,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0007: Dual-pipeline agent governance](0007-dual-pipeline-agent-governance.md)
 - [ADR-0008: Installer-resolved release digests](0008-installer-resolved-release-digests.md)
 - [ADR-0009: Sol-governed, capability-routed implementation](0009-capability-routed-implementation.md)
+- [ADR-0010: Outage-recoverable document scanning](0010-outage-recoverable-document-scanning.md)
