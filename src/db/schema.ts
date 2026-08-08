@@ -203,6 +203,7 @@ export const documentJobs = pgTable("document_jobs", {
   generation: integer("generation").notNull().default(1),
   status: documentJobStatus("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
   leaseToken: uuid("lease_token"),
@@ -211,8 +212,33 @@ export const documentJobs = pgTable("document_jobs", {
   ...auditColumns,
 }, (table) => [
   uniqueIndex("document_job_once").on(table.documentId, table.kind, table.generation),
-  index("document_job_claim_idx").on(table.status, table.createdAt),
+  index("document_job_claim_idx").on(table.status, table.nextAttemptAt, table.createdAt),
   index("document_job_lease_idx").on(table.status, table.leaseExpiresAt),
+]);
+
+/** Encrypted, non-downloadable bytes held only while a retryable scanner
+ * outage is recoverable. This is deliberately separate from document_crypto. */
+export const documentStagingObjects = pgTable("document_staging_objects", {
+  documentId: uuid("document_id").primaryKey().references(() => documents.id, { onDelete: "cascade" }),
+  storageKey: text("storage_key").notNull().unique(),
+  purpose: text("purpose").notNull().default("scanner_recovery"),
+  ciphertextSize: integer("ciphertext_size").notNull(),
+  envelopeVersion: integer("envelope_version").notNull(),
+  contentIv: text("content_iv").notNull(),
+  contentAuthTag: text("content_auth_tag").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  status: text("status").notNull().default("pending"),
+  recoveryExpiresAt: timestamp("recovery_expires_at", { withTimezone: true }).notNull(),
+  purgeAttempts: integer("purge_attempts").notNull().default(0),
+  purgeFailureCode: text("purge_failure_code"),
+  ...auditColumns,
+}, (table) => [
+  check("document_staging_purpose_valid", sql`${table.purpose} = 'scanner_recovery'`),
+  check("document_staging_status_valid", sql`${table.status} IN ('pending', 'purge_pending')`),
+  index("document_staging_expiry_idx").on(table.status, table.recoveryExpiresAt),
 ]);
 
 export const dueEvents = pgTable("due_events", {
