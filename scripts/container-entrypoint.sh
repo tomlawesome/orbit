@@ -4,11 +4,34 @@ set -eu
 readonly source_directory="/run/secrets"
 readonly runtime_directory="/run/orbit-secrets"
 readonly maximum_secret_bytes=65536
+readonly script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+readonly application_directory="$(dirname -- "$script_directory")"
+readonly version_path="${application_directory}/VERSION"
+readonly revision_path="${application_directory}/REVISION"
 
 fail() {
   printf 'Orbit container startup: %s\n' "$*" >&2
   exit 1
 }
+
+[ -f "$version_path" ] && [ ! -L "$version_path" ] ||
+  fail "the embedded version identity is unavailable"
+[ -f "$revision_path" ] && [ ! -L "$revision_path" ] ||
+  fail "the embedded revision identity is unavailable"
+
+orbit_version="$(cat -- "$version_path")"
+orbit_revision="$(cat -- "$revision_path")"
+printf '%s\n' "$orbit_version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ||
+  fail "the embedded version identity is invalid"
+printf '%s\n' "$orbit_revision" | grep -Eq '^[0-9a-f]{40}$' ||
+  fail "the embedded revision identity is invalid"
+
+if [ "${1:-}" = "--version" ]; then
+  printf "Orbit %s\n" "$orbit_version"
+  exit 0
+fi
+
+printf "Orbit startup: version=%s revision=%s\n" "$orbit_version" "$orbit_revision"
 
 # Docker Compose implements file-backed secrets as bind mounts. Their host
 # ownership is therefore retained and cannot be remapped with Compose uid/gid

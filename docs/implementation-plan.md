@@ -38,10 +38,10 @@ Every implementable issue must define:
 - evidence required before closure.
 
 Work uses short-lived `codex/` branches created from and normally merged into
-protected `develop`. Versioned `release/*` branches move accepted release
-source through `main` and back to `develop`; `hotfix/*` branches start from
-`main` and merge into both. Long-lived consolidation branches are retired after
-their accepted changes reach `develop`.
+protected `develop`. Release trains merge `develop` into protected `preview`,
+then move the accepted exact source through `main`; `hotfix/*` branches start
+from `main` and are reconciled into `develop` and `preview`. Long-lived
+consolidation branches are retired after their accepted changes reach `develop`.
 
 ## Delivery structure
 
@@ -228,9 +228,10 @@ requires Sol Extra High review before implementation proceeds.
   recovery and promotion acceptance wait for the feature-complete image.
 - Prepare the release-acceptance record structure now, but do not claim
   representative provider/device/operator results before those checks run
-  against the exact versioned-release preview digest.
-- Cut a semantic versioned release branch only when all stable-v1 blockers are
-  closed, then accept and promote its exact preview digest.
+  against the exact protected-preview digest.
+- Merge `develop` into `preview` only when all stable-v1 blockers are closed,
+  then accept and promote its exact digest under the automatically calculated
+  release-train version.
 
 Issue #22 begins only after the manual item and document-assisted review
 contracts are accepted, but its dedicated-mailbox ingestion and review journey
@@ -415,6 +416,6 @@ baseline, following the rolling-wave rule above.
 
 Previews provide ongoing deployment evidence while v1 is incomplete. Once the
 release scope is feature-complete, [the release policy](releasing.md) requires
-a versioned release branch, testing and deployment by immutable digest, merging
-the accepted source into both protected `main` and `develop`, and promotion
-without rebuilding.
+the protected `preview` lane, testing and deployment by immutable digest,
+merging the accepted source into protected `main`, and promotion without
+rebuilding.
