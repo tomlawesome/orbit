@@ -16,6 +16,10 @@ const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8
   "\r\n",
   "\n",
 );
+const configureScript = readFileSync(
+  new URL("./configure.sh", import.meta.url),
+  "utf8",
+).replaceAll("\r\n", "\n");
 const entrypoint = readFileSync(
   new URL("./container-entrypoint.sh", import.meta.url),
   "utf8",
@@ -50,6 +54,19 @@ describe("immutable container version identity", () => {
     expect(entrypoint).toContain('readonly version_path="${application_directory}/VERSION"');
     expect(entrypoint).not.toContain("${ORBIT_VERSION:-");
     expect(entrypoint).not.toContain("${ORBIT_REVISION:-");
+  });
+
+  it("keeps bootstrap key generation separate from the versioned runtime image", () => {
+    const helperStart = dockerfile.indexOf("FROM base AS vapid-generator");
+    const runtimeStart = dockerfile.indexOf(" AS runner");
+    const helper = dockerfile.slice(helperStart, runtimeStart);
+
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(runtimeStart).toBeGreaterThan(helperStart);
+    expect(helper).toContain("COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs");
+    expect(helper).not.toContain("ORBIT_VERSION");
+    expect(configureScript).toContain("docker build --target vapid-generator");
+    expect(configureScript).not.toContain("docker build --target runner");
   });
 
   it("handles --version before root and secret bootstrap checks", () => {

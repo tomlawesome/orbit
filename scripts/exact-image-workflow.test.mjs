@@ -164,6 +164,21 @@ describe("exact-image publication workflow", () => {
     expect(workflow.slice(push, attest)).not.toContain("docker/build-push-action");
   });
 
+  it("keeps failure diagnostics available before an exact image is configured", () => {
+    const diagnostics = workflow.slice(
+      workflow.indexOf("- name: Show service diagnostics"),
+      workflow.indexOf("- name: Stop smoke-test services"),
+    );
+    const cleanup = workflow.slice(
+      workflow.indexOf("- name: Stop smoke-test services"),
+      workflow.indexOf("- name: Start disposable installer registry"),
+    );
+
+    const fallback = 'export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"';
+    expect(diagnostics).toContain(fallback);
+    expect(cleanup).toContain(fallback);
+  });
+
   it("requires the database-backed ready contract before smoke acceptance continues", () => {
     expect(workflow).toContain("- name: Verify health endpoint");
     expect(workflow).toContain('.status == "ready" and .service == "orbit"');

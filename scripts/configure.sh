@@ -457,8 +457,8 @@ ensure_vapid_keys() {
   if [[ -z "$generated" ]]; then
     printf 'Building the Orbit bootstrap image to generate VAPID keys.\n'
     bootstrap_image="orbit-vapid-bootstrap:$(git rev-parse --short=12 HEAD)"
-    docker build --target runner --tag "$bootstrap_image" . >/dev/null || fail "Could not build the Orbit bootstrap image."
-    generated="$(docker run --rm --entrypoint node "$bootstrap_image" /opt/orbit/scripts/generate-vapid.mjs)" || fail "Could not generate VAPID keys."
+    docker build --target vapid-generator --tag "$bootstrap_image" . >/dev/null || fail "Could not build the Orbit bootstrap image."
+    generated="$(docker run --rm "$bootstrap_image")" || fail "Could not generate VAPID keys."
   fi
   public_key="$(printf '%s\n' "$generated" | sed -n 's/^public=//p')"
   private_key="$(printf '%s\n' "$generated" | sed -n 's/^private=//p')"
