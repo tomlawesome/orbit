@@ -8,6 +8,7 @@ readonly script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 readonly application_directory="$(dirname -- "$script_directory")"
 readonly version_path="${application_directory}/VERSION"
 readonly revision_path="${application_directory}/REVISION"
+readonly channel_path="${application_directory}/CHANNEL"
 
 fail() {
   printf 'Orbit container startup: %s\n' "$*" >&2
@@ -18,20 +19,42 @@ fail() {
   fail "the embedded version identity is unavailable"
 [ -f "$revision_path" ] && [ ! -L "$revision_path" ] ||
   fail "the embedded revision identity is unavailable"
+[ -f "$channel_path" ] && [ ! -L "$channel_path" ] ||
+  fail "the embedded release channel is unavailable"
 
 orbit_version="$(cat -- "$version_path")"
 orbit_revision="$(cat -- "$revision_path")"
+orbit_channel="$(cat -- "$channel_path")"
 printf '%s\n' "$orbit_version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ||
   fail "the embedded version identity is invalid"
 printf '%s\n' "$orbit_revision" | grep -Eq '^[0-9a-f]{40}$' ||
   fail "the embedded revision identity is invalid"
+printf '%s\n' "$orbit_channel" | grep -Eq '^(ci|preview|dev)$' ||
+  fail "the embedded release channel is invalid"
 
 if [ "${1:-}" = "--version" ]; then
   printf "Orbit %s\n" "$orbit_version"
   exit 0
 fi
 
-printf "Orbit startup: version=%s revision=%s\n" "$orbit_version" "$orbit_revision"
+if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "server.js" ]; then
+  cat <<'ORBIT_BANNER'
+─────────────────────────────────────────────────────────────────────────────
+      ·            ✦             ·                  ·           ✦      ·
+  ✦        ·               ○                ·             ·          ◯
+  ·      ·    ·    ██████╗  ██████╗  ██████╗  ██╗ ████████╗   ·      ·      ·
+·     ·      ·    ██╔═══██╗ ██╔══██╗ ██╔══██╗ ██║ ╚══██╔══╝   ·    ·        ·
+   ·      ·   ·   ██║   ██║ ██████╔╝ ██████╔╝ ██║    ██║        ·      ·    ·
+ ·      ·     ·   ██║   ██║ ██╔══██╗ ██╔══██╗ ██║    ██║      ·      ·      ·
+    ·      ·      ╚██████╔╝ ██║  ██║ ██████╔╝ ██║    ██║      ·     ·     · ·
+·       ·     ·    ╚═════╝  ╚═╝  ╚═╝ ╚═════╝  ╚═╝    ╚═╝       ·      ·     ·
+    ·          ◯              ·                ✦             ·           ·
+         ✦             ·              ·                ○          ·
+─────────────────────────────────────────────────────────────────────────────
+ORBIT_BANNER
+  printf 'Orbit %s | channel=%s | revision=%s\n' \
+    "$orbit_version" "$orbit_channel" "$orbit_revision"
+fi
 
 # Docker Compose implements file-backed secrets as bind mounts. Their host
 # ownership is therefore retained and cannot be remapped with Compose uid/gid
