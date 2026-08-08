@@ -611,6 +611,7 @@ jobs:
       - name: Show service diagnostics
         if: failure()
         run: |
+          export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml logs --no-color
           app_container="$(docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps --quiet orbit-app)"
@@ -620,7 +621,9 @@ jobs:
 
       - name: Stop smoke-test services
         if: always()
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml --profile processing down --volumes --remove-orphans
+        run: |
+          export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml --profile processing down --volumes --remove-orphans
 
       # Installer evidence must gate publication, and the disposable registry
       # bound to a Compose project named "orbit" must never collide with the
