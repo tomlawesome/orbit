@@ -70,6 +70,7 @@ chmod 600 \
 export ORBIT_IMAGE="orbit-local:${revision:0:12}"
 export ORBIT_VERSION="$version"
 export ORBIT_REVISION="$revision"
+export ORBIT_CHANNEL="preview"
 bash scripts/validate-compose-config.sh
 
 printf 'Orbit preview preflight: isolated configuration and Compose validation passed.\n'
