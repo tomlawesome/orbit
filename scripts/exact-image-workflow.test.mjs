@@ -123,6 +123,19 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toMatch(/type=raw,value=v\$?\{/u);
   });
 
+  it("runs the locally reproducible preflight before the exact image build", () => {
+    const version = workflow.indexOf("- name: Calculate release-train version");
+    const preflight = workflow.indexOf("- name: Validate preview-lane preflight");
+    const build = workflow.indexOf("- name: Build and load final image");
+    const preflightStep = workflow.slice(preflight, build);
+
+    expect(version).toBeGreaterThanOrEqual(0);
+    expect(preflight).toBeGreaterThan(version);
+    expect(build).toBeGreaterThan(preflight);
+    expect(preflightStep).toContain("bash scripts/preview-lane-preflight.sh");
+    expect(preflightStep).toContain("--channel");
+  });
+
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
     expect(workflow.match(/docker\/build-push-action@/gu)).toHaveLength(1);
     expect(workflow).toContain("platforms: linux/amd64");
