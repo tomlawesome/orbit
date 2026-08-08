@@ -141,6 +141,7 @@ test.describe("administrator operations evidence", () => {
           scanner: { status: "disabled", mode: "disabled" },
           quota: { usedBytes: 128, limitBytes: 1024 },
           worker: { started: false, running: false, lastSuccessAt: null, lastErrorAt: null, lastErrorCode: "synthetic-secret-must-not-render", lastReconciliationAt: null },
+          scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
         } }),
       });
     });
