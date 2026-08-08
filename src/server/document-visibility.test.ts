@@ -101,6 +101,9 @@ describe("document visibility boundary", () => {
       "lifecycle",
       "mediaType",
       "ready",
+      "recoverable",
+      "recoveryExpiresAt",
+      "recoveryStatus",
       "scanStatus",
       "sizeBytes",
     ]);

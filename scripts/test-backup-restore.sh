@@ -8,13 +8,16 @@ readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly live_kek="$secrets_directory/document-kek"
 readonly document_id="11111111-1111-4111-8111-111111111111"
+readonly recovery_document_id="55555555-5555-4555-8555-555555555555"
 readonly household_id="22222222-2222-4222-8222-222222222222"
 readonly attachment_message_id="33333333-3333-4333-8333-333333333333"
 readonly storage_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 readonly extra_storage_key="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 readonly attachment_storage_key="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+readonly staging_storage_key="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 readonly storage_path="/var/lib/orbit/documents/objects/aa/aa/${storage_key}.bin"
 readonly attachment_storage_path="/var/lib/orbit/documents/objects/cc/cc/${attachment_storage_key}.bin"
+readonly staging_path="/var/lib/orbit/documents/staging/${staging_storage_key}.bin"
 backup_path=""
 recovery_bundle_path=""
 test_directory=""
@@ -81,6 +84,14 @@ assert_fixture_present() {
   local actual_attachment_hash
   actual_attachment_hash="$(compose exec -T orbit-app sha256sum "$attachment_storage_path" | awk '{print $1}')"
   [[ "$actual_attachment_hash" == "$attachment_expected_hash" ]] || fail 'The stored IMAP attachment bytes changed.'
+  local recovery_state
+  recovery_state="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select string_agg(status || '\''|'\'' || attempts, '\'','\'' order by generation) from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
+    sh "$recovery_document_id" | tr -d '\''[:space:]'\'')"
+  [[ "$recovery_state" == 'pending|2,failed|5' ]] || fail 'Restore did not preserve attempts or failed scanner-job state.'
+  if ! compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1; then
+    fail 'The encrypted scanner-recovery staging sentinel was not restored.'
+  fi
 }
 
 assert_fixture_absent() {
@@ -91,6 +102,9 @@ assert_fixture_absent() {
   [[ -z "$(attachment_fixture_key)" ]] || fail 'The rollback IMAP attachment sentinel was not restored.'
   if compose exec -T orbit-app test -e "$attachment_storage_path" >/dev/null 2>&1; then
     fail 'The rollback IMAP attachment sentinel was not restored.'
+  fi
+  if compose exec -T orbit-app test -e "$staging_path" >/dev/null 2>&1; then
+    fail 'The rollback scanner-recovery staging sentinel was not restored.'
   fi
 }
 
@@ -108,6 +122,27 @@ insert_document_fixture() {
         '\''$2'\'', '\''$1'\'', '\''backup-round-trip.bin'\'', '\''application/octet-stream'\'',
         29, '\''$3'\'', '\''available'\'', '\''skipped'\'', now()
       );
+      insert into documents (
+        id, household_id, display_name, media_type, size_bytes, content_sha256,
+        lifecycle, scan_status, failure_code
+      ) values (
+        '\''$8'\'', '\''$1'\'', '\''backup-recovery-sentinel'\'', '\''application/octet-stream'\'',
+        31, '\''ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'\'', '\''scanning'\'', '\''error'\'', '\''scanner_timeout'\''
+      );
+      insert into document_staging_objects (
+        document_id, storage_key, purpose, ciphertext_size, envelope_version,
+        content_iv, content_auth_tag, wrapped_dek, wrap_iv, wrap_auth_tag, key_id,
+        status, recovery_expires_at
+      ) values (
+        '\''$8'\'', '\''$9'\'', '\''scanner_recovery'\'', 31, 1,
+        '\''dGVzdC1zdGFnZS1pdg'\'', '\''dGVzdC1zdGFnZS10YWc'\'', '\''dGVzdC1zdGFnZS1kZWs'\'',
+        '\''dGVzdC1zdGFnZS13cmFwLWl2'\'', '\''dGVzdC1zdGFnZS13cmFwLXRhZw'\'', '\''backup-stage-key'\'',
+        '\''pending'\'', now() + interval '\''1 day'\''
+      );
+      insert into document_jobs (document_id, kind, status, attempts, next_attempt_at, last_error)
+        values ('\''$8'\'', '\''scan'\'', '\''processing'\'', 2, now() - interval '\''1 minute'\'', '\''scanner_timeout'\'');
+      insert into document_jobs (document_id, kind, generation, status, attempts, next_attempt_at, last_error)
+        values ('\''$8'\'', '\''scan'\'', 2, '\''failed'\'', 5, now() - interval '\''1 minute'\'', '\''scanner_timeout'\'');
       insert into document_crypto (
         document_id, storage_key, ciphertext_size, envelope_version,
         content_iv, content_auth_tag, wrapped_dek, wrap_iv, wrap_auth_tag, key_id
@@ -137,7 +172,7 @@ insert_document_fixture() {
         '\''dGVzdC1hdHRhY2htZW50LWRlaw'\'', '\''dGVzdC1hdHRhY2htZW50LXdpdg'\'',
         '\''dGVzdC1hdHRhY2htZW50LWF1dGg'\'', '\''imap-test-key'\'', '\''stored'\''
       );"' \
-    sh "$household_id" "$document_id" "$1" "$storage_key" "$attachment_message_id" "$attachment_storage_key" "$attachment_expected_hash" >/dev/null
+    sh "$household_id" "$document_id" "$1" "$storage_key" "$attachment_message_id" "$attachment_storage_key" "$attachment_expected_hash" "$recovery_document_id" "$staging_storage_key" >/dev/null
 }
 
 remove_document_fixture() {
@@ -146,6 +181,7 @@ remove_document_fixture() {
     sh "$household_id" "$attachment_message_id" >/dev/null
   compose exec -T orbit-app rm -f "$storage_path" >/dev/null
   compose exec -T orbit-app rm -f "$attachment_storage_path" >/dev/null
+  compose exec -T orbit-app rm -f "$staging_path" >/dev/null
 }
 
 prepare_variant() {
@@ -160,7 +196,7 @@ prepare_variant() {
 }
 
 rebuild_documents_archive() {
-  (cd "$variant_directory" && rm -f documents.tar documents.tar.enc && tar -cf documents.tar ./objects)
+  (cd "$variant_directory" && rm -f documents.tar documents.tar.enc && tar -cf documents.tar ./objects ./staging)
   openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt \
     -pass "file:$live_kek" \
     -in "$variant_directory/documents.tar" -out "$variant_directory/documents.tar.enc"
@@ -510,8 +546,8 @@ test_wrong_recovery_material() {
 
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
 compose exec -T --user orbit:orbit orbit-app sh -c \
-  'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2"' \
-  sh "$storage_path" "$attachment_storage_path"
+  'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc /var/lib/orbit/documents/staging && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2" && printf "%s" "orbit-encrypted-recovery-00001" > "$3"' \
+  sh "$storage_path" "$attachment_storage_path" "$staging_path"
 expected_hash="$(compose exec -T orbit-app sha256sum "$storage_path" | awk '{print $1}')"
 attachment_expected_hash="$(compose exec -T orbit-app sha256sum "$attachment_storage_path" | awk '{print $1}')"
 insert_document_fixture "$expected_hash"
