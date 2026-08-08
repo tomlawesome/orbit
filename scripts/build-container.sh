@@ -31,6 +31,7 @@ docker compose version >/dev/null 2>&1 || {
 export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 export ORBIT_VERSION="$(node scripts/calculate-version.mjs --channel preview)"
 export ORBIT_REVISION="$(git rev-parse HEAD)"
+export ORBIT_CHANNEL="preview"
 
 # The build context lives in an overlay, because the base compose file
 # describes a deployment that has no source tree.
