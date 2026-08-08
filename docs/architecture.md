@@ -116,17 +116,28 @@ Worker invariants:
 1. Authorize the user, household, item, quota, and declared size.
 2. Stream bounded plaintext into private quarantine while hashing and
    identifying content from bytes.
-3. Scan through the private ClamAV adapter or record the explicit configured
-   skip.
-4. Encrypt with a per-document DEK and wrap it with the instance KEK.
-5. Atomically publish ciphertext and transition metadata to available.
-6. Parse only through an optional private adapter. Validate and bound any
-   suggested fields, then require user review.
+3. Validate the complete supported structure before scanning. Clean scanning
+   continues synchronously and encrypts with a per-document DEK before
+   returning `201` and `available`; explicit scan-disabled operation records
+   `skipped`.
+4. Malware, invalid structure, and the scanner-reported `scanner` error are
+   terminal fail-closed outcomes. Only adapter `unavailable`, `timeout`, and
+   `protocol` errors encrypt the validated bytes for the separate opaque
+   `staging/` namespace, record a `scanning`/`error` document and PostgreSQL
+   scan job, and return `202` with no-store headers.
+5. A leased worker reclaims the staged object with generation/token fencing,
+   re-scans it, and atomically publishes ordinary ciphertext only after a
+   clean result. Stage expiry, malware, invalid staging, and purge failures
+   remain inaccessible and are represented by bounded metadata.
+6. Parse only through an optional private adapter after the document is
+   available. Validate and bound any suggested fields, then require user
+   review.
 
 ### Backup and restore
 
-1. Produce a PostgreSQL custom-format dump, encrypted document tree, and
-   authenticated manifest in a private staged location.
+1. Produce a PostgreSQL custom-format dump, encrypted document tree (including
+   `staging/` recovery ciphertext), and authenticated manifest in a private
+   staged location; plaintext quarantine is never included.
 2. Verify the bundle before publication.
 3. Before active replacement, restore into disposable staged state and validate
    key identity plus exact database/blob correspondence.
@@ -147,12 +158,12 @@ evidence rather than starting with unproven mixed state.
 | Area | Current control | Principal v1 gap |
 | --- | --- | --- |
 | Installation | Idempotent configuration scripts and file-backed secrets | Prove clean install on the supported host and document failure recovery |
-| Migrations | 18 ordered migrations, optional migrate-on-start | Add fresh-schema and representative upgrade-path CI |
+| Migrations | 24 ordered migrations, optional migrate-on-start | Add fresh-schema and representative upgrade-path CI |
 | Health | Application and service health checks; administrator summaries | Exercise degraded optional providers and safe diagnostics |
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Implement and prove staged correspondence, durable rollback checkpoints, corrupt/wrong-key cases and interrupted recovery |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Build-once previews from `develop` and versioned release branches, dependency-change licence review, source and exact-image supply-chain gates, verified digest-bound attestations, plus guarded no-rebuild promotion after exact protected merges | Exercise representative versioned-release acceptance plus stable promotion |
+| Release | Static/unit issue lanes into `develop`, one build-once exact-image publication from protected `preview`, automatic train versions, digest-bound attestations, exact-source verification and guarded no-rebuild promotion to `latest` plus a GitHub Release | Exercise representative preview acceptance plus stable promotion |
 | Rollback | Prior image and verified pre-update backup retained; no unproven database downgrade | Prove the ADR-0004 update and recovery decision points |
 
 ## Architecture decisions and open questions
@@ -161,10 +172,11 @@ Durable decisions live in `docs/adr`; issues track their implementation.
 
 - [ADR-0001: Self-hosted single-instance deployment](adr/0001-self-hosted-single-instance.md)
 - [ADR-0002: Evidence-driven delivery and immutable promotion](adr/0002-evidence-driven-delivery.md)
-- [ADR-0003: Gitflow preview and stable channels](adr/0003-gitflow-preview-and-stable-channels.md)
+- [ADR-0003: Protected preview lane and stable promotion](adr/0003-gitflow-preview-and-stable-channels.md)
 - [ADR-0004: Supported upgrades and recoverable restore](adr/0004-supported-upgrades-and-recoverable-restore.md)
 - [ADR-0005: Private reviewed ingestion and mailbox staging](adr/0005-reviewed-ingestion-and-mailbox-staging.md)
 - [ADR-0006: Online-authoritative private workspace](adr/0006-online-authoritative-private-workspace.md)
+- [ADR-0010: Outage-recoverable document scanning](adr/0010-outage-recoverable-document-scanning.md)
 
 Decisions intentionally deferred beyond stable v1 include managed multi-tenancy,
 object storage, horizontal workers, a remote semantic-extraction provider, and

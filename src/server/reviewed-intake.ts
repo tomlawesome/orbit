@@ -743,6 +743,56 @@ export async function completeDirectReviewedUpload(userId: string, operationId: 
   if (changed) return;
 }
 
+/** Links an outage-recoverable direct upload without pretending it is attached. */
+export async function recordDirectReviewedUploadPending(
+  userId: string,
+  operationId: string,
+  householdId: string,
+  itemId: string,
+  documentId: string,
+  failureCode: string | null,
+): Promise<void> {
+  await getDb().transaction(async (transaction) => {
+    const [operation] = await transaction.select().from(reviewedIntakeOperations)
+      .where(eq(reviewedIntakeOperations.id, operationId)).for("update").limit(1);
+    if (!operation || operation.actorUserId !== userId || operation.source !== "direct_upload"
+      || operation.householdId !== householdId || operation.itemId !== itemId || !operation.expectedDocument) {
+      throw new AppError("reviewed_intake_not_found", "That reviewed intake is not available", 404);
+    }
+    if (operation.status === "completed") {
+      if (operation.documentId !== documentId) throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
+      return;
+    }
+    const [document] = await transaction.select({ id: documents.id, lifecycle: documents.lifecycle })
+      .from(documents).where(and(eq(documents.id, documentId), eq(documents.householdId, householdId), eq(documents.itemId, itemId))).limit(1);
+    if (!document || document.lifecycle !== "scanning") {
+      throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
+    }
+    await transaction.update(reviewedIntakeOperations).set({
+      status: "recoverable",
+      attachmentState: "pending",
+      documentId,
+      failureCode: failureCode ?? "scanner_unavailable",
+      updatedAt: new Date(),
+    }).where(and(eq(reviewedIntakeOperations.id, operationId), or(
+      eq(reviewedIntakeOperations.status, "pending_attachment"),
+      eq(reviewedIntakeOperations.status, "recoverable"),
+    )));
+    await transaction.insert(auditLog).values({
+      id: operation.resultId,
+      householdId,
+      actorUserId: userId,
+      entityType: "reviewed_intake",
+      entityId: operation.resultId,
+      action: "reviewed_intake_pending_document",
+      changes: { source: "direct_upload", result: "scanner_recovery", itemId },
+    }).onConflictDoUpdate({ target: auditLog.id, set: {
+      action: "reviewed_intake_pending_document",
+      changes: { source: "direct_upload", result: "scanner_recovery", itemId },
+    } });
+  });
+}
+
 export async function authorizeDirectReviewedUpload(userId: string, operationId: string, householdId: string, itemId: string): Promise<{ documentId?: string }> {
   const [operation] = await getDb().select().from(reviewedIntakeOperations)
     .where(eq(reviewedIntakeOperations.id, operationId)).limit(1);
@@ -751,6 +801,9 @@ export async function authorizeDirectReviewedUpload(userId: string, operationId:
   }
   if (operation.status === "completed") {
     if (!operation.documentId) throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
+    return { documentId: operation.documentId };
+  }
+  if (operation.documentId && ["pending_attachment", "recoverable"].includes(operation.status)) {
     return { documentId: operation.documentId };
   }
   if (!["pending_attachment", "recoverable"].includes(operation.status)) {

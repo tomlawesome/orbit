@@ -78,10 +78,13 @@ validate_document_archive() {
   local archive_path="$1" listing_path="$work_directory/document-archive-list"
   tar -tf "$archive_path" > "$listing_path" 2>/dev/null || fail "Document archive is invalid."
   while IFS= read -r entry; do
-    if [[ "$entry" == "." || "$entry" == "./" || "$entry" == "./objects" || "$entry" == "./objects/" ||
+    if [[ "$entry" == "." || "$entry" == "./" || "$entry" == "./objects" || "$entry" == "./objects/" || "$entry" == "./staging" || "$entry" == "./staging/" ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}$ || "$entry" =~ ^\./objects/[a-f0-9]{2}/$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}$ ||
       "$entry" =~ ^\./objects/[a-f0-9]{2}/[a-f0-9]{2}/$ ]]; then
+      continue
+    fi
+    if [[ "$entry" =~ ^\./staging/([a-f0-9]{64})\.bin$ ]]; then
       continue
     fi
     if [[ "$entry" =~ ^\./objects/([a-f0-9]{2})/([a-f0-9]{2})/([a-f0-9]{64})\.bin$ ]]; then

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { evaluateAcrossNavigation } from "../support/navigation-safe";
 
 async function signIn(page: Page) {
   await page.goto("/");
@@ -8,8 +9,20 @@ async function signIn(page: Page) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+/**
+ * Reads page state tolerantly of the navigations this journey performs by
+ * design. The retry itself is proven in `tests/support/navigation-safe.test.ts`.
+ */
+function acrossNavigation<T>(page: Page, describe: string, work: () => Promise<T>): Promise<T> {
+  return evaluateAcrossNavigation({
+    describe,
+    work,
+    settle: () => page.waitForLoadState("domcontentloaded").catch(() => undefined),
+  });
+}
+
 async function seedLegacyWorkspaceCache(page: Page) {
-  await page.evaluate(async () => {
+  await acrossNavigation(page, "Legacy workspace cache seeding", () => page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open("orbit-workspace", 1);
       request.onupgradeneeded = () => {
@@ -36,11 +49,13 @@ async function seedLegacyWorkspaceCache(page: Page) {
         transaction.onerror = () => reject(transaction.error);
       };
     });
-  });
+  }));
 }
 
 async function legacyWorkspaceCacheExists(page: Page) {
-  return page.evaluate(async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"));
+  return acrossNavigation(page, "Legacy workspace cache presence", () => page.evaluate(
+    async () => (await indexedDB.databases()).some((database) => database.name === "orbit-workspace"),
+  ));
 }
 
 async function activeHouseholdName(page: Page): Promise<string> {
@@ -133,8 +148,9 @@ test.describe("online-only private workspace policy", () => {
     });
 
     await page.getByRole("button", { name: "Open personalisation settings" }).click();
-    await page.getByRole("tab", { name: "Household" }).click();
-    const settings = page.getByRole("dialog", { name: "Personalise Orbit" });
+    await expect(page).toHaveURL(/\/settings$/);
+    await page.getByRole("link", { name: "Household", exact: true }).click();
+    const settings = page.locator(".settings-page");
     await settings.getByLabel("Household name").fill(rejectedName);
     await settings.getByRole("button", { name: "Save household" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "could not save" })).toBeVisible();
@@ -142,7 +158,9 @@ test.describe("online-only private workspace policy", () => {
 
     await page.unroute("**/api/workspace/commands");
     await page.reload();
-    await expect(page.getByText(originalName, { exact: true }).first()).toBeVisible();
+    expect(await activeHouseholdName(page)).toBe(originalName);
+    await page.getByRole("link", { name: "Household", exact: true }).click();
+    await expect(settings.getByLabel("Household name")).toHaveValue(originalName);
     await expect(page.getByText(rejectedName, { exact: true })).toHaveCount(0);
     expect(await legacyWorkspaceCacheExists(page)).toBe(false);
   });

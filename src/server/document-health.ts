@@ -1,8 +1,8 @@
 import { access, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { notInArray, sql } from "drizzle-orm";
+import { eq, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents } from "@/db/schema";
+import { documentJobs, documentStagingObjects, documents } from "@/db/schema";
 import { getDocumentWorkerHealth } from "@/server/document-worker";
 import { getDocumentConfig } from "@/server/documents/config";
 import { pingClamAv } from "@/server/documents/scanner";
@@ -14,6 +14,7 @@ export interface DocumentHealth {
   scanner: { status: "ready" | "disabled" | "unavailable"; mode: "required" | "disabled" | "unknown" };
   quota: { usedBytes: number; limitBytes: number };
   worker: ReturnType<typeof getDocumentWorkerHealth>;
+  scanRecovery: { retrying: number; failed: number; purgePending: number; nextExpiryAt: string | null };
 }
 
 /** Projects document health to the administrator-safe response contract. */
@@ -37,6 +38,7 @@ export function toPublicDocumentHealth(health: DocumentHealth): DocumentHealth {
       lastErrorCode,
       lastReconciliationAt: health.worker.lastReconciliationAt,
     },
+    scanRecovery: health.scanRecovery ?? { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
   };
 }
 
@@ -59,22 +61,31 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       : await pingClamAv({ ...config.clamAv, timeoutMs: Math.min(config.clamAv.timeoutMs, 2_000) })
         ? "ready" as const
         : "unavailable" as const;
-    const [usage] = await getDb()
+    const [usage, retrying, failed, purgePending, nextExpiry] = await Promise.all([
+      getDb()
       .select({ bytes: sql<number>`coalesce(sum(${documents.sizeBytes}), 0)` })
       .from(documents)
-      .where(notInArray(documents.lifecycle, ["rejected", "deleted"]));
+      .where(notInArray(documents.lifecycle, ["rejected", "deleted"])),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'scan' and ${documentJobs.status} = 'retry'`),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentJobs).where(sql`${documentJobs.kind} = 'scan' and ${documentJobs.status} = 'failed'`),
+      getDb().select({ count: sql<number>`count(*)` }).from(documentStagingObjects).where(eq(documentStagingObjects.status, "purge_pending")),
+      getDb().select({ expiresAt: sql<Date | null>`min(${documentStagingObjects.recoveryExpiresAt})` }).from(documentStagingObjects),
+    ]);
     const healthy = storageReady
       && scannerStatus !== "unavailable"
       && worker.started
-      && !worker.lastErrorCode;
+      && !worker.lastErrorCode
+      && Number(failed[0]?.count ?? 0) === 0
+      && Number(purgePending[0]?.count ?? 0) === 0;
 
     return {
       overall: healthy ? "healthy" : "degraded",
       encryption: { status: "ready" },
       storage: { status: storageReady ? "ready" : "unavailable" },
       scanner: { status: scannerStatus, mode: config.scanMode },
-      quota: { usedBytes: Number(usage?.bytes ?? 0), limitBytes: config.instanceQuotaBytes },
+      quota: { usedBytes: Number(usage[0]?.bytes ?? 0), limitBytes: config.instanceQuotaBytes },
       worker,
+      scanRecovery: { retrying: Number(retrying[0]?.count ?? 0), failed: Number(failed[0]?.count ?? 0), purgePending: Number(purgePending[0]?.count ?? 0), nextExpiryAt: nextExpiry[0]?.expiresAt?.toISOString?.() ?? null },
     };
   } catch {
     return {
@@ -84,6 +95,7 @@ export async function getDocumentHealth(): Promise<DocumentHealth> {
       scanner: { status: "unavailable", mode: "unknown" },
       quota: { usedBytes: 0, limitBytes: 0 },
       worker,
+      scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
     };
   }
 }

@@ -9,6 +9,7 @@ describe("document configuration", () => {
     expect(config.maxBytes).toBe(25 * 1_048_576);
     expect(config.householdQuotaBytes).toBe(5 * 1_073_741_824);
     expect(config.instanceQuotaBytes).toBe(20 * 1_073_741_824);
+    expect(config.scanRecoveryRetentionHours).toBe(24);
     expect(config.scanMode).toBe("required");
     expect(config.keyEncryptionKey).toEqual(Buffer.from(key, "hex"));
     expect(config.keyId).toMatch(/^[a-f0-9]{24}$/);

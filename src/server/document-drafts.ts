@@ -11,7 +11,8 @@ import {
 } from "@/server/documents/suggestions";
 import { extractTextWithTika } from "@/server/documents/tika";
 import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
-import { readDocumentDownload } from "@/server/document-repository";
+import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
+import { getDocumentConfig } from "@/server/documents/config";
 import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
@@ -69,7 +70,10 @@ async function requireDocumentMember(userId: string, documentId: string) {
     .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)))
     .where(and(eq(documents.id, documentId), isNull(households.deletionRequestedAt)))
     .limit(1);
-  if (!record || (record.lifecycle !== "available") || (!record.administrator && !record.member)) throw new AppError("document_not_found", "That document is not available", 404);
+  if (!record || (!record.administrator && !record.member)) throw new AppError("document_not_found", "That document is not available", 404);
+  if (!isDocumentContentReady(record, getDocumentConfig().scanMode, "draft")) {
+    throw new AppError("document_not_found", "That document is not available", 404);
+  }
   return record;
 }
 
@@ -94,7 +98,7 @@ export async function createDocumentDraft(userId: string, documentId: string) {
       && detected === record.mediaType
       && validateSupportedDocumentStructure(download.bytes, detected)) {
       try {
-        text = await extractTextWithTika(download.bytes, detected);
+        text = await extractTextWithTika(download.bytes, detected, documentId);
         extracted = true;
       } catch {
         text = "";

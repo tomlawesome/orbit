@@ -5,40 +5,93 @@ The repository is the source of truth; chat history is not.
 
 ## Model governance
 
-Broad product planning, architecture, security-model, systems-design, roadmap,
-ADR, release-policy, and engineering-baseline work is reserved for **Sol Extra
-High**. Only Sol Extra High may materially create, edit, approve, or restructure
-the protected planning files listed in `.github/planning-governance.json`.
+**Sol Extra High is Orbit's sole orchestration and protected-planning
+authority.** Sol owns product planning, architecture, security decisions,
+roadmaps, ADRs, release policy, repository settings, delivery sequencing,
+integration, publication and release. Only Sol may materially create, edit,
+approve or restructure the protected planning paths listed in
+`.github/planning-governance.json`.
 
-Implementation agents and separate implementation tasks use **Luna Extra
-High** by default. A different model may be used only after the user gives
-fresh, explicit approval for that invocation. Lower-capability models may read
-protected planning and implement bounded issues, tests, migrations, and
-feature documentation, but must not edit the protected planning set.
+Human-owner protected planning remains valid when it is genuinely human
+authored or directed. Pull requests that change protected planning must contain
+exactly one accepted attestation line from the planning policy:
+`Planning-Model: Sol Extra High` or `Planning-Model: Human`. This is a
+governance control, not cryptographic proof; never attest as an authority that
+did not do the work.
 
-Pull requests that modify protected planning files must contain the exact
-attestation `Planning-Model: Sol Extra High`. The CI check verifies the
-attestation and protected paths. This is a governance control, not
-cryptographic proof of model identity; authors must never make a false
-attestation.
+For `low-risk-implementation` and `donkey-work` task classes, Luna Extra High
+is the first OpenAI implementation model. When Ollama, Mistral and Claude are
+unavailable, record each provider in order with the `unavailable` fallback
+reason and route the bounded task to Luna. Routine implementation must never
+escalate to Sol because those providers are unavailable.
 
-When Luna Extra High is not available in the current subagent pool, Sol must
-use the Codex task launcher, when available, to create a separate user-visible
-task on Luna Extra High automatically. Start it in a dedicated worktree from
-the exact accepted base, give it the bounded handoff, and let it make focused
-local commits without pushing or changing GitHub state. Sol retains
-architecture, security decisions, integration review, protected CI, and
-delivery sequencing; it must inspect and integrate the Luna result before
-publication.
+Other bounded implementation prefers the cheapest qualified idle capacity, in
+this cost order:
 
-Do not ask the user to switch the current task manually merely because Luna is
-absent from the subagent pool. Manual switching is a fallback only when the
-separate-task launcher is also unavailable or has failed with a genuine hard
-block. In either path, write the bounded prompt under `.agents/handoffs/`. The
-prompt must name permitted and protected paths, forbid unapproved remote
-mutations, define hard stop conditions, require a result file, and tell Luna
-exactly when to hand control back for Sol review. Handoff files are local
-coordination state and are not committed.
+1. a local Ollama host and exact model qualified for the task class;
+2. a qualified Mistral model as the primary paid provider;
+3. a qualified Claude model as the paid fallback; and
+4. Luna Extra High as the last-resort implementation provider.
+
+This is a cost preference, not a strict serialization gate. A higher-cost
+qualified provider may implement a second independent ready issue while a
+cheaper provider is already occupied when Sol records a material throughput
+benefit, satisfied dependencies, exact disjoint path ownership and at most
+rebase-and-revalidation reconciliation. The projected total must remain within
+the repository cap of two in-flight pull requests. Do not use concurrency to
+escalate the same task, duplicate work or bypass the least-cost qualified model
+within one task. Unqualified, unsuitable, unreachable or exhausted providers
+remain ordinary fallback reasons.
+
+A theoretical model size, successful toy prompt or provider subscription is not
+qualification. Representative evidence must cover correctness, hidden edge
+cases, path and instruction scope, result honesty and context fit.
+Qualification records the exact provider, model and task class, plus the exact
+host for local Ollama. Cost, latency, resource use and provider capacity inform
+routing and circuit breakers; crossing a heuristic local limit does not
+disqualify otherwise correct work unless the task has an explicit budget. An
+unqualified model receives no real Orbit implementation work. Select the
+lowest-cost model that has actually passed the relevant gate.
+
+For each model and representative task class, stop qualification as soon as
+the result is satisfactory and never exceed five passes. A model that has not
+reached basic acceptance by pass three is unsuitable for that task class.
+Passes four and five may only fine-tune already acceptable behavior.
+
+Every delegated implementation uses an exact accepted base, a dedicated clean
+worktree, least-privilege tools, an explicit changed-path allowlist, bounded
+scope, a required result handback and independent Sol validation. Do not impose
+routine token, price or turn quotas: completion and correctness govern the
+task. Detect a genuine runaway from task- and model-appropriate time to first
+useful output or time since meaningful progress, with a reasonable
+benefit-of-the-doubt buffer. Slow useful work is not stalled.
+Delegated providers may not plan, orchestrate, make architecture or security
+decisions, integrate, publish, release, access GitHub or approve their own work.
+They make focused local changes and return control to Sol.
+
+When provider concurrency is used, the task state records the occupied cheaper
+provider and its independent issue, task identity, qualification evidence and
+allowed paths; the selected issue and allowed paths; dependency state; sibling
+landing impact; expected throughput benefit; and projected in-flight pull
+requests. Overlapping paths, premise-changing siblings, unbounded
+reconciliation, duplicated issues, authority expansion or a projected third
+pull request require sequencing instead.
+
+Claude is an implementation resource, not a peer project-management pipeline.
+Claude Opus-class secondary review may be useful, but each invocation requires
+fresh user approval and its output is advisory evidence for Sol; it grants no
+planning, security, approval or delivery authority. Historical controls
+approved under the superseded dual-pipeline policy remain evidence only where
+the orchestration policy explicitly enumerates their pull requests.
+
+For low-risk implementation, Sol uses the task launcher, when available, to
+create a separate user-visible Luna Extra High task after recording the
+unavailable-provider evidence. For other task classes, Luna remains the
+evidenced last resort. In every delegated path, write the bounded prompt under
+`.agents/handoffs/`; name permitted and protected paths, forbid remote
+mutations, define hard stops, require a result file, and state when control
+returns to Sol. Handoff files are local coordination state and are not
+committed.
 
 ## Orchestration and retained learning
 
@@ -50,11 +103,12 @@ Before any delivery mutation, read and obey
 Model authority is a preflight gate, not a review-time correction. All
 orchestration—including task launch, monitoring, sequencing, reconciliation,
 blocker classification, handback acceptance and retained-learning
-promotion—proceeds only under Sol Extra High. Terra may read protected
-planning for orientation or perform separately bounded mechanical analysis,
-but it cannot operate the delivery loop, make status or next-action decisions,
-or materially create, edit, approve, restructure or publish protected
-planning. Luna performs bounded implementation and hands control back to Sol.
+promotion—proceeds only under Sol Extra High. Terra may read protected planning
+for orientation or perform separately bounded mechanical analysis, but it
+cannot operate the delivery loop, make status or next-action decisions, or
+materially create, edit, approve, restructure or publish protected planning.
+Implementation providers perform only their bounded slice and hand control back
+to Sol.
 
 A successful asynchronous task-creation response establishes
 `launch_pending`. Omission from a partial, limited, paginated, stale or
@@ -79,9 +133,9 @@ planning or release-policy changes.
   characterization tests before refactors.
 - Run fast checks before container and browser checks.
 - Do not close an issue until its acceptance evidence is linked.
-- Publish previews only after required checks pass. Stable release acceptance
-  uses a preview from the matching versioned release branch. Test immutable
-  image digests and promote only the accepted digest without rebuilding it.
+- Publish previews only after required checks pass on the protected `preview`
+  lane. Test immutable image digests, verify the exact preview source through
+  `main`, and promote only the accepted digest without rebuilding it.
 - Never commit credentials, secrets, private keys, tokens, private documents,
   or real personal data.
 

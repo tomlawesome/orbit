@@ -5,15 +5,18 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
   push:
     branches:
-      - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
 
 concurrency:
-  group: orbit-container-${{ github.ref }}
-  cancel-in-progress: true
+  group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
+  # Cancel only a superseded pull-request commit. A push must never cancel the
+  # validation of an earlier merge: the delivery model requires trusted evidence
+  # for that exact merge SHA, and a cancelled run leaves it permanently without.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
@@ -21,8 +24,51 @@ env:
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
 
 jobs:
+  # Selects the cheapest pull-request lane that still exercises every changed
+  # boundary: fast, real PostgreSQL integration, or exact-image system tests.
+  #
+  # Classification is fail-safe: an unknown path, unreadable comparison, changed
+  # production dependency graph, workflow/deployment boundary, and every push
+  # event selects the broad system lane. Gates remain at job level rather than
+  # using workflow path filters, because required skipped jobs report a terminal
+  # result instead of leaving a pull request pending forever.
+  changes:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+      build: ${{ steps.classify.outputs.build }}
+      integration: ${{ steps.classify.outputs.integration }}
+      system: ${{ steps.classify.outputs.system }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      # The classifier uses pnpm's lockfile-only graph reader. It never installs
+      # dependencies or executes package lifecycle scripts.
+      - name: Set up pnpm graph reader
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          ORBIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/classify-changed-paths.mjs
+
   fast:
     name: Static and unit checks
+    needs:
+      - changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -63,6 +109,14 @@ jobs:
           ORBIT_TEST_COVERAGE: "true"
         run: bash scripts/test-backend.sh
 
+      - name: Build production application
+        if: >-
+          ${{
+            github.event_name == 'push' &&
+            needs.changes.outputs.build == 'true'
+          }}
+        run: pnpm build
+
       - name: Upload diagnostic coverage
         if: success()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
@@ -73,6 +127,7 @@ jobs:
 
   supply_chain_source:
     name: Source dependency and secret policy
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -128,8 +183,14 @@ jobs:
   integration:
     name: PostgreSQL service and API integration
     needs:
+      - changes
       - fast
-      - supply_chain_source
+    # Skipped rather than filtered out, so the required check still reports.
+    if: >-
+      ${{
+        github.event_name == 'push' &&
+        needs.changes.outputs.integration == 'true'
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -173,10 +234,14 @@ jobs:
   smoke:
     name: Compose smoke test
     needs:
+      - changes
       - fast
       - supply_chain_source
       - integration
-    if: github.event_name == 'pull_request'
+    # Retain the existing check identity for branch protection, but defer the
+    # expensive exact-image path until the protected preview merge. The publish
+    # job below reuses these steps and runs them exactly once for that revision.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -190,7 +255,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 2
+          # Stable Git tags are the version calculator's durable baseline.
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -218,33 +284,43 @@ jobs:
           chmod 600 .orbit-secrets/smtp-password .orbit-secrets/imap-password \
             .orbit-secrets/imap-alias-current-secret \
             .orbit-secrets/imap-alias-previous-secret
-          sed --in-place 's/^SMTP_HOST=.*/SMTP_HOST=smtp.example.invalid/' .env-orbit
-          sed --in-place 's/^SMTP_USER=.*/SMTP_USER=orbit@example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_HOST=.*/IMAP_HOST=imap.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_USER=.*/IMAP_USER=orbit@example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_TLS_SERVER_NAME=.*/IMAP_TLS_SERVER_NAME=imap.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_RECIPIENT_DOMAIN=.*/IMAP_RECIPIENT_DOMAIN=ingest.example.invalid/' .env-orbit
-          sed --in-place 's/^IMAP_ENABLED=.*/IMAP_ENABLED=false/' .env-orbit
-          sed --in-place 's/^OIDC_CLIENT_ID=.*/OIDC_CLIENT_ID=orbit-smoke/' .env-orbit
-          sed --in-place 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=orbit-smoke-only-secret/' .env-orbit
+          # Ephemeral fixture overrides are appended deliberately: dotenv uses
+          # the final assignment, so this remains valid whether an operator
+          # setting is active, commented, or omitted from the example file.
+          {
+            printf '%s\n' \
+              'SMTP_HOST=smtp.example.invalid' \
+              'SMTP_USER=orbit@example.invalid' \
+              'IMAP_HOST=imap.example.invalid' \
+              'IMAP_USER=orbit@example.invalid' \
+              'IMAP_TLS_SERVER_NAME=imap.example.invalid' \
+              'IMAP_RECIPIENT_DOMAIN=ingest.example.invalid' \
+              'IMAP_ENABLED=false' \
+              'OIDC_CLIENT_ID=orbit-smoke' \
+              'OIDC_CLIENT_SECRET=orbit-smoke-only-secret'
+          } >> .env-orbit
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
-      - name: Generate unique preview tag
-        id: preview_tag
+      - name: Calculate release-train version
+        id: version
         run: |
-          branch_slug="$(
-            printf '%s' "${GITHUB_REF_NAME}" |
-              tr '[:upper:]' '[:lower:]' |
-              sed --regexp-extended 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g'
-          )"
-          [[ -n "${branch_slug}" ]] || {
-            printf 'Could not derive a safe preview branch identifier.\n' >&2
-            exit 1
-          }
-          preview_tag="preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          printf 'tag=%s\n' "${preview_tag}" >> "${GITHUB_OUTPUT}"
+          channel=preview
+          if [[ "${GITHUB_REF_NAME}" == hotfix/* ]]; then
+            channel=hotfix
+          fi
+          version="$(node scripts/calculate-version.mjs --channel "${channel}")"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+          printf 'revision=%s\n' "$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate preview-lane preflight
+        run: |
+          channel=preview
+          if [[ "${GITHUB_REF_NAME}" == hotfix/* ]]; then
+            channel=hotfix
+          fi
+          bash scripts/preview-lane-preflight.sh --channel "${channel}"
 
       - name: Generate exact image metadata
         id: meta
@@ -252,11 +328,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=ci-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'ci' }}
-            type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}
+            type=raw,value=preview
           labels: |
             org.opencontainers.image.title=Orbit
             org.opencontainers.image.description=Everything in your orbit, on track.
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}
             io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}
 
@@ -271,6 +347,10 @@ jobs:
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ORBIT_VERSION=${{ steps.version.outputs.version }}
+            ORBIT_REVISION=${{ steps.version.outputs.revision }}
+            ORBIT_CHANNEL=${{ env.PUBLICATION_CHANNEL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -287,6 +367,7 @@ jobs:
           image_tag="${image_tags[0]}"
           image_id="$(docker image inspect --format '{{.Id}}' "${image_tag}")"
           revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image_tag}")"
+          version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image_tag}")"
           release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image_tag}")"
           [[ "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             printf 'Built image has no valid configuration identity.\n' >&2
@@ -296,13 +377,39 @@ jobs:
             printf 'Built image revision %s does not match workflow revision %s.\n' "${revision}" "${GITHUB_SHA}" >&2
             exit 1
           }
+          [[ "${version}" == "${{ steps.version.outputs.version }}" ]] || {
+            printf 'Built image version %s does not match calculated version %s.\n' \
+              "${version}" "${{ steps.version.outputs.version }}" >&2
+            exit 1
+          }
           [[ "${release_stage}" == "${PUBLICATION_CHANNEL}" ]] || {
             printf 'Built image stage %s does not match channel %s.\n' "${release_stage}" "${PUBLICATION_CHANNEL}" >&2
+            exit 1
+          }
+          embedded_version="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/VERSION)"
+          embedded_revision="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/REVISION)"
+          embedded_channel="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/CHANNEL)"
+          [[ "${embedded_version}" == "${version}" ]] || {
+            printf 'Embedded version does not match the image version label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_revision}" == "${revision}" ]] || {
+            printf 'Embedded revision does not match the image revision label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_channel}" == "${release_stage}" ]] || {
+            printf 'Embedded channel does not match the image release-stage label.\n' >&2
+            exit 1
+          }
+          reported_version="$(docker run --rm "${image_tag}" --version)"
+          [[ "${reported_version}" == "Orbit ${version}" ]] || {
+            printf 'Container version command did not report the embedded version.\n' >&2
             exit 1
           }
           {
             printf 'id=%s\n' "${image_id}"
             printf 'tag=%s\n' "${image_tag}"
+            printf 'version=%s\n' "${version}"
           } >> "${GITHUB_OUTPUT}"
           printf 'ORBIT_IMAGE=%s\n' "${image_tag}" >> "${GITHUB_ENV}"
 
@@ -355,15 +462,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Validate the deployment asset set without a source tree
+        run: |
+          # Proves the base compose file describes a deployment truthfully: an
+          # operator who fetched only deployment assets has no Dockerfile and no
+          # source, so a build declaration there would describe something absent.
+          deployment="$(mktemp -d)"
+          cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
+          cp .env-orbit "${deployment}/"
+          mkdir -p "${deployment}/config"
+          cp config/tika-config.xml "${deployment}/config/"
+          [[ ! -e "${deployment}/Dockerfile" ]] || {
+            printf 'The deployment asset set must not contain a Dockerfile.\n' >&2
+            exit 1
+          }
+          docker compose --project-directory "${deployment}" --env-file "${deployment}/.env-orbit" \
+            -f "${deployment}/docker-compose.yml" config --quiet
+          docker compose --project-directory "${deployment}" --env-file "${deployment}/.env-orbit" \
+            -f "${deployment}/docker-compose.yml" -f "${deployment}/docker-compose.mail.yml" config --quiet
+          rm -rf "${deployment}"
+
       - name: Validate Compose configuration
+        env:
+          ORBIT_VERSION: ${{ steps.version.outputs.version }}
+          ORBIT_REVISION: ${{ steps.version.outputs.revision }}
+          ORBIT_CHANNEL: ${{ env.PUBLICATION_CHANNEL }}
         run: |
           docker compose --env-file .env-orbit config --quiet
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.mail-alias-rotation.yml config --quiet
-          docker compose --env-file .env-orbit \
-            -f docker-compose.yml -f docker-compose.full.yml \
-            --profile processing --profile ai config --quiet
+          docker compose --env-file .env-orbit --profile processing --profile ai config --quiet
+
+          # Optional services must be selectable by configuration alone, so
+          # that an operator never needs a different compose command. This
+          # proves Compose honours COMPOSE_PROFILES from the environment file:
+          # without it the optional services are absent, with it they appear.
+          selection_env="$(mktemp)"
+          cp .env-orbit "${selection_env}"
+          docker compose --env-file "${selection_env}" config --format json \
+            | jq --exit-status '(.services | has("orbit-ollama") or has("orbit-tika")) | not' > /dev/null
+          printf 'COMPOSE_PROFILES=processing,ai\n' >> "${selection_env}"
+          docker compose --env-file "${selection_env}" config --format json \
+            | jq --exit-status '.services | has("orbit-ollama") and has("orbit-tika")' > /dev/null
+          rm -f "${selection_env}"
+
           processing_config="$(docker compose --env-file .env-orbit \
             --profile processing config --format json)"
           jq --exit-status '
@@ -445,6 +589,26 @@ jobs:
           response="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
           jq --exit-status '.status == "ready" and .service == "orbit"' <<< "${response}"
 
+      - name: Verify startup banner and immutable identity
+        run: |
+          startup_logs="$(docker compose --env-file .env-orbit logs --no-color orbit-app)"
+          startup_logs="$(sed -E 's/^[^|]*\| //' <<< "${startup_logs}")"
+          banner_line='  ·      ·    ·    ██████╗  ██████╗  ██████╗  ██╗ ████████╗   ·      ·      ·'
+          version="${{ steps.image.outputs.version }}"
+          release_stage="${PUBLICATION_CHANNEL}"
+          revision="${GITHUB_SHA}"
+          identity_line="Orbit ${version} | channel=${release_stage} | revision=${revision}"
+          banner_count="$(grep --fixed-strings --line-regexp --count "${banner_line}" <<< "${startup_logs}" || true)"
+          identity_count="$(grep --fixed-strings --line-regexp --count "${identity_line}" <<< "${startup_logs}" || true)"
+          [[ "${banner_count}" -eq 1 ]] || {
+            printf 'Expected the Orbit startup banner once, found %s.\n' "${banner_count}" >&2
+            exit 1
+          }
+          [[ "${identity_count}" -eq 1 ]] || {
+            printf 'Expected the immutable startup identity once, found %s.\n' "${identity_count}" >&2
+            exit 1
+          }
+
       - name: Verify non-root runtime and private secrets
         run: |
           runtime_uid="$(docker compose --env-file .env-orbit exec -T orbit-app \
@@ -490,6 +654,7 @@ jobs:
       - name: Show service diagnostics
         if: failure()
         run: |
+          export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml logs --no-color
           app_container="$(docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml ps --quiet orbit-app)"
@@ -499,7 +664,223 @@ jobs:
 
       - name: Stop smoke-test services
         if: always()
-        run: docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml --profile processing down --volumes --remove-orphans
+        run: |
+          export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"
+          docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml --profile processing down --volumes --remove-orphans
+
+      # Installer evidence must gate publication, and the disposable registry
+      # bound to a Compose project named "orbit" must never collide with the
+      # smoke stack above, so this runs only after it is fully torn down and
+      # only before any GHCR login, push or attestation step.
+      - name: Start disposable installer registry
+        id: installer_registry
+        env:
+          TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
+        run: |
+          run_attempt="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          registry_name="orbit-installer-registry-${run_attempt}"
+          channel="installer-${run_attempt}"
+          printf 'registry_name=%s\n' "${registry_name}" >> "${GITHUB_OUTPUT}"
+          printf 'channel=%s\n' "${channel}" >> "${GITHUB_OUTPUT}"
+
+          source_id="$(docker image inspect --format '{{.Id}}' "${TESTED_IMAGE_TAG}")"
+          [[ "${source_id}" == "${TESTED_IMAGE_ID}" ]] || {
+            printf 'Source image identity %s does not match the tested identity %s.\n' "${source_id}" "${TESTED_IMAGE_ID}" >&2
+            exit 1
+          }
+
+          # Bound to loopback only: this registry is disposable evidence, never a
+          # publication target.
+          registry_id="$(
+            docker run --detach --name "${registry_name}" --publish 127.0.0.1:5000:5000 \
+              registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+          )"
+          [[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]] || {
+            printf 'The disposable registry returned an invalid container identity.\n' >&2
+            exit 1
+          }
+          printf 'registry_id=%s\n' "${registry_id}" >> "${GITHUB_OUTPUT}"
+
+          ready=""
+          for _ in $(seq 1 30); do
+            if curl --silent --fail --output /dev/null http://127.0.0.1:5000/v2/; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          [[ -n "${ready}" ]] || {
+            printf 'The disposable local registry did not become ready.\n' >&2
+            exit 1
+          }
+
+          # No rebuild: retag and push the exact image already scanned above,
+          # then drop the local reference so the installer must resolve it
+          # through the registry round trip.
+          local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"
+          docker tag "${TESTED_IMAGE_TAG}" "${local_tag}"
+          docker push "${local_tag}" > /dev/null
+          docker rmi "${local_tag}" > /dev/null
+
+      - name: Prepare empty installer target and Git guard
+        id: installer_target
+        run: |
+          install_target="$(mktemp -d "${RUNNER_TEMP}/orbit-installer-target.XXXXXX")"
+          printf 'install_target=%s\n' "${install_target}" >> "${GITHUB_OUTPUT}"
+
+          shopt -s nullglob dotglob
+          entries=("${install_target}"/*)
+          shopt -u nullglob dotglob
+          [[ "${#entries[@]}" -eq 0 ]] || {
+            printf 'Installer target %s is not empty.\n' "${install_target}" >&2
+            exit 1
+          }
+          for marker in .git Dockerfile src package.json package-lock.json pnpm-lock.yaml yarn.lock; do
+            [[ ! -e "${install_target}/${marker}" ]] || {
+              printf 'Installer target unexpectedly contains %s before installation.\n' "${marker}" >&2
+              exit 1
+            }
+          done
+
+          # A guard executable proves the installer never shells out to git: it
+          # only records that it was invoked and fails, so a real git call would
+          # both leave evidence and abort the run.
+          git_guard_dir="$(mktemp -d "${RUNNER_TEMP}/orbit-installer-git-guard.XXXXXX")"
+          git_marker="${git_guard_dir}/git-was-invoked"
+          printf 'git_guard_dir=%s\n' "${git_guard_dir}" >> "${GITHUB_OUTPUT}"
+          printf 'git_marker=%s\n' "${git_marker}" >> "${GITHUB_OUTPUT}"
+          {
+            printf '#!/usr/bin/env bash\n'
+            printf 'touch %s\n' "$(printf '%q' "${git_marker}")"
+            printf 'exit 1\n'
+          } > "${git_guard_dir}/git"
+          chmod +x "${git_guard_dir}/git"
+
+      - name: Run installer against the disposable registry
+        working-directory: ${{ steps.installer_target.outputs.install_target }}
+        env:
+          ORBIT_REGISTRY: 127.0.0.1:5000
+          ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
+          ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
+          GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
+        run: |
+          exec < /dev/null
+          [[ ! -t 0 ]] || {
+            printf 'The installer run must not have a TTY on standard input.\n' >&2
+            exit 1
+          }
+          PATH="${GIT_GUARD_DIR}:${PATH}" bash "${GITHUB_WORKSPACE}/scripts/install.sh"
+
+      - name: Verify exact-image installer evidence
+        env:
+          TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
+          INSTALL_TARGET: ${{ steps.installer_target.outputs.install_target }}
+          GIT_MARKER: ${{ steps.installer_target.outputs.git_marker }}
+        run: |
+          [[ ! -e "${GIT_MARKER}" ]] || {
+            printf 'The installer invoked git.\n' >&2
+            exit 1
+          }
+
+          env_file="${INSTALL_TARGET}/.env-orbit"
+          [[ -f "${env_file}" && ! -L "${env_file}" ]] || {
+            printf '%s is not a regular, non-symlink file.\n' "${env_file}" >&2
+            exit 1
+          }
+
+          mapfile -t image_lines < <(grep -- '^ORBIT_IMAGE=' "${env_file}")
+          [[ "${#image_lines[@]}" -eq 1 ]] || {
+            printf 'Expected exactly one ORBIT_IMAGE assignment in %s, found %s.\n' "${env_file}" "${#image_lines[@]}" >&2
+            exit 1
+          }
+
+          expected_prefix="ORBIT_IMAGE=127.0.0.1:5000/${IMAGE_NAME}@sha256:"
+          image_line="${image_lines[0]}"
+          [[ "${image_line}" == "${expected_prefix}"* ]] || {
+            printf '%s is not a digest-pinned disposable-registry reference.\n' "${image_line}" >&2
+            exit 1
+          }
+          digest="${image_line#"${expected_prefix}"}"
+          [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || {
+            printf '%s does not carry a lowercase sha256 digest.\n' "${image_line}" >&2
+            exit 1
+          }
+
+          resolved_reference="${image_line#ORBIT_IMAGE=}"
+          resolved_id="$(docker image inspect --format '{{.Id}}' "${resolved_reference}")"
+          [[ "${resolved_id}" == "${TESTED_IMAGE_ID}" ]] || {
+            printf 'Digest-resolved image configuration %s does not match the tested image %s.\n' "${resolved_id}" "${TESTED_IMAGE_ID}" >&2
+            exit 1
+          }
+
+          running_id="$(docker inspect --format '{{.Image}}' orbit)"
+          [[ "${running_id}" == "${TESTED_IMAGE_ID}" ]] || {
+            printf 'Running orbit container image %s does not match the tested image %s.\n' "${running_id}" "${TESTED_IMAGE_ID}" >&2
+            exit 1
+          }
+
+          revision_label="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${resolved_reference}")"
+          [[ "${revision_label}" == "${GITHUB_SHA}" ]] || {
+            printf 'Installed image revision %s does not match %s.\n' "${revision_label}" "${GITHUB_SHA}" >&2
+            exit 1
+          }
+
+          cmp --silent "${INSTALL_TARGET}/docker-compose.yml" "${GITHUB_WORKSPACE}/docker-compose.yml" || {
+            printf 'Fetched docker-compose.yml does not match the checkout.\n' >&2
+            exit 1
+          }
+          cmp --silent "${INSTALL_TARGET}/scripts/configure.sh" "${GITHUB_WORKSPACE}/scripts/configure.sh" || {
+            printf 'Fetched scripts/configure.sh does not match the checkout.\n' >&2
+            exit 1
+          }
+
+          for marker in .git Dockerfile src package.json package-lock.json pnpm-lock.yaml yarn.lock; do
+            [[ ! -e "${INSTALL_TARGET}/${marker}" ]] || {
+              printf 'Installer target unexpectedly contains %s after installation.\n' "${marker}" >&2
+              exit 1
+            }
+          done
+
+          ready=""
+          for _ in $(seq 1 60); do
+            if response="$(curl --silent --fail http://127.0.0.1:3000/api/health)" &&
+              jq --exit-status '.status == "ready" and .service == "orbit"' <<< "${response}" > /dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          [[ -n "${ready}" ]] || {
+            printf 'Orbit did not reach the ready health state through the installer deployment.\n' >&2
+            exit 1
+          }
+
+      - name: Clean up installer validation resources
+        if: always()
+        env:
+          REGISTRY_NAME: ${{ steps.installer_registry.outputs.registry_name }}
+          REGISTRY_ID: ${{ steps.installer_registry.outputs.registry_id }}
+          INSTALL_TARGET: ${{ steps.installer_target.outputs.install_target }}
+          GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
+        run: |
+          if [[ -n "${INSTALL_TARGET:-}" && "${INSTALL_TARGET}" == "${RUNNER_TEMP}"/orbit-installer-target.* && -d "${INSTALL_TARGET}" && ! -L "${INSTALL_TARGET}" ]]; then
+            if [[ -f "${INSTALL_TARGET}/docker-compose.yml" && -f "${INSTALL_TARGET}/.env-orbit" ]]; then
+              (cd "${INSTALL_TARGET}" && docker compose --env-file .env-orbit -f docker-compose.yml down --volumes --remove-orphans) || true
+            fi
+            rm -rf -- "${INSTALL_TARGET}"
+          fi
+
+          if [[ -n "${GIT_GUARD_DIR:-}" && "${GIT_GUARD_DIR}" == "${RUNNER_TEMP}"/orbit-installer-git-guard.* && -d "${GIT_GUARD_DIR}" && ! -L "${GIT_GUARD_DIR}" ]]; then
+            rm -rf -- "${GIT_GUARD_DIR}"
+          fi
+
+          if [[ -n "${REGISTRY_NAME:-}" && "${REGISTRY_ID:-}" =~ ^[0-9a-f]{64}$ ]]; then
+            current_registry_id="$(docker inspect --format '{{.Id}}' "${REGISTRY_NAME}" 2> /dev/null || true)"
+            if [[ "${current_registry_id}" == "${REGISTRY_ID}" ]]; then
+              docker rm --force "${REGISTRY_ID}" > /dev/null 2>&1 || true
+            fi
+          fi
 
       - name: Log in to GitHub Container Registry
         if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
@@ -597,12 +978,124 @@ jobs:
           {
             printf '## Orbit preview image\n\n'
             printf -- '- Tag: `%s`\n' "${IMAGE_TAG}"
+            printf -- '- Version: `%s`\n' "${{ steps.image.outputs.version }}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
             printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf -- '- Supply-chain evidence: dependency/secret policy, exact-image vulnerability report, SPDX SBOM, and verified provenance/SBOM attestations\n'
             printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify_preview:
+    name: Verify tested preview for stable merge
+    needs:
+      - fast
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+
+    steps:
+      - name: Check out proposed stable source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify preview identity and source
+        id: preview
+        env:
+          EXPECTED_REVISION: ${{ github.event.pull_request.head.sha }}
+          SOURCE_BRANCH: ${{ github.head_ref }}
+        run: |
+          channel=preview
+          if [[ "${SOURCE_BRANCH}" == hotfix/* ]]; then
+            channel=hotfix
+          elif [[ "${SOURCE_BRANCH}" != "preview" ]]; then
+            printf 'Stable pull requests must come from preview or a hotfix branch.\n' >&2
+            exit 1
+          fi
+
+          expected_version="$(node scripts/calculate-version.mjs --channel "${channel}")"
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          digest="$(
+            docker buildx imagetools inspect "${image}:preview" |
+              awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ { print $2; exit }'
+          )"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'The preview tag did not resolve to an immutable digest.\n' >&2
+            exit 1
+          }
+          docker pull "${image}@${digest}"
+          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${digest}")"
+          version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image}@${digest}")"
+          release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image}@${digest}")"
+          source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${digest}")"
+          embedded_version="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/VERSION)"
+          embedded_revision="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/REVISION)"
+          embedded_channel="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/CHANNEL)"
+          reported_version="$(docker run --rm "${image}@${digest}" --version)"
+
+          [[ "${version}" == "${expected_version}" && "${embedded_version}" == "${version}" ]] || {
+            printf 'Preview version does not match the calculated release train.\n' >&2
+            exit 1
+          }
+          [[ "${revision}" == "${embedded_revision}" ]] || {
+            printf 'Preview revision label and embedded identity differ.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_channel}" == "${release_stage}" ]] || {
+            printf 'Preview channel label and embedded identity differ.\n' >&2
+            exit 1
+          }
+          [[ "${reported_version}" == "Orbit ${version}" ]] || {
+            printf 'Preview --version output does not match its embedded identity.\n' >&2
+            exit 1
+          }
+
+          ORBIT_PROMOTION_PHASE=merge \
+          ORBIT_PREVIEW_DIGEST="${digest}" \
+          ORBIT_STABLE_VERSION="${version}" \
+          ORBIT_PREVIEW_STAGE="${release_stage}" \
+          ORBIT_PREVIEW_REVISION="${revision}" \
+          ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
+          ORBIT_EXPECTED_PREVIEW_REVISION="${EXPECTED_REVISION}" \
+            node scripts/stable-promotion-policy.mjs
+          printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify preview attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.preview.outputs.digest }}
+        run: |
+          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+          gh attestation verify "${image_reference}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://spdx.dev/Document/v2.3 >/dev/null
+
+      - name: Record stable merge evidence
+        run: |
+          {
+            printf '## Orbit preview verified for stable merge\n\n'
+            printf -- '- Version: `%s`\n' "${{ steps.preview.outputs.version }}"
+            printf -- '- Digest: `%s`\n' "${{ steps.preview.outputs.digest }}"
+            printf -- '- Source revision: `%s`\n' "${{ github.event.pull_request.head.sha }}"
+            printf '\nNo container rebuild occurred.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish_preview:
@@ -615,11 +1108,8 @@ jobs:
       ${{
         github.event_name == 'push' &&
         (
-          github.ref == 'refs/heads/develop' ||
-          (
-            startsWith(github.ref, 'refs/heads/release/') &&
-            github.ref_name != 'release/architecture-consolidation-rc'
-          )
+          github.ref == 'refs/heads/preview' ||
+          startsWith(github.ref, 'refs/heads/hotfix/')
         )
       }}
     runs-on: ubuntu-latest

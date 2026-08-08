@@ -31,29 +31,43 @@
 
 ## Quick start
 
-From an empty directory on a Linux host with Git and Docker Compose v2:
+From an empty directory on a Linux host with Docker Compose v2 and `curl`:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh)
+curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-The installer downloads Orbit into the current directory, creates the
-Orbit-specific `.env-orbit` configuration when needed, generates independent
-256-bit session, PostgreSQL, and document-encryption secrets, and asks whether to build the
-application container locally:
+The installer takes no interactive input, so the same command works in a
+terminal, over SSH without a TTY, in CI and from cloud-init. Git is not
+required and the repository is not cloned: a deployment needs compose assets
+and a published image, not source or tests.
 
-- answer **Y/Yes** (or press Enter) to pull current base images and build
-  the `orbit-app` service from source;
-- answer **N/No** only after setting `ORBIT_IMAGE` to an exact published
-  `registry/repository@sha256:...` digest. Orbit deliberately has no implicit
-  `latest` deployment default.
+It resolves the published image to an immutable digest, reads the exact source
+revision recorded in that image, and fetches its deployment assets from that
+same revision — so a compose file cannot drift from the image it configures. The
+resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
+that digest is what runs. A tag is only ever read to resolve it; a mutable
+reference is never deployed.
 
-It then starts the `orbit` application container, the official
+It then creates the Orbit-specific `.env-orbit` configuration when needed,
+generates independent 256-bit session, PostgreSQL, and document-encryption
+secrets, and starts the `orbit` application container, the official
 `orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
 in the background and displays their status. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
 only after a dedicated exact-image validation path is enabled for that
 architecture.
+
+### Building from source instead
+
+Building is a developer workflow rather than an installation choice, so the
+installer does not offer it. Clone the repository and build explicitly:
+
+```bash
+git clone https://github.com/tomlawesome/orbit.git && cd orbit
+bash scripts/configure.sh
+bash scripts/build-container.sh
+```
 
 The generated secrets live under `.orbit-secrets`, which is accessible only to
 the installing host user. Compose mounts only the required files into each
@@ -147,23 +161,42 @@ persistent warning and marks subsequently uploaded files as unscanned.
 
 ```sh
 bash scripts/configure.sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
+bash scripts/configure.sh --check
 ```
 
-This creates `.env-orbit` plus the private `.orbit-secrets` directory without
-starting containers. It also runs the selected Orbit image once, with only a
-key-generation command, to generate and persist Orbit's VAPID Web Push key
-pair on first setup: the private key stays in `.orbit-secrets` and only the
-public key is written to `.env-orbit`. Configure your OIDC provider in
-`.env-orbit`. SMTP is required when you are ready to exercise email delivery.
+The first, non-interactive command creates `.env-orbit` plus the private
+`.orbit-secrets` directory without starting containers. It also runs the
+selected Orbit image once, with only a key-generation command, to generate and
+persist Orbit's VAPID Web Push key pair on first setup: the private key stays
+in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
+explicit `--init` step then records the public HTTPS Orbit origin, full OIDC
+issuer URL, and client ID, and derives the exact callback URL. It never asks
+for or invents the provider's client secret. The dedicated secret step reads
+that credential silently and persists it in the private `.orbit-secrets`
+directory; only its runtime file path is recorded in `.env-orbit`. See
+[authentication setup](docs/authentication.md). The value-free `--check`
+reports whether required settings and optional setting groups are complete
+without printing their contents. For non-interactive installation or upgrade,
+plain `bash scripts/configure.sh` preserves the existing configuration and
+secret file.
 
 ### 2. Start Orbit
 
 ```sh
 ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
-  docker compose --env-file .env-orbit up --build
+  docker compose --env-file .env-orbit \
+  -f docker-compose.yml -f docker-compose.build.yml up --build
 ```
 
-Open `http://<docker-host-ip>:3000` from another device, or
+Building from source needs the `docker-compose.build.yml` overlay. The base
+compose file describes a deployment, which has a published image but no source
+tree, so the build context lives in the overlay rather than the base file.
+
+For a deployed instance, open the HTTPS origin recorded in `APP_URL`; the
+reverse proxy must route that origin to Orbit's published port. Plain HTTP is
+supported only for loopback development, such as
 [http://127.0.0.1:3000](http://127.0.0.1:3000) on the Docker host. The health
 endpoint is available at `/api/health`.
 
@@ -188,13 +221,22 @@ TIKA_URL=http://orbit-tika:9998
 OLLAMA_MODEL=<a-local-model-name>
 ```
 
-Then launch the full local stack:
+Select the optional services in `.env-orbit`:
 
 ```sh
-docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.full.yml \
-  --profile processing --profile ai up -d
+COMPOSE_PROFILES=processing,ai
 ```
+
+Then launch the full local stack with the ordinary command:
+
+```sh
+docker compose --env-file .env-orbit up -d
+```
+
+Selection lives in configuration rather than in the command, so enabling or
+disabling an optional service later is a one-line edit rather than a different
+command to remember. Leave `COMPOSE_PROFILES` empty for the standard
+deployment, which runs neither the parser nor the model server.
 
 The services have no published host ports. Tika is attached only to a dedicated
 internal processing network shared with Orbit, so it has no route to the
@@ -206,7 +248,6 @@ the server reports healthy, pull the model selected above explicitly:
 
 ```sh
 docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f docker-compose.full.yml \
   exec orbit-ollama sh -ec 'test -n "$ORBIT_OLLAMA_MODEL"; ollama pull "$ORBIT_OLLAMA_MODEL"'
 ```
 
@@ -355,6 +396,12 @@ All supported runtime variables are documented in
 [`.env-orbit.example`](.env-orbit.example). Sensitive settings accept either
 their direct variable or the corresponding `_FILE` variable. Do not configure
 both forms for the same setting.
+
+The persistent `.env-orbit` copy is arranged by required, installer-managed,
+ordinary, optional, and advanced groups. Keep optional examples commented
+until the whole related group is configured, then run
+`bash scripts/configure.sh --check` before starting or updating Orbit. The
+check reports only field names and readiness states, never values.
 
 Examples below demonstrate the expected shape. Generate real secrets; do not
 copy placeholder secret values into a public deployment.

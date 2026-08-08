@@ -25,6 +25,12 @@ function isSha(value) {
   return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
 }
 
+function isRepositoryPath(value) {
+  return isNonEmptyString(value)
+    && !value.startsWith("/")
+    && !value.split("/").includes("..");
+}
+
 function hasExactStrings(value, expected) {
   return Array.isArray(value)
     && value.length === expected.length
@@ -38,27 +44,188 @@ function readJson(urlOrPath) {
 export function validateOrchestrationPolicy(policy) {
   assert(isObject(policy), "policy must be an object.");
   assert(policy.schemaVersion === 1, "unsupported policy schema version.");
+  assert(
+    isNonEmptyString(policy.humanApprovalIdentifier),
+    "humanApprovalIdentifier is required.",
+  );
   assert(isObject(policy.modelAuthority), "modelAuthority is required.");
-  for (const role of ["orchestration", "protectedPlanning", "implementation", "mechanicalAnalysis"]) {
+  for (const role of ["orchestration", "protectedPlanning", "mechanicalAnalysis"]) {
     assert(
       Array.isArray(policy.modelAuthority[role]) && policy.modelAuthority[role].every(isNonEmptyString),
       `modelAuthority.${role} must be a non-empty string array.`,
     );
   }
   assert(
-    policy.modelAuthority.orchestration.length === 1
-      && policy.modelAuthority.orchestration[0] === "Sol Extra High",
-    "orchestration must be reserved to Sol Extra High.",
+    hasExactStrings(policy.modelAuthority.orchestration, ["Sol Extra High"]),
+    "orchestration must remain reserved to Sol Extra High.",
   );
   assert(
-    policy.modelAuthority.protectedPlanning.length === 1
-      && policy.modelAuthority.protectedPlanning[0] === "Sol Extra High",
-    "protected planning must be reserved to Sol Extra High.",
+    hasExactStrings(policy.modelAuthority.protectedPlanning, ["Sol Extra High"]),
+    "protected planning must remain reserved to Sol Extra High.",
+  );
+
+  const routing = policy.implementationRouting;
+  assert(isObject(routing), "implementationRouting is required.");
+  assert(routing.qualificationRequired === true, "implementation qualification must be mandatory.");
+  assert(
+    hasExactStrings(routing.qualificationIdentity, ["provider", "model", "taskClass"]),
+    "implementation qualification must identify provider, model and task class.",
   );
   assert(
-    policy.modelAuthority.implementation.length === 1
-      && policy.modelAuthority.implementation[0] === "Luna Extra High",
-    "bounded implementation must default to Luna Extra High.",
+    hasExactStrings(routing.qualificationCriteria, [
+      "correctness",
+      "hidden_edge_cases",
+      "scope_compliance",
+      "result_honesty",
+      "context_fit",
+    ]),
+    "implementation qualification criteria are incomplete.",
+  );
+  assert(
+    hasExactStrings(routing.routingSignals, ["cost", "latency", "resource_use", "capacity"]),
+    "implementation routing signals are incomplete.",
+  );
+  assert(
+    isObject(routing.resourceLimits)
+      && routing.resourceLimits.circuitBreakerOnly === true
+      && routing.resourceLimits.overrunDisqualifiesCorrectWork === false,
+    "resource limits must remain circuit breakers and must not disqualify otherwise correct work.",
+  );
+  assert(
+    routing.resourceLimits.routineSessionTokenCaps === false,
+    "routine token caps must remain disabled; task completion and correctness govern implementation.",
+  );
+  const stallMonitoring = routing.resourceLimits.stallMonitoring;
+  assert(
+    isObject(stallMonitoring)
+      && hasExactStrings(stallMonitoring.signals, [
+        "time_to_first_useful_output",
+        "time_since_meaningful_progress",
+      ])
+      && stallMonitoring.taskAndModelAppropriate === true
+      && stallMonitoring.benefitOfDoubtBuffer === true
+      && stallMonitoring.slowUsefulProgressIsNotStalled === true,
+    "stall monitoring must be time-based, task-appropriate, and buffered before intervention.",
+  );
+  assert(
+    isObject(routing.evaluationPasses)
+      && routing.evaluationPasses.maximum === 5
+      && routing.evaluationPasses.basicAcceptanceBy === 3
+      && Array.isArray(routing.evaluationPasses.fineTuningOnly)
+      && routing.evaluationPasses.fineTuningOnly.join(",") === "4,5"
+      && routing.evaluationPasses.stopEarlyWhenSatisfied === true,
+    "model evaluation must stop by pass five, require basic acceptance by pass three, and reserve passes four and five for fine tuning.",
+  );
+  const lowRiskImplementation = routing.lowRiskImplementation;
+  assert(
+    isObject(lowRiskImplementation)
+      && hasExactStrings(lowRiskImplementation.taskClasses, [
+        "low-risk-implementation",
+        "donkey-work",
+      ])
+      && lowRiskImplementation.provider === "luna"
+      && lowRiskImplementation.model === "Luna Extra High"
+      && lowRiskImplementation.fallbackReason === "unavailable"
+      && hasExactStrings(lowRiskImplementation.unavailableProviders, [
+        "ollama",
+        "mistral",
+        "claude",
+      ]),
+    "low-risk implementation must route to Luna after unavailable-provider evidence.",
+  );
+  const providerSelection = routing.providerSelection;
+  const providerConcurrency = providerSelection?.concurrency;
+  assert(
+    isObject(providerSelection)
+      && providerSelection.mode === "cheapest_qualified_idle_capacity_first"
+      && providerSelection.strictSerialFallback === false
+      && providerSelection.withinTaskLeastCostQualified === true
+      && isObject(providerConcurrency)
+      && providerConcurrency.allowed === true
+      && providerConcurrency.reason === "occupied_beneficial_concurrency"
+      && providerConcurrency.requiresCheaperProviderOccupied === true
+      && providerConcurrency.requiresIndependentIssue === true
+      && providerConcurrency.requiresDisjointPaths === true
+      && providerConcurrency.requiresSatisfiedDependencies === true
+      && providerConcurrency.requiresRecordedThroughputBenefit === true
+      && providerConcurrency.prohibitsDuplicateTask === true
+      && providerConcurrency.prohibitsAuthorityExpansion === true
+      && providerConcurrency.maximumInFlightPullRequests === 2
+      && hasExactStrings(providerConcurrency.siblingLandingImpacts, [
+        "rebase_only",
+        "rebase_and_revalidate",
+      ]),
+    "provider selection must permit bounded cost-aware concurrency while preserving least-cost within-task routing.",
+  );
+  assert(Array.isArray(routing.providers), "implementation providers are required.");
+  const providerIds = routing.providers.map((provider) => provider?.id);
+  assert(
+    providerIds.join(",") === "ollama,mistral,claude,luna",
+    "implementation provider order must be qualified Ollama, Mistral, Claude, then Luna.",
+  );
+  for (const provider of routing.providers) {
+    assert(isObject(provider), "each implementation provider must be an object.");
+    assert(provider.requiresExactModel === true, `${provider.id} must require an exact model identity.`);
+    assert(
+      typeof provider.requiresExactHost === "boolean",
+      `${provider.id} must declare whether an exact host identity is required.`,
+    );
+  }
+  assert(
+    routing.providers[0].requiresExactHost === true
+      && routing.providers.slice(1).every((provider) => provider.requiresExactHost === false),
+    "only local Ollama routing requires an exact host identity.",
+  );
+  assert(
+    routing.providers.at(-1).lastResort === true,
+    "Luna must remain the last-resort implementation provider.",
+  );
+  assert(
+    hasExactStrings(routing.fallbackReasons, [
+      "unqualified",
+      "unsuitable_task_class",
+      "unreachable",
+      "capacity_exhausted",
+      "unavailable",
+      "occupied_beneficial_concurrency",
+    ]),
+    "implementation fallback reasons are incomplete.",
+  );
+  assert(isObject(routing.isolation), "implementation isolation controls are required.");
+  for (const control of [
+    "exactBase",
+    "dedicatedWorktree",
+    "leastPrivilegeTools",
+    "pathAllowlist",
+    "runawayMonitoring",
+    "requiredResult",
+    "solReview",
+  ]) {
+    assert(routing.isolation[control] === true, `implementation isolation requires ${control}.`);
+  }
+  assert(
+    hasExactStrings(routing.delegatedAuthorities, ["implementation"]),
+    "delegated providers may hold implementation authority only.",
+  );
+  assert(
+    hasExactStrings(routing.prohibitedAuthorities, [
+      "orchestration",
+      "protected_planning",
+      "architecture",
+      "security",
+      "integration",
+      "publication",
+      "release",
+    ]),
+    "delegated-provider authority prohibitions are incomplete.",
+  );
+  assert(isObject(policy.secondaryReview), "secondaryReview is required.");
+  assert(
+    policy.secondaryReview.provider === "claude"
+      && policy.secondaryReview.minimumModel === "Claude Opus Extra High"
+      && policy.secondaryReview.freshUserApprovalRequired === true
+      && policy.secondaryReview.authority === "advisory_only",
+    "Claude secondary review must require fresh approval and remain advisory only.",
   );
   assert(
     Array.isArray(policy.protectedDecisionClasses)
@@ -68,7 +235,7 @@ export function validateOrchestrationPolicy(policy) {
   );
   assert(
     Array.isArray(policy.taskStatusSources)
-      && ["create_thread", "list_threads_full", "read_thread", "wait_threads"]
+      && ["create_thread", "bounded_wrapper", "list_threads_full", "read_thread", "wait_threads"]
         .every((source) => policy.taskStatusSources.includes(source)),
     "task status sources are incomplete.",
   );
@@ -180,13 +347,21 @@ export function validateOrchestrationPolicy(policy) {
       ),
     "every protected decision class must prohibit automatic adoption.",
   );
+  assert(
+    Array.isArray(policy.learning.legacyProtectedApprovals)
+      && policy.learning.legacyProtectedApprovals.length === 3
+      && [131, 136, 159].every((pullRequest) => policy.learning.legacyProtectedApprovals.some(
+        (approval) => approval?.model === "Claude Opus Extra High"
+          && approval.pullRequest === pullRequest,
+      )),
+    "legacy Claude protected approvals must be limited to PRs 131, 136 and 159.",
+  );
 }
 
 function authorityRole(role) {
   return {
     orchestration: "orchestration",
     protected_planning: "protectedPlanning",
-    implementation: "implementation",
     mechanical_analysis: "mechanicalAnalysis",
   }[role];
 }
@@ -202,15 +377,169 @@ function validateActor(actor, policy) {
   );
 }
 
-function validateLaunchReceipt(receipt, policy, requestedModel, baseSha) {
+function validateImplementationTask(task, policy, issue) {
+  const routing = policy.implementationRouting;
+  assert(isObject(task), "implementation task state is required.");
+  assert(isNonEmptyString(task.provider), "implementation provider is required.");
+  assert(isNonEmptyString(task.requestedModel), "implementation model is required.");
+  assert(isNonEmptyString(task.taskClass), "implementation task class is required.");
+
+  const providerIndex = routing.providers.findIndex((provider) => provider.id === task.provider);
+  assert(providerIndex >= 0, `unknown implementation provider ${String(task.provider)}.`);
+  const provider = routing.providers[providerIndex];
+  const lowRiskImplementation = routing.lowRiskImplementation;
+  const isLowRiskImplementation = lowRiskImplementation.taskClasses.includes(task.taskClass);
+
+  if (isLowRiskImplementation) {
+    assert(
+      task.provider === lowRiskImplementation.provider
+        && task.requestedModel === lowRiskImplementation.model,
+      "low-risk implementation must use Luna Extra High; do not escalate routine work to Sol.",
+    );
+  }
+
+  assert(isObject(task.qualification), "qualified implementation evidence is required.");
+  assert(
+    task.qualification.status === "qualified"
+      && task.qualification.provider === task.provider
+      && task.qualification.model === task.requestedModel
+      && task.qualification.taskClass === task.taskClass
+      && isNonEmptyString(task.qualification.evidenceId),
+    "qualified implementation evidence must match the exact provider, model and task class.",
+  );
+  if (provider.requiresExactHost) {
+    assert(
+      isNonEmptyString(task.host),
+      "qualified local Ollama work requires an exact host identity.",
+    );
+  }
+
+  assert(Array.isArray(task.skippedProviders), "skipped implementation providers are required.");
+  const expectedEarlier = routing.providers.slice(0, providerIndex).map((entry) => entry.id);
+  assert(
+    task.skippedProviders.length === expectedEarlier.length,
+    "every earlier implementation provider requires explicit fallback evidence.",
+  );
+  for (const [index, skipped] of task.skippedProviders.entries()) {
+    assert(
+      isObject(skipped)
+        && skipped.provider === expectedEarlier[index]
+        && routing.fallbackReasons.includes(skipped.reason)
+        && isNonEmptyString(skipped.evidenceId),
+      "every earlier implementation provider requires ordered, evidenced fallback status.",
+    );
+  }
+
+  if (isLowRiskImplementation) {
+    assert(
+      task.skippedProviders.length === lowRiskImplementation.unavailableProviders.length
+        && lowRiskImplementation.unavailableProviders.every((providerId, index) => {
+          const skipped = task.skippedProviders[index];
+          return skipped?.provider === providerId
+            && skipped.reason === lowRiskImplementation.fallbackReason;
+        }),
+      "low-risk implementation fallback must record unavailable evidence for Ollama, Mistral and Claude.",
+    );
+  }
+
+  const concurrencyReason = routing.providerSelection.concurrency.reason;
+  const concurrentlyOccupied = task.skippedProviders.filter(
+    (skipped) => skipped.reason === concurrencyReason,
+  );
+  if (concurrentlyOccupied.length === 0) {
+    assert(
+      task.concurrencyAssessment === undefined,
+      "a concurrency assessment requires an occupied cheaper provider.",
+    );
+    return;
+  }
+
+  const assessment = task.concurrencyAssessment;
+  assert(isObject(assessment), "beneficial provider concurrency requires an assessment.");
+  assert(
+    Array.isArray(assessment.selectedAllowedPaths)
+      && assessment.selectedAllowedPaths.length > 0
+      && assessment.selectedAllowedPaths.every(isRepositoryPath)
+      && new Set(assessment.selectedAllowedPaths).size === assessment.selectedAllowedPaths.length,
+    "beneficial provider concurrency requires unique selected-task paths.",
+  );
+  assert(
+    Array.isArray(assessment.occupiedTasks)
+      && assessment.occupiedTasks.length === concurrentlyOccupied.length,
+    "every occupied cheaper provider requires one concurrent task record.",
+  );
+
+  const selectedPaths = new Set(assessment.selectedAllowedPaths);
+  const occupiedPaths = new Set();
+  for (const [index, occupied] of assessment.occupiedTasks.entries()) {
+    assert(
+      isObject(occupied)
+        && occupied.provider === concurrentlyOccupied[index].provider
+        && Number.isInteger(occupied.issue)
+        && occupied.issue > 0
+        && isNonEmptyString(occupied.taskId)
+        && isNonEmptyString(occupied.qualificationEvidenceId)
+        && Array.isArray(occupied.allowedPaths)
+        && occupied.allowedPaths.length > 0
+        && occupied.allowedPaths.every(isRepositoryPath)
+        && new Set(occupied.allowedPaths).size === occupied.allowedPaths.length,
+      "each occupied cheaper provider requires exact task, qualification and path evidence.",
+    );
+    assert(
+      occupied.issue !== issue,
+      "concurrent implementation must own an independent issue.",
+    );
+    for (const path of occupied.allowedPaths) {
+      assert(
+        !selectedPaths.has(path) && !occupiedPaths.has(path),
+        "concurrent implementation paths must be disjoint.",
+      );
+      occupiedPaths.add(path);
+    }
+  }
+
+  const concurrencyPolicy = routing.providerSelection.concurrency;
+  assert(
+    assessment.dependenciesSatisfied === true,
+    "concurrent implementation requires satisfied dependencies.",
+  );
+  assert(
+    concurrencyPolicy.siblingLandingImpacts.includes(assessment.siblingLandingImpact),
+    "concurrent sibling impact must remain bounded.",
+  );
+  assert(
+    isNonEmptyString(assessment.expectedThroughputBenefit),
+    "beneficial provider concurrency requires a recorded throughput benefit.",
+  );
+  assert(
+    Number.isInteger(assessment.projectedInFlightPullRequests)
+      && assessment.projectedInFlightPullRequests >= 2
+      && assessment.projectedInFlightPullRequests === assessment.occupiedTasks.length + 1
+      && assessment.projectedInFlightPullRequests <= concurrencyPolicy.maximumInFlightPullRequests,
+    "projected in-flight pull requests must match the concurrent task set and remain within the cap.",
+  );
+}
+
+function validateLaunchReceipt(receipt, policy, task, baseSha) {
   assert(isObject(receipt), "task launch receipt is required.");
   assert(policy.taskStatusSources.includes(receipt.source), "unknown launch receipt source.");
-  assert(receipt.source === "create_thread", "task launch receipts must come from create_thread.");
+  if (task.provider === "luna") {
+    assert(receipt.source === "create_thread", "Luna implementation must use a create_thread receipt.");
+    assert(
+      isNonEmptyString(receipt.threadId) || isNonEmptyString(receipt.clientThreadId),
+      "task launch receipt requires threadId or clientThreadId.",
+    );
+  } else {
+    assert(
+      receipt.source === "bounded_wrapper",
+      "non-Luna implementation must use a bounded wrapper receipt.",
+    );
+    assert(isNonEmptyString(receipt.runId), "bounded wrapper receipt requires a runId.");
+  }
   assert(
-    isNonEmptyString(receipt.threadId) || isNonEmptyString(receipt.clientThreadId),
-    "task launch receipt requires threadId or clientThreadId.",
+    receipt.requestedModel === task.requestedModel,
+    "launch receipt model does not match requested model.",
   );
-  assert(receipt.requestedModel === requestedModel, "launch receipt model does not match requested model.");
   assert(receipt.baseSha === baseSha, "launch receipt base does not match accepted delivery base.");
   assert(isTimestamp(receipt.observedAt), "task launch receipt requires an observation timestamp.");
 }
@@ -219,6 +548,9 @@ function validateAuthoritativeTaskStatus(status, policy) {
   assert(isObject(status), "authoritative task status is required.");
   assert(policy.taskStatusSources.includes(status.source), "unknown task status source.");
   assert(status.source !== "create_thread", "create_thread is a receipt, not authoritative task status.");
+  if (status.source === "bounded_wrapper") {
+    assert(isNonEmptyString(status.runId), "bounded wrapper status requires a runId.");
+  }
   assert(isNonEmptyString(status.status), "task status is required.");
   assert(isTimestamp(status.observedAt), "task status requires an observation timestamp.");
 }
@@ -409,16 +741,15 @@ export function validateOperationalState(state, policy) {
       "protected write path is unavailable; do not launch or advance dependent delivery.",
     );
   }
+  if (delivery.task !== undefined) {
+    validateImplementationTask(delivery.task, policy, delivery.issue);
+  }
   if (taskStages.has(delivery.stage)) {
     assert(isObject(delivery.task), `${delivery.stage} delivery requires task state.`);
-    assert(
-      policy.modelAuthority.implementation.includes(delivery.task.requestedModel),
-      `requested task model ${String(delivery.task.requestedModel)} is not authorized for implementation.`,
-    );
     validateLaunchReceipt(
       delivery.task.launchReceipt,
       policy,
-      delivery.task.requestedModel,
+      delivery.task,
       delivery.baseSha,
     );
   }
@@ -437,7 +768,9 @@ export function validateOperationalState(state, policy) {
       delivery.task.authoritativeStatus.status === "active",
       "active delivery requires an active authoritative task observation.",
     );
-    assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active task requires threadId.");
+    if (delivery.task.authoritativeStatus.source !== "bounded_wrapper") {
+      assert(isNonEmptyString(delivery.task.authoritativeStatus.threadId), "active Luna task requires threadId.");
+    }
     assert(isNonEmptyString(delivery.task.authoritativeStatus.worktree), "active task requires worktree.");
   }
 
@@ -516,6 +849,30 @@ export function validateOperationalState(state, policy) {
       issue.acceptanceChecklist === "reviewed_complete",
       "acceptance checklist must be reviewed complete.",
     );
+    // A summary flag can be asserted from memory. Requiring each criterion to
+    // be itemised with its own evidence makes "reviewed complete" auditable
+    // rather than assertable, and fails closed when the itemisation is absent.
+    assert(
+      Array.isArray(issue.acceptanceCriteria) && issue.acceptanceCriteria.length > 0,
+      "reconciliation must itemise every acceptance criterion.",
+    );
+    for (const criterion of issue.acceptanceCriteria) {
+      assert(isObject(criterion), "each acceptance criterion must be an object.");
+      assert(
+        isNonEmptyString(criterion.criterion),
+        "each acceptance criterion must record the criterion it accounts for.",
+      );
+      assert(
+        criterion.met === true,
+        "every acceptance criterion must be met before reconciliation.",
+      );
+      assert(
+        Array.isArray(criterion.evidence)
+          && criterion.evidence.length > 0
+          && criterion.evidence.every(isNonEmptyString),
+        "each acceptance criterion requires its own evidence.",
+      );
+    }
     assert(
       Array.isArray(issue.closureEvidence)
         && issue.closureEvidence.length > 0
@@ -619,9 +976,15 @@ export function validateAdoptedControls(ledger, policy) {
         `${control.id} requires a pull request.`,
       );
       if (policy.protectedDecisionClasses.includes(control.decisionClass)) {
+        const legacyApproval = policy.learning.legacyProtectedApprovals.some(
+          (approval) => approval.model === control.approvedByModel
+            && approval.pullRequest === control.pullRequest,
+        );
         assert(
-          control.approvedByModel === "Sol Extra High",
-          `${control.id} protected adoption requires Sol Extra High approval.`,
+          policy.modelAuthority.protectedPlanning.includes(control.approvedByModel)
+            || control.approvedByModel === policy.humanApprovalIdentifier
+            || legacyApproval,
+          `${control.id} protected adoption requires approval by a protected-planning authority or ${policy.humanApprovalIdentifier}.`,
         );
       }
     }

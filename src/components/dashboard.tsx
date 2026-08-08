@@ -1,10 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { AdminManager } from "@/components/admin-manager";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
-import { FocusDialog } from "@/components/focus-dialog";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
@@ -48,10 +47,35 @@ const DEFAULT_THEME: ThemePreference = {
 };
 const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 const NOTICE_DURATION_MS = 10_000;
+const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
+const THEME_SESSION_HYDRATED_KEY = "orbit:theme-session-user:v1";
 
-type SettingsView = "appearance" | "data" | "inbox" | "household" | "sections" | "members" | "recovery" | "administration";
+type DashboardMode = "workspace" | "settings";
 type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
+
+const settingsSectionIds = {
+  appearance: "settings-appearance",
+  data: "settings-data",
+  inbox: "settings-inbox",
+  recovery: "settings-recovery",
+  household: "settings-household",
+  sections: "settings-sections",
+  members: "settings-members",
+} as const;
+
+function visibleSettingsTrigger(): "desktop-profile" | "mobile-menu" {
+  return window.matchMedia("(min-width: 821px)").matches ? "desktop-profile" : "mobile-menu";
+}
+
+function focusSettingsSection(sectionId: string) {
+  window.setTimeout(() => {
+    const heading = document.getElementById(sectionId)?.querySelector<HTMLElement>("h2");
+    if (!heading) return;
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ block: "start" });
+  }, 0);
+}
 
 const customSectionAccents: SectionAccent[] = ["coral", "sage", "blue", "sand", "plum"];
 const customSectionIcons: SectionIcon[] = ["home", "vehicle", "device", "service", "calendar"];
@@ -66,18 +90,30 @@ const urgencyPaletteLabels = {
   themed: { name: "Theme matched", detail: "Urgency colours adapt to your colourway" },
 } as const;
 
-function AuthenticationGate({ loading, error }: { loading: boolean; error?: string }) {
+function AuthenticationGate({
+  loading,
+  loadingMessage,
+  error,
+  onRetry,
+}: {
+  loading: boolean;
+  loadingMessage?: string;
+  error?: string;
+  onRetry?: () => void;
+}) {
+  const message = loading ? loadingMessage : error;
   return (
     <main className="authentication-gate">
       <section>
         <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
         <p className="eyebrow">Everything in your orbit, on track</p>
-        <h1>{loading ? "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
-        <p role={error ? "alert" : undefined}>
-          {loading
+        <h1>{loading ? loadingMessage ? "Orbit is starting…" : "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
+        <p role={message ? "alert" : undefined}>
+          {message ?? (loading
             ? "Orbit is confirming your session."
-            : error ?? "Your household information is private and is only available after authentication."}
+            : "Your household information is private and is only available after authentication.")}
         </p>
+        {!loading && error && onRetry && <button className="wizard-primary" type="button" onClick={onRetry}>Try again <Icon name="chevron" /></button>}
         {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
       </section>
     </main>
@@ -107,20 +143,23 @@ function useLocalStorageValue(key: string, fallback: string): string {
 type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
 
 /** Keeps signed-out/loading state outside the authenticated dashboard tree. */
-export function Dashboard() {
+export function Dashboard({ mode = "workspace" }: { mode?: DashboardMode } = {}) {
   const { session, ...workspaceState } = useWorkspace();
   if (!session) {
     return (
       <AuthenticationGate
         loading={workspaceState.syncStatus === "loading"}
+        loadingMessage={workspaceState.syncStatus === "loading" ? workspaceState.syncMessage || undefined : undefined}
         error={workspaceState.syncStatus === "error" ? workspaceState.syncMessage : undefined}
+        onRetry={workspaceState.syncStatus === "error" ? workspaceState.retryInitialization : undefined}
       />
     );
   }
-  return <AuthenticatedDashboard session={session} workspaceState={workspaceState} />;
+  return <AuthenticatedDashboard session={session} workspaceState={workspaceState} mode={mode} />;
 }
 
-function AuthenticatedDashboard({ session, workspaceState }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace }) {
+function AuthenticatedDashboard({ session, workspaceState, mode }: { session: NonNullable<ReturnType<typeof useWorkspace>["session"]>; workspaceState: AuthenticatedWorkspace; mode: DashboardMode }) {
+  const router = useRouter();
   const { workspace, dispatch, executeCommand, refreshWorkspace, signOut, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
   const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
@@ -132,7 +171,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
   const sections = household.sections;
   const today = calendarDateInTimeZone(household.timezone);
   const [activeSection, setActiveSection] = useState<string | "all">("all");
-  const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
+  const settingsHeadingRef = useRef<HTMLHeadingElement>(null);
   const [query, setQuery] = useState("");
   const [itemFilter, setItemFilter] = useState<ItemFilter>("all");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -188,8 +227,16 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
   const urgentSection = mostUrgent ? sections.find((section) => section.id === mostUrgent.sectionId) : undefined;
   const focusDays = mostUrgent?.dueDate ? daysUntil(mostUrgent.dueDate, today) : undefined;
 
+  const navigateHomeWithFocus = useCallback(() => {
+    if (!sessionStorage.getItem(SETTINGS_RETURN_FOCUS_KEY)) {
+      sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, visibleSettingsTrigger());
+    }
+    router.push("/");
+  }, [router]);
+
   useEffect(() => {
     if (!session) return;
+    if (sessionStorage.getItem(THEME_SESSION_HYDRATED_KEY) === session.user.id) return;
     storePreference(THEME_STORAGE_KEY, {
       mode: session.user.themeMode,
       colourway: session.user.themeId,
@@ -198,6 +245,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       emailNotifications: session.user.emailNotifications,
       pushNotifications: session.user.pushNotifications,
     });
+    sessionStorage.setItem(THEME_SESSION_HYDRATED_KEY, session.user.id);
   }, [session]);
 
   useEffect(() => {
@@ -206,11 +254,60 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  // Handle ?open=inbox routing for workspace mode
   useEffect(() => {
+    if (mode !== "workspace") return;
     if (new URLSearchParams(window.location.search).get("open") !== "inbox") return;
-    const timer = window.setTimeout(() => setSettingsView("inbox"), 0);
+    router.push("/settings?open=inbox");
+  }, [mode, router]);
+
+  // Focus the settings heading on route entry, or the requested section when
+  // the route carries a same-page destination.
+  useEffect(() => {
+    if (mode !== "settings") return;
+    const requestedSection = new URLSearchParams(window.location.search).get("open") === "inbox"
+      ? settingsSectionIds.inbox
+      : window.location.hash.slice(1);
+    const settingsSectionIdValues = Object.values(settingsSectionIds);
+    const sectionId = settingsSectionIdValues.includes(requestedSection as (typeof settingsSectionIdValues)[number])
+      ? requestedSection
+      : null;
+    const timer = window.setTimeout(() => {
+      if (sectionId) focusSettingsSection(sectionId);
+      else settingsHeadingRef.current?.focus();
+    }, 50);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [mode]);
+
+  // Handle focus return in workspace mode
+  useEffect(() => {
+    if (mode !== "workspace") return;
+    const focusMarker = sessionStorage.getItem(SETTINGS_RETURN_FOCUS_KEY);
+    if (!focusMarker) return;
+
+    sessionStorage.removeItem(SETTINGS_RETURN_FOCUS_KEY);
+
+    const timer = window.setTimeout(() => {
+      if (focusMarker === "desktop-profile") {
+        const profileButton = document.querySelector("button.topbar-profile") as HTMLButtonElement | null;
+        profileButton?.focus();
+      } else if (focusMarker === "mobile-menu") {
+        const menuButton = document.querySelector("button.mobile-menu") as HTMLButtonElement | null;
+        menuButton?.focus();
+      }
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== "settings") return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") navigateHomeWithFocus();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [mode, navigateHomeWithFocus]);
 
   function updateAppearance(changes: Partial<ThemePreference>) {
     const preference = { ...themePreference, ...changes };
@@ -341,12 +438,14 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       // Refresh the canonical workspace before the secure upload. The item is
       // intentionally durable and reachable even when attachment storage fails.
       await refreshWorkspace();
+      const documentId = crypto.randomUUID();
       const response = await fetch(`/api/households/${household.id}/items/${approvedItemId}/documents`, {
           method: "POST", credentials: "same-origin",
           headers: {
             "X-CSRF-Token": session.csrfToken,
             "X-Orbit-Filename": encodeURIComponent(document.name),
             "X-Orbit-Review-Operation": item.id,
+            "X-Orbit-Document-Id": documentId,
           },
           body: document,
         });
@@ -454,7 +553,6 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
     setItemFilter("all");
     setDetailItemId(null);
     setNotificationsOpen(false);
-    setSettingsView(null);
     setHouseholdMenuOpen(false);
     setMenuOpen(false);
   }
@@ -497,6 +595,208 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       ...input,
     });
     setNotice({ message: `${input.name} is ready` });
+  }
+
+  function navigateToSettings() {
+    sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, visibleSettingsTrigger());
+    router.push("/settings");
+  }
+
+  if (mode === "settings") {
+    return (
+      <main className="settings-page" data-theme={colourway} data-mode={themeMode} data-text-size={textSize} data-urgency-palette={urgencyPalette}>
+        <header className="settings-page-header">
+          <button className="settings-return-button" onClick={navigateHomeWithFocus}>
+            <Icon name="chevron" /> Return to Orbit
+          </button>
+          <h1 ref={settingsHeadingRef} tabIndex={-1}>Settings</h1>
+        </header>
+
+        {syncStatus === "error" && syncMessage && (
+          <div className="sync-error-banner" role="alert">{syncMessage}</div>
+        )}
+
+        {session.user.isInstanceAdmin && (
+          <nav className="settings-admin-link" aria-label="Instance administration">
+            <a href="/admin">Administration</a>
+          </nav>
+        )}
+
+        <div className="settings-layout">
+          <aside className="settings-section-nav-column">
+            <nav className="settings-section-nav" aria-label="Settings sections">
+              <a href={`#${settingsSectionIds.appearance}`} onClick={() => focusSettingsSection(settingsSectionIds.appearance)}>Appearance</a>
+              <a href={`#${settingsSectionIds.data}`} onClick={() => focusSettingsSection(settingsSectionIds.data)}>Your data</a>
+              <a href={`#${settingsSectionIds.inbox}`} onClick={() => focusSettingsSection(settingsSectionIds.inbox)}>Inbox</a>
+              {workspace.recoverableHouseholds.length > 0 && <a href={`#${settingsSectionIds.recovery}`} onClick={() => focusSettingsSection(settingsSectionIds.recovery)}>Removed</a>}
+              {household.canManage && <a href={`#${settingsSectionIds.household}`} onClick={() => focusSettingsSection(settingsSectionIds.household)}>Household</a>}
+              {household.canManage && <a href={`#${settingsSectionIds.sections}`} onClick={() => focusSettingsSection(settingsSectionIds.sections)}>Sections</a>}
+              <a href={`#${settingsSectionIds.members}`} onClick={() => focusSettingsSection(settingsSectionIds.members)}>Members</a>
+            </nav>
+          </aside>
+          {renderSettingsContent()}
+        </div>
+
+        <footer className="settings-session-actions">
+          <div>
+            <strong>End this session</strong>
+            <span>Private workspace data is not retained for offline use.</span>
+          </div>
+          <button type="button" onClick={handleSignOut} disabled={logoutBusy}>
+            {logoutBusy ? "Signing out…" : "Sign out securely"}
+          </button>
+        </footer>
+      </main>
+    );
+  }
+
+  function renderSettingsContent() {
+    return (
+      <div className="settings-content">
+        <section className="settings-section-region" id={settingsSectionIds.appearance} aria-labelledby={`${settingsSectionIds.appearance}-heading`}>
+          <h2 id={`${settingsSectionIds.appearance}-heading`} tabIndex={-1}>Appearance</h2>
+          <section>
+            <div className="setting-heading"><h3>Display mode</h3><p>Use your device setting or choose a consistent mode.</p></div>
+            <div className="mode-picker">
+              {themeModes.map((mode) => (
+                <button className={themeMode === mode ? "active" : ""} key={mode} onClick={() => updateAppearance({ mode })}>
+                  <span className={`mode-preview mode-${mode}`}><i /><b /></span>
+                  {mode[0].toUpperCase() + mode.slice(1)}
+                </button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <div className="setting-heading"><h3>Colourway</h3><p>Each palette has a carefully tuned light and dark expression.</p></div>
+            <div className="colourway-list">
+              {colourways.map((theme) => (
+                <button className={colourway === theme.id ? "active" : ""} key={theme.id} onClick={() => updateAppearance({ colourway: theme.id })}>
+                  <span className="theme-swatches">{theme.swatches.map((swatch) => <i key={swatch} style={{ backgroundColor: swatch }} />)}</span>
+                  <span><strong>{theme.name}</strong><small>{theme.description}</small></span>
+                  <b>{colourway === theme.id ? "✓" : ""}</b>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <div className="setting-heading"><h3>Text size</h3><p>Increase Orbit&apos;s typography without scaling the rest of the interface.</p></div>
+            <div className="preference-card-picker">
+              {textSizes.map((size) => (
+                <button className={textSize === size ? "active" : ""} key={size} onClick={() => updateAppearance({ textSize: size })}>
+                  <span className={`text-size-preview text-size-${size}`}>Aa</span>
+                  <span><strong>{textSizeLabels[size].name}</strong><small>{textSizeLabels[size].detail}</small></span>
+                  <b>{textSize === size ? "✓" : ""}</b>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <div className="setting-heading"><h3>Due-date heat map</h3><p>Choose traditional urgency colours or a palette tuned to the active theme.</p></div>
+            <div className="preference-card-picker">
+              {urgencyPalettes.map((palette) => (
+                <button className={urgencyPalette === palette ? "active" : ""} key={palette} onClick={() => updateAppearance({ urgencyPalette: palette })}>
+                  <span className={`heat-preview heat-preview-${palette}`}><i /><i /><i /><i /></span>
+                  <span><strong>{urgencyPaletteLabels[palette].name}</strong><small>{urgencyPaletteLabels[palette].detail}</small></span>
+                  <b>{urgencyPalette === palette ? "✓" : ""}</b>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section>
+            <div className="setting-heading"><h3>Reminder delivery</h3><p>Choose how Orbit contacts you. These choices only affect your account.</p></div>
+            <div className="preference-card-picker">
+              <button
+                aria-pressed={emailNotifications}
+                className={emailNotifications ? "active" : ""}
+                onClick={() => updateAppearance({ emailNotifications: !emailNotifications })}
+              >
+                <span className="text-size-preview">Email</span>
+                <span><strong>Email reminders</strong><small>Send scheduled reminders to your registered address</small></span>
+                <b>{emailNotifications ? "On" : "Off"}</b>
+              </button>
+              <button
+                aria-pressed={pushNotifications}
+                className={pushNotifications ? "active" : ""}
+                onClick={() => updateAppearance({ pushNotifications: !pushNotifications })}
+              >
+                <span className="text-size-preview">Push</span>
+                <span><strong>Browser push</strong><small>Notify browsers where you have enabled Orbit notifications</small></span>
+                <b>{pushNotifications ? "On" : "Off"}</b>
+              </button>
+            </div>
+          </section>
+        </section>
+
+        <section className="settings-section-region" id={settingsSectionIds.data} aria-labelledby={`${settingsSectionIds.data}-heading`}>
+          <h2 id={`${settingsSectionIds.data}-heading`} tabIndex={-1}>Your data</h2>
+          <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
+        </section>
+
+        <section className="settings-section-region" id={settingsSectionIds.inbox} aria-labelledby={`${settingsSectionIds.inbox}-heading`}>
+          <h2 id={`${settingsSectionIds.inbox}-heading`} tabIndex={-1}>Inbox</h2>
+          <ImapInbox csrfToken={session.csrfToken} />
+        </section>
+
+        {workspace.recoverableHouseholds.length > 0 && (
+          <section className="settings-section-region" id={settingsSectionIds.recovery} aria-labelledby={`${settingsSectionIds.recovery}-heading`}>
+            <h2 id={`${settingsSectionIds.recovery}-heading`} tabIndex={-1}>Removed</h2>
+            <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />
+          </section>
+        )}
+
+        {household.canManage && (
+          <section className="settings-section-region" id={settingsSectionIds.household} aria-labelledby={`${settingsSectionIds.household}-heading`}>
+            <h2 id={`${settingsSectionIds.household}-heading`} tabIndex={-1}>Household</h2>
+            <HouseholdSettings
+              key={household.id}
+              household={household}
+              onSave={updateHousehold}
+              onRemoved={() => router.replace("/")}
+              csrfToken={session.csrfToken}
+            />
+          </section>
+        )}
+
+        {household.canManage && (
+          <section className="settings-section-region" id={settingsSectionIds.sections} aria-labelledby={`${settingsSectionIds.sections}-heading`}>
+            <h2 id={`${settingsSectionIds.sections}-heading`} tabIndex={-1}>Sections</h2>
+            <div className="settings-content">
+              <section>
+                <div className="setting-heading section-heading"><div><h3>{household.name}&apos;s sections</h3><p>Rename, reorder or hide the areas this household uses.</p></div><button onClick={addSection} disabled={sections.length >= 12}><Icon name="plus" /> Add</button></div>
+                <div className="section-editor">
+                  {sections.map((section, index) => {
+                    const itemCount = activeItems.filter((item) => item.sectionId === section.id).length;
+                    return (
+                      <article key={section.id}>
+                        <button className={`section-drag accent-${section.accent}`} aria-label={`Change colour for ${section.name}`} title="Change section colour" onClick={() => cycleSectionAccent(section.id)}><Icon name={section.icon} /></button>
+                        <div>
+                          <input aria-label={`Name for ${section.name}`} maxLength={30} value={section.name} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name: event.target.value || "Untitled section" } : entry))} />
+                          <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small>
+                        </div>
+                        <select aria-label={`Icon for ${section.name}`} value={section.icon} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, icon: event.target.value as SectionIcon } : entry))}>
+                          {customSectionIcons.map((icon) => <option key={icon} value={icon}>{icon}</option>)}
+                        </select>
+                        <div className="order-buttons">
+                          <button aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => moveSection(section.id, -1)}>↑</button>
+                          <button aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => moveSection(section.id, 1)}>↓</button>
+                        </div>
+                        <label className="visibility-toggle"><input type="checkbox" checked={section.visible} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, visible: event.target.checked } : entry))} /><span /><em>{section.visible ? "Shown" : "Hidden"}</em></label>
+                      </article>
+                    );
+                  })}
+                </div>
+                <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
+              </section>
+            </div>
+          </section>
+        )}
+
+        <section className="settings-section-region" id={settingsSectionIds.members} aria-labelledby={`${settingsSectionIds.members}-heading`}>
+          <h2 id={`${settingsSectionIds.members}-heading`} tabIndex={-1}>Members</h2>
+          <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
+        </section>
+      </div>
+    );
   }
 
   return (
@@ -546,7 +846,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
           <p className="nav-label nav-spaced">Manage</p>
           <button className="nav-item" onClick={() => { setNotificationsOpen(true); setMenuOpen(false); }}><Icon name="bell" /><span>Notifications</span>{unreadNotificationCount > 0 && <b>{unreadNotificationCount}</b>}</button>
           <button className={archiveMode ? "nav-item active" : "nav-item"} onClick={() => { setActiveSection("archive"); setItemFilter("all"); setMenuOpen(false); }}><Icon name="archive" /><span>Archive</span><b>{inactiveItems.length}</b></button>
-          <button className="nav-item" onClick={() => { setSettingsView("appearance"); setMenuOpen(false); }}><Icon name="settings" /><span>Personalise</span></button>
+          <button className="nav-item" onClick={() => { navigateToSettings(); setMenuOpen(false); }}><Icon name="settings" /><span>Personalise</span></button>
         </nav>
       </aside>
 
@@ -558,7 +858,7 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
             <i />{syncStatus === "saving" ? "Saving" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
-          <button className="topbar-profile" data-settings-return-focus onClick={() => setSettingsView("appearance")} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
+          <button className="topbar-profile" data-settings-return-focus onClick={navigateToSettings} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
         </header>
 
@@ -643,153 +943,6 @@ function AuthenticatedDashboard({ session, workspaceState }: { session: NonNulla
       </main>
 
       {menuOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
-
-      {settingsView && (
-        <>
-          <button className="settings-scrim" aria-label="Close personalisation" onClick={() => setSettingsView(null)} />
-          <FocusDialog className="settings-drawer" aria-labelledby="personalise-title" onDismiss={() => setSettingsView(null)} returnFocusFallback="[data-settings-return-focus]">
-            <header>
-              <div><p>Make it yours</p><h2 id="personalise-title" tabIndex={-1} data-dialog-initial-focus>Personalise Orbit</h2></div>
-              <button aria-label="Close personalisation" onClick={() => setSettingsView(null)}>×</button>
-            </header>
-            <div className="settings-tabs" role="tablist" aria-label="Personalisation settings">
-              <button role="tab" aria-selected={settingsView === "appearance"} className={settingsView === "appearance" ? "active" : ""} onClick={() => setSettingsView("appearance")}>Appearance</button>
-              <button role="tab" aria-selected={settingsView === "data"} className={settingsView === "data" ? "active" : ""} onClick={() => setSettingsView("data")}>Your data</button>
-              <button role="tab" aria-selected={settingsView === "inbox"} className={settingsView === "inbox" ? "active" : ""} onClick={() => setSettingsView("inbox")}>Inbox</button>
-              {workspace.recoverableHouseholds.length > 0 && <button role="tab" aria-selected={settingsView === "recovery"} className={settingsView === "recovery" ? "active" : ""} onClick={() => setSettingsView("recovery")}>Removed</button>}
-              {household.canManage && <button role="tab" aria-selected={settingsView === "household"} className={settingsView === "household" ? "active" : ""} onClick={() => setSettingsView("household")}>Household</button>}
-              {household.canManage && <button role="tab" aria-selected={settingsView === "sections"} className={settingsView === "sections" ? "active" : ""} onClick={() => setSettingsView("sections")}>Sections</button>}
-              <button role="tab" aria-selected={settingsView === "members"} className={settingsView === "members" ? "active" : ""} onClick={() => setSettingsView("members")}>Members</button>
-              {session.user.isInstanceAdmin && <button role="tab" aria-selected={settingsView === "administration"} className={settingsView === "administration" ? "active" : ""} onClick={() => setSettingsView("administration")}>Admin</button>}
-            </div>
-
-            {settingsView === "appearance" ? (
-              <div className="settings-content">
-                <section>
-                  <div className="setting-heading"><h3>Display mode</h3><p>Use your device setting or choose a consistent mode.</p></div>
-                  <div className="mode-picker">
-                    {themeModes.map((mode) => (
-                      <button className={themeMode === mode ? "active" : ""} key={mode} onClick={() => updateAppearance({ mode })}>
-                        <span className={`mode-preview mode-${mode}`}><i /><b /></span>
-                        {mode[0].toUpperCase() + mode.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <div className="setting-heading"><h3>Colourway</h3><p>Each palette has a carefully tuned light and dark expression.</p></div>
-                  <div className="colourway-list">
-                    {colourways.map((theme) => (
-                      <button className={colourway === theme.id ? "active" : ""} key={theme.id} onClick={() => updateAppearance({ colourway: theme.id })}>
-                        <span className="theme-swatches">{theme.swatches.map((swatch) => <i key={swatch} style={{ backgroundColor: swatch }} />)}</span>
-                        <span><strong>{theme.name}</strong><small>{theme.description}</small></span>
-                        <b>{colourway === theme.id ? "✓" : ""}</b>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <div className="setting-heading"><h3>Text size</h3><p>Increase Orbit&apos;s typography without scaling the rest of the interface.</p></div>
-                  <div className="preference-card-picker">
-                    {textSizes.map((size) => (
-                      <button className={textSize === size ? "active" : ""} key={size} onClick={() => updateAppearance({ textSize: size })}>
-                        <span className={`text-size-preview text-size-${size}`}>Aa</span>
-                        <span><strong>{textSizeLabels[size].name}</strong><small>{textSizeLabels[size].detail}</small></span>
-                        <b>{textSize === size ? "✓" : ""}</b>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <div className="setting-heading"><h3>Due-date heat map</h3><p>Choose traditional urgency colours or a palette tuned to the active theme.</p></div>
-                  <div className="preference-card-picker">
-                    {urgencyPalettes.map((palette) => (
-                      <button className={urgencyPalette === palette ? "active" : ""} key={palette} onClick={() => updateAppearance({ urgencyPalette: palette })}>
-                        <span className={`heat-preview heat-preview-${palette}`}><i /><i /><i /><i /></span>
-                        <span><strong>{urgencyPaletteLabels[palette].name}</strong><small>{urgencyPaletteLabels[palette].detail}</small></span>
-                        <b>{urgencyPalette === palette ? "✓" : ""}</b>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section>
-                  <div className="setting-heading"><h3>Reminder delivery</h3><p>Choose how Orbit contacts you. These choices only affect your account.</p></div>
-                  <div className="preference-card-picker">
-                    <button
-                      aria-pressed={emailNotifications}
-                      className={emailNotifications ? "active" : ""}
-                      onClick={() => updateAppearance({ emailNotifications: !emailNotifications })}
-                    >
-                      <span className="text-size-preview">Email</span>
-                      <span><strong>Email reminders</strong><small>Send scheduled reminders to your registered address</small></span>
-                      <b>{emailNotifications ? "On" : "Off"}</b>
-                    </button>
-                    <button
-                      aria-pressed={pushNotifications}
-                      className={pushNotifications ? "active" : ""}
-                      onClick={() => updateAppearance({ pushNotifications: !pushNotifications })}
-                    >
-                      <span className="text-size-preview">Push</span>
-                      <span><strong>Browser push</strong><small>Notify browsers where you have enabled Orbit notifications</small></span>
-                      <b>{pushNotifications ? "On" : "Off"}</b>
-                    </button>
-                  </div>
-                </section>
-              </div>
-            ) : settingsView === "data" ? (
-              <PortableArchiveManager householdId={household.id} csrfToken={session.csrfToken} />
-            ) : settingsView === "inbox" ? (
-              <ImapInbox csrfToken={session.csrfToken} />
-            ) : settingsView === "recovery" ? (
-              <HouseholdRecovery households={workspace.recoverableHouseholds} csrfToken={session.csrfToken} isInstanceAdmin={session.user.isInstanceAdmin} />
-            ) : settingsView === "household" && household.canManage ? (
-              <HouseholdSettings key={household.id} household={household} onSave={updateHousehold} csrfToken={session.csrfToken} />
-            ) : settingsView === "sections" && household.canManage ? (
-              <div className="settings-content">
-                <section>
-                  <div className="setting-heading section-heading"><div><h3>{household.name}&apos;s sections</h3><p>Rename, reorder or hide the areas this household uses.</p></div><button onClick={addSection} disabled={sections.length >= 12}><Icon name="plus" /> Add</button></div>
-                  <div className="section-editor">
-                    {sections.map((section, index) => {
-                      const itemCount = activeItems.filter((item) => item.sectionId === section.id).length;
-                      return (
-                        <article key={section.id}>
-                          <button className={`section-drag accent-${section.accent}`} aria-label={`Change colour for ${section.name}`} title="Change section colour" onClick={() => cycleSectionAccent(section.id)}><Icon name={section.icon} /></button>
-                          <div>
-                            <input aria-label={`Name for ${section.name}`} maxLength={30} value={section.name} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name: event.target.value || "Untitled section" } : entry))} />
-                            <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small>
-                          </div>
-                          <select aria-label={`Icon for ${section.name}`} value={section.icon} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, icon: event.target.value as SectionIcon } : entry))}>
-                            {customSectionIcons.map((icon) => <option key={icon} value={icon}>{icon}</option>)}
-                          </select>
-                          <div className="order-buttons">
-                            <button aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => moveSection(section.id, -1)}>↑</button>
-                            <button aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => moveSection(section.id, 1)}>↓</button>
-                          </div>
-                          <label className="visibility-toggle"><input type="checkbox" checked={section.visible} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, visible: event.target.checked } : entry))} /><span /><em>{section.visible ? "Shown" : "Hidden"}</em></label>
-                        </article>
-                      );
-                    })}
-                  </div>
-                  <button className="reset-sections" onClick={restoreDefaultSections}>Restore default sections</button>
-                </section>
-              </div>
-            ) : settingsView === "members" ? (
-              <MemberManager householdId={household.id} session={session} refreshWorkspace={refreshWorkspace} />
-            ) : (
-              <AdminManager session={session} />
-            )}
-            <footer className="settings-session-actions">
-              <div>
-                <strong>End this session</strong>
-                <span>Private workspace data is not retained for offline use.</span>
-              </div>
-              <button type="button" onClick={handleSignOut} disabled={logoutBusy}>
-                {logoutBusy ? "Signing out…" : "Sign out securely"}
-              </button>
-            </footer>
-          </FocusDialog>
-        </>
-      )}
 
       {itemEditorOpen && (
         <ItemEditor

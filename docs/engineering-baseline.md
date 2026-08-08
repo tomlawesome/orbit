@@ -40,8 +40,8 @@ changing delivery status after this snapshot.
   accessibility.
 - Gated image publication records an immutable digest. The image named above
   predates the preview terminology and is not evidence of feature completeness.
-  Stable promotion reuses an accepted versioned-release preview digest after
-  its exact source reaches protected `main` and `develop`.
+  Stable promotion reuses an accepted protected-preview digest after its exact
+  source reaches `main`; the version is embedded before testing.
 - Build, database, malware-scanner, parser, optional-AI and disposable OIDC
   container inputs are pinned to reviewed Linux/AMD64 manifests. Pulled Orbit
   deployments require an explicit immutable application digest; local builds
@@ -77,7 +77,7 @@ acceptance and stable promotion remain separate release gates.
 | Migrations and update | V1-OPS-03 | Drizzle migrations and migrate-on-start entrypoint | ordered fresh-schema, supported-baseline upgrade, idempotency and failure-recording tests | **Partially proven:** automated migration integrity is established; operator update, rollback and clean-host acceptance remain |
 | Backup and recovery | V1-OPS-04 | backup, verify, restore and encrypted recovery-bundle scripts | corrupt/wrong-key/mismatched-object/interrupted restore matrix plus successful PostgreSQL and encrypted-file recovery | **Partially proven:** automated recovery safety is established; documented off-host operator recovery remains |
 | Health, audit and logging | V1-OPS-02 | health endpoints, audit table and safe failure categories | health smoke plus unit category checks | **Implemented, unverified:** redaction, audit completeness, retention and degraded-service behaviour need integration evidence |
-| CI, preview and promotion | V1-REL-01 | validation and promotion workflows | build-once exact-image preview flow, Gitflow source checks, dependency/secret and dependency-change licence policy, exact-image vulnerability/SPDX evidence, verified digest-bound attestations and immutable digest recording | **Partially proven:** protected `develop` preview supply-chain evidence is established; representative versioned-release acceptance and completed stable promotion remain |
+| CI, preview and promotion | V1-REL-01 | validation and promotion workflows | fast issue lanes, protected build-once `preview` publication, automatic train versions, source checks, dependency/secret and dependency-change licence policy, exact-image vulnerability/SPDX evidence, verified digest-bound attestations and immutable digest recording | **Partially proven:** automated contracts are established; representative protected-preview acceptance and completed stable promotion remain |
 | IMAP/SMTP ingestion | V1-DOC-03 | ingestion, holding, review and receipt workers/routes | configuration, alias, TLS-header and worker-helper units | **Partially proven:** live provider contracts, hostile MIME, identity, duplicate/retry recovery, shared draft review and privacy evidence remain in #22 |
 | Local semantic extraction | Deferred | optional Ollama container only | Compose configuration validation | **Deferred:** no application adapter or automatic-write authority is allowed |
 

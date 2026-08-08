@@ -1,26 +1,8 @@
-export async function register() {
+/** Keep the Edge instrumentation graph free of Node-only modules. */
+
+export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  if (process.env.MIGRATE_ON_START === "true") {
-    // Keep database and filesystem dependencies out of the Edge instrumentation bundle.
-    const [{ migrate }, { getDb }] = await Promise.all([
-      import("drizzle-orm/postgres-js/migrator"),
-      import("@/db"),
-    ]);
-
-    await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
-  }
-
-  if (process.env.WORKER_ENABLED === "true") {
-    const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }] = await Promise.all([
-      import("@/server/notification-worker"),
-      import("@/server/document-worker"),
-      import("@/server/imap-ingestion"),
-      import("@/server/imap-receipt-worker"),
-    ]);
-    startNotificationWorker();
-    startDocumentWorker();
-    startImapIngestionWorker();
-    startImapReceiptWorker();
-  }
+  const { registerNode } = await import("./instrumentation-node");
+  await registerNode();
 }

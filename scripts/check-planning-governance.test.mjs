@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasPlanningAttestation,
   isProtectedPlanningPath,
+  matchedPlanningAttestation,
 } from "./check-planning-governance.mjs";
 
 describe("planning governance", () => {
@@ -26,9 +27,24 @@ describe("planning governance", () => {
     expect(isProtectedPlanningPath("src/server/example.ts")).toBe(false);
   });
 
-  it("requires an exact, standalone Sol Extra High attestation", () => {
+  it("accepts an exact, standalone attestation from Sol or the human owner", () => {
     expect(hasPlanningAttestation("Planning-Model: Sol Extra High")).toBe(true);
+    expect(hasPlanningAttestation("Planning-Model: Human")).toBe(true);
+  });
+
+  it("rejects implementation-tier, unknown, and non-standalone attestations", () => {
     expect(hasPlanningAttestation("Planning-Model: Luna Extra High")).toBe(false);
+    expect(hasPlanningAttestation("Planning-Model: Claude Opus Extra High")).toBe(false);
+    expect(hasPlanningAttestation("Planning-Model: Claude Sonnet Extra High")).toBe(false);
+    expect(hasPlanningAttestation("Planning-Model: Not applicable")).toBe(false);
     expect(hasPlanningAttestation("Not Planning-Model: Sol Extra High")).toBe(false);
+    expect(hasPlanningAttestation("")).toBe(false);
+    expect(hasPlanningAttestation(null)).toBe(false);
+  });
+
+  it("reports which attestation satisfied the gate", () => {
+    expect(matchedPlanningAttestation("intro\nPlanning-Model: Human\noutro"))
+      .toBe("Planning-Model: Human");
+    expect(matchedPlanningAttestation("Planning-Model: Terra Medium")).toBe(null);
   });
 });

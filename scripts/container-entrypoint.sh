@@ -4,11 +4,57 @@ set -eu
 readonly source_directory="/run/secrets"
 readonly runtime_directory="/run/orbit-secrets"
 readonly maximum_secret_bytes=65536
+readonly script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+readonly application_directory="$(dirname -- "$script_directory")"
+readonly version_path="${application_directory}/VERSION"
+readonly revision_path="${application_directory}/REVISION"
+readonly channel_path="${application_directory}/CHANNEL"
 
 fail() {
   printf 'Orbit container startup: %s\n' "$*" >&2
   exit 1
 }
+
+[ -f "$version_path" ] && [ ! -L "$version_path" ] ||
+  fail "the embedded version identity is unavailable"
+[ -f "$revision_path" ] && [ ! -L "$revision_path" ] ||
+  fail "the embedded revision identity is unavailable"
+[ -f "$channel_path" ] && [ ! -L "$channel_path" ] ||
+  fail "the embedded release channel is unavailable"
+
+orbit_version="$(cat -- "$version_path")"
+orbit_revision="$(cat -- "$revision_path")"
+orbit_channel="$(cat -- "$channel_path")"
+printf '%s\n' "$orbit_version" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ||
+  fail "the embedded version identity is invalid"
+printf '%s\n' "$orbit_revision" | grep -Eq '^[0-9a-f]{40}$' ||
+  fail "the embedded revision identity is invalid"
+printf '%s\n' "$orbit_channel" | grep -Eq '^(ci|preview|dev)$' ||
+  fail "the embedded release channel is invalid"
+
+if [ "${1:-}" = "--version" ]; then
+  printf "Orbit %s\n" "$orbit_version"
+  exit 0
+fi
+
+if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "server.js" ]; then
+  cat <<'ORBIT_BANNER'
+─────────────────────────────────────────────────────────────────────────────
+      ·            ✦             ·                  ·           ✦      ·
+  ✦        ·               ○                ·             ·          ◯
+  ·      ·    ·    ██████╗  ██████╗  ██████╗  ██╗ ████████╗   ·      ·      ·
+·     ·      ·    ██╔═══██╗ ██╔══██╗ ██╔══██╗ ██║ ╚══██╔══╝   ·    ·        ·
+   ·      ·   ·   ██║   ██║ ██████╔╝ ██████╔╝ ██║    ██║        ·      ·    ·
+ ·      ·     ·   ██║   ██║ ██╔══██╗ ██╔══██╗ ██║    ██║      ·      ·      ·
+    ·      ·      ╚██████╔╝ ██║  ██║ ██████╔╝ ██║    ██║      ·     ·     · ·
+·       ·     ·    ╚═════╝  ╚═╝  ╚═╝ ╚═════╝  ╚═╝    ╚═╝       ·      ·     ·
+    ·          ◯              ·                ✦             ·           ·
+         ✦             ·              ·                ○          ·
+─────────────────────────────────────────────────────────────────────────────
+ORBIT_BANNER
+  printf 'Orbit %s | channel=%s | revision=%s\n' \
+    "$orbit_version" "$orbit_channel" "$orbit_revision"
+fi
 
 # Docker Compose implements file-backed secrets as bind mounts. Their host
 # ownership is therefore retained and cannot be remapped with Compose uid/gid
@@ -44,6 +90,16 @@ for source_path in "$source_directory"/*; do
       fail "could not determine a secret's size"
       ;;
   esac
+  # The protected Compose secret declaration requires a host source for
+  # orbit-oidc-client-secret even when the operator has not run
+  # `configure.sh --set-oidc-secret`, so configure.sh leaves a zero-byte
+  # placeholder in that case. Skip only that exact placeholder, and only when
+  # OIDC_CLIENT_SECRET_FILE does not select it; once that variable selects the
+  # file, an empty secret is a startup failure like any other.
+  if [ "$secret_name" = "orbit-oidc-client-secret" ] && [ "$secret_size" -eq 0 ] &&
+    [ -z "${OIDC_CLIENT_SECRET_FILE:-}" ]; then
+    continue
+  fi
   [ "$secret_size" -gt 0 ] ||
     fail "refusing an empty secret"
   [ "$secret_size" -le "$maximum_secret_bytes" ] ||

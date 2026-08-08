@@ -4,6 +4,10 @@ import { clearTransactionCookie, sessionCookieName, setSessionCookie, transactio
 import { constantTimeEqual, openLoginTransaction } from "@/lib/auth/crypto";
 import { AuthError, asAuthError } from "@/lib/auth/errors";
 import { authErrorResponse } from "@/lib/auth/http";
+import {
+  reportAuthProviderDiscoveryFailure,
+  reportAuthTokenExchangeFailure,
+} from "@/lib/auth/observability";
 import { completeAuthorization, discoverProvider } from "@/lib/auth/oidc";
 import { provisionIdentity } from "@/lib/auth/provision";
 import { createSession, deleteSessionToken } from "@/lib/auth/session";
@@ -11,6 +15,8 @@ import { createSession, deleteSessionToken } from "@/lib/auth/session";
 export const dynamic = "force-dynamic";
 
 function logCallbackFailure(authError: AuthError): void {
+  if (authError.code === "discovery_failed") reportAuthProviderDiscoveryFailure();
+  if (authError.code === "token_exchange_failed") reportAuthTokenExchangeFailure(authError.tokenExchangeReason ?? "provider_rejected");
   // Deliberately log only bounded metadata; causes can contain provider data.
   console.error("Orbit authentication callback failed", {
     code: authError.code,
