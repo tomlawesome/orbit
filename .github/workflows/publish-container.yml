@@ -464,6 +464,9 @@ jobs:
           rm -rf "${deployment}"
 
       - name: Validate Compose configuration
+        env:
+          ORBIT_VERSION: ${{ steps.version.outputs.version }}
+          ORBIT_REVISION: ${{ steps.version.outputs.revision }}
         run: |
           docker compose --env-file .env-orbit config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
