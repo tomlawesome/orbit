@@ -45,15 +45,14 @@ unchanged target state and unchanged audit state where mutation is applicable.
 
 ## CI relationship
 
-CI always runs static/unit and source-policy evidence on pull requests, adding
-a production build for executable changes and dependency snapshots. A
-fail-safe changed-boundary classifier then selects whether the pull request also
-needs two concurrent `pnpm test:integration` invocations, or those real
-PostgreSQL runs plus the complete exact-image system sequence. A changed or
-unproven production dependency graph and every unknown path select the broadest
-lane. Every push to `develop` and `release/**` still runs the complete
-PostgreSQL, exact-image, browser, security, recovery, installer and publication
-path regardless of pull-request classification.
+Pull requests run planning governance, lint, type checking and the complete unit
+suite. Separate read-only workflows retain dependency-diff and CodeQL evidence.
+They do not run a production build, PostgreSQL integration, source secret scan
+or container build. Every push to protected `preview` (or a bounded
+`hotfix/**` source) runs the complete source-policy, PostgreSQL, exact-image,
+browser, security, recovery, installer and publication path. A pull request to
+`main` verifies the already-tested preview digest, embedded identity and
+attestations without rebuilding it.
 
 When selected, the two concurrent integration invocations prove that
 independent runs do not share PostgreSQL state or Docker resources. The command
