@@ -5,8 +5,9 @@ closes.
 
 Closes #
 
-Ordinary issue branches start from and target `develop`. A release or hotfix
-pull request must identify its required `main`/`develop` merge pair.
+Ordinary issue branches start from and target `develop`. Release-train pull
+requests merge `develop` into `preview`, then the accepted `preview` into
+`main`. A hotfix must identify its later `develop`/`preview` reconciliation.
 
 ## Changes
 
@@ -37,6 +38,8 @@ pull request must identify its required `main`/`develop` merge pair.
 
 Leave the next line unchanged for implementation-only pull requests. If this
 pull request changes a path protected by `.github/planning-governance.json`,
-replace `Not applicable` with `Sol Extra High`.
+replace `Not applicable` with the authority that did the planning work:
+`Sol Extra High`, or `Human` when a human owner authored or directed the
+change. Never attest as an authority that did not do the work.
 
 Planning-Model: Not applicable

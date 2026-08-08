@@ -38,4 +38,10 @@ describe("OIDC transaction cryptography", () => {
     expect(safeReturnPath("//attacker.example")).toBe("/");
     expect(safeReturnPath("https://attacker.example")).toBe("/");
   });
+
+  it("rejects backslash paths that WHATWG URL parsing treats as protocol-relative", () => {
+    expect(safeReturnPath("/\\evil.example")).toBe("/");
+    expect(safeReturnPath("/\\/evil.example")).toBe("/");
+    expect(safeReturnPath("/\\\\evil.example")).toBe("/");
+  });
 });

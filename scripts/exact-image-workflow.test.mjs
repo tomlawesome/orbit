@@ -20,12 +20,58 @@ function jobBlock(job, nextJob) {
 }
 
 describe("exact-image publication workflow", () => {
-  it("gates integration and publication on a read-only source supply-chain scan", () => {
+  it("keeps ordinary pull requests on the static and unit lane", () => {
+    const fast = jobBlock("fast", "supply_chain_source");
+    const supplyChain = jobBlock("supply_chain_source", "integration");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "verify_preview");
+
+    expect(fast).toContain("run: bash scripts/test-backend.sh");
+    expect(fast).toContain("github.event_name == 'push'");
+    expect(supplyChain).toContain("if: github.event_name == 'push'");
+    expect(integration).toContain("github.event_name == 'push'");
+    expect(smoke).toContain("if: ${{ false }}");
+  });
+
+  it("selects fail-safe risk lanes while keeping required checks reportable", () => {
+    const changes = jobBlock("changes", "fast");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "publish_preview");
+
+    expect(changes).toContain("risk: ${{ steps.classify.outputs.risk }}");
+    expect(changes).toContain("build: ${{ steps.classify.outputs.build }}");
+    expect(changes).toContain("integration: ${{ steps.classify.outputs.integration }}");
+    expect(changes).toContain("system: ${{ steps.classify.outputs.system }}");
+    expect(changes).toContain("Set up pnpm graph reader");
+    expect(changes).toContain("run_install: false");
+    const fast = jobBlock("fast", "supply_chain_source");
+    expect(fast).toContain("- changes");
+    expect(fast).toContain("needs.changes.outputs.build == 'true'");
+    expect(fast).toContain("github.event_name == 'push'");
+    expect(fast).toContain("run: pnpm build");
+    expect(integration).toContain("needs.changes.outputs.integration == 'true'");
+    expect(integration).toContain("github.event_name == 'push'");
+    expect(smoke).toContain("if: ${{ false }}");
+    expect(workflow).not.toContain("paths:");
+    expect(workflow).not.toContain("paths-ignore:");
+  });
+
+  it("keeps every integration-branch push on the complete publication path", () => {
+    const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
+
+    expect(preview).toContain("github.event_name == 'push'");
+    expect(preview).not.toContain("needs.changes.outputs.risk");
+    expect(preview).not.toContain("needs.changes.outputs.system");
+    expect(preview).toContain("steps: *container_validation_steps");
+  });
+
+  it("moves source supply-chain scanning to the authoritative preview publication", () => {
     const supplyChain = jobBlock("supply_chain_source", "integration");
     const integration = jobBlock("integration", "smoke");
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(supplyChain).toContain("name: Source dependency and secret policy");
+    expect(supplyChain).toContain("if: github.event_name == 'push'");
     expect(supplyChain).toContain("contents: read");
     expect(supplyChain).not.toContain("packages: write");
     expect(supplyChain).not.toContain("id-token: write");
@@ -33,28 +79,25 @@ describe("exact-image publication workflow", () => {
     expect(supplyChain).toContain("persist-credentials: false");
     expect(supplyChain).toContain("scripts/supply-chain-policy.mjs source");
     expect(supplyChain).toContain("orbit-supply-chain-source");
-    expect(integration).toContain("- supply_chain_source");
+    expect(integration).not.toContain("- supply_chain_source");
     expect(preview).toContain("- supply_chain_source");
   });
 
-  it("keeps pull-request container validation read-only", () => {
+  it("defers pull-request container validation to the protected preview merge", () => {
     const smoke = jobBlock("smoke", "publish_preview");
 
-    expect(smoke).toContain("if: github.event_name == 'pull_request'");
+    expect(smoke).toContain("if: ${{ false }}");
     expect(smoke).toContain("contents: read");
     expect(smoke).not.toContain("packages: write");
     expect(smoke).toContain("steps: &container_validation_steps");
   });
 
-  it("publishes unique previews only from trusted Gitflow integration branches", () => {
+  it("publishes previews only from the protected preview or bounded hotfix lanes", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
-    expect(preview).toContain("github.ref == 'refs/heads/develop'");
-    expect(preview).toContain("startsWith(github.ref, 'refs/heads/release/')");
-    expect(preview).toContain(
-      "github.ref_name != 'release/architecture-consolidation-rc'",
-    );
+    expect(preview).toContain("github.ref == 'refs/heads/preview'");
+    expect(preview).toContain("startsWith(github.ref, 'refs/heads/hotfix/')");
     expect(preview).toContain("packages: write");
     expect(preview).toContain("PUBLICATION_CHANNEL: preview");
     expect(preview).toContain("steps: *container_validation_steps");
@@ -63,24 +106,54 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain("PUBLICATION_CHANNEL: development");
   });
 
-  it("gives every preview an immutable human-readable branch and run tag", () => {
-    expect(workflow).toContain("- name: Generate unique preview tag");
-    expect(workflow).toContain("preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
+  it("publishes only the preview discovery tag while retaining digest identity", () => {
+    expect(workflow).toContain("- name: Calculate release-train version");
     expect(workflow).toContain(
-      "type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}",
+      "type=raw,value=preview",
     );
     expect(workflow).toContain(
       "io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}",
     );
-    expect(workflow).not.toContain("type=raw,value=dev-");
+    const metadata = workflow.slice(
+      workflow.indexOf("- name: Generate exact image metadata"),
+      workflow.indexOf("- name: Build and load final image"),
+    );
+    expect(metadata).not.toContain("GITHUB_RUN_ID");
+    expect(workflow).not.toContain("type=raw,value=dev");
+    expect(workflow).not.toMatch(/type=raw,value=v\$?\{/u);
+  });
+
+  it("runs the locally reproducible preflight before the exact image build", () => {
+    const version = workflow.indexOf("- name: Calculate release-train version");
+    const preflight = workflow.indexOf("- name: Validate preview-lane preflight");
+    const build = workflow.indexOf("- name: Build and load final image");
+    const preflightStep = workflow.slice(preflight, build);
+
+    expect(version).toBeGreaterThanOrEqual(0);
+    expect(preflight).toBeGreaterThan(version);
+    expect(build).toBeGreaterThan(preflight);
+    expect(preflightStep).toContain("bash scripts/preview-lane-preflight.sh");
+    expect(preflightStep).toContain("--channel");
   });
 
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
     expect(workflow.match(/docker\/build-push-action@/gu)).toHaveLength(1);
     expect(workflow).toContain("platforms: linux/amd64");
+    expect(workflow).toContain("Stable Git tags are the version calculator's durable baseline.");
     expect(workflow).toContain("load: true");
     expect(workflow).toContain("push: false");
     expect(workflow).toContain("io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}");
+    expect(workflow).toContain("org.opencontainers.image.version=${{ steps.version.outputs.version }}");
+    expect(workflow).toContain("ORBIT_VERSION=${{ steps.version.outputs.version }}");
+    expect(workflow).toContain("ORBIT_CHANNEL=${{ env.PUBLICATION_CHANNEL }}");
+    expect(workflow).toContain('/opt/orbit/CHANNEL');
+    expect(workflow).toContain('[[ "${embedded_channel}" == "${release_stage}" ]]');
+    expect(workflow).toContain('docker run --rm "${image_tag}" --version');
+    expect(workflow).toContain("docker compose --env-file .env-orbit logs --no-color orbit-app");
+    expect(workflow).toContain(
+      'Orbit ${version} | channel=${release_stage} | revision=${revision}',
+    );
+    expect(workflow).toContain("grep --fixed-strings --line-regexp --count");
     expect(workflow).toContain("ORBIT_IMAGE=");
     expect(workflow).toContain("--no-build");
     expect(workflow).not.toContain("include_arm64");
@@ -110,6 +183,38 @@ describe("exact-image publication workflow", () => {
     expect(attest).toBeGreaterThan(push);
     expect(verify).toBeGreaterThan(attest);
     expect(workflow.slice(push, attest)).not.toContain("docker/build-push-action");
+  });
+
+  it("keeps failure diagnostics available before an exact image is configured", () => {
+    const diagnostics = workflow.slice(
+      workflow.indexOf("- name: Show service diagnostics"),
+      workflow.indexOf("- name: Stop smoke-test services"),
+    );
+    const cleanup = workflow.slice(
+      workflow.indexOf("- name: Stop smoke-test services"),
+      workflow.indexOf("- name: Start disposable installer registry"),
+    );
+
+    const fallback = 'export ORBIT_IMAGE="${ORBIT_IMAGE:-orbit-local:000000000000}"';
+    expect(diagnostics).toContain(fallback);
+    expect(cleanup).toContain(fallback);
+  });
+
+  it("supplies the calculated identity to source-build overlay validation", () => {
+    const validation = workflow.slice(
+      workflow.indexOf("- name: Validate Compose configuration"),
+      workflow.indexOf("- name: Detect exact processor validation scope"),
+    );
+
+    expect(validation).toContain(
+      "ORBIT_VERSION: ${{ steps.version.outputs.version }}",
+    );
+    expect(validation).toContain(
+      "ORBIT_REVISION: ${{ steps.version.outputs.revision }}",
+    );
+    expect(validation).toContain(
+      "ORBIT_CHANNEL: ${{ env.PUBLICATION_CHANNEL }}",
+    );
   });
 
   it("requires the database-backed ready contract before smoke acceptance continues", () => {
@@ -198,5 +303,92 @@ describe("exact-image publication workflow", () => {
   it("does not describe any preview as a release candidate", () => {
     expect(workflow.toLowerCase()).not.toContain("release candidate");
     expect(workflow.toLowerCase()).not.toContain("release-candidate");
+  });
+
+  it("validates exact-image installer workflow sequence and configuration", () => {
+    // Sequence: installer steps ordered after smoke-test stop, before GHCR login.
+    const stop = workflow.indexOf("- name: Stop smoke-test services");
+    const registryStart = workflow.indexOf("- name: Start disposable installer registry");
+    const targetPrepare = workflow.indexOf("- name: Prepare empty installer target and Git guard");
+    const installerRun = workflow.indexOf("- name: Run installer against the disposable registry");
+    const installerVerify = workflow.indexOf("- name: Verify exact-image installer evidence");
+    const cleanup = workflow.indexOf("- name: Clean up installer validation resources");
+    const login = workflow.indexOf("- name: Log in to GitHub Container Registry");
+
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(registryStart).toBeGreaterThan(stop);
+    expect(targetPrepare).toBeGreaterThan(registryStart);
+    expect(installerRun).toBeGreaterThan(targetPrepare);
+    expect(installerVerify).toBeGreaterThan(installerRun);
+    expect(cleanup).toBeGreaterThan(installerVerify);
+    expect(login).toBeGreaterThan(cleanup);
+
+    // Registry pinning and configuration.
+    const registryStep = workflow.slice(registryStart, targetPrepare);
+    expect(registryStep).toContain(
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373",
+    );
+    expect(registryStep).toContain("--publish 127.0.0.1:5000:5000");
+    expect(registryStep).toContain('local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"');
+    expect(registryStep).toContain('[[ "${source_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(registryStep).toContain("docker tag");
+    expect(registryStep).toContain("docker push");
+    expect(registryStep).not.toContain("docker build");
+    expect(registryStep).toContain('registry_id="$(');
+    expect(registryStep).toContain('[[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]]');
+
+    const prepareStep = workflow.slice(targetPrepare, installerRun);
+    expect(prepareStep).toContain('mktemp -d "${RUNNER_TEMP}/orbit-installer-target.XXXXXX"');
+    expect(prepareStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
+    expect(prepareStep).toContain("orbit-installer-git-guard.XXXXXX");
+    expect(prepareStep).toContain("git-was-invoked");
+
+    // Image mirroring: ${IMAGE_NAME} in local registry, ORBIT_REPOSITORY env var.
+    expect(registryStep).toContain("127.0.0.1:5000/${IMAGE_NAME}");
+
+    // Installer input validation: stdin from /dev/null, TTY assertion, Git guard.
+    const installerStep = workflow.slice(installerRun, installerVerify);
+    expect(installerStep).toContain("ORBIT_REGISTRY: 127.0.0.1:5000");
+    expect(installerStep).toContain("ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}");
+    expect(installerStep).toContain("exec < /dev/null");
+    expect(installerStep).toContain("[[ ! -t 0 ]]");
+    expect(installerStep).toContain("PATH=\"${GIT_GUARD_DIR}:${PATH}\"");
+    expect(installerStep).toContain('bash "${GITHUB_WORKSPACE}/scripts/install.sh"');
+
+    // Image digest requirements.
+    expect(installerVerify).toBeGreaterThanOrEqual(0);
+    const verifyStep = workflow.slice(installerVerify, cleanup);
+    expect(verifyStep).toContain("ORBIT_IMAGE=127.0.0.1:5000/${IMAGE_NAME}@sha256:");
+    expect(verifyStep).toContain("[[ \"${digest}\" =~ ^[0-9a-f]{64}$ ]]");
+    expect(verifyStep).toContain('[[ "${resolved_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(verifyStep).toContain('[[ "${running_id}" == "${TESTED_IMAGE_ID}" ]]');
+    expect(verifyStep).toContain('[[ "${revision_label}" == "${GITHUB_SHA}" ]]');
+    expect(verifyStep).toContain("org.opencontainers.image.revision");
+
+    // Fetched assets validation: docker-compose.yml and scripts/configure.sh match.
+    expect(verifyStep).toContain("docker-compose.yml");
+    expect(verifyStep).toContain("scripts/configure.sh");
+    expect(verifyStep).toContain("cmp --silent");
+
+    // Absence of source/build markers.
+    expect(verifyStep).toContain(".git");
+    expect(verifyStep).toContain("Dockerfile");
+    expect(verifyStep).toContain("package.json");
+    expect(verifyStep).toContain("pnpm-lock.yaml");
+
+    // Ready health response.
+    expect(verifyStep).toContain("curl");
+    expect(verifyStep).toContain("/api/health");
+    expect(verifyStep).toContain(".status == \"ready\"");
+    expect(verifyStep).toContain(".service == \"orbit\"");
+
+    const cleanupSection = workflow.slice(cleanup, login);
+    expect(cleanupSection).toContain("if: always()");
+    expect(cleanupSection).toContain("${RUNNER_TEMP}");
+    expect(cleanupSection).toContain("! -L");
+    expect(cleanupSection).toContain("down --volumes --remove-orphans");
+    expect(cleanupSection).toContain('docker rm --force "${REGISTRY_ID}"');
+    expect(cleanupSection).toContain("current_registry_id=");
+    expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
   });
 });

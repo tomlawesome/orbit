@@ -34,6 +34,13 @@ describe("document envelope encryption", () => {
     expect(() => decryptDocument(fresh.ciphertext, { ...context, itemId: crypto.randomUUID() }, fresh.envelope, kek)).toThrow();
   });
 
+  it("binds recovery staging ciphertext to its separate purpose", () => {
+    const kek = randomBytes(32);
+    const staged = encryptDocument(plaintext, { ...context, purpose: "scanner_recovery" }, kek, "key-1");
+    expect(decryptDocument(staged.ciphertext, { ...context, purpose: "scanner_recovery" }, staged.envelope, kek)).toEqual(plaintext);
+    expect(() => decryptDocument(staged.ciphertext, context, staged.envelope, kek)).toThrow();
+  });
+
   it("rewraps the DEK without changing ciphertext", () => {
     const currentKek = randomBytes(32);
     const nextKek = randomBytes(32);

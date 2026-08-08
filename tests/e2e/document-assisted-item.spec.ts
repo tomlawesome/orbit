@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { syntheticPdf } from "../support/synthetic-documents";
 
+const terminalInspectionMessage = /Document inspected|Suggestions are unavailable|Automatic suggestions require the optional document processor\. You can still attach this file\./u;
+
 async function signIn(page: Page) {
   await page.goto("/");
   await page.getByRole("link", { name: "Sign in securely" }).click();
@@ -88,7 +90,12 @@ test.describe("document-assisted item intake", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ extracted: true, suggestions: mockedSuggestions }),
+        body: JSON.stringify({
+          extracted: true,
+          suggestions: mockedSuggestions,
+          attachmentDisposition: "attachable",
+          reason: "supported_structure",
+        }),
       });
     });
     const inspectionResponse = page.waitForResponse((response) => response.url().includes("/item-document-inspection") && response.request().method() === "POST");
@@ -157,7 +164,7 @@ test.describe("document-assisted item intake", () => {
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic command failure"),
     });
-    await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    await expect(editor.getByRole("status")).toContainText(terminalInspectionMessage, { timeout: 15_000 });
 
     const uploadRequests: string[] = [];
     let approvalRequests = 0;
@@ -192,13 +199,13 @@ test.describe("document-assisted item intake", () => {
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic attachment failure"),
     });
-    await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    await expect(editor.getByRole("status")).toContainText(terminalInspectionMessage, { timeout: 15_000 });
     let attempts = 0;
     await page.route("**/api/households/*/items/*/documents", async (route) => {
       if (route.request().method() === "POST") {
         attempts += 1;
         if (attempts === 1) {
-          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unavailable", message: "Document scanning is temporarily unavailable" } }) });
+          await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "document_scanner_unreachable", message: "Document upload is not possible because the malware scanner cannot be reached. Uploads stay blocked until the scanner is running." } }) });
         } else {
           await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ document: { id: "22222222-2222-4222-8222-222222222222" } }) });
         }
@@ -209,12 +216,81 @@ test.describe("document-assisted item intake", () => {
 
     await submitAddItem(page, editor, isMobile);
     await expect(editor).toBeVisible();
-    await expect(editor.getByRole("status")).toContainText("temporarily unavailable");
+    await expect(editor.getByRole("status")).toContainText("malware scanner cannot be reached");
     const workspace = await readWorkspace(page);
     expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(true);
     await submitAddItem(page, editor, isMobile);
     await expect(page.locator(".action-toast")).toContainText(`${title} added`, { timeout: 15_000 });
     expect(attempts).toBe(2);
     await page.unroute("**/api/households/*/items/*/documents");
+  });
+
+  test("clears rejected files and permits a later explicitly attachable document", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+
+    await signIn(page);
+    await ensureHousehold(page);
+    await openAddItem(page, isMobile);
+    const editor = page.getByRole("dialog", { name: "Add an item" });
+
+    const title = `Inspection recovery ${Date.now()}`;
+    await editor.getByLabel("What do you want to keep track of?").fill(title);
+    await editor.getByRole("button", { name: "No schedule" }).click();
+
+    let callCount = 0;
+    await page.route("**/api/households/*/item-document-inspection", async (route) => {
+      callCount += 1;
+      if (callCount === 1) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            extracted: false,
+            message: "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.",
+            suggestions: [],
+            attachmentDisposition: "rejected",
+            reason: "unsupported_structure",
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          extracted: false,
+          suggestions: [],
+          attachmentDisposition: "attachable",
+          reason: "supported_structure",
+        }),
+      });
+    });
+
+    const fileInput = editor.locator('input[type="file"][accept="application/pdf,image/jpeg,image/png"]');
+    await fileInput.setInputFiles({
+      name: "invalid.pdf",
+      mimeType: "application/pdf",
+      buffer: syntheticPdf("Invalid"),
+    });
+
+    await expect(editor.getByRole("status")).toContainText("could not safely inspect", { timeout: 15_000 });
+    await expect(fileInput).toHaveValue("");
+    await expect(editor.getByText(/selected for attachment after you submit/)).toHaveCount(0);
+    await expect(editor.getByRole("button", { name: "Remove document" })).toHaveCount(0);
+
+    await fileInput.setInputFiles({
+      name: "valid.pdf",
+      mimeType: "application/pdf",
+      buffer: syntheticPdf("Valid structure"),
+    });
+
+    await expect(editor.getByText("valid.pdf selected for attachment after you submit.")).toBeVisible({ timeout: 15_000 });
+    await expect(fileInput.locator("..").getByRole("button", { name: "Remove document", exact: true })).toBeVisible();
+    const workspace = await readWorkspace(page);
+    expect(workspace.workspace.households.flatMap((household) => household.items).some((item) => item.title === title)).toBe(false);
+    expect(callCount).toBe(2);
+
+    await page.unroute("**/api/households/*/item-document-inspection");
   });
 });

@@ -24,8 +24,9 @@ record.
 
 Broad planning and systems decisions are protected Sol Extra High work under
 the root `AGENTS.md` and `.github/planning-governance.json`. Bounded
-implementation subagents default to Luna Extra High. A different subagent model
-requires fresh, explicit user approval before use.
+implementation follows the qualification-gated provider order in `AGENTS.md`
+and `.github/orchestration-governance.json`; every provider returns its focused
+result to Sol for independent review and delivery.
 
 Every implementable issue must define:
 
@@ -37,10 +38,10 @@ Every implementable issue must define:
 - evidence required before closure.
 
 Work uses short-lived `codex/` branches created from and normally merged into
-protected `develop`. Versioned `release/*` branches move accepted release
-source through `main` and back to `develop`; `hotfix/*` branches start from
-`main` and merge into both. Long-lived consolidation branches are retired after
-their accepted changes reach `develop`.
+protected `develop`. Release trains merge `develop` into protected `preview`,
+then move the accepted exact source through `main`; `hotfix/*` branches start
+from `main` and are reconciled into `develop` and `preview`. Long-lived
+consolidation branches are retired after their accepted changes reach `develop`.
 
 ## Delivery structure
 
@@ -102,6 +103,23 @@ GitHub milestone assignment is administrative metadata rather than a second
 status source: issues #10–#13 and this baseline pull request belong to `v1
 Engineering Baseline`; v1 roadmap and implementation issues belong to `v1.0`.
 
+### v1.1 roadmap
+
+The `v1.1` milestone contains three outcome-level epics:
+
+1. [document processing observability and visible failure](https://github.com/tomlawesome/orbit/issues/115);
+2. [desktop-first navigation and settings](https://github.com/tomlawesome/orbit/issues/116);
+3. [prebuilt-container installation as the supported default](https://github.com/tomlawesome/orbit/issues/117).
+
+These epics cite `ORB-FUT-*` feature-register entries rather than `V1-*`
+charter requirements, because the v1 charter is the v1 contract and is not
+reopened for post-v1 direction.
+
+This roadmap is the single shared plan. Sol Extra High maintains it;
+implementation providers receive only bounded slices and do not maintain a
+private plan, because a second plan would become a second source of truth and
+diverge.
+
 ## Rolling planning and delegation
 
 Delivery uses a rolling-wave model:
@@ -109,14 +127,19 @@ Delivery uses a rolling-wave model:
 1. Sol Extra High maintains the portfolio-level risk order, dependencies,
    release gates and durable architecture decisions.
 2. Only the next two to four implementable issues are made decision-complete.
-3. Bounded implementations default to Luna Extra High. Independent issues may
-   run concurrently only in isolated worktrees with disjoint file ownership.
+3. Bounded implementations use the cheapest qualified idle capacity in the
+   repository's capability-and-cost order. A higher-cost qualified provider may
+   take a second independent ready issue while cheaper capacity is occupied when
+   the task state records the throughput benefit, exact disjoint paths, satisfied
+   dependencies and at-most-rebase-and-revalidation impact. This never permits
+   duplicate work or same-task escalation. While the target branch requires
+   up-to-date branches, keep at most two pull requests in flight.
 4. Sol Extra High reviews architecture and security consequences, then
    integrates protected pull requests sequentially. A later concurrent branch
    rebases onto the accepted earlier result before final validation.
 5. The next wave is refined only after the current wave's evidence changes the
    baseline. Terra may perform bounded read-only or mechanical audits, but may
-   not replace Sol architecture work or Luna feature implementation.
+   not replace Sol architecture, orchestration or implementation-routing work.
 
 This avoids both a stale hundred-issue backlog and repeated high-cost planning
 inside implementation. Handoffs must name permitted paths, protected paths,
@@ -170,6 +193,17 @@ requires Sol Extra High review before implementation proceeds.
 
 ### Wave 3 — lifecycle, administration and operations
 
+- Issue #168 extends the existing secure document lifecycle with the accepted
+  outage-only scanner recovery path. Implement in this order: characterization
+  and route/idempotency tests; migration and purpose-bound staging storage;
+  synchronous classification plus `202` response; leased/reconciled worker
+  and terminal purge backlog; reviewed direct-intake completion; backup/restore
+  correspondence and lease reset; then admin/user surfaces and the complete
+  PostgreSQL/authorization/privacy matrix. Do not introduce a second queue or
+  make clean uploads asynchronous. Closure requires the ADR-0010 decision,
+  threat-model and operations updates, migration upgrade evidence, and the
+  staged backup/restore drill.
+
 - Complete issue #22 after #43 establishes the shared editable draft and review
   contract. Dedicated-mailbox messages and attachments enter that same private
   flow with authenticated identity, idempotent receipt, hostile-MIME bounds,
@@ -205,13 +239,179 @@ requires Sol Extra High review before implementation proceeds.
   recovery and promotion acceptance wait for the feature-complete image.
 - Prepare the release-acceptance record structure now, but do not claim
   representative provider/device/operator results before those checks run
-  against the exact versioned-release preview digest.
-- Cut a semantic versioned release branch only when all stable-v1 blockers are
-  closed, then accept and promote its exact preview digest.
+  against the exact protected-preview digest.
+- Merge `develop` into `preview` only when all stable-v1 blockers are closed,
+  then accept and promote its exact digest under the automatically calculated
+  release-train version.
 
 Issue #22 begins only after the manual item and document-assisted review
 contracts are accepted, but its dedicated-mailbox ingestion and review journey
 remain required before stable v1.
+
+## v1.1 delivery waves
+
+The critical path is the reported silent-upload defect. Observability is
+deliberately delivered before any corrective change, because the cause was a
+hypothesis drawn from reading the code rather than a fact established from
+evidence. Slices in a later wave assume the earlier wave is accepted.
+
+Each slice records a **concurrency assessment**, because disjoint file
+ownership alone is not sufficient grounds to run work in parallel. Disjoint
+files prevent merge conflicts; they do not prevent revalidation churn, and they
+do not say whether a sibling landing first would invalidate a slice's premises.
+Assess each slice as one of:
+
+- **concurrent** — a sibling landing first requires at most a rebase, so the
+  work in progress stays valid; or
+- **sequenced** — a sibling landing first would change the slice's premises and
+  force rework, so it waits for a later wave.
+
+Because the `develop` ruleset requires branches to be up to date, every merge
+leaves every other open pull request behind and forces a full revalidation.
+Keep at most two pull requests in flight regardless of assessment; concurrency
+beyond that costs more in revalidation than it returns.
+
+## Current position
+
+This section is the rolling commentary. It names where delivery actually is, so
+the next action is never inferred from memory. Update it whenever a slice
+changes state.
+
+- **Current wave:** v1.1 Wave 2, substantially delivered but **not complete**.
+  One slice is deferred pending an owner decision, so the wave cannot be
+  reviewed as finished.
+- **Next slice:** none may start. [#138 — settings and administration as
+  dedicated routes](https://github.com/tomlawesome/orbit/issues/138) is the
+  next in sequence and is blocked on a decision below. The remaining Wave 3
+  slices depend on it.
+- **In flight:** nothing.
+- **Delivered in Wave 2:** [#141 — deploy-compose separation](https://github.com/tomlawesome/orbit/issues/141),
+  [#139 — optional services by configuration](https://github.com/tomlawesome/orbit/issues/139),
+  [#140 — installer-resolved release digests](https://github.com/tomlawesome/orbit/issues/140),
+  [#146 — visible document lifecycle states](https://github.com/tomlawesome/orbit/issues/146),
+  and, from Wave 3 ahead of sequence because its dependencies completed early,
+  [#143 — non-interactive installer](https://github.com/tomlawesome/orbit/issues/143).
+
+### Decisions reserved to the repository owner
+
+Recorded together because each is easy to miss on an individual issue, and each
+is currently proceeding on an assumption rather than an answer.
+
+1. **How an administration route enforces authority.** A server component
+   reading the session through `next/headers`, which is genuine server-side
+   refusal but introduces a session-reading pattern the codebase does not have
+   and arguably needs an ADR; or a client route over already-gated APIs, which
+   protects the data but not the route. Recorded on #138. **No assumption
+   made — the slice is deferred rather than guessed at.** It also carries a
+   judgement about how the interface should feel, which tests cannot settle.
+2. **Whether the installer may resolve a tag to a digest automatically.**
+   Recorded on #140 before implementation and never answered. Work proceeded on
+   the assumption that it may, because the deployed artifact stays digest-pinned.
+   If that is wrong, ADR-0008 and #140 are revertible together and #143 changes
+   shape.
+3. **Whether to enable repository auto-merge or a merge queue.** Recorded on
+   #131. Not enabled; merging remains manual and serial. A merge queue, not
+   auto-merge, is the tool that would actually address it.
+
+### Delivered without execution evidence
+
+Named so nothing is assumed validated:
+
+- **The installer has never been run.** Docker is unavailable on the authoring
+  machine and no CI job executes `install.sh`. Its shape is tested; its
+  behaviour is not. The install path should not be advertised until a real run
+  against a published preview digest is performed. Recorded on #143.
+- **Every compose change was first executed by CI**, not locally, for the same
+  reason. Each passed first time, but the caveat stands on #141 and #139.
+
+### Withdrawn during delivery
+
+- **Convergence without a manual refresh**, acceptance criterion 4 of #146. A
+  five-second poll was implemented and removed on a hypothesis that later proved
+  wrong. It now belongs to
+  [#150 — converge the item view when processing finishes](https://github.com/tomlawesome/orbit/issues/150),
+  with the failure recorded so the next attempt starts from evidence. The poll
+  may in fact have been acceptable.
+
+### Wave 1 completion review
+
+Wave 1 delivered the diagnostic instrument every later document slice reasons
+from, plus two independent improvements. Every slice is closed as completed
+with itemised per-criterion evidence, and every delivering merge is trusted on
+`develop`.
+
+| Slice | Delivered by | Trusted at |
+| --- | --- | --- |
+| [#118 — document lifecycle and processor diagnostics](https://github.com/tomlawesome/orbit/issues/118) | #122, #125 | `b7d82d0`, `a931c0c` |
+| [#119 — accessible drop zone](https://github.com/tomlawesome/orbit/issues/119) | #129 | `6835666` |
+| [#120 — patched esbuild](https://github.com/tomlawesome/orbit/issues/120) | #121 | `64b4bde` |
+
+What Wave 1 deliberately did **not** deliver, so nothing later is assumed done:
+documents in a non-available state are still invisible in the item list; the
+settings and administration surfaces are unchanged; and nothing in the
+installation epic was touched.
+
+Deviations recorded rather than absorbed:
+
+- [#124 — scanner failure attribution](https://github.com/tomlawesome/orbit/pull/124),
+  a Wave 2 slice, was merged while all three Wave 1 issues were still open. It
+  is trusted on `develop`, but it was delivered out of wave order.
+- [#118](https://github.com/tomlawesome/orbit/issues/118) was first reported
+  complete while three of its own acceptance criteria were unmet. That is the
+  primary evidence behind ORCH-008.
+- [#133 — private-storage navigation races](https://github.com/tomlawesome/orbit/issues/133)
+  was first fixed without the reproduction its own test-first plan required.
+  The proof was added before merge rather than deferred.
+- [#132](https://github.com/tomlawesome/orbit/issues/132) cites a later green
+  `develop` state rather than an exact-SHA run, because its own merge hit the
+  navigation-race flake later fixed by #137.
+
+A process batch agreed with the repository owner ran between Wave 1 and Wave 2:
+ORCH-008 acceptance evidence, the ORB-FUT-011 register entry, CI path
+filtering, ORCH-009 wave costing, and the navigation-race fix. All are
+delivered and trusted.
+
+### Wave 1 — diagnostic instrument and independent improvements
+
+- [#118 — bounded document lifecycle and processor diagnostics](https://github.com/tomlawesome/orbit/issues/118)
+  owns `src/lib/logger.ts` and the document server paths. Critical path: it is
+  the instrument every later document slice reasons from. **Concurrent** —
+  nothing else in this wave reads its output.
+- [#119 — accessible drop zone](https://github.com/tomlawesome/orbit/issues/119)
+  owns `src/components/document-manager.tsx`. **Concurrent** — presentation
+  only, unaffected by server-side diagnostics landing first.
+- [#120 — patched esbuild across transitive tooling](https://github.com/tomlawesome/orbit/issues/120)
+  owns `pnpm-workspace.yaml`. **Concurrent** — a lockfile change reconciles by
+  regeneration, never by rework.
+
+### Wave 2 — corrective and structural change
+
+- [#123 — explicit malware scanner failure attribution](https://github.com/tomlawesome/orbit/issues/123)
+  depends on #118, whose records identify where an upload stops. Scanning stays
+  fail-closed and the default deployment keeps ClamAV installed and enabled;
+  what changes is that the requirement becomes verifiable and its failure
+  explicit. **Sequenced** — designing the correction before the diagnostics
+  land means designing it from a hypothesis.
+- Settings and administration promoted to routes, under
+  [#116](https://github.com/tomlawesome/orbit/issues/116). Owns `src/app` route
+  segments and `dashboard.tsx`. **Concurrent** with the document work, which
+  shares no files with it.
+- Supply-chain policy amendment and deploy-compose separation, under
+  [#117](https://github.com/tomlawesome/orbit/issues/117). **Concurrent** with
+  each other; both **sequenced** before the installer rewrite, which cannot be
+  written against a policy and a compose layout that have not settled.
+
+### Wave 3 — dependent experience and deployment
+
+- Account menu exposing settings, administration and sign out. Depends on the
+  route promotion, because the menu's destinations must exist first.
+  **Sequenced** — building it against dialogs would be discarded work.
+- Non-interactive installer resolving a published release digest. Depends on
+  both Wave 2 deployment slices. **Sequenced** — its behaviour is defined by
+  the amended supply-chain policy and the separated compose layout.
+
+Later waves are refined only after the current wave's evidence changes the
+baseline, following the rolling-wave rule above.
 
 ## Pull-request lifecycle
 
@@ -227,6 +427,6 @@ remain required before stable v1.
 
 Previews provide ongoing deployment evidence while v1 is incomplete. Once the
 release scope is feature-complete, [the release policy](releasing.md) requires
-a versioned release branch, testing and deployment by immutable digest, merging
-the accepted source into both protected `main` and `develop`, and promotion
-without rebuilding.
+the protected `preview` lane, testing and deployment by immutable digest,
+merging the accepted source into protected `main`, and promotion without
+rebuilding.

@@ -72,6 +72,10 @@ export async function openLoginTransaction(value: string, config: AuthConfig): P
 }
 
 export function safeReturnPath(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\u0000-\u001f]/.test(value)) return "/";
+  // A leading "\" is normalized to "/" by WHATWG URL parsing on special schemes,
+  // so "/\evil.com" resolves to the external origin "https://evil.com/" once
+  // joined with appUrl in the callback route. Backslashes have no legitimate use
+  // in an application-relative path, so any occurrence is rejected outright.
+  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\u0000-\u001f\\]/.test(value)) return "/";
   return value;
 }

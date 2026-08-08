@@ -5,19 +5,24 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
   pull_request:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
   schedule:
     - cron: "37 2 * * 6"
   workflow_dispatch:
 
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: codeql-${{ github.workflow }}-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
+  # Cancel only a superseded pull-request commit. A push must never cancel the
+  # validation of an earlier merge: the delivery model requires trusted evidence
+  # for that exact merge SHA, and a cancelled run leaves it permanently without.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

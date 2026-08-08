@@ -281,7 +281,7 @@ foundation, not a deferred enhancement.
   the default stack.
 - **Local semantic extraction:** Ollama remains an optional later provider for
   schema-constrained draft fields after text extraction. It is neither OCR nor
-  a default container. `docker-compose.full.yml` now supplies an opt-in,
+  a default container. The `ai` Compose profile now supplies an opt-in,
   private local service for evaluation, but Orbit has no Ollama client yet and
   must not infer or write household data from a model response.
 - All images are pinned to reviewed release tags, isolated on an internal
@@ -464,6 +464,43 @@ and useful notes without allowing generated text to become authoritative.
   authority decisions, or automatic write capability.
 - Never infer missing contractual facts or silently replace user-authored
   notes. Regeneration must not erase prior accepted content.
+
+## ORB-FUT-011 — Desktop navigation, settings and administration surfaces
+
+**Roadmap disposition:** Post-v1; targeted at v1.1
+**Priority:** High
+**Phase:** Post-v1 experience
+**Dependencies:** Existing authorization and session contracts
+**Decision status:** Product direction agreed
+**Objective:** Give settings and administration room to breathe on a desktop
+viewport, and make account actions predictable to find.
+
+Complements ORB-FUT-002, which covers mobile and installed-PWA density only.
+Desktop navigation is not in scope there.
+
+### Intended experience
+
+- Settings and administration are addressable pages with their own layout,
+  rather than panels constrained inside a modal dialog.
+- Those surfaces are visually distinct from the workspace, so it is obvious
+  when the user is configuring Orbit rather than using it.
+- Available desktop width is used instead of a dialog-sized column.
+- An account control exposes settings, administration where the user holds
+  instance-administrator authority, and sign out.
+- Sign out is reachable from that control rather than from the foot of a
+  settings panel.
+
+### Acceptance criteria
+
+- Settings and administration are reachable by route and render with their own
+  layout.
+- Administration entry points are absent, not merely disabled, for
+  non-administrators, and the route enforces authority server-side.
+- Sign out completes through the existing logout contract.
+- Focus management, visible focus and the authenticated accessibility checks
+  continue to pass on the new surfaces.
+- Signed-out privacy behaviour is unchanged.
+- Mobile density behaviour defined by ORB-FUT-002 is unaffected.
 
 ## Foundations every future direction must preserve
 
