@@ -25,7 +25,9 @@ Worker boundaries convert errors to versioned categories before persistence:
   `push_unconfigured`, `push_unsubscribed`, `push_unavailable`,
   `recipient_preferences_disabled`, or `unknown`;
 - documents: existing controlled codes such as `key_unavailable` and
-  `purge_failed`.
+  `purge_failed`, plus `scanner_unavailable`, `scanner_timeout`,
+  `scanner_protocol`, `scanner_failed`, `staging_object_invalid`,
+  `scan_recovery_expired`, and `stage_purge_failed`.
 
 Historical raw notification errors remain internal and are never returned.
 
@@ -73,7 +75,9 @@ docker compose logs -f orbit-app | grep document.
 
 Expect `document.lifecycle` records progressing `quarantined`, `scanning`,
 `encrypting`, `available`, and one `document.scan` record carrying the scanner
-outcome and duration.
+outcome and duration. A retryable outage instead emits a bounded
+`document.scan outcome=recoverable` record and stays in `scanning` until a
+worker obtains a clean result or the recovery retention expires.
 
 A stalled or failed upload is diagnosed from the last record reached:
 
@@ -82,7 +86,8 @@ A stalled or failed upload is diagnosed from the last record reached:
 | `document.scanner state=starting` | The independently starting scanner is still inside its 180-second initialisation window | Allow the stack to finish booting; uploads remain temporarily blocked |
 | `document.scanner state=unreachable` | The scanner did not answer before its bounded startup window expired | Check that `orbit-clamav` is running and healthy; uploads stay blocked until it is reachable |
 | `document.lifecycle state=scanning` with no following record | The scanner did not answer within `CLAMAV_TIMEOUT_MS` | Check `orbit-clamav` health |
-| `document.scan outcome=error reason=unavailable` | The scanner refused or dropped the connection | Check `orbit-clamav` is running and reachable on the document-processing network |
+| `document.scan outcome=error reason=unavailable` | The scanner refused or dropped the connection; the validated upload is recoverable for 24 hours | Check `orbit-clamav`; the worker retries without re-upload |
+| `document.scan outcome=recoverable` | Encrypted, non-downloadable scanner-recovery stage is waiting for a bounded retry | Check the retry count and expiry in document health; use the document job only when automatic attempts are exhausted |
 | `document.scan outcome=infected` | Malware was detected; the document is rejected by design | No action |
 | `document.worker outcome=cycle_failed` | A maintenance cycle failed | Consult `/api/admin/documents/health` for the bounded failure code |
 
@@ -99,7 +104,12 @@ Neither message nor startup record discloses the configured host, port or
 provider text.
 
 Scanning is fail-closed while `DOCUMENT_SCAN_MODE` is `required`, so an
-unavailable scanner rejects uploads rather than storing unscanned content.
+unavailable scanner never stores an available or unscanned document. A
+retryable outage stores only authenticated-encrypted, non-downloadable stage
+bytes and returns `202`; the generic scanner-reported error still returns
+`503` without durable stage. Automatic recovery is limited to five attempts at
+60s, 2m, 4m, 8m and 15m delays and expires after the immutable 24-hour
+retention window.
 `orbit-clamav` has a 180-second health start period and downloads signature
 databases on first run, so uploads attempted during initial startup fail until
 it becomes healthy.
@@ -114,10 +124,15 @@ the bounded conflict result and writes no misleading success audit.
 - A failed or cancelled notification may be retried. Its attempt count, lock,
   sent time, and failure state are cleared and it is scheduled immediately.
 - A pending, retrying, or failed notification may be discarded as cancelled.
-- A failed document job may be retried from attempt zero.
-- A failed document job may be discarded as cancelled. This never deletes or
-  restores document bytes; a pending-deletion document remains visible as
-  retention cleanup paused.
+- A failed scanner recovery job may be retried from attempt zero while its
+  recovery expiry remains unchanged. A failed terminal stage purge may be
+  retried as deletion only; it never re-enters scanning.
+- Restore preserves the scanner job attempt count and failed/manual state; only
+  live pending, retry, or processing leases are requeued.
+- A failed document job may be discarded as cancelled. Scanner-recovery
+  discard/expiry rejects metadata and schedules idempotent secure stage purge;
+  a deletion error remains an administrator-visible `purge_pending` backlog,
+  never a claimed success.
 - Processing work is never mutated by an administrator. The API returns the
   same non-enumerating conflict response for missing and non-actionable IDs.
 

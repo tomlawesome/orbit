@@ -5,6 +5,7 @@ import {
   auditLog,
   documentCrypto,
   documentJobs,
+  documentStagingObjects,
   documents,
   households,
   items,
@@ -23,6 +24,7 @@ import {
   validateSupportedDocumentStructure,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
+import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -90,6 +92,10 @@ export interface DocumentSummary {
   ready: boolean;
   /** Bounded failure reason for a rejected document; never provider text. */
   failureCode: string | null;
+  /** Whether an outage-staged scan can be retried without re-upload. */
+  recoverable: boolean;
+  recoveryExpiresAt: string | null;
+  recoveryStatus: "retrying" | "manual" | null;
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
@@ -178,6 +184,9 @@ export function toSummary(record: {
   availableAt: Date | null;
   deleteAfter: Date | null;
   failureCode?: string | null;
+  recoverable?: boolean;
+  recoveryExpiresAt?: Date | null;
+  recoveryStatus?: "retrying" | "manual" | null;
 }, scanMode: string): DocumentSummary {
   // A purged document must never reach a user-visible list, so an unexpected
   // lifecycle fails loudly rather than being rendered.
@@ -196,6 +205,9 @@ export function toSummary(record: {
     deleteAfter: record.deleteAfter?.toISOString() ?? null,
     ready: isDocumentContentReady(record, scanMode, "summary"),
     failureCode: record.failureCode ?? null,
+    recoverable: record.recoverable ?? false,
+    recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
+    recoveryStatus: record.recoveryStatus ?? null,
   };
 }
 
@@ -235,8 +247,13 @@ export async function listItemDocuments(
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
       failureCode: documents.failureCode,
+      stageStatus: documentStagingObjects.status,
+      recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
+      recoveryJobStatus: documentJobs.status,
     })
     .from(documents)
+    .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
+    .leftJoin(documentJobs, and(eq(documentJobs.documentId, documents.id), eq(documentJobs.kind, "scan")))
     .where(and(
       eq(documents.householdId, householdId),
       eq(documents.itemId, itemId),
@@ -246,7 +263,14 @@ export async function listItemDocuments(
       inArray(documents.lifecycle, [...listableDocumentLifecycles]),
     ))
     .orderBy(desc(documents.createdAt));
-  return rows.map((row) => toSummary(row, config.scanMode));
+  return rows.map((row) => {
+    const recoverable = row.stageStatus === "pending" && row.recoveryExpiresAt !== null && row.recoveryExpiresAt > new Date() && row.lifecycle === "scanning";
+    return toSummary({
+      ...row,
+      recoverable,
+      recoveryStatus: recoverable && row.recoveryJobStatus === "failed" ? "manual" : recoverable ? "retrying" : null,
+    }, config.scanMode);
+  });
 }
 
 async function reserveDocumentMetadata(input: {
@@ -309,43 +333,77 @@ export async function uploadItemDocument(input: {
   const config = getDocumentConfig();
   const storage = documentStorage();
   const documentId = input.documentId ?? randomUUID();
-  if (input.documentId) {
-    const [existing] = await getDb().select({
-      id: documents.id,
-      itemId: documents.itemId,
-      householdId: documents.householdId,
-      displayName: documents.displayName,
-      mediaType: documents.mediaType,
-      sizeBytes: documents.sizeBytes,
-      lifecycle: documents.lifecycle,
-      scanStatus: documents.scanStatus,
-      availableAt: documents.availableAt,
-      deleteAfter: documents.deleteAfter,
-    }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
-    if (existing) {
-      if (existing.householdId !== input.householdId || existing.itemId !== input.itemId) {
+  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
+  let storageKey: string | undefined;
+  let stagingKey: string | undefined;
+  let metadataReserved = false;
+  try {
+    // Check idempotency scope and content before parsing the retry body. A
+    // reused identity must deterministically return 409 even when the new
+    // bytes are not a supported document type.
+    if (input.documentId) {
+      const [identity] = await getDb().select({
+        householdId: documents.householdId,
+        itemId: documents.itemId,
+        contentSha256: documents.contentSha256,
+        sizeBytes: documents.sizeBytes,
+      }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
+      if (identity && (identity.householdId !== input.householdId || identity.itemId !== input.itemId
+        || identity.contentSha256 !== received.contentSha256 || identity.sizeBytes !== received.sizeBytes)) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
-      if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
-      if (existing.lifecycle === "rejected") {
-        const [cryptoRecord] = await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
-          .where(eq(documentCrypto.documentId, input.documentId)).limit(1);
-        if (cryptoRecord) throw new AppError("document_conflict", "That document identity is already in use", 409);
-        const [removed] = await getDb().delete(documents)
-          .where(and(eq(documents.id, input.documentId), eq(documents.householdId, input.householdId), eq(documents.itemId, input.itemId), eq(documents.lifecycle, "rejected")))
-          .returning({ id: documents.id });
-        if (!removed) throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
-      } else {
+    }
+    const mediaType = detectDocumentMediaType(received.leadingBytes);
+    const displayName = normalizedDocumentFilename(input.filename, mediaType);
+
+    if (input.documentId) {
+      const [existing] = await getDb().select({
+        id: documents.id,
+        itemId: documents.itemId,
+        householdId: documents.householdId,
+        displayName: documents.displayName,
+        mediaType: documents.mediaType,
+        sizeBytes: documents.sizeBytes,
+        contentSha256: documents.contentSha256,
+        lifecycle: documents.lifecycle,
+        scanStatus: documents.scanStatus,
+        failureCode: documents.failureCode,
+        availableAt: documents.availableAt,
+        deleteAfter: documents.deleteAfter,
+        stageStatus: documentStagingObjects.status,
+        recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
+        recoveryJobStatus: documentJobs.status,
+      }).from(documents).leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
+        .leftJoin(documentJobs, and(eq(documentJobs.documentId, documents.id), eq(documentJobs.kind, "scan")))
+        .where(eq(documents.id, input.documentId)).limit(1);
+      if (existing) {
+        if (existing.householdId !== input.householdId || existing.itemId !== input.itemId
+          || existing.contentSha256 !== received.contentSha256
+          || existing.sizeBytes !== received.sizeBytes
+          || existing.mediaType !== mediaType) {
+          throw new AppError("document_conflict", "That document identity is already in use", 409);
+        }
+        if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
+        if (existing.lifecycle === "scanning" && existing.stageStatus === "pending" && existing.recoveryExpiresAt !== null && existing.recoveryExpiresAt > new Date()) {
+          return toSummary({
+            ...existing,
+            recoverable: true,
+            recoveryStatus: existing.recoveryJobStatus === "failed" ? "manual" : "retrying",
+          }, config.scanMode);
+        }
+        if (existing.lifecycle === "rejected") {
+          if (existing.failureCode === "malware_detected") {
+            throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
+          }
+          if (existing.failureCode === "scanner_failed") {
+            throw new AppError("document_scanner_failed", "That document upload has already been rejected", 503);
+          }
+          throw new AppError("document_upload_failed", "That document upload has already been rejected", 422);
+        }
         throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
       }
     }
-  }
-  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
-  let storageKey: string | undefined;
-  let metadataReserved = false;
-  try {
-    const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const displayName = normalizedDocumentFilename(input.filename, mediaType);
+
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
       if (!validateSupportedDocumentStructure(validationBytes, mediaType)) {
@@ -387,9 +445,8 @@ export async function uploadItemDocument(input: {
         // with a failure" so an operator knows whether to check connectivity or
         // the scanner itself. Neither message discloses host, port or provider
         // text, per the bounded-diagnostics rule.
-        const unreachable = scan.status === "error"
-          && (scan.reason === "unavailable" || scan.reason === "timeout");
-        const failureCode = infected ? "malware_detected" : `scanner_${scan.reason}`;
+        const retryableFailureCode = retryableScannerFailureCode(scan);
+        const failureCode = infected ? "malware_detected" : retryableFailureCode ?? "scanner_failed";
         // `scan.reason` is a fixed enumeration from the scanner adapter, never
         // provider text, so it is safe to record.
         log.warn("document.scan", {
@@ -398,6 +455,85 @@ export async function uploadItemDocument(input: {
           reason: infected ? "malware_detected" : scan.reason,
           ms: scanMs,
         });
+        if (retryableFailureCode) {
+          const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+          try {
+            const staged = encryptDocument(plaintext, {
+              documentId,
+              householdId: input.householdId,
+              itemId: input.itemId,
+              mediaType,
+              plaintextSize: received.sizeBytes,
+              purpose: "scanner_recovery",
+            }, config.keyEncryptionKey, config.keyId);
+            stagingKey = storage.createStorageKey();
+            await storage.writeStagingCiphertext(stagingKey, staged.ciphertext);
+            const now = new Date();
+            const recoveryExpiresAt = new Date(now.getTime() + config.scanRecoveryRetentionHours * 60 * 60 * 1_000);
+            const nextAttemptAt = new Date(now.getTime() + scannerRecoveryDelayMs(1));
+            try {
+              await getDb().transaction(async (transaction) => {
+                await transaction.insert(documentStagingObjects).values({
+                  documentId,
+                  storageKey: stagingKey!,
+                  purpose: "scanner_recovery",
+                  ciphertextSize: staged.ciphertext.length,
+                  ...staged.envelope,
+                  status: "pending",
+                  recoveryExpiresAt,
+                });
+                await transaction.insert(documentJobs).values({
+                  documentId,
+                  kind: "scan",
+                  generation: 1,
+                  status: "pending",
+                  attempts: 0,
+                  nextAttemptAt,
+                  lastError: failureCode,
+                });
+                await transaction.update(documents).set({
+                  lifecycle: "scanning",
+                  scanStatus: "error",
+                  failureCode,
+                  updatedAt: now,
+                }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "scanning")));
+                await transaction.insert(auditLog).values({
+                  householdId: input.householdId,
+                  actorUserId: input.userId,
+                  entityType: "document",
+                  entityId: documentId,
+                  action: "document_scan_recoverable",
+                  changes: { itemId: input.itemId, reason: failureCode },
+                });
+              });
+            } catch (error) {
+              await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
+              stagingKey = undefined;
+              throw error;
+            } finally {
+              staged.ciphertext.fill(0);
+            }
+            log.warn("document.scan", { document: documentId, outcome: "recoverable", reason: failureCode, ms: scanMs });
+            return toSummary({
+              id: documentId,
+              itemId: input.itemId,
+              displayName,
+              mediaType,
+              sizeBytes: received.sizeBytes,
+              lifecycle: "scanning",
+              scanStatus: "error",
+              availableAt: null,
+              deleteAfter: null,
+              failureCode,
+              recoverable: true,
+              recoveryExpiresAt,
+              recoveryStatus: "retrying",
+            }, config.scanMode);
+          } finally {
+            plaintext.fill(0);
+          }
+        }
+
         await getDb().update(documents).set({
           lifecycle: "rejected",
           scanStatus: infected ? "infected" : "error",
@@ -420,10 +556,8 @@ export async function uploadItemDocument(input: {
           );
         }
         throw new AppError(
-          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
-          unreachable
-            ? "Document upload is not possible because the malware scanner cannot be reached. Uploads stay blocked until the scanner is running."
-            : "Document upload is not possible because the malware scanner reported a failure. Uploads stay blocked until the scanner is healthy.",
+          "document_scanner_failed",
+          "Document upload is not possible because the malware scanner reported a failure. Uploads stay blocked until the scanner is healthy.",
           503,
         );
       }
@@ -495,9 +629,13 @@ export async function uploadItemDocument(input: {
       deleteAfter: null,
       ready: isDocumentContentReady({ lifecycle: "available", scanStatus: config.scanMode === "disabled" ? "skipped" : "clean" }, config.scanMode, "summary"),
       failureCode: null,
+      recoverable: false,
+      recoveryExpiresAt: null,
+      recoveryStatus: null,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
+    if (stagingKey) await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
     if (metadataReserved && !(error instanceof AppError && error.code.startsWith("document_malware"))) {
       const failureCode = error instanceof AppError ? error.code : "processing_failed";
       const rejected = await getDb().update(documents).set({

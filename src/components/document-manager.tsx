@@ -18,14 +18,17 @@ export interface ItemDocument {
   /** Whether the content can be opened yet; derived when absent. */
   ready?: boolean;
   failureCode?: string | null;
+  recoverable?: boolean;
+  recoveryExpiresAt?: string | null;
+  recoveryStatus?: "retrying" | "manual" | null;
 }
-
 
 interface UploadingDocument {
   id: string;
   name: string;
   progress: number;
 }
+interface FailedUpload { file: File; documentId: string }
 interface CaptureReview { file: File; bitmap: ImageBitmap; rotation: number }
 interface DraftReview { title: string; provider: string; reference: string }
 
@@ -78,7 +81,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [failedUploads, setFailedUploads] = useState<File[]>([]);
+  const [failedUploads, setFailedUploads] = useState<FailedUpload[]>([]);
   const [captureReview, setCaptureReview] = useState<CaptureReview | null>(null);
   const [draft, setDraft] = useState<{ id: string; proposal: { title: string; provider?: string; reference?: string }; evidence: { excerpt: string }; duplicates?: Array<{ itemId: string; title: string; reason: string }> } | null>(null);
   const [draftReview, setDraftReview] = useState<DraftReview>({ title: "", provider: "", reference: "" });
@@ -239,8 +242,9 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
     setUploading((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
   }
 
-  function upload(file: File): Promise<void> {
+  function upload(file: File, existingDocumentId?: string): Promise<void> {
     const uploadId = crypto.randomUUID();
+    const documentId = existingDocumentId ?? crypto.randomUUID();
     setUploading((current) => [...current, { id: uploadId, name: file.name, progress: 0 }]);
     setMessage(`Uploading ${file.name}.`);
     setError("");
@@ -250,6 +254,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       request.withCredentials = true;
       request.setRequestHeader("X-CSRF-Token", csrfToken);
       request.setRequestHeader("X-Orbit-Filename", encodeURIComponent(file.name));
+      request.setRequestHeader("X-Orbit-Document-Id", documentId);
       request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
       request.upload.onprogress = (event) => {
         if (event.lengthComputable) updateUpload(uploadId, { progress: Math.round((event.loaded / event.total) * 100) });
@@ -257,7 +262,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       request.onerror = () => {
         setError(`Could not upload ${file.name}. Check your connection and try again.`);
         setUploading((current) => current.filter((entry) => entry.id !== uploadId));
-        setFailedUploads((current) => [...current, file]);
+        setFailedUploads((current) => [...current, { file, documentId }]);
         resolve();
       };
       request.onload = () => {
@@ -269,7 +274,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
             uploadError = body.message ?? body.error?.message ?? uploadError;
           } catch { /* Use the safe generic upload error. */ }
           setError(uploadError);
-          setFailedUploads((current) => [...current, file]);
+          setFailedUploads((current) => [...current, { file, documentId }]);
           resolve();
           return;
         }
@@ -443,7 +448,7 @@ export function DocumentManager({ householdId, itemId, sectionId, csrfToken, sec
       </div>
       <p className="document-live" aria-live="polite">{message}</p>
       {error && <p className="document-error" role="alert">{error}</p>}
-      {failedUploads.length > 0 && <ul className="document-list" aria-label="Uploads ready to retry">{failedUploads.map((file, index) => <li className="document-row" key={`${file.name}-${file.lastModified}-${index}`}><div><strong>{file.name}</strong><span>Upload did not finish</span></div><button type="button" onClick={() => { setFailedUploads((current) => current.filter((_, itemIndex) => itemIndex !== index)); void upload(file); }}>Retry</button></li>)}</ul>}
+      {failedUploads.length > 0 && <ul className="document-list" aria-label="Uploads ready to retry">{failedUploads.map(({ file, documentId }, index) => <li className="document-row" key={`${file.name}-${file.lastModified}-${index}`}><div><strong>{file.name}</strong><span>Upload did not finish</span></div><button type="button" onClick={() => { setFailedUploads((current) => current.filter((_, itemIndex) => itemIndex !== index)); void upload(file, documentId); }}>Retry</button></li>)}</ul>}
 
       {uploading.length > 0 && <ul className="document-list" aria-label="Uploading documents">
         {uploading.map((entry) => <li key={entry.id} className="document-row uploading">
