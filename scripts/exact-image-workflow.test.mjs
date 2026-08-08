@@ -20,6 +20,19 @@ function jobBlock(job, nextJob) {
 }
 
 describe("exact-image publication workflow", () => {
+  it("keeps ordinary pull requests on the static and unit lane", () => {
+    const fast = jobBlock("fast", "supply_chain_source");
+    const supplyChain = jobBlock("supply_chain_source", "integration");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "verify_preview");
+
+    expect(fast).toContain("run: bash scripts/test-backend.sh");
+    expect(fast).toContain("github.event_name == 'push'");
+    expect(supplyChain).toContain("if: github.event_name == 'push'");
+    expect(integration).toContain("github.event_name == 'push'");
+    expect(smoke).toContain("if: ${{ false }}");
+  });
+
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
     const changes = jobBlock("changes", "fast");
     const integration = jobBlock("integration", "smoke");
@@ -33,12 +46,12 @@ describe("exact-image publication workflow", () => {
     expect(changes).toContain("run_install: false");
     const fast = jobBlock("fast", "supply_chain_source");
     expect(fast).toContain("- changes");
-    expect(fast).toContain("if: needs.changes.outputs.build == 'true'");
+    expect(fast).toContain("needs.changes.outputs.build == 'true'");
+    expect(fast).toContain("github.event_name == 'push'");
     expect(fast).toContain("run: pnpm build");
-    expect(integration).toContain("if: needs.changes.outputs.integration == 'true'");
-    expect(smoke).toContain(
-      "if: github.event_name == 'pull_request' && needs.changes.outputs.system == 'true'",
-    );
+    expect(integration).toContain("needs.changes.outputs.integration == 'true'");
+    expect(integration).toContain("github.event_name == 'push'");
+    expect(smoke).toContain("if: ${{ false }}");
     expect(workflow).not.toContain("paths:");
     expect(workflow).not.toContain("paths-ignore:");
   });
@@ -52,12 +65,13 @@ describe("exact-image publication workflow", () => {
     expect(preview).toContain("steps: *container_validation_steps");
   });
 
-  it("gates integration and publication on a read-only source supply-chain scan", () => {
+  it("moves source supply-chain scanning to the authoritative preview publication", () => {
     const supplyChain = jobBlock("supply_chain_source", "integration");
     const integration = jobBlock("integration", "smoke");
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(supplyChain).toContain("name: Source dependency and secret policy");
+    expect(supplyChain).toContain("if: github.event_name == 'push'");
     expect(supplyChain).toContain("contents: read");
     expect(supplyChain).not.toContain("packages: write");
     expect(supplyChain).not.toContain("id-token: write");
@@ -65,28 +79,25 @@ describe("exact-image publication workflow", () => {
     expect(supplyChain).toContain("persist-credentials: false");
     expect(supplyChain).toContain("scripts/supply-chain-policy.mjs source");
     expect(supplyChain).toContain("orbit-supply-chain-source");
-    expect(integration).toContain("- supply_chain_source");
+    expect(integration).not.toContain("- supply_chain_source");
     expect(preview).toContain("- supply_chain_source");
   });
 
-  it("keeps pull-request container validation read-only", () => {
+  it("defers pull-request container validation to the protected preview merge", () => {
     const smoke = jobBlock("smoke", "publish_preview");
 
-    expect(smoke).toContain("if: github.event_name == 'pull_request'");
+    expect(smoke).toContain("if: ${{ false }}");
     expect(smoke).toContain("contents: read");
     expect(smoke).not.toContain("packages: write");
     expect(smoke).toContain("steps: &container_validation_steps");
   });
 
-  it("publishes unique previews only from trusted Gitflow integration branches", () => {
+  it("publishes previews only from the protected preview or bounded hotfix lanes", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
-    expect(preview).toContain("github.ref == 'refs/heads/develop'");
-    expect(preview).toContain("startsWith(github.ref, 'refs/heads/release/')");
-    expect(preview).toContain(
-      "github.ref_name != 'release/architecture-consolidation-rc'",
-    );
+    expect(preview).toContain("github.ref == 'refs/heads/preview'");
+    expect(preview).toContain("startsWith(github.ref, 'refs/heads/hotfix/')");
     expect(preview).toContain("packages: write");
     expect(preview).toContain("PUBLICATION_CHANNEL: preview");
     expect(preview).toContain("steps: *container_validation_steps");
@@ -95,24 +106,33 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain("PUBLICATION_CHANNEL: development");
   });
 
-  it("gives every preview an immutable human-readable branch and run tag", () => {
-    expect(workflow).toContain("- name: Generate unique preview tag");
-    expect(workflow).toContain("preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
+  it("publishes only the preview discovery tag while retaining digest identity", () => {
+    expect(workflow).toContain("- name: Calculate release-train version");
     expect(workflow).toContain(
-      "type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}",
+      "type=raw,value=preview",
     );
     expect(workflow).toContain(
       "io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}",
     );
-    expect(workflow).not.toContain("type=raw,value=dev-");
+    const metadata = workflow.slice(
+      workflow.indexOf("- name: Generate exact image metadata"),
+      workflow.indexOf("- name: Build and load final image"),
+    );
+    expect(metadata).not.toContain("GITHUB_RUN_ID");
+    expect(workflow).not.toContain("type=raw,value=dev");
+    expect(workflow).not.toMatch(/type=raw,value=v\$?\{/u);
   });
 
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
     expect(workflow.match(/docker\/build-push-action@/gu)).toHaveLength(1);
     expect(workflow).toContain("platforms: linux/amd64");
+    expect(workflow).toContain("Stable Git tags are the version calculator's durable baseline.");
     expect(workflow).toContain("load: true");
     expect(workflow).toContain("push: false");
     expect(workflow).toContain("io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}");
+    expect(workflow).toContain("org.opencontainers.image.version=${{ steps.version.outputs.version }}");
+    expect(workflow).toContain("ORBIT_VERSION=${{ steps.version.outputs.version }}");
+    expect(workflow).toContain('docker run --rm "${image_tag}" --version');
     expect(workflow).toContain("ORBIT_IMAGE=");
     expect(workflow).toContain("--no-build");
     expect(workflow).not.toContain("include_arm64");

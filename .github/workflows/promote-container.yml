@@ -4,18 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       preview_digest:
-        description: "Accepted release-branch preview digest, beginning sha256:"
+        description: "Accepted preview digest, beginning sha256:"
         required: true
         type: string
-      version:
-        description: Stable semantic version, for example v0.2.0
-        required: true
-        type: string
-      update_latest:
-        description: Also point latest at this tested digest
-        required: true
-        default: true
-        type: boolean
 
 concurrency:
   group: orbit-stable-promotion
@@ -32,8 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     permissions:
-      contents: read
+      contents: write
       packages: write
+      attestations: read
 
     steps:
       - name: Check out stable branch
@@ -44,14 +36,9 @@ jobs:
       - name: Validate promotion request
         env:
           PREVIEW_DIGEST: ${{ inputs.preview_digest }}
-          VERSION: ${{ inputs.version }}
         run: |
           [[ "${PREVIEW_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             printf 'Preview digest must be sha256 followed by 64 lowercase hexadecimal characters.\n' >&2
-            exit 1
-          }
-          [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            printf 'Version must be a semantic version beginning with v, such as v0.2.0\n' >&2
             exit 1
           }
 
@@ -65,62 +52,116 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fetch protected integration ref
-        run: git fetch --no-tags origin +refs/heads/develop:refs/remotes/origin/develop
+      - name: Fetch protected preview refs
+        run: git fetch --no-tags origin '+refs/heads/preview:refs/remotes/origin/preview' '+refs/heads/hotfix/*:refs/remotes/origin/hotfix/*'
 
       - name: Resolve and verify tested preview
         id: preview
         env:
           PREVIEW_DIGEST: ${{ inputs.preview_digest }}
-          VERSION: ${{ inputs.version }}
         run: |
           image="${REGISTRY}/${IMAGE_NAME,,}"
           docker buildx imagetools inspect "${image}@${PREVIEW_DIGEST}" >/dev/null
-          if docker buildx imagetools inspect "${image}:${VERSION}" >/dev/null 2>&1; then
-            printf 'Stable tag %s already exists and will not be overwritten.\n' "${VERSION}" >&2
-            exit 1
-          fi
           docker pull "${image}@${PREVIEW_DIGEST}"
           revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${PREVIEW_DIGEST}")"
+          version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image}@${PREVIEW_DIGEST}")"
           release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image}@${PREVIEW_DIGEST}")"
           source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${PREVIEW_DIGEST}")"
+          embedded_version="$(docker run --rm --entrypoint cat "${image}@${PREVIEW_DIGEST}" /opt/orbit/VERSION)"
+          embedded_revision="$(docker run --rm --entrypoint cat "${image}@${PREVIEW_DIGEST}" /opt/orbit/REVISION)"
+          reported_version="$(docker run --rm "${image}@${PREVIEW_DIGEST}" --version)"
+
+          [[ "${embedded_version}" == "${version}" && "${reported_version}" == "Orbit ${version}" ]] || {
+            printf 'Embedded and reported versions do not match the image version label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_revision}" == "${revision}" ]] || {
+            printf 'Embedded revision does not match the image revision label.\n' >&2
+            exit 1
+          }
+          channel=preview
+          if [[ "${source_branch}" == hotfix/* ]]; then
+            channel=hotfix
+          elif [[ "${source_branch}" != "preview" ]]; then
+            printf 'Preview source branch is not eligible for stable promotion.\n' >&2
+            exit 1
+          fi
+          expected_version="$(node scripts/calculate-version.mjs --channel "${channel}")"
+          [[ "${version}" == "${expected_version}" ]] || {
+            printf 'Embedded version %s does not match calculated version %s.\n' \
+              "${version}" "${expected_version}" >&2
+            exit 1
+          }
+          if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+            printf 'Stable Git tag %s already exists and will not be overwritten.\n' "${version}" >&2
+            exit 1
+          fi
+
+          ORBIT_PROMOTION_PHASE=promote \
           ORBIT_PREVIEW_DIGEST="${PREVIEW_DIGEST}" \
-          ORBIT_STABLE_VERSION="${VERSION}" \
+          ORBIT_STABLE_VERSION="${version}" \
           ORBIT_PREVIEW_STAGE="${release_stage}" \
           ORBIT_PREVIEW_REVISION="${revision}" \
           ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
             node scripts/stable-promotion-policy.mjs
-          printf 'digest=%s\n' "${PREVIEW_DIGEST}" >> "${GITHUB_OUTPUT}"
-          printf 'revision=%s\n' "${revision}" >> "${GITHUB_OUTPUT}"
-          printf 'source_branch=%s\n' "${source_branch}" >> "${GITHUB_OUTPUT}"
+          {
+            printf 'digest=%s\n' "${PREVIEW_DIGEST}"
+            printf 'revision=%s\n' "${revision}"
+            printf 'source_branch=%s\n' "${source_branch}"
+            printf 'version=%s\n' "${version}"
+          } >> "${GITHUB_OUTPUT}"
 
-      - name: Promote exact preview digest
+      - name: Verify accepted digest attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.preview.outputs.digest }}
+        run: |
+          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          gh attestation verify "${image_reference}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://spdx.dev/Document/v2.3 >/dev/null
+
+      - name: Promote exact preview digest to latest
         env:
           DIGEST: ${{ steps.preview.outputs.digest }}
-          VERSION: ${{ inputs.version }}
-          UPDATE_LATEST: ${{ inputs.update_latest }}
         run: |
           image="${REGISTRY}/${IMAGE_NAME,,}"
-          tags=(--tag "${image}:${VERSION}")
-          if [[ "${UPDATE_LATEST}" == "true" ]]; then
-            tags+=(--tag "${image}:latest")
-          fi
-          docker buildx imagetools create --prefer-index=false "${tags[@]}" "${image}@${DIGEST}"
+          docker buildx imagetools create --prefer-index=false \
+            --tag "${image}:latest" "${image}@${DIGEST}"
           promoted_manifest="$(mktemp)"
-          docker buildx imagetools inspect --raw "${image}:${VERSION}" > "${promoted_manifest}"
+          docker buildx imagetools inspect --raw "${image}:latest" > "${promoted_manifest}"
           promoted_digest="sha256:$(sha256sum "${promoted_manifest}" | awk '{print $1}')"
           [[ "${promoted_digest}" == "${DIGEST}" ]] || {
-            printf 'Promoted version did not retain the tested digest.\n' >&2
+            printf 'Latest did not retain the tested digest.\n' >&2
             exit 1
           }
+
+      - name: Create stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.preview.outputs.digest }}
+          REVISION: ${{ steps.preview.outputs.revision }}
+          VERSION: ${{ steps.preview.outputs.version }}
+        run: |
+          notes="$(mktemp)"
+          {
+            printf 'Orbit %s\n\n' "${VERSION}"
+            printf -- '- Container digest: `%s`\n' "${DIGEST}"
+            printf -- '- Preview source revision: `%s`\n' "${REVISION}"
+            printf '\nThe exact tested preview digest was promoted without rebuilding it.\n'
+          } > "${notes}"
+          gh release create "${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --title "Orbit ${VERSION}" \
+            --notes-file "${notes}"
 
       - name: Record stable promotion
         env:
           DIGEST: ${{ steps.preview.outputs.digest }}
           REVISION: ${{ steps.preview.outputs.revision }}
           SOURCE_BRANCH: ${{ steps.preview.outputs.source_branch }}
-          VERSION: ${{ inputs.version }}
-          UPDATE_LATEST: ${{ inputs.update_latest }}
+          VERSION: ${{ steps.preview.outputs.version }}
         run: |
           {
             printf '## Orbit stable image promoted\n\n'
@@ -128,6 +169,6 @@ jobs:
             printf -- '- Digest: `%s`\n' "${DIGEST}"
             printf -- '- Source revision: `%s`\n' "${REVISION}"
             printf -- '- Source branch: `%s`\n' "${SOURCE_BRANCH}"
-            printf -- '- Updated `latest`: `%s`\n' "${UPDATE_LATEST}"
-            printf '\nNo container rebuild occurred during promotion.\n'
+            printf -- '- Updated tag: `latest`\n'
+            printf '\nThe matching Git tag and GitHub Release were created. No container rebuild occurred.\n'
           } >> "${GITHUB_STEP_SUMMARY}"

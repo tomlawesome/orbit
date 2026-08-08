@@ -127,9 +127,9 @@ planning or release-policy changes.
   characterization tests before refactors.
 - Run fast checks before container and browser checks.
 - Do not close an issue until its acceptance evidence is linked.
-- Publish previews only after required checks pass. Stable release acceptance
-  uses a preview from the matching versioned release branch. Test immutable
-  image digests and promote only the accepted digest without rebuilding it.
+- Publish previews only after required checks pass on the protected `preview`
+  lane. Test immutable image digests, verify the exact preview source through
+  `main`, and promote only the accepted digest without rebuilding it.
 - Never commit credentials, secrets, private keys, tokens, private documents,
   or real personal data.
 
