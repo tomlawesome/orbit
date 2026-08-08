@@ -19,6 +19,7 @@ describe("administrator document-health redaction", () => {
     expect(JSON.stringify(publicHealth)).not.toContain("synthetic-key-id");
     expect(JSON.stringify(publicHealth)).not.toContain("synthetic-worker-secret");
     expect(JSON.stringify(publicHealth)).not.toContain("synthetic-top-level-secret");
+    expect(publicHealth.scanRecovery).toEqual({ retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null });
 
     expect(toPublicDocumentHealth({ ...unsafe, worker: { ...unsafe.worker, lastErrorCode: "maintenance_cycle_failed" } }).worker.lastErrorCode).toBe("maintenance_cycle_failed");
     expect(toPublicDocumentHealth({ ...unsafe, worker: { ...unsafe.worker, lastErrorCode: null } }).worker.lastErrorCode).toBeNull();

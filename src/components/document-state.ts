@@ -12,6 +12,9 @@ export interface DocumentProgress {
   /** Absent in payloads produced before readiness was reported. */
   ready?: boolean;
   failureCode?: string | null;
+  recoverable?: boolean;
+  recoveryExpiresAt?: string | null;
+  recoveryStatus?: "retrying" | "manual" | null;
 }
 
 /** Lifecycles whose content can be opened; mirrors the server's boundary. */
@@ -34,6 +37,7 @@ const rejectionReasons: Record<string, string> = {
   crypto_metadata_missing: "Rejected because its encryption record is missing.",
   storage_object_missing: "Rejected because its stored copy is missing.",
   storage_object_invalid: "Rejected because its stored copy could not be read.",
+  scan_recovery_expired: "The scanner did not recover before the upload expired. Upload it again.",
 };
 
 export function progressDescription(document: DocumentProgress): string | null {
@@ -51,6 +55,9 @@ export function progressDescription(document: DocumentProgress): string | null {
     return "Rejected. Upload it again.";
   }
 
+  if (document.recoverable && document.recoveryStatus === "manual") return "The malware scanner is still unavailable. An administrator can retry this upload without asking you to upload it again.";
+  if (document.recoverable) return "The malware scanner is unavailable. Orbit is retrying this upload automatically.";
+  if (document.lifecycle === "scanning" && document.failureCode?.startsWith("scanner_")) return "Waiting for the malware scanner…";
   if (document.lifecycle === "scanning") return "Checking for malware…";
   if (document.lifecycle === "encrypting") return "Encrypting…";
   return "Processing…";
