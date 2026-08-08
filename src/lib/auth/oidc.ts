@@ -3,7 +3,7 @@ import { createRemoteJWKSet, base64url, jwtVerify, type JWTPayload } from "jose"
 import { z } from "zod";
 import type { AuthConfig } from "@/lib/env";
 import { constantTimeEqual, createPkceChallenge, type LoginTransaction } from "@/lib/auth/crypto";
-import { AuthError } from "@/lib/auth/errors";
+import { AuthError, type TokenExchangeReason } from "@/lib/auth/errors";
 
 const discoverySchema = z.object({
   issuer: z.url(),
@@ -91,6 +91,42 @@ export function createAuthorizationUrl(config: AuthConfig, metadata: OidcMetadat
   return url;
 }
 
+type StandardTokenExchangeReason = Exclude<
+  TokenExchangeReason,
+  "provider_rejected" | "unreachable" | "invalid_response"
+>;
+
+const standardTokenExchangeReasons = new Set<StandardTokenExchangeReason>([
+  "invalid_request",
+  "invalid_client",
+  "invalid_grant",
+  "unauthorized_client",
+  "unsupported_grant_type",
+  "invalid_scope",
+  "server_error",
+  "temporarily_unavailable",
+]);
+
+function isStandardTokenExchangeReason(value: unknown): value is StandardTokenExchangeReason {
+  return typeof value === "string"
+    && standardTokenExchangeReasons.has(value as StandardTokenExchangeReason);
+}
+
+/** Reads only the top-level `error` field; every other response field is discarded immediately. */
+function resolveProviderRejectionReason(payload: unknown): TokenExchangeReason {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const candidate = (payload as Record<string, unknown>).error;
+    if (isStandardTokenExchangeReason(candidate)) return candidate;
+  }
+  return "provider_rejected";
+}
+
+function tokenExchangeFailure(reason: TokenExchangeReason): AuthError {
+  return new AuthError("token_exchange_failed", "The authorization code could not be exchanged", 502, {
+    tokenExchangeReason: reason,
+  });
+}
+
 async function exchangeCode(config: AuthConfig, metadata: OidcMetadata, code: string, codeVerifier: string) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -101,8 +137,9 @@ async function exchangeCode(config: AuthConfig, metadata: OidcMetadata, code: st
   const encodedClient = encodeURIComponent(config.clientId);
   const encodedSecret = encodeURIComponent(config.clientSecret);
 
+  let response: Response;
   try {
-    const response = await fetch(metadata.token_endpoint, {
+    response = await fetch(metadata.token_endpoint, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -113,12 +150,24 @@ async function exchangeCode(config: AuthConfig, metadata: OidcMetadata, code: st
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(`Token endpoint returned HTTP ${response.status}`);
-    return tokenResponseSchema.parse(payload);
-  } catch (error) {
-    throw new AuthError("token_exchange_failed", "The authorization code could not be exchanged", 502, { cause: error });
+  } catch {
+    // Provider URLs and low-level network errors are deliberately discarded.
+    throw tokenExchangeFailure("unreachable");
   }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    // A parser error can include provider-controlled response fragments.
+    throw tokenExchangeFailure("invalid_response");
+  }
+
+  if (!response.ok) throw tokenExchangeFailure(resolveProviderRejectionReason(payload));
+
+  const parsed = tokenResponseSchema.safeParse(payload);
+  if (!parsed.success) throw tokenExchangeFailure("invalid_response");
+  return parsed.data;
 }
 
 function validateAccessTokenHash(accessToken: string, tokenHash: string, algorithm: string): void {

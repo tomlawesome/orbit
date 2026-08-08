@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -8,13 +9,15 @@ import {
   safeDocumentFilenameTitle,
   safeDocumentPlainText,
 } from "@/server/documents/suggestions";
-import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
+import { classifyDocumentStructure, detectDocumentMediaType, type DocumentStructureReason } from "@/server/documents/validation";
 import { extractTextWithTika } from "@/server/documents/tika";
 import { requireHouseholdAccess } from "@/server/workspace-access";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
-const invalidStructureRecoveryMessage = "Suggestions are unavailable for that file. Review the fields manually and choose a valid document before attaching it.";
+const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
+const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
+const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -42,6 +45,8 @@ export interface ItemDocumentInspectionResult {
   extracted: boolean;
   suggestions: ItemDocumentSuggestion[];
   message?: string;
+  attachmentDisposition: "attachable" | "rejected";
+  reason: DocumentStructureReason;
 }
 
 const allowedSuggestionFields = new Set<ItemDocumentSuggestionField>(itemDocumentSuggestionFields);
@@ -93,52 +98,89 @@ export async function inspectItemDocument(input: {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
   const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-  const received = await storage.receive(input.body, randomUUID(), config.maxBytes, input.declaredBytes);
+  // Ephemeral opaque reference for this pre-attachment inspection only; never persisted.
+  const operationId = randomUUID();
+  const received = await storage.receive(input.body, operationId, config.maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      if (!validateSupportedDocumentStructure(bytes, mediaType)) {
+      const structureReason = classifyDocumentStructure(bytes, mediaType);
+      if (structureReason !== "supported_structure") {
+        log.info("document.inspection", { outcome: "rejected", reason: structureReason });
         return {
           extracted: false,
-          message: invalidStructureRecoveryMessage,
-          suggestions: buildSuggestions(input.filename, undefined),
+          message: structureReason === "prohibited_content" ? prohibitedContentMessage : unsupportedStructureMessage,
+          suggestions: [],
+          attachmentDisposition: "rejected",
+          reason: structureReason,
         };
       }
+      log.info("document.inspection", { outcome: "attachable", reason: structureReason });
       if (config.scanMode !== "required") {
         return {
           extracted: false,
           message: parserRecoveryMessage,
           suggestions: buildSuggestions(input.filename, undefined),
+          attachmentDisposition: "attachable",
+          reason: structureReason,
         };
       }
+      log.info("document.scan", { document: operationId, outcome: "attempt" });
+      const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
+        // `scan.reason` is a fixed enumeration from the scanner adapter, never
+        // provider text or the scanner's virus signature, so it is safe to record.
+        log.warn("document.scan", {
+          document: operationId,
+          outcome: infected ? "infected" : "error",
+          reason: infected ? "malware_detected" : scan.reason,
+          ms: scanMs,
+        });
+        if (infected) {
+          throw new AppError(
+            "document_malware_detected",
+            "Orbit rejected that document because malware was detected",
+            422,
+          );
+        }
+        // Attribute the failure exactly as the upload path does, so both
+        // scanner-dependent journeys report the same actionable cause.
+        const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
         throw new AppError(
-          infected ? "document_malware_detected" : "document_scanner_unavailable",
-          infected ? "Orbit rejected that document because malware was detected" : "Document scanning is temporarily unavailable",
-          infected ? 422 : 503,
+          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
+          unreachable
+            ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
+            : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
+          503,
         );
       }
+      log.info("document.scan", { document: operationId, outcome: "clean", ms: scanMs });
       let text = "";
       let extracted = false;
       let message: string | undefined;
       let proposal: unknown;
       try {
-        const parsedText = await extractTextWithTika(bytes, mediaType);
+        const parsedText = await extractTextWithTika(bytes, mediaType, operationId);
         if (typeof parsedText !== "string" || parsedText.length > MAX_EXTRACTED_CHARACTERS) throw new Error("parser_output_invalid");
         text = parsedText;
         extracted = true;
         proposal = proposalFromText(text, input.filename);
-      } catch {
+      } catch (error) {
         extracted = false;
-        message = parserRecoveryMessage;
+        message = error instanceof AppError && error.code === "parser_disabled"
+          ? processorDisabledMessage
+          : parserRecoveryMessage;
       }
       text = "";
       return {
         extracted,
         suggestions: buildSuggestions(input.filename, proposal),
+        attachmentDisposition: "attachable",
+        reason: structureReason,
         ...(message ? { message } : {}),
       };
     } finally {

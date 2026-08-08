@@ -1,60 +1,70 @@
-# ADR-0003: Gitflow preview and stable channels
+# ADR-0003: Protected preview lane and stable promotion
 
 **Status:** Accepted
-**Date:** 2026-07-30
+**Date:** 2026-08-08
 
 ## Context
 
-Orbit needs continuous deployable evidence without using a separate artifact
-stage between preview and stable. Tags are mutable and cannot safely establish
-either source identity or release readiness. The former v1 integration branch
-also prevented the repository from using its intended `develop`, versioned
-release, stable, and hotfix branch flow.
+Orbit needs strong release evidence without rebuilding and exercising a full
+container pipeline for every feature pull request. Mutable image tags are useful
+discovery pointers but cannot establish source identity or release readiness.
+Manually choosing the semantic version also risks mismatches between source,
+the tested image and the eventual release record.
 
 ## Decision
 
-- `main` represents stable source, and `develop` is the protected integration
-  branch.
-- Issue branches start from and normally target `develop`.
-- A protected `release/vMAJOR.MINOR.PATCH` branch starts from `develop`.
-  Release work is limited to validation and narrowly reviewed fixes. It is
-  merged through protected pull requests into both `main` and `develop`.
-- A `hotfix/*` branch starts from `main` and is merged through protected pull
-  requests into both `main` and `develop`.
-- Pushes to `develop` and versioned `release/*` branches publish uniquely tagged
-  previews. Published images carry
-  `io.github.tomlawesome.orbit.release-stage=preview` and a source-branch label.
-- Stable promotion accepts only the tested digest published from the release
-  branch matching the requested semantic version. The source revision must be
-  present in both `main` and `develop`, and the `main` tree must exactly match
-  the preview revision.
-- Promotion requires the protected production environment, refuses version-tag
-  replacement, and retags the exact accepted digest without rebuilding.
-- The legacy `release/architecture-consolidation-rc` branch no longer publishes
-  previews and receives no feature work.
-- Historic preview tags, including the former `rc-YYYY.MM.DD.<run>` form, remain
-  untouched as audit evidence. They are never eligible for stable promotion.
+- `develop` is the protected integration branch. Ordinary issue branches start
+  from and target `develop`; they run static and unit checks without building
+  or publishing an image.
+- `preview` is the protected release lane. A reviewed merge of `develop` into
+  `preview` runs the complete PostgreSQL, exact-image, browser, recovery and
+  supply-chain path once and publishes the tested digest behind the mutable
+  `preview` tag.
+- A stable pull request merges `preview` into protected `main`. It verifies that
+  the current preview digest, embedded version and source revision exactly match
+  the pull-request head, including digest-bound provenance and SBOM evidence. It
+  does not rebuild the image.
+- Stable promotion accepts the tested digest under the protected `production`
+  environment. It requires the preview revision to be present in `main`, the
+  `main` tree to match it exactly, and the source revision to remain on its
+  protected source branch.
+- Stable promotion points only `latest` at the accepted digest, then creates the
+  matching immutable Git tag and GitHub Release. The release records the digest.
+  It does not publish semantic-version container tags.
+- Preview publication points only `preview` at the tested digest. `dev` is
+  reserved but is not initially published. No commit, branch, run, release or
+  semantic-version container tags are published.
+- Orbit calculates one semantic version per release train from the highest
+  stable Git tag. An ordinary preview train increments minor once; a bounded
+  `hotfix/*` preview increments patch once. `package.json` bootstraps repositories
+  that predate their first stable Git tag. Major releases require a separate
+  protected human decision.
+- Every rebuild within the same unpromoted train has the same version. The
+  version and revision are embedded into the image and cannot be replaced by
+  runtime environment variables.
+- A rare `hotfix/*` branch may publish the `preview` pointer and merge directly
+  to `main`; it must subsequently be reconciled into `develop` and `preview`.
+- Historic `preview-*`, `rc-*` and semantic-version image tags remain untouched
+  as audit evidence. They are never eligible for new promotion.
 
 ## Consequences
 
-- Real-world testing continues from immutable preview digests throughout
-  development and release validation.
-- There is no intermediate artifact stage: readiness is established by exact
-  digest acceptance plus protected branch evidence.
-- Stable promotion fails closed for development previews, legacy previews, and
-  release previews whose exact source has not reached both protected branches.
-- Operators still deploy and record immutable digests; human-readable tags are
-  only discovery aids.
-- The stable image has exactly the bytes exercised during release acceptance.
+- Feature development normally waits only for fast and risk-selected checks.
+- The expensive authoritative path runs once after a protected preview merge,
+  before stable source is proposed.
+- Operators test and record immutable digests; `preview` and `latest` remain
+  convenience pointers only.
+- A candidate version is visible in `--version`, startup logs and OCI metadata
+  without consuming multiple semantic versions during preview iteration.
+- Stable releases preserve the exact bytes exercised during acceptance.
 
 ## Alternatives considered
 
-- **Stop publishing until v1 is complete:** rejected because deployable
-  snapshots provide valuable real-world and operational feedback.
-- **Add a separate pre-stable artifact stage:** rejected because branch
-  identity, immutable digest acceptance, and protected promotion already
-  provide the required evidence with less policy surface.
-- **Trust the tag prefix during promotion:** rejected because registry tags are
-  mutable and do not form immutable policy evidence.
-- **Continue feature work on the legacy integration branch:** rejected because
-  it obscures the permanent Gitflow branch contract and delays consolidation.
+- **Build a container for every feature pull request:** rejected because it
+  duplicates the authoritative preview build and dominates development time.
+- **Publish unique tags for every preview:** rejected because digests already
+  provide immutable identity and the extra tags create registry clutter.
+- **Type the version during promotion:** rejected because the accepted artifact
+  already contains the deterministic version and should be authoritative.
+- **Rebuild on `main`:** rejected because the resulting bytes would not be the
+  image accepted on the preview lane.

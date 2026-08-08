@@ -20,8 +20,10 @@ services:
       retries: 10
   orbit-app:
     container_name: orbit
+    # No build declaration: this file describes a deployment, which fetches
+    # compose assets and a published image but no source tree. Building from
+    # source is an explicit developer workflow through docker-compose.build.yml.
     image: "${ORBIT_IMAGE:?Set ORBIT_IMAGE to an immutable registry digest or a local build tag}"
-    build: .
     restart: unless-stopped
     env_file: .env-orbit
     environment:
@@ -42,6 +44,7 @@ services:
       - orbit-session-secret
       - orbit-document-kek
       - orbit-vapid-private-key
+      - orbit-oidc-client-secret
     security_opt:
       - no-new-privileges:true
     networks:
@@ -105,6 +108,46 @@ services:
     mem_limit: ${TIKA_MEMORY_LIMIT:-1g}
     pids_limit: 256
 
+  # Optional private model server for a future reviewed semantic-extraction
+  # workflow. Orbit does not call it yet, so selecting and pulling a model is an
+  # explicit operator action rather than a deployment requirement.
+  orbit-ollama:
+    container_name: orbit-ollama
+    image: ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7
+    profiles: ["ai"]
+    restart: unless-stopped
+    environment:
+      # Bind on the Compose network only; deliberately do not publish 11434 to
+      # the host. The service needs this address for future in-network callers.
+      OLLAMA_HOST: 0.0.0.0:11434
+      # Never fall back to a cloud model or transmit document text to Ollama
+      # Cloud. Pulling an explicitly chosen local model remains possible.
+      OLLAMA_NO_CLOUD: "1"
+      # Keep a small host from accumulating queued inference work or several
+      # resident models. The application will also retain its own timeouts.
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_QUEUE: "${OLLAMA_MAX_QUEUE:-8}"
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-0}"
+      # Kept separate from Ollama's own settings so the administrator-selected
+      # model can be pulled without relying on a host shell environment.
+      ORBIT_OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+    volumes:
+      - orbit-ollama-data:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: "${OLLAMA_CPUS:-2.0}"
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-6g}
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 8
+
 networks:
   orbit-document-processing:
     internal: true
@@ -114,6 +157,7 @@ volumes:
   orbit-db-data:
   orbit-documents-data:
   orbit-clamav-data:
+  orbit-ollama-data:
 
 configs:
   orbit-tika-config:
@@ -128,3 +172,5 @@ secrets:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek
   orbit-vapid-private-key:
     file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/vapid-private-key
+  orbit-oidc-client-secret:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/oidc-client-secret

@@ -8,25 +8,57 @@ In the Authentik Admin interface:
 
 1. Open **Applications → Applications**, create the Orbit application, and add an **OAuth2/OIDC** provider.
 2. Set **Client type** to **Confidential** and enable the **Authorization code** grant.
-3. Add the Orbit callback as a **Strict** redirect URI. For local development this is `http://127.0.0.1:3000/api/auth/callback`; for production it is `https://your-orbit-host/api/auth/callback`.
+3. Add the Orbit callback as a **Strict** redirect URI. For production use `https://orbit.your-domain.tld/api/auth/callback`. Loopback development may instead use `http://127.0.0.1:3000/api/auth/callback`.
 4. Include the standard `openid`, `profile`, and `email` scope mappings.
 5. Keep the recommended per-provider issuer mode. With an application slug of `orbit`, the issuer is normally `https://auth.example.com/application/o/orbit/`.
 6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit intentionally accepts asymmetric ID-token algorithms only and validates them against the provider's JWKS.
 7. Select a stable, non-email subject mode, such as a hashed user ID or user UUID. Changing this setting later creates a new Orbit identity from the application's perspective.
 
-Copy the provider's client ID and secret into the Orbit environment:
+Run the guided configuration from the persistent deployment directory:
+
+```sh
+bash scripts/configure.sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
+bash scripts/configure.sh --check
+```
+
+The plain command safely bootstraps any missing installer-managed files and is
+idempotent on an existing deployment. Guided setup asks for the public Orbit
+origin, the provider's complete issuer URL, and the client ID. It derives the
+callback URL and writes all four values atomically. The secret command then
+reads the provider credential silently from standard input, writes it
+atomically to `.orbit-secrets/oidc-client-secret` with mode `0600`, and selects
+only the canonical runtime file path in `.env-orbit`. The credential is never
+accepted as a command argument, printed, or written to the environment file.
+Run it directly in a private terminal; do not pipe a literal secret from shell
+history or paste it into chat. The resulting production settings have this
+shape:
 
 ```env
-APP_URL=http://127.0.0.1:3000
-SESSION_SECRET=replace-with-a-unique-random-value-of-at-least-32-characters
-OIDC_ISSUER=https://auth.example.com/application/o/orbit/
+APP_URL=https://orbit.your-domain.tld
+OIDC_ISSUER=https://sso.your-domain.tld/application/o/orbit/
 OIDC_CLIENT_ID=your-authentik-client-id
-OIDC_CLIENT_SECRET=your-authentik-client-secret
-OIDC_CALLBACK_URL=http://127.0.0.1:3000/api/auth/callback
+OIDC_CLIENT_SECRET=
+OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret
+OIDC_CALLBACK_URL=https://orbit.your-domain.tld/api/auth/callback
 OIDC_SCOPES=openid profile email
 ```
 
+The supported Compose deployment mounts the persistent host file read-only,
+copies it into Orbit's private runtime tmpfs with Orbit-user ownership and mode
+`0400`, and exposes only the runtime path to the application. Existing
+direct-value configuration remains readable for upgrade compatibility, but
+direct and file-backed forms are mutually exclusive. Re-running the secret
+command safely replaces the file; ordinary configuration and recognised
+upgrades preserve it.
+
 The issuer, including its path and trailing slash, must exactly match the `issuer` value in Authentik's discovery document. The callback must exactly match the strict redirect URI. Keep `APP_URL`, `OIDC_CALLBACK_URL`, and the address used in the browser consistent; `localhost` and `127.0.0.1` are different hosts.
+
+For loopback development only, use `http://127.0.0.1:3000` for `APP_URL`
+and `http://127.0.0.1:3000/api/auth/callback` for the callback. Do not use
+plain HTTP, loopback names, or documentation placeholder domains for a real
+deployment.
 
 Authentik currently reports `email_verified` independently of the `email` claim. Orbit requires a usable email address but does not pretend an unverified address is verified: it records the claim as supplied and can use that status for future policy decisions.
 
@@ -99,7 +131,13 @@ await fetch("/api/auth/session/refresh", {
 
 ## Troubleshooting
 
-- `auth_not_configured`: verify every required environment variable and use at least 32 characters for `SESSION_SECRET`.
+- Run `bash scripts/configure.sh --check` first. It identifies missing or
+  inconsistent configuration by field name without displaying values.
+- `auth_not_configured`: verify every required authentication field and ensure
+  exactly one direct or `_FILE` form is configured for each secret. For the
+  supported OIDC path, rerun `bash scripts/configure.sh --set-oidc-secret` and
+  then the value-free readiness check; a missing, empty, non-regular or
+  symbolic-link secret is rejected without displaying its contents.
 - `discovery_failed`: compare `OIDC_ISSUER` exactly with the provider discovery document and confirm every advertised endpoint uses HTTPS.
 - `invalid_state`: restart sign-in without reusing a callback URL; also check that the browser host did not change during the flow.
 - `invalid_id_token`: select an asymmetric signing key, confirm the configured client ID, and check server clock accuracy.

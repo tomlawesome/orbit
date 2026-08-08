@@ -45,10 +45,18 @@ unchanged target state and unchanged audit state where mutation is applicable.
 
 ## CI relationship
 
-CI runs two `pnpm test:integration` invocations concurrently after static/unit
-checks and before the production-image build. This proves that independent
-runs do not share PostgreSQL state or Docker resources. The command remains
-reusable as a single isolated run during local development.
+Pull requests run planning governance, lint, type checking and the complete unit
+suite. Separate read-only workflows retain dependency-diff and CodeQL evidence.
+They do not run a production build, PostgreSQL integration, source secret scan
+or container build. Every push to protected `preview` (or a bounded
+`hotfix/**` source) runs the complete source-policy, PostgreSQL, exact-image,
+browser, security, recovery, installer and publication path. A pull request to
+`main` verifies the already-tested preview digest, embedded identity and
+attestations without rebuilding it.
+
+When selected, the two concurrent integration invocations prove that
+independent runs do not share PostgreSQL state or Docker resources. The command
+remains reusable as a single isolated run during local development.
 
 If Docker is unavailable, the command fails clearly. If a run is interrupted,
 inspect only the uniquely named `orbit-integration-*` container reported by the

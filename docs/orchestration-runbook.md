@@ -57,24 +57,52 @@ Protected planning, architecture, security, release, repository-setting,
 product-scope and model-governance work has the same gate. Terra may read for
 orientation or perform explicitly bounded mechanical analysis outside the
 orchestration role, but it cannot operate the delivery loop or make status and
-next-action decisions. Luna Extra High remains the default for bounded
-implementation and returns control to Sol for review and delivery. A different
-implementation model requires fresh user approval under `AGENTS.md`.
+next-action decisions.
+
+For `low-risk-implementation` and `donkey-work`, Luna Extra High is the first
+OpenAI implementation model. When Ollama, Mistral and Claude are unavailable,
+the task state records each provider in order with the `unavailable` reason and
+selects Luna; routine work never escalates to Sol because of that absence.
+Other bounded implementation follows the cheapest-qualified-idle-capacity
+preference in `AGENTS.md` and `.github/orchestration-governance.json`. Every
+task state records the selected provider, exact model, task class,
+qualification evidence, exact host for local Ollama, and an evidenced reason
+for every cheaper provider skipped. A cheaper provider already occupied by an
+independent task is an accepted reason only when the provider-concurrency
+evidence in the Wave concurrency section is complete. Every provider returns
+control to Sol for review and delivery. Claude Opus-class secondary review
+requires fresh user approval and remains advisory only.
+Correctness, hidden-edge, scope, handback honesty and context-fit evidence
+determine qualification. Cost, latency, resource observations and current
+capacity inform routing. Routine token, price and turn caps are not task or
+capability controls. Detect a genuine stall from task- and model-appropriate
+time to first useful output or time since meaningful progress, and include a
+reasonable benefit-of-the-doubt buffer before intervening. Slow useful work is
+not stalled.
+
+Qualification and tuning stop as soon as a model is satisfactory and never
+exceed five passes for one representative task class. Basic acceptance is
+required by pass three; passes four and five may only fine-tune an already
+acceptable result.
 
 ## Launch receipt and task-state protocol
 
-Task creation is asynchronous. A successful creation response is a launch
-receipt, not proof that the task is already queryable.
+Luna task creation is asynchronous. A successful creation response is a launch
+receipt, not proof that the task is already queryable. Local Ollama, Mistral and
+Claude runs instead use an approved bounded wrapper whose receipt records a
+local run ID; it grants no remote or orchestration authority.
 
-1. Record the requested model, exact base SHA, creation source, timestamp and
-   returned `threadId` or `clientThreadId`.
+1. Record the provider, exact model, task class, qualification evidence, exact
+   base SHA, source and timestamp. A Luna receipt records `threadId` or
+   `clientThreadId`; a wrapper receipt records its bounded `runId`.
 2. Move from `planned` to `launch_pending`.
-3. Resolve a client task to its real task ID through a full task listing.
+3. For Luna, resolve a client task to its real task ID through a full task listing.
    Do not pass a client ID to tools that require a real task ID.
-4. Confirm the task through a full list, direct read or wait response. Record
+4. Confirm Luna through a full list, direct read or wait response. Record
    its real task ID, worktree, status and observation time.
-5. Move to `active` only when that authoritative observation matches the
-   requested model, repository, worktree and accepted base.
+5. Confirm a wrapper run through its bounded status/result channel. Move to
+   `active` only when the authoritative observation matches the provider,
+   model, worktree and accepted base.
 6. Use direct reads only for diagnosis. Use bounded task waits for ordinary
    monitoring and handback.
 
@@ -99,8 +127,9 @@ heartbeat reconciles, in order:
 8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
-`sol_review` requires independent diff, test, privacy, credential, dependency
-and protected-path review. `pr_open` requires a pushed short-lived branch and
+`sol_review` is the Sol-owned orchestration-review stage. It requires
+independent diff, test, privacy, credential, dependency and protected-path
+review. `pr_open` requires a pushed short-lived branch and
 linked issue. `merged` requires the exact protected merge SHA, pull request and
 target branch, but it is not terminal completion. `trusted` requires successful
 target-branch checks for that exact merge SHA. `reconciled` is the only
@@ -122,7 +151,7 @@ coordination file entered the tracked tree, and the short-lived remote head is
 eligible for deletion. Delete a remote branch only after recording its exact
 head SHA and merged or independently proven superseding outcome, and only with
 the required explicit authority for destructive remote state. Preserve
-`main`, `develop`, active `release/*` and `hotfix/*` branches, active task
+`main`, `develop`, `preview`, active `hotfix/*` branches, active task
 branches, and any unreviewed unique commit. Local worktrees remain until their
 commits and result handoffs have been accepted or safely retained.
 
@@ -162,6 +191,62 @@ An adopted control requires:
 
 Future tasks and heartbeats read the adopted-control ledger during preflight,
 so accepted learning is applied without depending on chat memory.
+
+## Wave concurrency
+
+Disjoint file ownership is necessary but not sufficient grounds to run slices
+concurrently. Disjoint files prevent merge conflicts; they do not prevent
+revalidation churn, and they do not establish whether a sibling landing first
+would invalidate a slice's premises.
+
+Each slice therefore records a concurrency assessment in the implementation
+plan. A slice is concurrent when a sibling landing first requires at most a
+rebase, and sequenced when it would force rework. A sequenced slice waits for a
+later wave rather than running in parallel and being rewritten.
+
+While the target branch requires up-to-date branches, keep at most two pull
+requests in flight regardless of assessment. Every merge leaves every other open
+pull request behind its base and forces a full revalidation, so concurrency
+beyond that costs more than it returns.
+
+Provider cost order does not force otherwise independent work to serialize.
+When the cheapest qualified provider is already active, Sol may select the next
+qualified provider for another ready issue only when the task record proves:
+
+- the occupied cheaper provider's exact task, qualification evidence, issue
+  and allowed paths;
+- a different selected issue with exact disjoint allowed paths and satisfied
+  dependencies;
+- that either sibling landing first requires no more than a rebase and
+  revalidation, never a change of premises or redesign;
+- a concrete throughput benefit from starting now rather than waiting; and
+- no more than two projected in-flight pull requests.
+
+Concurrency never justifies escalating or duplicating the same task, using an
+unqualified model, overlapping paths, broadening delegated authority or
+opening a third pull request. Within each task, use the least-cost model already
+qualified for that task class. Sol still reviews and integrates handbacks
+sequentially.
+
+## Investigating a delivery failure
+
+A required check halts at the first blocker, so its output is never the complete
+fault list. Later instances of the same mistake stay invisible until the earlier
+one is corrected.
+
+Investigate a failure as a **fault class**, not a single instance. Identify the
+general shape of the mistake, then inspect the whole change for other places
+that shape occurs, and correct all of them together. Record the identified class
+and the scope swept in the pull request, so a reviewer sees what was checked
+rather than inferring it.
+
+Correcting only the reported instance converts one review pass into one
+validation cycle per instance, and each cycle establishes nothing except that
+another instance exists.
+
+A hypothesis is not a diagnosis. Where a correction rests on an unproven cause,
+say so, and prefer evidence that distinguishes causes over a change that merely
+makes the symptom disappear.
 
 ## Circuit breakers and limits
 

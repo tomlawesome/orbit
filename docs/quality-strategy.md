@@ -42,7 +42,7 @@ remove the boundary the test claims to prove.
 | Adapter contract | Prove bounded behaviour at replaceable external boundaries | OIDC, ClamAV, Tika, SMTP, IMAP, Web Push, local storage | before enabling that adapter |
 | Browser/accessibility | Prove critical user journeys and rendered privacy | OIDC sign-in, households, items, documents, admin, mobile, keyboard, axe | exact production image |
 | Container/operational | Prove runtime identity, migrations, health, secrets, restart, backup/restore and degraded dependencies | Compose topology and scripts | exact production image |
-| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, preview field testing, versioned-release preview deployment and restore | preview feedback or release acceptance |
+| Representative manual | Prove operator and provider realities that cannot be safely automated | real OIDC, update, SMTP/push where enabled, protected-preview deployment and restore | preview feedback or release acceptance |
 
 Unit tests may mock I/O. Integration tests use real PostgreSQL and isolated
 temporary storage. Contract tests may use disposable protocol implementations,
@@ -83,33 +83,56 @@ accessibility, or recoverability. Those require the appropriate layer above.
 
 ```mermaid
 flowchart LR
-    fast["Static + unit + diagnostic coverage"]
+    issue["Issue PR: static + unit"]
+    develop["Protected develop"]
+    train["Merge develop into preview"]
     integration["PostgreSQL service/API + migrations"]
     build["Build one production image"]
     system["Compose + browser + security + recovery against that image"]
     supply["SBOM + dependency/image scan + provenance"]
     preview["Publish preview digest"]
-    feedback["Engineering field feedback"]
-    ready{"Release scope complete?"}
-    releasePreview["Publish versioned-release preview"]
     manual["Representative release acceptance"]
+    stable["Verify preview into main without rebuild"]
     promote["Promote exact digest"]
 
-    fast --> integration --> build --> system
-    system --> supply --> preview --> feedback
-    supply --> ready
-    ready -->|"yes"| releasePreview --> manual --> promote
+    issue --> develop --> train --> integration --> build --> system
+    system --> supply --> preview --> manual --> stable --> promote
 ```
 
-Engineering previews are published only after source dependency/secret policy,
-exact-image vulnerability and SBOM evidence, and the existing system gates
+Protected previews are published only after source dependency/secret policy,
+exact-image vulnerability and SBOM evidence, and the complete system gates
 pass. Trusted publication then attaches and verifies digest-bound provenance
-and SBOM attestations. A versioned-release preview is eligible for stable
-acceptance only when this complete target path passes.
+and SBOM attestations. The exact digest is eligible for stable acceptance only
+when this complete path passes.
 
 Pull requests also receive a read-only dependency-diff review. Newly
 introduced high or critical vulnerabilities in any dependency scope and
 dependencies outside the approved SPDX licence policy block integration.
+
+### Risk-proportional pull-request lanes
+
+Every pull request runs planning governance, lint, type checking and the
+complete unit suite. Separate read-only workflows retain dependency-diff review
+and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
+
+| Lane | Additional evidence | Typical eligible change |
+| --- | --- | --- |
+| issue pull request | static analysis and unit regression evidence | ordinary work targeting `develop` or a release-lane merge proposal |
+| protected preview push | production build, source dependency/secret policy, two isolated PostgreSQL runs, exact-image Compose, vulnerability, malware, recovery, browser/accessibility, installer and digest-bound attestations | accepted merge to `preview` or a bounded `hotfix/**` source |
+| stable pull request | existing preview digest, embedded identity and attestation verification | `preview` or a tested hotfix proposed to `main` |
+
+The deterministic changed-boundary classifier remains fail-safe for reporting
+and for the authoritative protected push. Required higher-cost job identities
+are skipped at job level on pull requests so branch protection still receives
+terminal check results; workflow-level path filters are not used.
+
+Pull requests run static and unit checks without a production application or
+container build. Every accepted push to protected `preview` or `hotfix/**`
+runs the complete exact-image system and publication path, so integration and
+release evidence is never inferred from a cheaper pull-request lane. Until a
+forge-native combined-state queue is available, only one release train is
+admitted to protected CI at a time while
+independent implementation and local validation continue concurrently.
 
 ### Required behaviour
 
@@ -140,9 +163,9 @@ dependencies outside the approved SPDX licence policy block integration.
   images are pinned to reviewed Linux/AMD64 manifests. Configuration tests
   reject untracked mutable references, and pulled Orbit deployments require an
   explicit application digest.
-- Stable promotion accepts only a tested preview from the matching semantic
-  release branch, validates its revision in `main` and `develop` plus exact
-  `main` tree identity, and never replaces an existing version.
+- Stable promotion accepts only a tested protected preview, derives its
+  semantic version from the image, validates its source revision in `main` plus
+  exact `main` tree identity, and never replaces an existing Git version.
 
 ## Required test scenarios by risk
 
@@ -162,7 +185,16 @@ dependencies outside the approved SPDX licence policy block integration.
 - concurrent ownership, quota, lease and state-transition conflicts;
 - worker crash after claim, after durable intent, and after external side
   effect;
+- synchronous clean `201`, invalid/malware terminal discard, retryable
+  unavailable/timeout/protocol `202` recovery, generic scanner-error `503`,
+  repeat-request idempotency and `409` content/scope mismatch;
+- encrypted staging privacy/AAD separation, no download/draft/parse/action
+  authorization, duplicate workers, ten-minute lease expiry and stale-worker
+  fencing, restart recovery, five attempts/manual retry/immutable 24-hour
+  expiry, purge failure backlog, and reviewed pending attachment;
 - backup/restore with missing, extra, corrupt and mixed-state document objects;
+- backup/restore with in-flight encrypted scanner stages, correspondence
+  validation, lease reset and requeue, with no plaintext quarantine archive;
 - wrong or missing recovery key and interrupted restore;
 - archive conflict and failure atomicity.
 
@@ -172,6 +204,8 @@ dependencies outside the approved SPDX licence policy block integration.
   malware cases;
 - parser timeout, oversized output and hostile extracted instructions;
 - provider outage, timeout, rejection, malformed response and bounded retries;
+- admin counts/categories/expiry/retry/purge surfaces and user distinctions
+  between recoverable outage, active retry, terminal rejection and success;
 - no private content, filenames, addresses, endpoints, tokens or raw provider
   errors in logs and administrator responses.
 
@@ -201,7 +235,7 @@ An issue is complete only when:
 - required CI passes;
 - manual preview evidence is linked when the issue changes a real provider,
   deployment, upgrade, recovery, browser, or hardware-dependent boundary;
-- versioned-release preview evidence is required at the feature-complete
+- protected-preview evidence is required at the feature-complete
   release gate.
 
 Issue closure records the pull request and evidence. Passing unit tests alone is

@@ -5,6 +5,7 @@ import {
   auditLog,
   documentCrypto,
   documentJobs,
+  documentStagingObjects,
   documents,
   households,
   items,
@@ -12,6 +13,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -22,6 +24,59 @@ import {
   validateSupportedDocumentStructure,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
+import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
+
+/**
+ * Lifecycles a user may see listed against an item.
+ *
+ * `deleted` is deliberately absent: a purged document must stay invisible, so
+ * this list must never become a way to observe removed content.
+ */
+export const listableDocumentLifecycles = [
+  "receiving",
+  "validating",
+  "quarantined",
+  "scanning",
+  "encrypting",
+  "available",
+  "pending_deletion",
+  "rejected",
+] as const;
+
+export type ListableDocumentLifecycle = typeof listableDocumentLifecycles[number];
+
+export type DocumentContentOperation = "summary" | "download" | "draft" | "restore";
+
+/**
+ * The single content-readiness boundary for document operations.
+ *
+ * A genuinely `clean` scan is always ready. `skipped` is ready only when the
+ * runtime scan mode is explicitly `disabled`; any other or unknown scan mode
+ * value must not authorize a `skipped` scan status. The operation also
+ * supplies its own lifecycle boundary: content reads and draft creation
+ * require `available`, while restore is only valid during retention.
+ */
+export function isDocumentContentReady(
+  record: { lifecycle: string; scanStatus: string },
+  scanMode: string,
+  operation: DocumentContentOperation,
+): boolean {
+  const scanReady = record.scanStatus === "clean"
+    || (record.scanStatus === "skipped" && scanMode === "disabled");
+  if (!scanReady) return false;
+
+  switch (operation) {
+    case "summary":
+      return record.lifecycle === "available" || record.lifecycle === "pending_deletion";
+    case "download":
+    case "draft":
+      return record.lifecycle === "available";
+    case "restore":
+      return record.lifecycle === "pending_deletion";
+    default:
+      return false;
+  }
+}
 
 export interface DocumentSummary {
   id: string;
@@ -29,10 +84,18 @@ export interface DocumentSummary {
   displayName: string;
   mediaType: string;
   sizeBytes: number;
-  lifecycle: "available" | "pending_deletion";
-  scanStatus: "clean" | "skipped";
+  lifecycle: ListableDocumentLifecycle;
+  scanStatus: string;
   availableAt: string | null;
   deleteAfter: string | null;
+  /** Whether the document's content can be downloaded or drafted from yet. */
+  ready: boolean;
+  /** Bounded failure reason for a rejected document; never provider text. */
+  failureCode: string | null;
+  /** Whether an outage-staged scan can be retried without re-upload. */
+  recoverable: boolean;
+  recoveryExpiresAt: string | null;
+  recoveryStatus: "retrying" | "manual" | null;
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
@@ -109,7 +172,8 @@ async function requireDocumentAccess(userId: string, documentId: string) {
   return record;
 }
 
-function toSummary(record: {
+/** Exported for tests: the visibility boundary is the security-relevant part. */
+export function toSummary(record: {
   id: string;
   itemId: string | null;
   displayName: string;
@@ -119,11 +183,14 @@ function toSummary(record: {
   scanStatus: string;
   availableAt: Date | null;
   deleteAfter: Date | null;
-}): DocumentSummary {
-  if (
-    (record.lifecycle !== "available" && record.lifecycle !== "pending_deletion")
-    || (record.scanStatus !== "clean" && record.scanStatus !== "skipped")
-  ) {
+  failureCode?: string | null;
+  recoverable?: boolean;
+  recoveryExpiresAt?: Date | null;
+  recoveryStatus?: "retrying" | "manual" | null;
+}, scanMode: string): DocumentSummary {
+  // A purged document must never reach a user-visible list, so an unexpected
+  // lifecycle fails loudly rather than being rendered.
+  if (!(listableDocumentLifecycles as readonly string[]).includes(record.lifecycle)) {
     throw new Error("Document is not in a user-visible state");
   }
   return {
@@ -132,10 +199,15 @@ function toSummary(record: {
     displayName: record.displayName,
     mediaType: record.mediaType,
     sizeBytes: record.sizeBytes,
-    lifecycle: record.lifecycle,
+    lifecycle: record.lifecycle as ListableDocumentLifecycle,
     scanStatus: record.scanStatus,
     availableAt: record.availableAt?.toISOString() ?? null,
     deleteAfter: record.deleteAfter?.toISOString() ?? null,
+    ready: isDocumentContentReady(record, scanMode, "summary"),
+    failureCode: record.failureCode ?? null,
+    recoverable: record.recoverable ?? false,
+    recoveryExpiresAt: record.recoveryExpiresAt?.toISOString() ?? null,
+    recoveryStatus: record.recoveryStatus ?? null,
   };
 }
 
@@ -162,6 +234,7 @@ export async function listItemDocuments(
   itemId: string,
 ): Promise<DocumentSummary[]> {
   await requireHouseholdAndItemAccess(userId, householdId, itemId);
+  const config = getDocumentConfig();
   const rows = await getDb()
     .select({
       id: documents.id,
@@ -173,15 +246,31 @@ export async function listItemDocuments(
       scanStatus: documents.scanStatus,
       availableAt: documents.availableAt,
       deleteAfter: documents.deleteAfter,
+      failureCode: documents.failureCode,
+      stageStatus: documentStagingObjects.status,
+      recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
+      recoveryJobStatus: documentJobs.status,
     })
     .from(documents)
+    .leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
+    .leftJoin(documentJobs, and(eq(documentJobs.documentId, documents.id), eq(documentJobs.kind, "scan")))
     .where(and(
       eq(documents.householdId, householdId),
       eq(documents.itemId, itemId),
-      inArray(documents.lifecycle, ["available", "pending_deletion"]),
+      // Widened beyond the openable states so an upload in progress, or one
+      // that was rejected, is visible rather than indistinguishable from an
+      // upload that never happened. Authorisation above is unchanged.
+      inArray(documents.lifecycle, [...listableDocumentLifecycles]),
     ))
     .orderBy(desc(documents.createdAt));
-  return rows.map(toSummary);
+  return rows.map((row) => {
+    const recoverable = row.stageStatus === "pending" && row.recoveryExpiresAt !== null && row.recoveryExpiresAt > new Date() && row.lifecycle === "scanning";
+    return toSummary({
+      ...row,
+      recoverable,
+      recoveryStatus: recoverable && row.recoveryJobStatus === "failed" ? "manual" : recoverable ? "retrying" : null,
+    }, config.scanMode);
+  });
 }
 
 async function reserveDocumentMetadata(input: {
@@ -244,43 +333,77 @@ export async function uploadItemDocument(input: {
   const config = getDocumentConfig();
   const storage = documentStorage();
   const documentId = input.documentId ?? randomUUID();
-  if (input.documentId) {
-    const [existing] = await getDb().select({
-      id: documents.id,
-      itemId: documents.itemId,
-      householdId: documents.householdId,
-      displayName: documents.displayName,
-      mediaType: documents.mediaType,
-      sizeBytes: documents.sizeBytes,
-      lifecycle: documents.lifecycle,
-      scanStatus: documents.scanStatus,
-      availableAt: documents.availableAt,
-      deleteAfter: documents.deleteAfter,
-    }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
-    if (existing) {
-      if (existing.householdId !== input.householdId || existing.itemId !== input.itemId) {
+  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
+  let storageKey: string | undefined;
+  let stagingKey: string | undefined;
+  let metadataReserved = false;
+  try {
+    // Check idempotency scope and content before parsing the retry body. A
+    // reused identity must deterministically return 409 even when the new
+    // bytes are not a supported document type.
+    if (input.documentId) {
+      const [identity] = await getDb().select({
+        householdId: documents.householdId,
+        itemId: documents.itemId,
+        contentSha256: documents.contentSha256,
+        sizeBytes: documents.sizeBytes,
+      }).from(documents).where(eq(documents.id, input.documentId)).limit(1);
+      if (identity && (identity.householdId !== input.householdId || identity.itemId !== input.itemId
+        || identity.contentSha256 !== received.contentSha256 || identity.sizeBytes !== received.sizeBytes)) {
         throw new AppError("document_conflict", "That document identity is already in use", 409);
       }
-      if (existing.lifecycle === "available") return toSummary(existing);
-      if (existing.lifecycle === "rejected") {
-        const [cryptoRecord] = await getDb().select({ documentId: documentCrypto.documentId }).from(documentCrypto)
-          .where(eq(documentCrypto.documentId, input.documentId)).limit(1);
-        if (cryptoRecord) throw new AppError("document_conflict", "That document identity is already in use", 409);
-        const [removed] = await getDb().delete(documents)
-          .where(and(eq(documents.id, input.documentId), eq(documents.householdId, input.householdId), eq(documents.itemId, input.itemId), eq(documents.lifecycle, "rejected")))
-          .returning({ id: documents.id });
-        if (!removed) throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
-      } else {
+    }
+    const mediaType = detectDocumentMediaType(received.leadingBytes);
+    const displayName = normalizedDocumentFilename(input.filename, mediaType);
+
+    if (input.documentId) {
+      const [existing] = await getDb().select({
+        id: documents.id,
+        itemId: documents.itemId,
+        householdId: documents.householdId,
+        displayName: documents.displayName,
+        mediaType: documents.mediaType,
+        sizeBytes: documents.sizeBytes,
+        contentSha256: documents.contentSha256,
+        lifecycle: documents.lifecycle,
+        scanStatus: documents.scanStatus,
+        failureCode: documents.failureCode,
+        availableAt: documents.availableAt,
+        deleteAfter: documents.deleteAfter,
+        stageStatus: documentStagingObjects.status,
+        recoveryExpiresAt: documentStagingObjects.recoveryExpiresAt,
+        recoveryJobStatus: documentJobs.status,
+      }).from(documents).leftJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
+        .leftJoin(documentJobs, and(eq(documentJobs.documentId, documents.id), eq(documentJobs.kind, "scan")))
+        .where(eq(documents.id, input.documentId)).limit(1);
+      if (existing) {
+        if (existing.householdId !== input.householdId || existing.itemId !== input.itemId
+          || existing.contentSha256 !== received.contentSha256
+          || existing.sizeBytes !== received.sizeBytes
+          || existing.mediaType !== mediaType) {
+          throw new AppError("document_conflict", "That document identity is already in use", 409);
+        }
+        if (existing.lifecycle === "available") return toSummary(existing, config.scanMode);
+        if (existing.lifecycle === "scanning" && existing.stageStatus === "pending" && existing.recoveryExpiresAt !== null && existing.recoveryExpiresAt > new Date()) {
+          return toSummary({
+            ...existing,
+            recoverable: true,
+            recoveryStatus: existing.recoveryJobStatus === "failed" ? "manual" : "retrying",
+          }, config.scanMode);
+        }
+        if (existing.lifecycle === "rejected") {
+          if (existing.failureCode === "malware_detected") {
+            throw new AppError("document_malware_detected", "That document upload has already been rejected", 422);
+          }
+          if (existing.failureCode === "scanner_failed") {
+            throw new AppError("document_scanner_failed", "That document upload has already been rejected", 503);
+          }
+          throw new AppError("document_upload_failed", "That document upload has already been rejected", 422);
+        }
         throw new AppError("document_upload_recoverable", "That document upload needs recovery", 503);
       }
     }
-  }
-  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
-  let storageKey: string | undefined;
-  let metadataReserved = false;
-  try {
-    const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const displayName = normalizedDocumentFilename(input.filename, mediaType);
+
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
       if (!validateSupportedDocumentStructure(validationBytes, mediaType)) {
@@ -306,18 +429,118 @@ export async function uploadItemDocument(input: {
     });
     metadataReserved = true;
 
+    log.info("document.lifecycle", { document: documentId, state: "quarantined", bytes: received.sizeBytes });
+
     if (config.scanMode === "required") {
       await getDb().update(documents).set({ lifecycle: "scanning", updatedAt: new Date() })
         .where(and(eq(documents.id, documentId), eq(documents.lifecycle, "quarantined")));
+      log.info("document.lifecycle", { document: documentId, state: "scanning" });
+      log.info("document.scan", { document: documentId, outcome: "attempt" });
+      const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
+        // Distinguish "cannot reach the scanner" from "the scanner answered
+        // with a failure" so an operator knows whether to check connectivity or
+        // the scanner itself. Neither message discloses host, port or provider
+        // text, per the bounded-diagnostics rule.
+        const retryableFailureCode = retryableScannerFailureCode(scan);
+        const failureCode = infected ? "malware_detected" : retryableFailureCode ?? "scanner_failed";
+        // `scan.reason` is a fixed enumeration from the scanner adapter, never
+        // provider text, so it is safe to record.
+        log.warn("document.scan", {
+          document: documentId,
+          outcome: infected ? "infected" : "error",
+          reason: infected ? "malware_detected" : scan.reason,
+          ms: scanMs,
+        });
+        if (retryableFailureCode) {
+          const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+          try {
+            const staged = encryptDocument(plaintext, {
+              documentId,
+              householdId: input.householdId,
+              itemId: input.itemId,
+              mediaType,
+              plaintextSize: received.sizeBytes,
+              purpose: "scanner_recovery",
+            }, config.keyEncryptionKey, config.keyId);
+            stagingKey = storage.createStorageKey();
+            await storage.writeStagingCiphertext(stagingKey, staged.ciphertext);
+            const now = new Date();
+            const recoveryExpiresAt = new Date(now.getTime() + config.scanRecoveryRetentionHours * 60 * 60 * 1_000);
+            const nextAttemptAt = new Date(now.getTime() + scannerRecoveryDelayMs(1));
+            try {
+              await getDb().transaction(async (transaction) => {
+                await transaction.insert(documentStagingObjects).values({
+                  documentId,
+                  storageKey: stagingKey!,
+                  purpose: "scanner_recovery",
+                  ciphertextSize: staged.ciphertext.length,
+                  ...staged.envelope,
+                  status: "pending",
+                  recoveryExpiresAt,
+                });
+                await transaction.insert(documentJobs).values({
+                  documentId,
+                  kind: "scan",
+                  generation: 1,
+                  status: "pending",
+                  attempts: 0,
+                  nextAttemptAt,
+                  lastError: failureCode,
+                });
+                await transaction.update(documents).set({
+                  lifecycle: "scanning",
+                  scanStatus: "error",
+                  failureCode,
+                  updatedAt: now,
+                }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "scanning")));
+                await transaction.insert(auditLog).values({
+                  householdId: input.householdId,
+                  actorUserId: input.userId,
+                  entityType: "document",
+                  entityId: documentId,
+                  action: "document_scan_recoverable",
+                  changes: { itemId: input.itemId, reason: failureCode },
+                });
+              });
+            } catch (error) {
+              await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
+              stagingKey = undefined;
+              throw error;
+            } finally {
+              staged.ciphertext.fill(0);
+            }
+            log.warn("document.scan", { document: documentId, outcome: "recoverable", reason: failureCode, ms: scanMs });
+            return toSummary({
+              id: documentId,
+              itemId: input.itemId,
+              displayName,
+              mediaType,
+              sizeBytes: received.sizeBytes,
+              lifecycle: "scanning",
+              scanStatus: "error",
+              availableAt: null,
+              deleteAfter: null,
+              failureCode,
+              recoverable: true,
+              recoveryExpiresAt,
+              recoveryStatus: "retrying",
+            }, config.scanMode);
+          } finally {
+            plaintext.fill(0);
+          }
+        }
+
         await getDb().update(documents).set({
           lifecycle: "rejected",
           scanStatus: infected ? "infected" : "error",
-          failureCode: infected ? "malware_detected" : `scanner_${scan.reason}`,
+          failureCode,
           updatedAt: new Date(),
         }).where(eq(documents.id, documentId));
+        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
         await recordDocumentAudit(
           input.householdId,
           documentId,
@@ -325,18 +548,28 @@ export async function uploadItemDocument(input: {
           infected ? "document_rejected_malware" : "document_rejected_scanner",
           { itemId: input.itemId },
         );
+        if (infected) {
+          throw new AppError(
+            "document_malware_detected",
+            "Orbit rejected that document because malware was detected",
+            422,
+          );
+        }
         throw new AppError(
-          infected ? "document_malware_detected" : "document_scanner_unavailable",
-          infected ? "Orbit rejected that document because malware was detected" : "Document scanning is temporarily unavailable",
-          infected ? 422 : 503,
+          "document_scanner_failed",
+          "Document upload is not possible because the malware scanner reported a failure. Uploads stay blocked until the scanner is healthy.",
+          503,
         );
       }
+      log.info("document.scan", { document: documentId, outcome: "clean", ms: scanMs });
       await getDb().update(documents).set({ scanStatus: "clean", lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     } else {
+      log.info("document.scan", { document: documentId, outcome: "skipped", reason: "scan_mode_disabled" });
       await getDb().update(documents).set({ lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     }
+    log.info("document.lifecycle", { document: documentId, state: "encrypting" });
 
     const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
@@ -383,6 +616,7 @@ export async function uploadItemDocument(input: {
         },
       });
     });
+    log.info("document.lifecycle", { document: documentId, state: "available", bytes: received.sizeBytes });
     return {
       id: documentId,
       itemId: input.itemId,
@@ -393,16 +627,27 @@ export async function uploadItemDocument(input: {
       scanStatus: config.scanMode === "disabled" ? "skipped" : "clean",
       availableAt: now.toISOString(),
       deleteAfter: null,
+      ready: isDocumentContentReady({ lifecycle: "available", scanStatus: config.scanMode === "disabled" ? "skipped" : "clean" }, config.scanMode, "summary"),
+      failureCode: null,
+      recoverable: false,
+      recoveryExpiresAt: null,
+      recoveryStatus: null,
     };
   } catch (error) {
     if (storageKey) await storage.deleteCiphertext(storageKey).catch(() => undefined);
+    if (stagingKey) await storage.deleteStagingCiphertext(stagingKey).catch(() => undefined);
     if (metadataReserved && !(error instanceof AppError && error.code.startsWith("document_malware"))) {
-      await getDb().update(documents).set({
+      const failureCode = error instanceof AppError ? error.code : "processing_failed";
+      const rejected = await getDb().update(documents).set({
         lifecycle: "rejected",
-        failureCode: error instanceof AppError ? error.code : "processing_failed",
+        failureCode,
         updatedAt: new Date(),
       }).where(and(eq(documents.id, documentId), notInArray(documents.lifecycle, ["available", "rejected"])))
-        .catch(() => undefined);
+        .returning({ id: documents.id })
+        .catch(() => []);
+      if (rejected.length > 0) {
+        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
+      }
     }
     throw error;
   } finally {
@@ -416,13 +661,13 @@ export async function readDocumentDownload(
   documentId: string,
 ): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
   const record = await requireDocumentAccess(userId, documentId);
-  if (record.lifecycle !== "available" || !record.itemId) {
+  const config = getDocumentConfig();
+  if (!record.itemId || !isDocumentContentReady(record, config.scanMode, "download")) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
   const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId)).limit(1);
   if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
 
-  const config = getDocumentConfig();
   if (crypto.keyId !== config.keyId) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
@@ -482,16 +727,18 @@ export async function requestDocumentDeletion(userId: string, documentId: string
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  log.info("document.lifecycle", { document: documentId, state: "pending_deletion" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_deletion_requested", {
     itemId: record.itemId,
     deleteAfter: deleteAfter.toISOString(),
   });
-  return toSummary(updated);
+  return toSummary(updated, config.scanMode);
 }
 
 export async function restoreDocument(userId: string, documentId: string): Promise<DocumentSummary> {
   const record = await requireDocumentAccess(userId, documentId);
-  if (record.lifecycle !== "pending_deletion" || !record.deleteAfter || record.deleteAfter <= new Date()) {
+  const config = getDocumentConfig();
+  if (!isDocumentContentReady(record, config.scanMode, "restore") || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
   const updated = await getDb().transaction(async (transaction) => {
@@ -544,6 +791,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
+  log.info("document.lifecycle", { document: documentId, state: "available" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
-  return toSummary(updated);
+  return toSummary(updated, config.scanMode);
 }

@@ -3,7 +3,7 @@ import { appErrorResponse, AppError } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { listItemDocuments, requestDocumentDeletion, uploadItemDocument } from "@/server/document-repository";
-import { authorizeDirectReviewedUpload, completeDirectReviewedUpload, markDirectReviewedUploadRecoverable } from "@/server/reviewed-intake";
+import { authorizeDirectReviewedUpload, completeDirectReviewedUpload, markDirectReviewedUploadRecoverable, recordDirectReviewedUploadPending } from "@/server/reviewed-intake";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -34,15 +34,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
     assertCsrf(request, session, config);
     const { householdId, itemId } = await context.params;
     const operationIdHeader = request.headers.get("x-orbit-review-operation");
+    const documentIdHeader = request.headers.get("x-orbit-document-id");
+    const documentIdResult = documentIdHeader ? z.uuid().safeParse(documentIdHeader) : undefined;
+    if (documentIdResult && !documentIdResult.success) throw new AppError("document_id_invalid", "The document identity is invalid", 422);
+    const documentId = documentIdResult?.success ? documentIdResult.data.toLowerCase() : undefined;
     if (operationIdHeader) {
-      if (!z.uuid().safeParse(operationIdHeader).success) throw new AppError("reviewed_intake_operation_invalid", "The reviewed intake operation is invalid", 422);
-      reviewedOperationId = operationIdHeader;
+      const operationIdResult = z.uuid().safeParse(operationIdHeader);
+      if (!operationIdResult.success) throw new AppError("reviewed_intake_operation_invalid", "The reviewed intake operation is invalid", 422);
+      const validatedOperationId = operationIdResult.data.toLowerCase();
+      reviewedOperationId = validatedOperationId;
       reviewedOperationUserId = session.user.id;
-      const existing = await authorizeDirectReviewedUpload(session.user.id, reviewedOperationId, householdId, itemId);
+      const existing = await authorizeDirectReviewedUpload(session.user.id, validatedOperationId, householdId, itemId);
       if (existing.documentId) {
         const document = (await listItemDocuments(session.user.id, householdId, itemId)).find((candidate) => candidate.id === existing.documentId);
         if (!document) throw new AppError("reviewed_intake_recoverable", "That reviewed document is not available yet", 503);
-        return NextResponse.json({ document }, { status: 201, headers: { "Cache-Control": "no-store" } });
+        if (document.lifecycle === "rejected") {
+          throw new AppError(
+            document.failureCode === "malware_detected" ? "document_malware_detected" : document.failureCode === "scanner_failed" ? "document_scanner_failed" : "document_upload_failed",
+            "That document upload has already been rejected",
+            document.failureCode === "scanner_failed" ? 503 : 422,
+          );
+        }
+        return NextResponse.json({ document }, { status: document.recoverable || !document.ready ? 202 : 201, headers: { "Cache-Control": "no-store" } });
       }
     }
     const encodedFilename = request.headers.get("x-orbit-filename");
@@ -66,17 +79,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       filename,
       body: request.body,
       declaredBytes,
+      documentId,
     });
     if (reviewedOperationId) {
       try {
-        await completeDirectReviewedUpload(session.user.id, reviewedOperationId, householdId, itemId, document.id);
+        if (document.recoverable) {
+          await recordDirectReviewedUploadPending(session.user.id, reviewedOperationId, householdId, itemId, document.id, document.failureCode);
+        } else {
+          await completeDirectReviewedUpload(session.user.id, reviewedOperationId, householdId, itemId, document.id);
+        }
       } catch (error) {
-        await requestDocumentDeletion(session.user.id, document.id).catch(() => undefined);
+        if (!document.recoverable) await requestDocumentDeletion(session.user.id, document.id).catch(() => undefined);
         throw error;
       }
     }
     return NextResponse.json({ document }, {
-      status: 201,
+      status: document.recoverable ? 202 : 201,
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

@@ -12,6 +12,7 @@ export interface HouseholdSettingsInput {
 interface HouseholdSettingsProps {
   household: HouseholdWorkspace;
   onSave(input: HouseholdSettingsInput): Promise<void>;
+  onRemoved(): void;
   csrfToken: string;
 }
 
@@ -27,7 +28,7 @@ const timezones = [
   "UTC",
 ];
 
-export function HouseholdSettings({ household, onSave, csrfToken }: HouseholdSettingsProps) {
+export function HouseholdSettings({ household, onSave, onRemoved, csrfToken }: HouseholdSettingsProps) {
   const [message, setMessage] = useState("");
   const [saveBusy, setSaveBusy] = useState(false);
   const [deletionConfirmation, setDeletionConfirmation] = useState("");
@@ -62,8 +63,13 @@ export function HouseholdSettings({ household, onSave, csrfToken }: HouseholdSet
       });
       const payload = await response.json() as { deleteAfter?: string; error?: { message: string } };
       if (!response.ok) throw new Error(payload.error?.message ?? "Orbit could not update this household");
-      setMessage(action === "delete" ? `Deletion is scheduled for ${new Date(payload.deleteAfter!).toLocaleDateString()}.` : "Household deletion was cancelled.");
-      window.location.reload();
+      if (action === "delete") {
+        setMessage(`Deletion is scheduled for ${new Date(payload.deleteAfter!).toLocaleDateString()}.`);
+        onRemoved();
+      } else {
+        setMessage("Household deletion was cancelled.");
+        window.location.reload();
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Orbit could not update this household");
     } finally { setLifecycleBusy(false); }
