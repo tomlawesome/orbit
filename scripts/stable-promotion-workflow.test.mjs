@@ -49,6 +49,8 @@ describe("stable promotion workflow", () => {
     expect(workflow).toContain("Stable Git tag %s already exists and will not be overwritten");
     expect(workflow).toContain('org.opencontainers.image.version');
     expect(workflow).toContain('/opt/orbit/VERSION');
+    expect(workflow).toContain('/opt/orbit/CHANNEL');
+    expect(workflow).toContain('[[ "${embedded_channel}" == "${release_stage}" ]]');
     expect(workflow).toContain('node scripts/calculate-version.mjs --channel "${channel}"');
     expect(workflow).toContain("docker buildx imagetools create");
     expect(workflow).toContain('--tag "${image}:latest"');
