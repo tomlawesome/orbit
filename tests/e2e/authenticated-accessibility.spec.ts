@@ -181,6 +181,7 @@ async function openItemDetail(page: Page, fixture: AccessibilityFixture) {
   await row.locator("button.more-button").click();
   const dialog = page.getByRole("dialog", { name: fixture.itemTitle });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: fixture.itemTitle, exact: true })).toBeFocused();
   return { dialog, trigger: row.locator("button.more-button") };
 }
 
