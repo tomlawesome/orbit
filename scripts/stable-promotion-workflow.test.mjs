@@ -27,44 +27,52 @@ describe("stable promotion workflow", () => {
   it("promotes a tested preview through explicit protected approval", () => {
     expect(workflow).toContain("name: Promote tested Orbit preview");
     expect(workflow).toContain("preview_digest:");
+    expect(workflow).not.toContain("      version:");
+    expect(workflow).not.toContain("update_latest:");
     expect(workflow).toContain("environment: production");
     expect(workflow).toContain("io.github.tomlawesome.orbit.release-stage");
     expect(workflow).toContain("io.github.tomlawesome.orbit.source-branch");
+    expect(workflow).toContain("attestations: read");
+    expect(workflow).toContain("Verify accepted digest attestations");
     expect(workflow).toContain("node scripts/stable-promotion-policy.mjs");
     expect(workflow.toLowerCase()).not.toContain("release candidate");
     expect(workflow.toLowerCase()).not.toContain("release-candidate");
   });
 
-  it("requires the exact preview tree in main and its revision in develop", () => {
+  it("requires the exact preview tree in main and retains the source revision", () => {
     expect(policy).toContain('["merge-base", "--is-ancestor", revision, "origin/main"]');
-    expect(policy).toContain('["merge-base", "--is-ancestor", revision, "origin/develop"]');
+    expect(policy).toContain('["merge-base", "--is-ancestor", revision, `origin/${sourceBranch}`]');
     expect(policy).toContain('["diff", "--quiet", `${revision}^{tree}`, "origin/main^{tree}"]');
   });
 
-  it("rejects version replacement and retags without rebuilding", () => {
-    expect(workflow).toContain("already exists and will not be overwritten");
+  it("derives the embedded version and promotes only latest without rebuilding", () => {
+    expect(workflow).toContain("Stable Git tag %s already exists and will not be overwritten");
+    expect(workflow).toContain('org.opencontainers.image.version');
+    expect(workflow).toContain('/opt/orbit/VERSION');
+    expect(workflow).toContain('node scripts/calculate-version.mjs --channel "${channel}"');
     expect(workflow).toContain("docker buildx imagetools create");
-    expect(workflow).toContain("Promoted version did not retain the tested digest");
+    expect(workflow).toContain('--tag "${image}:latest"');
+    expect(workflow).toContain("Latest did not retain the tested digest");
+    expect(workflow).toContain('gh release create "${VERSION}"');
     expect(workflow).not.toContain("docker/build-push-action");
     expect(workflow).not.toContain("docker build ");
   });
 
-  it("documents the protected Gitflow merge contract", () => {
+  it("documents the protected preview-lane merge contract", () => {
     const documentation = `${releaseGuide}\n${releaseDecision}\n${pullRequestTemplate}`;
 
-    expect(documentation).toContain("Issue branches start from and normally target `develop`.");
-    expect(documentation).toContain("`release/vMAJOR.MINOR.PATCH` starts from `develop`");
-    expect(documentation).toContain("`hotfix/*` starts from `main`");
-    expect(documentation).toContain("into both `main` and `develop`");
+    expect(documentation).toContain("issue branches start from and target `develop`");
+    expect(documentation).toContain("Merge `develop` into protected `preview`");
+    expect(documentation).toContain("merge `preview` into protected `main`");
+    expect(documentation).toContain("one semantic version per release train");
     expect(documentation.toLowerCase()).not.toContain("release candidate");
     expect(documentation.toLowerCase()).not.toContain("release-candidate");
   });
 
-  it("retires legacy publication while retaining historic preview identities", () => {
+  it("retains historic preview identities without publishing new per-run tags", () => {
     expect(releaseGuide).toContain(
-      "The legacy `release/architecture-consolidation-rc` branch receives no new",
+      "Historic `preview-*` and `rc-*` tags remain",
     );
-    expect(releaseGuide).toContain("Historic `rc-YYYY.MM.DD.<run>` images");
-    expect(releaseGuide).toContain("Do not relabel, replace, or promote them.");
+    expect(releaseGuide).toContain("relabel, replace, or promote them.");
   });
 });

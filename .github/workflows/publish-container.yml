@@ -5,11 +5,11 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
   push:
     branches:
-      - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
 
 concurrency:
   group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
@@ -110,7 +110,11 @@ jobs:
         run: bash scripts/test-backend.sh
 
       - name: Build production application
-        if: needs.changes.outputs.build == 'true'
+        if: >-
+          ${{
+            github.event_name == 'push' &&
+            needs.changes.outputs.build == 'true'
+          }}
         run: pnpm build
 
       - name: Upload diagnostic coverage
@@ -123,6 +127,7 @@ jobs:
 
   supply_chain_source:
     name: Source dependency and secret policy
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -180,9 +185,12 @@ jobs:
     needs:
       - changes
       - fast
-      - supply_chain_source
     # Skipped rather than filtered out, so the required check still reports.
-    if: needs.changes.outputs.integration == 'true'
+    if: >-
+      ${{
+        github.event_name == 'push' &&
+        needs.changes.outputs.integration == 'true'
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -230,7 +238,10 @@ jobs:
       - fast
       - supply_chain_source
       - integration
-    if: github.event_name == 'pull_request' && needs.changes.outputs.system == 'true'
+    # Retain the existing check identity for branch protection, but defer the
+    # expensive exact-image path until the protected preview merge. The publish
+    # job below reuses these steps and runs them exactly once for that revision.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -244,7 +255,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 2
+          # Stable Git tags are the version calculator's durable baseline.
+          fetch-depth: 0
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -291,20 +303,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
-      - name: Generate unique preview tag
-        id: preview_tag
+      - name: Calculate release-train version
+        id: version
         run: |
-          branch_slug="$(
-            printf '%s' "${GITHUB_REF_NAME}" |
-              tr '[:upper:]' '[:lower:]' |
-              sed --regexp-extended 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g'
-          )"
-          [[ -n "${branch_slug}" ]] || {
-            printf 'Could not derive a safe preview branch identifier.\n' >&2
-            exit 1
-          }
-          preview_tag="preview-${branch_slug}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          printf 'tag=%s\n' "${preview_tag}" >> "${GITHUB_OUTPUT}"
+          channel=preview
+          if [[ "${GITHUB_REF_NAME}" == hotfix/* ]]; then
+            channel=hotfix
+          fi
+          version="$(node scripts/calculate-version.mjs --channel "${channel}")"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+          printf 'revision=%s\n' "$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Generate exact image metadata
         id: meta
@@ -312,11 +320,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=ci-${{ github.sha }},enable=${{ env.PUBLICATION_CHANNEL == 'ci' }}
-            type=raw,value=${{ steps.preview_tag.outputs.tag }},enable=${{ env.PUBLICATION_CHANNEL == 'preview' }}
+            type=raw,value=preview
           labels: |
             org.opencontainers.image.title=Orbit
             org.opencontainers.image.description=Everything in your orbit, on track.
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
             io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}
             io.github.tomlawesome.orbit.source-branch=${{ github.ref_name }}
 
@@ -331,6 +339,9 @@ jobs:
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ORBIT_VERSION=${{ steps.version.outputs.version }}
+            ORBIT_REVISION=${{ steps.version.outputs.revision }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -347,6 +358,7 @@ jobs:
           image_tag="${image_tags[0]}"
           image_id="$(docker image inspect --format '{{.Id}}' "${image_tag}")"
           revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image_tag}")"
+          version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image_tag}")"
           release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image_tag}")"
           [[ "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
             printf 'Built image has no valid configuration identity.\n' >&2
@@ -356,13 +368,29 @@ jobs:
             printf 'Built image revision %s does not match workflow revision %s.\n' "${revision}" "${GITHUB_SHA}" >&2
             exit 1
           }
+          [[ "${version}" == "${{ steps.version.outputs.version }}" ]] || {
+            printf 'Built image version %s does not match calculated version %s.\n' \
+              "${version}" "${{ steps.version.outputs.version }}" >&2
+            exit 1
+          }
           [[ "${release_stage}" == "${PUBLICATION_CHANNEL}" ]] || {
             printf 'Built image stage %s does not match channel %s.\n' "${release_stage}" "${PUBLICATION_CHANNEL}" >&2
+            exit 1
+          }
+          reported_version="$(docker run --rm "${image_tag}" --version)"
+          [[ "${reported_version}" == "Orbit ${version}" ]] || {
+            printf 'Container version command did not report the embedded version.\n' >&2
+            exit 1
+          }
+          embedded_revision="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/REVISION)"
+          [[ "${embedded_revision}" == "${revision}" ]] || {
+            printf 'Embedded revision does not match the image revision label.\n' >&2
             exit 1
           }
           {
             printf 'id=%s\n' "${image_id}"
             printf 'tag=%s\n' "${image_tag}"
+            printf 'version=%s\n' "${version}"
           } >> "${GITHUB_OUTPUT}"
           printf 'ORBIT_IMAGE=%s\n' "${image_tag}" >> "${GITHUB_ENV}"
 
@@ -904,12 +932,119 @@ jobs:
           {
             printf '## Orbit preview image\n\n'
             printf -- '- Tag: `%s`\n' "${IMAGE_TAG}"
+            printf -- '- Version: `%s`\n' "${{ steps.image.outputs.version }}"
             printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
             printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
             printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
             printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
             printf -- '- Supply-chain evidence: dependency/secret policy, exact-image vulnerability report, SPDX SBOM, and verified provenance/SBOM attestations\n'
             printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify_preview:
+    name: Verify tested preview for stable merge
+    needs:
+      - fast
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+
+    steps:
+      - name: Check out proposed stable source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify preview identity and source
+        id: preview
+        env:
+          EXPECTED_REVISION: ${{ github.event.pull_request.head.sha }}
+          SOURCE_BRANCH: ${{ github.head_ref }}
+        run: |
+          channel=preview
+          if [[ "${SOURCE_BRANCH}" == hotfix/* ]]; then
+            channel=hotfix
+          elif [[ "${SOURCE_BRANCH}" != "preview" ]]; then
+            printf 'Stable pull requests must come from preview or a hotfix branch.\n' >&2
+            exit 1
+          fi
+
+          expected_version="$(node scripts/calculate-version.mjs --channel "${channel}")"
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          digest="$(
+            docker buildx imagetools inspect "${image}:preview" |
+              awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ { print $2; exit }'
+          )"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            printf 'The preview tag did not resolve to an immutable digest.\n' >&2
+            exit 1
+          }
+          docker pull "${image}@${digest}"
+          revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${image}@${digest}")"
+          version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${image}@${digest}")"
+          release_stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "${image}@${digest}")"
+          source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${digest}")"
+          embedded_version="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/VERSION)"
+          embedded_revision="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/REVISION)"
+          reported_version="$(docker run --rm "${image}@${digest}" --version)"
+
+          [[ "${version}" == "${expected_version}" && "${embedded_version}" == "${version}" ]] || {
+            printf 'Preview version does not match the calculated release train.\n' >&2
+            exit 1
+          }
+          [[ "${revision}" == "${embedded_revision}" ]] || {
+            printf 'Preview revision label and embedded identity differ.\n' >&2
+            exit 1
+          }
+          [[ "${reported_version}" == "Orbit ${version}" ]] || {
+            printf 'Preview --version output does not match its embedded identity.\n' >&2
+            exit 1
+          }
+
+          ORBIT_PROMOTION_PHASE=merge \
+          ORBIT_PREVIEW_DIGEST="${digest}" \
+          ORBIT_STABLE_VERSION="${version}" \
+          ORBIT_PREVIEW_STAGE="${release_stage}" \
+          ORBIT_PREVIEW_REVISION="${revision}" \
+          ORBIT_PREVIEW_SOURCE_BRANCH="${source_branch}" \
+          ORBIT_EXPECTED_PREVIEW_REVISION="${EXPECTED_REVISION}" \
+            node scripts/stable-promotion-policy.mjs
+          printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify preview attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_DIGEST: ${{ steps.preview.outputs.digest }}
+        run: |
+          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+          gh attestation verify "${image_reference}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh attestation verify "${image_reference}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --predicate-type https://spdx.dev/Document/v2.3 >/dev/null
+
+      - name: Record stable merge evidence
+        run: |
+          {
+            printf '## Orbit preview verified for stable merge\n\n'
+            printf -- '- Version: `%s`\n' "${{ steps.preview.outputs.version }}"
+            printf -- '- Digest: `%s`\n' "${{ steps.preview.outputs.digest }}"
+            printf -- '- Source revision: `%s`\n' "${{ github.event.pull_request.head.sha }}"
+            printf '\nNo container rebuild occurred.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish_preview:
@@ -922,11 +1057,8 @@ jobs:
       ${{
         github.event_name == 'push' &&
         (
-          github.ref == 'refs/heads/develop' ||
-          (
-            startsWith(github.ref, 'refs/heads/release/') &&
-            github.ref_name != 'release/architecture-consolidation-rc'
-          )
+          github.ref == 'refs/heads/preview' ||
+          startsWith(github.ref, 'refs/heads/hotfix/')
         )
       }}
     runs-on: ubuntu-latest

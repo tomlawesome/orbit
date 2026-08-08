@@ -5,8 +5,9 @@ closes.
 
 Closes #
 
-Ordinary issue branches start from and target `develop`. A release or hotfix
-pull request must identify its required `main`/`develop` merge pair.
+Ordinary issue branches start from and target `develop`. Release-train pull
+requests merge `develop` into `preview`, then the accepted `preview` into
+`main`. A hotfix must identify its later `develop`/`preview` reconciliation.
 
 ## Changes
 

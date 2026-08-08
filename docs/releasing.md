@@ -1,104 +1,87 @@
-# Orbit Gitflow previews and stable promotion
+# Orbit preview lane and stable promotion
 
 Orbit treats a container digest—not a mutable tag—as the identity of an
-artifact. Preview tags help people find images, but every deployment,
-acceptance record, and promotion uses the immutable digest.
+artifact. `preview` and `latest` help people find an image, but deployments,
+acceptance records and promotion use the immutable digest.
 
 ## Protected branch flow
 
-- `main` contains stable source only.
-- `develop` is the integration branch. Issue branches start from and normally
-  target `develop`.
-- `release/vMAJOR.MINOR.PATCH` starts from `develop`. Only release validation
-  and narrowly reviewed fixes belong on it. Merge the accepted release branch
-  into both `main` and `develop` through protected pull requests.
-- `hotfix/*` starts from `main`. Merge every accepted hotfix into both `main`
-  and `develop` through protected pull requests.
-- The legacy `release/architecture-consolidation-rc` branch receives no new
-  feature work and is excluded from preview publication.
+- Ordinary issue branches start from and target `develop`.
+- Merge `develop` into protected `preview` to start or update an ordinary
+  release train.
+- The protected `preview` push runs the authoritative CI and publication path.
+- After digest-based acceptance, merge `preview` into protected `main`.
+- A `hotfix/*` branch starts from `main`, publishes and accepts a patch preview,
+  merges to `main`, and is then reconciled into `develop` and `preview`.
 
-Do not squash or rebase away a release preview's source revision when merging
-the release branch. Stable promotion verifies that exact revision and tree.
+Do not squash or rebase away the accepted preview revision. Stable promotion
+verifies that revision and its exact tree.
+
+## Automatic version calculation
+
+Orbit uses one semantic version per release train. The calculator reads the
+highest stable `vMAJOR.MINOR.PATCH` Git tag:
+
+- an ordinary `preview` train increments minor and resets patch;
+- a `hotfix/*` train increments patch; and
+- a major increment requires a separate protected human release decision.
+
+Until the first stable Git tag exists, the package version is the migration
+baseline. Commits, retries and repeated preview builds do not consume versions;
+they all calculate the same candidate until stable promotion creates the tag.
+No operator types a version into the promotion workflow.
 
 ## Preview publication
 
-Pushes to protected `develop` and version-specific `release/*` branches publish
-an AMD64 preview tagged
-`preview-<branch>-<workflow-run-id>-<workflow-attempt>`. The run identity makes
-every published tag unique even when a workflow is retried.
+A push to protected `preview` (or a bounded `hotfix/*` branch) builds one AMD64
+image with its calculated version and exact source revision embedded in
+read-only image files and OCI labels. The same loaded image passes system and
+supply-chain validation before it is pushed as `preview`.
 
-Previews:
+Publication records the resolved digest and attaches verified GitHub OIDC
+provenance and SPDX SBOM attestations to that digest. Deploy the digest—not the
+tag—for manual acceptance. The image reports its identity without configured
+secrets:
 
-- pass the repository's automated publication gates;
-- are built once with their final metadata, loaded into Compose, and pushed
-  only after that exact image passes system validation;
-- carry retained source dependency/secret evidence plus an exact-image
-  vulnerability report and SPDX SBOM under the repository's explicit
-  [supply-chain policy](supply-chain.md);
-- receive verified GitHub OIDC provenance and SBOM attestations bound to the
-  resolved registry digest after publication, without rebuilding;
-- carry the immutable image label
-  `io.github.tomlawesome.orbit.release-stage=preview` plus the exact source
-  branch and revision;
-- support deployment by digest for real-world engineering feedback;
-- may contain incomplete, experimental, or not-yet-proven behaviour; and
-- are eligible for stable promotion only when published from the exact
-  versioned release branch and accepted under the controls below.
+```text
+docker run --rm ghcr.io/tomlawesome/orbit@sha256:<digest> --version
+Orbit vMAJOR.MINOR.PATCH
+```
 
-Pull requests run the same production-image and Compose checks with a read-only
-token and cannot publish. The protected-branch push repeats validation because
-that merged revision is the publication identity, but it does not rebuild
-between system testing and publication. The workflow records both the tested
-image configuration ID and the resulting registry digest. A preview is not
-recorded as deployable if either digest-bound attestation cannot be verified.
+The only new registry tag is `preview`. `dev` remains reserved and unpublished.
+There are no per-run, commit, branch or semantic-version container tags.
 
-Preview publication is currently AMD64 only. ARM64 remains disabled until CI
-can build and exercise that platform and assemble a multi-platform manifest
-from exact tested identities; it is not sufficient to append an untested
-architecture after the AMD64 gates pass.
+## Stable merge and promotion
 
-Historic `rc-YYYY.MM.DD.<run>` images published before
-[ADR-0003](adr/0003-gitflow-preview-and-stable-channels.md) remain immutable
-historical preview evidence. Do not relabel, replace, or promote them.
+1. Deploy the protected preview by digest and complete release acceptance.
+2. Open the protected pull request from `preview` to `main` (or from the tested
+   `hotfix/*` source). CI verifies the `preview` tag resolves to the pull-request
+   head, validates the embedded version/revision and verifies provenance and
+   SBOM attestations without building a container.
+3. Merge without changing the accepted source tree.
+4. From `main`, run **Promote tested Orbit preview** with the accepted digest.
+5. Approve the protected `production` environment.
 
-## Release acceptance and stable promotion
-
-After all release blockers and automated gates—including SBOM, dependency and
-image scanning, and provenance—pass:
-
-1. Cut `release/vMAJOR.MINOR.PATCH` from protected `develop`.
-2. Deploy the release branch's preview by digest to a representative
-   self-hosted test bed and complete the release-acceptance checklist. Any
-   content change requires a newly published and accepted preview digest.
-3. Merge the tested release revision into protected `main` without squashing,
-   rebasing it away, or changing its source tree.
-4. Merge the same release branch back into protected `develop`.
-5. From `main`, run **Promote tested Orbit preview** with the accepted digest
-   and matching `vMAJOR.MINOR.PATCH` stable version.
-6. Approve the protected `production` environment.
-
-The workflow rejects development, legacy, and mismatched release previews. It
-verifies the `preview` stage, matching version-specific source branch, source
-revision in both protected branches, exact `main` tree identity, and absence of
-the requested stable tag. It then points the version tag and, when requested,
-`latest` at the exact tested digest without rebuilding.
+The workflow reads the version from the image, verifies it against the embedded
+identity, checks the exact protected source and `main` tree, and refuses an
+existing stable Git tag. It points `latest` at the accepted digest without a
+rebuild, creates the matching Git tag and GitHub Release, and records the digest
+in the release notes.
 
 ## Required repository settings
 
-- Keep `main` protected with required checks, reviewed pull requests, resolved
-  conversations, and force-push/deletion prevention.
-- Give `develop` the same protection and make it the default base for ordinary
-  issue pull requests.
-- Protect `release/**` against force-push and deletion and require the same
-  checks for pull requests targeting those branches.
-- Protect `hotfix/**` against force-push and deletion and require pull requests
-  into both stable and integration branches.
-- Create a GitHub Actions environment named `production`.
-- Give `production` required reviewers, prevent self-review where practical,
-  and allow deployments only from protected `main`.
-- Keep the repository-linked GHCR package writable by this repository's
-  `GITHUB_TOKEN`. No personal token or long-lived registry secret is required.
+- Protect `develop`, `preview` and `main` against direct changes, force-pushes
+  and deletion. Require reviewed pull requests and resolved conversations.
+- Keep the fast checks required for ordinary changes and the preview identity
+  verification required for pull requests to `main`.
+- Protect `hotfix/**` while active and require review before stable merge.
+- Create a GitHub Actions environment named `production`, require reviewers,
+  prevent self-review where practical, and allow deployments only from `main`.
+- Keep the repository-linked GHCR package writable only by this repository's
+  least-privilege `GITHUB_TOKEN`.
 
-Tags can move; digests cannot. Compose does not default to `latest`; always set
-`ORBIT_IMAGE` to and record the digest shown in the publication workflow
-summary. A promoted `latest` tag remains only a convenience pointer.
+Historic `preview-*` and `rc-*` tags remain immutable audit evidence. Do not
+relabel, replace, or promote them.
+
+Tags can move; digests cannot. Compose does not default to either discovery
+tag. Always set `ORBIT_IMAGE` to and record the accepted digest.

@@ -147,7 +147,7 @@ coordination file entered the tracked tree, and the short-lived remote head is
 eligible for deletion. Delete a remote branch only after recording its exact
 head SHA and merged or independently proven superseding outcome, and only with
 the required explicit authority for destructive remote state. Preserve
-`main`, `develop`, active `release/*` and `hotfix/*` branches, active task
+`main`, `develop`, `preview`, active `hotfix/*` branches, active task
 branches, and any unreviewed unique commit. Local worktrees remain until their
 commits and result handoffs have been accepted or safely retained.
 
