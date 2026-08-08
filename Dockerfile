@@ -20,6 +20,7 @@ RUN pnpm build
 FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS runner
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
+ARG ORBIT_CHANNEL
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
@@ -30,6 +31,7 @@ LABEL org.opencontainers.image.description="Everything in your orbit, on track."
 LABEL org.opencontainers.image.source="https://github.com/tomlawesome/orbit"
 LABEL org.opencontainers.image.version="${ORBIT_VERSION}"
 LABEL org.opencontainers.image.revision="${ORBIT_REVISION}"
+LABEL io.github.tomlawesome.orbit.release-stage="${ORBIT_CHANNEL}"
 WORKDIR /opt/orbit
 # Seed the mount point with the runtime user's ownership so a new named volume
 # is writable when Docker copies the image directory into it on first use.
@@ -57,10 +59,12 @@ COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./
 COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
 RUN printf '%s\n' "${ORBIT_VERSION}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
   && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq '^[0-9a-f]{40}$' \
+  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq '^(ci|preview|dev)$' \
   && printf '%s\n' "${ORBIT_VERSION}" > /opt/orbit/VERSION \
   && printf '%s\n' "${ORBIT_REVISION}" > /opt/orbit/REVISION \
-  && chown root:root /opt/orbit/VERSION /opt/orbit/REVISION \
-  && chmod 0444 /opt/orbit/VERSION /opt/orbit/REVISION \
+  && printf '%s\n' "${ORBIT_CHANNEL}" > /opt/orbit/CHANNEL \
+  && chown root:root /opt/orbit/VERSION /opt/orbit/REVISION /opt/orbit/CHANNEL \
+  && chmod 0444 /opt/orbit/VERSION /opt/orbit/REVISION /opt/orbit/CHANNEL \
   && chmod 0755 ./scripts/container-entrypoint.sh
 USER root
 EXPOSE 3000

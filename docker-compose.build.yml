@@ -17,3 +17,4 @@ services:
       args:
         ORBIT_VERSION: ${ORBIT_VERSION:?Set ORBIT_VERSION to the calculated release-train version}
         ORBIT_REVISION: ${ORBIT_REVISION:?Set ORBIT_REVISION to the full Git revision}
+        ORBIT_CHANNEL: ${ORBIT_CHANNEL:?Set ORBIT_CHANNEL to the immutable image release channel}

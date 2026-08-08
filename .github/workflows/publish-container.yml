@@ -350,6 +350,7 @@ jobs:
           build-args: |
             ORBIT_VERSION=${{ steps.version.outputs.version }}
             ORBIT_REVISION=${{ steps.version.outputs.revision }}
+            ORBIT_CHANNEL=${{ env.PUBLICATION_CHANNEL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -385,14 +386,24 @@ jobs:
             printf 'Built image stage %s does not match channel %s.\n' "${release_stage}" "${PUBLICATION_CHANNEL}" >&2
             exit 1
           }
+          embedded_version="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/VERSION)"
+          embedded_revision="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/REVISION)"
+          embedded_channel="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/CHANNEL)"
+          [[ "${embedded_version}" == "${version}" ]] || {
+            printf 'Embedded version does not match the image version label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_revision}" == "${revision}" ]] || {
+            printf 'Embedded revision does not match the image revision label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_channel}" == "${release_stage}" ]] || {
+            printf 'Embedded channel does not match the image release-stage label.\n' >&2
+            exit 1
+          }
           reported_version="$(docker run --rm "${image_tag}" --version)"
           [[ "${reported_version}" == "Orbit ${version}" ]] || {
             printf 'Container version command did not report the embedded version.\n' >&2
-            exit 1
-          }
-          embedded_revision="$(docker run --rm --entrypoint cat "${image_tag}" /opt/orbit/REVISION)"
-          [[ "${embedded_revision}" == "${revision}" ]] || {
-            printf 'Embedded revision does not match the image revision label.\n' >&2
             exit 1
           }
           {
@@ -475,6 +486,7 @@ jobs:
         env:
           ORBIT_VERSION: ${{ steps.version.outputs.version }}
           ORBIT_REVISION: ${{ steps.version.outputs.revision }}
+          ORBIT_CHANNEL: ${{ env.PUBLICATION_CHANNEL }}
         run: |
           docker compose --env-file .env-orbit config --quiet
           docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.build.yml config --quiet
@@ -576,6 +588,26 @@ jobs:
         run: |
           response="$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)"
           jq --exit-status '.status == "ready" and .service == "orbit"' <<< "${response}"
+
+      - name: Verify startup banner and immutable identity
+        run: |
+          startup_logs="$(docker compose --env-file .env-orbit logs --no-color orbit-app)"
+          startup_logs="$(sed -E 's/^[^|]*\| //' <<< "${startup_logs}")"
+          banner_line='  ·      ·    ·    ██████╗  ██████╗  ██████╗  ██╗ ████████╗   ·      ·      ·'
+          version="${{ steps.image.outputs.version }}"
+          release_stage="${PUBLICATION_CHANNEL}"
+          revision="${GITHUB_SHA}"
+          identity_line="Orbit ${version} | channel=${release_stage} | revision=${revision}"
+          banner_count="$(grep --fixed-strings --line-regexp --count "${banner_line}" <<< "${startup_logs}" || true)"
+          identity_count="$(grep --fixed-strings --line-regexp --count "${identity_line}" <<< "${startup_logs}" || true)"
+          [[ "${banner_count}" -eq 1 ]] || {
+            printf 'Expected the Orbit startup banner once, found %s.\n' "${banner_count}" >&2
+            exit 1
+          }
+          [[ "${identity_count}" -eq 1 ]] || {
+            printf 'Expected the immutable startup identity once, found %s.\n' "${identity_count}" >&2
+            exit 1
+          }
 
       - name: Verify non-root runtime and private secrets
         run: |
@@ -1014,6 +1046,7 @@ jobs:
           source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${digest}")"
           embedded_version="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/VERSION)"
           embedded_revision="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/REVISION)"
+          embedded_channel="$(docker run --rm --entrypoint cat "${image}@${digest}" /opt/orbit/CHANNEL)"
           reported_version="$(docker run --rm "${image}@${digest}" --version)"
 
           [[ "${version}" == "${expected_version}" && "${embedded_version}" == "${version}" ]] || {
@@ -1022,6 +1055,10 @@ jobs:
           }
           [[ "${revision}" == "${embedded_revision}" ]] || {
             printf 'Preview revision label and embedded identity differ.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_channel}" == "${release_stage}" ]] || {
+            printf 'Preview channel label and embedded identity differ.\n' >&2
             exit 1
           }
           [[ "${reported_version}" == "Orbit ${version}" ]] || {
