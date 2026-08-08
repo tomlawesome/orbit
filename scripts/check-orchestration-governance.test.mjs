@@ -49,6 +49,13 @@ function validPolicy() {
         fineTuningOnly: [4, 5],
         stopEarlyWhenSatisfied: true,
       },
+      lowRiskImplementation: {
+        taskClasses: ["low-risk-implementation", "donkey-work"],
+        provider: "luna",
+        model: "Luna Extra High",
+        fallbackReason: "unavailable",
+        unavailableProviders: ["ollama", "mistral", "claude"],
+      },
       providerSelection: {
         mode: "cheapest_qualified_idle_capacity_first",
         strictSerialFallback: false,
@@ -83,6 +90,7 @@ function validPolicy() {
         "unsuitable_task_class",
         "unreachable",
         "capacity_exhausted",
+        "unavailable",
         "occupied_beneficial_concurrency",
       ],
       isolation: {
@@ -311,18 +319,18 @@ function activeState() {
       task: {
         provider: "luna",
         requestedModel: "Luna Extra High",
-        taskClass: "bounded-implementation",
+        taskClass: "low-risk-implementation",
         qualification: {
           status: "qualified",
           provider: "luna",
           model: "Luna Extra High",
-          taskClass: "bounded-implementation",
+          taskClass: "low-risk-implementation",
           evidenceId: "repository-governance-baseline",
         },
         skippedProviders: [
-          { provider: "ollama", reason: "unqualified", evidenceId: "global-registry:ollama" },
-          { provider: "mistral", reason: "unqualified", evidenceId: "global-registry:mistral" },
-          { provider: "claude", reason: "capacity_exhausted", evidenceId: "provider:claude" },
+          { provider: "ollama", reason: "unavailable", evidenceId: "provider:ollama-unavailable" },
+          { provider: "mistral", reason: "unavailable", evidenceId: "provider:mistral-unavailable" },
+          { provider: "claude", reason: "unavailable", evidenceId: "provider:claude-unavailable" },
         ],
         launchReceipt: {
           source: "create_thread",
@@ -458,6 +466,33 @@ function concurrentProviderState() {
 describe("orchestration governance", () => {
   it("accepts the canonical authority, transition, and learning policy", () => {
     expect(() => validateOrchestrationPolicy(validPolicy())).not.toThrow();
+  });
+
+  it("routes low-risk implementation and donkey work to Luna after unavailable-provider evidence", () => {
+    const policy = validPolicy();
+    expect(() => validateOperationalState(activeState(), policy)).not.toThrow();
+
+    const state = activeState();
+    state.delivery.task.taskClass = "donkey-work";
+    state.delivery.task.qualification.taskClass = "donkey-work";
+    state.delivery.task.launchReceipt.requestedModel = "Luna Extra High";
+    expect(() => validateOperationalState(state, policy)).not.toThrow();
+  });
+
+  it("rejects low-risk implementation routed to a provider other than Luna", () => {
+    const state = activeState();
+    state.delivery.task.provider = "claude";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /low-risk implementation must use Luna Extra High/u,
+    );
+  });
+
+  it("requires unavailable evidence for every skipped low-risk provider", () => {
+    const state = activeState();
+    state.delivery.task.skippedProviders[1].reason = "unqualified";
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /low-risk implementation fallback must record unavailable/u,
+    );
   });
 
   it("rejects Terra orchestration work before any mutation", () => {
@@ -623,6 +658,7 @@ describe("orchestration governance", () => {
       ...state.delivery.task,
       provider: "ollama",
       requestedModel: "qwen2.5-coder:14b-instruct-q4_K_M",
+      taskClass: "bounded-implementation",
       skippedProviders: [],
       qualification: {
         status: "qualified",

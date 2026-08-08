@@ -104,29 +104,29 @@
     "task": {
       "provider": "luna",
       "requestedModel": "Luna Extra High",
-      "taskClass": "bounded-implementation",
+      "taskClass": "low-risk-implementation",
       "qualification": {
         "status": "qualified",
         "provider": "luna",
         "model": "Luna Extra High",
-        "taskClass": "bounded-implementation",
+        "taskClass": "low-risk-implementation",
         "evidenceId": "repository-governance-baseline"
       },
       "skippedProviders": [
         {
           "provider": "ollama",
-          "reason": "unqualified",
-          "evidenceId": "global-registry:ollama"
+          "reason": "unavailable",
+          "evidenceId": "provider:ollama-unavailable"
         },
         {
           "provider": "mistral",
-          "reason": "unqualified",
-          "evidenceId": "global-registry:mistral"
+          "reason": "unavailable",
+          "evidenceId": "provider:mistral-unavailable"
         },
         {
           "provider": "claude",
-          "reason": "capacity_exhausted",
-          "evidenceId": "provider:claude"
+          "reason": "unavailable",
+          "evidenceId": "provider:claude-unavailable"
         }
       ],
       "launchReceipt": {
