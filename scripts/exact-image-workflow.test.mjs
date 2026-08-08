@@ -145,7 +145,15 @@ describe("exact-image publication workflow", () => {
     expect(workflow).toContain("io.github.tomlawesome.orbit.release-stage=${{ env.PUBLICATION_CHANNEL }}");
     expect(workflow).toContain("org.opencontainers.image.version=${{ steps.version.outputs.version }}");
     expect(workflow).toContain("ORBIT_VERSION=${{ steps.version.outputs.version }}");
+    expect(workflow).toContain("ORBIT_CHANNEL=${{ env.PUBLICATION_CHANNEL }}");
+    expect(workflow).toContain('/opt/orbit/CHANNEL');
+    expect(workflow).toContain('[[ "${embedded_channel}" == "${release_stage}" ]]');
     expect(workflow).toContain('docker run --rm "${image_tag}" --version');
+    expect(workflow).toContain("docker compose --env-file .env-orbit logs --no-color orbit-app");
+    expect(workflow).toContain(
+      'Orbit ${version} | channel=${release_stage} | revision=${revision}',
+    );
+    expect(workflow).toContain("grep --fixed-strings --line-regexp --count");
     expect(workflow).toContain("ORBIT_IMAGE=");
     expect(workflow).toContain("--no-build");
     expect(workflow).not.toContain("include_arm64");
@@ -203,6 +211,9 @@ describe("exact-image publication workflow", () => {
     );
     expect(validation).toContain(
       "ORBIT_REVISION: ${{ steps.version.outputs.revision }}",
+    );
+    expect(validation).toContain(
+      "ORBIT_CHANNEL: ${{ env.PUBLICATION_CHANNEL }}",
     );
   });
 
