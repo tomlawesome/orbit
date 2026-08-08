@@ -69,6 +69,7 @@ jobs:
           source_branch="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.source-branch" }}' "${image}@${PREVIEW_DIGEST}")"
           embedded_version="$(docker run --rm --entrypoint cat "${image}@${PREVIEW_DIGEST}" /opt/orbit/VERSION)"
           embedded_revision="$(docker run --rm --entrypoint cat "${image}@${PREVIEW_DIGEST}" /opt/orbit/REVISION)"
+          embedded_channel="$(docker run --rm --entrypoint cat "${image}@${PREVIEW_DIGEST}" /opt/orbit/CHANNEL)"
           reported_version="$(docker run --rm "${image}@${PREVIEW_DIGEST}" --version)"
 
           [[ "${embedded_version}" == "${version}" && "${reported_version}" == "Orbit ${version}" ]] || {
@@ -77,6 +78,10 @@ jobs:
           }
           [[ "${embedded_revision}" == "${revision}" ]] || {
             printf 'Embedded revision does not match the image revision label.\n' >&2
+            exit 1
+          }
+          [[ "${embedded_channel}" == "${release_stage}" ]] || {
+            printf 'Embedded channel does not match the image release-stage label.\n' >&2
             exit 1
           }
           channel=preview

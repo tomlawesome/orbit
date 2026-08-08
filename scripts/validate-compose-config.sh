@@ -17,6 +17,8 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 [[ "${ORBIT_VERSION:-}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
   fail "invalid ORBIT_VERSION"
 [[ "${ORBIT_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] || fail "invalid ORBIT_REVISION"
+[[ "${ORBIT_CHANNEL:-}" =~ ^(ci|preview|dev)$ ]] ||
+  fail "invalid ORBIT_CHANNEL"
 
 selection_env=""
 cleanup() {
