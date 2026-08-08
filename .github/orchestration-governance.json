@@ -57,6 +57,20 @@
       ],
       "stopEarlyWhenSatisfied": true
     },
+    "lowRiskImplementation": {
+      "taskClasses": [
+        "low-risk-implementation",
+        "donkey-work"
+      ],
+      "provider": "luna",
+      "model": "Luna Extra High",
+      "fallbackReason": "unavailable",
+      "unavailableProviders": [
+        "ollama",
+        "mistral",
+        "claude"
+      ]
+    },
     "providerSelection": {
       "mode": "cheapest_qualified_idle_capacity_first",
       "strictSerialFallback": false,
@@ -106,6 +120,7 @@
       "unsuitable_task_class",
       "unreachable",
       "capacity_exhausted",
+      "unavailable",
       "occupied_beneficial_concurrency"
     ],
     "isolation": {

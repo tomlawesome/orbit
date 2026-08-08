@@ -116,6 +116,23 @@ export function validateOrchestrationPolicy(policy) {
       && routing.evaluationPasses.stopEarlyWhenSatisfied === true,
     "model evaluation must stop by pass five, require basic acceptance by pass three, and reserve passes four and five for fine tuning.",
   );
+  const lowRiskImplementation = routing.lowRiskImplementation;
+  assert(
+    isObject(lowRiskImplementation)
+      && hasExactStrings(lowRiskImplementation.taskClasses, [
+        "low-risk-implementation",
+        "donkey-work",
+      ])
+      && lowRiskImplementation.provider === "luna"
+      && lowRiskImplementation.model === "Luna Extra High"
+      && lowRiskImplementation.fallbackReason === "unavailable"
+      && hasExactStrings(lowRiskImplementation.unavailableProviders, [
+        "ollama",
+        "mistral",
+        "claude",
+      ]),
+    "low-risk implementation must route to Luna after unavailable-provider evidence.",
+  );
   const providerSelection = routing.providerSelection;
   const providerConcurrency = providerSelection?.concurrency;
   assert(
@@ -169,6 +186,7 @@ export function validateOrchestrationPolicy(policy) {
       "unsuitable_task_class",
       "unreachable",
       "capacity_exhausted",
+      "unavailable",
       "occupied_beneficial_concurrency",
     ]),
     "implementation fallback reasons are incomplete.",
@@ -369,6 +387,16 @@ function validateImplementationTask(task, policy, issue) {
   const providerIndex = routing.providers.findIndex((provider) => provider.id === task.provider);
   assert(providerIndex >= 0, `unknown implementation provider ${String(task.provider)}.`);
   const provider = routing.providers[providerIndex];
+  const lowRiskImplementation = routing.lowRiskImplementation;
+  const isLowRiskImplementation = lowRiskImplementation.taskClasses.includes(task.taskClass);
+
+  if (isLowRiskImplementation) {
+    assert(
+      task.provider === lowRiskImplementation.provider
+        && task.requestedModel === lowRiskImplementation.model,
+      "low-risk implementation must use Luna Extra High; do not escalate routine work to Sol.",
+    );
+  }
 
   assert(isObject(task.qualification), "qualified implementation evidence is required.");
   assert(
@@ -399,6 +427,18 @@ function validateImplementationTask(task, policy, issue) {
         && routing.fallbackReasons.includes(skipped.reason)
         && isNonEmptyString(skipped.evidenceId),
       "every earlier implementation provider requires ordered, evidenced fallback status.",
+    );
+  }
+
+  if (isLowRiskImplementation) {
+    assert(
+      task.skippedProviders.length === lowRiskImplementation.unavailableProviders.length
+        && lowRiskImplementation.unavailableProviders.every((providerId, index) => {
+          const skipped = task.skippedProviders[index];
+          return skipped?.provider === providerId
+            && skipped.reason === lowRiskImplementation.fallbackReason;
+        }),
+      "low-risk implementation fallback must record unavailable evidence for Ollama, Mistral and Claude.",
     );
   }
 
