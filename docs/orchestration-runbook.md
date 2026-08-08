@@ -59,15 +59,19 @@ orientation or perform explicitly bounded mechanical analysis outside the
 orchestration role, but it cannot operate the delivery loop or make status and
 next-action decisions.
 
-Bounded implementation follows the cheapest-qualified-idle-capacity preference
-in `AGENTS.md` and `.github/orchestration-governance.json`. The task state
-records the selected provider, exact model, task class, qualification evidence,
-exact host for local Ollama, and an evidenced reason for every cheaper provider
-skipped. A cheaper provider already occupied by an independent task is an
-accepted reason only when the provider-concurrency evidence in the Wave
-concurrency section is complete. Every provider returns control to Sol for
-review and delivery. Claude Opus-class secondary review requires fresh user
-approval and remains advisory only.
+For `low-risk-implementation` and `donkey-work`, Luna Extra High is the first
+OpenAI implementation model. When Ollama, Mistral and Claude are unavailable,
+the task state records each provider in order with the `unavailable` reason and
+selects Luna; routine work never escalates to Sol because of that absence.
+Other bounded implementation follows the cheapest-qualified-idle-capacity
+preference in `AGENTS.md` and `.github/orchestration-governance.json`. Every
+task state records the selected provider, exact model, task class,
+qualification evidence, exact host for local Ollama, and an evidenced reason
+for every cheaper provider skipped. A cheaper provider already occupied by an
+independent task is an accepted reason only when the provider-concurrency
+evidence in the Wave concurrency section is complete. Every provider returns
+control to Sol for review and delivery. Claude Opus-class secondary review
+requires fresh user approval and remains advisory only.
 Correctness, hidden-edge, scope, handback honesty and context-fit evidence
 determine qualification. Cost, latency, resource observations and current
 capacity inform routing. Routine token, price and turn caps are not task or
