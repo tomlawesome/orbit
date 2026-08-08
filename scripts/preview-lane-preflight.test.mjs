@@ -28,8 +28,10 @@ describe("preview-lane local preflight", () => {
     expect(preflight).toContain("git rev-parse HEAD");
     expect(preflight).toContain("ORBIT_VERSION");
     expect(preflight).toContain("ORBIT_REVISION");
+    expect(preflight).toContain("ORBIT_CHANNEL");
     expect(composeValidation).toContain("invalid ORBIT_VERSION");
     expect(composeValidation).toContain("invalid ORBIT_REVISION");
+    expect(composeValidation).toContain("invalid ORBIT_CHANNEL");
   });
 
   it("validates every supported Compose combination and processing boundary", () => {
