@@ -13,6 +13,7 @@ const documentEnvironmentSchema = z.object({
   DOCUMENT_HOUSEHOLD_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(10_000 * GIB).default(5 * GIB),
   DOCUMENT_INSTANCE_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(100_000 * GIB).default(20 * GIB),
   DOCUMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
+  DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   DOCUMENT_SCAN_MODE: z.enum(["required", "disabled"]).default("required"),
   CLAMAV_HOST: z.string().min(1).default("orbit-clamav"),
   CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
@@ -29,6 +30,7 @@ export interface DocumentConfig {
   householdQuotaBytes: number;
   instanceQuotaBytes: number;
   retentionDays: number;
+  scanRecoveryRetentionHours: number;
   scanMode: "required" | "disabled";
   clamAv: {
     host: string;
@@ -68,6 +70,7 @@ export function getDocumentConfig(environment: NodeJS.ProcessEnv = process.env):
     householdQuotaBytes: parsed.DOCUMENT_HOUSEHOLD_QUOTA_BYTES,
     instanceQuotaBytes: parsed.DOCUMENT_INSTANCE_QUOTA_BYTES,
     retentionDays: parsed.DOCUMENT_RETENTION_DAYS,
+    scanRecoveryRetentionHours: parsed.DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS,
     scanMode: parsed.DOCUMENT_SCAN_MODE,
     clamAv: {
       host: parsed.CLAMAV_HOST,
