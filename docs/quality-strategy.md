@@ -185,7 +185,16 @@ independent implementation and local validation continue concurrently.
 - concurrent ownership, quota, lease and state-transition conflicts;
 - worker crash after claim, after durable intent, and after external side
   effect;
+- synchronous clean `201`, invalid/malware terminal discard, retryable
+  unavailable/timeout/protocol `202` recovery, generic scanner-error `503`,
+  repeat-request idempotency and `409` content/scope mismatch;
+- encrypted staging privacy/AAD separation, no download/draft/parse/action
+  authorization, duplicate workers, ten-minute lease expiry and stale-worker
+  fencing, restart recovery, five attempts/manual retry/immutable 24-hour
+  expiry, purge failure backlog, and reviewed pending attachment;
 - backup/restore with missing, extra, corrupt and mixed-state document objects;
+- backup/restore with in-flight encrypted scanner stages, correspondence
+  validation, lease reset and requeue, with no plaintext quarantine archive;
 - wrong or missing recovery key and interrupted restore;
 - archive conflict and failure atomicity.
 
@@ -195,6 +204,8 @@ independent implementation and local validation continue concurrently.
   malware cases;
 - parser timeout, oversized output and hostile extracted instructions;
 - provider outage, timeout, rejection, malformed response and bounded retries;
+- admin counts/categories/expiry/retry/purge surfaces and user distinctions
+  between recoverable outage, active retry, terminal rejection and success;
 - no private content, filenames, addresses, endpoints, tokens or raw provider
   errors in logs and administrator responses.
 

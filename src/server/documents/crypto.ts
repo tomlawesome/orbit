@@ -16,6 +16,7 @@ export interface DocumentEncryptionContext {
   itemId: string;
   mediaType: string;
   plaintextSize: number;
+  purpose?: "document" | "scanner_recovery";
 }
 
 export interface DocumentCryptoEnvelope {
@@ -52,12 +53,13 @@ function contentAdditionalData(context: DocumentEncryptionContext): Buffer {
     itemId: context.itemId,
     mediaType: context.mediaType,
     plaintextSize: context.plaintextSize,
+    purpose: context.purpose ?? "document",
   }), "utf8");
 }
 
-function keyAdditionalData(documentId: string, keyId: string): Buffer {
+function keyAdditionalData(documentId: string, keyId: string, purpose: DocumentEncryptionContext["purpose"] = "document"): Buffer {
   return Buffer.from(JSON.stringify({
-    purpose: "orbit-document-dek",
+    purpose: purpose === "scanner_recovery" ? "orbit-document-staging-dek" : "orbit-document-dek",
     envelopeVersion: ENVELOPE_VERSION,
     documentId,
     keyId,
@@ -69,12 +71,13 @@ function wrapDocumentKey(
   documentId: string,
   keyEncryptionKey: Buffer,
   keyId: string,
+  purpose: DocumentEncryptionContext["purpose"] = "document",
 ): Pick<DocumentCryptoEnvelope, "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
   requireKey(documentKey, "Document key");
   requireKey(keyEncryptionKey, "Key-encryption key");
   const wrapIv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
-  cipher.setAAD(keyAdditionalData(documentId, keyId));
+  cipher.setAAD(keyAdditionalData(documentId, keyId, purpose));
   const wrappedDek = Buffer.concat([cipher.update(documentKey), cipher.final()]);
   return {
     wrappedDek: wrappedDek.toString("base64url"),
@@ -87,6 +90,7 @@ function unwrapDocumentKey(
   documentId: string,
   envelope: DocumentCryptoEnvelope,
   keyEncryptionKey: Buffer,
+  purpose: DocumentEncryptionContext["purpose"] = "document",
 ): Buffer {
   requireKey(keyEncryptionKey, "Key-encryption key");
   if (envelope.envelopeVersion !== ENVELOPE_VERSION || envelope.algorithm !== ALGORITHM) {
@@ -97,7 +101,7 @@ function unwrapDocumentKey(
   const wrappedDek = Buffer.from(envelope.wrappedDek, "base64url");
   if (wrappedDek.length !== KEY_BYTES) throw new Error("Wrapped document key has an invalid length");
   const decipher = createDecipheriv(ALGORITHM, keyEncryptionKey, wrapIv, { authTagLength: AUTH_TAG_BYTES });
-  decipher.setAAD(keyAdditionalData(documentId, envelope.keyId));
+  decipher.setAAD(keyAdditionalData(documentId, envelope.keyId, purpose));
   decipher.setAuthTag(wrapTag);
   const documentKey = Buffer.concat([decipher.update(wrappedDek), decipher.final()]);
   requireKey(documentKey, "Unwrapped document key");
@@ -120,7 +124,7 @@ export function encryptDocument(
     const cipher = createCipheriv(ALGORITHM, documentKey, contentIv, { authTagLength: AUTH_TAG_BYTES });
     cipher.setAAD(contentAdditionalData(context), { plaintextLength: plaintext.length });
     const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    const wrapped = wrapDocumentKey(documentKey, context.documentId, keyEncryptionKey, keyId);
+    const wrapped = wrapDocumentKey(documentKey, context.documentId, keyEncryptionKey, keyId, context.purpose);
     return {
       ciphertext,
       envelope: {
@@ -144,7 +148,7 @@ export function decryptDocument(
   envelope: DocumentCryptoEnvelope,
   keyEncryptionKey: Buffer,
 ): Buffer {
-  const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey);
+  const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
   try {
     const contentIv = decodeFixed(envelope.contentIv, IV_BYTES, "Content IV");
     const contentTag = decodeFixed(envelope.contentAuthTag, AUTH_TAG_BYTES, "Content authentication tag");

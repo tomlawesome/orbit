@@ -71,6 +71,12 @@ describe("document progress description", () => {
     expect(description).not.toMatch(/unavailable/u);
   });
 
+  it("distinguishes outage recovery from terminal expiry", () => {
+    expect(progressDescription(document({ lifecycle: "scanning", ready: false, failureCode: "scanner_timeout", recoverable: true, recoveryStatus: "retrying" }))).toContain("retrying");
+    expect(progressDescription(document({ lifecycle: "scanning", ready: false, failureCode: "scanner_timeout", recoverable: true, recoveryStatus: "manual" }))).toContain("administrator");
+    expect(progressDescription(document({ lifecycle: "rejected", ready: false, failureCode: "scan_recovery_expired" }))).toContain("expired");
+  });
+
   it("falls back to a safe explanation for an unrecognised failure", () => {
     const description = progressDescription(document({
       lifecycle: "rejected",
