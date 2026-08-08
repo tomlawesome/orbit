@@ -212,6 +212,29 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
+  it("explains when the optional document processor is disabled without blocking attachment", async () => {
+    const bytes = validPdf("processor-disabled bytes");
+    mocks.readQuarantine.mockResolvedValue(bytes);
+    mocks.extract.mockRejectedValue(new AppError("parser_disabled", "Document processing is not enabled", 409));
+
+    const result = await inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "manual-policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    });
+
+    expect(result).toEqual({
+      extracted: false,
+      message: "Automatic suggestions require the optional document processor. You can still attach this file.",
+      suggestions: [{ field: "title", value: "manual-policy", source: "filename", confidence: "high" }],
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
+    });
+    expect(bytes.every((byte) => byte === 0)).toBe(true);
+    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+  });
+
   it.each([
     ["non-string", 42],
     ["oversized", "x".repeat(250_001)],
