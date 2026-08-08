@@ -84,14 +84,31 @@ assert_fixture_present() {
   local actual_attachment_hash
   actual_attachment_hash="$(compose exec -T orbit-app sha256sum "$attachment_storage_path" | awk '{print $1}')"
   [[ "$actual_attachment_hash" == "$attachment_expected_hash" ]] || fail 'The stored IMAP attachment bytes changed.'
-  local recovery_state
-  recovery_state="$(compose exec -T orbit-db sh -c \
-    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select string_agg(status || '\''|'\'' || attempts, '\'','\'' order by generation) from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
-    sh "$recovery_document_id" | tr -d '\''[:space:]'\'')"
-  [[ "$recovery_state" == 'pending|2,failed|5' ]] || fail 'Restore did not preserve attempts or failed scanner-job state.'
+}
+
+assert_staging_fixture_present() {
   if ! compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1; then
     fail 'The encrypted scanner-recovery staging sentinel was not restored.'
   fi
+}
+
+assert_recovery_jobs_restored() {
+  local recovery_state recovery_deadline=$((SECONDS + 10))
+  while (( SECONDS < recovery_deadline )); do
+    recovery_state="$(compose exec -T orbit-db sh -c \
+      'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select case when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''pending'\'' and attempts = 2 and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''pending'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''processing'\'' and attempts = 3 and locked_at is not null and lease_token is not null and lease_expires_at > now()) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''scanning'\'' and scan_status = '\''error'\'' and exists (select 1 from document_staging_objects where document_id = '\''$1'\'' and status = '\''pending'\'')) then '\''processing'\'' when count(*) = 2 and count(*) filter (where generation = 2 and status = '\''failed'\'' and attempts = 5) = 1 and count(*) filter (where generation = 1 and status = '\''completed'\'' and attempts = 3 and completed_at is not null and locked_at is null and lease_token is null and lease_expires_at is null) = 1 and exists (select 1 from documents where id = '\''$1'\'' and lifecycle = '\''rejected'\'' and scan_status = '\''error'\'' and failure_code = '\''staging_object_invalid'\'') and not exists (select 1 from document_staging_objects where document_id = '\''$1'\'') then '\''purged'\'' else '\''invalid'\'' end from document_jobs where document_id = '\''$1'\'' and kind = '\''scan'\'';"' \
+      sh "$recovery_document_id" 2>/dev/null | tr -d '[:space:]')" || recovery_state=invalid
+    case "$recovery_state" in
+      pending|processing)
+        compose exec -T orbit-app test -f "$staging_path" >/dev/null 2>&1 && return 0
+        ;;
+      purged)
+        ! compose exec -T orbit-app test -e "$staging_path" >/dev/null 2>&1 && return 0
+        ;;
+    esac
+    sleep 1
+  done
+  fail 'Scanner recovery did not reach an expected bounded state.'
 }
 
 assert_fixture_absent() {
@@ -134,7 +151,7 @@ insert_document_fixture() {
         content_iv, content_auth_tag, wrapped_dek, wrap_iv, wrap_auth_tag, key_id,
         status, recovery_expires_at
       ) values (
-        '\''$8'\'', '\''$9'\'', '\''scanner_recovery'\'', 31, 1,
+        '\''$8'\'', '\''$9'\'', '\''scanner_recovery'\'', 30, 1,
         '\''dGVzdC1zdGFnZS1pdg'\'', '\''dGVzdC1zdGFnZS10YWc'\'', '\''dGVzdC1zdGFnZS1kZWs'\'',
         '\''dGVzdC1zdGFnZS13cmFwLWl2'\'', '\''dGVzdC1zdGFnZS13cmFwLXRhZw'\'', '\''backup-stage-key'\'',
         '\''pending'\'', now() + interval '\''1 day'\''
@@ -311,12 +328,14 @@ expect_preflight_rejection() {
   fi
   health_check || fail "Orbit was not healthy after the ${label} preflight rejection."
   assert_fixture_present
+  assert_staging_fixture_present
 }
 
 run_valid_restore() {
   ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null
   wait_for_health
   assert_fixture_present
+  assert_recovery_jobs_restored
 }
 
 test_local_key_rejections() {
@@ -367,6 +386,7 @@ test_journal_publication_failures() {
     fail 'Unpublished checkpoint failure left a checkpoint behind.'
   fi
   assert_fixture_present
+  assert_staging_fixture_present
 
   remove_document_fixture
   if ORBIT_RESTORE_TEST_MODE=true ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE=journal-replacement-directory \
@@ -542,6 +562,7 @@ test_wrong_recovery_material() {
     fail 'Wrong recovery material replaced the live document key.'
   health_check || fail 'Orbit was not healthy after wrong recovery material was rejected.'
   assert_fixture_present
+  assert_recovery_jobs_restored
 }
 
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
