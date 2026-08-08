@@ -81,6 +81,7 @@ const config = {
   householdQuotaBytes: 1_000_000,
   instanceQuotaBytes: 1_000_000,
   retentionDays: 30,
+  scanRecoveryRetentionHours: 24,
   scanMode: "required" as const,
   clamAv: { host: "clamav", port: 3310, timeoutMs: 30_000 },
   tika: { url: null, timeoutMs: 45_000 },

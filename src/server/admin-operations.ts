@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import {
   auditLog,
   documentJobs,
+  documentStagingObjects,
   documents,
   households,
   imapNotificationDeliveries,
@@ -36,6 +37,13 @@ const documentFailureCodes = new Set([
   "purge_failed",
   "processing_interrupted",
   "storage_object_missing",
+  "scanner_unavailable",
+  "scanner_timeout",
+  "scanner_protocol",
+  "scanner_failed",
+  "stage_purge_failed",
+  "scan_recovery_expired",
+  "staging_object_invalid",
 ]);
 
 const actionLabels: Record<string, string> = {
@@ -178,6 +186,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       status: documentJobs.status,
       attempts: documentJobs.attempts,
       lastError: documentJobs.lastError,
+      nextAttemptAt: documentJobs.nextAttemptAt,
       createdAt: documentJobs.createdAt,
       updatedAt: documentJobs.updatedAt,
     }).from(documentJobs)
@@ -329,21 +338,32 @@ export async function updateDocumentJob(
   }
   await requireInstanceAdministrator(actorUserId);
   await getDb().transaction(async (transaction) => {
-    const [record] = await transaction.select({
-      householdId: documents.householdId,
-      status: documentJobs.status,
-    }).from(documentJobs)
-      .innerJoin(documents, eq(documents.id, documentJobs.documentId))
-      .where(eq(documentJobs.id, jobId))
-      .for("update")
-      .limit(1);
-    if (!record || record.status !== expectedStatus || expectedStatus !== "failed") {
+    const [jobReference] = await transaction.select({
+      documentId: documentJobs.documentId,
+    }).from(documentJobs).where(eq(documentJobs.id, jobId)).limit(1);
+    if (!jobReference) {
       throw new AppError("operation_conflict", "That operation is no longer available", 409);
     }
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${jobReference.documentId}`}, 0))`);
+    const [job] = await transaction.select({
+      documentId: documentJobs.documentId,
+      status: documentJobs.status,
+    }).from(documentJobs).where(eq(documentJobs.id, jobId)).for("update").limit(1);
+    if (!job || job.status !== expectedStatus || expectedStatus !== "failed") {
+      throw new AppError("operation_conflict", "That operation is no longer available", 409);
+    }
+    const [document] = await transaction.select({
+      householdId: documents.householdId,
+      documentId: documents.id,
+    }).from(documents).where(eq(documents.id, job.documentId)).for("update").limit(1);
+    if (!document) throw new AppError("operation_conflict", "That operation is no longer available", 409);
+    const [stage] = await transaction.select({ status: documentStagingObjects.status })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, document.documentId)).for("update").limit(1);
 
     const updated = await transaction.update(documentJobs).set(action === "retry" ? {
       status: "pending",
       attempts: 0,
+      nextAttemptAt: new Date(),
       lockedAt: null,
       leaseExpiresAt: null,
       leaseToken: null,
@@ -362,8 +382,29 @@ export async function updateDocumentJob(
     if (!updated.length) {
       throw new AppError("operation_conflict", "That operation is no longer available", 409);
     }
+    if (document.documentId) {
+      if (stage?.status === "purge_pending") {
+        // A failed terminal purge is retried by the maintenance purge path;
+        // changing it back to pending would incorrectly rescan rejected bytes.
+        await transaction.update(documentStagingObjects).set({
+          purgeFailureCode: null,
+          updatedAt: new Date(),
+        }).where(eq(documentStagingObjects.documentId, document.documentId));
+      } else {
+        await transaction.update(documentStagingObjects).set(action === "retry" ? {
+          status: "pending",
+          purgeFailureCode: null,
+          updatedAt: new Date(),
+        } : {
+          status: "pending",
+          recoveryExpiresAt: new Date(),
+          purgeFailureCode: "operator_discard_requested",
+          updatedAt: new Date(),
+        }).where(eq(documentStagingObjects.documentId, document.documentId));
+      }
+    }
     await transaction.insert(auditLog).values({
-      householdId: record.householdId,
+      householdId: document.householdId,
       actorUserId,
       entityType: "document_job",
       entityId: jobId,

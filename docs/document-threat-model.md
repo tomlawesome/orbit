@@ -45,8 +45,11 @@ quota never bypasses per-request limits.
    mount containing Orbit documents, database credentials, application
    secrets, or Docker socket.
 5. **Encryption boundary:** only clean—or explicitly scan-skipped—content is
-   encrypted for durable storage. Plaintext is removed after successful
-   finalisation.
+   encrypted for ordinary durable storage. A retryable scanner outage may
+   create only authenticated-encrypted recovery ciphertext in the separate
+   private `staging/` namespace; its purpose is bound into the envelope and it
+   is never downloadable, draftable, parseable or actionable. Plaintext is
+   removed after the synchronous attempt or worker recovery.
 6. **Persistent storage:** the document volume contains ciphertext only.
    PostgreSQL contains metadata and wrapped per-document keys, not plaintext
    document keys or document bytes.
@@ -162,8 +165,15 @@ recoverable state.
   an untrusted network.
 - Orbit uses `INSTREAM` with bounded chunks, connection/read timeouts, and a
   scan-size limit no larger than Orbit's upload limit.
-- Malware, scanner errors, timeouts, oversized-stream responses, and unavailable
-  scanner state never become clean documents.
+- Malware, scanner-reported errors, timeouts, oversized-stream responses, and
+  unavailable scanner state never become clean documents. Only adapter
+  `unavailable`, `timeout`, and `protocol` outcomes enter bounded recovery;
+  generic `scanner` errors fail closed without a durable stage.
+- Recovery uses `scanning` plus `scan_status=error`, a PostgreSQL `scan` job,
+  ten-minute lease/token/generation fencing, five automatic attempts, fixed
+  60-second/2-minute/4-minute/8-minute/15-minute delays, and immutable 24-hour
+  retention. Manual retry does not extend retention. Terminal purge failure
+  leaves an inaccessible `purge_pending` backlog and never claims success.
 - When scanning is explicitly disabled, validation continues, the document
   records `scan_status=skipped`, and administrators see a persistent warning.
 - Scanner responses are normalized to safe classifications; raw filenames or
@@ -197,6 +207,10 @@ recoverable state.
   sync where supported, and atomic rename.
 - Deletion is a 30-day reversible metadata state. Purge removes ciphertext
   first and then records completion; reconciliation safely retries either side.
+- Scanner-recovery stage deletion follows the same fail-closed rule. Malware,
+  invalid staging, operator discard and expiry reject metadata immediately;
+  encrypted stage bytes are removed idempotently, and deletion failure is
+  recorded as `purge_pending` for the administrator purge backlog.
 - A periodic reconciliation job detects stale quarantine data, interrupted
   states, missing ciphertext, orphaned ciphertext, quota drift, and expired
   deletion windows.
@@ -263,7 +277,9 @@ the supported runtime. It must not introduce a custom cipher construction.
   the active document tree.
 - Restore never silently overwrites an existing KEK.
 - Mixed lifecycle states, missing blobs, corrupt tags, and a wrong KEK are
-  covered by restore tests.
+  covered by restore tests. In-flight scanner stages and their document/job
+  correspondence are included; restore clears leases and requeues recoverable
+  scan jobs. Plaintext quarantine is never included.
 
 ## Logging and audit
 
@@ -283,6 +299,12 @@ the supported runtime. It must not introduce a custom cipher construction.
   oversized requests, unsupported types, and malformed images/PDFs;
 - EICAR detection, scanner timeout, scanner outage, malformed response, and
   explicit scan-disabled operation;
+- same-identity content/scope idempotency and `409` mismatch;
+- unavailable/timeout/protocol versus generic scanner-error classification;
+- staging privacy and purpose-bound AAD, duplicate workers, lease expiry,
+  restart recovery, five-attempt exhaustion, immutable retention expiry,
+  terminal stage-purge failure, reviewed pending attachment, and admin
+  redaction/authorization;
 - encryption round trips, AAD mismatch, corrupt ciphertext/tag/wrapped key,
   unknown version, wrong KEK, and key rewrap;
 - quota races, interrupted state transitions, missing/orphaned files, retention

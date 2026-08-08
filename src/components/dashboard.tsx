@@ -438,12 +438,14 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
       // Refresh the canonical workspace before the secure upload. The item is
       // intentionally durable and reachable even when attachment storage fails.
       await refreshWorkspace();
+      const documentId = crypto.randomUUID();
       const response = await fetch(`/api/households/${household.id}/items/${approvedItemId}/documents`, {
           method: "POST", credentials: "same-origin",
           headers: {
             "X-CSRF-Token": session.csrfToken,
             "X-Orbit-Filename": encodeURIComponent(document.name),
             "X-Orbit-Review-Operation": item.id,
+            "X-Orbit-Document-Id": documentId,
           },
           body: document,
         });
