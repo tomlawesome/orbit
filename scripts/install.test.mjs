@@ -14,6 +14,7 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,6 +42,8 @@ const deploymentAssets = [
   ".env-orbit.example",
   "config/tika-config.xml",
   "scripts/configure.sh",
+  "scripts/backup.sh",
+  "scripts/restore.sh",
 ];
 
 const fakeDockerScript = [
@@ -121,6 +124,10 @@ const fakeCurlScript = [
   'if [[ -n "${FAKE_CURL_FAIL_ASSET:-}" && "$asset" == "${FAKE_CURL_FAIL_ASSET}" ]]; then',
   "  exit 22",
   "fi",
+  'if [[ -n "${FAKE_INVALID_ASSET:-}" && "$asset" == "${FAKE_INVALID_ASSET}" ]]; then',
+  "  printf 'this is not valid shell syntax (\\n' > \"$output\"",
+  "  exit 0",
+  "fi",
   'case "$asset" in',
   "  scripts/configure.sh)",
   "    cat <<'SCRIPT' > \"$output\"",
@@ -141,6 +148,20 @@ const fakeCurlScript = [
   '  [[ ! -f .orbit-secrets/configure-secret ]] || chmod 600 .orbit-secrets/configure-secret',
   "  exit 42",
   "fi",
+  "SCRIPT",
+  "    ;;",
+  "  scripts/backup.sh)",
+  "    cat <<'SCRIPT' > \"$output\"",
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  "printf 'BACKUP_INVOKED\\n'",
+  "SCRIPT",
+  "    ;;",
+  "  scripts/restore.sh)",
+  "    cat <<'SCRIPT' > \"$output\"",
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  "printf 'RESTORE_INVOKED\\n'",
   "SCRIPT",
   "    ;;",
   "  *)",
@@ -200,6 +221,12 @@ function makeFullExistingDeployment(targetDir) {
   chmodSync(join(targetDir, ".orbit-secrets"), 0o750);
   writeFileSync(join(targetDir, ".orbit-secrets", "sentinel"), "KEEP-SECRET\n");
   chmodSync(join(targetDir, ".orbit-secrets", "sentinel"), 0o640);
+}
+
+function makeLegacyExistingDeployment(targetDir) {
+  makeFullExistingDeployment(targetDir);
+  unlinkSync(join(targetDir, "scripts", "backup.sh"));
+  unlinkSync(join(targetDir, "scripts", "restore.sh"));
 }
 
 function snapshotPath(path) {
@@ -307,6 +334,19 @@ describe("install.sh", () => {
     );
     expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
     expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
+    expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
+    expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
+    expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
+    expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
+    expect(result.calls).toContain(`scripts/backup.sh`);
+    expect(result.calls).toContain(`scripts/restore.sh`);
+    expect(result.stdout).not.toContain("BACKUP_INVOKED");
+    expect(result.stdout).not.toContain("RESTORE_INVOKED");
+    const backup = spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
+      encoding: "utf8",
+    });
+    expect(backup.status).toBe(0);
+    expect(backup.stdout).toBe("BACKUP_INVOKED\n");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
@@ -349,6 +389,90 @@ describe("install.sh", () => {
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe("EXISTING_ENV=1\n");
     expect(existsSync(join(targetDir, "config"))).toBe(false);
     expect(existsSync(join(targetDir, "scripts"))).toBe(false);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("leaves a recognised deployment unchanged when backup fetch fails", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "scripts/backup.sh" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Could not fetch scripts/backup.sh");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses to overwrite an existing backup script symlink", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    unlinkSync(join(targetDir, "scripts", "backup.sh"));
+    const symlinkTarget = mkdtempSync(join(tmpdir(), "orbit-install-backup-link-"));
+    symlinkSync(symlinkTarget, join(targetDir, "scripts", "backup.sh"));
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Refusing to overwrite scripts/backup.sh");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("adds recovery scripts to a recognised legacy deployment", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(false);
+    expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(false);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("EXISTING_ENV=1");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      `ORBIT_IMAGE=${resolvedReference}`,
+    );
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "sentinel"), "utf8")).toBe(
+      "KEEP-SECRET\n",
+    );
+    expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
+    expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("rolls a legacy deployment back when the final restore-script rename fails", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+    const beforeEntries = targetEntries(targetDir);
+    const markerDir = mkdtempSync(join(tmpdir(), "orbit-install-legacy-mv-failure-"));
+
+    const result = runInstall(targetDir, {
+      FAKE_MV_FAIL_DEST: "scripts/restore.sh",
+      FAKE_MV_FAIL_MARKER: join(markerDir, "failed"),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("restoring the previous deployment");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(false);
+    expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(false);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("leaves a recognised deployment unchanged when a new script fails syntax validation", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_INVALID_ASSET: "scripts/restore.sh" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Fetched scripts/restore.sh failed a syntax check");
+    expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
@@ -466,6 +590,8 @@ describe("install.sh", () => {
     expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
       "fake content for docker-compose.yml\n",
     );
+    expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
+    expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 

@@ -214,6 +214,13 @@ readonly deployment_assets=(
   ".env-orbit.example"
   "config/tika-config.xml"
   "scripts/configure.sh"
+  "scripts/backup.sh"
+  "scripts/restore.sh"
+)
+readonly deployment_scripts=(
+  "scripts/configure.sh"
+  "scripts/backup.sh"
+  "scripts/restore.sh"
 )
 declare -a asset_directories=()
 declare -A asset_directory_seen=()
@@ -295,8 +302,10 @@ for asset in "${deployment_assets[@]}"; do
   [[ -s "$staged_path" ]] || fail "Fetched ${asset} is empty."
 done
 
-bash -n "$staging_dir/scripts/configure.sh" ||
-  fail "Fetched scripts/configure.sh failed a syntax check."
+for script in "${deployment_scripts[@]}"; do
+  bash -n "$staging_dir/$script" ||
+    fail "Fetched ${script} failed a syntax check."
+done
 
 # Preflight all final file and parent paths before beginning the transaction.
 # No target directory is created until the backups are complete.
