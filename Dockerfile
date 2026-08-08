@@ -4,6 +4,10 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /opt/orbit
 
+FROM base AS vapid-generator
+COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
+ENTRYPOINT ["node", "/opt/orbit/scripts/generate-vapid.mjs"]
+
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 RUN pnpm install --frozen-lockfile
