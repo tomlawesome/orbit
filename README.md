@@ -82,6 +82,40 @@ warranty. Contracts roll over. Orbit brings those scattered responsibilities
 into one calm, shared view—so the important things stay visible before they
 become urgent.
 
+## A quick visual tour
+
+These screenshots show the real Orbit application using deterministic synthetic
+household, item, document and mailbox data. They contain no live accounts,
+provider settings or infrastructure details.
+
+<p align="center">
+  <img src="docs/assets/product-tour/overview.png" alt="Orbit desktop overview showing three upcoming synthetic household records" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/item-detail.png" alt="Orbit item details for a synthetic annual boiler service, including schedule and reminders" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/settings.png" alt="Orbit desktop settings page showing appearance, data, inbox and household sections" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
+</p>
+
+The captures are reproducible with the repository's disposable OIDC browser
+fixture. Start the acceptance Compose stack, then run:
+
+```sh
+ORBIT_ACCEPTANCE_OIDC=true ORBIT_CAPTURE_PRODUCT_TOUR=true \
+  pnpm test:e2e tests/e2e/product-tour.spec.ts --project=desktop-chromium
+```
+
+The opt-in capture freezes the browser clock, creates synthetic data, removes
+PNG metadata, and deletes the fixture after capture. Ordinary browser tests do
+not write documentation assets.
+
 <table>
   <tr>
     <td width="33%" valign="top">
