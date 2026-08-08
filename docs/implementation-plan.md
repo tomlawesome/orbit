@@ -193,6 +193,17 @@ requires Sol Extra High review before implementation proceeds.
 
 ### Wave 3 — lifecycle, administration and operations
 
+- Issue #168 extends the existing secure document lifecycle with the accepted
+  outage-only scanner recovery path. Implement in this order: characterization
+  and route/idempotency tests; migration and purpose-bound staging storage;
+  synchronous classification plus `202` response; leased/reconciled worker
+  and terminal purge backlog; reviewed direct-intake completion; backup/restore
+  correspondence and lease reset; then admin/user surfaces and the complete
+  PostgreSQL/authorization/privacy matrix. Do not introduce a second queue or
+  make clean uploads asynchronous. Closure requires the ADR-0010 decision,
+  threat-model and operations updates, migration upgrade evidence, and the
+  staged backup/restore drill.
+
 - Complete issue #22 after #43 establishes the shared editable draft and review
   contract. Dedicated-mailbox messages and attachments enter that same private
   flow with authenticated identity, idempotent receipt, hostile-MIME bounds,
