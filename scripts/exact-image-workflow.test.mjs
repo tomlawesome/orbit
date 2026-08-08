@@ -179,6 +179,20 @@ describe("exact-image publication workflow", () => {
     expect(cleanup).toContain(fallback);
   });
 
+  it("supplies the calculated identity to source-build overlay validation", () => {
+    const validation = workflow.slice(
+      workflow.indexOf("- name: Validate Compose configuration"),
+      workflow.indexOf("- name: Detect exact processor validation scope"),
+    );
+
+    expect(validation).toContain(
+      "ORBIT_VERSION: ${{ steps.version.outputs.version }}",
+    );
+    expect(validation).toContain(
+      "ORBIT_REVISION: ${{ steps.version.outputs.revision }}",
+    );
+  });
+
   it("requires the database-backed ready contract before smoke acceptance continues", () => {
     expect(workflow).toContain("- name: Verify health endpoint");
     expect(workflow).toContain('.status == "ready" and .service == "orbit"');
