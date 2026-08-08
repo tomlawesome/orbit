@@ -19,8 +19,14 @@ exactly one accepted attestation line from the planning policy:
 governance control, not cryptographic proof; never attest as an authority that
 did not do the work.
 
-Bounded implementation prefers the cheapest qualified idle capacity, in this
-cost order:
+For `low-risk-implementation` and `donkey-work` task classes, Luna Extra High
+is the first OpenAI implementation model. When Ollama, Mistral and Claude are
+unavailable, record each provider in order with the `unavailable` fallback
+reason and route the bounded task to Luna. Routine implementation must never
+escalate to Sol because those providers are unavailable.
+
+Other bounded implementation prefers the cheapest qualified idle capacity, in
+this cost order:
 
 1. a local Ollama host and exact model qualified for the task class;
 2. a qualified Mistral model as the primary paid provider;
@@ -78,10 +84,10 @@ planning, security, approval or delivery authority. Historical controls
 approved under the superseded dual-pipeline policy remain evidence only where
 the orchestration policy explicitly enumerates their pull requests.
 
-When Luna is the evidenced last resort and is absent from the current subagent
-pool, Sol uses the task launcher, when available, to create a separate
-user-visible Luna Extra High task in a dedicated worktree from the exact
-accepted base. In every delegated path, write the bounded prompt under
+For low-risk implementation, Sol uses the task launcher, when available, to
+create a separate user-visible Luna Extra High task after recording the
+unavailable-provider evidence. For other task classes, Luna remains the
+evidenced last resort. In every delegated path, write the bounded prompt under
 `.agents/handoffs/`; name permitted and protected paths, forbid remote
 mutations, define hard stops, require a result file, and state when control
 returns to Sol. Handoff files are local coordination state and are not
