@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { syntheticPdf } from "../support/synthetic-documents";
 
+const terminalInspectionMessage = /Document inspected|Suggestions are unavailable|Automatic suggestions require the optional document processor\. You can still attach this file\./u;
+
 async function signIn(page: Page) {
   await page.goto("/");
   await page.getByRole("link", { name: "Sign in securely" }).click();
@@ -162,7 +164,7 @@ test.describe("document-assisted item intake", () => {
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic command failure"),
     });
-    await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    await expect(editor.getByRole("status")).toContainText(terminalInspectionMessage, { timeout: 15_000 });
 
     const uploadRequests: string[] = [];
     let approvalRequests = 0;
@@ -197,7 +199,7 @@ test.describe("document-assisted item intake", () => {
       mimeType: "application/pdf",
       buffer: syntheticPdf("synthetic attachment failure"),
     });
-    await expect(editor.getByRole("status")).toContainText(/Document inspected|Suggestions are unavailable/, { timeout: 15_000 });
+    await expect(editor.getByRole("status")).toContainText(terminalInspectionMessage, { timeout: 15_000 });
     let attempts = 0;
     await page.route("**/api/households/*/items/*/documents", async (route) => {
       if (route.request().method() === "POST") {
