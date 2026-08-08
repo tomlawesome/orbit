@@ -152,7 +152,7 @@ evidence rather than starting with unproven mixed state.
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Implement and prove staged correspondence, durable rollback checkpoints, corrupt/wrong-key cases and interrupted recovery |
 | Logging/audit | Bounded categories and audit tables | Verify redaction and event completeness across critical flows |
-| Release | Build-once previews from `develop` and versioned release branches, dependency-change licence review, source and exact-image supply-chain gates, verified digest-bound attestations, plus guarded no-rebuild promotion after exact protected merges | Exercise representative versioned-release acceptance plus stable promotion |
+| Release | Static/unit issue lanes into `develop`, one build-once exact-image publication from protected `preview`, automatic train versions, digest-bound attestations, exact-source verification and guarded no-rebuild promotion to `latest` plus a GitHub Release | Exercise representative preview acceptance plus stable promotion |
 | Rollback | Prior image and verified pre-update backup retained; no unproven database downgrade | Prove the ADR-0004 update and recovery decision points |
 
 ## Architecture decisions and open questions
@@ -161,7 +161,7 @@ Durable decisions live in `docs/adr`; issues track their implementation.
 
 - [ADR-0001: Self-hosted single-instance deployment](adr/0001-self-hosted-single-instance.md)
 - [ADR-0002: Evidence-driven delivery and immutable promotion](adr/0002-evidence-driven-delivery.md)
-- [ADR-0003: Gitflow preview and stable channels](adr/0003-gitflow-preview-and-stable-channels.md)
+- [ADR-0003: Protected preview lane and stable promotion](adr/0003-gitflow-preview-and-stable-channels.md)
 - [ADR-0004: Supported upgrades and recoverable restore](adr/0004-supported-upgrades-and-recoverable-restore.md)
 - [ADR-0005: Private reviewed ingestion and mailbox staging](adr/0005-reviewed-ingestion-and-mailbox-staging.md)
 - [ADR-0006: Online-authoritative private workspace](adr/0006-online-authoritative-private-workspace.md)

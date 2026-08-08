@@ -5,12 +5,14 @@ on:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
   pull_request:
     branches:
       - main
       - develop
-      - "release/**"
+      - preview
+      - "hotfix/**"
   schedule:
     - cron: "37 2 * * 6"
   workflow_dispatch:

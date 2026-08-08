@@ -20,11 +20,17 @@ command -v docker >/dev/null 2>&1 || {
   printf 'Orbit build: Docker is required.\n' >&2
   exit 1
 }
+command -v node >/dev/null 2>&1 || {
+  printf 'Orbit build: Node.js is required to calculate the release-train version.\n' >&2
+  exit 1
+}
 docker compose version >/dev/null 2>&1 || {
   printf 'Orbit build: Docker Compose v2 is required.\n' >&2
   exit 1
 }
 export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
+export ORBIT_VERSION="$(node scripts/calculate-version.mjs --channel preview)"
+export ORBIT_REVISION="$(git rev-parse HEAD)"
 
 # The build context lives in an overlay, because the base compose file
 # describes a deployment that has no source tree.

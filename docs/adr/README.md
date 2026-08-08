@@ -17,7 +17,7 @@ issues track delivery work; ADRs do not contain changing implementation status.
 
 - [ADR-0001: Self-hosted single-instance deployment](0001-self-hosted-single-instance.md)
 - [ADR-0002: Evidence-driven delivery and immutable promotion](0002-evidence-driven-delivery.md)
-- [ADR-0003: Gitflow preview and stable channels](0003-gitflow-preview-and-stable-channels.md)
+- [ADR-0003: Protected preview lane and stable promotion](0003-gitflow-preview-and-stable-channels.md)
 - [ADR-0004: Supported upgrades and recoverable restore](0004-supported-upgrades-and-recoverable-restore.md)
 - [ADR-0005: Private reviewed ingestion and mailbox staging](0005-reviewed-ingestion-and-mailbox-staging.md)
 - [ADR-0006: Online-authoritative private workspace](0006-online-authoritative-private-workspace.md)
