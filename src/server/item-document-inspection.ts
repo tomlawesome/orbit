@@ -15,6 +15,7 @@ import { requireHouseholdAccess } from "@/server/workspace-access";
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
+const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
 const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
 const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
 
@@ -168,9 +169,11 @@ export async function inspectItemDocument(input: {
         text = parsedText;
         extracted = true;
         proposal = proposalFromText(text, input.filename);
-      } catch {
+      } catch (error) {
         extracted = false;
-        message = parserRecoveryMessage;
+        message = error instanceof AppError && error.code === "parser_disabled"
+          ? processorDisabledMessage
+          : parserRecoveryMessage;
       }
       text = "";
       return {
