@@ -185,6 +185,19 @@ describe("strict startup ordering", () => {
     await expect(registerNode()).rejects.toThrow("migration_integrity");
     expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
   });
+
+  it("maps a database authentication failure to the bounded migration code", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new Error("password authentication failed for user orbit"));
+
+    await expect(registerNode()).rejects.toThrow("migration_integrity");
+    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
+    expect(mocks.log.error).toHaveBeenCalledWith("startup.migration", {
+      state: "invalid",
+      code: "migration_integrity",
+    });
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("password authentication");
+  });
 });
 
 describe("scanner readiness diagnostics", () => {
