@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountMenu } from "@/components/account-menu";
+import { usePersistedThemePreference } from "@/components/appearance-preference";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
@@ -15,7 +16,7 @@ import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import { PortableArchiveManager } from "@/components/portable-archive-manager";
 import { ImapInbox } from "@/components/imap-inbox";
-import { calendarDateInTimeZone, dueCopy as dashboardDueCopy, formatCost, formatHeadingDate, formatLongDate, householdInitials, PREFERENCE_EVENT, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
+import { calendarDateInTimeZone, dueCopy as dashboardDueCopy, formatCost, formatHeadingDate, formatLongDate, householdInitials, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
 import {
   daysUntil,
   getDueBand,
@@ -31,25 +32,14 @@ import {
   colourways,
   textSizes,
   themeModes,
-  themePreferenceSchema,
   urgencyPalettes,
   type ThemePreference,
 } from "@/lib/preferences";
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createEmptyWorkspace, createHousehold, type ItemActivity } from "@/lib/workspace";
 
-const DEFAULT_THEME: ThemePreference = {
-  mode: "system",
-  colourway: "after-dark",
-  textSize: "comfortable",
-  urgencyPalette: "themed",
-  emailNotifications: true,
-  pushNotifications: true,
-};
-const DEFAULT_THEME_JSON = JSON.stringify(DEFAULT_THEME);
 const NOTICE_DURATION_MS = 10_000;
 const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
-const THEME_SESSION_HYDRATED_KEY = "orbit:theme-session-user:v1";
 
 type DashboardMode = "workspace" | "settings";
 type ItemFilter = "all" | "attention" | "unscheduled";
@@ -121,26 +111,6 @@ function AuthenticationGate({
   );
 }
 
-function useLocalStorageValue(key: string, fallback: string): string {
-  const subscribe = useCallback((onStoreChange: () => void) => {
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === key) onStoreChange();
-    };
-    const handlePreference = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === key) onStoreChange();
-    };
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener(PREFERENCE_EVENT, handlePreference);
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener(PREFERENCE_EVENT, handlePreference);
-    };
-  }, [key]);
-  const getSnapshot = useCallback(() => window.localStorage.getItem(key) ?? fallback, [fallback, key]);
-  const getServerSnapshot = useCallback(() => fallback, [fallback]);
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-}
-
 type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
 
 /** Keeps signed-out/loading state outside the authenticated dashboard tree. */
@@ -184,15 +154,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
-  const storedTheme = useLocalStorageValue(THEME_STORAGE_KEY, DEFAULT_THEME_JSON);
-  const themePreference = useMemo(() => {
-    try {
-      const parsed = themePreferenceSchema.safeParse(JSON.parse(storedTheme));
-      return parsed.success ? parsed.data : DEFAULT_THEME;
-    } catch {
-      return DEFAULT_THEME;
-    }
-  }, [storedTheme]);
+  const themePreference = usePersistedThemePreference(session.user);
   const themeMode = themePreference.mode;
   const colourway = themePreference.colourway;
   const textSize = themePreference.textSize;
@@ -234,20 +196,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     }
     router.push("/");
   }, [router]);
-
-  useEffect(() => {
-    if (!session) return;
-    if (sessionStorage.getItem(THEME_SESSION_HYDRATED_KEY) === session.user.id) return;
-    storePreference(THEME_STORAGE_KEY, {
-      mode: session.user.themeMode,
-      colourway: session.user.themeId,
-      textSize: session.user.textSize,
-      urgencyPalette: session.user.urgencyPalette,
-      emailNotifications: session.user.emailNotifications,
-      pushNotifications: session.user.pushNotifications,
-    });
-    sessionStorage.setItem(THEME_SESSION_HYDRATED_KEY, session.user.id);
-  }, [session]);
 
   useEffect(() => {
     if (!notice) return;
@@ -610,7 +558,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
           <button className="settings-return-button" onClick={navigateHomeWithFocus}>
             <Icon name="chevron" /> Return to Orbit
           </button>
-          <h1 ref={settingsHeadingRef} tabIndex={-1}>Settings</h1>
+          <h1 className="page-heading" ref={settingsHeadingRef} tabIndex={-1}>Settings</h1>
         </header>
 
         {syncStatus === "error" && syncMessage && (
