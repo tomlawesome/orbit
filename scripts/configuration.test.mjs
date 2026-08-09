@@ -8,6 +8,7 @@ const script = join(process.cwd(), "scripts", "configuration.sh");
 const appliedVersion = "v1.2.0";
 const appliedDigest = `sha256:${"a".repeat(64)}`;
 const appliedImage = `registry.example/orbit@${appliedDigest}`;
+const appliedProject = "orbit-test";
 
 function migrationArgs() {
   return [
@@ -18,6 +19,8 @@ function migrationArgs() {
     appliedVersion,
     "--applied-digest",
     appliedDigest,
+    "--compose-project-name",
+    appliedProject,
   ];
 }
 
@@ -43,6 +46,7 @@ describe("configuration.sh", () => {
     expect(readFileSync(result.file, "utf8")).toContain(`ORBIT_IMAGE=${appliedImage}\r\n`);
     expect(readFileSync(result.file, "utf8")).toContain(`ORBIT_CONFIG_APPLIED_VERSION=${appliedVersion}\r\n`);
     expect(readFileSync(result.file, "utf8")).toContain(`ORBIT_CONFIG_APPLIED_DIGEST=${appliedDigest}\r\n`);
+    expect(readFileSync(result.file, "utf8")).toContain(`COMPOSE_PROJECT_NAME=${appliedProject}\r\n`);
     expect(result.stdout).toContain(`schema v0 version legacy/unknown digest legacy/unknown to schema v1 version ${appliedVersion} digest ${appliedDigest}`);
     expect(result.stdout).not.toMatch(/orbit\.example|spaces/iu);
   });
@@ -91,6 +95,7 @@ describe("configuration.sh", () => {
       "ORBIT_CONFIG_SCHEMA_VERSION=1",
       `ORBIT_CONFIG_APPLIED_VERSION=${appliedVersion}`,
       `ORBIT_CONFIG_APPLIED_DIGEST=${appliedDigest}`,
+      `COMPOSE_PROJECT_NAME=${appliedProject}`,
       "APP_URL=https://orbit.example.invalid",
       "POSTGRES_DB=orbit",
       "",
@@ -136,6 +141,7 @@ describe("configuration.sh", () => {
       if (key === "ORBIT_IMAGE") return `${key}=${appliedImage}`;
       if (key === "ORBIT_CONFIG_APPLIED_VERSION") return `${key}=${appliedVersion}`;
       if (key === "ORBIT_CONFIG_APPLIED_DIGEST") return `${key}=${appliedDigest}`;
+      if (key === "COMPOSE_PROJECT_NAME") return `${key}=${appliedProject}`;
       return `${key}=value`;
     }).join("\n") + "\n");
     expect(result.status).toBe(0);
@@ -168,6 +174,30 @@ describe("configuration.sh", () => {
     chmodSync(result.file, 0o640);
     const unsafe = spawnSync("bash", [script, "--check", "--file", result.file], { encoding: "utf8" });
     expect(unsafe.status).not.toBe(0);
+  });
+
+  it("rejects invalid or mismatched managed Compose project identity", () => {
+    for (const [value, code] of [
+      ["", "configuration_project"],
+      ["Orbit", "configuration_project"],
+      ["-orbit", "configuration_project"],
+      ["orbit project", "configuration_project"],
+      ["orbit$host", "configuration_syntax"],
+    ]) {
+      const result = run(`APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=${value}\n`);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr.trim()).toBe(code);
+      if (value) expect(`${result.stdout}${result.stderr}`).not.toContain(value);
+    }
+
+    const mismatch = run(
+      `ORBIT_IMAGE=${appliedImage}\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=${appliedVersion}\nORBIT_CONFIG_APPLIED_DIGEST=${appliedDigest}\nCOMPOSE_PROJECT_NAME=one\n`,
+      [...migrationArgs().slice(0, -2), "--compose-project-name", "two"],
+    );
+    expect(mismatch.status).not.toBe(0);
+    expect(mismatch.stderr.trim()).toBe("configuration_project_mismatch");
+    expect(readFileSync(mismatch.file, "utf8")).toContain("COMPOSE_PROJECT_NAME=one");
+    expect(`${mismatch.stdout}${mismatch.stderr}`).not.toContain("one");
   });
 
   it("rejects NUL/control, oversized, directory, and symlink inputs without disclosure", () => {

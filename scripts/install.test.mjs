@@ -28,6 +28,8 @@ import { describe, expect, it } from "vitest";
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
+const backupScriptPath = fileURLToPath(new URL("./backup.sh", import.meta.url));
+const restoreScriptPath = fileURLToPath(new URL("./restore.sh", import.meta.url));
 const readmePath = fileURLToPath(new URL("../README.md", import.meta.url));
 
 const repository = "example/orbit-fixture";
@@ -591,6 +593,31 @@ describe("install.sh", () => {
     expect(readme).toContain('cp -- "$preupgrade_config" .env-orbit');
     expect(readme).toContain('bash scripts/restore.sh "$backup_path"');
     expect(readme).toContain('rm -f -- "$preupgrade_config"');
+    expect(readme).toContain("validated `COMPOSE_PROJECT_NAME`");
+  });
+
+  it("persists a validated Compose project identity for fresh installs", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      COMPOSE_PROJECT_NAME: "fresh-orbit",
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      "COMPOSE_PROJECT_NAME=fresh-orbit",
+    );
+    expect(result.stdout).not.toContain("fresh-orbit");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("keeps backup and restore commands on the persisted env-file project", () => {
+    for (const path of [backupScriptPath, restoreScriptPath]) {
+      const source = readFileSync(path, "utf8");
+      expect(source).toContain('docker compose --env-file "$environment_file"');
+      expect(source).not.toContain("--project-name orbit");
+    }
   });
 
   it("refuses a fresh non-TTY install before Compose when core configuration requires attention", () => {
@@ -920,7 +947,31 @@ describe("install.sh", () => {
     expect(result.status).toBe(0);
     expect(result.calls).toContain("docker compose --project-name renamed-orbit");
     expect(result.calls).not.toContain("docker compose --project-name orbit ");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      "COMPOSE_PROJECT_NAME=renamed-orbit",
+    );
     expect(readFileSync(passwordPath)).toEqual(beforePassword);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses an explicit Compose project mismatch with a proven database volume", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const environmentPath = join(targetDir, ".env-orbit");
+    writeFileSync(environmentPath, `${readFileSync(environmentPath, "utf8")}COMPOSE_PROJECT_NAME=declared-orbit\n`);
+    chmodSync(environmentPath, 0o600);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides("renamed-orbit"),
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does not match the recognized database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("up -d");
+    expect(result.stderr).not.toContain("declared-orbit");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
