@@ -96,7 +96,7 @@ export async function createDocumentDraft(userId: string, documentId: string) {
     const detected = detectDocumentMediaType(download.bytes);
     if (record.scanStatus === "clean"
       && detected === record.mediaType
-      && validateSupportedDocumentStructure(download.bytes, detected)) {
+      && await validateSupportedDocumentStructure(download.bytes, detected)) {
       try {
         text = await extractTextWithTika(download.bytes, detected, documentId);
         extracted = true;

@@ -48,15 +48,15 @@ describe("hostile IMAP attachment validation", () => {
     expect(classifyImapBodyStructure(structure({ disposition: undefined, dispositionParameters: {}, filename: undefined })).candidates).toEqual([]);
   });
 
-  it("only accepts supported types when the declaration agrees with detected bytes", () => {
+  it("only accepts supported types when the declaration agrees with detected bytes", async () => {
     const validPdf = syntheticPdf();
-    expect(validateImapAttachmentBytes(validPdf, "application/pdf")).toMatchObject({ ok: true, mediaType: "application/pdf" });
-    expect(validateImapAttachmentBytes(validPdf, "image/png")).toMatchObject({ ok: false, code: "mime_type_mismatch" });
-    expect(validateImapAttachmentBytes(Buffer.from("PK\x03\x04"), "application/pdf")).toMatchObject({ ok: false, code: "document_type_unsupported" });
-    expect(validateImapAttachmentBytes(Buffer.from("<svg></svg>"), "image/svg+xml")).toMatchObject({ ok: false, code: "document_type_unsupported" });
-    expect(validateImapAttachmentBytes(Buffer.from("%PDF-"), "application/pdf")).toMatchObject({ ok: false, code: "mime_structure_invalid" });
-    expect(validateImapAttachmentBytes(validPdf, "application/pdf", { pdfOnly: true })).toMatchObject({ ok: true, mediaType: "application/pdf" });
-    expect(validateImapAttachmentBytes(Buffer.from([0xff, 0xd8, 0xff]), "application/pdf", { pdfOnly: true })).toMatchObject({ ok: false, code: "mime_type_mismatch" });
+    await expect(validateImapAttachmentBytes(validPdf, "application/pdf")).resolves.toMatchObject({ ok: true, mediaType: "application/pdf" });
+    await expect(validateImapAttachmentBytes(validPdf, "image/png")).resolves.toMatchObject({ ok: false, code: "mime_type_mismatch" });
+    await expect(validateImapAttachmentBytes(Buffer.from("PK\x03\x04"), "application/pdf")).resolves.toMatchObject({ ok: false, code: "document_type_unsupported" });
+    await expect(validateImapAttachmentBytes(Buffer.from("<svg></svg>"), "image/svg+xml")).resolves.toMatchObject({ ok: false, code: "document_type_unsupported" });
+    await expect(validateImapAttachmentBytes(Buffer.from("%PDF-"), "application/pdf")).resolves.toMatchObject({ ok: false, code: "mime_structure_invalid" });
+    await expect(validateImapAttachmentBytes(validPdf, "application/pdf", { pdfOnly: true })).resolves.toMatchObject({ ok: true, mediaType: "application/pdf" });
+    await expect(validateImapAttachmentBytes(Buffer.from([0xff, 0xd8, 0xff]), "application/pdf", { pdfOnly: true })).resolves.toMatchObject({ ok: false, code: "mime_type_mismatch" });
   });
 
   it("selects only metadata-claimed PDFs for the mailbox path while counting other MIME nodes", () => {
