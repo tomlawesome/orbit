@@ -25,6 +25,7 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   disableFontFace: true,
   disableRange: true,
   disableStream: true,
+  enableScripting: false,
   enableXfa: true,
   isEvalSupported: false,
   isImageDecoderSupported: false,
