@@ -11,6 +11,8 @@ readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
 readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
 readonly maximum_secret_bytes=65536
 temporary_file=""
+terminal_fd=""
+terminal_echo_disabled=0
 
 fail() {
   printf 'Orbit configuration: %s\n' "$*" >&2
@@ -22,10 +24,52 @@ usage() {
 }
 
 cleanup() {
+  if [[ "$terminal_echo_disabled" == 1 && -n "$terminal_fd" ]]; then
+    stty echo <&"$terminal_fd" 2>/dev/null || true
+    terminal_echo_disabled=0
+  fi
+  if [[ -n "$terminal_fd" ]]; then
+    exec {terminal_fd}>&-
+    terminal_fd=""
+  fi
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
 }
 
 trap cleanup EXIT
+
+open_controlling_terminal() {
+  [[ -n "$terminal_fd" ]] && return 0
+  if ! { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
+    terminal_fd=""
+    return 1
+  fi
+}
+
+read_guided_line() {
+  local prompt="$1" input
+
+  if [[ -n "$terminal_fd" ]]; then
+    printf '%s' "$prompt" >&"$terminal_fd"
+    IFS= read -r -u "$terminal_fd" input || return 1
+  else
+    IFS= read -r -p "$prompt" input || return 1
+  fi
+  printf '%s' "$input"
+}
+
+disable_terminal_echo() {
+  stty -echo <&"$terminal_fd" 2>/dev/null ||
+    fail "Could not secure hidden terminal input."
+  terminal_echo_disabled=1
+}
+
+restore_terminal_echo() {
+  if [[ "$terminal_echo_disabled" == 1 ]]; then
+    stty echo <&"$terminal_fd" 2>/dev/null ||
+      fail "Could not restore terminal input."
+    terminal_echo_disabled=0
+  fi
+}
 
 generate_hex_secret() {
   local secret
@@ -250,7 +294,7 @@ validate_oidc_issuer() {
 prompt_app_url() {
   local input normalized
   while true; do
-    if ! IFS= read -r -p 'Public Orbit origin (e.g. https://orbit.your-domain.tld): ' input; then
+    if ! input="$(read_guided_line 'Public Orbit origin (e.g. https://orbit.your-domain.tld): ')"; then
       return 1
     fi
     if normalized="$(normalize_public_origin "$input")"; then
@@ -264,7 +308,7 @@ prompt_app_url() {
 prompt_oidc_issuer() {
   local input
   while true; do
-    if ! IFS= read -r -p 'OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ' input; then
+    if ! input="$(read_guided_line 'OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ')"; then
       return 1
     fi
     if validate_oidc_issuer "$input"; then
@@ -278,7 +322,7 @@ prompt_oidc_issuer() {
 prompt_oidc_client_id() {
   local input
   while true; do
-    if ! IFS= read -r -p 'OIDC client ID: ' input; then
+    if ! input="$(read_guided_line 'OIDC client ID: ')"; then
       return 1
     fi
     if is_valid_client_id "$input"; then
@@ -309,7 +353,7 @@ guided_init() {
     client_id="$ORBIT_CONFIGURE_OIDC_CLIENT_ID"
   elif [[ "$env_count" -gt 0 ]]; then
     fail "Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set."
-  elif [[ -t 0 && -t 1 ]]; then
+  elif open_controlling_terminal; then
     if ! app_url="$(prompt_app_url)"; then
       fail "Guided configuration was cancelled."
     fi
@@ -320,7 +364,7 @@ guided_init() {
       fail "Guided configuration was cancelled."
     fi
   else
-    fail "Guided configuration needs an interactive terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use."
+    fail "Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use."
   fi
 
   local normalized_app_url
@@ -375,12 +419,32 @@ ensure_secret_file() {
   printf 'Generated %s.\n' "$path"
 }
 
+environment_key_is_nonempty() {
+  local requested_key="$1" line value="" found=0
+  [[ -f "$environment_file" && ! -L "$environment_file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      value="${line#*=}"
+      found=1
+    fi
+  done < "$environment_file"
+  [[ "$found" == 1 && -n "$value" ]]
+}
+
 # Creates a zero-byte, mode-0600 placeholder only when no OIDC client secret
 # file exists yet: the protected Compose secret declaration requires a host
 # source to exist even before an operator runs --set-oidc-secret. An existing
 # regular file is preserved byte-for-byte; a symlink or other non-regular path
 # is refused rather than silently followed or replaced.
 ensure_oidc_secret_placeholder() {
+  # Existing direct-value deployments remain valid and must not gain a second
+  # active secret form merely because the installer now performs readiness
+  # checks. A direct value and a file-backed value remain mutually exclusive.
+  if environment_key_is_nonempty OIDC_CLIENT_SECRET &&
+    ! environment_key_is_nonempty OIDC_CLIENT_SECRET_FILE; then
+    return 0
+  fi
+
   if [[ -e "$oidc_secret_file" ]]; then
     [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" ]] ||
       fail "Refusing to use ${oidc_secret_file} because it is not a regular file."
@@ -406,7 +470,24 @@ ensure_oidc_secret_placeholder() {
 set_oidc_secret() {
   local secret secret_bytes
 
-  IFS= read -r -s -p '' secret || true
+  if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
+    open_controlling_terminal; then
+    disable_terminal_echo
+    printf 'OIDC client secret (input hidden): ' >&"$terminal_fd"
+    if ! IFS= read -r -s -u "$terminal_fd" secret; then
+      restore_terminal_echo
+      printf '\n' >&"$terminal_fd"
+      fail "Could not read a complete OIDC client secret from the controlling terminal."
+    fi
+    restore_terminal_echo
+    printf '\n' >&"$terminal_fd"
+  elif [[ -t 0 ]]; then
+    if ! IFS= read -r -s -p '' secret; then
+      fail "Could not read a complete OIDC client secret from standard input."
+    fi
+  elif ! IFS= read -r -p '' secret; then
+    fail "Could not read a complete OIDC client secret from standard input."
+  fi
   [[ -n "$secret" ]] ||
     fail "Could not read a non-empty OIDC client secret from standard input."
   secret_bytes="$(printf '%s' "$secret" | wc -c | tr -d '[:space:]')"
@@ -484,6 +565,8 @@ run_check() {
   if [[ -e "$environment_file" ]]; then
     [[ -f "$environment_file" && ! -L "$environment_file" ]] ||
       fail "Refusing to use ${environment_file} because it is not a regular file."
+    [[ "$(stat -c '%a' -- "$environment_file" 2>/dev/null)" == 600 ]] ||
+      fail "Refusing to check ${environment_file} because its permissions are not restricted to the owner."
     source_path="$environment_file"
   fi
 
@@ -640,7 +723,10 @@ run_check() {
     oidc_secret_ready=1
   elif ! is_set OIDC_CLIENT_SECRET && is_set OIDC_CLIENT_SECRET_FILE \
     && [[ "${values[OIDC_CLIENT_SECRET_FILE]}" == "$oidc_secret_file_path" ]] \
-    && [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" && -s "$oidc_secret_file" ]]; then
+    && [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] \
+    && [[ "$(stat -c '%a' -- "$secrets_directory" 2>/dev/null)" == 700 ]] \
+    && [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" && -s "$oidc_secret_file" ]] \
+    && [[ "$(stat -c '%a' -- "$oidc_secret_file" 2>/dev/null)" == 600 ]]; then
     oidc_secret_ready=1
   fi
 
