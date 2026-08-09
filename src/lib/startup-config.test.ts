@@ -12,7 +12,6 @@ import { StartupConfigurationError, validateStartupConfiguration } from "./start
 const baseEnvironment = (): NodeJS.ProcessEnv => ({
   NODE_ENV: "test",
   ORBIT_CONFIG_SCHEMA_VERSION: "1",
-  ORBIT_IMAGE: "orbit-local:abcdef123456",
   APP_URL: "https://orbit.example.invalid",
   SESSION_SECRET: "s".repeat(32),
   OIDC_ISSUER: "https://identity.example.invalid/issuer",
@@ -54,7 +53,6 @@ describe("startup configuration", () => {
 
   it.each([
     ["version", { ORBIT_CONFIG_SCHEMA_VERSION: "2" }, "ORBIT_CONFIG_SCHEMA_VERSION"],
-    ["image", { ORBIT_IMAGE: "" }, "ORBIT_IMAGE"],
     ["missing secret file", { SESSION_SECRET: undefined, SESSION_SECRET_FILE: "/missing/runtime-secret" }, "authentication"],
   ])("rejects invalid core %s before database access", (_label, changes, field) => {
     let failure: unknown;
@@ -65,6 +63,49 @@ describe("startup configuration", () => {
     }
     expect(failure).toBeInstanceOf(StartupConfigurationError);
     expect((failure as StartupConfigurationError).issues).toContainEqual(expect.objectContaining({ field }));
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("accepts preconfigured disabled IMAP and dormant VAPID key material without a push subject", () => {
+    expect(() => validateStartupConfiguration({
+      ...baseEnvironment(),
+      IMAP_ENABLED: "false",
+      IMAP_HOST: "imap.example.invalid",
+      IMAP_USER: "orbit-test-user",
+      IMAP_PASSWORD: "test-only-imap-password",
+      VAPID_PUBLIC_KEY: "dormant-public-key",
+      VAPID_PRIVATE_KEY_FILE: "/missing/runtime-secret",
+    })).not.toThrow();
+  });
+
+  it("rejects enabled push when its private key file is unreadable", () => {
+    let failure: unknown;
+    try {
+      validateStartupConfiguration({
+        ...baseEnvironment(),
+        VAPID_SUBJECT: "mailto:admin@example.invalid",
+        VAPID_PUBLIC_KEY: "configured-public-key",
+        VAPID_PRIVATE_KEY_FILE: "/missing/runtime-secret",
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(StartupConfigurationError);
+    expect((failure as StartupConfigurationError).issues).toContainEqual({ field: "push", code: "configuration_optional" });
+    expect((failure as StartupConfigurationError).issues).not.toContainEqual(expect.objectContaining({ field: "mail" }));
+    expect(JSON.stringify(failure)).not.toContain("configured-public-key");
+    expect(JSON.stringify(failure)).not.toContain("missing/runtime-secret");
+  });
+
+  it("rejects partially configured default IMAP before database access", () => {
+    let failure: unknown;
+    try {
+      validateStartupConfiguration({ ...baseEnvironment(), IMAP_HOST: "imap.example.invalid" });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(StartupConfigurationError);
+    expect((failure as StartupConfigurationError).issues).toContainEqual({ field: "imap", code: "configuration_optional" });
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });
