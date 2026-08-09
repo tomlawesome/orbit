@@ -16,6 +16,7 @@ import {
   users,
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
+import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const notificationEnvironmentSchema = z.object({
@@ -60,6 +61,13 @@ export const notificationFailureCategories = [
 ] as const;
 
 export type NotificationFailureCategory = typeof notificationFailureCategories[number];
+
+function operationalNotificationReason(category: NotificationFailureCategory): OperationalReason {
+  if (category === "unknown") return "provider_error";
+  return (operationalReasons as readonly string[]).includes(category)
+    ? category as OperationalReason
+    : "unexpected_failure";
+}
 
 export interface NotificationWorkerHealth {
   started: boolean;
@@ -670,6 +678,14 @@ async function deliverClaimed(
         now,
         retryDelay,
       );
+      const exhausted = delivery.attempts + 1 >= config.maxAttempts;
+      log.warn({
+        event: delivery.channel === "email" ? "delivery.smtp" : "delivery.push",
+        state: exhausted ? "exhausted" : "retrying",
+        reason: operationalNotificationReason(categorizeProviderError(delivery.channel, error)),
+        action: exhausted ? "inspect_admin_diagnostics" : "retry",
+        impact: "notification_delivery_delayed",
+      });
     }
   }
 }
@@ -756,10 +772,17 @@ export function startNotificationWorker(config = getNotificationWorkerConfig()):
       await runNotificationCycle(config);
       workerState.__orbitWorkerLastSuccessAt = new Date().toISOString();
       workerState.__orbitWorkerLastErrorCategory = undefined;
+      log.info({ event: "notification.worker", state: "ready", action: "none" });
     } catch {
       workerState.__orbitWorkerLastErrorAt = new Date().toISOString();
       workerState.__orbitWorkerLastErrorCategory = "unknown";
-      console.error("Orbit notification cycle failed");
+      log.error({
+        event: "notification.worker",
+        state: "retrying",
+        reason: "worker_cycle_failed",
+        action: "inspect_admin_diagnostics",
+        impact: "worker_degraded",
+      });
     } finally {
       workerState.__orbitWorkerRunning = false;
       setTimeout(poll, config.pollMilliseconds).unref();

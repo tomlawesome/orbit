@@ -1,7 +1,7 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
-import { log } from "@/lib/logger";
+import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
@@ -16,6 +16,12 @@ import { processOwnedPurge, type OwnedPurgeJob, type OwnedPurgeState } from "@/s
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { purgeExpiredPortableArchives, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
 import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
+
+function operationalDocumentReason(value: string): OperationalReason {
+  return (operationalReasons as readonly string[]).includes(value)
+    ? value as OperationalReason
+    : "unexpected_failure";
+}
 
 interface ClaimedDocumentJob extends OwnedPurgeJob {
   /** The job's status immediately before this claim; distinguishes an expired-lease reclaim from a fresh pending/retry claim. */
@@ -247,13 +253,12 @@ async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string):
     eq(documentJobs.status, "processing"),
     eq(documentJobs.leaseToken, job.leaseToken),
   ));
-  log.warn("document.job", {
-    document: job.documentId,
-    job: job.id,
-    kind: "scan",
-    outcome: exhausted ? "failed" : "retry",
-    reason: failureCode,
-    attempts: current.attempts,
+  log.warn({
+    event: "document.job",
+    state: exhausted ? "exhausted" : "retrying",
+    reason: operationalDocumentReason(failureCode),
+    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
+    impact: "document_processing_blocked",
   });
 }
 
@@ -508,12 +513,12 @@ async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<void> {
     }
   } catch (error) {
     if (availabilityFinalized) {
-      log.warn("document.job", {
-        document: job.documentId,
-        job: job.id,
-        kind: "scan",
-        outcome: "purge_pending",
+      log.warn({
+        event: "document.job",
+        state: "retrying",
         reason: "stage_purge_failed",
+        action: "retry_job",
+        impact: "document_processing_blocked",
       });
       return;
     }
@@ -744,7 +749,7 @@ async function processPurgeJob(job: ClaimedDocumentJob): Promise<"completed" | "
       });
     },
   });
-  if (outcome === "completed") log.info("document.lifecycle", { document: job.documentId, state: "deleted" });
+  if (outcome === "completed") log.info({ event: "document.lifecycle", state: "completed", action: "none" });
   if (outcome === "stale") await completeStalePurgeClaim(job);
   return outcome;
 }
@@ -801,13 +806,12 @@ async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
     ? "key_unavailable"
     : "purge_failed";
   const exhausted = current.attempts >= 5;
-  log.warn("document.job", {
-    document: job.documentId,
-    job: job.id,
-    kind: "purge",
-    outcome: exhausted ? "failed" : "retry",
-    reason: safeCode,
-    attempts: current.attempts,
+  log.warn({
+    event: "document.job",
+    state: exhausted ? "exhausted" : "retrying",
+    reason: operationalDocumentReason(safeCode),
+    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
+    impact: "document_processing_blocked",
   });
   await getDb().update(documentJobs).set({
     status: exhausted ? "failed" : "retry",
@@ -833,13 +837,15 @@ async function rejectInterruptedDocuments(): Promise<void> {
     inArray(documents.lifecycle, ["receiving", "validating", "quarantined", "encrypting"]),
     lt(documents.updatedAt, staleBoundary),
   )).returning({ id: documents.id });
-  // A document stranded mid-pipeline is the visible symptom of a processor
-  // outage, so each one is recorded rather than only counted.
-  for (const document of rejected) {
-    log.warn("document.lifecycle", {
-      document: document.id,
-      state: "rejected",
+  // A stranded item is represented by one bounded transition; identifiers are
+  // intentionally excluded and the shared logger deduplicates repeated items.
+  if (rejected.length > 0) {
+    log.warn({
+      event: "document.lifecycle",
+      state: "exhausted",
       reason: "processing_interrupted",
+      action: "inspect_admin_diagnostics",
+      impact: "document_processing_blocked",
     });
   }
 }
@@ -893,7 +899,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
         return true;
       });
       if (rejected) {
-        log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "crypto_metadata_missing" });
+        log.warn({ event: "document.lifecycle", state: "exhausted", reason: "crypto_metadata_missing", action: "inspect_admin_diagnostics", impact: "document_processing_blocked" });
       }
       continue;
     }
@@ -923,7 +929,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
         return true;
       });
       if (rejected) {
-        log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "storage_object_invalid" });
+        log.warn({ event: "document.lifecycle", state: "exhausted", reason: "storage_object_invalid", action: "inspect_admin_diagnostics", impact: "document_processing_blocked" });
       }
       continue;
     }
@@ -970,7 +976,7 @@ export async function reconcileDocumentStorage(): Promise<void> {
       }),
     });
     if (reconciliationOutcome === "rejected") {
-      log.warn("document.lifecycle", { document: record.documentId, state: "rejected", reason: "storage_object_missing" });
+      log.warn({ event: "document.lifecycle", state: "exhausted", reason: "storage_object_missing", action: "inspect_admin_diagnostics", impact: "document_processing_blocked" });
     }
   }
 
@@ -1007,7 +1013,7 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   }
   const scanJobs = await claimScannerRecoveryJobs();
   for (const job of scanJobs) {
-    log.info("document.job", { document: job.documentId, job: job.id, kind: "scan", outcome: job.previousStatus === "processing" ? "reclaimed" : "claimed" });
+    log.info({ event: "document.job", state: "starting", reason: "retry_scheduled", action: "retry_job", impact: "document_processing_blocked" });
     try {
       await processScannerRecoveryJob(job);
     } catch {
@@ -1016,10 +1022,10 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
   }
   const jobs = await claimExpiredPurgeJobs();
   for (const job of jobs) {
-    log.info("document.job", { document: job.documentId, job: job.id, kind: "purge", outcome: purgeClaimOutcome(job.previousStatus) });
+    log.info({ event: "document.job", state: "starting", action: "retry_job" });
     try {
       const outcome = await processPurgeJob(job);
-      log.info("document.job", { document: job.documentId, job: job.id, kind: "purge", outcome });
+      if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
     } catch (error) {
       await failJob(job, error);
     }
@@ -1037,12 +1043,19 @@ export function startDocumentWorker(pollMilliseconds = 60_000): void {
       await runDocumentMaintenanceCycle();
       workerState.__orbitDocumentWorkerLastSuccessAt = new Date().toISOString();
       workerState.__orbitDocumentWorkerLastErrorCode = undefined;
+      log.info({ event: "document.worker", state: "ready", action: "none" });
     } catch {
       workerState.__orbitDocumentWorkerLastErrorAt = new Date().toISOString();
       workerState.__orbitDocumentWorkerLastErrorCode = "maintenance_cycle_failed";
       // The cause is deliberately not logged: it may carry storage paths or
       // provider text. The health endpoint exposes the bounded failure code.
-      log.error("document.worker", { outcome: "cycle_failed" });
+      log.error({
+        event: "document.worker",
+        state: "retrying",
+        reason: "worker_cycle_failed",
+        action: "inspect_admin_diagnostics",
+        impact: "worker_degraded",
+      });
     } finally {
       workerState.__orbitDocumentWorkerRunning = false;
       setTimeout(poll, pollMilliseconds).unref();

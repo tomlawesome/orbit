@@ -4,6 +4,8 @@ import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { getImapIngestionConfig } from "@/server/imap-ingestion";
+import { setConfigurationProblems } from "@/lib/configuration-problems";
+import { logFormats, logLevels } from "@/lib/logger";
 
 export type StartupConfigurationCode =
   | "configuration_version"
@@ -11,7 +13,7 @@ export type StartupConfigurationCode =
   | "configuration_optional";
 
 export type StartupConfigurationIssue = {
-  field: "ORBIT_CONFIG_SCHEMA_VERSION" | "authentication" | "database" | "documents" | "mail" | "imap" | "push" | "processing" | "ai";
+  field: "ORBIT_CONFIG_SCHEMA_VERSION" | "authentication" | "database" | "documents" | "logging" | "mail" | "imap" | "push" | "processing" | "ai";
   code: StartupConfigurationCode;
 };
 
@@ -81,6 +83,12 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
       issues.push({ field: "imap", code: "configuration_optional" });
     }
   }
+  if (environment.ORBIT_LOG_LEVEL !== undefined && !(logLevels as readonly string[]).includes(environment.ORBIT_LOG_LEVEL)) {
+    issues.push({ field: "logging", code: "configuration_optional" });
+  }
+  if (environment.ORBIT_LOG_FORMAT !== undefined && !(logFormats as readonly string[]).includes(environment.ORBIT_LOG_FORMAT)) {
+    issues.push({ field: "logging", code: "configuration_optional" });
+  }
   if (hasAny(environment, ["VAPID_SUBJECT"])) {
     try {
       const privateKey = readRuntimeSecret(environment, "VAPID_PRIVATE_KEY");
@@ -92,5 +100,7 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
     }
   }
   issues.push(...selectedProfileConfiguration(environment));
-  if (issues.length > 0) throw new StartupConfigurationError(issues);
+  setConfigurationProblems(issues);
+  const blockingIssues = issues.filter((issue) => issue.code !== "configuration_optional");
+  if (blockingIssues.length > 0) throw new StartupConfigurationError(issues);
 }
