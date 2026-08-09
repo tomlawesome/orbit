@@ -92,7 +92,7 @@ export async function scanAndHoldImapAttachment(input: {
   try {
     const bytes = await storage().readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      const validated = validateImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: config.maxBytes, pdfOnly: input.mailboxIngestion === true });
+      const validated = await validateImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: config.maxBytes, pdfOnly: input.mailboxIngestion === true });
       if (!validated.ok) throw new Error(validated.code);
       const mediaType = validated.mediaType;
       const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);
