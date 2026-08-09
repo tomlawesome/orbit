@@ -280,17 +280,85 @@ to the public internet.
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
 
-Before an upgrade, create and verify a database backup with `scripts/backup.sh`.
+Before an upgrade, create and verify a database backup and retain an owner-only
+copy of the exact pre-upgrade `.env-orbit` beside it. The ordinary backup
+manifest intentionally does not contain configuration or secrets; the sidecar
+copy preserves the previous immutable image and provenance identity:
+
+```sh
+umask 077
+preupgrade_dir="${ORBIT_BACKUP_DIR:-backups}"
+mkdir -p -- "$preupgrade_dir"
+chmod 700 -- "$preupgrade_dir"
+preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"
+cp -- .env-orbit "$preupgrade_config"
+chmod 600 "$preupgrade_config"
+backup_output="$(ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh)" || exit 1
+case "$backup_output" in
+  "Orbit backup created: "*) backup_path="${backup_output#Orbit backup created: }" ;;
+  *) exit 1 ;;
+esac
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path" >/dev/null
+```
+
 The installer validates the image's configuration contract before changing an
 existing `.env-orbit`; legacy configuration is migrated only by the installer
-transaction, which keeps its private rollback copy. A standalone legacy
-configuration can be inspected with `scripts/configuration.sh --preflight` and
-must be migrated explicitly with `scripts/configuration.sh --migrate`; that
-command retains one owner-only rollback copy beside the file. If configuration
-or database migration fails, retry after restoring the pre-upgrade database
-backup with the matching previous image. Configuration migration only adds the
-schema marker and is idempotent; it does not rewrite operator values or
-secrets.
+transaction, which keeps its private rollback copy. Before the installer
+reports that configuration and Compose preflight passed, an ordinary
+configuration or pre-start failure automatically restores the original
+managed file state. Each successful migration records the target semantic
+version and exact image digest in the managed
+`ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST` fields; these
+must match the immutable `ORBIT_IMAGE` digest and must not be edited manually.
+A successful fresh install or recognized directory rename also persists the
+validated `COMPOSE_PROJECT_NAME`. Keep using `docker compose --env-file
+.env-orbit`, `scripts/backup.sh`, and `scripts/restore.sh` from the deployment
+directory so ordinary operator actions continue to address that same Compose
+project after reboot; do not substitute a remembered `--project-name`.
+A hard interruption can bypass cleanup: `.env-orbit` is either the original
+file or a complete atomic new file, never a partial file, and private
+`.orbit-install-staging.*` evidence may remain with owner-only permissions.
+Keep that evidence until recovery is complete.
+A standalone legacy configuration can be inspected with
+`scripts/configuration.sh --preflight` and must be migrated explicitly with
+the target image metadata supplied to `scripts/configuration.sh --migrate`:
+
+```sh
+bash scripts/configuration.sh --migrate --orbit-image \
+  'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
+  --applied-version v1.2.3 \
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
+  --compose-project-name orbit
+```
+
+The image digest and applied digest must be the same; the command retains one
+owner-only rollback copy beside the file. For a recognized existing
+deployment, the installer proves the Compose project, database volume labels,
+stopped-container ownership, and prior immutable application image before
+reusing that project, so moving the deployment directory does not silently
+create a new database volume. A fresh or pre-provisioned target is refused
+when any Orbit database volume is present, and an existing deployment is
+refused when ownership is ambiguous or cannot be proven. Orbit never deletes
+or resets a database volume automatically; preserve the existing
+`.orbit-secrets/postgres-password` byte-for-byte. If services have started and
+database migration or authentication then fails, stop Orbit and restore both
+the verified backup and the matching owner-only configuration copy:
+
+```sh
+docker compose --env-file .env-orbit stop orbit-app
+cp -- "$preupgrade_config" .env-orbit
+chmod 600 .env-orbit
+docker compose --env-file .env-orbit pull orbit-app
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
+```
+
+The restored configuration supplies the exact previous image digest and
+provenance; do not substitute a mutable tag or edit only `ORBIT_IMAGE`. Follow
+the restore confirmation, verify the configured `/api/health` endpoint and
+authenticated sign-in on the previous image, and only then remove the temporary
+copy with `rm -f -- "$preupgrade_config"`. Keep it if health is not verified.
+Configuration migration is atomic and idempotent; it does not rewrite operator
+values or secrets.
 
 ### Optional local processing stack
 
