@@ -36,15 +36,18 @@ describe("authentication HTTP diagnostics", () => {
         message: "Authentication runtime configuration is incomplete",
       },
     });
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.configuration",
       state: "invalid",
+      reason: "configuration_invalid",
+      action: "check_configuration",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(secret);
   });
 
-  it("reports provider discovery failure once without exposing provider or exception details", () => {
+  it("reports provider discovery failures without exposing provider or exception details", () => {
     const providerUrl = "https://provider.example.invalid/tenant/discovery-sensitive";
     const error = new AuthError(
       "discovery_failed",
@@ -58,12 +61,14 @@ describe("authentication HTTP diagnostics", () => {
 
     expect(first.status).toBe(502);
     expect(second.status).toBe(502);
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "discovery_failed",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
-    expect(mocks.log.error).toHaveBeenCalledTimes(1);
+    expect(mocks.log.error).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain(providerUrl);
   });
 
@@ -89,12 +94,14 @@ describe("authentication HTTP diagnostics", () => {
 
     expect(first.status).toBe(502);
     expect(second.status).toBe(502);
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "invalid_grant",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
-    expect(mocks.log.error).toHaveBeenCalledTimes(1);
+    expect(mocks.log.error).toHaveBeenCalledTimes(2);
     const records = JSON.stringify(mocks.log.error.mock.calls);
     for (const value of sensitiveDetails) expect(records).not.toContain(value);
   });
@@ -108,9 +115,11 @@ describe("authentication HTTP diagnostics", () => {
 
     authErrorResponse(error);
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "provider_rejected",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);

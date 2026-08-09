@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const [entrypoint, ...arguments_] = process.argv.slice(2);
 if (!entrypoint) {
-  console.error("Orbit launcher: a Node.js entrypoint is required.");
+  process.stderr.write("Orbit launcher: a Node.js entrypoint is required.\n");
   process.exit(1);
 }
 
@@ -24,7 +24,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("error", (error) => {
-  console.error("Orbit launcher:", error.message);
+  // The child error may include a path or environment detail; keep launcher
+  // output bounded and let the child own its operational diagnostics.
+  void error;
+  process.stderr.write("Orbit launcher: startup failed.\n");
   process.exitCode = 1;
 });
 

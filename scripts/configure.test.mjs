@@ -200,6 +200,7 @@ describe(".env-orbit.example", () => {
       "ORBIT_BIND_ADDRESS",
       "ORBIT_PORT",
       "ORBIT_LOG_LEVEL",
+      "ORBIT_LOG_FORMAT",
       "COMPOSE_PROFILES",
       "POSTGRES_DB",
       "POSTGRES_USER",

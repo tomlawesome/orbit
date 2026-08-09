@@ -13,7 +13,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { log } from "@/lib/logger";
+import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { getDocumentConfig } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -25,6 +25,12 @@ import {
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
+
+function operationalDocumentReason(value: string): OperationalReason {
+  return (operationalReasons as readonly string[]).includes(value)
+    ? value as OperationalReason
+    : "unexpected_failure";
+}
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -429,13 +435,13 @@ export async function uploadItemDocument(input: {
     });
     metadataReserved = true;
 
-    log.info("document.lifecycle", { document: documentId, state: "quarantined", bytes: received.sizeBytes });
+    log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
     if (config.scanMode === "required") {
       await getDb().update(documents).set({ lifecycle: "scanning", updatedAt: new Date() })
         .where(and(eq(documents.id, documentId), eq(documents.lifecycle, "quarantined")));
-      log.info("document.lifecycle", { document: documentId, state: "scanning" });
-      log.info("document.scan", { document: documentId, outcome: "attempt" });
+      log.info({ event: "document.lifecycle", state: "starting", action: "check_scanner" });
+      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
       const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
       const scanMs = Math.max(0, Date.now() - scanStartedAt);
@@ -449,11 +455,13 @@ export async function uploadItemDocument(input: {
         const failureCode = infected ? "malware_detected" : retryableFailureCode ?? "scanner_failed";
         // `scan.reason` is a fixed enumeration from the scanner adapter, never
         // provider text, so it is safe to record.
-        log.warn("document.scan", {
-          document: documentId,
-          outcome: infected ? "infected" : "error",
-          reason: infected ? "malware_detected" : scan.reason,
-          ms: scanMs,
+        log.warn({
+          event: "document.scan",
+          state: infected ? "exhausted" : "degraded",
+          reason: operationalDocumentReason(failureCode),
+          action: "check_scanner",
+          impact: "document_upload_blocked",
+          durationMs: scanMs,
         });
         if (retryableFailureCode) {
           const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
@@ -513,7 +521,14 @@ export async function uploadItemDocument(input: {
             } finally {
               staged.ciphertext.fill(0);
             }
-            log.warn("document.scan", { document: documentId, outcome: "recoverable", reason: failureCode, ms: scanMs });
+            log.warn({
+              event: "document.scan",
+              state: "retrying",
+              reason: operationalDocumentReason(failureCode),
+              action: "retry",
+              impact: "document_upload_blocked",
+              durationMs: scanMs,
+            });
             return toSummary({
               id: documentId,
               itemId: input.itemId,
@@ -540,7 +555,13 @@ export async function uploadItemDocument(input: {
           failureCode,
           updatedAt: new Date(),
         }).where(eq(documents.id, documentId));
-        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
+        log.warn({
+          event: "document.lifecycle",
+          state: "exhausted",
+          reason: operationalDocumentReason(failureCode),
+          action: "check_scanner",
+          impact: "document_upload_blocked",
+        });
         await recordDocumentAudit(
           input.householdId,
           documentId,
@@ -561,15 +582,15 @@ export async function uploadItemDocument(input: {
           503,
         );
       }
-      log.info("document.scan", { document: documentId, outcome: "clean", ms: scanMs });
+      log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
       await getDb().update(documents).set({ scanStatus: "clean", lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     } else {
-      log.info("document.scan", { document: documentId, outcome: "skipped", reason: "scan_mode_disabled" });
+      log.info({ event: "document.scan", state: "disabled", reason: "scan_mode_disabled", action: "none" });
       await getDb().update(documents).set({ lifecycle: "encrypting", updatedAt: new Date() })
         .where(eq(documents.id, documentId));
     }
-    log.info("document.lifecycle", { document: documentId, state: "encrypting" });
+    log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
     const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
@@ -616,7 +637,7 @@ export async function uploadItemDocument(input: {
         },
       });
     });
-    log.info("document.lifecycle", { document: documentId, state: "available", bytes: received.sizeBytes });
+    log.info({ event: "document.lifecycle", state: "ready", action: "none" });
     return {
       id: documentId,
       itemId: input.itemId,
@@ -646,7 +667,13 @@ export async function uploadItemDocument(input: {
         .returning({ id: documents.id })
         .catch(() => []);
       if (rejected.length > 0) {
-        log.warn("document.lifecycle", { document: documentId, state: "rejected", reason: failureCode });
+        log.warn({
+          event: "document.lifecycle",
+          state: "exhausted",
+          reason: operationalDocumentReason(failureCode),
+          action: "inspect_admin_diagnostics",
+          impact: "document_processing_blocked",
+        });
       }
     }
     throw error;
@@ -727,7 +754,7 @@ export async function requestDocumentDeletion(userId: string, documentId: string
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
-  log.info("document.lifecycle", { document: documentId, state: "pending_deletion" });
+  log.info({ event: "document.lifecycle", state: "stopping", action: "none" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_deletion_requested", {
     itemId: record.itemId,
     deleteAfter: deleteAfter.toISOString(),
@@ -791,7 +818,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     return changed;
   });
   if (!updated) throw new AppError("document_conflict", "That document changed; refresh and try again", 409);
-  log.info("document.lifecycle", { document: documentId, state: "available" });
+  log.info({ event: "document.lifecycle", state: "recovered", action: "none" });
   await recordDocumentAudit(record.householdId, documentId, userId, "document_restored", { itemId: record.itemId });
   return toSummary(updated, config.scanMode);
 }
