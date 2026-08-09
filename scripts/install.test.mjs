@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
+const readmePath = fileURLToPath(new URL("../README.md", import.meta.url));
 
 const repository = "example/orbit-fixture";
 const registry = "fake-registry.example";
@@ -580,6 +581,18 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
 }
 
 describe("install.sh", () => {
+  it("documents the configuration and database recovery identity contract", () => {
+    const readme = readFileSync(readmePath, "utf8");
+
+    expect(readme).toContain('preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"');
+    expect(readme).toContain('chmod 600 "$preupgrade_config"');
+    expect(readme).toContain("configuration or pre-start failure automatically restores");
+    expect(readme).toContain(".orbit-install-staging.*");
+    expect(readme).toContain('cp -- "$preupgrade_config" .env-orbit');
+    expect(readme).toContain('bash scripts/restore.sh "$backup_path"');
+    expect(readme).toContain('rm -f -- "$preupgrade_config"');
+  });
+
   it("refuses a fresh non-TTY install before Compose when core configuration requires attention", () => {
     const targetDir = makeTarget();
 
