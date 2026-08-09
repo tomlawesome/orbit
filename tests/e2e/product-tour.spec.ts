@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { generatedPdfFixtures } from "../support/generated-pdf-documents";
 
 type ProductTourFixture = {
   householdId: string;
@@ -14,11 +13,7 @@ type ProductTourFixture = {
 
 const fixedNow = "2026-08-08T10:00:00.000Z";
 const outputDirectory = join(process.cwd(), "docs/assets/product-tour");
-const generatedPdf = (() => {
-  const fixture = generatedPdfFixtures.find(({ name }) => name === "compressed cross-reference stream");
-  if (!fixture) throw new Error("generated PDF browser fixture is missing");
-  return fixture.bytes;
-})();
+const generatedPdf = readFileSync(new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url));
 
 function newFixture(): ProductTourFixture {
   return {

@@ -119,11 +119,13 @@ recoverable state.
   transport input; it does not make mailbox PDFs more trusted or manual image
   uploads less dangerous.
 - Validate the complete bounded container before reserving durable upload
-  metadata or invoking a scanner or parser. PDF structure is parsed by the
-  maintained PDF.js standards-aware parser with error recovery disabled,
-  streaming/prefetch disabled, and no document rendering or JavaScript
-  evaluation in the inspection boundary; WebAssembly is disabled and XFA is
-  inspected only for rejection. PDF active/embedded-file
+  metadata or invoking a scanner or parser. PDF structure is parsed by a
+  maintained, bounded in-process PDF.js structure parser with error recovery
+  disabled, range/stream/prefetch/network/font/eval/rendering/WASM paths
+  disabled, and XFA inspected only for rejection. Inspection is capped at
+  1,000 pages and five seconds; the timer can abort asynchronous PDF.js work,
+  but cannot pre-empt synchronous JavaScript already executing in Orbit's
+  process. PDF active/embedded-file
   features are classified separately from unfamiliar structure; names are
   inspected outside comments, strings, and stream payloads so harmless text in
   compressed page content does not become active content. Malformed JPEG
@@ -136,6 +138,9 @@ recoverable state.
 - Parser responses must be content-type checked, strictly decoded, and bounded
   before allocation. Redirects and arbitrary request URLs or options are
   rejected. Parser errors expose no provider or document content.
+- PDF.js runs in the Orbit process and is not a separate sandbox. The optional
+  Tika service remains the separately isolated parser/OCR boundary described
+  below.
 - The optional Tika service shares only a dedicated internal network with the
   Orbit application. It has no network path to PostgreSQL, default-network
   services, or external networks. The pinned image runs as UID/GID 35002,
