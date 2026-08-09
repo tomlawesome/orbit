@@ -376,8 +376,10 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
     test.skip(isMobile, "The account control is desktop-only; mobile navigation remains unchanged.");
 
     const fixture = newFixture();
+    let cleanupRequired = false;
     try {
       await signIn(page);
+      cleanupRequired = true;
       await createFixture(page, fixture);
       const trigger = page.getByRole("button", { name: "Open account menu" });
       const menu = page.getByRole("menu", { name: "Account menu" });
@@ -432,15 +434,13 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await page.keyboard.press("Escape");
       await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
       await trigger.click();
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await cleanupFixture(page, fixture);
+      cleanupRequired = false;
       await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
     } finally {
-      try {
-        await page.goto("/");
-        if (await page.getByRole("link", { name: "Sign in securely" }).isVisible()) {
-          await signIn(page);
-        }
-      } finally {
+      if (cleanupRequired) {
         await cleanupFixture(page, fixture);
       }
     }
