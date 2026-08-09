@@ -10,6 +10,12 @@ readonly rollback_suffix=".orbit-config.rollback"
 readonly removed_keys=''
 parsed_keys=()
 schema_present=0
+applied_version_present=0
+applied_digest_present=0
+schema_value=""
+orbit_image_value=""
+applied_version_value=""
+applied_digest_value=""
 
 fail_code() {
   printf '%s\n' "$1" >&2
@@ -24,7 +30,7 @@ usage() {
 # accepted for upgrades, but their _FILE counterparts are the preferred form.
 # The alias compatibility names are retained because the runtime getter still
 # reads them for pre-rotation installations; they are not documented defaults.
-readonly allowed_keys='APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE IMAP_ENABLED SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE IMAP_MAILBOX IMAP_TLS_SERVER_NAME IMAP_RECIPIENT_DOMAIN IMAP_TRUSTED_RECIPIENT_HEADER IMAP_POLL_SECONDS IMAP_ALIAS_CURRENT_GENERATION IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE IMAP_ALIAS_PREVIOUS_GENERATION IMAP_ALIAS_PREVIOUS_SECRET IMAP_ALIAS_PREVIOUS_SECRET_FILE IMAP_ALIAS_PREVIOUS_EXPIRES_AT IMAP_ALIAS_GENERATION IMAP_ALIAS_CURRENT_KEY IMAP_ALIAS_CURRENT_KEY_FILE IMAP_ALIAS_SECRET IMAP_ALIAS_SECRET_FILE IMAP_ALIAS_PREVIOUS_KEY IMAP_ALIAS_PREVIOUS_KEY_FILE IMAP_ALIAS_PREVIOUS_EXPIRY VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
+readonly allowed_keys='APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE IMAP_ENABLED SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE IMAP_MAILBOX IMAP_TLS_SERVER_NAME IMAP_RECIPIENT_DOMAIN IMAP_TRUSTED_RECIPIENT_HEADER IMAP_POLL_SECONDS IMAP_ALIAS_CURRENT_GENERATION IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE IMAP_ALIAS_PREVIOUS_GENERATION IMAP_ALIAS_PREVIOUS_SECRET IMAP_ALIAS_PREVIOUS_SECRET_FILE IMAP_ALIAS_PREVIOUS_EXPIRES_AT IMAP_ALIAS_GENERATION IMAP_ALIAS_CURRENT_KEY IMAP_ALIAS_CURRENT_KEY_FILE IMAP_ALIAS_SECRET IMAP_ALIAS_SECRET_FILE IMAP_ALIAS_PREVIOUS_KEY IMAP_ALIAS_PREVIOUS_KEY_FILE IMAP_ALIAS_PREVIOUS_EXPIRY VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
 
 is_allowed() {
   local candidate
@@ -68,6 +74,29 @@ validate_value() {
     "$value" != *\\* ]] || return 1
 }
 
+is_valid_applied_version() {
+  [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
+is_valid_applied_digest() {
+  [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+is_valid_immutable_image() {
+  [[ "$1" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]
+}
+
+validate_provenance() {
+  if [[ "$applied_version_present" != "$applied_digest_present" ]]; then
+    fail_code configuration_provenance
+  fi
+  [[ "$applied_version_present" == 1 ]] || return 0
+  is_valid_applied_version "$applied_version_value" || fail_code configuration_provenance
+  is_valid_applied_digest "$applied_digest_value" || fail_code configuration_provenance
+  is_valid_immutable_image "$orbit_image_value" || fail_code configuration_provenance
+  [[ "${orbit_image_value##*@}" == "$applied_digest_value" ]] || fail_code configuration_provenance
+}
+
 check_file_safety() {
   local file="$1"
   [[ -f "$file" && ! -L "$file" ]] || fail_code configuration_syntax
@@ -77,8 +106,8 @@ check_file_safety() {
 parse_file() {
   local file="$1" line key value line_number=0 assignment_count=0
   local -A seen=()
-  local schema_marker=""
-  parsed_keys=(); schema_present=0
+  parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0
+  schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""
   check_file_safety "$file"
   # A NUL cannot be represented in a dotenv assignment and must fail closed.
   cmp -s "$file" <(tr -d '\000' < "$file") || fail_code configuration_syntax
@@ -101,14 +130,20 @@ parse_file() {
       fail_code configuration_unknown_key
     fi
     validate_value "$value" || fail_code configuration_syntax
-    if [[ "$key" == ORBIT_CONFIG_SCHEMA_VERSION ]]; then schema_marker="$value"; schema_present=1; fi
+    case "$key" in
+      ORBIT_CONFIG_SCHEMA_VERSION) schema_value="$value"; schema_present=1;;
+      ORBIT_IMAGE) orbit_image_value="$value";;
+      ORBIT_CONFIG_APPLIED_VERSION) applied_version_value="$value"; applied_version_present=1;;
+      ORBIT_CONFIG_APPLIED_DIGEST) applied_digest_value="$value"; applied_digest_present=1;;
+    esac
   done < "$file"
   [[ "$assignment_count" -gt 0 ]] || fail_code configuration_syntax
-  if [[ -n "$schema_marker" && "$schema_marker" != "$schema_version" ]]; then
-    [[ "$schema_marker" =~ ^[0-9]+$ && "$schema_marker" -gt "$schema_version" ]] && fail_code configuration_version
+  if [[ -n "$schema_value" && "$schema_value" != "$schema_version" ]]; then
+    [[ "$schema_value" =~ ^[0-9]+$ && "$schema_value" -gt "$schema_version" ]] && fail_code configuration_version
     fail_code configuration_version
   fi
-  [[ -z "$schema_marker" ]] && return 2
+  validate_provenance
+  [[ "$schema_present" == 0 ]] && return 2
   return 0
 }
 
@@ -122,13 +157,49 @@ report_classification() {
     fi
   done
   [[ "$schema_present" == 1 ]] || printf 'safely_migratable ORBIT_CONFIG_SCHEMA_VERSION\n'
+  if [[ "$applied_version_present" == 0 && "$applied_digest_present" == 0 ]]; then
+    printf 'safely_migratable ORBIT_CONFIG_APPLIED_VERSION\n'
+    printf 'safely_migratable ORBIT_CONFIG_APPLIED_DIGEST\n'
+  fi
 }
 
 migrate_file() {
   local file="$1" state temp newline backup transaction="$2"
+  local target_image="$3" target_version="$4" target_digest="$5"
+  local desired_image desired_version desired_digest prior_schema prior_version prior_digest
+  local line_without_cr key replaced
+  local -a managed_order=(ORBIT_IMAGE ORBIT_CONFIG_SCHEMA_VERSION ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST)
+  local -A managed_values=() written=()
   state=0; parse_file "$file" || state=$?
   [[ "$state" == 0 || "$state" == 2 ]] || exit "$state"
-  [[ "$state" == 2 ]] || { printf 'status migrated action none\n'; return 0; }
+
+  if [[ -n "$target_image" || -n "$target_version" || -n "$target_digest" ]]; then
+    [[ -n "$target_image" && -n "$target_version" && -n "$target_digest" ]] || fail_code configuration_provenance
+    is_valid_immutable_image "$target_image" || fail_code configuration_provenance
+    is_valid_applied_version "$target_version" || fail_code configuration_provenance
+    is_valid_applied_digest "$target_digest" || fail_code configuration_provenance
+    [[ "${target_image##*@}" == "$target_digest" ]] || fail_code configuration_provenance
+    desired_image="$target_image"; desired_version="$target_version"; desired_digest="$target_digest"
+  else
+    [[ "$state" == 0 && "$schema_present" == 1 && "$applied_version_present" == 1 ]] ||
+      fail_code configuration_provenance_required
+    desired_image="$orbit_image_value"; desired_version="$applied_version_value"; desired_digest="$applied_digest_value"
+  fi
+
+  if [[ "$state" == 0 && "$schema_present" == 1 && "$applied_version_present" == 1 &&
+    "$orbit_image_value" == "$desired_image" && "$applied_version_value" == "$desired_version" &&
+    "$applied_digest_value" == "$desired_digest" ]]; then
+    printf 'Orbit configuration: already current schema v1 version %s digest %s\n' "$desired_version" "$desired_digest"
+    return 0
+  fi
+
+  prior_schema="v0"; [[ "$schema_present" == 1 ]] && prior_schema="v1"
+  prior_version="legacy/unknown"; [[ "$applied_version_present" == 1 ]] && prior_version="$applied_version_value"
+  prior_digest="legacy/unknown"; [[ "$applied_digest_present" == 1 ]] && prior_digest="$applied_digest_value"
+  managed_values[ORBIT_IMAGE]="$desired_image"
+  managed_values[ORBIT_CONFIG_SCHEMA_VERSION]="$schema_version"
+  managed_values[ORBIT_CONFIG_APPLIED_VERSION]="$desired_version"
+  managed_values[ORBIT_CONFIG_APPLIED_DIGEST]="$desired_digest"
 
   if [[ "$transaction" != 1 ]]; then
     backup="${file}${rollback_suffix}"
@@ -141,30 +212,52 @@ migrate_file() {
   chmod 600 "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
   newline=$'\n'
   LC_ALL=C grep -q $'\r' "$file" && newline=$'\r\n'
-  last_byte="$(tail -c 1 "$file" 2>/dev/null | od -An -t x1 | tr -d '[:space:]')"
-  if [[ -s "$file" ]] && [[ "$last_byte" != 0a && "$last_byte" != 0d ]]; then
-    cat -- "$file" > "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
-    printf '%s' "$newline" >> "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
-  else
-    cat -- "$file" > "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
-  fi
-  printf 'ORBIT_CONFIG_SCHEMA_VERSION=1%s' "$newline" >> "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_without_cr="${line%$'\r'}"
+    replaced=0
+    for key in "${managed_order[@]}"; do
+      if [[ "$line_without_cr" == "${key}="* ]]; then
+        printf '%s=%s%s' "$key" "${managed_values[$key]}" "$newline" >> "$temp" 2>/dev/null || {
+          rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration;
+        }
+        written["$key"]=1
+        replaced=1
+        break
+      fi
+    done
+    if [[ "$replaced" == 0 ]]; then
+      printf '%s\n' "$line" >> "$temp" 2>/dev/null || {
+        rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration;
+      }
+    fi
+  done < "$file"
+  for key in "${managed_order[@]}"; do
+    [[ -n "${written[$key]:-}" ]] && continue
+    printf '%s=%s%s' "$key" "${managed_values[$key]}" "$newline" >> "$temp" 2>/dev/null || {
+      rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration;
+    }
+  done
   chmod 600 "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
   if ! mv -f -- "$temp" "$file" 2>/dev/null; then
     rm -f -- "$temp" 2>/dev/null
     if [[ "$transaction" != 1 ]]; then cp -- "$backup" "$file" 2>/dev/null || true; fi
     fail_code configuration_migration
   fi
-  printf 'status migrated action marker_added\n'
+  printf 'Orbit configuration: migrated from schema %s version %s digest %s to schema v1 version %s digest %s\n' \
+    "$prior_schema" "$prior_version" "$prior_digest" "$desired_version" "$desired_digest"
 }
 
 file="$environment_file_default"; action=check; transaction=0
+target_image=""; target_version=""; target_digest=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) action=check; shift;;
     --preflight) action=preflight; shift;;
     --migrate) action=migrate; shift;;
     --transaction) transaction=1; shift;;
+    --orbit-image) [[ $# -ge 2 ]] || { usage; exit 2; }; target_image="$2"; shift 2;;
+    --applied-version) [[ $# -ge 2 ]] || { usage; exit 2; }; target_version="$2"; shift 2;;
+    --applied-digest) [[ $# -ge 2 ]] || { usage; exit 2; }; target_digest="$2"; shift 2;;
     --file) [[ $# -ge 2 ]] || { usage; exit 2; }; file="$2"; shift 2;;
     *) usage; exit 2;;
   esac
@@ -187,5 +280,5 @@ case "$action" in
     ;;
   migrate)
     [[ "$transaction" == 1 || "$transaction" == 0 ]] || fail_code configuration_migration
-    migrate_file "$file" "$transaction";;
+    migrate_file "$file" "$transaction" "$target_image" "$target_version" "$target_digest";;
 esac
