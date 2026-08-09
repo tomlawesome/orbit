@@ -11,7 +11,15 @@ const mocks = vi.hoisted(() => ({
   log: {
     error: vi.fn(),
     info: vi.fn(),
+    warn: vi.fn(),
   },
+  getConfigurationProblems: vi.fn(() => [] as Array<{
+    code: "configuration_optional";
+    severity: "warning";
+    setting: "mail";
+    fallback: "feature_disabled";
+    remediation: "repair_configuration";
+  }>),
   registerNode: vi.fn(),
   validateStartupConfiguration: vi.fn(),
   getDatabaseClient: vi.fn(() => ({ unsafe: vi.fn() })),
@@ -45,6 +53,9 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/logger", () => ({
   log: mocks.log,
 }));
+vi.mock("@/lib/configuration-problems", () => ({
+  getConfigurationProblems: mocks.getConfigurationProblems,
+}));
 vi.mock("@/lib/startup-config", () => ({
   validateStartupConfiguration: mocks.validateStartupConfiguration,
   StartupConfigurationError: class StartupConfigurationError extends Error {},
@@ -76,6 +87,8 @@ describe("instrumentation runtime boundary", () => {
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
     mocks.migrate.mockReset();
+    mocks.getConfigurationProblems.mockReset();
+    mocks.getConfigurationProblems.mockReturnValue([]);
     mocks.getDatabaseClient.mockClear();
     mocks.getDb.mockClear();
   });
@@ -122,6 +135,11 @@ describe("instrumentation runtime boundary", () => {
     expect(staticImports).toEqual([]);
     expect(source).not.toContain("@/");
   });
+
+  it("does not intercept termination signals", () => {
+    const source = readFileSync(new URL("./instrumentation-node.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/process\.(once|on)\(\s*["']SIG(?:TERM|INT)/u);
+  });
 });
 
 describe("strict startup ordering", () => {
@@ -156,6 +174,34 @@ describe("strict startup ordering", () => {
     const { registerNode } = await import("./instrumentation-node");
     await registerNode();
     expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "migrate", "postcheck", "notification", "document", "imap", "receipt"]);
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "startup.migration", state: "starting", action: "check_migrations" });
+    expect(mocks.log.info).not.toHaveBeenCalledWith({ event: "application.startup", state: "ready", action: "none" });
+  });
+
+  it("keeps workers bootable while skipping workers for an optional disabled feature", async () => {
+    mocks.getConfigurationProblems.mockReturnValue([{
+      code: "configuration_optional",
+      severity: "warning",
+      setting: "mail",
+      fallback: "feature_disabled",
+      remediation: "repair_configuration",
+    }]);
+    vi.stubEnv("MIGRATE_ON_START", "false");
+
+    const { registerNode } = await import("./instrumentation-node");
+    await registerNode();
+
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "document", "imap"]);
+    expect(mocks.log.warn).toHaveBeenCalledWith({
+      event: "configuration.problem",
+      state: "degraded",
+      reason: "configuration_optional",
+      action: "repair_configuration",
+      impact: "application_degraded",
+      setting: "mail",
+      problemCode: "configuration_optional",
+      fallback: "feature_disabled",
+    });
   });
 
   it("fails closed before database access and workers for invalid configuration", async () => {
@@ -227,7 +273,7 @@ describe("scanner readiness diagnostics", () => {
 
     await expect(reportAuthConfigurationReadinessNode()).resolves.toBeUndefined();
 
-    expect(mocks.log.info).toHaveBeenCalledWith("auth.configuration", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "auth.configuration", state: "ready" });
     expect(mocks.log.info).toHaveBeenCalledTimes(1);
     expect(mocks.log.error).not.toHaveBeenCalled();
   });
@@ -240,8 +286,11 @@ describe("scanner readiness diagnostics", () => {
 
     await expect(reportAuthConfigurationReadinessNode()).resolves.toBeUndefined();
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.configuration",
       state: "invalid",
+      reason: "configuration_invalid",
+      action: "check_configuration",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -253,7 +302,7 @@ describe("scanner readiness diagnostics", () => {
 
     await reportScannerReadinessNode();
 
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "document.scanner", state: "ready", action: "none" });
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(mocks.config.clamAv.host);
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(String(mocks.config.clamAv.port));
   });
@@ -263,8 +312,11 @@ describe("scanner readiness diagnostics", () => {
 
     await reportScannerReadinessNode();
 
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+    expect(mocks.log.info).toHaveBeenCalledWith({
+      event: "document.scanner",
       state: "starting",
+      reason: "dependency_unavailable",
+      action: "check_scanner",
       impact: "document_upload_blocked",
     });
     expect(mocks.log.error).not.toHaveBeenCalled();
@@ -272,7 +324,7 @@ describe("scanner readiness diagnostics", () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(mocks.pingClamAv).toHaveBeenCalledTimes(2);
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "document.scanner", state: "recovered", action: "none" });
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(mocks.config.clamAv.host);
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain(String(mocks.config.clamAv.port));
   });
@@ -282,15 +334,21 @@ describe("scanner readiness diagnostics", () => {
 
     await reportScannerReadinessNode();
 
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+    expect(mocks.log.info).toHaveBeenCalledWith({
+      event: "document.scanner",
       state: "starting",
+      reason: "dependency_unavailable",
+      action: "check_scanner",
       impact: "document_upload_blocked",
     });
 
     await vi.advanceTimersByTimeAsync(180_000);
 
-    expect(mocks.log.error).toHaveBeenCalledWith("document.scanner", {
-      state: "unreachable",
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "document.scanner",
+      state: "exhausted",
+      reason: "scanner_unavailable",
+      action: "check_scanner",
       impact: "document_upload_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -303,15 +361,18 @@ describe("scanner readiness diagnostics", () => {
 
     await reportScannerReadinessNode();
 
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+    expect(mocks.log.info).toHaveBeenCalledWith({
+      event: "document.scanner",
       state: "starting",
+      reason: "dependency_unavailable",
+      action: "check_scanner",
       impact: "document_upload_blocked",
     });
     expect(mocks.log.error).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(5_000);
 
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "document.scanner", state: "recovered", action: "none" });
   });
 
   it("does not probe a scanner when scanning is disabled", async () => {
@@ -320,9 +381,11 @@ describe("scanner readiness diagnostics", () => {
     await reportScannerReadinessNode();
 
     expect(mocks.pingClamAv).not.toHaveBeenCalled();
-    expect(mocks.log.info).toHaveBeenCalledWith("document.scanner", {
+    expect(mocks.log.info).toHaveBeenCalledWith({
+      event: "document.scanner",
       state: "disabled",
       reason: "scan_mode_disabled",
+      action: "none",
     });
   });
 });

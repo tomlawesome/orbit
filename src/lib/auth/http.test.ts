@@ -36,8 +36,11 @@ describe("authentication HTTP diagnostics", () => {
         message: "Authentication runtime configuration is incomplete",
       },
     });
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.configuration",
       state: "invalid",
+      reason: "configuration_invalid",
+      action: "check_configuration",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -58,9 +61,11 @@ describe("authentication HTTP diagnostics", () => {
 
     expect(first.status).toBe(502);
     expect(second.status).toBe(502);
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "discovery_failed",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -89,9 +94,11 @@ describe("authentication HTTP diagnostics", () => {
 
     expect(first.status).toBe(502);
     expect(second.status).toBe(502);
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "invalid_grant",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -108,9 +115,11 @@ describe("authentication HTTP diagnostics", () => {
 
     authErrorResponse(error);
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "provider_rejected",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);

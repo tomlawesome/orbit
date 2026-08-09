@@ -60,7 +60,7 @@ describe("authentication operational diagnostics", () => {
     reportAuthConfiguration("ready");
     reportAuthConfiguration("invalid");
 
-    expect(mocks.log.info).toHaveBeenCalledWith("auth.configuration", { state: "ready" });
+    expect(mocks.log.info).toHaveBeenCalledWith({ event: "auth.configuration", state: "ready" });
     expect(mocks.log.info).toHaveBeenCalledTimes(1);
     expect(mocks.log.error).not.toHaveBeenCalled();
   });
@@ -69,8 +69,11 @@ describe("authentication operational diagnostics", () => {
     reportAuthConfiguration("invalid");
     reportAuthConfiguration("invalid");
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.configuration", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.configuration",
       state: "invalid",
+      reason: "configuration_invalid",
+      action: "check_configuration",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -82,9 +85,11 @@ describe("authentication operational diagnostics", () => {
     reportAuthProviderDiscoveryFailure();
     reportAuthProviderDiscoveryFailure();
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "discovery_failed",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -95,9 +100,11 @@ describe("authentication operational diagnostics", () => {
   it.each(tokenExchangeReasons)("emits a fixed token exchange failure record for the closed reason %s", (reason) => {
     reportAuthTokenExchangeFailure(reason);
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason,
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(1);
@@ -111,14 +118,18 @@ describe("authentication operational diagnostics", () => {
     reportAuthTokenExchangeFailure("unreachable");
     reportAuthTokenExchangeFailure("unreachable");
 
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "invalid_grant",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
-    expect(mocks.log.error).toHaveBeenCalledWith("auth.provider", {
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "auth.provider",
       state: "invalid",
       reason: "unreachable",
+      action: "check_provider",
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(2);

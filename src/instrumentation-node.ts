@@ -74,11 +74,18 @@ export async function reportScannerReadiness(): Promise<void> {
     config = getDocumentConfig();
   } catch {
     // Document configuration is reported by its own failure path on first use.
+    log.warn({
+      event: "document.scanner",
+      state: "degraded",
+      reason: "configuration_optional",
+      action: "repair_configuration",
+      impact: "document_upload_blocked",
+    });
     return;
   }
 
   if (config.scanMode !== "required") {
-    log.info("document.scanner", { state: "disabled", reason: "scan_mode_disabled" });
+    log.info({ event: "document.scanner", state: "disabled", reason: "scan_mode_disabled", action: "none" });
     return;
   }
 
@@ -90,41 +97,70 @@ export async function reportScannerReadiness(): Promise<void> {
   }
 
   if (ready) {
-    log.info("document.scanner", { state: "ready" });
+    log.info({ event: "document.scanner", state: "ready", action: "none" });
     return;
   }
 
-  log.info("document.scanner", {
+  log.info({
+    event: "document.scanner",
     state: "starting",
+    reason: "dependency_unavailable",
+    action: "check_scanner",
     impact: "document_upload_blocked",
   });
   retryScannerReadiness(
     pingClamAv,
     config.clamAv,
-    () => log.info("document.scanner", { state: "ready" }),
-    () => log.error("document.scanner", {
-      state: "unreachable",
+    () => log.info({ event: "document.scanner", state: "recovered", action: "none" }),
+    () => log.error({
+      event: "document.scanner",
+      state: "exhausted",
+      reason: "scanner_unavailable",
+      action: "check_scanner",
       impact: "document_upload_blocked",
     }),
   );
 }
 
 export async function registerNode(): Promise<void> {
-  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }] = await Promise.all([
+  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
     import("@/db"),
     import("@/db/migration-integrity"),
     import("@/lib/logger"),
+    import("@/lib/configuration-problems"),
   ]);
+
+  log.info({ event: "application.startup", state: "starting", action: "none" });
 
   try {
     validateStartupConfiguration();
   } catch (error) {
     const issues = error instanceof StartupConfigurationError ? error.issues : [];
-    log.error("startup.configuration", {
-      state: "invalid",
-      issues: issues.map((issue) => `${issue.field}:${issue.code}`).join(","),
-    });
+    if (issues.length > 0) {
+      for (const issue of issues) {
+        log.error({
+          event: "configuration.problem",
+          state: issue.code === "configuration_optional" ? "degraded" : "blocked",
+          reason: issue.code === "configuration_version"
+            ? "configuration_version"
+            : issue.code === "configuration_optional" ? "configuration_optional" : "configuration_invalid",
+          action: issue.code === "configuration_optional" ? "repair_configuration" : "check_configuration",
+          impact: issue.code === "configuration_optional" ? "application_degraded" : "application_unavailable",
+          setting: issue.field,
+          problemCode: issue.code,
+          fallback: issue.code === "configuration_optional" ? "feature_disabled" : "startup_blocked",
+        });
+      }
+    } else {
+      log.error({
+        event: "startup.configuration",
+        state: "blocked",
+        reason: "configuration_invalid",
+        action: "check_configuration",
+        impact: "application_unavailable",
+      });
+    }
     throw new Error("configuration_invalid");
   }
 
@@ -137,24 +173,44 @@ export async function registerNode(): Promise<void> {
     ]);
     try {
       const migrationsFolder = process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
+      log.info({ event: "startup.migration", state: "starting", action: "check_migrations" });
       await verifyMigrationIntegrity(getDatabaseClient(), migrationsFolder);
     } catch (error) {
       const code = error instanceof MigrationIntegrityError ? error.code : "migration_integrity";
-      log.error("startup.migration", { state: "invalid", code });
+      log.error({
+        event: "startup.migration",
+        state: "exhausted",
+        reason: "migration_integrity",
+        action: "check_migrations",
+        impact: "migration_blocked",
+      });
       throw new Error(code);
     }
     try {
       await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
     } catch {
-      log.error("startup.migration", { state: "invalid", code: "migration_failed" });
+      log.error({
+        event: "startup.migration",
+        state: "exhausted",
+        reason: "migration_failed",
+        action: "check_migrations",
+        impact: "migration_blocked",
+      });
       throw new Error("migration_failed");
     }
     try {
       await verifyMigrationJournalComplete(getDatabaseClient(), process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle");
     } catch {
-      log.error("startup.migration", { state: "invalid", code: "migration_integrity" });
+      log.error({
+        event: "startup.migration",
+        state: "exhausted",
+        reason: "migration_integrity",
+        action: "check_migrations",
+        impact: "migration_blocked",
+      });
       throw new Error("migration_integrity");
     }
+    log.info({ event: "startup.migration", state: "ready", action: "none" });
   }
 
   if (process.env.WORKER_ENABLED === "true") {
@@ -164,13 +220,39 @@ export async function registerNode(): Promise<void> {
       import("@/server/imap-ingestion"),
       import("@/server/imap-receipt-worker"),
     ]);
-    startNotificationWorker();
+    const optionalSettings = new Set(
+      getConfigurationProblems()
+        .filter((problem) => problem.severity === "warning")
+        .map((problem) => problem.setting),
+    );
+    for (const problem of getConfigurationProblems().filter((problem) => problem.severity === "warning")) {
+      log.warn({
+        event: "configuration.problem",
+        state: "degraded",
+        reason: "configuration_optional",
+        action: problem.remediation,
+        impact: "application_degraded",
+        setting: problem.setting,
+        problemCode: problem.code,
+        fallback: problem.fallback,
+      });
+    }
+    if (!optionalSettings.has("mail")) startNotificationWorker();
     startDocumentWorker();
-    startImapIngestionWorker();
-    startImapReceiptWorker();
+    if (!optionalSettings.has("imap")) startImapIngestionWorker();
+    if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
   }
 
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.
-  void reportScannerReadiness().catch(() => undefined);
+  void reportScannerReadiness().catch(() => {
+    log.error({
+      event: "document.scanner",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "document_upload_blocked",
+    });
+  });
+
 }
