@@ -1,21 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
   normalizedDocumentFilename,
+  PDF_STRUCTURE_PARSER_OPTIONS,
   validateSupportedDocumentStructure,
 } from "./validation";
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
-  generatedPdfFixtures,
-  generatedPdfWithCatalogFeature,
-  generatedPdfWithCompressedJavaScript,
-  generatedPdfWithHarmlessFeatureName,
+  syntheticPdfWithCatalogFeature,
+  syntheticPdfWithCompressedJavaScript,
+  syntheticPdfWithHarmlessFeatureName,
+  syntheticStructurePdfFixtures,
 } from "../../../tests/support/generated-pdf-documents";
 
 const validPdf = syntheticPdf();
 const validPng = syntheticPng();
 const validJpeg = syntheticJpeg();
+const chromiumPdf = readFileSync(new URL("../../../tests/support/fixtures/chromium-synthetic.pdf", import.meta.url));
 
 function forgedPdfXref(): Buffer {
   let value = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
@@ -38,6 +41,7 @@ describe("structural document classification", () => {
   it.each([
     [validPdf, "application/pdf", "supported_structure"],
     [syntheticPdfWithXrefStream(), "application/pdf", "supported_structure"],
+    [chromiumPdf, "application/pdf", "supported_structure"],
     [validJpeg, "image/jpeg", "supported_structure"],
     [validPng, "image/png", "supported_structure"],
   ] as const)("classifies supported %s as supported_structure", async (bytes, mediaType, expected) => {
@@ -45,19 +49,57 @@ describe("structural document classification", () => {
     await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(true);
   });
 
-  it.each(generatedPdfFixtures)("accepts generated standards-valid PDF from $name", async ({ bytes }) => {
+  it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
     await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
     await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
   });
 
   it("does not classify feature names inside compressed page content as active content", async () => {
-    await expect(classifyDocumentStructure(generatedPdfWithHarmlessFeatureName(), "application/pdf"))
+    await expect(classifyDocumentStructure(syntheticPdfWithHarmlessFeatureName(), "application/pdf"))
       .resolves.toBe("supported_structure");
   });
 
   it("rejects JavaScript hidden in a compressed object stream", async () => {
-    await expect(classifyDocumentStructure(generatedPdfWithCompressedJavaScript(), "application/pdf"))
+    await expect(classifyDocumentStructure(syntheticPdfWithCompressedJavaScript(), "application/pdf"))
       .resolves.toBe("prohibited_content");
+  });
+
+  it("keeps parser security options explicit", () => {
+    expect(PDF_STRUCTURE_PARSER_OPTIONS).toMatchObject({
+      disableAutoFetch: true,
+      disableFontFace: true,
+      disableRange: true,
+      disableStream: true,
+      isEvalSupported: false,
+      isImageDecoderSupported: false,
+      isOffscreenCanvasSupported: false,
+      stopAtErrors: true,
+      useSystemFonts: false,
+      useWasm: false,
+      useWorkerFetch: false,
+    });
+  });
+
+  it("does not expose parser failure details to console output", async () => {
+    const sentinel = "hostile-filename-provider-sentinel";
+    let value = `%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Title (${sentinel}) >>\nendobj\n`;
+    const xrefOffset = Buffer.byteLength(value);
+    value += `xref\nnot a table\ntrailer\n<< /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+    const spies = [
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "info"),
+      vi.spyOn(console, "log"),
+      vi.spyOn(console, "warn"),
+    ];
+    spies.forEach((spy) => spy.mockImplementation(() => undefined));
+    try {
+      await expect(classifyDocumentStructure(Buffer.from(value), "application/pdf"))
+        .resolves.toBe("unsupported_structure");
+      const output = spies.flatMap((spy) => spy.mock.calls.flat()).map(String).join(" ");
+      expect(output).not.toContain(sentinel);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
   });
 
   it.each([
@@ -67,7 +109,7 @@ describe("structural document classification", () => {
     "/RichMedia 6 0 R",
     "/XFA 6 0 R",
   ])("classifies parsed prohibited catalog feature %s as prohibited_content", async (feature) => {
-    await expect(classifyDocumentStructure(generatedPdfWithCatalogFeature(feature), "application/pdf"))
+    await expect(classifyDocumentStructure(syntheticPdfWithCatalogFeature(feature), "application/pdf"))
       .resolves.toBe("prohibited_content");
   });
 
@@ -117,7 +159,7 @@ describe("document content validation", () => {
 
   it.each([
     [Buffer.from("%PDF-1.7\nheader only"), "application/pdf"],
-    [generatedPdfWithCatalogFeature("/Names << /EmbeddedFiles << /Names [(payload.bin) 6 0 R] >> >>"), "application/pdf"],
+    [syntheticPdfWithCatalogFeature("/Names << /EmbeddedFiles << /Names [(payload.bin) 6 0 R] >> >>"), "application/pdf"],
     [Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1"), "application/pdf"],
     [forgedPdfXref(), "application/pdf"],
     [forgedPdfObjectOffset(), "application/pdf"],

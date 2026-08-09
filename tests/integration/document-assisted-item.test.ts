@@ -4,13 +4,9 @@ import { POST as inspectRoute } from "@/app/api/households/[householdId]/item-do
 import { getDb } from "@/db";
 import { auditLog, documents, items } from "@/db/schema";
 import { requestForSession, createIntegrationFixture } from "./support/fixtures";
-import { generatedPdfFixtures } from "../support/generated-pdf-documents";
+import { readFileSync } from "node:fs";
 
-const generatedPdf = (() => {
-  const fixture = generatedPdfFixtures.find(({ name }) => name === "compressed cross-reference stream");
-  if (!fixture) throw new Error("generated PDF integration fixture is missing");
-  return fixture.bytes;
-})();
+const generatedPdf = readFileSync(new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url));
 
 function context(householdId: string) {
   return { params: Promise.resolve({ householdId }) };
