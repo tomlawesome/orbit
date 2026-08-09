@@ -80,6 +80,7 @@ describe("structural document classification", () => {
       disableFontFace: true,
       disableRange: true,
       disableStream: true,
+      enableScripting: false,
       isEvalSupported: false,
       isImageDecoderSupported: false,
       isOffscreenCanvasSupported: false,
