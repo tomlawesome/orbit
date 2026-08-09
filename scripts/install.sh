@@ -16,6 +16,7 @@ readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
+readonly database_volume_name="orbit_orbit-db-data"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
 readonly oidc_discovery_parser='const fs = require("node:fs");
@@ -49,6 +50,10 @@ rollback_dir=""
 file_transaction_active=0
 file_transaction_committed=0
 target_was_empty=0
+database_volume_seen=0
+database_volume_checked=0
+database_password_was_present=0
+configuration_migration_completed=0
 declare -a created_directories=()
 declare -A managed_was_present=()
 
@@ -58,7 +63,7 @@ fail() {
 }
 
 compose() {
-  docker compose --env-file "$environment_file" "$@"
+  docker compose --project-name orbit --env-file "$environment_file" "$@"
 }
 
 is_regular_non_symlink_file() {
@@ -230,6 +235,44 @@ validate_target() {
   fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
 }
 
+verify_database_volume_safety() {
+  local volume_list=""
+
+  volume_list="$(docker volume ls --filter "name=${database_volume_name}" --format '{{.Name}}' 2>/dev/null)" ||
+    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+  if [[ -n "$volume_list" && "$volume_list" != "$database_volume_name" ]]; then
+    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+  fi
+
+  if [[ "$volume_list" == "$database_volume_name" ]]; then
+    if [[ "$target_was_empty" == 1 ]]; then
+      fail "An existing Orbit database volume requires the original deployment directory and its preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
+    fi
+    if [[ "$database_volume_checked" == 1 && "$database_password_was_present" == 0 ]]; then
+      fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
+    fi
+    if ! is_regular_non_symlink_file "$secrets_directory/postgres-password" ||
+      ! has_mode "$secrets_directory/postgres-password" 600; then
+      fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
+    fi
+    database_volume_seen=1
+    database_password_was_present=1
+  else
+    [[ "$database_volume_seen" == 0 ]] ||
+      fail "The Orbit database volume changed during installation; refusing to start Compose."
+  fi
+  database_volume_checked=1
+}
+
+verify_database_password_preserved() {
+  local previous_password="$rollback_dir/original/$secrets_directory/postgres-password"
+  [[ "$database_volume_seen" == 1 ]] || return 0
+  if ! cmp -s "$previous_password" "$secrets_directory/postgres-password" ||
+    ! has_mode "$secrets_directory/postgres-password" 600; then
+    fail "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose."
+  fi
+}
+
 has_controlling_terminal() {
   local terminal_fd=""
   if ! { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
@@ -398,11 +441,32 @@ prepare_configuration() {
   verify_oidc_discovery
 }
 
+run_configuration_migration() {
+  local configuration_script="$1" migration_output="" migration_status=0
+
+  migration_output="$(bash "$configuration_script" \
+    --migrate --transaction --file "$environment_file" \
+    --orbit-image "$resolved_reference" \
+    --applied-version "$image_version" \
+    --applied-digest "$applied_digest" 2>/dev/null)" || migration_status=$?
+  [[ "$migration_status" == 0 ]] ||
+    fail "Configuration migration failed; restoring the previous deployment."
+  case "$migration_output" in
+    "Orbit configuration: already current schema v1 version "*|"Orbit configuration: migrated from schema "*)
+      printf '%s\n' "$migration_output"
+      ;;
+    *)
+      fail "Configuration migration returned an unexpected result; restoring the previous deployment."
+      ;;
+  esac
+}
+
 validate_target
 
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 command -v curl >/dev/null 2>&1 || fail "curl is required."
+verify_database_volume_safety
 
 # Resolve the requested channel to an immutable digest. The channel tag is only
 # ever read; the digest is what is recorded and deployed, so a tag that moves
@@ -433,6 +497,13 @@ if ! revision="$(docker image inspect --format '{{index .Config.Labels "org.open
 fi
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] ||
   fail "The published image does not record the source revision that produced it."
+
+if ! image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$resolved_reference" 2>/dev/null)"; then
+  fail "Could not inspect the published image for its semantic version."
+fi
+[[ "$image_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+  fail "The published image does not record a valid semantic version."
+readonly applied_digest="${resolved_reference##*@}"
 
 printf 'Resolved %s\n' "$resolved_reference"
 
@@ -550,8 +621,8 @@ file_transaction_active=1
 if [[ -e "$environment_file" ]]; then
   bash "$staging_dir/scripts/configuration.sh" --preflight --file "$environment_file" >/dev/null ||
     fail "Configuration preflight failed; restoring the previous deployment."
-  bash "$staging_dir/scripts/configuration.sh" --migrate --transaction --file "$environment_file" >/dev/null ||
-    fail "Configuration migration failed; restoring the previous deployment."
+  run_configuration_migration "$staging_dir/scripts/configuration.sh"
+  configuration_migration_completed=1
 fi
 
 for asset_dir in "${asset_directories[@]}"; do
@@ -577,6 +648,14 @@ done
 # generation and every other configuration step use the immutable published
 # image instead of falling back to git rev-parse and a local source build.
 prepare_configuration
+
+verify_database_volume_safety
+verify_database_password_preserved
+
+if [[ "$configuration_migration_completed" == 0 ]]; then
+  run_configuration_migration "scripts/configuration.sh"
+  configuration_migration_completed=1
+fi
 
 is_regular_non_symlink_file "$environment_file" ||
   fail "Configuration did not leave a regular, non-symlink ${environment_file}."
