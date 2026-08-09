@@ -17,7 +17,24 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_PNG_CHUNKS = 4_096;
 const MAX_PDF_XREF_ENTRIES = 1_250_000;
-const MAX_PDF_PAGES = 10_000;
+export const PDF_STRUCTURE_MAX_PAGES = 1_000;
+export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
+type PdfStructureParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
+export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
+  disableAutoFetch: true,
+  disableFontFace: true,
+  disableRange: true,
+  disableStream: true,
+  enableXfa: true,
+  isEvalSupported: false,
+  isImageDecoderSupported: false,
+  isOffscreenCanvasSupported: false,
+  stopAtErrors: true,
+  useSystemFonts: false,
+  useWasm: false,
+  useWorkerFetch: false,
+  verbosity: VerbosityLevel.ERRORS,
+}) as Readonly<PdfStructureParserOptions>;
 const unsafePdfFeatures = new Set([
   "EmbeddedFile",
   "EmbeddedFiles",
@@ -376,7 +393,7 @@ function hasUnsafePdfValue(value: unknown): boolean {
 }
 
 async function inspectParsedPdfFeatures(pdf: { numPages: number; getJSActions: () => Promise<unknown>; getAttachments: () => Promise<unknown>; getOpenAction: () => Promise<unknown>; getPage: (pageNumber: number) => Promise<{ getJSActions: () => Promise<unknown>; getAnnotations: (options: { intent: string }) => Promise<unknown>; getXfa: () => Promise<unknown> }> }): Promise<"unsupported_structure" | "prohibited_content" | undefined> {
-  if (pdf.numPages < 1 || pdf.numPages > MAX_PDF_PAGES) return "unsupported_structure";
+  if (pdf.numPages < 1 || pdf.numPages > PDF_STRUCTURE_MAX_PAGES) return "unsupported_structure";
   if (hasEntries(await pdf.getJSActions()) || hasEntries(await pdf.getAttachments())) return "prohibited_content";
   if (hasUnsafePdfValue(await pdf.getOpenAction())) return "prohibited_content";
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
@@ -399,6 +416,7 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
 
 export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "prohibited_content";
 
+/** Classifies document structure with a maintained bounded in-process parser. */
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
   if (bytes.length < 24
     || !/^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
@@ -410,26 +428,29 @@ async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureRea
   if (hasUnsafePdfName(structuralContent)) return "prohibited_content";
 
   let loadingTask: ReturnType<typeof getDocument> | undefined;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     loadingTask = getDocument({
+      ...PDF_STRUCTURE_PARSER_OPTIONS,
       data: new Uint8Array(bytes),
-      disableAutoFetch: true,
-      disableStream: true,
-      enableXfa: true,
-      stopAtErrors: true,
-      useWasm: false,
-      verbosity: VerbosityLevel.ERRORS,
     });
-    const pdf = await loadingTask.promise;
-    return (await inspectParsedPdfFeatures(pdf)) ?? "supported_structure";
+    const inspection = (async (): Promise<DocumentStructureReason> => {
+      const pdf = await loadingTask!.promise;
+      return (await inspectParsedPdfFeatures(pdf)) ?? "supported_structure";
+    })();
+    const budget = new Promise<never>((_, reject) => {
+      budgetTimer = setTimeout(() => reject(new Error("pdf_inspection_budget_exceeded")), PDF_STRUCTURE_INSPECTION_BUDGET_MS);
+    });
+    return await Promise.race([inspection, budget]);
   } catch {
     return "unsupported_structure";
   } finally {
-    await loadingTask?.destroy().catch(() => undefined);
+    if (budgetTimer) clearTimeout(budgetTimer);
+    if (loadingTask) await loadingTask.destroy().catch(() => undefined);
   }
 }
 
-/** Classifies document structure with explicit reason and a standards-aware isolated parser. */
+/** Classifies document structure with explicit reason and a bounded in-process parser. */
 export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<DocumentStructureReason> {
   if (mediaType === "application/pdf") {
     return classifyPdfStructure(bytes);
