@@ -16,7 +16,7 @@ readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
-readonly database_volume_name="orbit_orbit-db-data"
+readonly database_volume_key="orbit-db-data"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
 readonly oidc_discovery_parser='const fs = require("node:fs");
@@ -52,7 +52,8 @@ file_transaction_committed=0
 target_was_empty=0
 database_volume_seen=0
 database_volume_checked=0
-database_password_was_present=0
+compose_project_name=""
+database_volume_name=""
 configuration_migration_completed=0
 declare -a created_directories=()
 declare -A managed_was_present=()
@@ -63,7 +64,7 @@ fail() {
 }
 
 compose() {
-  docker compose --project-name orbit --env-file "$environment_file" "$@"
+  docker compose --project-name "$compose_project_name" --env-file "$environment_file" "$@"
 }
 
 is_regular_non_symlink_file() {
@@ -235,31 +236,144 @@ validate_target() {
   fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
 }
 
-verify_database_volume_safety() {
-  local volume_list=""
+derive_compose_project_name() {
+  local requested_name=""
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    requested_name="$COMPOSE_PROJECT_NAME"
+  else
+    requested_name="$(basename -- "$(pwd -P)")" ||
+      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+  fi
+  requested_name="$(printf '%s' "$requested_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')" ||
+    fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+  while [[ "$requested_name" == [-_]* ]]; do requested_name="${requested_name:1}"; done
+  [[ -n "$requested_name" && "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+    fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+  compose_project_name="$requested_name"
+}
 
-  volume_list="$(docker volume ls --filter "name=${database_volume_name}" --format '{{.Name}}' 2>/dev/null)" ||
-    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
-  if [[ -n "$volume_list" && "$volume_list" != "$database_volume_name" ]]; then
-    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+volume_belongs_to_deployment() {
+  local candidate_volume="$1" expected_image="$2"
+  local volume_labels="" volume_project="" volume_key="" extra=""
+  local db_containers="" app_containers=""
+  local db_id="" db_project="" db_service="" app_id="" app_project="" app_service="" app_config_hash="" app_image=""
+  local selected_app_config_hash=""
+  local expected_config_hash=""
+  local db_count=0 app_count=0
+
+  if ! volume_labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}\t{{index .Labels "com.docker.compose.volume"}}' "$candidate_volume" 2>/dev/null)"; then
+    return 2
+  fi
+  [[ ${#volume_labels} -le 256 ]] || return 2
+  [[ "$volume_labels" != *$'\n'* ]] || return 2
+  IFS=$'\t' read -r volume_project volume_key extra <<< "$volume_labels"
+  [[ -n "$volume_project" && "$volume_project" =~ ^[a-z0-9][a-z0-9_-]*$ &&
+    "$volume_key" == "$database_volume_key" &&
+    "$candidate_volume" == "${volume_project}_${database_volume_key}" && -z "$extra" ]] || return 2
+
+  if ! db_containers="$(docker ps -a --filter "volume=$candidate_volume" \
+    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+    return 2
+  fi
+  [[ ${#db_containers} -le 65536 ]] || return 2
+  while IFS=$'\t' read -r db_id db_project db_service extra ||
+    [[ -n "$db_id" || -n "$db_project" || -n "$db_service" || -n "$extra" ]]; do
+    [[ -z "$db_id" && -z "$db_project" && -z "$db_service" && -z "$extra" ]] && continue
+    [[ "$db_id" =~ ^[0-9a-f]{12,64}$ && "$db_project" == "$volume_project" && -z "$extra" ]] ||
+      return 2
+    [[ "$db_service" == "orbit-db" ]] || continue
+    db_count=$((db_count + 1))
+  done <<< "$db_containers"
+  [[ "$db_count" == 1 ]] || return 1
+
+  if ! app_containers="$(docker ps -a --filter "label=com.docker.compose.project=$volume_project" \
+    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.config-hash"}}' 2>/dev/null)"; then
+    return 2
+  fi
+  [[ ${#app_containers} -le 65536 ]] || return 2
+  while IFS=$'\t' read -r app_id app_project app_service app_config_hash extra ||
+    [[ -n "$app_id" || -n "$app_project" || -n "$app_service" || -n "$app_config_hash" || -n "$extra" ]]; do
+    [[ -z "$app_id" && -z "$app_project" && -z "$app_service" && -z "$app_config_hash" && -z "$extra" ]] && continue
+    [[ "$app_id" =~ ^[0-9a-f]{12,64}$ && "$app_project" == "$volume_project" && "$app_config_hash" =~ ^[0-9a-f]{64}$ && -z "$extra" ]] ||
+      return 2
+    [[ "$app_service" == "orbit-app" ]] || continue
+    app_count=$((app_count + 1))
+    [[ "$app_count" == 1 ]] || return 1
+    selected_app_config_hash="$app_config_hash"
+    if ! app_image="$(docker inspect --format '{{.Config.Image}}' "$app_id" 2>/dev/null)"; then
+      return 2
+    fi
+    [[ ${#app_image} -le 4096 ]] || return 2
+    [[ "$app_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 2
+    [[ "$app_image" == "$expected_image" ]] || return 1
+  done <<< "$app_containers"
+  [[ "$app_count" == 1 ]] || return 1
+  if ! expected_config_hash="$(docker compose --project-name "$volume_project" --env-file "$environment_file" \
+    config --hash orbit-app 2>/dev/null)"; then
+    return 2
+  fi
+  [[ ${#expected_config_hash} -le 128 ]] || return 2
+  [[ "$expected_config_hash" == "$selected_app_config_hash" ]] || return 1
+}
+
+verify_database_volume_safety() {
+  local volume_list="" volume="" old_image="" status=0
+  local -a candidates=()
+
+  if [[ "$database_volume_checked" == 1 ]]; then
+    [[ "$database_volume_seen" == 1 ]] || return 0
+    volume_list="$(docker volume ls --filter "name=^$database_volume_name\$" --format '{{.Name}}' 2>/dev/null)" ||
+      fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+    [[ "$volume_list" == "$database_volume_name" && "$volume_list" != *$'\n'* ]] ||
+      fail "The existing Orbit database volume changed during installation; refusing to start Compose."
+    return 0
   fi
 
-  if [[ "$volume_list" == "$database_volume_name" ]]; then
-    if [[ "$target_was_empty" == 1 ]]; then
-      fail "An existing Orbit database volume requires the original deployment directory and its preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
-    fi
-    if [[ "$database_volume_checked" == 1 && "$database_password_was_present" == 0 ]]; then
-      fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
-    fi
+  derive_compose_project_name
+  volume_list="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" ||
+    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+  [[ ${#volume_list} -le 1048576 ]] ||
+    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+  while IFS= read -r volume || [[ -n "$volume" ]]; do
+    [[ -z "$volume" ]] && continue
+    [[ "$volume" == *"$database_volume_key" ]] || continue
+    [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-db-data$ ]] ||
+      fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+    candidates+=("$volume")
+  done <<< "$volume_list"
+
+  if [[ "${#candidates[@]}" == 0 ]]; then
+    database_volume_checked=1
+    return 0
+  fi
+  if [[ "$target_was_empty" == 1 ]]; then
+    fail "An existing Orbit database volume requires a recognized deployment with its preserved database credentials; refusing to start Compose."
+  fi
+  [[ "${#candidates[@]}" == 1 ]] ||
+    fail "Multiple Orbit database volumes were found; refusing to start Compose until exactly one recognized deployment can be proven."
+  old_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null)" ||
+    fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
+  [[ "$old_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
+    fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
+
+  if volume_belongs_to_deployment "${candidates[0]}" "$old_image"; then
+    database_volume_name="${candidates[0]}"
+    database_volume_seen=1
+    compose_project_name="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' \
+      "$database_volume_name" 2>/dev/null)" ||
+      fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
+    [[ "$compose_project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+      fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
     if ! is_regular_non_symlink_file "$secrets_directory/postgres-password" ||
       ! has_mode "$secrets_directory/postgres-password" 600; then
       fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
     fi
-    database_volume_seen=1
-    database_password_was_present=1
   else
-    [[ "$database_volume_seen" == 0 ]] ||
-      fail "The Orbit database volume changed during installation; refusing to start Compose."
+    status=$?
+    case "$status" in
+      1) fail "Could not prove that the existing Orbit database volume belongs to this Orbit deployment; refusing to start Compose." ;;
+      *) fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose." ;;
+    esac
   fi
   database_volume_checked=1
 }

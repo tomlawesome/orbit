@@ -58,12 +58,38 @@ const fakeDockerScript = [
   "fi",
   'case "$1" in',
   "  volume)",
-  '    if [[ "${2:-}" == "ls" && "${FAKE_DOCKER_EXISTING_DB_VOLUME:-}" == "1" ]]; then',
-  "      printf 'orbit_orbit-db-data\\n'",
+  '    if [[ "${2:-}" == "ls" ]]; then',
+  '      if [[ -n "${FAKE_DOCKER_VOLUME_NAMES:-}" ]]; then',
+  '        printf "%s\\n" "${FAKE_DOCKER_VOLUME_NAMES}"',
+  '      elif [[ "${FAKE_DOCKER_EXISTING_DB_VOLUME:-}" == "1" ]]; then',
+  "        printf 'orbit_orbit-db-data\\n'",
+  "      fi",
+  '    elif [[ "${2:-}" == "inspect" ]]; then',
+  '      if [[ "$*" == *"com.docker.compose.volume"* ]]; then',
+  '        printf "%s\\torbit-db-data\\n" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
+  "      else",
+  '        printf "%s\\n" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
+  "      fi",
   "    fi",
   "    exit 0",
   "    ;;",
+  "  ps)",
+  '    if [[ "$*" == *"volume="* ]]; then',
+  '      printf "%s\\t%s\\torbit-db\\n" "${FAKE_DOCKER_DB_CONTAINER_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
+  '    elif [[ "$*" == *"label=com.docker.compose.project="* ]]; then',
+  '      printf "%s\\t%s\\torbit-app\\t%s\\n" "${FAKE_DOCKER_APP_CONTAINER_ID:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}" "${FAKE_DOCKER_RUNNING_CONFIG_HASH:-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"',
+  "    fi",
+  "    exit 0",
+  "    ;;",
+  "  inspect)",
+  '    printf "%s\\n" "${FAKE_DOCKER_APP_IMAGE:?}"',
+  "    exit 0",
+  "    ;;",
   "  compose)",
+  '    if [[ "$*" == *"config --hash orbit-app"* ]]; then',
+  '      printf "%s\\n" "${FAKE_DOCKER_CONFIG_HASH:-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"',
+  "      exit 0",
+  "    fi",
   '    if [[ "${FAKE_COMPOSE_CONFIG_FAIL:-}" == "1" && " $* " == *" config "* ]]; then',
   "      exit 23",
   "    fi",
@@ -417,6 +443,15 @@ function makeLegacyExistingDeployment(targetDir) {
   unlinkSync(join(targetDir, "scripts", "restore.sh"));
 }
 
+function recognizedVolumeOverrides(project = "renamed-orbit") {
+  return {
+    FAKE_DOCKER_VOLUME_NAMES: `${project}_orbit-db-data`,
+    FAKE_DOCKER_VOLUME_PROJECT: project,
+    FAKE_DOCKER_DB_CONTAINER_ID: "c".repeat(64),
+    FAKE_DOCKER_APP_CONTAINER_ID: "d".repeat(64),
+  };
+}
+
 function snapshotPath(path) {
   let descriptor;
   try {
@@ -488,6 +523,8 @@ function runInstall(targetDir, envOverrides = {}) {
   const binDir = makeFakeBin();
   const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
   const logPath = join(logDir, "calls.log");
+  const priorEnvironment = readOptionalFile(join(targetDir, ".env-orbit"));
+  const priorImage = /^ORBIT_IMAGE=([^\n]*)$/m.exec(priorEnvironment)?.[1] ?? resolvedReference;
   const result = spawnSync("bash", [installScript], {
     cwd: targetDir,
     encoding: "utf8",
@@ -500,6 +537,9 @@ function runInstall(targetDir, envOverrides = {}) {
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
       FAKE_DOCKER_VERSION: "v1.2.0",
+      FAKE_DOCKER_APP_IMAGE: priorImage,
+      FAKE_DOCKER_CONFIG_HASH: "f".repeat(64),
+      FAKE_DOCKER_RUNNING_CONFIG_HASH: "f".repeat(64),
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
       FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
@@ -834,6 +874,90 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("docker pull");
     expect(result.calls).not.toContain("curl");
     expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a fresh target when a renamed-directory Orbit volume is orphaned", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_VOLUME_NAMES: "old-directory_orbit-db-data",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("existing Orbit database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("reuses the proven Compose project for a recognized deployment in a renamed directory", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const passwordPath = join(targetDir, ".orbit-secrets", "postgres-password");
+    const beforePassword = readFileSync(passwordPath);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides(),
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("docker compose --project-name renamed-orbit");
+    expect(result.calls).not.toContain("docker compose --project-name orbit ");
+    expect(readFileSync(passwordPath)).toEqual(beforePassword);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("uses stopped-container ownership evidence for a recognized orphaned deployment volume", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides("stopped-orbit"),
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("docker ps -a");
+    expect(result.calls).toContain("docker compose --project-name stopped-orbit");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a recognized deployment when multiple Orbit database volumes exist", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_VOLUME_NAMES: "first-orbit_orbit-db-data\nsecond-orbit_orbit-db-data",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Multiple Orbit database volumes");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("up -d");
+    expect(result.stderr).not.toContain("existing-postgres-password");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a same-image volume whose stopped containers do not match the recognized deployment", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides("unrelated-orbit"),
+      FAKE_DOCKER_CONFIG_HASH: "e".repeat(64),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("belongs to this Orbit deployment");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("up -d");
+    expect(result.stderr).not.toContain("existing-postgres-password");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
