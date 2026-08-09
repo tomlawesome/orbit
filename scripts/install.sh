@@ -3,10 +3,10 @@ set -Eeuo pipefail
 
 # Orbit installer.
 #
-# Deploys a published, digest-pinned image. It takes no interactive input, so
-# it works under CI, non-TTY SSH and cloud-init as well as a terminal, and it
-# does not clone the repository: a deployment needs compose assets and a
-# published image, not source or tests.
+# Deploys a published, digest-pinned image. First installs can collect core
+# configuration from a controlling terminal; unattended runs require a safe
+# pre-provisioned configuration shape. It does not clone the repository: a
+# deployment needs compose assets and a published image, not source or tests.
 #
 # Building from source is a separate developer workflow; see the README.
 
@@ -17,11 +17,38 @@ readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
 readonly image_repository="${registry}/${repository}"
+readonly oidc_discovery_max_bytes=1048576
+readonly oidc_discovery_parser='const fs = require("node:fs");
+const maximumInputBytes = 1048576 + 8192;
+const input = fs.readFileSync(0, "utf8");
+if (Buffer.byteLength(input, "utf8") > maximumInputBytes) process.exit(1);
+const separator = input.indexOf("\n");
+if (separator <= 0) process.exit(1);
+const issuer = input.slice(0, separator);
+let document;
+try {
+  document = JSON.parse(input.slice(separator + 1));
+} catch {
+  process.exit(1);
+}
+if (document === null || typeof document !== "object" || Array.isArray(document)) process.exit(1);
+if (document.issuer !== issuer) process.exit(1);
+for (const field of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
+  if (typeof document[field] !== "string") process.exit(1);
+  let endpoint;
+  try {
+    endpoint = new URL(document[field]);
+  } catch {
+    process.exit(1);
+  }
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash) process.exit(1);
+}'
 
 staging_dir=""
 rollback_dir=""
 file_transaction_active=0
 file_transaction_committed=0
+target_was_empty=0
 declare -a created_directories=()
 declare -A managed_was_present=()
 
@@ -48,6 +75,34 @@ target_is_empty() {
   entries=(*)
   shopt -u nullglob dotglob
   [[ ${#entries[@]} -eq 0 ]]
+}
+
+has_mode() {
+  [[ "$(stat -c '%a' -- "$1" 2>/dev/null)" == "$2" ]]
+}
+
+is_preprovisioned_input() {
+  local child
+  local -a entries=() children=()
+
+  is_regular_non_symlink_file "$environment_file" && has_mode "$environment_file" 600 || return 1
+  is_real_non_symlink_directory "$secrets_directory" && has_mode "$secrets_directory" 700 || return 1
+
+  shopt -s nullglob dotglob
+  entries=(*)
+  children=("$secrets_directory"/*)
+  shopt -u nullglob dotglob
+  [[ ${#entries[@]} -eq 2 ]] || return 1
+  [[ -e "$environment_file" && -e "$secrets_directory" ]] || return 1
+
+  for child in "${children[@]}"; do
+    [[ -f "$child" && ! -L "$child" ]] || return 1
+    [[ -s "$child" ]] || return 1
+    has_mode "$child" 600 || return 1
+  done
+
+  is_regular_non_symlink_file "$secrets_directory/oidc-client-secret" || return 1
+  [[ -s "$secrets_directory/oidc-client-secret" ]] || return 1
 }
 
 remove_target_path() {
@@ -159,13 +214,187 @@ trap cleanup EXIT
 # and a symlinked marker could redirect the install at attacker-controlled
 # paths. This runs before any pull or download.
 validate_target() {
-  target_is_empty && return
+  if target_is_empty; then
+    target_was_empty=1
+    return
+  fi
   if is_regular_non_symlink_file "$environment_file" &&
     is_regular_non_symlink_file "$compose_file" &&
     is_real_non_symlink_directory "$secrets_directory"; then
     return
   fi
-  fail "The installation directory is not empty and is not a recognizable existing Orbit deployment (expected ${environment_file}, ${compose_file} and ${secrets_directory}/ as regular, non-symlink paths). Refusing to install here."
+  if is_preprovisioned_input; then
+    target_was_empty=1
+    return
+  fi
+  fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
+}
+
+has_controlling_terminal() {
+  local terminal_fd=""
+  if ! { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
+    return 1
+  fi
+  exec {terminal_fd}>&-
+}
+
+read_environment_value() {
+  local requested_key="$1" line value="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      value="${line#*=}"
+      found=1
+    fi
+  done < "$environment_file"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
+}
+
+missing_required_fields() {
+  local readiness="$1" field missing=""
+  local -a required_fields=(APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL)
+  for field in "${required_fields[@]}"; do
+    if grep -q "^missing ${field}$" <<< "$readiness"; then
+      [[ -z "$missing" ]] || missing+=" "
+      missing+="$field"
+    fi
+  done
+  printf '%s' "$missing"
+}
+
+missing_guided_fields() {
+  local readiness="$1" field missing=""
+  local -a guided_fields=(APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CALLBACK_URL)
+  for field in "${guided_fields[@]}"; do
+    if grep -q "^missing ${field}$" <<< "$readiness"; then
+      [[ -z "$missing" ]] || missing+=" "
+      missing+="$field"
+    fi
+  done
+  printf '%s' "$missing"
+}
+
+missing_configuration_fields() {
+  local readiness="$1" field missing=""
+  local -a fields=(APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL processing ai mail imap push)
+  for field in "${fields[@]}"; do
+    if grep -q "^missing ${field}$" <<< "$readiness"; then
+      [[ -z "$missing" ]] || missing+=" "
+      missing+="$field"
+    fi
+  done
+  printf '%s' "$missing"
+}
+
+print_noninteractive_configuration_guidance() {
+  local missing="$1"
+  printf 'Orbit installer: configuration fields requiring attention: %s.\n' "$missing" >&2
+  printf 'Orbit installer: non-interactive use requires a complete .env-orbit and an existing owner-only .orbit-secrets/oidc-client-secret file.\n' >&2
+  printf 'Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash\n' >&2
+  printf 'Orbit installer: configure with --init, provide the secret with --set-oidc-secret, then verify with --check before rerunning automation.\n' >&2
+}
+
+verify_oidc_discovery() {
+  local issuer discovery_url response_status curl_status discovery_size
+  local discovery_file="$staging_dir/oidc-discovery.json"
+
+  issuer="$(read_environment_value OIDC_ISSUER)" ||
+    fail "OIDC_ISSUER requires attention; run the guided configuration and rerun the installer."
+  if [[ "$issuer" == */ ]]; then
+    discovery_url="${issuer}.well-known/openid-configuration"
+  else
+    discovery_url="${issuer}/.well-known/openid-configuration"
+  fi
+
+  curl_status=0
+  response_status="$(curl --silent --show-error --location --connect-timeout 5 --max-time 10 \
+    --max-filesize "$oidc_discovery_max_bytes" \
+    --header 'Accept: application/json' \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --output "$discovery_file" --write-out '%{http_code}' "$discovery_url" 2>/dev/null)" ||
+    curl_status=$?
+  if [[ "$curl_status" -ne 0 ]]; then
+    if [[ "$curl_status" == 3 || "$curl_status" == 63 ]]; then
+      fail "OIDC provider configuration could not be validated; review the OIDC discovery response."
+    fi
+    fail "OIDC provider is unavailable; retry without changing the configuration."
+  fi
+
+  case "$response_status" in
+    2[0-9][0-9]) ;;
+    000) fail "OIDC provider is unavailable; retry without changing the configuration." ;;
+    *) fail "OIDC provider configuration could not be validated; review the OIDC discovery response." ;;
+  esac
+
+  is_regular_non_symlink_file "$discovery_file" ||
+    fail "OIDC provider configuration could not be validated; review the OIDC discovery response."
+  chmod 600 "$discovery_file" 2>/dev/null ||
+    fail "OIDC provider configuration could not be validated; review the OIDC discovery response."
+  discovery_size="$(stat -c '%s' -- "$discovery_file" 2>/dev/null)"
+  [[ "$discovery_size" =~ ^[0-9]+$ && "$discovery_size" -le "$oidc_discovery_max_bytes" ]] ||
+    fail "OIDC provider configuration could not be validated; review the OIDC discovery response."
+
+  if ! {
+    printf '%s\n' "$issuer"
+    cat -- "$discovery_file"
+  } | docker run --rm \
+    --entrypoint node \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --user 1001:1001 \
+    --pids-limit 64 \
+    --memory 64m \
+    --cpus 0.5 \
+    "$resolved_reference" \
+    --input-type=commonjs -e "$oidc_discovery_parser" >/dev/null 2>&1; then
+    fail "OIDC provider configuration could not be validated; review the OIDC discovery response."
+  fi
+}
+
+prepare_configuration() {
+  local readiness readiness_status missing guided_missing
+
+  if ! ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh; then
+    fail "Configuration failed; restoring the previous deployment."
+  fi
+  is_regular_non_symlink_file "$environment_file" ||
+    fail "Configuration did not leave a regular, non-symlink ${environment_file}."
+  is_real_non_symlink_directory "$secrets_directory" ||
+    fail "Configuration did not leave a real, non-symlink ${secrets_directory} directory."
+
+  readiness_status=0
+  readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
+  if [[ "$readiness_status" -ne 0 ]]; then
+    missing="$(missing_required_fields "$readiness")"
+    if [[ -n "$missing" ]] && has_controlling_terminal; then
+      guided_missing="$(missing_guided_fields "$readiness")"
+      if [[ -n "$guided_missing" ]]; then
+        bash scripts/configure.sh --init ||
+          fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
+      fi
+
+      readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || true
+      if grep -q '^missing OIDC_CLIENT_SECRET$' <<< "$readiness"; then
+        ORBIT_CONFIGURE_TTY_INPUT=1 bash scripts/configure.sh --set-oidc-secret ||
+          fail "OIDC client secret collection was cancelled or invalid; restoring the previous deployment."
+      fi
+    elif [[ -n "$missing" ]]; then
+      print_noninteractive_configuration_guidance "$missing"
+      fail "Required configuration fields require attention; refusing to start Compose."
+    fi
+  fi
+
+  readiness_status=0
+  readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
+  if [[ "$readiness_status" -ne 0 ]]; then
+    missing="$(missing_configuration_fields "$readiness")"
+    [[ -n "$missing" ]] || missing="APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL"
+    fail "Configuration fields require attention (${missing}); refusing to start Compose."
+  fi
+
+  verify_oidc_discovery
 }
 
 validate_target
@@ -178,10 +407,10 @@ command -v curl >/dev/null 2>&1 || fail "curl is required."
 # ever read; the digest is what is recorded and deployed, so a tag that moves
 # later cannot change this deployment.
 printf 'Resolving %s:%s...\n' "$image_repository" "$channel"
-docker pull --quiet "${image_repository}:${channel}" >/dev/null ||
+docker pull --quiet "${image_repository}:${channel}" >/dev/null 2>&1 ||
   fail "Could not pull ${image_repository}:${channel}. If the image is private, authenticate with ${registry} first."
 
-if ! inspect_output="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image_repository}:${channel}")"; then
+if ! inspect_output="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image_repository}:${channel}" 2>/dev/null)"; then
   fail "Could not inspect ${image_repository}:${channel} to resolve an immutable digest."
 fi
 
@@ -198,7 +427,7 @@ done <<< "$inspect_output"
 # The image records the exact source revision that produced it, so deployment
 # assets are fetched from that revision rather than from a moving branch. A
 # compose file therefore cannot drift from the image it configures.
-if ! revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$resolved_reference")"; then
+if ! revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect ${resolved_reference} for its source revision."
 fi
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] ||
@@ -295,7 +524,7 @@ printf 'Fetching deployment assets from %s...\n' "${revision:0:12}"
 for asset in "${deployment_assets[@]}"; do
   staged_path="$staging_dir/$asset"
   mkdir -p -- "$(dirname "$staged_path")"
-  curl --fail --silent --show-error --location --output "$staged_path" "${asset_base}/${asset}" ||
+  curl --fail --silent --show-error --location --output "$staged_path" "${asset_base}/${asset}" 2>/dev/null ||
     fail "Could not fetch ${asset} from the published revision."
   is_regular_non_symlink_file "$staged_path" ||
     fail "Fetched ${asset} is not a regular file."
@@ -303,7 +532,7 @@ for asset in "${deployment_assets[@]}"; do
 done
 
 for script in "${deployment_scripts[@]}"; do
-  bash -n "$staging_dir/$script" ||
+  bash -n "$staging_dir/$script" 2>/dev/null ||
     fail "Fetched ${script} failed a syntax check."
 done
 
@@ -335,9 +564,7 @@ done
 # The resolved digest is exported before configuration runs so VAPID key
 # generation and every other configuration step use the immutable published
 # image instead of falling back to git rev-parse and a local source build.
-if ! ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh; then
-  fail "Configuration failed; restoring the previous deployment."
-fi
+prepare_configuration
 
 is_regular_non_symlink_file "$environment_file" ||
   fail "Configuration did not leave a regular, non-symlink ${environment_file}."
@@ -381,11 +608,30 @@ mv -- "$tmp_environment" "$environment_file" ||
   fail "Could not persist the resolved image digest in ${environment_file}."
 
 export ORBIT_IMAGE="$resolved_reference"
+
+if ! compose config --quiet >/dev/null 2>&1; then
+  fail "Docker Compose configuration is invalid; review the named configuration fields and rerun."
+fi
+
+printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.\n'
+
 file_transaction_committed=1
 
-compose pull orbit-db
-compose up -d --no-build --remove-orphans
-compose ps
+if ! compose pull orbit-db >/dev/null 2>&1; then
+  fail "Could not prepare the Orbit database image."
+fi
+if ! compose up -d --no-build --remove-orphans >/dev/null 2>&1; then
+  if [[ "$target_was_empty" == 1 ]]; then
+    compose down --remove-orphans >/dev/null 2>&1 || true
+  fi
+  fail "Orbit could not start; review the verified configuration and rerun."
+fi
+if ! compose ps >/dev/null 2>&1; then
+  if [[ "$target_was_empty" == 1 ]]; then
+    compose down --remove-orphans >/dev/null 2>&1 || true
+  fi
+  fail "Orbit started but its status could not be verified."
+fi
 
 printf '\nOrbit is deployed from %s\n' "$resolved_reference"
 printf 'Optional services are selected with COMPOSE_PROFILES in %s\n' "$environment_file"

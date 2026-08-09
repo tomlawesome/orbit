@@ -37,10 +37,31 @@ From an empty directory on a Linux host with Docker Compose v2 and `curl`:
 curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-The installer takes no interactive input, so the same command works in a
-terminal, over SSH without a TTY, in CI and from cloud-init. Git is not
-required and the repository is not cloned: a deployment needs compose assets
-and a published image, not source or tests.
+On a first install from a controlling terminal, the installer guides you
+through the public HTTPS Orbit origin, complete OIDC issuer, client ID, and a
+hidden OIDC client-secret entry. It refuses to start Compose until the core
+configuration is ready. Git is not required and the repository is not cloned:
+a deployment needs compose assets and a published image, not source or tests.
+
+Unattended installation is supported only with a complete, pre-provisioned
+`.env-orbit` and an existing non-empty regular
+`.orbit-secrets/oidc-client-secret` file with mode `0600`. The environment file
+must select the canonical file-backed secret path, and all required values must
+pass `bash scripts/configure.sh --check`. A field requiring attention, unsafe
+file, invalid callback, or incomplete optional group is refused before Compose
+starts.
+
+For an unattended bootstrap into a directory that has no Compose files yet,
+the directory must contain exactly `.env-orbit` and `.orbit-secrets/` before
+the installer runs. `.env-orbit` must be a regular, non-symlink file with mode
+`0600`; `.orbit-secrets/` must be a real, non-symlink directory with mode
+`0700`; and every existing immediate child of that directory must be a
+non-empty regular, non-symlink file with mode `0600`. The required
+`.orbit-secrets/oidc-client-secret` file must already be present and non-empty.
+Extra top-level entries, symlinks, directories, devices, empty files, or broad
+permissions are refused before Docker or downloads begin. These pre-provisioned
+files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
+preflight fails before transaction commit.
 
 It resolves the published image to an immutable digest, reads the exact source
 revision recorded in that image, and fetches its deployment assets from that
@@ -49,14 +70,30 @@ resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
 that digest is what runs. A tag is only ever read to resolve it; a mutable
 reference is never deployed.
 
-It then creates the Orbit-specific `.env-orbit` configuration when needed,
+It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
 generates independent 256-bit session, PostgreSQL, and document-encryption
-secrets, and starts the `orbit` application container, the official
-`orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
-in the background and displays their status. Development and routine preview
+secrets, validates the rendered Compose configuration, and starts the `orbit`
+application container, the official `orbit-postgres` PostgreSQL container, and
+the isolated official ClamAV scanner in the background, reporting fixed
+success or failure messages. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
 only after a dedicated exact-image validation path is enabled for that
 architecture.
+
+If guided collection is cancelled or a non-interactive run has a required
+field requiring attention, the installer restores the previous managed file
+state and prints only field names and safe next actions. From a controlling terminal,
+rerun the same installer command, then use the existing configuration
+contracts when working from a checked-out deployment:
+
+```sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
+bash scripts/configure.sh --check
+```
+
+Recognized upgrades with complete configuration are revalidated without
+reprompting or rewriting valid operator values or secrets.
 
 ### Building from source instead
 
@@ -214,7 +251,8 @@ directory; only its runtime file path is recorded in `.env-orbit`. See
 reports whether required settings and optional setting groups are complete
 without printing their contents. For non-interactive installation or upgrade,
 plain `bash scripts/configure.sh` preserves the existing configuration and
-secret file.
+secret file; the installer will continue only when that existing configuration
+and secret file are already complete and safe.
 
 ### 2. Start Orbit
 

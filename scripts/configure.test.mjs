@@ -8,6 +8,7 @@ import {
   readdirSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -104,6 +105,51 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
       ...envOverrides,
     },
   });
+}
+
+function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides = {}, input = "") {
+  const binDir = makeFakeBin();
+  const command = `exec </dev/null; bash ${join(targetDir, "scripts", "configure.sh")} ${args.join(" ")}`;
+  return spawnSync("script", ["-qec", command, "/dev/null"], {
+    cwd: targetDir,
+    encoding: "utf8",
+    input,
+    env: {
+      PATH: `${binDir}:${process.env.PATH}`,
+      HOME: process.env.HOME ?? tmpdir(),
+      ORBIT_IMAGE: "orbit-local:abcdef123456",
+      ...envOverrides,
+    },
+  });
+}
+
+function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input = "") {
+  const binDir = makeFakeBin();
+  const inputPath = join(targetDir, ".configure-stdin-fixture");
+  writeFileSync(inputPath, input);
+  const result = spawnSync(
+    "bash",
+    [
+      "-c",
+      'cat -- "$1" | bash "$2" "${@:3}"',
+      "pipe-runner",
+      inputPath,
+      join(targetDir, "scripts", "configure.sh"),
+      ...args,
+    ],
+    {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME ?? tmpdir(),
+        ORBIT_IMAGE: "orbit-local:abcdef123456",
+        ...envOverrides,
+      },
+    },
+  );
+  unlinkSync(inputPath);
+  return result;
 }
 
 function stagingLeftovers(targetDir) {
@@ -499,11 +545,26 @@ describe("configure.sh", () => {
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
 
     const result = runConfigure(targetDir, ["--check"]);
 
     const lines = result.stdout.split("\n").filter(Boolean);
     expect(lines).toContain("ready OIDC_CLIENT_SECRET");
+    expect(result.stdout).not.toContain("configured-secret-value");
+  });
+
+  it("reports a file-backed OIDC secret as missing when its permissions are too broad", () => {
+    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o640);
+
+    const result = runConfigure(targetDir, ["--check"]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout.split("\n").filter(Boolean)).toContain("missing OIDC_CLIENT_SECRET");
     expect(result.stdout).not.toContain("configured-secret-value");
   });
 
@@ -577,6 +638,18 @@ describe("configure.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
+  it("preserves a valid direct OIDC client secret without creating a conflicting file form", () => {
+    const targetDir = makeFixture("OIDC_CLIENT_SECRET=existing-direct-secret\n");
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      "OIDC_CLIENT_SECRET=existing-direct-secret",
+    );
+  });
+
   it("preserves an existing OIDC client secret file byte-for-byte on an ordinary run", () => {
     const targetDir = makeFixture(undefined);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
@@ -645,6 +718,17 @@ describe("configure.sh", () => {
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("non-empty OIDC client secret");
+      expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+      expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+    });
+
+    it("rejects EOF without a newline instead of accepting a partial secret", () => {
+      const targetDir = makeFixture(undefined);
+
+      const result = runConfigureWithPipeEOF(targetDir, ["--set-oidc-secret"], {}, "partial-secret");
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("standard input");
       expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
       expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
     });
@@ -756,6 +840,22 @@ describe("configure.sh", () => {
       expect(result.status).not.toBe(0);
       expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
       expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("uses the controlling terminal when stdin is occupied by the installer script", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigureWithControllingTerminal(
+        targetDir,
+        ["--init"],
+        {},
+        `${validAppUrl}\n${validIssuer}\n${validClientId}\n`,
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+        `OIDC_CALLBACK_URL=${validAppUrl}/api/auth/callback`,
+      );
     });
 
     it.each([
