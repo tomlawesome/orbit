@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
 type ProductTourFixture = {
   householdId: string;
@@ -14,7 +13,7 @@ type ProductTourFixture = {
 
 const fixedNow = "2026-08-08T10:00:00.000Z";
 const outputDirectory = join(process.cwd(), "docs/assets/product-tour");
-const syntheticPdf = createSyntheticPdf("Orbit product tour document");
+const generatedPdf = readFileSync(new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url));
 
 function newFixture(): ProductTourFixture {
   return {
@@ -163,7 +162,7 @@ async function attachSyntheticDocument(page: Page, fixture: ProductTourFixture) 
   await page.locator('input[type="file"]').first().setInputFiles({
     name: fixture.documentName,
     mimeType: "application/pdf",
-    buffer: syntheticPdf,
+    buffer: generatedPdf,
   });
   const documentRow = page.getByRole("listitem").filter({ hasText: fixture.documentName });
   await expect(documentRow).toBeVisible();

@@ -60,6 +60,13 @@ body:
     validations:
       required: true
   - type: textarea
+    id: observability
+    attributes:
+      label: Operational observability
+      description: Describe observable operational events/states, fixed classifications and operator action, positive and privacy-negative tests, or explain why observability is not applicable.
+    validations:
+      required: true
+  - type: textarea
     id: evidence
     attributes:
       label: Closure evidence

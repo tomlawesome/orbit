@@ -183,11 +183,11 @@ export function normalizeImapAttachmentName(input: string | undefined, mediaType
   return result || fallback;
 }
 
-export function validateImapAttachmentBytes(
+export async function validateImapAttachmentBytes(
   bytes: Buffer,
   declaredMediaType: string | undefined,
   maximumDocumentBytesOrOptions: number | { maximumDocumentBytes?: number; pdfOnly?: boolean } = IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes,
-): { ok: true; mediaType: SupportedDocumentMediaType } | { ok: false; code: ImapAttachmentValidationCode } {
+): Promise<{ ok: true; mediaType: SupportedDocumentMediaType } | { ok: false; code: ImapAttachmentValidationCode }> {
   const maximumDocumentBytes = typeof maximumDocumentBytesOrOptions === "number"
     ? maximumDocumentBytesOrOptions
     : maximumDocumentBytesOrOptions.maximumDocumentBytes ?? IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes;
@@ -202,6 +202,6 @@ export function validateImapAttachmentBytes(
   const declared = declaredMediaType?.toLowerCase().split(";", 1)[0].trim();
   if (declared && declared !== detected) return { ok: false, code: "mime_type_mismatch" };
   if (pdfOnly && detected !== "application/pdf") return { ok: false, code: "mime_type_mismatch" };
-  if (!validateSupportedDocumentStructure(bytes, detected)) return { ok: false, code: "mime_structure_invalid" };
+  if (!await validateSupportedDocumentStructure(bytes, detected)) return { ok: false, code: "mime_structure_invalid" };
   return { ok: true, mediaType: detected };
 }

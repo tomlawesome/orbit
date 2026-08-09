@@ -35,8 +35,7 @@ type CallbackMocks = {
   provisionIdentity: ReturnType<typeof vi.fn>;
   createSession: ReturnType<typeof vi.fn>;
   deleteSessionToken: ReturnType<typeof vi.fn>;
-  reportAuthProviderDiscoveryFailure: ReturnType<typeof vi.fn>;
-  reportAuthTokenExchangeFailure: ReturnType<typeof vi.fn>;
+  reportAuthCallbackFailure: ReturnType<typeof vi.fn>;
 };
 
 async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/route").GET; mocks: CallbackMocks }> {
@@ -48,8 +47,7 @@ async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/rou
     provisionIdentity: vi.fn(),
     createSession: vi.fn(),
     deleteSessionToken: vi.fn(),
-    reportAuthProviderDiscoveryFailure: vi.fn(),
-    reportAuthTokenExchangeFailure: vi.fn(),
+    reportAuthCallbackFailure: vi.fn(),
   };
   vi.doMock("@/lib/env", () => ({ getAuthConfig: () => config }));
   vi.doMock("@/lib/auth/oidc", () => ({
@@ -61,8 +59,9 @@ async function loadCallbackRoute(): Promise<{ GET: typeof import("./callback/rou
   vi.doMock("@/lib/auth/provision", () => ({ provisionIdentity: mocks.provisionIdentity }));
   vi.doMock("@/lib/auth/observability", () => ({
     reportAuthConfiguration: vi.fn(),
-    reportAuthProviderDiscoveryFailure: mocks.reportAuthProviderDiscoveryFailure,
-    reportAuthTokenExchangeFailure: mocks.reportAuthTokenExchangeFailure,
+    reportAuthProviderDiscoveryFailure: vi.fn(),
+    reportAuthTokenExchangeFailure: vi.fn(),
+    reportAuthCallbackFailure: mocks.reportAuthCallbackFailure,
   }));
   vi.doMock("@/lib/auth/session", () => ({
     createSession: mocks.createSession,
@@ -157,15 +156,10 @@ describe("authentication callback and login route contracts", () => {
     expectCallbackFailure(response, code);
     expect(mocks.createSession).not.toHaveBeenCalled();
     expect(mocks.provisionIdentity).not.toHaveBeenCalled();
-    expect(errorLog).toHaveBeenCalledTimes(1);
-    expect(errorLog.mock.calls[0]).toEqual([
-      "Orbit authentication callback failed",
-      { code, status: code === "provider_error" ? 401 : 400 },
-    ]);
+    expect(errorLog).not.toHaveBeenCalled();
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(credentialSentinel);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(identitySentinel);
-    expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
-    expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
+    expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith(code, undefined);
   });
 
   it("rejects a mismatched transaction state without creating a session", async () => {
@@ -178,10 +172,8 @@ describe("authentication callback and login route contracts", () => {
     expectCallbackFailure(response, "invalid_state");
     expect(mocks.createSession).not.toHaveBeenCalled();
     expect(mocks.provisionIdentity).not.toHaveBeenCalled();
-    expect(errorLog.mock.calls[0]).toEqual([
-      "Orbit authentication callback failed",
-      { code: "invalid_state", status: 400 },
-    ]);
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith("invalid_state", undefined);
   });
 
   it.each([
@@ -222,22 +214,15 @@ describe("authentication callback and login route contracts", () => {
     expectCallbackFailure(response, redirectCode);
     expect(mocks.provisionIdentity).not.toHaveBeenCalled();
     expect(mocks.createSession).not.toHaveBeenCalled();
-    expect(errorLog.mock.calls[0]).toEqual([
-      "Orbit authentication callback failed",
-      { code: redirectCode, status: 502 },
-    ]);
+    expect(errorLog).not.toHaveBeenCalled();
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(credentialSentinel);
     expect(JSON.stringify(errorLog.mock.calls)).not.toContain(identitySentinel);
     if (failureCode === "discovery_failed") {
-      expect(mocks.reportAuthProviderDiscoveryFailure).toHaveBeenCalledOnce();
-      expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
+      expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith("discovery_failed", undefined);
     } else if (failureCode === "token_exchange_failed") {
-      expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledOnce();
-      expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledWith("invalid_grant");
-      expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
+      expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith("token_exchange_failed", "invalid_grant");
     } else {
-      expect(mocks.reportAuthProviderDiscoveryFailure).not.toHaveBeenCalled();
-      expect(mocks.reportAuthTokenExchangeFailure).not.toHaveBeenCalled();
+      expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith("provider_error", undefined);
     }
   });
 
@@ -250,15 +235,15 @@ describe("authentication callback and login route contracts", () => {
       "The authorization code could not be exchanged",
       502,
     ));
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const response = await GET(callbackRequest("?code=authorization-code-sentinel&state=expected-state", sealed));
 
     expectCallbackFailure(response, "token_exchange_failed");
     expect(mocks.provisionIdentity).not.toHaveBeenCalled();
     expect(mocks.createSession).not.toHaveBeenCalled();
-    expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledOnce();
-    expect(mocks.reportAuthTokenExchangeFailure).toHaveBeenCalledWith("provider_rejected");
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(mocks.reportAuthCallbackFailure).toHaveBeenCalledWith("token_exchange_failed", undefined);
   });
 
   it("returns a bounded no-store login error when discovery fails", async () => {

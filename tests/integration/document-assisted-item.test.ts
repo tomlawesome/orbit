@@ -4,9 +4,9 @@ import { POST as inspectRoute } from "@/app/api/households/[householdId]/item-do
 import { getDb } from "@/db";
 import { auditLog, documents, items } from "@/db/schema";
 import { requestForSession, createIntegrationFixture } from "./support/fixtures";
-import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
+import { readFileSync } from "node:fs";
 
-const syntheticPdf = createSyntheticPdf("Provider: Inert Cover\nPolicy number: SAFE-12345\n2030-12-20");
+const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-object-stream.pdf", import.meta.url));
 
 function context(householdId: string) {
   return { params: Promise.resolve({ householdId }) };
@@ -25,10 +25,10 @@ describe("document-assisted item inspection boundary", () => {
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("safe-policy.pdf"),
-        "x-orbit-declared-bytes": String(syntheticPdf.length),
+        "x-orbit-declared-bytes": String(qpdfObjectStreamPdf.length),
         "content-type": "application/pdf",
       },
-      body: syntheticPdf,
+      body: new Uint8Array(qpdfObjectStreamPdf),
     }), context(fixture.household.id));
 
     expect(response.status).toBe(200);
@@ -89,9 +89,9 @@ describe("document-assisted item inspection boundary", () => {
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("private-policy.pdf"),
-        "x-orbit-declared-bytes": String(syntheticPdf.length),
+        "x-orbit-declared-bytes": String(qpdfObjectStreamPdf.length),
       },
-      body: syntheticPdf,
+      body: new Uint8Array(qpdfObjectStreamPdf),
     }), context(fixture.household.id));
 
     expect(response.status).toBe(404);
