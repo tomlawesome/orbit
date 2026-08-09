@@ -41,11 +41,11 @@ button { color: inherit; }
   box-shadow: 0 0 0 5px #17172b;
 }
 .app-frame { min-height: 100dvh; color: var(--ink); background: var(--canvas); display: grid; grid-template-columns: 248px minmax(0, 1fr); }
-:is(.app-frame, .settings-page)[data-text-size="standard"] { --text-bump: 0px; }
-:is(.app-frame, .settings-page)[data-text-size="comfortable"] { --text-bump: 2px; }
-:is(.app-frame, .settings-page)[data-text-size="large"] { --text-bump: 4px; }
-:is(.app-frame, .settings-page)[data-text-size="extra-large"] { --text-bump: 6px; }
-:is(.app-frame, .settings-page)[data-urgency-palette="classic"] {
+:is(.app-frame, .settings-page, .admin-page)[data-text-size="standard"] { --text-bump: 0px; }
+:is(.app-frame, .settings-page, .admin-page)[data-text-size="comfortable"] { --text-bump: 2px; }
+:is(.app-frame, .settings-page, .admin-page)[data-text-size="large"] { --text-bump: 4px; }
+:is(.app-frame, .settings-page, .admin-page)[data-text-size="extra-large"] { --text-bump: 6px; }
+:is(.app-frame, .settings-page, .admin-page)[data-urgency-palette="classic"] {
   --heat-overdue: #dc2626;
   --heat-overdue-bg: color-mix(in srgb, #ef4444 23%, var(--paper));
   --heat-week: #ea580c;
@@ -56,72 +56,72 @@ button { color: inherit; }
   --heat-later-bg: color-mix(in srgb, #22c55e 18%, var(--paper));
 }
 
-:is(.app-frame, .settings-page)[data-theme="verdant"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="verdant"] {
   --ink: #17352c; --muted: #6b7972; --canvas: #f0f2e9; --paper: #fffdf7; --forest: #0d4033; --forest-2: #17604d;
   --mint: #dcebdd; --coral: #ff7456; --coral-dark: #963d2a; --sun: #f2ca63; --line: #d8dfd5; --sidebar: #092f27;
   --sidebar-glow: rgb(35 128 99 / 25%); --hero-start: #0c352c; --hero-end: #185b48; --focus-ink: #4e271f; --focus-muted: #844638;
 }
-:is(.app-frame, .settings-page)[data-theme="coast"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="coast"] {
   --ink: #152733; --muted: #6f7c82; --canvas: #eef3f2; --paper: #fbfdfb; --forest: #123c5a; --forest-2: #195979;
   --mint: #cfe8ec; --coral: #35a7c8; --coral-dark: #155d75; --sun: #f0b75e; --line: #d5dfdf; --sidebar: #0b3148;
   --sidebar-glow: rgb(56 156 183 / 25%); --hero-start: #0d334c; --hero-end: #155d73; --focus-ink: #12394a; --focus-muted: #265f72;
 }
-:is(.app-frame, .settings-page)[data-theme="berry"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="berry"] {
   --ink: #302033; --muted: #796d79; --canvas: #f4eef1; --paper: #fffafd; --forest: #4b274f; --forest-2: #69356d;
   --mint: #e8dbee; --coral: #ec6687; --coral-dark: #8c2f4b; --sun: #bd9bea; --line: #e2d6de; --sidebar: #38203c;
   --sidebar-glow: rgb(189 101 167 / 25%); --hero-start: #3e2243; --hero-end: #6b3869; --focus-ink: #511c31; --focus-muted: #84334e;
 }
-:is(.app-frame, .settings-page)[data-theme="ember"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="ember"] {
   --ink: #292822; --muted: #767169; --canvas: #f2eee5; --paper: #fffaf2; --forest: #393832; --forest-2: #56544c;
   --mint: #e8dfcd; --coral: #e97535; --coral-dark: #803816; --sun: #d7a84d; --line: #ded6c8; --sidebar: #292a27;
   --sidebar-glow: rgb(221 136 61 / 22%); --hero-start: #2d2e2a; --hero-end: #4a4840; --focus-ink: #4e2713; --focus-muted: #813e1c;
 }
-:is(.app-frame, .settings-page)[data-theme="after-dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="after-dark"] {
   --ink: #1b1b31; --muted: #626278; --canvas: #f2f1f9; --paper: #fff; --forest: #6255ed; --forest-2: #4c40c9;
   --mint: #dffaf7; --coral: #ff4fa3; --coral-dark: #a72168; --sun: #22e7d3; --line: #deddf0; --sidebar: #12132c;
   --sidebar-glow: rgb(113 92 255 / 32%); --hero-start: #171833; --hero-end: #30266e; --focus-ink: #401137; --focus-muted: #4d1542;
 }
 
-:is(.app-frame, .settings-page)[data-mode="dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-mode="dark"] {
   --ink: #f0f4f1; --muted: #a4b0a9; --canvas: #0b1c17; --paper: #132820; --line: #294339; --mint: #25493c;
   --sidebar: #061d18; --hero-start: #0b3027; --hero-end: #14533f; --shadow: 0 20px 50px rgb(0 0 0 / 22%);
 }
-:is(.app-frame, .settings-page)[data-theme="coast"][data-mode="dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="coast"][data-mode="dark"] {
   --ink: #eff7fa; --muted: #9db1ba; --canvas: #071923; --paper: #102833; --line: #294957; --mint: #1c4655;
   --sidebar: #061c29; --hero-start: #0a2c40; --hero-end: #13566c;
 }
-:is(.app-frame, .settings-page)[data-theme="berry"][data-mode="dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="berry"][data-mode="dark"] {
   --ink: #fbf1fa; --muted: #b8a1b5; --canvas: #211322; --paper: #321d33; --line: #543552; --mint: #4b304f;
   --sidebar: #1a0f1d; --hero-start: #321a35; --hero-end: #63305f;
 }
-:is(.app-frame, .settings-page)[data-theme="ember"][data-mode="dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="ember"][data-mode="dark"] {
   --ink: #f5f0e6; --muted: #ada79c; --canvas: #1d1d1a; --paper: #292923; --line: #48463d; --mint: #494436;
   --sidebar: #161714; --hero-start: #292a26; --hero-end: #49463e;
 }
-:is(.app-frame, .settings-page)[data-theme="after-dark"][data-mode="dark"] {
+:is(.app-frame, .settings-page, .admin-page)[data-theme="after-dark"][data-mode="dark"] {
   --ink: #f6f4ff; --muted: #a9a6c4; --canvas: #0b0c20; --paper: #15162e; --forest: #8275ff; --forest-2: #968cff;
   --line: #343459; --mint: #153f40; --sidebar: #080919; --hero-start: #111229; --hero-end: #33256f;
   --focus-ink: #ffd7ec; --focus-muted: #f3a7d2; --shadow: 0 22px 60px rgb(0 0 0 / 36%);
 }
 
 @media (prefers-color-scheme: dark) {
-  :is(.app-frame, .settings-page)[data-mode="system"] {
+  :is(.app-frame, .settings-page, .admin-page)[data-mode="system"] {
     --ink: #f0f4f1; --muted: #a4b0a9; --canvas: #0b1c17; --paper: #132820; --line: #294339; --mint: #25493c;
     --sidebar: #061d18; --hero-start: #0b3027; --hero-end: #14533f; --shadow: 0 20px 50px rgb(0 0 0 / 22%);
   }
-  :is(.app-frame, .settings-page)[data-theme="coast"][data-mode="system"] {
+  :is(.app-frame, .settings-page, .admin-page)[data-theme="coast"][data-mode="system"] {
     --ink: #eff7fa; --muted: #9db1ba; --canvas: #071923; --paper: #102833; --line: #294957; --mint: #1c4655;
     --sidebar: #061c29; --hero-start: #0a2c40; --hero-end: #13566c;
   }
-  :is(.app-frame, .settings-page)[data-theme="berry"][data-mode="system"] {
+  :is(.app-frame, .settings-page, .admin-page)[data-theme="berry"][data-mode="system"] {
     --ink: #fbf1fa; --muted: #b8a1b5; --canvas: #211322; --paper: #321d33; --line: #543552; --mint: #4b304f;
     --sidebar: #1a0f1d; --hero-start: #321a35; --hero-end: #63305f;
   }
-  :is(.app-frame, .settings-page)[data-theme="ember"][data-mode="system"] {
+  :is(.app-frame, .settings-page, .admin-page)[data-theme="ember"][data-mode="system"] {
     --ink: #f5f0e6; --muted: #ada79c; --canvas: #1d1d1a; --paper: #292923; --line: #48463d; --mint: #494436;
     --sidebar: #161714; --hero-start: #292a26; --hero-end: #49463e;
   }
-  :is(.app-frame, .settings-page)[data-theme="after-dark"][data-mode="system"] {
+  :is(.app-frame, .settings-page, .admin-page)[data-theme="after-dark"][data-mode="system"] {
     --ink: #f6f4ff; --muted: #a9a6c4; --canvas: #0b0c20; --paper: #15162e; --forest: #8275ff; --forest-2: #968cff;
     --line: #343459; --mint: #153f40; --sidebar: #080919; --hero-start: #111229; --hero-end: #33256f;
     --focus-ink: #ffd7ec; --focus-muted: #f3a7d2; --shadow: 0 22px 60px rgb(0 0 0 / 36%);
@@ -311,8 +311,10 @@ nav { margin-top: 22px; }
 .hero-copy { position: relative; z-index: 2; width: min(540px, 72%); }
 .eyebrow { margin: 0 0 13px; color: #22e7d3; font-size: calc(9px + var(--text-bump)); font-weight: 800; letter-spacing: 1.7px; text-transform: uppercase; }
 h1, h2, h3 { font-family: var(--font-heading), sans-serif; }
-h1 { margin: 0; font-size: clamp(34px, 4vw, 54px); font-weight: 650; letter-spacing: -2.8px; line-height: .98; }
+h1 { margin: 0; font-size: clamp(34px, 4vw, 54px); font-weight: 650; }
 h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163 / 22%); }
+.hero-copy h1 { letter-spacing: -2.8px; line-height: .98; }
+.page-heading { margin: 0; max-width: 100%; font-size: calc(32px + var(--text-bump)); font-weight: 650; letter-spacing: -.9px; line-height: 1.1; overflow-wrap: break-word; }
 .hero-copy > p:last-child { max-width: 460px; margin: 16px 0 0; color: #c8c5df; font-size: calc(12px + var(--text-bump)); line-height: 1.6; }
 .hero-footer { position: relative; z-index: 2; margin-top: auto; padding-top: 20px; border-top: 1px solid rgb(255 255 255 / 14%); display: flex; justify-content: space-between; color: #aaa5c8; font-size: calc(9px + var(--text-bump)); letter-spacing: .3px; }
 .hero-footer b { margin-right: 4px; color: #22e7d3; font-size: calc(14px + var(--text-bump)); }
@@ -770,7 +772,6 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
 .admin-page { min-height: 100dvh; padding: 32px 20px 64px; background: var(--canvas); }
 .admin-page-inner { max-width: 1100px; margin: 0 auto; padding: 28px 30px 32px; display: flex; flex-direction: column; gap: 20px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 16px; }
 .admin-page-header p { margin: 0 0 4px; font-size: calc(8px + var(--text-bump)); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--ink) 65%, transparent); }
-.admin-page-header h1 { margin: 0; font-size: calc(18px + var(--text-bump)); }
 .admin-page-refusal { margin: 0; max-width: 60ch; font-size: calc(9px + var(--text-bump)); line-height: 1.6; }
 .admin-page-status { margin: 0; font-size: calc(9px + var(--text-bump)); }
 .admin-page-back { align-self: flex-start; min-height: 34px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--paper); font-weight: 800; text-decoration: none; }
@@ -1205,12 +1206,6 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
   transform: rotate(180deg);
 }
 
-.settings-page h1 {
-  margin: 0;
-  font-size: calc(32px + var(--text-bump));
-  letter-spacing: -.9px;
-}
-
 .settings-layout {
   width: min(100%, 1180px);
   margin: 0 auto;
@@ -1357,7 +1352,7 @@ h1 em { color: #ff4fa3; font-style: normal; text-shadow: 0 0 28px rgb(255 79 163
     border-radius: 10px;
   }
 
-  .settings-page h1 {
+  .page-heading {
     text-align: center;
     font-size: calc(28px + var(--text-bump));
   }
