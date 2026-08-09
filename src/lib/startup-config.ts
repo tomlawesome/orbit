@@ -11,7 +11,7 @@ export type StartupConfigurationCode =
   | "configuration_optional";
 
 export type StartupConfigurationIssue = {
-  field: "ORBIT_CONFIG_SCHEMA_VERSION" | "ORBIT_IMAGE" | "authentication" | "database" | "documents" | "mail" | "imap" | "push" | "processing" | "ai";
+  field: "ORBIT_CONFIG_SCHEMA_VERSION" | "authentication" | "database" | "documents" | "mail" | "imap" | "push" | "processing" | "ai";
   code: StartupConfigurationCode;
 };
 
@@ -47,9 +47,6 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   if (environment.ORBIT_CONFIG_SCHEMA_VERSION !== "1") {
     issues.push({ field: "ORBIT_CONFIG_SCHEMA_VERSION", code: "configuration_version" });
   }
-  if (!environment.ORBIT_IMAGE) {
-    issues.push({ field: "ORBIT_IMAGE", code: "configuration_core" });
-  }
   try {
     getAuthConfig(environment);
   } catch {
@@ -65,18 +62,26 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   } catch {
     issues.push({ field: "documents", code: "configuration_core" });
   }
+  const notificationEnvironment = {
+    ...environment,
+    VAPID_SUBJECT: undefined,
+    VAPID_PUBLIC_KEY: undefined,
+    VAPID_PRIVATE_KEY: undefined,
+    VAPID_PRIVATE_KEY_FILE: undefined,
+  };
   try {
-    getNotificationWorkerConfig(environment);
+    getNotificationWorkerConfig(notificationEnvironment);
   } catch {
     issues.push({ field: "mail", code: "configuration_optional" });
   }
-  try {
-    getImapIngestionConfig(environment);
-  } catch {
-    issues.push({ field: "imap", code: "configuration_optional" });
+  if (environment.IMAP_ENABLED !== "false") {
+    try {
+      getImapIngestionConfig(environment);
+    } catch {
+      issues.push({ field: "imap", code: "configuration_optional" });
+    }
   }
-  const pushKeys = ["VAPID_SUBJECT", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"];
-  if (hasAny(environment, pushKeys)) {
+  if (hasAny(environment, ["VAPID_SUBJECT"])) {
     try {
       const privateKey = readRuntimeSecret(environment, "VAPID_PRIVATE_KEY");
       if (!environment.VAPID_SUBJECT || !environment.VAPID_PUBLIC_KEY || !privateKey) {
