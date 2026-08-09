@@ -53,6 +53,7 @@ target_was_empty=0
 database_volume_seen=0
 database_volume_checked=0
 compose_project_name=""
+compose_project_name_explicit=0
 database_volume_name=""
 configuration_migration_completed=0
 declare -a created_directories=()
@@ -237,19 +238,36 @@ validate_target() {
 }
 
 derive_compose_project_name() {
-  local requested_name=""
+  local requested_name="" configured_name=""
+  if is_regular_non_symlink_file "$environment_file" &&
+    configured_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)"; then
+    [[ "$configured_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+      fail "Could not verify the configured Docker Compose project name; refusing to start Compose."
+    compose_project_name="$configured_name"
+    compose_project_name_explicit=1
+  fi
+
   if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
     requested_name="$COMPOSE_PROJECT_NAME"
+    [[ "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+    if [[ "$compose_project_name_explicit" == 1 && "$compose_project_name" != "$requested_name" ]]; then
+      fail "The configured Docker Compose project name does not match the requested project; refusing to start Compose."
+    fi
+    compose_project_name="$requested_name"
+    compose_project_name_explicit=1
+  elif [[ "$compose_project_name_explicit" == 1 ]]; then
+    return
   else
     requested_name="$(basename -- "$(pwd -P)")" ||
       fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+    requested_name="$(printf '%s' "$requested_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')" ||
+      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+    while [[ "$requested_name" == [-_]* ]]; do requested_name="${requested_name:1}"; done
+    [[ -n "$requested_name" && "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
+    compose_project_name="$requested_name"
   fi
-  requested_name="$(printf '%s' "$requested_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')" ||
-    fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-  while [[ "$requested_name" == [-_]* ]]; do requested_name="${requested_name:1}"; done
-  [[ -n "$requested_name" && "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
-    fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-  compose_project_name="$requested_name"
 }
 
 volume_belongs_to_deployment() {
@@ -257,6 +275,7 @@ volume_belongs_to_deployment() {
   local volume_labels="" volume_project="" volume_key="" extra=""
   local db_containers="" app_containers=""
   local db_id="" db_project="" db_service="" app_id="" app_project="" app_service="" app_config_hash="" app_image=""
+  local discovered_project=""
   local selected_app_config_hash=""
   local expected_config_hash=""
   local db_count=0 app_count=0
@@ -359,11 +378,15 @@ verify_database_volume_safety() {
   if volume_belongs_to_deployment "${candidates[0]}" "$old_image"; then
     database_volume_name="${candidates[0]}"
     database_volume_seen=1
-    compose_project_name="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' \
+    discovered_project="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' \
       "$database_volume_name" 2>/dev/null)" ||
       fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
-    [[ "$compose_project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+    [[ "$discovered_project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
       fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
+    if [[ "$compose_project_name_explicit" == 1 && "$compose_project_name" != "$discovered_project" ]]; then
+      fail "The configured Docker Compose project does not match the recognized database volume; refusing to start Compose."
+    fi
+    compose_project_name="$discovered_project"
     if ! is_regular_non_symlink_file "$secrets_directory/postgres-password" ||
       ! has_mode "$secrets_directory/postgres-password" 600; then
       fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
@@ -562,6 +585,7 @@ run_configuration_migration() {
     --migrate --transaction --file "$environment_file" \
     --orbit-image "$resolved_reference" \
     --applied-version "$image_version" \
+    --compose-project-name "$compose_project_name" \
     --applied-digest "$applied_digest" 2>/dev/null)" || migration_status=$?
   [[ "$migration_status" == 0 ]] ||
     fail "Configuration migration failed; restoring the previous deployment."

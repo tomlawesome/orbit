@@ -310,6 +310,11 @@ managed file state. Each successful migration records the target semantic
 version and exact image digest in the managed
 `ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST` fields; these
 must match the immutable `ORBIT_IMAGE` digest and must not be edited manually.
+A successful fresh install or recognized directory rename also persists the
+validated `COMPOSE_PROJECT_NAME`. Keep using `docker compose --env-file
+.env-orbit`, `scripts/backup.sh`, and `scripts/restore.sh` from the deployment
+directory so ordinary operator actions continue to address that same Compose
+project after reboot; do not substitute a remembered `--project-name`.
 A hard interruption can bypass cleanup: `.env-orbit` is either the original
 file or a complete atomic new file, never a partial file, and private
 `.orbit-install-staging.*` evidence may remain with owner-only permissions.
@@ -322,7 +327,8 @@ the target image metadata supplied to `scripts/configuration.sh --migrate`:
 bash scripts/configuration.sh --migrate --orbit-image \
   'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
   --applied-version v1.2.3 \
-  --applied-digest 'sha256:<64 lowercase hexadecimal characters>'
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
+  --compose-project-name orbit
 ```
 
 The image digest and applied digest must be the same; the command retains one
@@ -339,10 +345,10 @@ database migration or authentication then fails, stop Orbit and restore both
 the verified backup and the matching owner-only configuration copy:
 
 ```sh
-docker compose stop orbit-app
+docker compose --env-file .env-orbit stop orbit-app
 cp -- "$preupgrade_config" .env-orbit
 chmod 600 .env-orbit
-docker compose pull orbit-app
+docker compose --env-file .env-orbit pull orbit-app
 ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
 ```
 

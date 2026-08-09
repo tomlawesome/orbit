@@ -12,10 +12,12 @@ parsed_keys=()
 schema_present=0
 applied_version_present=0
 applied_digest_present=0
+compose_project_present=0
 schema_value=""
 orbit_image_value=""
 applied_version_value=""
 applied_digest_value=""
+compose_project_value=""
 
 fail_code() {
   printf '%s\n' "$1" >&2
@@ -30,7 +32,7 @@ usage() {
 # accepted for upgrades, but their _FILE counterparts are the preferred form.
 # The alias compatibility names are retained because the runtime getter still
 # reads them for pre-rotation installations; they are not documented defaults.
-readonly allowed_keys='APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE IMAP_ENABLED SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE IMAP_MAILBOX IMAP_TLS_SERVER_NAME IMAP_RECIPIENT_DOMAIN IMAP_TRUSTED_RECIPIENT_HEADER IMAP_POLL_SECONDS IMAP_ALIAS_CURRENT_GENERATION IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE IMAP_ALIAS_PREVIOUS_GENERATION IMAP_ALIAS_PREVIOUS_SECRET IMAP_ALIAS_PREVIOUS_SECRET_FILE IMAP_ALIAS_PREVIOUS_EXPIRES_AT IMAP_ALIAS_GENERATION IMAP_ALIAS_CURRENT_KEY IMAP_ALIAS_CURRENT_KEY_FILE IMAP_ALIAS_SECRET IMAP_ALIAS_SECRET_FILE IMAP_ALIAS_PREVIOUS_KEY IMAP_ALIAS_PREVIOUS_KEY_FILE IMAP_ALIAS_PREVIOUS_EXPIRY VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
+readonly allowed_keys='APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE IMAP_ENABLED SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE IMAP_HOST IMAP_PORT IMAP_USER IMAP_PASSWORD IMAP_PASSWORD_FILE IMAP_MAILBOX IMAP_TLS_SERVER_NAME IMAP_RECIPIENT_DOMAIN IMAP_TRUSTED_RECIPIENT_HEADER IMAP_POLL_SECONDS IMAP_ALIAS_CURRENT_GENERATION IMAP_ALIAS_CURRENT_SECRET IMAP_ALIAS_CURRENT_SECRET_FILE IMAP_ALIAS_PREVIOUS_GENERATION IMAP_ALIAS_PREVIOUS_SECRET IMAP_ALIAS_PREVIOUS_SECRET_FILE IMAP_ALIAS_PREVIOUS_EXPIRES_AT IMAP_ALIAS_GENERATION IMAP_ALIAS_CURRENT_KEY IMAP_ALIAS_CURRENT_KEY_FILE IMAP_ALIAS_SECRET IMAP_ALIAS_SECRET_FILE IMAP_ALIAS_PREVIOUS_KEY IMAP_ALIAS_PREVIOUS_KEY_FILE IMAP_ALIAS_PREVIOUS_EXPIRY VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
 
 is_allowed() {
   local candidate
@@ -86,6 +88,10 @@ is_valid_immutable_image() {
   [[ "$1" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]
 }
 
+is_valid_compose_project_name() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+}
+
 validate_provenance() {
   if [[ "$applied_version_present" != "$applied_digest_present" ]]; then
     fail_code configuration_provenance
@@ -106,8 +112,8 @@ check_file_safety() {
 parse_file() {
   local file="$1" line key value line_number=0 assignment_count=0
   local -A seen=()
-  parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0
-  schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""
+  parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0; compose_project_present=0
+  schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""; compose_project_value=""
   check_file_safety "$file"
   # A NUL cannot be represented in a dotenv assignment and must fail closed.
   cmp -s "$file" <(tr -d '\000' < "$file") || fail_code configuration_syntax
@@ -135,6 +141,9 @@ parse_file() {
       ORBIT_IMAGE) orbit_image_value="$value";;
       ORBIT_CONFIG_APPLIED_VERSION) applied_version_value="$value"; applied_version_present=1;;
       ORBIT_CONFIG_APPLIED_DIGEST) applied_digest_value="$value"; applied_digest_present=1;;
+      COMPOSE_PROJECT_NAME)
+        is_valid_compose_project_name "$value" || fail_code configuration_project
+        compose_project_value="$value"; compose_project_present=1;;
     esac
   done < "$file"
   [[ "$assignment_count" -gt 0 ]] || fail_code configuration_syntax
@@ -161,14 +170,15 @@ report_classification() {
     printf 'safely_migratable ORBIT_CONFIG_APPLIED_VERSION\n'
     printf 'safely_migratable ORBIT_CONFIG_APPLIED_DIGEST\n'
   fi
+  [[ "$compose_project_present" == 1 ]] || printf 'safely_migratable COMPOSE_PROJECT_NAME\n'
 }
 
 migrate_file() {
   local file="$1" state temp newline backup transaction="$2"
-  local target_image="$3" target_version="$4" target_digest="$5"
-  local desired_image desired_version desired_digest prior_schema prior_version prior_digest
+  local target_image="$3" target_version="$4" target_digest="$5" target_project="$6"
+  local desired_image desired_version desired_digest desired_project prior_schema prior_version prior_digest
   local line_without_cr key replaced
-  local -a managed_order=(ORBIT_IMAGE ORBIT_CONFIG_SCHEMA_VERSION ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST)
+  local -a managed_order=(ORBIT_IMAGE ORBIT_CONFIG_SCHEMA_VERSION ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME)
   local -A managed_values=() written=()
   state=0; parse_file "$file" || state=$?
   [[ "$state" == 0 || "$state" == 2 ]] || exit "$state"
@@ -186,9 +196,23 @@ migrate_file() {
     desired_image="$orbit_image_value"; desired_version="$applied_version_value"; desired_digest="$applied_digest_value"
   fi
 
+  if [[ -n "$target_project" ]]; then
+    is_valid_compose_project_name "$target_project" || fail_code configuration_project
+  fi
+  if [[ "$compose_project_present" == 1 ]]; then
+    if [[ -n "$target_project" && "$compose_project_value" != "$target_project" ]]; then
+      fail_code configuration_project_mismatch
+    fi
+    desired_project="$compose_project_value"
+  else
+    [[ -n "$target_project" ]] || fail_code configuration_project_required
+    desired_project="$target_project"
+  fi
+
   if [[ "$state" == 0 && "$schema_present" == 1 && "$applied_version_present" == 1 &&
     "$orbit_image_value" == "$desired_image" && "$applied_version_value" == "$desired_version" &&
-    "$applied_digest_value" == "$desired_digest" ]]; then
+    "$applied_digest_value" == "$desired_digest" && "$compose_project_present" == 1 &&
+    "$compose_project_value" == "$desired_project" ]]; then
     printf 'Orbit configuration: already current schema v1 version %s digest %s\n' "$desired_version" "$desired_digest"
     return 0
   fi
@@ -200,6 +224,7 @@ migrate_file() {
   managed_values[ORBIT_CONFIG_SCHEMA_VERSION]="$schema_version"
   managed_values[ORBIT_CONFIG_APPLIED_VERSION]="$desired_version"
   managed_values[ORBIT_CONFIG_APPLIED_DIGEST]="$desired_digest"
+  managed_values[COMPOSE_PROJECT_NAME]="$desired_project"
 
   if [[ "$transaction" != 1 ]]; then
     backup="${file}${rollback_suffix}"
@@ -249,6 +274,7 @@ migrate_file() {
 
 file="$environment_file_default"; action=check; transaction=0
 target_image=""; target_version=""; target_digest=""
+target_project=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) action=check; shift;;
@@ -258,6 +284,7 @@ while [[ $# -gt 0 ]]; do
     --orbit-image) [[ $# -ge 2 ]] || { usage; exit 2; }; target_image="$2"; shift 2;;
     --applied-version) [[ $# -ge 2 ]] || { usage; exit 2; }; target_version="$2"; shift 2;;
     --applied-digest) [[ $# -ge 2 ]] || { usage; exit 2; }; target_digest="$2"; shift 2;;
+    --compose-project-name) [[ $# -ge 2 ]] || { usage; exit 2; }; target_project="$2"; shift 2;;
     --file) [[ $# -ge 2 ]] || { usage; exit 2; }; file="$2"; shift 2;;
     *) usage; exit 2;;
   esac
@@ -280,5 +307,5 @@ case "$action" in
     ;;
   migrate)
     [[ "$transaction" == 1 || "$transaction" == 0 ]] || fail_code configuration_migration
-    migrate_file "$file" "$transaction" "$target_image" "$target_version" "$target_digest";;
+    migrate_file "$file" "$transaction" "$target_image" "$target_version" "$target_digest" "$target_project";;
 esac
