@@ -406,7 +406,7 @@ export async function uploadItemDocument(input: {
 
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      if (!validateSupportedDocumentStructure(validationBytes, mediaType)) {
+      if (!await validateSupportedDocumentStructure(validationBytes, mediaType)) {
         throw new AppError(
           "document_structure_invalid",
           "Choose a structurally valid PDF, JPEG, or PNG document",

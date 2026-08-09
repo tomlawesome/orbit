@@ -105,7 +105,7 @@ export async function inspectItemDocument(input: {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      const structureReason = classifyDocumentStructure(bytes, mediaType);
+      const structureReason = await classifyDocumentStructure(bytes, mediaType);
       if (structureReason !== "supported_structure") {
         log.info("document.inspection", { outcome: "rejected", reason: structureReason });
         return {

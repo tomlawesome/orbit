@@ -119,10 +119,17 @@ recoverable state.
   transport input; it does not make mailbox PDFs more trusted or manual image
   uploads less dangerous.
 - Validate the complete bounded container before reserving durable upload
-  metadata or invoking a scanner or parser. PDF active/embedded-file markers,
-  malformed JPEG marker streams, malformed PNG chunk/CRC structure, and
-  decompression-risk image dimensions are rejected. Magic bytes alone are not
-  structural validation.
+  metadata or invoking a scanner or parser. PDF structure is parsed by the
+  maintained PDF.js standards-aware parser with error recovery disabled,
+  streaming/prefetch disabled, and no document rendering or JavaScript
+  evaluation in the inspection boundary; WebAssembly is disabled and XFA is
+  inspected only for rejection. PDF active/embedded-file
+  features are classified separately from unfamiliar structure; names are
+  inspected outside comments, strings, and stream payloads so harmless text in
+  compressed page content does not become active content. Malformed JPEG
+  marker streams, malformed PNG chunk/CRC structure, and decompression-risk
+  image dimensions are rejected. Magic bytes alone are not structural
+  validation.
 - ClamAV detects known file threats. Parsers and OCR engines extract content.
   Neither function proves that extracted text, metadata, or suggested values
   are safe, accurate, or authoritative.

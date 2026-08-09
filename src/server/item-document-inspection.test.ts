@@ -72,7 +72,7 @@ describe("item document inspection", () => {
     mocks.receive.mockResolvedValue(received());
     mocks.readQuarantine.mockResolvedValue(validPdf());
     mocks.discardQuarantine.mockResolvedValue(undefined);
-    mocks.classifyStructure.mockReturnValue("supported_structure");
+    mocks.classifyStructure.mockResolvedValue("supported_structure");
     mocks.scan.mockResolvedValue({ status: "clean" });
     mocks.extract.mockResolvedValue("Provider: Safe Cover\nPolicy number: AB-12345\n2027-08-01");
     mocks.proposal.mockReturnValue({
