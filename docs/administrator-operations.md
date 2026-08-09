@@ -74,9 +74,11 @@ The lifecycle states are `starting`, `ready`, `degraded`, `retrying`,
 `recovered`, `exhausted`, `stopping`, `disabled`, `invalid`, `blocked`, and
 `completed`. Components cover application, configuration, authentication,
 database/migrations, notification and delivery, document/scanner/parser,
-mail receipt/ingestion, backup/recovery, and shutdown. Repeated identical
-transitions are deduplicated process-locally so polling and retries cannot
-flood ordinary logs.
+mail receipt/ingestion, backup/recovery, and shutdown. Unchanged steady states
+such as `ready` are suppressed for the process lifetime. Persistent failure
+and retry states are re-emitted after a fixed 60-second cooldown, and an
+unhealthy-to-healthy transition is emitted as `recovered`; initial `starting`
+to `ready` remains `ready`.
 
 Ordinary logs never contain raw exceptions, stack traces, provider responses,
 SQL, filenames, paths, hosts, URLs, recipients, tokens, user/household/

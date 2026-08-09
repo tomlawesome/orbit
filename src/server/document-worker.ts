@@ -837,9 +837,9 @@ async function rejectInterruptedDocuments(): Promise<void> {
     inArray(documents.lifecycle, ["receiving", "validating", "quarantined", "encrypting"]),
     lt(documents.updatedAt, staleBoundary),
   )).returning({ id: documents.id });
-  // A document stranded mid-pipeline is the visible symptom of a processor
-  // outage, so each one is recorded rather than only counted.
-  for (let index = 0; index < rejected.length; index += 1) {
+  // A stranded item is represented by one bounded transition; identifiers are
+  // intentionally excluded and the shared logger deduplicates repeated items.
+  if (rejected.length > 0) {
     log.warn({
       event: "document.lifecycle",
       state: "exhausted",

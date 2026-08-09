@@ -81,7 +81,7 @@ describe("authentication operational diagnostics", () => {
     for (const value of hostileValues) expect(records).not.toContain(value);
   });
 
-  it("emits one fixed provider discovery failure record per process", () => {
+  it("emits repeated provider discovery failures for shared logger deduplication", () => {
     reportAuthProviderDiscoveryFailure();
     reportAuthProviderDiscoveryFailure();
 
@@ -92,7 +92,7 @@ describe("authentication operational diagnostics", () => {
       action: "check_provider",
       impact: "sign_in_blocked",
     });
-    expect(mocks.log.error).toHaveBeenCalledTimes(1);
+    expect(mocks.log.error).toHaveBeenCalledTimes(2);
     const records = JSON.stringify(mocks.log.error.mock.calls);
     for (const value of hostileValues) expect(records).not.toContain(value);
   });
@@ -112,7 +112,7 @@ describe("authentication operational diagnostics", () => {
     for (const value of hostileValues) expect(records).not.toContain(value);
   });
 
-  it("deduplicates token exchange failures independently per reason", () => {
+  it("emits repeated token exchange failures for shared logger deduplication", () => {
     reportAuthTokenExchangeFailure("invalid_grant");
     reportAuthTokenExchangeFailure("invalid_grant");
     reportAuthTokenExchangeFailure("unreachable");
@@ -132,6 +132,6 @@ describe("authentication operational diagnostics", () => {
       action: "check_provider",
       impact: "sign_in_blocked",
     });
-    expect(mocks.log.error).toHaveBeenCalledTimes(2);
+    expect(mocks.log.error).toHaveBeenCalledTimes(4);
   });
 });
