@@ -217,7 +217,8 @@ let cachedLevel: LogLevel | undefined;
 let cachedFormat: LogFormat | undefined;
 const LOG_DEDUP_COOLDOWN_MS = 60_000;
 let loggerClock = (): number => Date.now();
-const lastTransitions = new Map<string, { state: string; emittedAt: number }>();
+const repeatableFailureStates = new Set<OperationalState>(["degraded", "retrying", "exhausted", "blocked", "invalid"]);
+const lastTransitions = new Map<string, { inputState: string; emittedAt: number }>();
 
 export function getLogLevel(environment: NodeJS.ProcessEnv = process.env): LogLevel {
   if (environment === process.env && cachedLevel) return cachedLevel;
@@ -329,22 +330,33 @@ export function formatJsonRecord(level: LogLevel, event: OperationalEvent, times
 }
 
 function transitionSource(record: OperationalRecord): string {
-  return [record.level, record.component, record.event, record.setting, record.problem_code, record.fallback].join("|");
+  return [record.component, record.event, record.setting, record.problem_code, record.fallback].join("|");
 }
 
 function transitionState(record: OperationalRecord): string {
   return [record.state, record.reason, record.action, record.impact].join("|");
 }
 
+function recoveryRecord(record: OperationalRecord, previous: { inputState: string } | undefined): OperationalRecord {
+  if (record.state !== "ready" || previous === undefined) return record;
+  const previousState = previous.inputState.split("|", 1)[0] as OperationalState;
+  if (!repeatableFailureStates.has(previousState)) return record;
+  return { ...record, state: "recovered" };
+}
+
 function emit(level: LogLevel, event: OperationalEvent): void {
   if (levelRank[level] > levelRank[getLogLevel()]) return;
-  const record = createRecord(level, event);
-  const source = transitionSource(record);
-  const state = transitionState(record);
-  const now = loggerClock();
+  const inputRecord = createRecord(level, event);
+  const source = transitionSource(inputRecord);
   const previous = lastTransitions.get(source);
-  if (previous?.state === state && now >= previous.emittedAt && now - previous.emittedAt < LOG_DEDUP_COOLDOWN_MS) return;
-  lastTransitions.set(source, { state, emittedAt: now });
+  const record = recoveryRecord(inputRecord, previous);
+  const inputState = transitionState(inputRecord);
+  const now = loggerClock();
+  if (previous?.inputState === inputState) {
+    if (!repeatableFailureStates.has(inputRecord.state)) return;
+    if (now >= previous.emittedAt && now - previous.emittedAt < LOG_DEDUP_COOLDOWN_MS) return;
+  }
+  lastTransitions.set(source, { inputState, emittedAt: now });
   const outputStream = level === "error" || level === "warn" ? process.stderr : process.stdout;
   const rendered = getLogFormat() === "json"
     ? JSON.stringify(record)

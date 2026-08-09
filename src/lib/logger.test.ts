@@ -58,6 +58,25 @@ describe("log configuration", () => {
     expect(warnings).toHaveBeenCalledTimes(1);
   });
 
+  it("does not repeat steady health or worker ready records", () => {
+    process.env.ORBIT_LOG_LEVEL = "info";
+    let now = 0;
+    setLoggerClockForTests(() => now);
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    const healthReady = { event: "application.startup" as const, state: "ready" as const, action: "none" as const };
+    const workerReady = { event: "notification.worker" as const, state: "ready" as const, action: "none" as const };
+
+    log.info(healthReady);
+    log.info(healthReady);
+    log.info(workerReady);
+    log.info(workerReady);
+    now = 120_000;
+    log.info(healthReady);
+    log.info(workerReady);
+
+    expect(output).toHaveBeenCalledTimes(2);
+  });
+
   it("re-emits a persistent transition after the bounded cooldown", () => {
     process.env.ORBIT_LOG_LEVEL = "warn";
     let now = 0;
@@ -72,6 +91,59 @@ describe("log configuration", () => {
     now = 60_000;
     log.warn(retrying);
     expect(warnings).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates a persistent failure across levels and re-emits after cooldown", () => {
+    process.env.ORBIT_LOG_LEVEL = "debug";
+    let now = 0;
+    setLoggerClockForTests(() => now);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    const failure = { ...event, state: "retrying" as const, reason: "retry_scheduled" as const, action: "retry" as const };
+
+    log.warn(failure);
+    log.info(failure);
+    expect(warnings).toHaveBeenCalledTimes(1);
+    expect(output).not.toHaveBeenCalled();
+
+    now = 60_000;
+    log.info(failure);
+    expect(output).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a fast unhealthy-to-healthy transition as recovered", () => {
+    process.env.ORBIT_LOG_LEVEL = "info";
+    let now = 0;
+    setLoggerClockForTests(() => now);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    log.warn({
+      event: "application.startup",
+      state: "degraded",
+      reason: "dependency_unavailable",
+      action: "check_database",
+      impact: "database_unavailable",
+    });
+    now = 1;
+    log.info({ event: "application.startup", state: "ready", action: "none" });
+    log.info({ event: "application.startup", state: "ready", action: "none" });
+
+    expect(warnings).toHaveBeenCalledTimes(1);
+    expect(output).toHaveBeenCalledTimes(1);
+    expect(output.mock.calls[0][0]).toContain("state=recovered");
+  });
+
+  it("keeps initial startup readiness as ready rather than recovered", () => {
+    process.env.ORBIT_LOG_LEVEL = "info";
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    log.info({ event: "application.startup", state: "starting", action: "none" });
+    log.info({ event: "application.startup", state: "ready", action: "none" });
+
+    expect(output).toHaveBeenCalledTimes(2);
+    expect(output.mock.calls[1][0]).toContain("state=ready");
+    expect(output.mock.calls[1][0]).not.toContain("state=recovered");
   });
 });
 
@@ -129,5 +201,35 @@ describe("record formatting", () => {
     expect(shouldUseColor({ NODE_ENV: "test" }, tty)).toBe(true);
     expect(shouldUseColor({ NODE_ENV: "test", NO_COLOR: "" }, tty)).toBe(false);
     expect(shouldUseColor({ NODE_ENV: "test" }, redirected)).toBe(false);
+  });
+
+  it("keeps concurrent text and JSON emissions as complete fixed-schema lines", async () => {
+    const expectedJsonKeys = ["timestamp", "level", "component", "event", "state", "reason", "action", "impact", "duration_ms", "setting", "problem_code", "fallback"];
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line) => output.push(String(line)));
+
+    for (const format of ["text", "json"] as const) {
+      output.length = 0;
+      resetLoggerForTests();
+      process.env.ORBIT_LOG_LEVEL = "info";
+      process.env.ORBIT_LOG_FORMAT = format;
+      setLoggerClockForTests(() => 0);
+
+      await Promise.all(Array.from({ length: 32 }, (_, index) => Promise.resolve().then(() => log.info({
+        event: "document.scan",
+        state: index % 2 === 0 ? "starting" : "ready",
+        action: index % 2 === 0 ? "check_scanner" : "none",
+      }))));
+
+      expect(output).toHaveLength(32);
+      for (const line of output) {
+        expect(line.split("\n")).toHaveLength(1);
+        if (format === "json") {
+          expect(Object.keys(JSON.parse(line))).toEqual(expectedJsonKeys);
+        } else {
+          expect(line).toMatch(/^\S+ (?:ERROR|WARN|INFO|DEBUG) orbit \S+ \S+ state=\S+ reason=\S+ action=\S+ impact=\S+ duration_ms=\S+ setting=\S+ problem_code=\S+ fallback=\S+$/u);
+        }
+      }
+    }
   });
 });

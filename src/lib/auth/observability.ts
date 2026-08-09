@@ -5,8 +5,6 @@ type AuthConfigurationState = "ready" | "invalid";
 type AuthProviderFailureReason = "discovery_failed" | TokenExchangeReason;
 
 let authConfigurationReported = false;
-const reportedAuthProviderFailures = new Set<AuthProviderFailureReason>();
-const reportedAuthCallbackFailures = new Set<string>();
 
 /** Emits one fixed authentication configuration record for this process. */
 export function reportAuthConfiguration(state: AuthConfigurationState): void {
@@ -27,19 +25,17 @@ export function reportAuthConfiguration(state: AuthConfigurationState): void {
   });
 }
 
-/** Emits one fixed provider-discovery failure record for this process. */
+/** Emits a fixed provider-discovery failure record; logger deduplication is shared. */
 export function reportAuthProviderDiscoveryFailure(): void {
   reportAuthProviderFailure("discovery_failed");
 }
 
-/** Emits one fixed token-exchange failure record per closed reason for this process. */
+/** Emits a fixed token-exchange failure record; logger deduplication is shared. */
 export function reportAuthTokenExchangeFailure(reason: TokenExchangeReason): void {
   reportAuthProviderFailure(reason);
 }
 
 function reportAuthProviderFailure(reason: AuthProviderFailureReason): void {
-  if (reportedAuthProviderFailures.has(reason)) return;
-  reportedAuthProviderFailures.add(reason);
   log.error({
     event: "auth.provider",
     state: "invalid",
@@ -65,8 +61,6 @@ export function reportAuthCallbackFailure(code: AuthErrorCode, tokenReason?: Tok
     : code === "provider_error"
       ? "provider_error"
       : "unexpected_failure";
-  if (reportedAuthCallbackFailures.has(reason)) return;
-  reportedAuthCallbackFailures.add(reason);
   log.error({
     event: "auth.provider",
     state: "degraded",
@@ -79,6 +73,4 @@ export function reportAuthCallbackFailure(code: AuthErrorCode, tokenReason?: Tok
 /** Resets process-local diagnostic state between isolated tests. */
 export function resetAuthObservabilityForTests(): void {
   authConfigurationReported = false;
-  reportedAuthProviderFailures.clear();
-  reportedAuthCallbackFailures.clear();
 }
