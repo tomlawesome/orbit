@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/run-with-orbit-env.mjs node_modules/next/dist/bin/next dev",
     "build": "node scripts/run-with-orbit-env.mjs node_modules/next/dist/bin/next build",
-    "postbuild": "node scripts/prepare-standalone.mjs",
+    "postbuild": "node scripts/prepare-standalone.mjs && node scripts/standalone-pdfjs-runtime-check.mjs",
     "start": "node scripts/run-with-orbit-env.mjs .next/standalone/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -14,11 +14,13 @@
     "acceptance:mailbox": "node scripts/acceptance-mailbox.mjs",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:standalone-pdfjs": "node scripts/standalone-pdfjs-runtime-check.mjs",
     "orchestration:check": "node scripts/check-orchestration-governance.mjs --state docs/examples/orchestration-state.example.json",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "1.0.3",
     "drizzle-orm": "^0.45.2",
     "imapflow": "1.5.0",
     "jose": "^6.0.0",
