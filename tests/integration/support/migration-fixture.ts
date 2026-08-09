@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -6,16 +6,12 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import baselineFixture from "../fixtures/migration-baseline.json";
+import { canonicalMigrationChecksum, readExpectedMigrationHashes as readProductionExpectedMigrationHashes } from "../../../src/db/migration-integrity";
 
 export const BASELINE_MIGRATION_TAG = baselineFixture.finalMigrationTag;
 export const EXPECTED_POSTGRES_MAJOR = baselineFixture.postgresMajor;
 const MIGRATION_SCHEMA = "drizzle";
 const MIGRATION_TABLE = "__drizzle_migrations";
-
-function canonicalMigrationChecksum(content: string | Buffer): string {
-  const canonicalContent = content.toString().replace(/\r\n/g, "\n");
-  return createHash("sha256").update(canonicalContent, "utf8").digest("hex");
-}
 
 type FixtureRow = Record<string, unknown>;
 type MigrationJournalEntry = {
@@ -352,7 +348,7 @@ export async function verifyMigrationPrefix(migrationsFolder: string): Promise<v
 }
 
 export async function readExpectedMigrationHashes(migrationsFolder: string): Promise<string[]> {
-  return (await migrationDefinitions(migrationsFolder)).map((migration) => migration.hash);
+  return (await readProductionExpectedMigrationHashes(resolve(process.cwd(), migrationsFolder))).map((migration) => migration.hash);
 }
 
 export async function createBaselineMigrationDirectory(migrationsFolder: string): Promise<TemporaryMigrationDirectory> {

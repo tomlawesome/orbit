@@ -280,6 +280,18 @@ to the public internet.
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
 
+Before an upgrade, create and verify a database backup with `scripts/backup.sh`.
+The installer validates the image's configuration contract before changing an
+existing `.env-orbit`; legacy configuration is migrated only by the installer
+transaction, which keeps its private rollback copy. A standalone legacy
+configuration can be inspected with `scripts/configuration.sh --preflight` and
+must be migrated explicitly with `scripts/configuration.sh --migrate`; that
+command retains one owner-only rollback copy beside the file. If configuration
+or database migration fails, retry after restoring the pre-upgrade database
+backup with the matching previous image. Configuration migration only adds the
+schema marker and is idempotent; it does not rewrite operator values or
+secrets.
+
 ### Optional local processing stack
 
 The standard stack includes private ClamAV scanning. Tika OCR/text extraction
