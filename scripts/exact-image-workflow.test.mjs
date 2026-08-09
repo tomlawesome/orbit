@@ -310,7 +310,9 @@ describe("exact-image publication workflow", () => {
     const stop = workflow.indexOf("- name: Stop smoke-test services");
     const registryStart = workflow.indexOf("- name: Start disposable installer registry");
     const targetPrepare = workflow.indexOf("- name: Prepare empty installer target and Git guard");
-    const installerRun = workflow.indexOf("- name: Run installer against the disposable registry");
+    const refusal = workflow.indexOf("- name: Verify empty target refuses unattended install");
+    const provision = workflow.indexOf("- name: Pre-provision unattended installer target");
+    const installerRun = workflow.indexOf("- name: Run installer against the pre-provisioned disposable registry");
     const installerVerify = workflow.indexOf("- name: Verify exact-image installer evidence");
     const cleanup = workflow.indexOf("- name: Clean up installer validation resources");
     const login = workflow.indexOf("- name: Log in to GitHub Container Registry");
@@ -318,7 +320,9 @@ describe("exact-image publication workflow", () => {
     expect(stop).toBeGreaterThanOrEqual(0);
     expect(registryStart).toBeGreaterThan(stop);
     expect(targetPrepare).toBeGreaterThan(registryStart);
-    expect(installerRun).toBeGreaterThan(targetPrepare);
+    expect(refusal).toBeGreaterThan(targetPrepare);
+    expect(provision).toBeGreaterThan(refusal);
+    expect(installerRun).toBeGreaterThan(provision);
     expect(installerVerify).toBeGreaterThan(installerRun);
     expect(cleanup).toBeGreaterThan(installerVerify);
     expect(login).toBeGreaterThan(cleanup);
@@ -346,7 +350,46 @@ describe("exact-image publication workflow", () => {
     // Image mirroring: ${IMAGE_NAME} in local registry, ORBIT_REPOSITORY env var.
     expect(registryStep).toContain("127.0.0.1:5000/${IMAGE_NAME}");
 
-    // Installer input validation: stdin from /dev/null, TTY assertion, Git guard.
+    // Empty non-TTY input must fail closed without starting Compose, mutate no
+    // Git state, and leave the target empty for the documented bootstrap path.
+    const refusalStep = workflow.slice(refusal, provision);
+    expect(refusalStep).toContain('refusal_output="${RUNNER_TEMP}/orbit-installer-refusal-');
+    expect(refusalStep).toContain("exec < /dev/null");
+    expect(refusalStep).toContain("[[ ! -t 0 ]]");
+    expect(refusalStep).toContain("installer_status=$?");
+    expect(refusalStep).toContain('[[ "${installer_status}" -ne 0 ]]');
+    expect(refusalStep).toContain(
+      "Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.",
+    );
+    expect(refusalStep).toContain(
+      "Orbit installer: Required configuration fields require attention; refusing to start Compose.",
+    );
+    expect(refusalStep).toContain("docker inspect orbit");
+    expect(refusalStep).toContain('[[ ! -e "${GIT_MARKER}" ]]');
+    expect(refusalStep).toContain('[[ "${#entries[@]}" -eq 0 ]]');
+
+    // The unattended bootstrap uses only the documented example plus fixed
+    // non-secret inputs and an owner-only generated secret file.
+    const provisionStep = workflow.slice(provision, installerRun);
+    expect(provisionStep).toContain('cp -- "${GITHUB_WORKSPACE}/.env-orbit.example" "${env_file}"');
+    expect(provisionStep).toContain("ORBIT_CONFIG_SCHEMA_VERSION=1");
+    expect(provisionStep).toContain("APP_URL=https://orbit.install-test.invalid");
+    expect(provisionStep).toContain("OIDC_ISSUER=https://accounts.google.com");
+    expect(provisionStep).toContain("OIDC_CLIENT_ID=orbit-install-test-client");
+    expect(provisionStep).toContain("OIDC_CLIENT_SECRET=|");
+    expect(provisionStep).toContain("OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret");
+    expect(provisionStep).toContain("OIDC_CALLBACK_URL=https://orbit.install-test.invalid/api/auth/callback");
+    expect(provisionStep).toContain('mkdir -- "${secrets_directory}"');
+    expect(provisionStep).toContain('chmod 700 "${secrets_directory}"');
+    expect(provisionStep).toContain('openssl rand -hex 32 > "${secrets_directory}/oidc-client-secret"');
+    expect(provisionStep).toContain('chmod 600 "${secrets_directory}/oidc-client-secret"');
+    expect(provisionStep).toContain("stat -c '%a'");
+    expect(provisionStep).toContain('[[ "${#entries[@]}" -eq 2 ]]');
+    expect(provisionStep).toContain("for marker in .git Dockerfile src package.json package-lock.json pnpm-lock.yaml yarn.lock");
+    expect(provisionStep).not.toContain("OIDC_CLIENT_SECRET=orbit-");
+
+    // Successful installer input validation: stdin from /dev/null, TTY
+    // assertion, and the same Git guard used by the refusal path.
     const installerStep = workflow.slice(installerRun, installerVerify);
     expect(installerStep).toContain("ORBIT_REGISTRY: 127.0.0.1:5000");
     expect(installerStep).toContain("ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}");
