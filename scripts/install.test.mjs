@@ -778,15 +778,19 @@ describe("install.sh", () => {
     const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
 
     expect(result.status).toBe(0);
-    expect(statSync(environmentPath).mode & 0o777).toBe(0o600);
-    expect(readFileSync(environmentPath, "utf8") === expected).toBe(true);
+    const migratedEnvironment = snapshotPath(environmentPath);
+    expect(migratedEnvironment?.type).toBe("file");
+    expect(migratedEnvironment?.mode & 0o777).toBe(0o600);
+    expect(migratedEnvironment?.content === expected).toBe(true);
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
 
     const rerun = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
 
     expect(rerun.status).toBe(0);
-    expect(readFileSync(environmentPath, "utf8") === expected).toBe(true);
+    const rerunEnvironment = snapshotPath(environmentPath);
+    expect(rerunEnvironment?.type).toBe("file");
+    expect(rerunEnvironment?.content === expected).toBe(true);
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
