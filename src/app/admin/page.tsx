@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AdminManager } from "@/components/admin-manager";
+import { usePersistedThemePreference } from "@/components/appearance-preference";
 import { useWorkspace } from "@/lib/preview-workspace";
 
 /**
@@ -14,10 +15,17 @@ import { useWorkspace } from "@/lib/preview-workspace";
  */
 export default function AdminPage() {
   const { session, syncStatus, syncMessage } = useWorkspace();
+  const themePreference = usePersistedThemePreference(session?.user);
+  const appearanceAttributes = {
+    "data-theme": themePreference.colourway,
+    "data-mode": themePreference.mode,
+    "data-text-size": themePreference.textSize,
+    "data-urgency-palette": themePreference.urgencyPalette,
+  };
 
   if (!session) {
     return (
-      <main className="admin-page">
+      <main className="admin-page" {...appearanceAttributes}>
         <div className="admin-page-inner">
           <p className="admin-page-status" role="status">
             {syncStatus === "error" ? syncMessage ?? "Orbit could not confirm your session." : "Checking your session…"}
@@ -30,11 +38,11 @@ export default function AdminPage() {
 
   if (!session.user.isInstanceAdmin) {
     return (
-      <main className="admin-page">
+      <main className="admin-page" {...appearanceAttributes}>
         <div className="admin-page-inner">
           <header className="admin-page-header">
             <p>Administration</p>
-            <h1>You do not have administrator privileges</h1>
+            <h1 className="page-heading">You do not have administrator privileges</h1>
           </header>
           <p className="admin-page-refusal">
             Administration is limited to instance administrators. Your household
@@ -47,7 +55,7 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="admin-page">
+    <main className="admin-page" {...appearanceAttributes}>
       <div className="admin-page-inner">
         {/* This heading must not contain, or be contained by, any heading
             rendered inside AdminManager. Playwright matches accessible names by
@@ -55,7 +63,7 @@ export default function AdminPage() {
             assertion ambiguous. Guarded by admin-page-headings.test.mjs. */}
         <header className="admin-page-header">
           <p>Administration</p>
-          <h1>Manage this Orbit instance</h1>
+          <h1 className="page-heading">Manage this Orbit instance</h1>
         </header>
         <AdminManager session={session} />
         <Link className="admin-page-back" href="/">Return to Orbit</Link>
