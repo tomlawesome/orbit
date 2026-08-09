@@ -238,9 +238,12 @@ describe("strict startup ordering", () => {
 
     await expect(registerNode()).rejects.toThrow("migration_integrity");
     expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
-    expect(mocks.log.error).toHaveBeenCalledWith("startup.migration", {
-      state: "invalid",
-      code: "migration_integrity",
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "migration_integrity",
+      action: "check_migrations",
+      impact: "migration_blocked",
     });
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("password authentication");
   });
