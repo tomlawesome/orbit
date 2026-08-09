@@ -72,7 +72,16 @@ const fakeDockerScript = [
   "  run)",
   "    args=(\"$@\")",
   '    [[ "${args[${#args[@]} - 2]:-}" == "-e" ]] || exit 24',
-  '    payload="$(cat)"; if printf "%s" "$payload" | node --input-type=commonjs -e "${args[${#args[@]} - 1]}"; then parser_status=0; else parser_status=$?; fi; exit "$parser_status"',
+  "    interactive=0",
+  '    for argument in "${args[@]}"; do',
+  '      if [[ "$argument" == "--interactive" || "$argument" == "-i" ]]; then interactive=1; fi',
+  "    done",
+  '    if [[ "${FAKE_REQUIRE_INTERACTIVE:-0}" == "1" && "$interactive" != "1" ]]; then',
+  '      payload=""',
+  "    else",
+  '      payload="$(cat)"',
+  "    fi",
+  '    if printf "%s" "$payload" | node --input-type=commonjs -e "${args[${#args[@]} - 1]}"; then parser_status=0; else parser_status=$?; fi; exit "$parser_status"',
   "    ;;",
   "  image)",
   '    args="$*"',
@@ -528,6 +537,17 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("keeps OIDC discovery input attached to the isolated parser container", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, { FAKE_REQUIRE_INTERACTIVE: "1" });
+
+    expect(result.status).toBe(0);
+    const parserCall = result.calls.split("\n").find((line) => line.startsWith("docker run"));
+    expect(parserCall).toContain("--interactive");
+    expect(result.calls).toContain("curl oidc-discovery");
   });
 
   it("collects guided core configuration and the OIDC secret from a controlling terminal", () => {
