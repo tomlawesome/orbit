@@ -414,6 +414,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
 
       await trigger.click();
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(menu).toBeHidden();
       await expect(trigger).toHaveAttribute("aria-expanded", "false");
