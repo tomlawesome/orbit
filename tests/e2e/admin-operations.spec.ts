@@ -24,7 +24,7 @@ async function readDurableWorkspace(page: Page): Promise<{ households: Synthetic
 
 async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold | null> {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
-  const desktopSettings = page.getByRole("button", { name: "Open personalisation settings" });
+  const desktopSettings = page.getByRole("button", { name: "Open account menu" });
   const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
   await expect(page.locator(".sync-state")).toHaveText("Synced", { timeout: 15_000 });
   await expect.poll(async () => {
