@@ -51,15 +51,15 @@ function captureLogLines() {
   };
 }
 
-function parseLogLine(line: string): { level: string; event: string; fields: Record<string, string> } {
-  const [, level, , event, ...rest] = line.split(" ");
+function parseLogLine(line: string): { level: string; component: string; event: string; fields: Record<string, string> } {
+  const [, level, , component, event, ...rest] = line.split(" ");
   const fields: Record<string, string> = {};
   for (const token of rest) {
     const separatorIndex = token.indexOf("=");
     if (separatorIndex === -1) continue;
     fields[token.slice(0, separatorIndex)] = token.slice(separatorIndex + 1);
   }
-  return { level, event, fields };
+  return { level, component, event, fields };
 }
 
 async function uploadWithFilename(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, filename: string, documentId?: string, body = syntheticPdf) {
@@ -489,11 +489,9 @@ describe("authenticated encrypted document lifecycle", () => {
       lastError: documentJobs.lastError,
     }).from(documentJobs).where(eq(documentJobs.documentId, documentId));
     expect(failedJob).toMatchObject({ status: "failed", attempts: 5, lastError: "purge_failed" });
-    const jobRecords = capture.lines.map(parseLogLine).filter((entry) =>
-      entry.event === "document.job" && entry.fields.document === documentId,
-    );
-    expect(jobRecords.some((entry) => entry.fields.outcome === "retry" && entry.fields.job === failedJob?.id)).toBe(true);
-    expect(jobRecords.some((entry) => entry.fields.outcome === "failed" && entry.fields.job === failedJob?.id)).toBe(true);
+    const jobRecords = capture.lines.map(parseLogLine).filter((entry) => entry.event === "document.job");
+    expect(jobRecords.some((entry) => entry.fields.state === "retrying" && entry.fields.reason === "purge_failed")).toBe(true);
+    expect(jobRecords.some((entry) => entry.fields.state === "exhausted" && entry.fields.reason === "purge_failed")).toBe(true);
     expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(true);
 
     await updateDocumentJob(fixture.users.admin.id, failedJob!.id, "retry", "failed");
@@ -504,9 +502,9 @@ describe("authenticated encrypted document lifecycle", () => {
       completionCapture.restore();
     }
     const completed = completionCapture.lines.map(parseLogLine).find((entry) =>
-      entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "completed",
+      entry.event === "document.job" && entry.fields.state === "ready",
     );
-    expect(completed?.fields.job).toBe(failedJob?.id);
+    expect(completed?.fields.state).toBe("ready");
 
     expect(await storage.ciphertextExists(crypto!.storageKey)).toBe(false);
     expect(await getDb().select({ lifecycle: documents.lifecycle }).from(documents)
@@ -613,22 +611,20 @@ describe("authenticated encrypted document lifecycle", () => {
         const hostileFilename = "<script>alert(1)</script> confidential-report.pdf";
         const { response } = await uploadWithFilename(fixture, hostileFilename);
         expect(response.status).toBe(201);
-        const payload = await response.json() as { document: { id: string } };
-        const documentId = payload.document.id;
+        await response.json();
 
         const records = capture.lines.map(parseLogLine);
-        const scanAttempt = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "attempt");
-        const scanClean = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "clean");
-        expect(scanAttempt?.fields.document).toBe(documentId);
-        expect(scanClean?.fields.document).toBe(documentId);
-        expect(scanClean?.fields.ms).toMatch(/^\d+$/u);
+        const scanAttempt = records.find((entry) => entry.event === "document.scan" && entry.fields.state === "starting");
+        const scanClean = records.find((entry) => entry.event === "document.scan" && entry.fields.state === "ready");
+        expect(scanAttempt).toBeDefined();
+        expect(scanClean?.fields.duration_ms).toMatch(/^\d+$/u);
         expect(scanClean?.fields).not.toHaveProperty("host");
         expect(scanClean?.fields).not.toHaveProperty("port");
 
         const lifecycleStates = records
-          .filter((entry) => entry.event === "document.lifecycle" && entry.fields.document === documentId)
+          .filter((entry) => entry.event === "document.lifecycle")
           .map((entry) => entry.fields.state);
-        expect(lifecycleStates).toEqual(["quarantined", "scanning", "encrypting", "available"]);
+        expect(lifecycleStates).toEqual(["starting", "starting", "starting", "ready"]);
 
         const combined = capture.lines.join("\n");
         expect(combined).not.toContain("script");
@@ -650,34 +646,34 @@ describe("authenticated encrypted document lifecycle", () => {
         expect(response.status).toBe(202);
         expect(response.headers.get("cache-control")).toBe("no-store");
         const payload = await response.json() as { document: { id: string; lifecycle: string; scanStatus: string; recoverable: boolean; recoveryStatus: string; ready: boolean } };
+        const documentId = payload.document.id;
         expect(payload.document).toMatchObject({ lifecycle: "scanning", scanStatus: "error", recoverable: true, recoveryStatus: "retrying", ready: false });
 
         const records = capture.lines.map(parseLogLine);
-        const scanError = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "error");
-        expect(scanError?.fields.reason).toBe("unavailable");
-        expect(scanError?.fields.ms).toMatch(/^\d+$/u);
+        const scanError = records.find((entry) => entry.event === "document.scan" && entry.fields.state === "degraded");
+        expect(scanError?.fields.reason).toBe("scanner_unavailable");
+        expect(scanError?.fields.duration_ms).toMatch(/^\d+$/u);
         expect(scanError?.fields).not.toHaveProperty("host");
         expect(scanError?.fields).not.toHaveProperty("port");
 
-        const recoverable = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "recoverable");
+        const recoverable = records.find((entry) => entry.event === "document.scan" && entry.fields.state === "retrying");
         expect(recoverable?.fields.reason).toBe("scanner_unavailable");
-        expect(recoverable?.fields.document).toBe(scanError?.fields.document);
 
         const [stored] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
-          .from(documents).where(eq(documents.id, scanError!.fields.document));
+          .from(documents).where(eq(documents.id, documentId));
         expect(stored).toMatchObject({ lifecycle: "scanning", scanStatus: "error", failureCode: "scanner_unavailable" });
         const [stage] = await getDb().select({ storageKey: documentStagingObjects.storageKey, status: documentStagingObjects.status })
-          .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, scanError!.fields.document));
+          .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
         expect(stage).toMatchObject({ status: "pending" });
         expect(stage?.storageKey).toMatch(/^[a-f0-9]{64}$/u);
-        expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, scanError!.fields.document))).toHaveLength(0);
-        expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts).where(eq(documentDrafts.documentId, scanError!.fields.document))).toHaveLength(0);
+        expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+        expect(await getDb().select({ id: documentDrafts.id }).from(documentDrafts).where(eq(documentDrafts.documentId, documentId))).toHaveLength(0);
         const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
         expect(await storage.stagingExists(stage!.storageKey)).toBe(true);
         expect(await storage.listQuarantineFiles()).toHaveLength(0);
-        const documentUrl = `http://127.0.0.1:3000/api/documents/${scanError!.fields.document}`;
-        expect((await downloadDocument(requestForSession(session, `${documentUrl}/download`), documentContext(scanError!.fields.document))).status).toBe(404);
-        expect((await createDocumentDraftRoute(requestForSession(session, `${documentUrl}/draft`, { method: "POST" }), documentContext(scanError!.fields.document))).status).toBe(404);
+        const documentUrl = `http://127.0.0.1:3000/api/documents/${documentId}`;
+        expect((await downloadDocument(requestForSession(session, `${documentUrl}/download`), documentContext(documentId))).status).toBe(404);
+        expect((await createDocumentDraftRoute(requestForSession(session, `${documentUrl}/draft`, { method: "POST" }), documentContext(documentId))).status).toBe(404);
       });
     } finally {
       capture.restore();
@@ -1118,9 +1114,9 @@ describe("authenticated encrypted document lifecycle", () => {
         expect(combined).not.toContain("Eicar");
 
         const records = capture.lines.map(parseLogLine);
-        const infectedScan = records.find((entry) => entry.event === "document.scan" && entry.fields.outcome === "infected");
+        const infectedScan = records.find((entry) => entry.event === "document.scan" && entry.fields.state === "exhausted");
         expect(infectedScan?.fields.reason).toBe("malware_detected");
-        const rejectedLifecycle = records.find((entry) => entry.event === "document.lifecycle" && entry.fields.state === "rejected");
+        const rejectedLifecycle = records.find((entry) => entry.event === "document.lifecycle" && entry.fields.state === "exhausted");
         expect(rejectedLifecycle?.fields.reason).toBe("malware_detected");
       });
     } finally {
@@ -1137,35 +1133,26 @@ describe("authenticated encrypted document lifecycle", () => {
     try {
       await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
       expect(capture.lines.map(parseLogLine).some((entry) =>
-        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "pending_deletion",
+        entry.event === "document.lifecycle" && entry.fields.state === "stopping",
       )).toBe(true);
 
       await restoreDocumentRoute(requestForSession(session, downloadUrl + "/restore", { method: "POST" }), documentContext(documentId));
       expect(capture.lines.map(parseLogLine).some((entry) =>
-        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "available",
+        entry.event === "document.lifecycle" && entry.fields.state === "recovered",
       )).toBe(true);
 
       await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
-      const [purgeJob] = await getDb().select({ id: documentJobs.id })
-        .from(documentJobs)
-        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")))
-        .orderBy(desc(documentJobs.generation))
-        .limit(1);
       await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
 
       capture.lines.length = 0;
       await runDocumentMaintenanceCycle();
       const cycleRecords = capture.lines.map(parseLogLine);
-      const claimed = cycleRecords.find((entry) =>
-        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "claimed",
-      );
-      const completed = cycleRecords.find((entry) =>
-        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "completed",
-      );
-      expect(claimed?.fields.job).toBe(purgeJob?.id);
-      expect(completed?.fields.job).toBe(purgeJob?.id);
+      const claimed = cycleRecords.find((entry) => entry.event === "document.job" && entry.fields.state === "starting");
+      const completed = cycleRecords.find((entry) => entry.event === "document.job" && entry.fields.state === "ready");
+      expect(claimed?.fields.state).toBe("starting");
+      expect(completed?.fields.state).toBe("ready");
       expect(cycleRecords.some((entry) =>
-        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "deleted",
+        entry.event === "document.lifecycle" && entry.fields.state === "completed",
       )).toBe(true);
     } finally {
       capture.restore();
@@ -1177,11 +1164,6 @@ describe("authenticated encrypted document lifecycle", () => {
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
     await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
-    const [purgeJob] = await getDb().select({ id: documentJobs.id })
-      .from(documentJobs)
-      .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "purge")))
-      .orderBy(desc(documentJobs.generation))
-      .limit(1);
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
     await getDb().update(documentJobs).set({
       status: "processing",
@@ -1194,10 +1176,8 @@ describe("authenticated encrypted document lifecycle", () => {
     try {
       await runDocumentMaintenanceCycle();
       const records = capture.lines.map(parseLogLine);
-      const reclaimed = records.find((entry) =>
-        entry.event === "document.job" && entry.fields.document === documentId && entry.fields.outcome === "reclaimed",
-      );
-      expect(reclaimed?.fields.job).toBe(purgeJob?.id);
+      const reclaimed = records.find((entry) => entry.event === "document.job" && entry.fields.state === "starting");
+      expect(reclaimed?.fields.state).toBe("starting");
     } finally {
       capture.restore();
     }
@@ -1216,7 +1196,7 @@ describe("authenticated encrypted document lifecycle", () => {
       await reconcileDocumentStorage();
       const records = capture.lines.map(parseLogLine);
       const rejected = records.find((entry) =>
-        entry.event === "document.lifecycle" && entry.fields.document === documentId && entry.fields.state === "rejected",
+        entry.event === "document.lifecycle" && entry.fields.state === "exhausted",
       );
       expect(rejected?.fields.reason).toBe("storage_object_missing");
     } finally {

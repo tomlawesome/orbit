@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { AuthError } from "@/lib/auth/errors";
+import { log } from "@/lib/logger";
 
 export class AppError extends Error {
   constructor(
@@ -27,7 +28,13 @@ export function appErrorResponse(error: unknown): NextResponse {
       { status: 422, headers: { "Cache-Control": "no-store" } },
     );
   }
-  console.error(error);
+  log.error({
+    event: "application.error",
+    state: "degraded",
+    reason: "unexpected_failure",
+    action: "inspect_admin_diagnostics",
+    impact: "application_degraded",
+  });
   return NextResponse.json(
     { error: { code: "internal_error", message: "Orbit could not complete the request" } },
     { status: 500, headers: { "Cache-Control": "no-store" } },
