@@ -57,11 +57,17 @@ const fakeDockerScript = [
   "  printf 'docker %s\\n' \"$*\" >> \"$FAKE_CALL_LOG\"",
   "fi",
   'case "$1" in',
+  "  volume)",
+  '    if [[ "${2:-}" == "ls" && "${FAKE_DOCKER_EXISTING_DB_VOLUME:-}" == "1" ]]; then',
+  "      printf 'orbit_orbit-db-data\\n'",
+  "    fi",
+  "    exit 0",
+  "    ;;",
   "  compose)",
   '    if [[ "${FAKE_COMPOSE_CONFIG_FAIL:-}" == "1" && " $* " == *" config "* ]]; then',
   "      exit 23",
   "    fi",
-  '    if [[ "${FAKE_COMPOSE_FAIL:-}" == "1" && "${2:-}" != "version" && " $* " != *" config "* ]]; then',
+  '    if [[ "${FAKE_COMPOSE_FAIL:-}" == "1" && " $* " != *" version "* && " $* " != *" config "* ]]; then',
   "      exit 23",
   "    fi",
   "    exit 0",
@@ -107,6 +113,10 @@ const fakeDockerScript = [
   "          exit 0",
   "        fi",
   "        printf '%s\\n' \"${FAKE_DOCKER_REVISION:?}\"",
+  "        exit 0",
+  "        ;;",
+  "      *image.version*)",
+  '        printf "%s\\n" "${FAKE_DOCKER_VERSION:-v1.2.0}"',
   "        exit 0",
   "        ;;",
   "    esac",
@@ -254,6 +264,10 @@ const fakeCurlScript = [
   "  if [[ ! -e .orbit-secrets/oidc-client-secret ]]; then if [[ \"${FAKE_CONFIGURE_READY:-}\" == \"1\" ]]; then printf 'fake-oidc-secret' > .orbit-secrets/oidc-client-secret; else : > .orbit-secrets/oidc-client-secret; fi; fi",
   "  chmod 600 .orbit-secrets/oidc-client-secret",
   "fi",
+  'if [[ "${FAKE_CONFIGURE_MUTATE_POSTGRES_PASSWORD:-}" == "1" ]]; then',
+  "  printf 'mutated-postgres-password' > .orbit-secrets/postgres-password",
+  "  chmod 600 .orbit-secrets/postgres-password",
+  "fi",
   '[[ ! -e .env-orbit ]] || chmod 600 .env-orbit',
   'if [[ "${FAKE_CONFIGURE_FAIL:-}" == "1" ]]; then',
   '  [[ ! -f .env-orbit ]] || printf "CONFIGURE_MUTATION=1\\n" >> .env-orbit',
@@ -277,7 +291,7 @@ const fakeCurlScript = [
   "      cat <<'SCRIPT' > \"$output\"",
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
-  "exit 0",
+  "printf 'Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
   "SCRIPT",
   "    fi",
   "    ;;",
@@ -376,6 +390,8 @@ function makeFullExistingDeployment(targetDir) {
   chmodSync(join(targetDir, ".orbit-secrets"), 0o700);
   writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "existing-oidc-secret");
   chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+  writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "existing-postgres-password");
+  chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
   writeFileSync(join(targetDir, ".orbit-secrets", "sentinel"), "KEEP-SECRET\n");
   chmodSync(join(targetDir, ".orbit-secrets", "sentinel"), 0o640);
 }
@@ -483,6 +499,7 @@ function runInstall(targetDir, envOverrides = {}) {
       FAKE_IMAGE_REPOSITORY: imageRepository,
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
+      FAKE_DOCKER_VERSION: "v1.2.0",
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
       FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
@@ -511,6 +528,7 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
       FAKE_IMAGE_REPOSITORY: imageRepository,
       FAKE_DOCKER_DIGEST: digest,
       FAKE_DOCKER_REVISION: revision,
+      FAKE_DOCKER_VERSION: "v1.2.0",
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
       FAKE_CONFIGURE_READY: "0",
@@ -788,20 +806,105 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
+  it("refuses a new target when an existing Orbit database volume is present", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_EXISTING_DB_VOLUME: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("existing Orbit database volume");
+    expect(result.calls).toContain("docker volume ls");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(result.calls).not.toContain("config --quiet");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a pre-provisioned target when an existing Orbit database volume is present", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_EXISTING_DB_VOLUME: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("existing Orbit database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a recognised upgrade without the preserved database password file", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    unlinkSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, { FAKE_DOCKER_EXISTING_DB_VOLUME: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("preserved POSTGRES_PASSWORD_FILE");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("preserves the prior database password byte-for-byte on a recognized upgrade", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const passwordPath = join(targetDir, ".orbit-secrets", "postgres-password");
+    const beforePassword = readFileSync(passwordPath);
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_EXISTING_DB_VOLUME: "1",
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(passwordPath)).toEqual(beforePassword);
+    expect(result.stdout).not.toContain("existing-postgres-password");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("rolls back a recognized upgrade if configuration changes the prior database password", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const before = managedSnapshot(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_EXISTING_DB_VOLUME: "1",
+      FAKE_USE_REAL_CONFIGURATION: "1",
+      FAKE_CONFIGURE_MUTATE_POSTGRES_PASSWORD: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(managedSnapshot(targetDir)).toEqual(before);
+    expect(result.stdout).not.toContain("existing-postgres-password");
+    expect(result.stderr).not.toContain("mutated-postgres-password");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
   it("migrates a legacy configuration through the installer and remains idempotent", () => {
     const targetDir = makeTarget();
     makeLegacyExistingDeployment(targetDir);
     const environmentPath = join(targetDir, ".env-orbit");
-    const before = readFileSync(environmentPath, "utf8");
-    const expected = `${before}ORBIT_CONFIG_SCHEMA_VERSION=1\n`;
-
     const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
 
     expect(result.status).toBe(0);
     const migratedEnvironment = snapshotPath(environmentPath);
     expect(migratedEnvironment?.type).toBe("file");
     expect(migratedEnvironment?.mode & 0o777).toBe(0o600);
-    expect(migratedEnvironment?.content === expected).toBe(true);
+    expect(migratedEnvironment?.content).toContain("ORBIT_CONFIG_SCHEMA_VERSION=1\n");
+    expect(migratedEnvironment?.content).toContain("ORBIT_CONFIG_APPLIED_VERSION=v1.2.0\n");
+    expect(migratedEnvironment?.content).toContain(`ORBIT_CONFIG_APPLIED_DIGEST=sha256:${"a".repeat(64)}\n`);
+    expect(result.stdout).toContain(
+      `Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:${"a".repeat(64)}`,
+    );
+    const expected = migratedEnvironment?.content;
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
 
@@ -810,7 +913,10 @@ describe("install.sh", () => {
     expect(rerun.status).toBe(0);
     const rerunEnvironment = snapshotPath(environmentPath);
     expect(rerunEnvironment?.type).toBe("file");
-    expect(rerunEnvironment?.content === expected).toBe(true);
+    expect(rerunEnvironment?.content).toBe(expected);
+    expect(rerun.stdout).toContain(
+      `Orbit configuration: already current schema v1 version v1.2.0 digest sha256:${"a".repeat(64)}`,
+    );
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });

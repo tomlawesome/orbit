@@ -283,14 +283,30 @@ notification scheduler, and then serves the full-stack application.
 Before an upgrade, create and verify a database backup with `scripts/backup.sh`.
 The installer validates the image's configuration contract before changing an
 existing `.env-orbit`; legacy configuration is migrated only by the installer
-transaction, which keeps its private rollback copy. A standalone legacy
-configuration can be inspected with `scripts/configuration.sh --preflight` and
-must be migrated explicitly with `scripts/configuration.sh --migrate`; that
-command retains one owner-only rollback copy beside the file. If configuration
-or database migration fails, retry after restoring the pre-upgrade database
-backup with the matching previous image. Configuration migration only adds the
-schema marker and is idempotent; it does not rewrite operator values or
-secrets.
+transaction, which keeps its private rollback copy. Each successful migration
+records the target semantic version and exact image digest in the managed
+`ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST` fields; these
+must match the immutable `ORBIT_IMAGE` digest and must not be edited manually.
+A standalone legacy configuration can be inspected with
+`scripts/configuration.sh --preflight` and must be migrated explicitly with
+the target image metadata supplied to `scripts/configuration.sh --migrate`:
+
+```sh
+bash scripts/configuration.sh --migrate --orbit-image \
+  'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
+  --applied-version v1.2.3 \
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>'
+```
+
+The image digest and applied digest must be the same; the command retains one
+owner-only rollback copy beside the file. If an
+existing Orbit PostgreSQL volume is detected, a new or pre-provisioned target
+is refused: rerun from the original deployment directory so the existing
+`.orbit-secrets/postgres-password` is preserved. Orbit never deletes or resets
+that volume automatically. If configuration or database migration fails, retry
+after restoring the pre-upgrade database backup with the matching previous
+image. Configuration migration is atomic and idempotent; it does not rewrite
+operator values or secrets.
 
 ### Optional local processing stack
 
