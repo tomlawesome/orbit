@@ -338,6 +338,7 @@ verify_oidc_discovery() {
     printf '%s\n' "$issuer"
     cat -- "$discovery_file"
   } | docker run --rm \
+    --interactive \
     --entrypoint node \
     --network none \
     --read-only \
