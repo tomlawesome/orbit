@@ -157,6 +157,7 @@ async function openSettings(page: Page) {
   const desktopTrigger = page.locator("button.topbar-profile:visible");
   if (await desktopTrigger.count()) {
     await desktopTrigger.click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   } else {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name: "Personalise", exact: true }).click();
@@ -346,7 +347,7 @@ async function expectCoreSurfacesFit(
     await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
     await expect(page.locator(".sidebar")).toHaveCSS("visibility", "hidden");
   } else {
-    await expect(page.getByRole("button", { name: "Open personalisation settings" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Open account menu" })).toBeFocused();
   }
 
   const editor = await openItemEditor(page);
@@ -370,6 +371,66 @@ async function expectCoreSurfacesFit(
 }
 
 test.describe("authenticated accessibility and responsive acceptance", () => {
+  test("provides an accessible desktop account menu with explicit sign-out", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.skip(isMobile, "The account control is desktop-only; mobile navigation remains unchanged.");
+
+    await signIn(page);
+    const trigger = page.getByRole("button", { name: "Open account menu" });
+    const menu = page.getByRole("menu", { name: "Account menu" });
+    await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toHaveCount(0);
+
+    await trigger.click();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem")).toHaveCount(3);
+    await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+    await expectNoAxeViolations(page, ".account-menu-popup");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Administration", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await page.locator("header.topbar .search").click();
+    await expect(menu).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
+
+    await trigger.click();
+    await page.keyboard.press("Tab");
+    await expect(menu).toBeHidden();
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: "Add item", exact: true })).toBeFocused();
+
+    await trigger.click();
+    await menu.getByRole("menuitem", { name: "Administration", exact: true }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
+
+    await page.goto("/");
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
+    await trigger.click();
+    await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
+  });
+
   test("has no automated WCAG A or AA violations across core authenticated surfaces", async ({ page }) => {
     test.setTimeout(90_000);
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
@@ -418,9 +479,10 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.skip(isMobile, "Desktop provides the representative physical-keyboard focus journey.");
     await withFixture(page, async (fixture) => {
-      const settingsTrigger = page.getByRole("button", { name: "Open personalisation settings" });
+      const settingsTrigger = page.getByRole("button", { name: "Open account menu" });
       await settingsTrigger.focus();
       await settingsTrigger.click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
       await expect(page).toHaveURL(/\/settings$/);
       const settingsHeading = page.getByRole("heading", { name: "Settings" });
       await expect(settingsHeading).toBeFocused();
