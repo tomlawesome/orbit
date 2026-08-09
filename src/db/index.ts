@@ -8,6 +8,11 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
 let client: ReturnType<typeof postgres> | undefined;
 let database: Database | undefined;
 
+export function getDatabaseClient(): ReturnType<typeof postgres> {
+  if (!client) client = postgres(databaseConnectionString(), { max: 10, prepare: false });
+  return client;
+}
+
 export function databaseConnectionString(environment: NodeJS.ProcessEnv = process.env): string {
   const configuredUrl = readRuntimeSecret(environment, "DATABASE_URL");
   if (configuredUrl) return configuredUrl;
@@ -25,8 +30,7 @@ export function databaseConnectionString(environment: NodeJS.ProcessEnv = proces
 /** Creates the database connection only when a request actually needs it. */
 export function getDb(): Database {
   if (database) return database;
-  client = postgres(databaseConnectionString(), { max: 10, prepare: false });
-  database = drizzle(client, { schema });
+  database = drizzle(getDatabaseClient(), { schema });
   return database;
 }
 
