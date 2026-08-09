@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/db", () => mocks);
 
+import { getConfigurationProblems, resetConfigurationProblemsForTests } from "./configuration-problems";
 import { StartupConfigurationError, validateStartupConfiguration } from "./startup-config";
 
 const baseEnvironment = (): NodeJS.ProcessEnv => ({
@@ -25,6 +26,7 @@ const baseEnvironment = (): NodeJS.ProcessEnv => ({
 describe("startup configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetConfigurationProblemsForTests();
   });
 
   it("accepts valid core configuration without opening the database", () => {
@@ -38,17 +40,15 @@ describe("startup configuration", () => {
     ["mail", { SMTP_HOST: "smtp.example.invalid" }, "mail"],
     ["imap", { IMAP_HOST: "imap.example.invalid" }, "imap"],
     ["push", { VAPID_SUBJECT: "mailto:admin@example.invalid" }, "push"],
-  ])("rejects partial %s configuration with bounded fields", (_label, changes, field) => {
-    let failure: unknown;
-    try {
-      validateStartupConfiguration({ ...baseEnvironment(), ...changes });
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(StartupConfigurationError);
-    const issues = (failure as StartupConfigurationError).issues;
-    expect(issues).toContainEqual(expect.objectContaining({ field, code: "configuration_optional" }));
-    expect(JSON.stringify(failure)).not.toContain("example.invalid");
+  ])("tolerates partial %s configuration and records a bounded disabled fallback", (_label, changes, field) => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), ...changes })).not.toThrow();
+    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({
+      setting: field,
+      code: "configuration_optional",
+      severity: "warning",
+      fallback: "feature_disabled",
+    }));
+    expect(JSON.stringify(getConfigurationProblems())).not.toContain("example.invalid");
   });
 
   it.each([
@@ -78,34 +78,45 @@ describe("startup configuration", () => {
     })).not.toThrow();
   });
 
-  it("rejects enabled push when its private key file is unreadable", () => {
-    let failure: unknown;
-    try {
-      validateStartupConfiguration({
-        ...baseEnvironment(),
-        VAPID_SUBJECT: "mailto:admin@example.invalid",
-        VAPID_PUBLIC_KEY: "configured-public-key",
-        VAPID_PRIVATE_KEY_FILE: "/missing/runtime-secret",
-      });
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(StartupConfigurationError);
-    expect((failure as StartupConfigurationError).issues).toContainEqual({ field: "push", code: "configuration_optional" });
-    expect((failure as StartupConfigurationError).issues).not.toContainEqual(expect.objectContaining({ field: "mail" }));
-    expect(JSON.stringify(failure)).not.toContain("configured-public-key");
-    expect(JSON.stringify(failure)).not.toContain("missing/runtime-secret");
+  it("records an enabled push problem while leaving the application bootable", () => {
+    expect(() => validateStartupConfiguration({
+      ...baseEnvironment(),
+      VAPID_SUBJECT: "mailto:admin@example.invalid",
+      VAPID_PUBLIC_KEY: "configured-public-key",
+      VAPID_PRIVATE_KEY_FILE: "/missing/runtime-secret",
+    })).not.toThrow();
+    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({
+      setting: "push",
+      code: "configuration_optional",
+      severity: "warning",
+      fallback: "feature_disabled",
+    }));
+    expect(JSON.stringify(getConfigurationProblems())).not.toContain("configured-public-key");
+    expect(JSON.stringify(getConfigurationProblems())).not.toContain("missing/runtime-secret");
   });
 
-  it("rejects partially configured default IMAP before database access", () => {
-    let failure: unknown;
-    try {
-      validateStartupConfiguration({ ...baseEnvironment(), IMAP_HOST: "imap.example.invalid" });
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(StartupConfigurationError);
-    expect((failure as StartupConfigurationError).issues).toContainEqual({ field: "imap", code: "configuration_optional" });
+  it("records partially configured default IMAP without opening the database", () => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), IMAP_HOST: "imap.example.invalid" })).not.toThrow();
+    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({
+      setting: "imap",
+      code: "configuration_optional",
+      severity: "warning",
+      fallback: "feature_disabled",
+    }));
     expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("uses safe logging defaults while exposing invalid logging configuration", () => {
+    expect(() => validateStartupConfiguration({
+      ...baseEnvironment(),
+      ORBIT_LOG_LEVEL: "verbose",
+      ORBIT_LOG_FORMAT: "yaml",
+    })).not.toThrow();
+    expect(getConfigurationProblems()).toContainEqual(expect.objectContaining({
+      setting: "logging",
+      code: "configuration_optional",
+      severity: "warning",
+      fallback: "feature_disabled",
+    }));
   });
 });

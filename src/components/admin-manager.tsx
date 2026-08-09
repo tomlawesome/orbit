@@ -32,6 +32,13 @@ type DeliveryStatus = "pending" | "processing" | "sent" | "retry" | "failed" | "
 type DocumentJobStatus = "pending" | "processing" | "retry" | "completed" | "failed" | "cancelled";
 
 interface Operations {
+  configurationProblems: Array<{
+    code: "configuration_version" | "configuration_core" | "configuration_optional";
+    severity: "error" | "warning";
+    setting: string;
+    fallback: "startup_blocked" | "feature_disabled";
+    remediation: "check_configuration" | "repair_configuration";
+  }>;
   notificationWorker: { started: boolean; running: boolean; lastSuccessAt: string | null; lastErrorAt: string | null; lastErrorCode: string | null };
   providers: { smtp: ProviderState; push: ProviderState };
   mailboxIngestion: {
@@ -268,6 +275,12 @@ export function AdminManager({ session }: AdminManagerProps) {
           <article><span>Mailbox ingestion</span><strong data-status={operations.mailboxIngestion.status === "available" ? "ready" : "unavailable"}>{operations.mailboxIngestion.status}</strong></article>
           <article><span>Web Push</span><strong data-status={operations.providers.push === "configured" ? "ready" : "unavailable"}>{operations.providers.push}</strong></article>
           <article><span>Worker success</span><strong>{formatDate(operations.notificationWorker.lastSuccessAt)}</strong></article>
+        </div>
+        <div className="admin-operation-detail" aria-live="polite">
+          <strong>Configuration</strong>
+          {operations.configurationProblems.length === 0
+            ? <p>No current configuration problems.</p>
+            : <ul>{operations.configurationProblems.map((problem) => <li key={`${problem.setting}:${problem.code}`}><strong>{problem.severity}</strong> · {problem.setting} · {problem.code} · fallback: {problem.fallback} · action: {problem.remediation}</li>)}</ul>}
         </div>
         {operations.notificationWorker.lastErrorCode && <p className="admin-operation-detail" role="status">Latest worker error: {operations.notificationWorker.lastErrorCode}</p>}
         <div className="admin-operation-actions"><button type="button" onClick={() => void testSmtp()} disabled={smtpTestState === "sending" || operations.providers.smtp !== "configured"}>{smtpTestState === "sending" ? "Testing SMTP…" : "Test SMTP"}</button>{smtpTestState === "success" && <span role="status">SMTP test passed.</span>}<button type="button" onClick={() => void testImap()} disabled={imapTestState === "sending" || !operations.mailboxIngestion.configured}>{imapTestState === "sending" ? "Verifying inbound mail…" : "Verify inbound mail"}</button>{imapTestState === "success" && <span role="status">Inbound mail verification passed.</span>}</div>

@@ -1,10 +1,21 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
   hasPlanningAttestation,
   isProtectedPlanningPath,
   matchedPlanningAttestation,
+  validateObservabilityDeclaration,
 } from "./check-planning-governance.mjs";
+
+const deliveryTemplate = readFileSync(
+  new URL("../.github/ISSUE_TEMPLATE/delivery.yml", import.meta.url),
+  "utf8",
+);
+const pullRequestTemplate = readFileSync(
+  new URL("../.github/pull_request_template.md", import.meta.url),
+  "utf8",
+);
 
 describe("planning governance", () => {
   it("protects architecture, ADR, governance, and roadmap sources", () => {
@@ -46,5 +57,62 @@ describe("planning governance", () => {
     expect(matchedPlanningAttestation("intro\nPlanning-Model: Human\noutro"))
       .toBe("Planning-Model: Human");
     expect(matchedPlanningAttestation("Planning-Model: Terra Medium")).toBe(null);
+  });
+});
+
+describe("observability governance", () => {
+  const changedBody = `
+- Operational event/state: auth.callback state=provider_rejected; operator checks provider configuration.
+- Failure/recovery: record the bounded rejection category and a successful retry after configuration repair.
+- Privacy/redaction: omit claims, tokens, email addresses, provider responses, and request URLs; assert those values are absent.
+- Operator-documentation impact: update the authentication troubleshooting table with the category and action.
+
+Observability-Impact: changed
+`;
+
+  it("accepts changed evidence with all required bounded entries", () => {
+    expect(validateObservabilityDeclaration(changedBody)).toEqual({
+      impact: "changed",
+      reason: null,
+    });
+  });
+
+  it("accepts a specific none reason", () => {
+    expect(validateObservabilityDeclaration(
+      "Observability-Impact: none — documentation-only wording change with no runtime or operator behavior impact",
+    )).toEqual({
+      impact: "none",
+      reason: "documentation-only wording change with no runtime or operator behavior impact",
+    });
+  });
+
+  it.each([
+    ["missing", "No declaration"],
+    ["duplicated", "Observability-Impact: changed\nObservability-Impact: changed"],
+    ["malformed", "Observability-Impact: none - docs only"],
+    ["unexplained", "Observability-Impact: none — <specific reason>"],
+    ["generic", "Observability-Impact: none — docs only"],
+  ])("rejects %s declarations", (_name, body) => {
+    expect(() => validateObservabilityDeclaration(body)).toThrow(/Observability-Impact/u);
+  });
+
+  it("rejects changed declarations without every concise evidence entry", () => {
+    expect(() => validateObservabilityDeclaration(
+      "Operational event/state: startup\nObservability-Impact: changed",
+    )).toThrow(/Failure\/recovery.*Privacy\/redaction.*Operator-documentation impact/u);
+  });
+
+  it("keeps the issue and PR templates on the explicit observability contract", () => {
+    expect(deliveryTemplate).toContain("id: observability");
+    expect(deliveryTemplate).toContain("label: Operational observability");
+    expect(deliveryTemplate).toContain("required: true");
+    expect(pullRequestTemplate).toContain("## Operational observability");
+    expect(pullRequestTemplate).toContain("Observability-Impact: changed");
+    expect(pullRequestTemplate).toContain("Observability-Impact: none — <specific reason>");
+    expect(pullRequestTemplate.match(/^Observability-Impact:/gmu)).toHaveLength(1);
+    expect(pullRequestTemplate).toContain("Logs describe transient operational events");
+    expect(pullRequestTemplate).toContain("the audit trail records durable security or business actions");
+    expect(pullRequestTemplate).toContain("public health is a content-free readiness contract");
+    expect(pullRequestTemplate).toContain("authenticated admin UI presents bounded corrective diagnostics");
   });
 });

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { log } from "@/lib/logger";
 
 export type PublicReadiness = { status: "ready" | "degraded" };
 
@@ -22,8 +23,16 @@ async function checkDatabase(): Promise<unknown> {
 export async function getPublicReadiness(): Promise<PublicReadiness> {
   try {
     await checkDatabase();
+    log.info({ event: "application.startup", state: "ready", action: "none" });
     return { status: "ready" };
   } catch {
+    log.warn({
+      event: "application.startup",
+      state: "degraded",
+      reason: "dependency_unavailable",
+      action: "check_database",
+      impact: "database_unavailable",
+    });
     return { status: "degraded" };
   }
 }
