@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { AccountMenu } from "@/components/account-menu";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
@@ -858,7 +859,15 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
             <i />{syncStatus === "saving" ? "Saving" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
           </span>
           <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
-          <button className="topbar-profile" data-settings-return-focus onClick={navigateToSettings} aria-label="Open personalisation settings"><span className="profile-avatar">{householdInitials(session.user.displayName)}</span><strong>{session.user.displayName}</strong></button>
+          <AccountMenu
+            displayName={session.user.displayName}
+            initials={householdInitials(session.user.displayName)}
+            isInstanceAdmin={session.user.isInstanceAdmin}
+            onSettings={navigateToSettings}
+            onAdministration={() => router.push("/admin")}
+            onSignOut={() => { void handleSignOut(); }}
+            logoutBusy={logoutBusy}
+          />
           <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
         </header>
 

@@ -115,6 +115,12 @@ These epics cite `ORB-FUT-*` feature-register entries rather than `V1-*`
 charter requirements, because the v1 charter is the v1 contract and is not
 reopened for post-v1 direction.
 
+Orbit v1.1.0 was released on 2026-08-08 from accepted `main` source
+`ac7c64955b8a2a227259fdb33e35166f213c60e8`. The release closes the delivered
+v1.1 train; unfinished account-navigation work is planned forward rather than
+left attached to the released milestone. The live milestone and issue records
+remain authoritative for that placement.
+
 This roadmap is the single shared plan. Sol Extra High maintains it;
 implementation providers receive only bounded slices and do not maintain a
 private plan, because a second plan would become a second source of truth and
@@ -277,61 +283,54 @@ This section is the rolling commentary. It names where delivery actually is, so
 the next action is never inferred from memory. Update it whenever a slice
 changes state.
 
-- **Current wave:** v1.1 Wave 2, substantially delivered but **not complete**.
-  One slice is deferred pending an owner decision, so the wave cannot be
-  reviewed as finished.
-- **Next slice:** none may start. [#138 — settings and administration as
-  dedicated routes](https://github.com/tomlawesome/orbit/issues/138) is the
-  next in sequence and is blocked on a decision below. The remaining Wave 3
-  slices depend on it.
-- **In flight:** nothing.
-- **Delivered in Wave 2:** [#141 — deploy-compose separation](https://github.com/tomlawesome/orbit/issues/141),
-  [#139 — optional services by configuration](https://github.com/tomlawesome/orbit/issues/139),
-  [#140 — installer-resolved release digests](https://github.com/tomlawesome/orbit/issues/140),
-  [#146 — visible document lifecycle states](https://github.com/tomlawesome/orbit/issues/146),
-  and, from Wave 3 ahead of sequence because its dependencies completed early,
-  [#143 — non-interactive installer](https://github.com/tomlawesome/orbit/issues/143).
+- **Released train:** v1.1.0 from `main`
+  `ac7c64955b8a2a227259fdb33e35166f213c60e8`, promoted without rebuilding as
+  `ghcr.io/tomlawesome/orbit@sha256:92fb79336d997139002f94c52fd4767787767cc293147c12bbcfc25362a9237d`.
+- **Accepted branch position before this reconciliation PR:** `develop`
+  `c73ffb421c1bbbd911fc9ad11c4720e7b5b43eb7`, `preview`
+  `4ffed836d8646c33d13a0a7ada7db6571a37a2f4`, and the released `main` above.
+  GitHub refs remain the source of truth after this planning commit moves
+  `develop` forward.
+- **v1.1 closeout:** scanner recovery [#168](https://github.com/tomlawesome/orbit/issues/168)
+  and prebuilt installation [#117](https://github.com/tomlawesome/orbit/issues/117)
+  are accepted. The account-control residual [#192](https://github.com/tomlawesome/orbit/issues/192)
+  and its parent [#116](https://github.com/tomlawesome/orbit/issues/116) move to
+  the next release train. The superseded development-channel proposal
+  [#163](https://github.com/tomlawesome/orbit/issues/163) is not part of the
+  released contract: `preview` and `latest` are the only published discovery
+  tags, while `dev` remains reserved and unpublished.
+- **Next delivery sequence:** the product-tour documentation in
+  [#200](https://github.com/tomlawesome/orbit/issues/200) is delivered. Package
+  the missing backup and restore scripts in
+  [#232](https://github.com/tomlawesome/orbit/issues/232); require verified core
+  configuration in [#233](https://github.com/tomlawesome/orbit/issues/233)
+  before adding versioned configuration migrations in
+  [#234](https://github.com/tomlawesome/orbit/issues/234); then deliver #192 and
+  reconcile #116. Establish the proportional observability contract in
+  [#183](https://github.com/tomlawesome/orbit/issues/183) before the runtime
+  logging implementation [#206](https://github.com/tomlawesome/orbit/issues/206),
+  then address the independent local-tooling defect
+  [#101](https://github.com/tomlawesome/orbit/issues/101).
+- **Deferred portfolio work:** [#75](https://github.com/tomlawesome/orbit/issues/75)
+  awaits an explicit destination-repository decision. [#197](https://github.com/tomlawesome/orbit/issues/197)
+  remains a bounded governance improvement rather than release scope.
+- **In-flight state:** GitHub pull requests own live in-flight status; keep at
+  most two open delivery pull requests as required above.
 
-### Decisions reserved to the repository owner
+### Resolved v1.1 decisions and evidence
 
-Recorded together because each is easy to miss on an individual issue, and each
-is currently proceeding on an assumption rather than an answer.
-
-1. **How an administration route enforces authority.** A server component
-   reading the session through `next/headers`, which is genuine server-side
-   refusal but introduces a session-reading pattern the codebase does not have
-   and arguably needs an ADR; or a client route over already-gated APIs, which
-   protects the data but not the route. Recorded on #138. **No assumption
-   made — the slice is deferred rather than guessed at.** It also carries a
-   judgement about how the interface should feel, which tests cannot settle.
-2. **Whether the installer may resolve a tag to a digest automatically.**
-   Recorded on #140 before implementation and never answered. Work proceeded on
-   the assumption that it may, because the deployed artifact stays digest-pinned.
-   If that is wrong, ADR-0008 and #140 are revertible together and #143 changes
-   shape.
-3. **Whether to enable repository auto-merge or a merge queue.** Recorded on
-   #131. Not enabled; merging remains manual and serial. A merge queue, not
-   auto-merge, is the tool that would actually address it.
-
-### Delivered without execution evidence
-
-Named so nothing is assumed validated:
-
-- **The installer has never been run.** Docker is unavailable on the authoring
-  machine and no CI job executes `install.sh`. Its shape is tested; its
-  behaviour is not. The install path should not be advertised until a real run
-  against a published preview digest is performed. Recorded on #143.
-- **Every compose change was first executed by CI**, not locally, for the same
-  reason. Each passed first time, but the caveat stands on #141 and #139.
-
-### Withdrawn during delivery
-
-- **Convergence without a manual refresh**, acceptance criterion 4 of #146. A
-  five-second poll was implemented and removed on a hypothesis that later proved
-  wrong. It now belongs to
-  [#150 — converge the item view when processing finishes](https://github.com/tomlawesome/orbit/issues/150),
-  with the failure recorded so the next attempt starts from evidence. The poll
-  may in fact have been acceptable.
+- Settings and administration routes, server-side administration refusal and
+  page-section navigation are accepted; #192 is the sole remaining #116
+  product slice.
+- ADR-0008's accepted decision is backed by the source-less exact-image
+  installer execution in #156/PR #172 and protected run 30706088817. Tags are
+  resolved for discovery, but only the resulting digest is deployed. The
+  human owner ratified that implemented behaviour on 2026-08-08.
+- Target-branch merges remain serial. No repository merge queue or auto-merge
+  setting is assumed.
+- The release and promotion evidence is GitHub Actions run 31276736930 and the
+  v1.1.0 release record. The exact digest above, not either mutable discovery
+  tag, is the authoritative artifact identity.
 
 ### Wave 1 completion review
 

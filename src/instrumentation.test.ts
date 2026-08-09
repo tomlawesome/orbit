@@ -13,6 +13,21 @@ const mocks = vi.hoisted(() => ({
     info: vi.fn(),
   },
   registerNode: vi.fn(),
+  validateStartupConfiguration: vi.fn(),
+  getDatabaseClient: vi.fn(() => ({ unsafe: vi.fn() })),
+  getDb: vi.fn(),
+  verifyMigrationIntegrity: vi.fn(),
+  verifyMigrationJournalComplete: vi.fn(),
+  migrate: vi.fn(),
+  workerCalls: [] as string[],
+  MigrationIntegrityError: class MigrationIntegrityError extends Error {
+    code: "migration_integrity";
+
+    constructor(_message: string) {
+      super(_message);
+      this.code = "migration_integrity";
+    }
+  },
 }));
 
 vi.mock("@/server/documents/config", () => ({
@@ -30,6 +45,24 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/logger", () => ({
   log: mocks.log,
 }));
+vi.mock("@/lib/startup-config", () => ({
+  validateStartupConfiguration: mocks.validateStartupConfiguration,
+  StartupConfigurationError: class StartupConfigurationError extends Error {},
+}));
+vi.mock("@/db", () => ({
+  getDatabaseClient: mocks.getDatabaseClient,
+  getDb: mocks.getDb,
+}));
+vi.mock("@/db/migration-integrity", () => ({
+  verifyMigrationIntegrity: mocks.verifyMigrationIntegrity,
+  verifyMigrationJournalComplete: mocks.verifyMigrationJournalComplete,
+  MigrationIntegrityError: mocks.MigrationIntegrityError,
+}));
+vi.mock("drizzle-orm/postgres-js/migrator", () => ({ migrate: mocks.migrate }));
+vi.mock("@/server/notification-worker", () => ({ startNotificationWorker: () => mocks.workerCalls.push("notification") }));
+vi.mock("@/server/document-worker", () => ({ startDocumentWorker: () => mocks.workerCalls.push("document") }));
+vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
+vi.mock("@/server/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
 
 import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 
@@ -38,6 +71,13 @@ describe("instrumentation runtime boundary", () => {
     vi.clearAllMocks();
     vi.resetModules();
     resetAuthObservabilityForTests();
+    mocks.workerCalls.length = 0;
+    mocks.validateStartupConfiguration.mockReset();
+    mocks.verifyMigrationIntegrity.mockReset();
+    mocks.verifyMigrationJournalComplete.mockReset();
+    mocks.migrate.mockReset();
+    mocks.getDatabaseClient.mockClear();
+    mocks.getDb.mockClear();
   });
 
   afterEach(() => {
@@ -81,6 +121,69 @@ describe("instrumentation runtime boundary", () => {
 
     expect(staticImports).toEqual([]);
     expect(source).not.toContain("@/");
+  });
+});
+
+describe("strict startup ordering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetAuthObservabilityForTests();
+    mocks.workerCalls.length = 0;
+    mocks.getDatabaseClient.mockClear();
+    mocks.getDb.mockClear();
+    mocks.validateStartupConfiguration.mockReset();
+    mocks.verifyMigrationIntegrity.mockReset();
+    mocks.verifyMigrationJournalComplete.mockReset();
+    mocks.migrate.mockReset();
+    vi.stubEnv("MIGRATE_ON_START", "true");
+    vi.stubEnv("WORKER_ENABLED", "true");
+    mocks.validateStartupConfiguration.mockImplementation(() => mocks.workerCalls.push("configuration"));
+    mocks.getAuthConfig.mockImplementation(() => {
+      mocks.workerCalls.push("auth");
+      return {};
+    });
+    mocks.verifyMigrationIntegrity.mockImplementation(() => mocks.workerCalls.push("precheck"));
+    mocks.migrate.mockImplementation(() => mocks.workerCalls.push("migrate"));
+    mocks.verifyMigrationJournalComplete.mockImplementation(() => mocks.workerCalls.push("postcheck"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("validates, reports auth, checks and migrates before workers", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    await registerNode();
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "migrate", "postcheck", "notification", "document", "imap", "receipt"]);
+  });
+
+  it("fails closed before database access and workers for invalid configuration", async () => {
+    mocks.validateStartupConfiguration.mockImplementation(() => { throw new Error("private configuration value"); });
+    const { registerNode } = await import("./instrumentation-node");
+    await expect(registerNode()).rejects.toThrow("configuration_invalid");
+    expect(mocks.getDatabaseClient).not.toHaveBeenCalled();
+    expect(mocks.workerCalls).toEqual([]);
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private configuration value");
+  });
+
+  it("does not start workers when the migration precheck, migrate, or postcheck fails", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("private drift"));
+    await expect(registerNode()).rejects.toThrow("migration_integrity");
+    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
+
+    mocks.workerCalls.length = 0;
+    mocks.verifyMigrationIntegrity.mockResolvedValue(undefined);
+    mocks.migrate.mockRejectedValueOnce(new Error("private SQL"));
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
+
+    mocks.workerCalls.length = 0;
+    mocks.migrate.mockResolvedValue(undefined);
+    mocks.verifyMigrationJournalComplete.mockRejectedValueOnce(new Error("private postcheck"));
+    await expect(registerNode()).rejects.toThrow("migration_integrity");
+    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
   });
 });
 
