@@ -172,6 +172,7 @@ async function openItemEditor(page: Page) {
   await page.locator("button.add-button:visible, button.mobile-add:visible").first().click();
   const dialog = page.getByRole("dialog", { name: "Add an item" });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("What do you want to keep track of?")).toBeFocused();
   return dialog;
 }
 
