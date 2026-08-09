@@ -7,6 +7,77 @@ const policy = JSON.parse(
   readFileSync(new URL("../.github/planning-governance.json", import.meta.url), "utf8"),
 );
 
+const observabilityDeclarationPrefix = "Observability-Impact:";
+const observabilityChangedDeclaration = "Observability-Impact: changed";
+const observabilityNoneDeclaration = /^Observability-Impact: none — (.+)$/u;
+const unexplainedReasonPattern = /^(?:<[^>]+>|specific reason|tbd|todo|n\/?a|none|not applicable|no impact|no operational impact|(?:documentation|docs|test|tests|formatting) only|no runtime changes?|replace(?: this)?(?: with)? .*)\.?$/iu;
+const observabilityEntries = [
+  {
+    label: "Operational event/state",
+    pattern: /^(?:[-*]\s*)?Operational event\/state\s*:\s*(.*?)\s*$/iu,
+  },
+  {
+    label: "Failure/recovery",
+    pattern: /^(?:[-*]\s*)?Failure\/recovery\s*:\s*(.*?)\s*$/iu,
+  },
+  {
+    label: "Privacy/redaction",
+    pattern: /^(?:[-*]\s*)?Privacy\/redaction\s*:\s*(.*?)\s*$/iu,
+  },
+  {
+    label: "Operator-documentation impact",
+    pattern: /^(?:[-*]\s*)?Operator-documentation impact\s*:\s*(.*?)\s*$/iu,
+  },
+];
+
+function isUnexplained(value) {
+  const normalized = value.trim();
+  return normalized.length === 0 || unexplainedReasonPattern.test(normalized);
+}
+
+function bodyLines(body) {
+  return String(body ?? "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim());
+}
+
+/** Validate the one PR-body observability declaration and its evidence fields. */
+export function validateObservabilityDeclaration(body) {
+  const lines = bodyLines(body);
+  const declarations = lines.filter((line) => line.startsWith(observabilityDeclarationPrefix));
+
+  if (declarations.length === 0) {
+    throw new Error("an Observability-Impact declaration is required");
+  }
+  if (declarations.length !== 1) {
+    throw new Error("exactly one Observability-Impact declaration is required");
+  }
+
+  const declaration = declarations[0];
+  if (declaration === observabilityChangedDeclaration) {
+    const missing = observabilityEntries
+      .filter(({ pattern }) => {
+        const matches = lines.filter((line) => pattern.test(line));
+        return matches.length !== 1 || isUnexplained(matches[0]?.match(pattern)?.[1] ?? "");
+      })
+      .map(({ label }) => label);
+    if (missing.length > 0) {
+      throw new Error(
+        `Observability-Impact: changed requires concise entries for: ${missing.join(", ")}`,
+      );
+    }
+    return { impact: "changed", reason: null };
+  }
+
+  const noneMatch = declaration.match(observabilityNoneDeclaration);
+  if (!noneMatch || isUnexplained(noneMatch[1])) {
+    throw new Error(
+      "the Observability-Impact declaration must be exactly changed or none with a specific reason",
+    );
+  }
+  return { impact: "none", reason: noneMatch[1].trim() };
+}
+
 export function isProtectedPlanningPath(path, configuredPolicy = policy) {
   const normalized = path.replaceAll("\\", "/");
   return configuredPolicy.protectedFiles.includes(normalized)
@@ -41,6 +112,17 @@ function changedFilesFromGit(base, head) {
 }
 
 function main() {
+  if (Object.hasOwn(process.env, "ORBIT_PR_BODY")) {
+    try {
+      validateObservabilityDeclaration(process.env.ORBIT_PR_BODY);
+    } catch (error) {
+      console.error(`Observability governance: ${error.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log("Observability governance: accepted exactly one proportional declaration.");
+  }
+
   const filesFlag = process.argv.indexOf("--files");
   const changedFiles = filesFlag >= 0
     ? process.argv.slice(filesFlag + 1)

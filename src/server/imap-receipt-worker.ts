@@ -4,6 +4,7 @@ import { imapIngestionMessages, imapNotificationDeliveries, users } from "@/db/s
 import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeExpiredImapStaging } from "@/server/imap-inbox";
 import { AppError } from "@/lib/app-error";
+import { log } from "@/lib/logger";
 
 type ImapNotificationKind = "receipt" | "review_ready";
 export type ImapNotificationFailure = "smtp_unconfigured" | "smtp_unavailable" | "smtp_rejected" | "unknown";
@@ -289,7 +290,18 @@ export function startImapReceiptWorker(): void {
   if (workerState.__orbitImapReceiptWorkerStarted) return;
   workerState.__orbitImapReceiptWorkerStarted = true;
   const poll = async () => {
-    try { await runImapReceiptCycle(); } catch { console.error("Orbit IMAP receipt cycle failed"); }
+    try {
+      await runImapReceiptCycle();
+      log.info({ event: "imap.receipt", state: "ready", action: "none" });
+    } catch {
+      log.error({
+        event: "imap.receipt",
+        state: "retrying",
+        reason: "worker_cycle_failed",
+        action: "inspect_admin_diagnostics",
+        impact: "mail_delivery_delayed",
+      });
+    }
     finally {
       let pollMilliseconds = 60_000;
       try { pollMilliseconds = getNotificationWorkerConfig().pollMilliseconds; } catch { /* Unsafe configuration remains paused. */ }

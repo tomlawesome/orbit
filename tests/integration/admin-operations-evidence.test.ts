@@ -62,6 +62,10 @@ describe("administrator operations evidence", () => {
     expect(health.status).toBe(200);
     expect(operations.headers.get("cache-control")).toBe("no-store");
     expect(health.headers.get("cache-control")).toBe("no-store");
+    const operationsPayload = await json(operations);
+    expect(operationsPayload.operations).toEqual(expect.objectContaining({
+      configurationProblems: expect.any(Array),
+    }));
     const healthText = JSON.stringify(await json(health));
     expect(healthText).not.toContain("keyId");
     expect(healthText).not.toContain("synthetic-key-id");

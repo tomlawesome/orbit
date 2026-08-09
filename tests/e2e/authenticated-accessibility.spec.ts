@@ -310,6 +310,14 @@ async function setThemePreference(page: Page, preference: ThemePreference) {
     .toHaveAttribute("data-theme", preference.colourway);
 }
 
+async function expectAdminTheme(page: Page, preference: ThemePreference) {
+  const admin = page.locator(".admin-page");
+  await expect(admin).toHaveAttribute("data-text-size", preference.textSize);
+  await expect(admin).toHaveAttribute("data-mode", preference.mode);
+  await expect(admin).toHaveAttribute("data-theme", preference.colourway);
+  await expect(admin).toHaveAttribute("data-urgency-palette", preference.urgencyPalette);
+}
+
 async function expectNoHorizontalOverflow(page: Page, context: string) {
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -487,6 +495,85 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
       await expectNoAxeViolations(page, ".admin-page");
+    });
+  });
+
+  test("applies persisted appearance to a fresh direct administration load and wraps its heading", async ({ page, browser, isMobile }) => {
+    test.setTimeout(90_000);
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.skip(isMobile, "One browser context runs the narrow administration layout matrix.");
+    await withFixture(page, async () => {
+      const sessionResponse = await page.request.get("/api/auth/session");
+      expect(sessionResponse.ok()).toBeTruthy();
+      const sessionPayload = await sessionResponse.json() as {
+        user: {
+          themeMode: ThemePreference["mode"];
+          themeId: ThemePreference["colourway"];
+          textSize: ThemePreference["textSize"];
+          urgencyPalette: ThemePreference["urgencyPalette"];
+        };
+      };
+      const sessionPreference = {
+        mode: sessionPayload.user.themeMode,
+        colourway: sessionPayload.user.themeId,
+        textSize: sessionPayload.user.textSize,
+        urgencyPalette: sessionPayload.user.urgencyPalette,
+      };
+      const authenticatedState = await page.context().storageState();
+      const directContext = await browser.newContext({
+        storageState: { cookies: authenticatedState.cookies, origins: [] },
+      });
+      const directPage = await directContext.newPage();
+      try {
+        await directPage.goto(new URL("/admin", page.url()).toString());
+        await expectAdminTheme(directPage, {
+          ...sessionPreference,
+          emailNotifications: true,
+          pushNotifications: true,
+        });
+      } finally {
+        await directContext.close();
+      }
+
+      const textSizes: ThemePreference["textSize"][] = [
+        "standard",
+        "comfortable",
+        "large",
+        "extra-large",
+      ];
+      for (const textSize of textSizes) {
+        await page.setViewportSize({ width: 320, height: 900 });
+        const preference: ThemePreference = {
+          mode: "dark",
+          colourway: "coast",
+          textSize,
+          urgencyPalette: "themed",
+          emailNotifications: true,
+          pushNotifications: true,
+        };
+        await page.goto("/");
+        await setThemePreference(page, preference);
+        await page.goto("/admin");
+        await expectAdminTheme(page, preference);
+        const heading = page.getByRole("heading", { name: "Manage this Orbit instance", exact: true });
+        await expect(heading).toBeVisible();
+        const metrics = await heading.evaluate((element) => {
+          const style = window.getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return {
+            fontSize: Number.parseFloat(style.fontSize),
+            lineHeight: Number.parseFloat(style.lineHeight),
+            letterSpacing: Number.parseFloat(style.letterSpacing),
+            height: rect.height,
+            width: rect.width,
+            scrollWidth: element.scrollWidth,
+          };
+        });
+        expect(metrics.lineHeight).toBeGreaterThan(metrics.fontSize);
+        expect(metrics.letterSpacing).toBeGreaterThan(-2.8);
+        expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.width);
+        expect(metrics.height).toBeGreaterThan(metrics.lineHeight);
+      }
     });
   });
 

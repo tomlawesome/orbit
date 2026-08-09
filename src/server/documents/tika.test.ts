@@ -202,15 +202,11 @@ describe("Tika adapter", () => {
 
     await extractTextWithTika(Buffer.from("document bytes"), "application/pdf", DOCUMENT_ID);
 
-    const parseCalls = infoSpy.mock.calls.filter(([event]) => event === "document.parse");
+    const parseCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.parse");
     expect(parseCalls).toHaveLength(2);
-    expect(parseCalls[0][1]).toEqual({ document: DOCUMENT_ID, outcome: "attempt" });
-    expect(parseCalls[1][1]).toMatchObject({
-      document: DOCUMENT_ID,
-      outcome: "extracted",
-      characters: "bounded text".length,
-    });
-    const ms = (parseCalls[1][1] as { ms: number }).ms;
+    expect(parseCalls[0][0]).toEqual({ event: "document.parse", state: "starting", action: "check_parser" });
+    expect(parseCalls[1][0]).toMatchObject({ event: "document.parse", state: "ready", action: "none" });
+    const ms = (parseCalls[1][0] as { durationMs: number }).durationMs;
     expect(Number.isInteger(ms)).toBe(true);
     expect(ms).toBeGreaterThanOrEqual(0);
   });
@@ -250,15 +246,15 @@ describe("Tika adapter", () => {
 
       await expectParserUnavailable(extractTextWithTika(Buffer.from("document bytes"), "application/pdf", DOCUMENT_ID));
 
-      const parseCalls = warnSpy.mock.calls.filter(([event]) => event === "document.parse");
+      const parseCalls = warnSpy.mock.calls.filter(([event]) => event.event === "document.parse");
       expect(parseCalls).toHaveLength(1);
-      const fields = parseCalls[0][1] as Record<string, unknown>;
-      expect(fields.document).toBe(DOCUMENT_ID);
-      expect(fields.outcome).toBe("error");
+      const fields = parseCalls[0][0] as Record<string, unknown>;
+      expect(fields.event).toBe("document.parse");
+      expect(fields.state).toBe("degraded");
       expect(fields.reason).toBe(reason);
-      expect(Number.isInteger(fields.ms)).toBe(true);
-      expect(fields.ms as number).toBeGreaterThanOrEqual(0);
-      expect(Object.keys(fields).sort()).toEqual(["document", "ms", "outcome", "reason"]);
+      expect(Number.isInteger(fields.durationMs)).toBe(true);
+      expect(fields.durationMs as number).toBeGreaterThanOrEqual(0);
+      expect(Object.keys(fields).sort()).toEqual(["action", "durationMs", "event", "impact", "reason", "state"]);
       expect(JSON.stringify(fields)).not.toMatch(/private|network|redirect/iu);
     },
   );
@@ -270,8 +266,8 @@ describe("Tika adapter", () => {
 
     await extractTextWithTika(Buffer.from("document bytes"), "application/pdf", DOCUMENT_ID);
 
-    const parseCalls = infoSpy.mock.calls.filter(([event]) => event === "document.parse");
-    for (const [, fields] of parseCalls) {
+    const parseCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.parse");
+    for (const [fields] of parseCalls) {
       const serialized = JSON.stringify(fields);
       expect(serialized).not.toContain("script");
       expect(serialized).not.toContain("Ignore previous instructions");
