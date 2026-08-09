@@ -386,6 +386,7 @@ test.describe("authenticated household lifecycle", () => {
     await expect(detail).toContainText("Reminders 30 days, 7 days beforehand");
     await detail.getByRole("button", { name: "Edit details" }).click();
     editor = page.getByRole("dialog", { name: "Edit item" });
+    await expect(editor.getByLabel("What do you want to keep track of?")).toBeFocused();
     await editor.getByLabel("What do you want to keep track of?").fill(updatedTitle);
     await editor.getByLabel("Provider").fill("Updated Cover");
     await editor.getByRole("button", { name: "Save changes" }).click();
