@@ -299,14 +299,18 @@ bash scripts/configuration.sh --migrate --orbit-image \
 ```
 
 The image digest and applied digest must be the same; the command retains one
-owner-only rollback copy beside the file. If an
-existing Orbit PostgreSQL volume is detected, a new or pre-provisioned target
-is refused: rerun from the original deployment directory so the existing
-`.orbit-secrets/postgres-password` is preserved. Orbit never deletes or resets
-that volume automatically. If configuration or database migration fails, retry
-after restoring the pre-upgrade database backup with the matching previous
-image. Configuration migration is atomic and idempotent; it does not rewrite
-operator values or secrets.
+owner-only rollback copy beside the file. For a recognized existing
+deployment, the installer proves the Compose project, database volume labels,
+stopped-container ownership, and prior immutable application image before
+reusing that project, so moving the deployment directory does not silently
+create a new database volume. A fresh or pre-provisioned target is refused
+when any Orbit database volume is present, and an existing deployment is
+refused when ownership is ambiguous or cannot be proven. Orbit never deletes
+or resets a database volume automatically; preserve the existing
+`.orbit-secrets/postgres-password` byte-for-byte. If configuration or database
+migration fails, retry after restoring the pre-upgrade database backup with the
+matching previous image. Configuration migration is atomic and idempotent; it
+does not rewrite operator values or secrets.
 
 ### Optional local processing stack
 
