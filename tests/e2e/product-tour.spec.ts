@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 type ProductTourFixture = {
@@ -13,7 +13,7 @@ type ProductTourFixture = {
 
 const fixedNow = "2026-08-08T10:00:00.000Z";
 const outputDirectory = join(process.cwd(), "docs/assets/product-tour");
-const generatedPdf = readFileSync(new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url));
+const generatedPdf = readFileSync(resolve(process.cwd(), "tests/support/fixtures/chromium-synthetic.pdf"));
 
 function newFixture(): ProductTourFixture {
   return {
