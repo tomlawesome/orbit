@@ -119,9 +119,9 @@ describe("item document inspection", () => {
       body: new ReadableStream<Uint8Array>(),
     });
 
-    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event === "document.inspection");
+    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.inspection");
     expect(inspectionCalls).toHaveLength(1);
-    expect(inspectionCalls[0][1]).toEqual({ outcome: "attachable", reason: "supported_structure" });
+    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });
   });
 
   it("logs a bounded scan attempt and clean outcome with the ephemeral operation reference, never the filename, and reuses it for parsing", async () => {
@@ -135,11 +135,11 @@ describe("item document inspection", () => {
       body: new ReadableStream<Uint8Array>(),
     });
 
-    const scanCalls = infoSpy.mock.calls.filter(([event]) => event === "document.scan");
+    const scanCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.scan");
     expect(scanCalls).toHaveLength(2);
-    expect(scanCalls[0][1]).toEqual({ document: OPERATION_ID, outcome: "attempt" });
-    expect(scanCalls[1][1]).toMatchObject({ document: OPERATION_ID, outcome: "clean" });
-    const cleanMs = (scanCalls[1][1] as { ms: number }).ms;
+    expect(scanCalls[0][0]).toEqual({ event: "document.scan", state: "starting", action: "check_scanner" });
+    expect(scanCalls[1][0]).toMatchObject({ event: "document.scan", state: "ready", action: "none" });
+    const cleanMs = (scanCalls[1][0] as { durationMs: number }).durationMs;
     expect(Number.isInteger(cleanMs)).toBe(true);
     expect(cleanMs).toBeGreaterThanOrEqual(0);
 
@@ -163,11 +163,11 @@ describe("item document inspection", () => {
       body: new ReadableStream<Uint8Array>(),
     })).rejects.toMatchObject({ code: "document_scanner_unreachable" });
 
-    const scanCalls = warnSpy.mock.calls.filter(([event]) => event === "document.scan");
+    const scanCalls = warnSpy.mock.calls.filter(([event]) => event.event === "document.scan");
     expect(scanCalls).toHaveLength(1);
-    const fields = scanCalls[0][1] as Record<string, unknown>;
-    expect(fields).toMatchObject({ document: OPERATION_ID, outcome: "error", reason: "unavailable" });
-    expect(Number.isInteger(fields.ms)).toBe(true);
+    const fields = scanCalls[0][0] as Record<string, unknown>;
+    expect(fields).toMatchObject({ state: "degraded", reason: "scanner_unavailable", action: "check_scanner" });
+    expect(Number.isInteger(fields.durationMs)).toBe(true);
     expect(fields).not.toHaveProperty("host");
     expect(fields).not.toHaveProperty("port");
   });
@@ -183,10 +183,10 @@ describe("item document inspection", () => {
       body: new ReadableStream<Uint8Array>(),
     })).rejects.toMatchObject({ code: "document_malware_detected" });
 
-    const scanCalls = warnSpy.mock.calls.filter(([event]) => event === "document.scan");
+    const scanCalls = warnSpy.mock.calls.filter(([event]) => event.event === "document.scan");
     expect(scanCalls).toHaveLength(1);
-    expect(scanCalls[0][1]).toMatchObject({ document: OPERATION_ID, outcome: "infected", reason: "malware_detected" });
-    expect(JSON.stringify(scanCalls[0][1])).not.toContain("Eicar");
+    expect(scanCalls[0][0]).toMatchObject({ state: "exhausted", reason: "malware_detected" });
+    expect(JSON.stringify(scanCalls[0][0])).not.toContain("Eicar");
   });
 
   it("degrades parser failures to filename-only suggestions and zeroes extracted bytes", async () => {
@@ -450,9 +450,9 @@ describe("item document inspection", () => {
       reason: "prohibited_content",
     });
 
-    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event === "document.inspection");
+    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.inspection");
     expect(inspectionCalls).toHaveLength(1);
-    expect(inspectionCalls[0][1]).toEqual({ outcome: "rejected", reason: "prohibited_content" });
+    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "exhausted", reason: "prohibited_content", action: "check_parser", impact: "document_processing_blocked" });
     expect(JSON.stringify(inspectionCalls)).not.toContain(OPERATION_ID);
     expect(JSON.stringify(inspectionCalls)).not.toContain("embedded-file");
 
