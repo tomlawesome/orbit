@@ -19,6 +19,8 @@ const validPdf = syntheticPdf();
 const validPng = syntheticPng();
 const validJpeg = syntheticJpeg();
 const chromiumPdf = readFileSync(new URL("../../../tests/support/fixtures/chromium-synthetic.pdf", import.meta.url));
+const qpdfObjectStreamPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-object-stream.pdf", import.meta.url));
+const qpdfIncrementalPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-incremental-3.pdf", import.meta.url));
 
 function forgedPdfXref(): Buffer {
   let value = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
@@ -41,12 +43,20 @@ describe("structural document classification", () => {
   it.each([
     [validPdf, "application/pdf", "supported_structure"],
     [syntheticPdfWithXrefStream(), "application/pdf", "supported_structure"],
-    [chromiumPdf, "application/pdf", "supported_structure"],
     [validJpeg, "image/jpeg", "supported_structure"],
     [validPng, "image/png", "supported_structure"],
   ] as const)("classifies supported %s as supported_structure", async (bytes, mediaType, expected) => {
     await expect(classifyDocumentStructure(bytes, mediaType)).resolves.toBe(expected);
     await expect(validateSupportedDocumentStructure(bytes, mediaType)).resolves.toBe(true);
+  });
+
+  it.each([
+    ["Chromium PDF producer", chromiumPdf],
+    ["qpdf object and xref streams", qpdfObjectStreamPdf],
+    ["qpdf incremental update", qpdfIncrementalPdf],
+  ] as const)("accepts independent producer fixture: %s", async (_name, bytes) => {
+    await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
+    await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
   });
 
   it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {

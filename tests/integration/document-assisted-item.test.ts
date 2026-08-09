@@ -6,7 +6,7 @@ import { auditLog, documents, items } from "@/db/schema";
 import { requestForSession, createIntegrationFixture } from "./support/fixtures";
 import { readFileSync } from "node:fs";
 
-const generatedPdf = readFileSync(new URL("../support/fixtures/chromium-synthetic.pdf", import.meta.url));
+const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-object-stream.pdf", import.meta.url));
 
 function context(householdId: string) {
   return { params: Promise.resolve({ householdId }) };
@@ -25,10 +25,10 @@ describe("document-assisted item inspection boundary", () => {
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("safe-policy.pdf"),
-        "x-orbit-declared-bytes": String(generatedPdf.length),
+        "x-orbit-declared-bytes": String(qpdfObjectStreamPdf.length),
         "content-type": "application/pdf",
       },
-      body: new Uint8Array(generatedPdf),
+      body: new Uint8Array(qpdfObjectStreamPdf),
     }), context(fixture.household.id));
 
     expect(response.status).toBe(200);
@@ -89,9 +89,9 @@ describe("document-assisted item inspection boundary", () => {
       method: "POST",
       headers: {
         "x-orbit-filename": encodeURIComponent("private-policy.pdf"),
-        "x-orbit-declared-bytes": String(generatedPdf.length),
+        "x-orbit-declared-bytes": String(qpdfObjectStreamPdf.length),
       },
-      body: new Uint8Array(generatedPdf),
+      body: new Uint8Array(qpdfObjectStreamPdf),
     }), context(fixture.household.id));
 
     expect(response.status).toBe(404);
