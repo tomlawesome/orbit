@@ -110,15 +110,51 @@ export async function reportScannerReadiness(): Promise<void> {
 }
 
 export async function registerNode(): Promise<void> {
-  void reportAuthConfigurationReadiness().catch(() => undefined);
+  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }] = await Promise.all([
+    import("@/lib/startup-config"),
+    import("@/db"),
+    import("@/db/migration-integrity"),
+    import("@/lib/logger"),
+  ]);
+
+  try {
+    validateStartupConfiguration();
+  } catch (error) {
+    const issues = error instanceof StartupConfigurationError ? error.issues : [];
+    log.error("startup.configuration", {
+      state: "invalid",
+      issues: issues.map((issue) => `${issue.field}:${issue.code}`).join(","),
+    });
+    throw new Error("configuration_invalid");
+  }
+
+  await reportAuthConfigurationReadiness();
 
   if (process.env.MIGRATE_ON_START === "true") {
     const [{ migrate }, { getDb }] = await Promise.all([
       import("drizzle-orm/postgres-js/migrator"),
       import("@/db"),
     ]);
-
-    await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
+    try {
+      const migrationsFolder = process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
+      await verifyMigrationIntegrity(getDatabaseClient(), migrationsFolder);
+    } catch (error) {
+      const code = error instanceof MigrationIntegrityError ? error.code : "migration_integrity";
+      log.error("startup.migration", { state: "invalid", code });
+      throw new Error(code);
+    }
+    try {
+      await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
+    } catch {
+      log.error("startup.migration", { state: "invalid", code: "migration_failed" });
+      throw new Error("migration_failed");
+    }
+    try {
+      await verifyMigrationJournalComplete(getDatabaseClient(), process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle");
+    } catch {
+      log.error("startup.migration", { state: "invalid", code: "migration_integrity" });
+      throw new Error("migration_integrity");
+    }
   }
 
   if (process.env.WORKER_ENABLED === "true") {

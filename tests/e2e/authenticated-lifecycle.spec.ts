@@ -10,6 +10,11 @@ async function signIn(page: Page, identity: string) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
+async function openDesktopSettings(page: Page) {
+  await page.getByRole("button", { name: "Open account menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+}
+
 async function clickWithConfirmation(page: Page, click: () => Promise<void>) {
   let accepted: Promise<void> | undefined;
   const handleDialog = (dialog: Dialog) => {
@@ -248,7 +253,7 @@ test.describe("authenticated household lifecycle", () => {
       await signIn(memberPage, member);
       await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
 
-      await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await openDesktopSettings(page);
       await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("link", { name: "Members", exact: true }).click();
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
@@ -258,8 +263,12 @@ test.describe("authenticated household lifecycle", () => {
 
       await memberPage.reload();
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
-      await memberPage.getByRole("button", { name: "Open personalisation settings" }).click();
+      await memberPage.getByRole("button", { name: "Open account menu" }).click();
+      await expect(memberPage.getByRole("menuitem", { name: "Settings", exact: true })).toHaveCount(1);
+      await expect(memberPage.getByRole("menuitem", { name: "Sign out", exact: true })).toHaveCount(1);
       await expect(memberPage.getByRole("link", { name: "Administration" })).toHaveCount(0);
+      await expect(memberPage.getByRole("menuitem", { name: "Administration", exact: true })).toHaveCount(0);
+      await memberPage.getByRole("menuitem", { name: "Settings", exact: true }).click();
       await expect(memberPage.getByRole("link", { name: "Household", exact: true })).toHaveCount(0);
       await expect(memberPage.getByRole("region", { name: "Household", exact: true })).toHaveCount(0);
       await expect(memberPage.getByRole("link", { name: "Sections", exact: true })).toHaveCount(0);
@@ -300,7 +309,7 @@ test.describe("authenticated household lifecycle", () => {
       // Administration is now a route, so the journey must return to the
       // workspace and reopen settings before using a settings section again.
       await page.goto("/");
-      await page.getByRole("button", { name: "Open personalisation settings" }).click();
+      await openDesktopSettings(page);
       await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("link", { name: "Household", exact: true }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
@@ -467,7 +476,7 @@ test.describe("authenticated household lifecycle", () => {
             await openMobileNavigationIfNeeded(targetPage);
             await targetPage.getByRole("button", { name: "Personalise", exact: true }).click();
           } else {
-            await targetPage.getByRole("button", { name: "Open personalisation settings" }).click();
+            await openDesktopSettings(targetPage);
           }
         }
         await expect(targetPage).toHaveURL(/\/settings(?:#settings-members)?$/);
