@@ -185,6 +185,7 @@ describe(".env-orbit.example", () => {
     const activeKeys = [...environmentExampleSource.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1]);
 
     expect(activeKeys).toEqual([
+      "ORBIT_CONFIG_SCHEMA_VERSION",
       "APP_URL",
       "OIDC_ISSUER",
       "OIDC_CLIENT_ID",

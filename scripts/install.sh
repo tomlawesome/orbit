@@ -443,11 +443,13 @@ readonly deployment_assets=(
   ".env-orbit.example"
   "config/tika-config.xml"
   "scripts/configure.sh"
+  "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
 )
 readonly deployment_scripts=(
   "scripts/configure.sh"
+  "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
 )
@@ -541,6 +543,15 @@ done
 preflight_final_paths
 prepare_rollback_area
 file_transaction_active=1
+
+# Validate and, for a legacy v0 file, add only the schema marker before any
+# fetched asset or configure.sh mutation. The transaction above owns rollback.
+if [[ -e "$environment_file" ]]; then
+  bash "$staging_dir/scripts/configuration.sh" --preflight --file "$environment_file" >/dev/null ||
+    fail "Configuration preflight failed; restoring the previous deployment."
+  bash "$staging_dir/scripts/configuration.sh" --migrate --transaction --file "$environment_file" >/dev/null ||
+    fail "Configuration migration failed; restoring the previous deployment."
+fi
 
 for asset_dir in "${asset_directories[@]}"; do
   if [[ -e "$asset_dir" || -L "$asset_dir" ]]; then
