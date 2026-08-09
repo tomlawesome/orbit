@@ -14,6 +14,17 @@ temporary_file=""
 terminal_fd=""
 terminal_echo_disabled=0
 
+run_configuration_preflight() {
+  [[ -f scripts/configuration.sh ]] || return 0
+  [[ ! -e "$environment_file" ]] && return 0
+  local preflight_status=0 preflight_output=""
+  preflight_output="$(bash scripts/configuration.sh --preflight --file "$environment_file" 2>/dev/null)" || preflight_status=$?
+  [[ "$preflight_status" == 0 ]] || fail "Configuration preflight failed; restoring the previous deployment."
+  if grep -q '^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$' <<< "$preflight_output"; then
+    fail "configuration_migration_required"
+  fi
+}
+
 fail() {
   printf 'Orbit configuration: %s\n' "$*" >&2
   exit 1
@@ -782,6 +793,7 @@ case "${1:-}" in
 esac
 
 ensure_environment_file
+run_configuration_preflight
 persist_orbit_image
 ensure_secrets_directory
 ensure_secret_file "$secrets_directory/session-secret"

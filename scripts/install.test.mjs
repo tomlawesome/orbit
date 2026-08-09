@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 // network access, Git or a TTY.
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
+const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
 
 const repository = "example/orbit-fixture";
 const registry = "fake-registry.example";
@@ -44,6 +45,7 @@ const deploymentAssets = [
   ".env-orbit.example",
   "config/tika-config.xml",
   "scripts/configure.sh",
+  "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
 ];
@@ -259,6 +261,17 @@ const fakeCurlScript = [
   "printf 'BACKUP_INVOKED\\n'",
   "SCRIPT",
   "    ;;",
+  "  scripts/configuration.sh)",
+  '    if [[ "${FAKE_USE_REAL_CONFIGURATION:-0}" == "1" ]]; then',
+  '      cp -- "${FAKE_CONFIGURATION_SCRIPT_PATH:?}" "$output"',
+  "    else",
+  "      cat <<'SCRIPT' > \"$output\"",
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  "exit 0",
+  "SCRIPT",
+  "    fi",
+  "    ;;",
   "  scripts/restore.sh)",
   "    cat <<'SCRIPT' > \"$output\"",
   "#!/usr/bin/env bash",
@@ -360,6 +373,21 @@ function makeFullExistingDeployment(targetDir) {
 
 function makeLegacyExistingDeployment(targetDir) {
   makeFullExistingDeployment(targetDir);
+  writeFileSync(
+    join(targetDir, ".env-orbit"),
+    [
+      "APP_URL=https://orbit.install-test.internal",
+      `ORBIT_IMAGE=${resolvedReference}`,
+      "OIDC_ISSUER=https://auth.install-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=existing-install-client",
+      "OIDC_CLIENT_SECRET=legacy-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.install-test.internal/api/auth/callback",
+      "POSTGRES_DB=orbit",
+      "POSTGRES_USER=orbit",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
   unlinkSync(join(targetDir, "scripts", "backup.sh"));
   unlinkSync(join(targetDir, "scripts", "restore.sh"));
 }
@@ -448,6 +476,8 @@ function runInstall(targetDir, envOverrides = {}) {
       FAKE_DOCKER_REVISION: revision,
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
+      FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
+      FAKE_USE_REAL_CONFIGURATION: "0",
       FAKE_CONFIGURE_READY: "1",
       ...envOverrides,
     },
@@ -629,6 +659,7 @@ describe("install.sh", () => {
     expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
     expect(result.calls).toContain(`scripts/backup.sh`);
@@ -723,7 +754,9 @@ describe("install.sh", () => {
     const result = runInstall(targetDir);
 
     expect(result.status).toBe(0);
-    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("EXISTING_ENV=1");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      "APP_URL=https://orbit.install-test.internal",
+    );
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
       `ORBIT_IMAGE=${resolvedReference}`,
     );
@@ -732,6 +765,49 @@ describe("install.sh", () => {
     );
     expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("migrates a legacy configuration through the installer and remains idempotent", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const environmentPath = join(targetDir, ".env-orbit");
+    const before = readFileSync(environmentPath, "utf8");
+    const expected = `${before}ORBIT_CONFIG_SCHEMA_VERSION=1\n`;
+
+    const result = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
+
+    expect(result.status).toBe(0);
+    expect(statSync(environmentPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(environmentPath, "utf8") === expected).toBe(true);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+
+    const rerun = runInstall(targetDir, { FAKE_USE_REAL_CONFIGURATION: "1" });
+
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(environmentPath, "utf8") === expected).toBe(true);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("restores the exact legacy configuration when a later transaction step fails", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+    const environmentPath = join(targetDir, ".env-orbit");
+    const before = readFileSync(environmentPath, "utf8");
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_USE_REAL_CONFIGURATION: "1",
+      FAKE_CONFIGURE_FAIL: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(environmentPath, "utf8") === before).toBe(true);
+    expect(statSync(environmentPath).mode & 0o777).toBe(0o600);
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
@@ -837,6 +913,7 @@ describe("install.sh", () => {
     expect(result.stderr).toContain("restoring the previous deployment");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
@@ -852,6 +929,7 @@ describe("install.sh", () => {
     expect(result.stderr).toContain("Configuration failed");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
