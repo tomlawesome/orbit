@@ -1,74 +1,133 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatRecord, getLogLevel, log, resetLogLevelForTests } from "./logger";
+import {
+  formatJsonRecord,
+  formatRecord,
+  getLogFormat,
+  getLogLevel,
+  log,
+  resetLoggerForTests,
+  setLoggerClockForTests,
+  shouldUseColor,
+} from "./logger";
 
 afterEach(() => {
-  resetLogLevelForTests();
+  resetLoggerForTests();
   vi.restoreAllMocks();
   delete process.env.ORBIT_LOG_LEVEL;
+  delete process.env.ORBIT_LOG_FORMAT;
+  delete process.env.NO_COLOR;
 });
 
-const environment = (level?: string): NodeJS.ProcessEnv =>
-  level === undefined ? { NODE_ENV: "test" } : { NODE_ENV: "test", ORBIT_LOG_LEVEL: level };
+const environment = (level?: string, format?: string): NodeJS.ProcessEnv => ({
+  NODE_ENV: "test",
+  ...(level === undefined ? {} : { ORBIT_LOG_LEVEL: level }),
+  ...(format === undefined ? {} : { ORBIT_LOG_FORMAT: format }),
+});
 
-describe("log level configuration", () => {
-  it("defaults to info when unset", () => {
+const event = {
+  event: "document.scan" as const,
+  state: "degraded" as const,
+  reason: "scanner_timeout" as const,
+  action: "check_scanner" as const,
+  impact: "document_upload_blocked" as const,
+  durationMs: 12,
+};
+
+describe("log configuration", () => {
+  it("keeps the existing level contract and defaults safely", () => {
     expect(getLogLevel(environment())).toBe("info");
-  });
-
-  it("accepts every declared level", () => {
     expect(getLogLevel(environment("debug"))).toBe("debug");
-    expect(getLogLevel(environment("error"))).toBe("error");
-  });
-
-  it("falls back to info rather than failing on an invalid level", () => {
     expect(getLogLevel(environment("verbose"))).toBe("info");
   });
 
-  it("suppresses records below the configured level", () => {
+  it("supports the documented machine format without changing level semantics", () => {
+    expect(getLogFormat(environment())).toBe("text");
+    expect(getLogFormat(environment(undefined, "json"))).toBe("json");
+    expect(getLogFormat(environment(undefined, "yaml"))).toBe("text");
+    expect(getLogLevel(environment("debug", "yaml"))).toBe("debug");
+  });
+
+  it("suppresses records below the configured level and deduplicates transitions", () => {
     process.env.ORBIT_LOG_LEVEL = "warn";
     const output = vi.spyOn(console, "log").mockImplementation(() => {});
     const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
-    log.info("document.lifecycle", { document: "a" });
-    log.warn("document.scan", { document: "a" });
+    log.info(event);
+    log.warn({ ...event, state: "retrying", reason: "retry_scheduled", action: "retry" });
+    log.warn({ ...event, state: "retrying", reason: "retry_scheduled", action: "retry" });
     expect(output).not.toHaveBeenCalled();
     expect(warnings).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-emits a persistent transition after the bounded cooldown", () => {
+    process.env.ORBIT_LOG_LEVEL = "warn";
+    let now = 0;
+    setLoggerClockForTests(() => now);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const retrying = { ...event, state: "retrying" as const, reason: "retry_scheduled" as const, action: "retry" as const };
+
+    log.warn(retrying);
+    log.warn(retrying);
+    expect(warnings).toHaveBeenCalledTimes(1);
+
+    now = 60_000;
+    log.warn(retrying);
+    expect(warnings).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("record formatting", () => {
-  it("renders one line with the level, event and scalar fields", () => {
-    const record = formatRecord("info", "document.lifecycle", { document: "abc", state: "scanning", ms: 12 });
-    expect(record).toContain("INFO orbit document.lifecycle");
-    expect(record).toContain("document=abc");
-    expect(record).toContain("state=scanning");
-    expect(record).toContain("ms=12");
+  it("renders a bounded one-line text record with stable fields", () => {
+    process.env.ORBIT_LOG_FORMAT = "text";
+    const record = formatRecord("info", event, "2026-01-01T00:00:00.000Z");
+    expect(record).toContain("INFO orbit scanner document.scan");
+    expect(record).toContain("state=degraded");
+    expect(record).toContain("reason=scanner_timeout");
+    expect(record).toContain("action=check_scanner");
+    expect(record).toContain("impact=document_upload_blocked");
+    expect(record).toContain("duration_ms=12");
     expect(record.split("\n")).toHaveLength(1);
   });
 
-  it("renders absent and non-finite values as a placeholder", () => {
-    const record = formatRecord("info", "e", { a: null, b: undefined, c: Number.NaN, d: "   " });
-    expect(record).toContain("a=-");
-    expect(record).toContain("b=-");
-    expect(record).toContain("c=-");
-    expect(record).toContain("d=-");
-  });
-
-  it("keeps a hostile value from forging additional records", () => {
-    const record = formatRecord("info", "document.scan", {
-      reason: "line one\nERROR orbit document.scan outcome=clean\rinjected\ttab",
+  it("renders JSON with the same semantic record as text", () => {
+    process.env.ORBIT_LOG_FORMAT = "json";
+    const json = JSON.parse(formatJsonRecord("warn", event, "2026-01-01T00:00:00.000Z")) as Record<string, unknown>;
+    expect(json).toEqual({
+      timestamp: "2026-01-01T00:00:00.000Z",
+      level: "warn",
+      component: "scanner",
+      event: "document.scan",
+      state: "degraded",
+      reason: "scanner_timeout",
+      action: "check_scanner",
+      impact: "document_upload_blocked",
+      duration_ms: 12,
+      setting: null,
+      problem_code: null,
+      fallback: null,
     });
-    expect(record.split("\n")).toHaveLength(1);
+  });
+
+  it("rejects malformed event values without copying hostile input", () => {
+    const malformed = {
+      event: "document.scan\nforged",
+      state: "not-a-state",
+      reason: "private\rvalue",
+      action: "private\tvalue",
+      impact: "private value",
+    } as unknown as typeof event;
+    const record = formatRecord("error", malformed, "2026-01-01T00:00:00.000Z");
+    expect(record).not.toContain("forged");
+    expect(record).not.toContain("private");
     expect(record).not.toContain("\r");
     expect(record).not.toContain("\t");
+    expect(record.split("\n")).toHaveLength(1);
   });
 
-  it("bounds an oversized value so one record cannot flood the log", () => {
-    const record = formatRecord("info", "e", { value: "x".repeat(500) });
-    expect(record.length).toBeLessThan(300);
-    expect(record).toContain("...");
-  });
-
-  it("emits the event alone when no fields are supplied", () => {
-    expect(formatRecord("error", "document.worker")).toMatch(/ERROR orbit document\.worker$/u);
+  it("uses colour only for a real TTY and never when NO_COLOR is set", () => {
+    const tty = { isTTY: true } as NodeJS.WriteStream;
+    const redirected = { isTTY: false } as NodeJS.WriteStream;
+    expect(shouldUseColor({ NODE_ENV: "test" }, tty)).toBe(true);
+    expect(shouldUseColor({ NODE_ENV: "test", NO_COLOR: "" }, tty)).toBe(false);
+    expect(shouldUseColor({ NODE_ENV: "test" }, redirected)).toBe(false);
   });
 });

@@ -54,65 +54,74 @@ non-cacheable. A degraded optional category is actionable independently and
 does not disclose configuration values, provider identity, private content, or
 raw dependency errors.
 
-## Container log diagnostics
+## Operational log contract
 
-`ORBIT_LOG_LEVEL` selects operational verbosity: `error`, `warn`, `info` or
-`debug`. It defaults to `info`, which reports document lifecycle progress
-without debug noise. An unreadable value falls back to `info` rather than
-disabling logging.
+`ORBIT_LOG_LEVEL` remains compatible with the existing `error`, `warn`,
+`info`, and `debug` values and defaults to `info`. `ORBIT_LOG_FORMAT` is an
+optional secure control with `text` (the default) or `json`. Invalid values
+fall back to the safe default. Both formats are renders of one event model;
+they do not create separate vocabularies or fields.
 
-Records are one line each and greppable directly from `docker compose logs
-orbit-app`. They are bounded by construction: failure reasons come from fixed
-enumerations rather than provider text, and document content, extracted text,
-display names, mailbox recipients and alias material are never recorded. A
-document is identified only by its opaque identifier.
+Every record has a timestamp, level, component, event, lifecycle `state`, and
+bounded `reason`, `action`, `impact`, and `duration_ms` values. Configuration
+problem records additionally use fixed `setting`, `problem_code`, and
+`fallback` values. Text is one line with stable columns. JSON has the same
+fields and meanings. Colour is used only for a real TTY, is automatically off
+for `NO_COLOR`, non-TTY, redirected, and JSON output, and is never added to
+collected logs.
 
-To follow one document through upload:
+The lifecycle states are `starting`, `ready`, `degraded`, `retrying`,
+`recovered`, `exhausted`, `stopping`, `disabled`, `invalid`, `blocked`, and
+`completed`. Components cover application, configuration, authentication,
+database/migrations, notification and delivery, document/scanner/parser,
+mail receipt/ingestion, backup/recovery, and shutdown. Repeated identical
+transitions are deduplicated process-locally so polling and retries cannot
+flood ordinary logs.
 
-```text
-docker compose logs -f orbit-app | grep document.
-```
+Ordinary logs never contain raw exceptions, stack traces, provider responses,
+SQL, filenames, paths, hosts, URLs, recipients, tokens, user/household/
+document identifiers, message/document content, or configuration values.
+Worker catches classify the failure and continue their bounded polling loop;
+unexpected process-level startup failures remain fail-closed and are never
+silently swallowed. Database notices and launcher errors are reduced to fixed
+classifications.
 
-Expect `document.lifecycle` records progressing `quarantined`, `scanning`,
-`encrypting`, `available`, and one `document.scan` record carrying the scanner
-outcome and duration. A retryable outage instead emits a bounded
-`document.scan outcome=recoverable` record and stays in `scanning` until a
-worker obtains a clean result or the recovery retention expires.
+The relevant event groups are:
 
-A stalled or failed upload is diagnosed from the last record reached:
-
-| Last record | Meaning | Action |
+| Component | Starting/healthy path | Failure and operator action |
 | --- | --- | --- |
-| `document.scanner state=starting` | The independently starting scanner is still inside its 180-second initialisation window | Allow the stack to finish booting; uploads remain temporarily blocked |
-| `document.scanner state=unreachable` | The scanner did not answer before its bounded startup window expired | Check that `orbit-clamav` is running and healthy; uploads stay blocked until it is reachable |
-| `document.lifecycle state=scanning` with no following record | The scanner did not answer within `CLAMAV_TIMEOUT_MS` | Check `orbit-clamav` health |
-| `document.scan outcome=error reason=unavailable` | The scanner refused or dropped the connection; the validated upload is recoverable for 24 hours | Check `orbit-clamav`; the worker retries without re-upload |
-| `document.scan outcome=recoverable` | Encrypted, non-downloadable scanner-recovery stage is waiting for a bounded retry | Check the retry count and expiry in document health; use the document job only when automatic attempts are exhausted |
-| `document.scan outcome=infected` | Malware was detected; the document is rejected by design | No action |
-| `document.worker outcome=cycle_failed` | A maintenance cycle failed | Consult `/api/admin/documents/health` for the bounded failure code |
+| Application/configuration | `application.startup` and `configuration.problem` | invalid or optional settings are blocked/degraded with safe fallback and a fixed remediation |
+| Authentication | `auth.configuration`, `auth.provider` | discovery/token/callback failures block sign-in without provider detail |
+| Database/migrations | `database.connection`, `database.migration` | notices, unavailable connections, and migration integrity failures remain bounded |
+| Document/scanner/parser | `document.lifecycle`, `document.scan`, `document.parse`, `document.worker` | required scanning fails closed; retries, recovery, and exhaustion identify the safe action |
+| Notifications/delivery | `notification.worker`, `delivery.smtp`, `delivery.push` | provider failures are categorized and retried or exhausted without recipients |
+| Mail receipt/ingestion | `imap.receipt`, `imap.ingestion` | preflight and worker failures show bounded retry/degraded state |
+| Backup/recovery/shutdown | `backup.operation`, `recovery.operation`, `shutdown.signal` | scripts and runtime operators use fixed recovery/stopping classifications |
 
-Orbit probes the scanner at startup when `DOCUMENT_SCAN_MODE` is `required`.
-If the first probe does not answer, Orbit records `document.scanner` as
-`starting` and retries in the background for the scanner's bounded 180-second
-initialisation window. A successful retry records `ready`; only exhaustion of
-that window records `unreachable` as an error. The probes never stop the
-process: document operations fail closed while the rest of the application
-stays available. An upload blocked this way returns HTTP `503` with either
-`document_scanner_unreachable` or `document_scanner_failed`, which distinguish
-a scanner that cannot be contacted from one that answered with a failure.
-Neither message nor startup record discloses the configured host, port or
-provider text.
+Backup and restore remain explicit operator actions. Their CLI output is
+static and content-free; the application event vocabulary reserves the same
+bounded backup/recovery states for integrations without logging archive paths
+or private data.
 
-Scanning is fail-closed while `DOCUMENT_SCAN_MODE` is `required`, so an
-unavailable scanner never stores an available or unscanned document. A
-retryable outage stores only authenticated-encrypted, non-downloadable stage
-bytes and returns `202`; the generic scanner-reported error still returns
-`503` without durable stage. Automatic recovery is limited to five attempts at
-60s, 2m, 4m, 8m and 15m delays and expires after the immutable 24-hour
-retention window.
-`orbit-clamav` has a 180-second health start period and downloads signature
-databases on first run, so uploads attempted during initial startup fail until
-it becomes healthy.
+## Logs, audit, health, and administrator diagnostics
+
+Logs answer “what operational transition occurred?” and are ephemeral. The
+audit trail answers “what security or data action was accepted?” and persists
+the existing safe action labels. Public health remains the unchanged,
+content-free required-database readiness contract. The administrator-only
+operations surface answers “what is the current bounded state and what safe
+operator action is available?” It includes the in-memory configuration problem
+registry: fixed code, severity, setting category, safe fallback, and
+remediation only. It is exposed through the existing administrator-protected
+operations route; signed-out and non-administrator callers receive the same
+authorization failure and cannot read diagnostics.
+
+Roll out with the default text format and the existing level. Enable JSON only
+for a controlled collector that handles the same privacy contract. To roll
+back, unset `ORBIT_LOG_FORMAT` or restore `text`; no database migration or
+external telemetry service is involved. If a new classification is needed,
+add it to the bounded model and tests before use rather than logging arbitrary
+values.
 
 ## Corrective actions
 
