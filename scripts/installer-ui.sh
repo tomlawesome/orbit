@@ -6,9 +6,10 @@
 
 installer_ui_mode="plain"
 installer_ui_started_at=0
+installer_ui_simulation=0
 
 installer_ui_init() {
-  local requested_mode=""
+  local requested_mode="" requested_simulation=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -17,6 +18,9 @@ installer_ui_init() {
         ;;
       --tty)
         requested_mode="tty"
+        ;;
+      --simulation)
+        requested_simulation=1
         ;;
       *)
         return 2
@@ -44,6 +48,34 @@ installer_ui_init() {
 
   installer_ui_mode="$requested_mode"
   installer_ui_started_at="$SECONDS"
+  installer_ui_simulation="$requested_simulation"
+}
+
+# Save and restore only the trapped-signal state a caller actually had, so a
+# widget's temporary INT/TERM/HUP handling never silently replaces a caller's
+# own trap with the default disposition.
+installer_ui_save_traps() {
+  installer_ui_saved_trap_int="$(trap -p INT)"
+  installer_ui_saved_trap_term="$(trap -p TERM)"
+  installer_ui_saved_trap_hup="$(trap -p HUP)"
+}
+
+installer_ui_restore_traps() {
+  if [[ -n "$installer_ui_saved_trap_int" ]]; then
+    eval "$installer_ui_saved_trap_int"
+  else
+    trap - INT
+  fi
+  if [[ -n "$installer_ui_saved_trap_term" ]]; then
+    eval "$installer_ui_saved_trap_term"
+  else
+    trap - TERM
+  fi
+  if [[ -n "$installer_ui_saved_trap_hup" ]]; then
+    eval "$installer_ui_saved_trap_hup"
+  else
+    trap - HUP
+  fi
 }
 
 installer_ui_resume_clock() {
@@ -103,7 +135,8 @@ installer_ui_emit() {
   fi
 
   if [[ "$installer_ui_mode" == tty ]]; then
-    local state_color='\033[33m' width
+    local state_color='\033[33m' width simulation_prefix=""
+    [[ "$installer_ui_simulation" != 1 ]] || simulation_prefix='[SIMULATION] '
     case "$state" in
       waiting|starting|running) state_color='\033[36m' ;;
       healthy|completed) state_color='\033[32m' ;;
@@ -112,45 +145,54 @@ installer_ui_emit() {
     esac
     width="$(installer_ui_terminal_width 1)"
     if ((width < 60)); then
-      printf '[%s] %s %b%s\033[0m %s\n' \
-        "$elapsed" "$component" "$state_color" "$state" "$reason"
+      printf '%s[%s] %s %b%s\033[0m %s\n' \
+        "$simulation_prefix" "$elapsed" "$component" "$state_color" "$state" "$reason"
     else
-      printf '[%s] %-13s %-12s %b%-9s\033[0m %s / %s\n' \
-        "$elapsed" "$phase" "$component" "$state_color" "$state" "$reason" "$action"
+      printf '%s[%s] %-13s %-12s %b%-9s\033[0m %s / %s\n' \
+        "$simulation_prefix" "$elapsed" "$phase" "$component" "$state_color" "$state" "$reason" "$action"
     fi
+  elif [[ "$installer_ui_simulation" == 1 ]]; then
+    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s simulation=true\n' \
+      "$phase" "$component" "$state" "$reason" "$action" "$elapsed"
   else
     printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%s\n' \
       "$phase" "$component" "$state" "$reason" "$action" "$elapsed"
   fi
 }
 
+# Writes the decoded key name into the caller-named variable $2 rather than
+# printing it for command substitution. A command substitution would fork a
+# subshell per keystroke; a signal delivered to the calling process while that
+# child is blocked in its own read would not interrupt it, so a caller's trap
+# could not respond until the forked read happened to finish on its own. A
+# direct call keeps every blocking read in the signalled process itself.
 installer_ui_read_key() {
-  local terminal_fd="$1" key next read_status=0
+  local terminal_fd="$1" outvar="$2" raw_key next read_status=0
 
-  IFS= read -r -s -n 1 -t 0.2 -u "$terminal_fd" key || read_status=$?
+  IFS= read -r -s -n 1 -t 0.2 -u "$terminal_fd" raw_key || read_status=$?
   if [[ "$read_status" != 0 ]]; then
     if ((read_status > 128)); then
-      printf 'timeout'
+      printf -v "$outvar" '%s' 'timeout'
       return 0
     fi
     return "$read_status"
   fi
-  if [[ -z "$key" ]]; then
-    printf 'enter'
+  if [[ -z "$raw_key" ]]; then
+    printf -v "$outvar" '%s' 'enter'
     return 0
   fi
-  if [[ "$key" != $'\033' ]]; then
-    case "$key" in
+  if [[ "$raw_key" != $'\033' ]]; then
+    case "$raw_key" in
       $'\004') return 1 ;;
-      $'\177'|$'\b') printf 'backspace' ;;
-      [[:print:]]) printf 'char:%s' "$key" ;;
-      *) printf 'ignore' ;;
+      $'\177'|$'\b') printf -v "$outvar" '%s' 'backspace' ;;
+      [[:print:]]) printf -v "$outvar" 'char:%s' "$raw_key" ;;
+      *) printf -v "$outvar" '%s' 'ignore' ;;
     esac
     return 0
   fi
 
   if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" next; then
-    printf 'escape'
+    printf -v "$outvar" '%s' 'escape'
     return 0
   fi
   if [[ "$next" == "]" ]]; then
@@ -160,23 +202,23 @@ installer_ui_read_key() {
     local osc_byte="" osc_index
     for ((osc_index = 0; osc_index < 256; osc_index++)); do
       if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" osc_byte; then
-        printf 'ignore'
+        printf -v "$outvar" '%s' 'ignore'
         return 0
       fi
       case "$osc_byte" in
-        $'\a') printf 'ignore'; return 0 ;;
+        $'\a') printf -v "$outvar" '%s' 'ignore'; return 0 ;;
         $'\033')
           if IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" osc_byte &&
             [[ "$osc_byte" == "\\" ]]; then
-            printf 'ignore'
+            printf -v "$outvar" '%s' 'ignore'
           else
-            printf 'ignore'
+            printf -v "$outvar" '%s' 'ignore'
           fi
           return 0
           ;;
       esac
     done
-    printf 'ignore'
+    printf -v "$outvar" '%s' 'ignore'
     return 0
   fi
 
@@ -188,7 +230,7 @@ installer_ui_read_key() {
     local prefix="$next" sequence="" final="" sequence_byte="" sequence_index
     for ((sequence_index = 0; sequence_index < 32; sequence_index++)); do
       if ! IFS= read -r -s -n 1 -t 0.08 -u "$terminal_fd" sequence_byte; then
-        printf 'ignore'
+        printf -v "$outvar" '%s' 'ignore'
         return 0
       fi
       if [[ "$sequence_byte" == [@-~] ]]; then
@@ -196,50 +238,55 @@ installer_ui_read_key() {
         break
       fi
       [[ "$sequence_byte" != $'\033' ]] || {
-        printf 'ignore'
+        printf -v "$outvar" '%s' 'ignore'
         return 0
       }
       sequence+="$sequence_byte"
     done
     [[ -n "$final" ]] || {
-      printf 'ignore'
+      printf -v "$outvar" '%s' 'ignore'
       return 0
     }
 
     if [[ "$prefix" == "O" && -z "$sequence" ]]; then
       case "$final" in
-        A) printf 'up'; return 0 ;;
-        B) printf 'down'; return 0 ;;
-        C) printf 'right'; return 0 ;;
-        D) printf 'left'; return 0 ;;
-        H) printf 'home'; return 0 ;;
-        F) printf 'end'; return 0 ;;
+        A) printf -v "$outvar" '%s' 'up'; return 0 ;;
+        B) printf -v "$outvar" '%s' 'down'; return 0 ;;
+        C) printf -v "$outvar" '%s' 'right'; return 0 ;;
+        D) printf -v "$outvar" '%s' 'left'; return 0 ;;
+        H) printf -v "$outvar" '%s' 'home'; return 0 ;;
+        F) printf -v "$outvar" '%s' 'end'; return 0 ;;
       esac
     fi
 
     case "$sequence$final" in
-      A) printf 'up' ;;
-      B) printf 'down' ;;
-      C) printf 'right' ;;
-      D) printf 'left' ;;
-      H) printf 'home' ;;
-      F) printf 'end' ;;
-      1~|7~) printf 'home' ;;
-      3~) printf 'delete' ;;
-      4~|8~) printf 'end' ;;
-      200~) printf 'paste-start' ;;
-      201~) printf 'paste-end' ;;
-      *) printf 'ignore' ;;
+      A) printf -v "$outvar" '%s' 'up' ;;
+      B) printf -v "$outvar" '%s' 'down' ;;
+      C) printf -v "$outvar" '%s' 'right' ;;
+      D) printf -v "$outvar" '%s' 'left' ;;
+      H) printf -v "$outvar" '%s' 'home' ;;
+      F) printf -v "$outvar" '%s' 'end' ;;
+      1~|7~) printf -v "$outvar" '%s' 'home' ;;
+      3~) printf -v "$outvar" '%s' 'delete' ;;
+      4~|8~) printf -v "$outvar" '%s' 'end' ;;
+      200~) printf -v "$outvar" '%s' 'paste-start' ;;
+      201~) printf -v "$outvar" '%s' 'paste-end' ;;
+      *) printf -v "$outvar" '%s' 'ignore' ;;
     esac
     return 0
   fi
 
-  printf 'ignore'
+  printf -v "$outvar" '%s' 'ignore'
   return 0
 }
 
+# Writes the pasted payload into the caller-named variable $3; see
+# installer_ui_read_key for why this avoids a per-read command substitution.
+# Reads "${interrupted:-0}" from the caller's frame by design: a direct call
+# (not a subshell) makes the caller's INT/TERM/HUP trap update that same
+# variable while this loop is still blocked in a read.
 installer_ui_read_paste() {
-  local terminal_fd="$1" maximum="$2" byte payload="" marker=$'\033[201~' read_status=0 idle_timeouts=0
+  local terminal_fd="$1" maximum="$2" outvar="$3" byte payload="" marker=$'\033[201~' read_status=0 idle_timeouts=0
   while true; do
     read_status=0
     IFS= read -r -s -n 1 -t 0.2 -u "$terminal_fd" byte || read_status=$?
@@ -264,7 +311,7 @@ installer_ui_read_paste() {
   done
   ((${#payload} <= maximum)) || return 2
   [[ "$payload" != *$'\033'* && ! "$payload" =~ [[:cntrl:]] ]] || return 2
-  printf '%s' "$payload"
+  printf -v "$outvar" '%s' "$payload"
 }
 
 installer_ui_terminal_width() {
@@ -323,25 +370,52 @@ installer_ui_select() {
 
   printf '%s\n\n' "$prompt" >&"$terminal_fd"
   if [[ -t "$terminal_fd" && "${TERM:-}" != dumb ]]; then
+    # Single-key navigation, including a lone Escape, is only delivered
+    # portably in noncanonical mode: canonical mode buffers input until a
+    # line terminator, so a bare Escape would otherwise sit unread until
+    # Enter (or EOF) arrived. Save and restore the caller's exact prior mode
+    # and any prior INT/TERM/HUP trap across every exit path.
+    local saved_state interrupted=0 status=0 restore_status=0 chosen=0
+    saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
+    stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || {
+      stty "$saved_state" <&"$terminal_fd" 2>/dev/null
+      return 1
+    }
+    installer_ui_save_traps
+    trap 'interrupted=1' INT TERM HUP
+
     installer_ui_menu_render "$terminal_fd" "$selected" "${items[@]}"
     while true; do
-      key="$(installer_ui_read_key "$terminal_fd")" || return 1
+      installer_ui_read_key "$terminal_fd" key || {
+        status=1
+        break
+      }
       case "$key" in
+        timeout)
+          if [[ "$interrupted" == 1 ]]; then
+            status=130
+            break
+          fi
+          continue
+          ;;
         up) selected=$(((selected + count - 1) % count)) ;;
         down) selected=$(((selected + 1) % count)) ;;
         enter)
-          printf '%s' "${items[selected * 2]}"
-          return 0
+          chosen=1
+          break
           ;;
-        escape) return 130 ;;
+        escape)
+          status=130
+          break
+          ;;
         char:[1-9])
           index="${key#char:}"
           if ((index >= 1 && index <= count)); then
-            printf '%s' "${items[(index - 1) * 2]}"
-            return 0
+            selected=$((index - 1))
+            chosen=1
+            break
           fi
           ;;
-        timeout) continue ;;
         *) continue ;;
       esac
       printf '\033[%dA' "$count" >&"$terminal_fd"
@@ -355,6 +429,17 @@ installer_ui_select() {
         fi
       done
     done
+
+    stty "$saved_state" <&"$terminal_fd" 2>/dev/null || restore_status=1
+    installer_ui_restore_traps
+    [[ "$restore_status" == 0 ]] || return 1
+    [[ "$interrupted" == 0 ]] || return 130
+    [[ "$status" == 0 ]] || return "$status"
+    if [[ "$chosen" == 1 ]]; then
+      printf '%s' "${items[selected * 2]}"
+      return 0
+    fi
+    return 1
   fi
 
   installer_ui_menu_render "$terminal_fd" "$selected" "${items[@]}"
@@ -382,10 +467,11 @@ installer_ui_read_value() {
 
   saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
   stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || return 1
+  installer_ui_save_traps
   trap 'interrupted=1' INT TERM HUP
   printf '%s' "$prompt" >&"$terminal_fd"
   while true; do
-    key="$(installer_ui_read_key "$terminal_fd")" || {
+    installer_ui_read_key "$terminal_fd" key || {
       status=1
       break
     }
@@ -418,7 +504,7 @@ installer_ui_read_value() {
         fi
         ;;
       paste-start)
-        insert="$(installer_ui_read_paste "$terminal_fd" "$((maximum - ${#value}))")" || {
+        installer_ui_read_paste "$terminal_fd" "$((maximum - ${#value}))" insert || {
           status=$?
           break
         }
@@ -445,7 +531,7 @@ installer_ui_read_value() {
   done
   printf '\n' >&"$terminal_fd"
   stty "$saved_state" <&"$terminal_fd" 2>/dev/null || restore_status=1
-  trap - INT TERM HUP
+  installer_ui_restore_traps
   [[ "$restore_status" == 0 ]] || return 1
   [[ "$interrupted" == 0 ]] || return 130
   [[ "$status" == 0 ]] || return "$status"

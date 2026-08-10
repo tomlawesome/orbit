@@ -2028,3 +2028,130 @@ describe("install.sh", () => {
     expect(output).not.toContain("auth.install-test.internal");
   });
 });
+
+describe("install.sh --simulate", () => {
+  it("rejects --simulate combined with an installer action before any external action", () => {
+    const targetDir = makeTarget();
+
+    for (const action of ["--install", "--update", "--repair"]) {
+      const result = runInstall(targetDir, {}, ["--simulate", action]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("Usage:");
+      expect(result.calls).toBe("");
+    }
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("dispatches the plain simulation before target and deployment-environment validation, without files or external calls", () => {
+    const targetDir = makeTarget();
+    // A non-empty, non-recognizable target would fail validate_target for a
+    // real install/update; simulation must never reach that check.
+    writeFileSync(join(targetDir, "unrelated-file"), "not an Orbit deployment\n");
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstall(targetDir, { ORBIT_CHANNEL: "not a valid channel" }, ["--plain", "--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(result.stdout).toContain("simulation=true");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("chooses the fixed deterministic success path in plain mode", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--plain", "--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("state=healthy");
+    expect(result.stdout).toContain("state=completed");
+    expect(result.stdout).toContain("SIMULATED-DIGEST-NOT-REAL");
+    expect(result.stdout).not.toContain(`sha256:${digest}`);
+    expect(result.calls).toBe("");
+  });
+
+  it("cancels the interactive simulation with a lone Escape at the top-level menu", () => {
+    const targetDir = makeTarget();
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.stdout).toContain("Simulation: Greetings");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+  });
+
+  it("cancels the interactive simulation with a lone Escape at the profile menu", () => {
+    const targetDir = makeTarget();
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\r\x1b", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+  });
+
+  it("exits the interactive simulation from the top-level Exit choice", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\x1b[B\r", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("keeps interactive Repair presentation-only and non-mutating in simulation", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\r", ["--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("repair_unavailable");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("walks the full interactive simulation to a fixed success scenario without mutation or external calls", () => {
+    const targetDir = makeTarget();
+    const secret = "not-a-real-credential";
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      {},
+      `\r\rhello-note\r${secret}\r\r\r`,
+      ["--simulate"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("hello-note");
+    expect(result.stdout).not.toContain(secret);
+    expect(result.stdout).toContain("healthy");
+    expect(result.stdout).toContain("completed");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("presents the fixed representative failure scenarios without a real error or credential", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      {},
+      "\r\rnote\rsecret\r\r\x1b[B\r",
+      ["--simulate"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("database-auth-migration");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+});

@@ -378,4 +378,74 @@ describe("installer semantic UI", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
+
+  it("cancels the raw single-key menu with a lone Escape and restores the terminal", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s CHOICE=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)" "${choice:-none}"',
+      "\x1b",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes CHOICE=none");
+  });
+
+  it("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if choice="$(target="$BASHPID"; (sleep 0.2; kill -TERM "$target") & installer_ui_select 3 "Choose" install install Install update Update)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      "",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
+  });
+
+  it("preserves a caller's own INT trap after a widget restores it", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; trap "printf CALLER_TRAP_RAN" INT; installer_ui_read_text 3 "Value: " 64 >/dev/null; kill -INT $BASHPID; printf DONE',
+      "abc\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("CALLER_TRAP_RAN");
+    expect(result.stdout).toContain("DONE");
+  });
+
+  it("labels TTY output as simulation without affecting ordinary output", () => {
+    const colorEnv = { ...process.env, TERM: "xterm" };
+    delete colorEnv.NO_COLOR;
+    const simulated = spawnSync(
+      "script",
+      [
+        "-qec",
+        `source '${helper}'; installer_ui_init --simulation; installer_ui_emit bootstrap installer starting initial begin 3`,
+        "/dev/null",
+      ],
+      { encoding: "utf8", env: colorEnv },
+    );
+    const ordinary = spawnSync(
+      "script",
+      [
+        "-qec",
+        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
+        "/dev/null",
+      ],
+      { encoding: "utf8", env: colorEnv },
+    );
+
+    expect(simulated.status).toBe(0);
+    expect(simulated.stdout).toContain("[SIMULATION]");
+    expect(ordinary.status).toBe(0);
+    expect(ordinary.stdout).not.toContain("SIMULATION");
+  });
+
+  it("labels plain output with simulation=true without affecting ordinary output", () => {
+    const simulated = runHelper(["--plain", "--simulation"]);
+    const ordinary = runHelper(["--plain"]);
+
+    expect(simulated.status).toBe(0);
+    expect(simulated.stdout).toContain("simulation=true");
+    expect(simulated.stdout).not.toMatch(/\x1b\[/u);
+    expect(ordinary.status).toBe(0);
+    expect(ordinary.stdout).not.toContain("simulation");
+  });
 });
