@@ -11,6 +11,16 @@ import { describe, expect, it } from "vitest";
 
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
+// Waits until the target process's /proc/<pid>/status SigCgt bitmap (see
+// proc(5)) shows the TERM trap installed before delivering SIGTERM, instead
+// of racing a wall-clock sleep against scheduler-latency-dependent process
+// setup (the fork/exec of `stty` and the `trap -p` subshells that run before
+// the widget installs its own trap). Bit 0x4000 is signal 15 (TERM). Falls
+// back to firing after ~2s so a genuine regression still surfaces as a test
+// failure instead of a hang.
+const waitForTermTrapThenKill =
+  'target="$BASHPID"; (for i in $(seq 1 400); do line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then break; fi; sleep 0.005; done; kill -TERM "$target") &';
+
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
     "bash",
@@ -371,7 +381,7 @@ describe("installer semantic UI", () => {
 
   it("restores terminal state when text entry is interrupted by a signal", () => {
     const result = runPty(
-      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 1; kill -TERM "$target") & if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
     );
 
@@ -391,7 +401,7 @@ describe("installer semantic UI", () => {
 
   it("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
     const result = runPty(
-      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 1; kill -TERM "$target") & if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
     );
 
