@@ -263,7 +263,12 @@ test.describe("authenticated document lifecycle", () => {
 
       const documentName = "authenticated-browser-document.pdf";
       const fileInput = page.locator('input[type="file"]').first();
+      const uploadResponsePromise = page.waitForResponse((response) =>
+        response.url().includes(`/api/households/${workspace.householdId}/items/${workspace.itemId}/documents`)
+        && response.request().method() === "POST",
+      );
       await fileInput.setInputFiles({ name: documentName, mimeType: "application/pdf", buffer: syntheticPdf });
+      expect((await uploadResponsePromise).status()).toBe(201);
 
       const documentRow = page.getByRole("listitem").filter({ hasText: documentName });
       await expect(documentRow).toBeVisible();
@@ -388,8 +393,13 @@ test.describe("authenticated document lifecycle", () => {
 
       await dropZone.dispatchEvent("dragover", { dataTransfer: fileTransfer });
       await expect(dropZone).toHaveClass(/dragging/);
+      const uploadResponsePromise = page.waitForResponse((response) =>
+        response.url().includes(`/api/households/${workspace.householdId}/items/${workspace.itemId}/documents`)
+        && response.request().method() === "POST",
+      );
       await dropZone.dispatchEvent("drop", { dataTransfer: fileTransfer });
       await expect(dropZone).not.toHaveClass(/dragging/);
+      expect((await uploadResponsePromise).status()).toBe(201);
 
       const droppedRow = page.getByRole("listitem").filter({ hasText: droppedName });
       await expect(droppedRow).toBeVisible({ timeout: 15_000 });
