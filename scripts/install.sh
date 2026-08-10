@@ -278,22 +278,24 @@ volume_belongs_to_deployment() {
   local discovered_project=""
   local db_count=0 app_count=0
 
-  if ! volume_labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}\t{{index .Labels "com.docker.compose.volume"}}' "$candidate_volume" 2>/dev/null)"; then
+  # Docker's Go-template formatter does not guarantee shell-style escape
+  # interpretation. Use a literal delimiter and reject any extra field.
+  if ! volume_labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$candidate_volume" 2>/dev/null)"; then
     return 2
   fi
   [[ ${#volume_labels} -le 256 ]] || return 2
   [[ "$volume_labels" != *$'\n'* ]] || return 2
-  IFS=$'\t' read -r volume_project volume_key extra <<< "$volume_labels"
+  IFS='|' read -r volume_project volume_key extra <<< "$volume_labels"
   [[ -n "$volume_project" && "$volume_project" =~ ^[a-z0-9][a-z0-9_-]*$ &&
     "$volume_key" == "$database_volume_key" &&
     "$candidate_volume" == "${volume_project}_${database_volume_key}" && -z "$extra" ]] || return 2
 
   if ! db_containers="$(docker ps -a --filter "volume=$candidate_volume" \
-    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+    --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
     return 2
   fi
   [[ ${#db_containers} -le 65536 ]] || return 2
-  while IFS=$'\t' read -r db_id db_project db_service extra ||
+  while IFS='|' read -r db_id db_project db_service extra ||
     [[ -n "$db_id" || -n "$db_project" || -n "$db_service" || -n "$extra" ]]; do
     [[ -z "$db_id" && -z "$db_project" && -z "$db_service" && -z "$extra" ]] && continue
     [[ "$db_id" =~ ^[0-9a-f]{12,64}$ && "$db_project" == "$volume_project" && -z "$extra" ]] ||
@@ -304,11 +306,11 @@ volume_belongs_to_deployment() {
   [[ "$db_count" == 1 ]] || return 1
 
   if ! app_containers="$(docker ps -a --filter "label=com.docker.compose.project=$volume_project" \
-    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+    --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
     return 2
   fi
   [[ ${#app_containers} -le 65536 ]] || return 2
-  while IFS=$'\t' read -r app_id app_project app_service extra ||
+  while IFS='|' read -r app_id app_project app_service extra ||
     [[ -n "$app_id" || -n "$app_project" || -n "$app_service" || -n "$extra" ]]; do
     [[ -z "$app_id" && -z "$app_project" && -z "$app_service" && -z "$extra" ]] && continue
     [[ "$app_id" =~ ^[0-9a-f]{12,64}$ && "$app_project" == "$volume_project" && -z "$extra" ]] ||
