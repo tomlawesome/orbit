@@ -37,10 +37,31 @@ From an empty directory on a Linux host with Docker Compose v2 and `curl`:
 curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-The installer takes no interactive input, so the same command works in a
-terminal, over SSH without a TTY, in CI and from cloud-init. Git is not
-required and the repository is not cloned: a deployment needs compose assets
-and a published image, not source or tests.
+On a first install from a controlling terminal, the installer guides you
+through the public HTTPS Orbit origin, complete OIDC issuer, client ID, and a
+hidden OIDC client-secret entry. It refuses to start Compose until the core
+configuration is ready. Git is not required and the repository is not cloned:
+a deployment needs compose assets and a published image, not source or tests.
+
+Unattended installation is supported only with a complete, pre-provisioned
+`.env-orbit` and an existing non-empty regular
+`.orbit-secrets/oidc-client-secret` file with mode `0600`. The environment file
+must select the canonical file-backed secret path, and all required values must
+pass `bash scripts/configure.sh --check`. A field requiring attention, unsafe
+file, invalid callback, or incomplete optional group is refused before Compose
+starts.
+
+For an unattended bootstrap into a directory that has no Compose files yet,
+the directory must contain exactly `.env-orbit` and `.orbit-secrets/` before
+the installer runs. `.env-orbit` must be a regular, non-symlink file with mode
+`0600`; `.orbit-secrets/` must be a real, non-symlink directory with mode
+`0700`; and every existing immediate child of that directory must be a
+non-empty regular, non-symlink file with mode `0600`. The required
+`.orbit-secrets/oidc-client-secret` file must already be present and non-empty.
+Extra top-level entries, symlinks, directories, devices, empty files, or broad
+permissions are refused before Docker or downloads begin. These pre-provisioned
+files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
+preflight fails before transaction commit.
 
 It resolves the published image to an immutable digest, reads the exact source
 revision recorded in that image, and fetches its deployment assets from that
@@ -49,14 +70,30 @@ resolved `registry/repository@sha256:...` digest is written to `.env-orbit`, and
 that digest is what runs. A tag is only ever read to resolve it; a mutable
 reference is never deployed.
 
-It then creates the Orbit-specific `.env-orbit` configuration when needed,
+It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
 generates independent 256-bit session, PostgreSQL, and document-encryption
-secrets, and starts the `orbit` application container, the official
-`orbit-postgres` PostgreSQL container, and the isolated official ClamAV scanner
-in the background and displays their status. Development and routine preview
+secrets, validates the rendered Compose configuration, and starts the `orbit`
+application container, the official `orbit-postgres` PostgreSQL container, and
+the isolated official ClamAV scanner in the background, reporting fixed
+success or failure messages. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
 only after a dedicated exact-image validation path is enabled for that
 architecture.
+
+If guided collection is cancelled or a non-interactive run has a required
+field requiring attention, the installer restores the previous managed file
+state and prints only field names and safe next actions. From a controlling terminal,
+rerun the same installer command, then use the existing configuration
+contracts when working from a checked-out deployment:
+
+```sh
+bash scripts/configure.sh --init
+bash scripts/configure.sh --set-oidc-secret
+bash scripts/configure.sh --check
+```
+
+Recognized upgrades with complete configuration are revalidated without
+reprompting or rewriting valid operator values or secrets.
 
 ### Building from source instead
 
@@ -81,6 +118,40 @@ Boilers need servicing. Insurance renews. Cars need inspections. Devices leave
 warranty. Contracts roll over. Orbit brings those scattered responsibilities
 into one calm, shared view—so the important things stay visible before they
 become urgent.
+
+## A quick visual tour
+
+These screenshots show the real Orbit application using deterministic synthetic
+household, item, document and mailbox data. They contain no live accounts,
+provider settings or infrastructure details.
+
+<p align="center">
+  <img src="docs/assets/product-tour/overview.png" alt="Orbit desktop overview showing three upcoming synthetic household records" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/item-detail.png" alt="Orbit item details for a synthetic annual boiler service, including schedule and reminders" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/settings.png" alt="Orbit desktop settings page showing appearance, data, inbox and household sections" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
+</p>
+
+The captures are reproducible with the repository's disposable OIDC browser
+fixture. Start the acceptance Compose stack, then run:
+
+```sh
+ORBIT_ACCEPTANCE_OIDC=true ORBIT_CAPTURE_PRODUCT_TOUR=true \
+  pnpm test:e2e tests/e2e/product-tour.spec.ts --project=desktop-chromium
+```
+
+The opt-in capture freezes the browser clock, creates synthetic data, removes
+PNG metadata, and deletes the fixture after capture. Ordinary browser tests do
+not write documentation assets.
 
 <table>
   <tr>
@@ -180,7 +251,8 @@ directory; only its runtime file path is recorded in `.env-orbit`. See
 reports whether required settings and optional setting groups are complete
 without printing their contents. For non-interactive installation or upgrade,
 plain `bash scripts/configure.sh` preserves the existing configuration and
-secret file.
+secret file; the installer will continue only when that existing configuration
+and secret file are already complete and safe.
 
 ### 2. Start Orbit
 
@@ -207,6 +279,86 @@ to the public internet.
 
 The application waits for PostgreSQL, applies versioned migrations, starts the
 notification scheduler, and then serves the full-stack application.
+
+Before an upgrade, create and verify a database backup and retain an owner-only
+copy of the exact pre-upgrade `.env-orbit` beside it. The ordinary backup
+manifest intentionally does not contain configuration or secrets; the sidecar
+copy preserves the previous immutable image and provenance identity:
+
+```sh
+umask 077
+preupgrade_dir="${ORBIT_BACKUP_DIR:-backups}"
+mkdir -p -- "$preupgrade_dir"
+chmod 700 -- "$preupgrade_dir"
+preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"
+cp -- .env-orbit "$preupgrade_config"
+chmod 600 "$preupgrade_config"
+backup_output="$(ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh)" || exit 1
+case "$backup_output" in
+  "Orbit backup created: "*) backup_path="${backup_output#Orbit backup created: }" ;;
+  *) exit 1 ;;
+esac
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path" >/dev/null
+```
+
+The installer validates the image's configuration contract before changing an
+existing `.env-orbit`; legacy configuration is migrated only by the installer
+transaction, which keeps its private rollback copy. Before the installer
+reports that configuration and Compose preflight passed, an ordinary
+configuration or pre-start failure automatically restores the original
+managed file state. Each successful migration records the target semantic
+version and exact image digest in the managed
+`ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST` fields; these
+must match the immutable `ORBIT_IMAGE` digest and must not be edited manually.
+A successful fresh install or recognized directory rename also persists the
+validated `COMPOSE_PROJECT_NAME`. Keep using `docker compose --env-file
+.env-orbit`, `scripts/backup.sh`, and `scripts/restore.sh` from the deployment
+directory so ordinary operator actions continue to address that same Compose
+project after reboot; do not substitute a remembered `--project-name`.
+A hard interruption can bypass cleanup: `.env-orbit` is either the original
+file or a complete atomic new file, never a partial file, and private
+`.orbit-install-staging.*` evidence may remain with owner-only permissions.
+Keep that evidence until recovery is complete.
+A standalone legacy configuration can be inspected with
+`scripts/configuration.sh --preflight` and must be migrated explicitly with
+the target image metadata supplied to `scripts/configuration.sh --migrate`:
+
+```sh
+bash scripts/configuration.sh --migrate --orbit-image \
+  'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
+  --applied-version v1.2.3 \
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
+  --compose-project-name orbit
+```
+
+The image digest and applied digest must be the same; the command retains one
+owner-only rollback copy beside the file. For a recognized existing
+deployment, the installer proves the Compose project, database volume labels,
+stopped-container ownership, and prior immutable application image before
+reusing that project, so moving the deployment directory does not silently
+create a new database volume. A fresh or pre-provisioned target is refused
+when any Orbit database volume is present, and an existing deployment is
+refused when ownership is ambiguous or cannot be proven. Orbit never deletes
+or resets a database volume automatically; preserve the existing
+`.orbit-secrets/postgres-password` byte-for-byte. If services have started and
+database migration or authentication then fails, stop Orbit and restore both
+the verified backup and the matching owner-only configuration copy:
+
+```sh
+docker compose --env-file .env-orbit stop orbit-app
+cp -- "$preupgrade_config" .env-orbit
+chmod 600 .env-orbit
+docker compose --env-file .env-orbit pull orbit-app
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
+```
+
+The restored configuration supplies the exact previous image digest and
+provenance; do not substitute a mutable tag or edit only `ORBIT_IMAGE`. Follow
+the restore confirmation, verify the configured `/api/health` endpoint and
+authenticated sign-in on the previous image, and only then remove the temporary
+copy with `rm -f -- "$preupgrade_config"`. Keep it if health is not verified.
+Configuration migration is atomic and idempotent; it does not rewrite operator
+values or secrets.
 
 ### Optional local processing stack
 

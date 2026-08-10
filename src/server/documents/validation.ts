@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { AppError } from "@/lib/app-error";
+import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export type SupportedDocumentMediaType =
   | "application/pdf"
@@ -16,7 +17,36 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_PNG_CHUNKS = 4_096;
 const MAX_PDF_XREF_ENTRIES = 1_250_000;
-const unsafePdfFeature = /\/(?:EmbeddedFile|Filespec|JavaScript|JS|Launch|RichMedia|XFA)\b/u;
+export const PDF_STRUCTURE_MAX_PAGES = 1_000;
+export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
+type PdfStructureParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
+export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
+  disableAutoFetch: true,
+  disableFontFace: true,
+  disableRange: true,
+  disableStream: true,
+  enableScripting: false,
+  enableXfa: true,
+  isEvalSupported: false,
+  isImageDecoderSupported: false,
+  isOffscreenCanvasSupported: false,
+  stopAtErrors: true,
+  useSystemFonts: false,
+  useWasm: false,
+  useWorkerFetch: false,
+  verbosity: VerbosityLevel.ERRORS,
+}) as Readonly<PdfStructureParserOptions>;
+const unsafePdfFeatures = new Set([
+  "EmbeddedFile",
+  "EmbeddedFiles",
+  "Filespec",
+  "JavaScript",
+  "JS",
+  "Launch",
+  "RichMedia",
+  "XFA",
+]);
+const unsafePdfActionValues = new Set(["JavaScript", "Launch", "RichMedia"]);
 const crcTable = Array.from({ length: 256 }, (_, value) => {
   let crc = value;
   for (let bit = 0; bit < 8; bit += 1) {
@@ -225,96 +255,156 @@ function validatePngStructure(bytes: Buffer): boolean {
   return false;
 }
 
-function validateClassicPdfXref(xrefSection: string, content: string): boolean {
-  if (!/^xref(?:\r?\n|\s)/u.test(xrefSection)) return false;
-  const trailerIndex = xrefSection.indexOf("trailer");
-  if (trailerIndex < 0) return false;
-  const lines = xrefSection.slice(4, trailerIndex)
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const objectRanges: Array<{ first: number; count: number }> = [];
-  const inUseObjects = new Set<number>();
-  let cursor = 0;
-  let totalEntries = 0;
-  let lastObjectEnd = 0;
-  while (cursor < lines.length) {
-    const subsection = lines[cursor++].match(/^(\d+)\s+(\d+)$/u);
-    if (!subsection) return false;
-    const first = Number(subsection[1]);
-    const count = Number(subsection[2]);
-    if (!Number.isSafeInteger(first)
-      || !Number.isSafeInteger(count)
-      || count < 1
-      || first + count > MAX_PDF_XREF_ENTRIES
-      || totalEntries + count > MAX_PDF_XREF_ENTRIES
-      || first < lastObjectEnd
-      || cursor + count > lines.length) return false;
-    objectRanges.push({ first, count });
-    totalEntries += count;
-    lastObjectEnd = first + count;
-    for (let entryIndex = 0; entryIndex < count; entryIndex += 1) {
-      const entry = lines[cursor++].match(/^(\d{10})\s(\d{5})\s([fn])$/u);
-      if (!entry) return false;
-      const offset = Number(entry[1]);
-      const generation = Number(entry[2]);
-      const objectNumber = first + entryIndex;
-      if (entry[3] === "n") {
-        if (objectNumber === 0 || offset < 1 || offset >= content.length) return false;
-        const objectHeader = content.slice(offset, offset + 64).match(/^(\d+)\s+(\d+)\s+obj\b/u);
-        if (!objectHeader
-          || Number(objectHeader[1]) !== objectNumber
-          || Number(objectHeader[2]) !== generation) return false;
-        inUseObjects.add(objectNumber);
-      }
-    }
-  }
-  if (totalEntries < 2) return false;
-  const trailer = xrefSection.slice(trailerIndex);
-  const root = trailer.match(/\/Root\s+(\d+)\s+\d+\s+R\b/u);
-  const size = Number(trailer.match(/\/Size\s+(\d+)\b/u)?.[1]);
-  if (!root
-    || !Number.isSafeInteger(size)
-    || size < 2
-    || size > MAX_PDF_XREF_ENTRIES
-    || objectRanges.some(({ first, count }) => first + count > size)) return false;
-  const rootObject = Number(root[1]);
-  return rootObject < size && inUseObjects.has(rootObject);
+function pdfNameValue(value: string): string {
+  return value.replace(/#([0-9a-f]{2})/giu, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
 }
 
-function validatePdfXrefStream(xrefHeader: string, byteLength: number): boolean {
-  const object = xrefHeader.match(
-    /^(\d+)\s+(\d+)\s+obj\s*<<([\s\S]*?)>>\s*stream\r?\n/u,
-  );
-  if (!object) return false;
-  const dictionary = object[3];
+function isPdfDelimiter(value: number | undefined): boolean {
+  return value === undefined || value === 0x00 || value === 0x09 || value === 0x0a
+    || value === 0x0c || value === 0x0d || value === 0x20 || value === 0x28
+    || value === 0x29 || value === 0x3c || value === 0x3e || value === 0x5b
+    || value === 0x5d || value === 0x7b || value === 0x7d || value === 0x2f
+    || value === 0x25;
+}
+
+function isPdfTokenAt(bytes: Buffer, offset: number, token: string): boolean {
+  if (offset < 0 || offset + token.length > bytes.length) return false;
+  if (bytes.subarray(offset, offset + token.length).toString("latin1") !== token) return false;
+  return isPdfDelimiter(bytes[offset - 1]) && isPdfDelimiter(bytes[offset + token.length]);
+}
+
+function nextPdfToken(bytes: Buffer, offset: number, token: string): number {
+  let candidate = bytes.indexOf(Buffer.from(token, "latin1"), offset);
+  while (candidate >= 0 && !isPdfTokenAt(bytes, candidate, token)) {
+    candidate = bytes.indexOf(Buffer.from(token, "latin1"), candidate + token.length);
+  }
+  return candidate;
+}
+
+/** Removes comments, literal/hex strings and stream payloads before inspecting PDF names. */
+function structuralPdfText(bytes: Buffer): string {
+  let output = "";
+  let offset = 0;
+  while (offset < bytes.length) {
+    const value = bytes[offset];
+    if (value === 0x25) {
+      while (offset < bytes.length && bytes[offset] !== 0x0a && bytes[offset] !== 0x0d) offset += 1;
+      continue;
+    }
+    if (value === 0x28) {
+      offset += 1;
+      let depth = 1;
+      while (offset < bytes.length && depth > 0) {
+        if (bytes[offset] === 0x5c) offset += 2;
+        else if (bytes[offset] === 0x28) { depth += 1; offset += 1; }
+        else if (bytes[offset] === 0x29) { depth -= 1; offset += 1; }
+        else offset += 1;
+      }
+      continue;
+    }
+    if (value === 0x3c && bytes[offset + 1] === 0x3c) {
+      output += "<<";
+      offset += 2;
+      continue;
+    }
+    if (value === 0x3c) {
+      offset += 1;
+      while (offset < bytes.length && bytes[offset] !== 0x3e) offset += 1;
+      if (offset < bytes.length) offset += 1;
+      continue;
+    }
+    if (isPdfTokenAt(bytes, offset, "stream")) {
+      offset += 6;
+      if (bytes[offset] === 0x0d && bytes[offset + 1] === 0x0a) offset += 2;
+      else if (bytes[offset] === 0x0a || bytes[offset] === 0x0d) offset += 1;
+      const endstream = nextPdfToken(bytes, offset, "endstream");
+      if (endstream < 0) break;
+      offset = endstream + 9;
+      continue;
+    }
+    output += String.fromCharCode(value);
+    offset += 1;
+  }
+  return output;
+}
+
+function hasUnsafePdfName(content: string): boolean {
+  const names = content.match(/\/([!#$%&'*+\-./0-9:;<=>?@A-Z\\^_`a-z{|}~#]+)/gu) ?? [];
+  return names.some((name) => unsafePdfFeatures.has(pdfNameValue(name.slice(1))));
+}
+
+function hasTooManyPdfObjects(content: string): boolean {
+  const objectHeaders = content.match(/(?:^|[\r\n])\s*\d+\s+\d+\s+obj\b/gu)?.length ?? 0;
+  return objectHeaders > MAX_PDF_XREF_ENTRIES;
+}
+
+function hasValidPdfStartxref(bytes: Buffer): boolean {
+  const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
+  const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
+  if (!match) return false;
+  const offset = Number(match[1]);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
+  const target = bytes.subarray(offset, Math.min(bytes.length, offset + 512)).toString("latin1");
+  return /^xref(?:\s|$)/u.test(target)
+    || /^\d+\s+\d+\s+obj\s*<<[\s\S]*?\/Type\s*\/XRef\b/u.test(target);
+}
+
+function hasPdfIndexBudget(bytes: Buffer): boolean {
+  const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
+  const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
+  const offset = Number(match?.[1]);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
+  const target = bytes.subarray(offset).toString("latin1");
+  if (/^xref(?:\s|$)/u.test(target)) {
+    const trailerOffset = target.indexOf("trailer");
+    if (trailerOffset < 0) return true;
+    const subsectionCounts = target.slice(4, trailerOffset).match(/^\s*\d+\s+(\d+)\s*$/gmu) ?? [];
+    const total = subsectionCounts.reduce((sum, line) => sum + Number(line.match(/\d+\s*$/u)?.[0] ?? 0), 0);
+    return total <= MAX_PDF_XREF_ENTRIES;
+  }
+  const dictionary = target.match(/^\d+\s+\d+\s+obj\s*<<([\s\S]*?)>>/u)?.[1] ?? "";
   const size = Number(dictionary.match(/\/Size\s+(\d+)\b/u)?.[1]);
-  const length = Number(dictionary.match(/\/Length\s+(\d+)\b/u)?.[1]);
-  const widths = dictionary.match(/\/W\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s*\]/u);
-  if (!/\/Type\s*\/XRef\b/u.test(dictionary)
-    || !/\/Root\s+\d+\s+\d+\s+R\b/u.test(dictionary)
-    || !Number.isSafeInteger(size)
-    || size < 2
-    || size > MAX_PDF_XREF_ENTRIES
-    || !Number.isSafeInteger(length)
-    || length < 1
-    || length >= byteLength
-    || !widths) return false;
-  const widthTotal = Number(widths[1]) + Number(widths[2]) + Number(widths[3]);
-  if (!Number.isSafeInteger(widthTotal) || widthTotal < 1 || widthTotal > 24) return false;
   const index = dictionary.match(/\/Index\s*\[([^\]]+)\]/u)?.[1]
-    .trim()
+    ?.trim()
     .split(/\s+/u)
     .map(Number);
-  if (index && (index.length < 2
-    || index.length % 2 !== 0
-    || index.some((value) => !Number.isSafeInteger(value) || value < 0)
-    || index.some((value, position) => position % 2 === 0 && value >= size)
-    || index.some((value, position) => position % 2 === 1 && value < 1))) return false;
-  if (/\/Filter\b/u.test(dictionary) && !/\/Filter\s*\/FlateDecode\b/u.test(dictionary)) return false;
-  const streamEnd = object[0].length + length;
-  return streamEnd < xrefHeader.length
-    && /^(?:\r?\n)?endstream\b/u.test(xrefHeader.slice(streamEnd));
+  const total = index && index.length > 0 && index.length % 2 === 0
+    ? index.reduce((sum, value, position) => sum + (position % 2 === 1 ? value : 0), 0)
+    : size;
+  return Number.isSafeInteger(total) && total >= 1 && total <= MAX_PDF_XREF_ENTRIES;
+}
+
+function hasEntries(value: unknown): boolean {
+  if (value instanceof Map) return value.size > 0;
+  return value !== null && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+function hasUnsafePdfValue(value: unknown): boolean {
+  if (typeof value === "string") return unsafePdfActionValues.has(value);
+  if (Array.isArray(value)) return value.some((entry) => hasUnsafePdfValue(entry));
+  if (value instanceof Map) {
+    return Array.from(value.entries()).some(([key, entry]) => hasUnsafePdfValue(key) || hasUnsafePdfValue(entry));
+  }
+  if (value === null || typeof value !== "object") return false;
+  return Object.entries(value).some(([key, entry]) => {
+    const lowerKey = key.toLowerCase();
+    return ((lowerKey === "actiontype" || lowerKey === "subtype" || lowerKey === "s" || lowerKey === "type")
+      && typeof entry === "string" && unsafePdfActionValues.has(entry)) || hasUnsafePdfValue(entry);
+  });
+}
+
+async function inspectParsedPdfFeatures(pdf: { numPages: number; getJSActions: () => Promise<unknown>; getAttachments: () => Promise<unknown>; getOpenAction: () => Promise<unknown>; getPage: (pageNumber: number) => Promise<{ getJSActions: () => Promise<unknown>; getAnnotations: (options: { intent: string }) => Promise<unknown>; getXfa: () => Promise<unknown> }> }): Promise<"unsupported_structure" | "prohibited_content" | undefined> {
+  if (pdf.numPages < 1 || pdf.numPages > PDF_STRUCTURE_MAX_PAGES) return "unsupported_structure";
+  if (hasEntries(await pdf.getJSActions()) || hasEntries(await pdf.getAttachments())) return "prohibited_content";
+  if (hasUnsafePdfValue(await pdf.getOpenAction())) return "prohibited_content";
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const xfa = await page.getXfa();
+    if (hasEntries(await page.getJSActions())
+      || hasUnsafePdfValue(await page.getAnnotations({ intent: "any" }))
+      || (xfa !== null && xfa !== undefined)) return "prohibited_content";
+  }
+  return undefined;
 }
 
 /** Identifies the deliberately narrow initial document set from magic bytes. */
@@ -327,29 +417,44 @@ export function detectDocumentMediaType(bytes: Buffer): SupportedDocumentMediaTy
 
 export type DocumentStructureReason = "supported_structure" | "unsupported_structure" | "prohibited_content";
 
-/** Classifies document structure with explicit reason, without widening compatibility. */
-export function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): DocumentStructureReason {
-  if (mediaType === "application/pdf") {
-    const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
-    const content = bytes.toString("latin1");
-    const startXref = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
-    const xrefOffset = startXref ? Number(startXref[1]) : Number.NaN;
-    const xrefSection = Number.isSafeInteger(xrefOffset) && xrefOffset >= 0 && xrefOffset < bytes.length
-      ? content.slice(xrefOffset)
-      : "";
-    const hasClassicXref = validateClassicPdfXref(xrefSection, content);
-    const hasXrefStream = validatePdfXrefStream(xrefSection, bytes.length);
-    const hasProhibitedFeature = unsafePdfFeature.test(content);
-    const isValidStructure = bytes.length >= 24
-      && /^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
-      && !bytes.subarray(0, 512).includes(0)
-      && Boolean(startXref)
-      && /\bobj\b/u.test(content)
-      && (hasClassicXref || hasXrefStream);
+/** Classifies document structure with a maintained bounded in-process parser. */
+async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
+  if (bytes.length < 24
+    || !/^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
+    || !hasValidPdfStartxref(bytes)
+    || !hasPdfIndexBudget(bytes)
+    || hasTooManyPdfObjects(bytes.toString("latin1"))) return "unsupported_structure";
 
-    if (hasProhibitedFeature) return "prohibited_content";
-    if (!isValidStructure) return "unsupported_structure";
-    return "supported_structure";
+  const structuralContent = structuralPdfText(bytes);
+  if (hasUnsafePdfName(structuralContent)) return "prohibited_content";
+
+  let loadingTask: ReturnType<typeof getDocument> | undefined;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    loadingTask = getDocument({
+      ...PDF_STRUCTURE_PARSER_OPTIONS,
+      data: new Uint8Array(bytes),
+    });
+    const inspection = (async (): Promise<DocumentStructureReason> => {
+      const pdf = await loadingTask!.promise;
+      return (await inspectParsedPdfFeatures(pdf)) ?? "supported_structure";
+    })();
+    const budget = new Promise<never>((_, reject) => {
+      budgetTimer = setTimeout(() => reject(new Error("pdf_inspection_budget_exceeded")), PDF_STRUCTURE_INSPECTION_BUDGET_MS);
+    });
+    return await Promise.race([inspection, budget]);
+  } catch {
+    return "unsupported_structure";
+  } finally {
+    if (budgetTimer) clearTimeout(budgetTimer);
+    if (loadingTask) await loadingTask.destroy().catch(() => undefined);
+  }
+}
+
+/** Classifies document structure with explicit reason and a bounded in-process parser. */
+export async function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<DocumentStructureReason> {
+  if (mediaType === "application/pdf") {
+    return classifyPdfStructure(bytes);
   }
   if (mediaType === "image/jpeg") {
     return validateJpegStructure(bytes) ? "supported_structure" : "unsupported_structure";
@@ -357,9 +462,9 @@ export function classifyDocumentStructure(bytes: Buffer, mediaType: SupportedDoc
   return validatePngStructure(bytes) ? "supported_structure" : "unsupported_structure";
 }
 
-/** Performs cheap bounded container checks without rendering or decompressing. */
-export function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): boolean {
-  return classifyDocumentStructure(bytes, mediaType) === "supported_structure";
+/** Performs bounded container checks without rendering or executing document content. */
+export async function validateSupportedDocumentStructure(bytes: Buffer, mediaType: SupportedDocumentMediaType): Promise<boolean> {
+  return (await classifyDocumentStructure(bytes, mediaType)) === "supported_structure";
 }
 
 export function normalizedDocumentFilename(input: string, mediaType: SupportedDocumentMediaType): string {

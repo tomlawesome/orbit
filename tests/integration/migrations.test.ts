@@ -21,6 +21,7 @@ import {
   runMigrationsWithActionableError,
   verifyMigrationPrefix,
 } from "./support/migration-fixture";
+import { MigrationIntegrityError, verifyMigrationIntegrity, verifyMigrationJournalComplete } from "../../src/db/migration-integrity";
 
 type MigrationTestClient = Awaited<ReturnType<typeof createMigrationTestDatabase>>["client"];
 
@@ -55,7 +56,9 @@ describe("PostgreSQL migration evidence", () => {
     const database = await createMigrationTestDatabase("fresh");
     databases.push(database);
 
+    await verifyMigrationIntegrity(database.client, "drizzle");
     await runMigrations(database.url, "drizzle");
+    await verifyMigrationJournalComplete(database.client, "drizzle");
 
     expect(await readPostgresMajor(database.client)).toBe(EXPECTED_POSTGRES_MAJOR);
     expect(await readAppliedMigrationHashes(database.client)).toEqual(await readExpectedMigrationHashes("drizzle"));
@@ -63,6 +66,19 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
+  });
+
+  it("fails closed below the supported floor and on checksum drift", async () => {
+    const database = await createMigrationTestDatabase("integrity");
+    databases.push(database);
+    const belowFloorDirectory = await createMigrationDirectoryThroughTag("drizzle", "0016_imap_receipt_leases");
+    temporaryDirectories.push(belowFloorDirectory);
+    await runMigrations(database.url, belowFloorDirectory.path);
+    await expect(verifyMigrationIntegrity(database.client, "drizzle")).rejects.toMatchObject({ code: "database_floor" });
+
+    await runMigrations(database.url, "drizzle");
+    await database.client.unsafe('UPDATE "drizzle"."__drizzle_migrations" SET "hash" = $1 WHERE "id" = 1', ["f".repeat(64)]);
+    await expect(verifyMigrationIntegrity(database.client, "drizzle")).rejects.toBeInstanceOf(MigrationIntegrityError);
   });
 
   it("upgrades the supported baseline, preserves fixture data, and is idempotent", async () => {
@@ -73,6 +89,7 @@ describe("PostgreSQL migration evidence", () => {
     temporaryDirectories.push(baselineDirectory);
 
     await runMigrations(database.url, baselineDirectory.path);
+    await verifyMigrationIntegrity(database.client, "drizzle");
     expect(await readAppliedMigrationHashes(database.client)).toEqual(await readExpectedMigrationHashes(baselineDirectory.path));
     await loadMigrationFixture(database.client);
     const beforeUpgrade = await readFixtureSnapshot(database.client);

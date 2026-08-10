@@ -4,6 +4,7 @@ import { and, asc, eq, gt, inArray, isNull, lte, lt, notInArray, or, sql } from 
 import { z } from "zod";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, imapRecipientRotationState, users } from "@/db/schema";
+import { log } from "@/lib/logger";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "@/server/imap-attachment-holding";
@@ -1095,6 +1096,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
         currentConfig ??= getImapIngestionConfig();
       } catch {
         workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
         return;
       }
       let smtp: NotificationWorkerConfig;
@@ -1102,6 +1104,7 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
         smtp = getNotificationWorkerConfig();
       } catch {
         workerState.__orbitImapWorkerLastErrorCode = "unsafe_input";
+        log.error({ event: "imap.ingestion", state: "exhausted", reason: "configuration_invalid", action: "check_configuration", impact: "mail_receipt_delayed" });
         return;
       }
       const preflight = await verifyImapIngestionProviders(currentConfig, smtp);
@@ -1109,13 +1112,23 @@ export function startImapIngestionWorker(config?: ImapIngestionConfig): void {
         await runImapIngestionCycle(currentConfig);
         workerState.__orbitImapWorkerLastSuccessAt = new Date().toISOString();
         workerState.__orbitImapWorkerLastErrorCode = undefined;
+        log.info({ event: "imap.ingestion", state: "ready", action: "none" });
       } else if (preflight.status !== "disabled" && preflight.status !== "not_configured") {
         workerState.__orbitImapWorkerLastErrorCode = preflight.status;
+        log.warn({ event: "imap.ingestion", state: "retrying", reason: "provider_unavailable", action: "check_provider", impact: "mail_receipt_delayed" });
+      } else if (preflight.status === "disabled" || preflight.status === "not_configured") {
+        log.info({ event: "imap.ingestion", state: "disabled", reason: "not_configured", action: "none" });
       }
     } catch {
       workerState.__orbitImapWorkerLastErrorAt = new Date().toISOString();
       workerState.__orbitImapWorkerLastErrorCode = "provider_unavailable";
-      console.error("Orbit IMAP ingestion cycle failed");
+      log.error({
+        event: "imap.ingestion",
+        state: "retrying",
+        reason: "worker_cycle_failed",
+        action: "inspect_admin_diagnostics",
+        impact: "mail_receipt_delayed",
+      });
     } finally {
       workerState.__orbitImapWorkerRunning = false;
       const pollMilliseconds = config?.pollMilliseconds ?? 60_000;
