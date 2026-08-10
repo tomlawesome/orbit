@@ -78,9 +78,18 @@ const fakeDockerScript = [
   "    ;;",
   "  ps)",
   '    if [[ "$*" == *"volume="* ]]; then',
-  '      printf "%s\\t%s\\torbit-db\\n" "${FAKE_DOCKER_DB_CONTAINER_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
+  '      printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DB_CONTAINER_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_DB_SERVICE:-orbit-db}"',
+  '      if [[ "${FAKE_DOCKER_DUPLICATE_DB_CONTAINER:-0}" == "1" ]]; then',
+  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DUPLICATE_DB_CONTAINER_ID:-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_DB_SERVICE:-orbit-db}"',
+  "      fi",
+  '      if [[ "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER:-0}" == "1" ]]; then',
+  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_ID:-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_SERVICE:-worker}"',
+  "      fi",
   '    elif [[ "$*" == *"label=com.docker.compose.project="* ]]; then',
-  '      printf "%s\\t%s\\torbit-app\\t%s\\n" "${FAKE_DOCKER_APP_CONTAINER_ID:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}" "${FAKE_DOCKER_RUNNING_CONFIG_HASH:-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}"',
+  '      printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_APP_CONTAINER_ID:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" "${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_APP_SERVICE:-orbit-app}"',
+  '      if [[ "${FAKE_DOCKER_DUPLICATE_APP_CONTAINER:-0}" == "1" ]]; then',
+  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DUPLICATE_APP_CONTAINER_ID:-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}" "${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_APP_SERVICE:-orbit-app}"',
+  "      fi",
   "    fi",
   "    exit 0",
   "    ;;",
@@ -933,7 +942,7 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
-  it("reuses the proven Compose project for a recognized deployment in a renamed directory", () => {
+  it("accepts a recognized deployment when stored and recomputed config hashes diverge", () => {
     const targetDir = makeTarget();
     makeLegacyExistingDeployment(targetDir);
     const passwordPath = join(targetDir, ".orbit-secrets", "postgres-password");
@@ -941,12 +950,15 @@ describe("install.sh", () => {
 
     const result = runInstall(targetDir, {
       ...recognizedVolumeOverrides(),
+      FAKE_DOCKER_CONFIG_HASH: "e".repeat(64),
       FAKE_USE_REAL_CONFIGURATION: "1",
     });
 
     expect(result.status).toBe(0);
     expect(result.calls).toContain("docker compose --project-name renamed-orbit");
     expect(result.calls).not.toContain("docker compose --project-name orbit ");
+    expect(result.calls).not.toContain("config --hash orbit-app");
+    expect(readFileSync(installScript, "utf8")).not.toContain("config --hash orbit-app");
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
       "COMPOSE_PROJECT_NAME=renamed-orbit",
     );
@@ -1012,16 +1024,70 @@ describe("install.sh", () => {
     makeLegacyExistingDeployment(targetDir);
 
     const result = runInstall(targetDir, {
-      ...recognizedVolumeOverrides("unrelated-orbit"),
-      FAKE_DOCKER_CONFIG_HASH: "e".repeat(64),
+      ...recognizedVolumeOverrides("recognized-orbit"),
+      FAKE_DOCKER_APP_PROJECT: "unrelated-orbit",
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("belongs to this Orbit deployment");
+    expect(result.stderr).toContain("existing Orbit database volume");
     expect(result.calls).not.toContain("docker pull");
     expect(result.calls).not.toContain("curl");
     expect(result.calls).not.toContain("up -d");
     expect(result.stderr).not.toContain("existing-postgres-password");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses malformed canonical volume labels", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides("malformed-orbit"),
+      FAKE_DOCKER_VOLUME_PROJECT: "malformed project",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("existing Orbit database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("refuses a database volume with an extra non-database consumer", () => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides(),
+      FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it.each([
+    ["duplicate database containers", { FAKE_DOCKER_DUPLICATE_DB_CONTAINER: "1" }],
+    ["duplicate app containers", { FAKE_DOCKER_DUPLICATE_APP_CONTAINER: "1" }],
+    ["wrong database service", { FAKE_DOCKER_DB_SERVICE: "postgres" }],
+    ["wrong app service", { FAKE_DOCKER_APP_SERVICE: "web" }],
+    ["mismatched app image", { FAKE_DOCKER_APP_IMAGE: `other-registry.example/orbit@sha256:${"e".repeat(64)}` }],
+  ])("refuses a recognized deployment with %s", (_label, override) => {
+    const targetDir = makeTarget();
+    makeLegacyExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ...recognizedVolumeOverrides(),
+      ...override,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("database volume");
+    expect(result.calls).not.toContain("docker pull");
+    expect(result.calls).not.toContain("curl");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
