@@ -87,6 +87,7 @@ function operationsPayload(audit: Array<Record<string, unknown>>, nextCursor: st
     operations: {
       notificationWorker: { started: true, running: false, lastSuccessAt: new Date().toISOString(), lastErrorAt: null, lastErrorCode: null },
       providers: { smtp: "configured", push: "configured" },
+      configurationProblems: [],
       mailboxIngestion: {
         enabled: true,
         configured: true,
