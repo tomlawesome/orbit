@@ -81,6 +81,37 @@ describe("configuration.sh", () => {
     expect(existsSync(`${migrated.file}.orbit-config.rollback`)).toBe(false);
   });
 
+  it("fills concise managed placeholders in their canonical sections", () => {
+    const original = [
+      "# --- Core ---",
+      "ORBIT_CONFIG_SCHEMA_VERSION=1",
+      "APP_URL=https://orbit.example.invalid",
+      "ORBIT_IMAGE=",
+      "# ORBIT_CONFIG_APPLIED_VERSION=",
+      "# ORBIT_CONFIG_APPLIED_DIGEST=",
+      "",
+      "# --- Authentication ---",
+      "OIDC_ISSUER=https://auth.example.invalid/application/o/orbit/",
+      "",
+      "# --- Deployment ---",
+      "# COMPOSE_PROJECT_NAME=",
+      "ORBIT_PORT=3000",
+      "",
+    ].join("\n");
+
+    const migrated = run(original, [...migrationArgs(), "--transaction"]);
+    expect(migrated.status).toBe(0);
+    const environment = readFileSync(migrated.file, "utf8");
+    const authSection = environment.indexOf("# --- Authentication ---");
+    const deploymentSection = environment.indexOf("# --- Deployment ---");
+    expect(environment.indexOf(`ORBIT_CONFIG_APPLIED_VERSION=${appliedVersion}`)).toBeLessThan(authSection);
+    expect(environment.indexOf(`ORBIT_CONFIG_APPLIED_DIGEST=${appliedDigest}`)).toBeLessThan(authSection);
+    expect(environment.indexOf(`COMPOSE_PROJECT_NAME=${appliedProject}`)).toBeGreaterThan(deploymentSection);
+    expect(environment).not.toContain("# ORBIT_CONFIG_APPLIED_VERSION=");
+    expect(environment).not.toContain("# ORBIT_CONFIG_APPLIED_DIGEST=");
+    expect(environment).not.toContain("# COMPOSE_PROJECT_NAME=");
+  });
+
   it("preserves comments, CRLF, internal spaces, equals, and no-final-newline", () => {
     const original = "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==";
     const migrated = run(original, migrationArgs());

@@ -4,8 +4,10 @@ set -eu
 readonly source_directory="/run/secrets"
 readonly runtime_directory="/run/orbit-secrets"
 readonly maximum_secret_bytes=65536
-readonly script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-readonly application_directory="$(dirname -- "$script_directory")"
+script_directory="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+readonly script_directory
+application_directory="$(dirname -- "$script_directory")"
+readonly application_directory
 readonly version_path="${application_directory}/VERSION"
 readonly revision_path="${application_directory}/REVISION"
 readonly channel_path="${application_directory}/CHANNEL"
@@ -15,12 +17,15 @@ fail() {
   exit 1
 }
 
-[ -f "$version_path" ] && [ ! -L "$version_path" ] ||
+if [ ! -f "$version_path" ] || [ -L "$version_path" ]; then
   fail "the embedded version identity is unavailable"
-[ -f "$revision_path" ] && [ ! -L "$revision_path" ] ||
+fi
+if [ ! -f "$revision_path" ] || [ -L "$revision_path" ]; then
   fail "the embedded revision identity is unavailable"
-[ -f "$channel_path" ] && [ ! -L "$channel_path" ] ||
+fi
+if [ ! -f "$channel_path" ] || [ -L "$channel_path" ]; then
   fail "the embedded release channel is unavailable"
+fi
 
 orbit_version="$(cat -- "$version_path")"
 orbit_revision="$(cat -- "$revision_path")"
@@ -32,12 +37,7 @@ printf '%s\n' "$orbit_revision" | grep -Eq '^[0-9a-f]{40}$' ||
 printf '%s\n' "$orbit_channel" | grep -Eq '^(ci|preview|dev)$' ||
   fail "the embedded release channel is invalid"
 
-if [ "${1:-}" = "--version" ]; then
-  printf "Orbit %s\n" "$orbit_version"
-  exit 0
-fi
-
-if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "server.js" ]; then
+print_banner() {
   cat <<'ORBIT_BANNER'
 ─────────────────────────────────────────────────────────────────────────────
       ·            ✦             ·                  ·           ✦      ·
@@ -54,6 +54,20 @@ if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "server.js" ]; then
 ORBIT_BANNER
   printf 'Orbit %s | channel=%s | revision=%s\n' \
     "$orbit_version" "$orbit_channel" "$orbit_revision"
+}
+
+if [ "${1:-}" = "--version" ]; then
+  printf "Orbit %s\n" "$orbit_version"
+  exit 0
+fi
+
+if [ "${1:-}" = "--banner" ]; then
+  print_banner
+  exit 0
+fi
+
+if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "server.js" ]; then
+  print_banner
 fi
 
 # Docker Compose implements file-backed secrets as bind mounts. Their host
