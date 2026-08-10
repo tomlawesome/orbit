@@ -124,8 +124,8 @@ test.describe("online-only private workspace policy", () => {
     await seedLegacyWorkspaceCache(page);
     expect(await legacyWorkspaceCacheExists(page)).toBe(true);
 
-    await page.getByRole("button", { name: "Open personalisation settings" }).click();
-    await page.getByRole("button", { name: "Sign out securely" }).click();
+    await page.getByRole("button", { name: "Open account menu" }).click();
+    await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
     await expect.poll(() => legacyWorkspaceCacheExists(page)).toBe(false);
     await expect(page.getByText(householdName, { exact: true })).toHaveCount(0);
@@ -147,7 +147,8 @@ test.describe("online-only private workspace policy", () => {
       await route.continue();
     });
 
-    await page.getByRole("button", { name: "Open personalisation settings" }).click();
+    await page.getByRole("button", { name: "Open account menu" }).click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
     await page.getByRole("link", { name: "Household", exact: true }).click();
     const settings = page.locator(".settings-page");

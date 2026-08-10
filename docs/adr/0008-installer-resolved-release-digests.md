@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-31
+**Ratified:** 2026-08-08, after the source-less exact-image installation proved the decision in issue #156, PR #172 and protected run 30706088817.
 
 Supersedes the "no implicit `latest` deployment default" position recorded in
 [ADR-0002](0002-evidence-driven-delivery.md) and `docs/supply-chain.md`, in the

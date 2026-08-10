@@ -105,9 +105,15 @@ export async function inspectItemDocument(input: {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
     const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
-      const structureReason = classifyDocumentStructure(bytes, mediaType);
+      const structureReason = await classifyDocumentStructure(bytes, mediaType);
       if (structureReason !== "supported_structure") {
-        log.info("document.inspection", { outcome: "rejected", reason: structureReason });
+        log.info({
+          event: "document.inspection",
+          state: "exhausted",
+          reason: structureReason,
+          action: "check_parser",
+          impact: "document_processing_blocked",
+        });
         return {
           extracted: false,
           message: structureReason === "prohibited_content" ? prohibitedContentMessage : unsupportedStructureMessage,
@@ -116,7 +122,7 @@ export async function inspectItemDocument(input: {
           reason: structureReason,
         };
       }
-      log.info("document.inspection", { outcome: "attachable", reason: structureReason });
+      log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });
       if (config.scanMode !== "required") {
         return {
           extracted: false,
@@ -126,7 +132,7 @@ export async function inspectItemDocument(input: {
           reason: structureReason,
         };
       }
-      log.info("document.scan", { document: operationId, outcome: "attempt" });
+      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
       const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
       const scanMs = Math.max(0, Date.now() - scanStartedAt);
@@ -134,11 +140,22 @@ export async function inspectItemDocument(input: {
         const infected = scan.status === "infected";
         // `scan.reason` is a fixed enumeration from the scanner adapter, never
         // provider text or the scanner's virus signature, so it is safe to record.
-        log.warn("document.scan", {
-          document: operationId,
-          outcome: infected ? "infected" : "error",
-          reason: infected ? "malware_detected" : scan.reason,
-          ms: scanMs,
+        const scannerReason = infected
+          ? "malware_detected"
+          : scan.reason === "unavailable"
+            ? "scanner_unavailable"
+            : scan.reason === "timeout"
+              ? "scanner_timeout"
+              : scan.reason === "protocol"
+                ? "scanner_protocol"
+                : "scanner_failed";
+        log.warn({
+          event: "document.scan",
+          state: infected ? "exhausted" : "degraded",
+          reason: scannerReason,
+          action: "check_scanner",
+          impact: "document_upload_blocked",
+          durationMs: scanMs,
         });
         if (infected) {
           throw new AppError(
@@ -158,7 +175,7 @@ export async function inspectItemDocument(input: {
           503,
         );
       }
-      log.info("document.scan", { document: operationId, outcome: "clean", ms: scanMs });
+      log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
       let text = "";
       let extracted = false;
       let message: string | undefined;
