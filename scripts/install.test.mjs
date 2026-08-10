@@ -56,6 +56,13 @@ const deploymentAssets = [
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
+  "print_container_row() {",
+  '  if [[ "${FAKE_DOCKER_TEMPLATE_DELIMITER:-}" == "|" ]]; then',
+  "    printf '%s|%s|%s\\n' \"$1\" \"$2\" \"$3\"",
+  "  else",
+  "    printf '%s\\\\t%s\\\\t%s\\n' \"$1\" \"$2\" \"$3\"",
+  "  fi",
+  "}",
   'if [[ -n "${FAKE_CALL_LOG:-}" ]]; then',
   "  printf 'docker %s\\n' \"$*\" >> \"$FAKE_CALL_LOG\"",
   "fi",
@@ -69,7 +76,12 @@ const fakeDockerScript = [
   "      fi",
   '    elif [[ "${2:-}" == "inspect" ]]; then',
   '      if [[ "$*" == *"com.docker.compose.volume"* ]]; then',
-  '        printf "%s\\torbit-db-data\\n" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
+  '        # docker volume inspect emits a literal backslash-t for this template.',
+  '        if [[ "$*" == *"|"* ]]; then',
+  "          printf '%s|orbit-db-data\\n' \"${FAKE_DOCKER_VOLUME_PROJECT:-orbit}\"",
+  "        else",
+  "          printf '%s\\\\torbit-db-data\\n' \"${FAKE_DOCKER_VOLUME_PROJECT:-orbit}\"",
+  "        fi",
   "      else",
   '        printf "%s\\n" "${FAKE_DOCKER_VOLUME_PROJECT:-orbit}"',
   "      fi",
@@ -77,18 +89,23 @@ const fakeDockerScript = [
   "    exit 0",
   "    ;;",
   "  ps)",
+  '    if [[ "$*" == *"|"* ]]; then',
+  '      FAKE_DOCKER_TEMPLATE_DELIMITER="|"',
+  "    else",
+  '      FAKE_DOCKER_TEMPLATE_DELIMITER="literal-tab"',
+  "    fi",
   '    if [[ "$*" == *"volume="* ]]; then',
-  '      printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DB_CONTAINER_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_DB_SERVICE:-orbit-db}"',
+  "      print_container_row \"${FAKE_DOCKER_DB_CONTAINER_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}\" \"${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}\" \"${FAKE_DOCKER_DB_SERVICE:-orbit-db}\"",
   '      if [[ "${FAKE_DOCKER_DUPLICATE_DB_CONTAINER:-0}" == "1" ]]; then',
-  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DUPLICATE_DB_CONTAINER_ID:-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_DB_SERVICE:-orbit-db}"',
+  "        print_container_row \"${FAKE_DOCKER_DUPLICATE_DB_CONTAINER_ID:-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}\" \"${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}\" \"${FAKE_DOCKER_DB_SERVICE:-orbit-db}\"",
   "      fi",
   '      if [[ "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER:-0}" == "1" ]]; then',
-  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_ID:-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}" "${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_SERVICE:-worker}"',
+  "        print_container_row \"${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_ID:-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}\" \"${FAKE_DOCKER_DB_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}\" \"${FAKE_DOCKER_EXTRA_DB_VOLUME_CONSUMER_SERVICE:-worker}\"",
   "      fi",
   '    elif [[ "$*" == *"label=com.docker.compose.project="* ]]; then',
-  '      printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_APP_CONTAINER_ID:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}" "${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_APP_SERVICE:-orbit-app}"',
+  "      print_container_row \"${FAKE_DOCKER_APP_CONTAINER_ID:-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}\" \"${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}\" \"${FAKE_DOCKER_APP_SERVICE:-orbit-app}\"",
   '      if [[ "${FAKE_DOCKER_DUPLICATE_APP_CONTAINER:-0}" == "1" ]]; then',
-  '        printf "%s\\t%s\\t%s\\n" "${FAKE_DOCKER_DUPLICATE_APP_CONTAINER_ID:-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}" "${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}" "${FAKE_DOCKER_APP_SERVICE:-orbit-app}"',
+  "        print_container_row \"${FAKE_DOCKER_DUPLICATE_APP_CONTAINER_ID:-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd}\" \"${FAKE_DOCKER_APP_PROJECT:-${FAKE_DOCKER_VOLUME_PROJECT:-orbit}}\" \"${FAKE_DOCKER_APP_SERVICE:-orbit-app}\"",
   "      fi",
   "    fi",
   "    exit 0",
@@ -592,6 +609,24 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
 }
 
 describe("install.sh", () => {
+  it("uses literal delimiters for every Docker template/parser pair", () => {
+    const source = readFileSync(installScript, "utf8");
+
+    expect(source).toContain(
+      '--format \'{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}\'',
+    );
+    expect(source).toContain(
+      '--format \'{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}\'',
+    );
+    expect(source).toContain("IFS='|'");
+    expect(source).not.toContain(
+      '--format \'{{index .Labels "com.docker.compose.project"}}\\t{{index .Labels "com.docker.compose.volume"}}\'',
+    );
+    expect(source).not.toContain(
+      '--format \'{{.ID}}\\t{{.Label "com.docker.compose.project"}}\\t{{.Label "com.docker.compose.service"}}\'',
+    );
+  });
+
   it("documents the configuration and database recovery identity contract", () => {
     const readme = readFileSync(readmePath, "utf8");
 
