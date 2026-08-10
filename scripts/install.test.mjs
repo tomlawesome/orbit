@@ -684,6 +684,74 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
   return { ...result, calls };
 }
 
+function runInstallWithPromptedTerminalInput(
+  targetDir,
+  envOverrides = {},
+  interactions = [],
+  args = [],
+) {
+  const binDir = makeFakeBin();
+  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+  const logPath = join(logDir, "calls.log");
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
+      {
+        cwd: targetDir,
+        env: {
+          PATH: `${binDir}:${process.env.PATH}`,
+          HOME: process.env.HOME ?? tmpdir(),
+          TERM: "xterm",
+          ORBIT_REPOSITORY: repository,
+          ORBIT_REGISTRY: registry,
+          FAKE_IMAGE_REPOSITORY: imageRepository,
+          FAKE_DOCKER_DIGEST: digest,
+          FAKE_DOCKER_REVISION: revision,
+          FAKE_DOCKER_VERSION: "v1.2.0",
+          FAKE_ASSET_BASE: assetBase,
+          FAKE_CALL_LOG: logPath,
+          FAKE_PROBE_COUNTER_DIR: logDir,
+          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+          FAKE_CONFIGURE_READY: "0",
+          ...envOverrides,
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    let interactionIndex = 0;
+    let settled = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const interaction = interactions[interactionIndex];
+      if (interaction && stdout.includes(interaction.after)) {
+        child.stdin.write(interaction.input);
+        interactionIndex += 1;
+        if (interactionIndex === interactions.length) child.stdin.end();
+      }
+    });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
+    child.on("close", (status, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        status,
+        signal,
+        stdout,
+        stderr,
+        calls: readOptionalFile(logPath),
+        promptedInteractions: interactionIndex,
+      });
+    });
+  });
+}
+
 function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args = []) {
   const binDir = makeFakeBin();
   const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
@@ -789,12 +857,16 @@ describe("install.sh", () => {
     expect(targetEntries(targetDir)).toEqual([]);
   });
 
-  it("cancels profile selection without creating files or services", () => {
+  it("cancels profile selection without creating files or services", async () => {
     const targetDir = makeTarget();
 
-    const result = runInstallWithControllingTerminal(targetDir, {}, "\r\x1b");
+    const result = await runInstallWithPromptedTerminalInput(targetDir, {}, [
+      { after: "Greetings, what can we do for you today?", input: "\r" },
+      { after: "Choose a deployment profile", input: "\x1b" },
+    ]);
 
     expect(result.status).toBe(130);
+    expect(result.promptedInteractions).toBe(2);
     expect(result.calls).not.toContain("config --quiet");
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
