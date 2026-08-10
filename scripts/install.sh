@@ -274,10 +274,8 @@ volume_belongs_to_deployment() {
   local candidate_volume="$1" expected_image="$2"
   local volume_labels="" volume_project="" volume_key="" extra=""
   local db_containers="" app_containers=""
-  local db_id="" db_project="" db_service="" app_id="" app_project="" app_service="" app_config_hash="" app_image=""
+  local db_id="" db_project="" db_service="" app_id="" app_project="" app_service="" app_image=""
   local discovered_project=""
-  local selected_app_config_hash=""
-  local expected_config_hash=""
   local db_count=0 app_count=0
 
   if ! volume_labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}\t{{index .Labels "com.docker.compose.volume"}}' "$candidate_volume" 2>/dev/null)"; then
@@ -300,25 +298,24 @@ volume_belongs_to_deployment() {
     [[ -z "$db_id" && -z "$db_project" && -z "$db_service" && -z "$extra" ]] && continue
     [[ "$db_id" =~ ^[0-9a-f]{12,64}$ && "$db_project" == "$volume_project" && -z "$extra" ]] ||
       return 2
-    [[ "$db_service" == "orbit-db" ]] || continue
+    [[ "$db_service" == "orbit-db" ]] || return 1
     db_count=$((db_count + 1))
   done <<< "$db_containers"
   [[ "$db_count" == 1 ]] || return 1
 
   if ! app_containers="$(docker ps -a --filter "label=com.docker.compose.project=$volume_project" \
-    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}\t{{.Label "com.docker.compose.config-hash"}}' 2>/dev/null)"; then
+    --format '{{.ID}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
     return 2
   fi
   [[ ${#app_containers} -le 65536 ]] || return 2
-  while IFS=$'\t' read -r app_id app_project app_service app_config_hash extra ||
-    [[ -n "$app_id" || -n "$app_project" || -n "$app_service" || -n "$app_config_hash" || -n "$extra" ]]; do
-    [[ -z "$app_id" && -z "$app_project" && -z "$app_service" && -z "$app_config_hash" && -z "$extra" ]] && continue
-    [[ "$app_id" =~ ^[0-9a-f]{12,64}$ && "$app_project" == "$volume_project" && "$app_config_hash" =~ ^[0-9a-f]{64}$ && -z "$extra" ]] ||
+  while IFS=$'\t' read -r app_id app_project app_service extra ||
+    [[ -n "$app_id" || -n "$app_project" || -n "$app_service" || -n "$extra" ]]; do
+    [[ -z "$app_id" && -z "$app_project" && -z "$app_service" && -z "$extra" ]] && continue
+    [[ "$app_id" =~ ^[0-9a-f]{12,64}$ && "$app_project" == "$volume_project" && -z "$extra" ]] ||
       return 2
     [[ "$app_service" == "orbit-app" ]] || continue
     app_count=$((app_count + 1))
     [[ "$app_count" == 1 ]] || return 1
-    selected_app_config_hash="$app_config_hash"
     if ! app_image="$(docker inspect --format '{{.Config.Image}}' "$app_id" 2>/dev/null)"; then
       return 2
     fi
@@ -327,12 +324,6 @@ volume_belongs_to_deployment() {
     [[ "$app_image" == "$expected_image" ]] || return 1
   done <<< "$app_containers"
   [[ "$app_count" == 1 ]] || return 1
-  if ! expected_config_hash="$(docker compose --project-name "$volume_project" --env-file "$environment_file" \
-    config --hash orbit-app 2>/dev/null)"; then
-    return 2
-  fi
-  [[ ${#expected_config_hash} -le 128 ]] || return 2
-  [[ "$expected_config_hash" == "$selected_app_config_hash" ]] || return 1
 }
 
 verify_database_volume_safety() {
