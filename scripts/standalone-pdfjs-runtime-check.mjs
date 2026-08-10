@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
@@ -39,8 +40,15 @@ const run = async () => {
   const validatorChunkFound = readdirSync(serverChunks)
     .filter((name) => name.endsWith(".js"))
     .map((name) => resolve(serverChunks, name))
-    .some((path) => readFileSync(path, "utf8").includes(`pdfjs-dist@${pdfjsVersion}`));
+    .some((path) => {
+      const source = readFileSync(path, "utf8");
+      return source.includes("pdfjs-dist-") && source.includes("/legacy/build/pdf.mjs");
+    });
   if (!validatorChunkFound) throw new Error("missing traced PDF.js validator chunk");
+
+  const standaloneRequire = createRequire(resolve(standaloneRoot, "package.json"));
+  const canvas = standaloneRequire("@napi-rs/canvas");
+  if (typeof canvas.createCanvas !== "function") throw new Error("missing native canvas import");
 
   const pdfjs = await import(pathToFileURL(pdfjsEntry).href);
   if (typeof pdfjs.getDocument !== "function") throw new Error("missing PDF.js getDocument export");
