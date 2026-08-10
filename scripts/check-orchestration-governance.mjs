@@ -5,6 +5,35 @@ const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 const canonicalPolicyUrl = new URL("../.github/orchestration-governance.json", import.meta.url);
 const canonicalControlsUrl = new URL("../docs/orchestration-controls.json", import.meta.url);
 
+const routineDeliveryActions = [
+  "product_planning",
+  "product_scope",
+  "roadmaps",
+  "task_launch",
+  "monitoring",
+  "sequencing",
+  "reconciliation",
+  "blocker_classification",
+  "handback_acceptance",
+  "delivery_decisions",
+  "next_actions",
+  "provider_concurrency",
+  "review",
+  "integration",
+  "publication",
+  "release_execution",
+  "retained_learning_promotion",
+];
+const reservedDecisionClasses = [
+  "adr",
+  "high_level_architecture",
+  "model_governance",
+  "release_policy",
+  "repository_settings",
+  "protected_planning",
+  "requested_security_review",
+];
+
 function assert(condition, message) {
   if (!condition) throw new Error(`Orchestration governance: ${message}`);
 }
@@ -49,19 +78,79 @@ export function validateOrchestrationPolicy(policy) {
     "humanApprovalIdentifier is required.",
   );
   assert(isObject(policy.modelAuthority), "modelAuthority is required.");
-  for (const role of ["orchestration", "protectedPlanning", "mechanicalAnalysis"]) {
+  for (const role of [
+    "orchestration",
+    "protectedPlanning",
+    "reservedSpecialist",
+    "mechanicalAnalysis",
+  ]) {
     assert(
       Array.isArray(policy.modelAuthority[role]) && policy.modelAuthority[role].every(isNonEmptyString),
       `modelAuthority.${role} must be a non-empty string array.`,
     );
   }
   assert(
-    hasExactStrings(policy.modelAuthority.orchestration, ["Sol Extra High"]),
-    "orchestration must remain reserved to Sol Extra High.",
+    hasExactStrings(policy.modelAuthority.orchestration, ["Luna Extra High"]),
+    "default orchestration must remain assigned to Luna Extra High.",
   );
   assert(
     hasExactStrings(policy.modelAuthority.protectedPlanning, ["Sol Extra High"]),
     "protected planning must remain reserved to Sol Extra High.",
+  );
+  assert(
+    hasExactStrings(policy.modelAuthority.reservedSpecialist, ["Sol Extra High"]),
+    "reserved specialist authority must remain assigned to Sol Extra High.",
+  );
+
+  const routineDelivery = policy.routineDelivery;
+  assert(
+    isObject(routineDelivery)
+      && routineDelivery.accountableOrchestrator === "Luna Extra High"
+      && routineDelivery.modelRestrictedActions === false
+      && routineDelivery.lowestCompetentModelAndEffort === true
+      && routineDelivery.avoidRework === true
+      && routineDelivery.delegatedSelfApproval === false
+      && hasExactStrings(routineDelivery.actions, routineDeliveryActions),
+    "routine delivery must remain model-open under Luna accountability.",
+  );
+
+  const specialist = policy.reservedSpecialist;
+  assert(isObject(specialist), "reservedSpecialist is required.");
+  assert(
+    specialist.model === "Sol Extra High"
+      && specialist.freshUserApprovalRequired === true
+      && hasExactStrings(specialist.decisionClasses, reservedDecisionClasses),
+    "Sol specialist decision classes must match the reserved authority matrix.",
+  );
+  assert(
+    specialist.securityReviewRequiresExplicitHumanRequest === true,
+    "security review must require an explicit human request.",
+  );
+  assert(
+    hasExactStrings(specialist.architectureScope, [
+      "new_feature",
+      "broad_architecture_reconsideration",
+    ]),
+    "Sol architecture work must remain high-level and bounded to new features or broad reconsideration.",
+  );
+
+  const adr = policy.adrGovernance;
+  assert(
+    isObject(adr)
+      && adr.specialistModel === "Sol Extra High"
+      && adr.humanFinalDecision === true
+      && hasExactStrings(adr.lunaMay, ["identify", "research", "draft", "request_amendment"])
+      && hasExactStrings(adr.solMustAssess, [
+        "broader_context",
+        "proposal_reason",
+        "alternatives",
+        "consequences",
+      ])
+      && adr.lunaMustRespectSpecialistDecision === true
+      && adr.lunaMustPresentDecisionFaithfully === true
+      && adr.historicalRecordsImmutable === true
+      && adr.changedDecisionRequiresSupersedingAdr === true,
+    "ADR governance must keep Sol specialist assessment and the human final decision.",
   );
 
   const routing = policy.implementationRouting;
@@ -199,23 +288,23 @@ export function validateOrchestrationPolicy(policy) {
     "pathAllowlist",
     "runawayMonitoring",
     "requiredResult",
-    "solReview",
+    "orchestratorReview",
   ]) {
     assert(routing.isolation[control] === true, `implementation isolation requires ${control}.`);
   }
   assert(
-    hasExactStrings(routing.delegatedAuthorities, ["implementation"]),
-    "delegated providers may hold implementation authority only.",
+    hasExactStrings(routing.delegatedAuthorities, ["implementation", "routine_delivery"]),
+    "delegated providers may hold bounded implementation and routine-delivery authority only.",
   );
   assert(
     hasExactStrings(routing.prohibitedAuthorities, [
-      "orchestration",
+      "adr",
       "protected_planning",
-      "architecture",
-      "security",
-      "integration",
-      "publication",
-      "release",
+      "high_level_architecture",
+      "model_governance",
+      "release_policy",
+      "repository_settings",
+      "requested_security_review",
     ]),
     "delegated-provider authority prohibitions are incomplete.",
   );
@@ -228,10 +317,8 @@ export function validateOrchestrationPolicy(policy) {
     "Claude secondary review must require fresh approval and remain advisory only.",
   );
   assert(
-    Array.isArray(policy.protectedDecisionClasses)
-      && policy.protectedDecisionClasses.includes("protected_planning")
-      && policy.protectedDecisionClasses.includes("model_governance"),
-    "protected decision classes are incomplete.",
+    hasExactStrings(policy.protectedDecisionClasses, reservedDecisionClasses),
+    "protected decision classes must match the reserved authority matrix.",
   );
   assert(
     Array.isArray(policy.taskStatusSources)
@@ -362,6 +449,7 @@ function authorityRole(role) {
   return {
     orchestration: "orchestration",
     protected_planning: "protectedPlanning",
+    reserved_specialist: "reservedSpecialist",
     mechanical_analysis: "mechanicalAnalysis",
   }[role];
 }
@@ -375,6 +463,36 @@ function validateActor(actor, policy) {
     policy.modelAuthority[policyRole].includes(actor.model),
     `${actor.model} is not authorized for ${actor.role}.`,
   );
+}
+
+function validateReservedSpecialist(invocation, policy) {
+  assert(isObject(invocation), "reserved specialist invocation must be an object.");
+  assert(
+    invocation.model === policy.reservedSpecialist.model
+      && invocation.role === "reserved_specialist",
+    "reserved specialist invocation must use Sol Extra High in the reserved role.",
+  );
+  assert(
+    policy.reservedSpecialist.decisionClasses.includes(invocation.decisionClass),
+    "reserved specialist invocation requires an approved decision class.",
+  );
+  assert(isNonEmptyString(invocation.boundedRequest), "reserved specialist request must be bounded.");
+  assert(
+    ["requested", "active", "complete"].includes(invocation.status),
+    "reserved specialist invocation status is invalid.",
+  );
+  assert(
+    isObject(invocation.userApproval)
+      && invocation.userApproval.approved === true
+      && isTimestamp(invocation.userApproval.observedAt),
+    "reserved specialist invocation requires fresh task-specific user approval.",
+  );
+  if (invocation.decisionClass === "requested_security_review") {
+    assert(
+      invocation.explicitHumanRequest === true,
+      "security review invocation requires an explicit human request.",
+    );
+  }
 }
 
 function validateImplementationTask(task, policy, issue) {
@@ -681,6 +799,9 @@ export function validateOperationalState(state, policy) {
   assert(isObject(state), "operational state must be an object.");
   assert(state.schemaVersion === 1, "unsupported operational-state schema version.");
   validateActor(state.actor, policy);
+  if (state.reservedSpecialist !== undefined) {
+    validateReservedSpecialist(state.reservedSpecialist, policy);
+  }
   const remoteCapabilities = validateRemoteAccessPreflight(state.accessPreflight, policy);
   assert(isObject(state.delivery), "delivery state is required.");
 
@@ -728,8 +849,14 @@ export function validateOperationalState(state, policy) {
     "delivery parent issues must be unique positive integers.",
   );
 
-  const taskStages = new Set(["launch_pending", "active", "handback", "sol_review"]);
-  const protectedWriteStages = new Set(["launch_pending", "active", "handback", "sol_review", "pr_open"]);
+  const taskStages = new Set(["launch_pending", "active", "handback", "orchestrator_review"]);
+  const protectedWriteStages = new Set([
+    "launch_pending",
+    "active",
+    "handback",
+    "orchestrator_review",
+    "pr_open",
+  ]);
   if (
     policy.remoteAccessPreflight.failClosedBeforeDependentLaunch
     && protectedWriteStages.has(delivery.stage)
@@ -774,7 +901,7 @@ export function validateOperationalState(state, policy) {
     assert(isNonEmptyString(delivery.task.authoritativeStatus.worktree), "active task requires worktree.");
   }
 
-  if (delivery.stage === "handback" || delivery.stage === "sol_review") {
+  if (delivery.stage === "handback" || delivery.stage === "orchestrator_review") {
     validateAuthoritativeTaskStatus(delivery.task.authoritativeStatus, policy);
     assert(
       delivery.task.authoritativeStatus.baseSha === delivery.baseSha,
@@ -987,6 +1114,16 @@ export function validateAdoptedControls(ledger, policy) {
           `${control.id} protected adoption requires approval by a protected-planning authority or ${policy.humanApprovalIdentifier}.`,
         );
       }
+    }
+    if (control.status === "retired") {
+      assert(
+        Number.isInteger(control.retiredByIssue) && control.retiredByIssue > 0,
+        `${control.id} retirement requires an issue.`,
+      );
+      assert(
+        isNonEmptyString(control.retirementReason),
+        `${control.id} retirement requires a reason.`,
+      );
     }
   }
 }

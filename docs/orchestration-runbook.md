@@ -21,7 +21,8 @@ Before any mutation, delivery agent or heartbeat:
 1. reads the root `AGENTS.md`, planning governance, this runbook and the
    orchestration policy;
 2. records the active model and intended role;
-3. validates model authority for the orchestration role and action class;
+3. validates Luna accountability and whether the action crosses a Sol-reserved
+   decision boundary;
 4. resolves the issue, accepted base SHA, target branch and permitted paths;
 5. checks the tracked and untracked working tree without discarding unrelated
    work; and
@@ -50,14 +51,22 @@ separate authenticated capability check is required. Never ask a remote user
 to put a token, password, device code, recovery code, session value or other
 authentication material in chat.
 
-All orchestration—including task launch, monitoring, sequencing,
-reconciliation, blocker classification, handback acceptance, delivery
-decisions and retained-learning promotion—is a hard **Sol Extra High** gate.
-Protected planning, architecture, security, release, repository-setting,
-product-scope and model-governance work has the same gate. Terra may read for
-orientation or perform explicitly bounded mechanical analysis outside the
-orchestration role, but it cannot operate the delivery loop or make status and
-next-action decisions.
+**Luna Extra High is the default accountable orchestrator.** Product planning,
+product scope, roadmaps, task launch, monitoring, sequencing, reconciliation,
+blocker classification, handback acceptance, delivery and next-action
+decisions, provider concurrency, ordinary review, integration, publication,
+release execution and retained-learning promotion are model-open routine
+delivery actions. Luna may delegate them to the lowest-cost, lowest-effort
+qualified model that can complete the bounded task without rework, but remains
+accountable and prevents a provider from approving its own implementation.
+
+Sol Extra High is requested only for an ADR decision; high-level architecture
+for a new feature or broad architecture reconsideration; release policy; model
+governance; repository settings; genuinely protected planning; or a security
+review explicitly requested by the human owner. A Sol subagent requires fresh,
+task-specific user approval. Product planning, product scope, roadmaps and
+ordinary delivery never acquire a Sol gate merely because another provider is
+unavailable.
 
 For `low-risk-implementation` and `donkey-work`, Luna Extra High is the first
 OpenAI implementation model. When Ollama, Mistral and Claude are unavailable,
@@ -70,7 +79,7 @@ qualification evidence, exact host for local Ollama, and an evidenced reason
 for every cheaper provider skipped. A cheaper provider already occupied by an
 independent task is an accepted reason only when the provider-concurrency
 evidence in the Wave concurrency section is complete. Every provider returns
-control to Sol for review and delivery. Claude Opus-class secondary review
+control to Luna for review and delivery. Claude Opus-class secondary review
 requires fresh user approval and remains advisory only.
 Correctness, hidden-edge, scope, handback honesty and context-fit evidence
 determine qualification. Cost, latency, resource observations and current
@@ -127,9 +136,10 @@ heartbeat reconciles, in order:
 8. the next action permitted by the dependency and milestone/wave graph.
 
 `handback` requires a result file and focused local commits.
-`sol_review` is the Sol-owned orchestration-review stage. It requires
+`orchestrator_review` is the model-neutral independent-review stage. It requires
 independent diff, test, privacy, credential, dependency and protected-path
-review. `pr_open` requires a pushed short-lived branch and
+review by Luna or a bounded reviewer that did not implement the work. It does
+not imply a Sol review. `pr_open` requires a pushed short-lived branch and
 linked issue. `merged` requires the exact protected merge SHA, pull request and
 target branch, but it is not terminal completion. `trusted` requires successful
 target-branch checks for that exact merge SHA. `reconciled` is the only
@@ -184,7 +194,8 @@ An adopted control requires:
 
 - at least the policy's minimum independent evidence;
 - a scoped issue with outcome, limits, security and test plan;
-- Sol Extra High review for protected or high-impact classes;
+- the required Sol specialist assessment for a reserved decision class, with
+  human final authority where applicable;
 - a failing regression test where behaviour is executable;
 - a protected pull request with the required planning attestation; and
 - passing required checks.
@@ -210,7 +221,7 @@ pull request behind its base and forces a full revalidation, so concurrency
 beyond that costs more than it returns.
 
 Provider cost order does not force otherwise independent work to serialize.
-When the cheapest qualified provider is already active, Sol may select the next
+When the cheapest qualified provider is already active, Luna may select the next
 qualified provider for another ready issue only when the task record proves:
 
 - the occupied cheaper provider's exact task, qualification evidence, issue
@@ -225,8 +236,8 @@ qualified provider for another ready issue only when the task record proves:
 Concurrency never justifies escalating or duplicating the same task, using an
 unqualified model, overlapping paths, broadening delegated authority or
 opening a third pull request. Within each task, use the least-cost model already
-qualified for that task class. Sol still reviews and integrates handbacks
-sequentially.
+qualified for that task class. Luna remains accountable for sequential handback
+review and integration, and may delegate an independent routine review.
 
 ## Investigating a delivery failure
 
@@ -252,11 +263,12 @@ makes the symptom disappear.
 
 Stop the affected action and preserve evidence when:
 
-- the active model lacks authority;
+- the accountable orchestrator or a reserved specialist lacks authority;
 - base, branch, task, worktree or remote mutation state is contradictory;
 - credentials, provider access or new user authority is required;
 - the action changes repository settings outside explicit issue authority;
-- a product, security, architecture or release decision is unresolved;
+- a reserved ADR, high-level architecture, model-governance, repository-setting,
+  release-policy or explicitly requested security review is unresolved;
 - a destructive or irreversible action lacks an exact target and approval; or
 - tests would need to be weakened or protections bypassed.
 
@@ -264,10 +276,11 @@ Ordinary technical failures, CI waits and incomplete implementation are not
 hard blockers. Retry them through bounded, evidence-based recovery or progress
 independent work that does not violate dependencies.
 
-Automation may never self-adopt changes to product scope, architecture,
-security, model governance, repository settings, protected planning, release
-criteria or stable-promotion policy. Those changes always use the protected
-issue and pull-request path.
+Automation may never self-adopt a Sol-reserved decision. Product planning,
+product scope and roadmaps may be updated through the ordinary reviewed path.
+High-level architecture, ADRs, model governance, repository settings, protected
+planning, release policy and an explicitly requested security review use their
+reserved specialist and human-approval path.
 
 ## Validation
 

@@ -3,9 +3,12 @@
   "humanApprovalIdentifier": "Human",
   "modelAuthority": {
     "orchestration": [
-      "Sol Extra High"
+      "Luna Extra High"
     ],
     "protectedPlanning": [
+      "Sol Extra High"
+    ],
+    "reservedSpecialist": [
       "Sol Extra High"
     ],
     "mechanicalAnalysis": [
@@ -13,6 +16,70 @@
       "Luna Extra High",
       "Sol Extra High"
     ]
+  },
+  "routineDelivery": {
+    "accountableOrchestrator": "Luna Extra High",
+    "modelRestrictedActions": false,
+    "lowestCompetentModelAndEffort": true,
+    "avoidRework": true,
+    "delegatedSelfApproval": false,
+    "actions": [
+      "product_planning",
+      "product_scope",
+      "roadmaps",
+      "task_launch",
+      "monitoring",
+      "sequencing",
+      "reconciliation",
+      "blocker_classification",
+      "handback_acceptance",
+      "delivery_decisions",
+      "next_actions",
+      "provider_concurrency",
+      "review",
+      "integration",
+      "publication",
+      "release_execution",
+      "retained_learning_promotion"
+    ]
+  },
+  "reservedSpecialist": {
+    "model": "Sol Extra High",
+    "freshUserApprovalRequired": true,
+    "decisionClasses": [
+      "adr",
+      "high_level_architecture",
+      "model_governance",
+      "release_policy",
+      "repository_settings",
+      "protected_planning",
+      "requested_security_review"
+    ],
+    "securityReviewRequiresExplicitHumanRequest": true,
+    "architectureScope": [
+      "new_feature",
+      "broad_architecture_reconsideration"
+    ]
+  },
+  "adrGovernance": {
+    "specialistModel": "Sol Extra High",
+    "humanFinalDecision": true,
+    "lunaMay": [
+      "identify",
+      "research",
+      "draft",
+      "request_amendment"
+    ],
+    "solMustAssess": [
+      "broader_context",
+      "proposal_reason",
+      "alternatives",
+      "consequences"
+    ],
+    "lunaMustRespectSpecialistDecision": true,
+    "lunaMustPresentDecisionFaithfully": true,
+    "historicalRecordsImmutable": true,
+    "changedDecisionRequiresSupersedingAdr": true
   },
   "implementationRouting": {
     "qualificationRequired": true,
@@ -130,19 +197,20 @@
       "pathAllowlist": true,
       "runawayMonitoring": true,
       "requiredResult": true,
-      "solReview": true
+      "orchestratorReview": true
     },
     "delegatedAuthorities": [
-      "implementation"
+      "implementation",
+      "routine_delivery"
     ],
     "prohibitedAuthorities": [
-      "orchestration",
+      "adr",
       "protected_planning",
-      "architecture",
-      "security",
-      "integration",
-      "publication",
-      "release"
+      "high_level_architecture",
+      "model_governance",
+      "release_policy",
+      "repository_settings",
+      "requested_security_review"
     ]
   },
   "secondaryReview": {
@@ -152,13 +220,13 @@
     "authority": "advisory_only"
   },
   "protectedDecisionClasses": [
-    "architecture",
+    "adr",
+    "high_level_architecture",
     "model_governance",
-    "product_scope",
-    "release",
+    "release_policy",
     "repository_settings",
-    "security",
-    "protected_planning"
+    "protected_planning",
+    "requested_security_review"
   ],
   "taskStatusSources": [
     "create_thread",
@@ -216,7 +284,7 @@
     "launch_pending",
     "active",
     "handback",
-    "sol_review",
+    "orchestrator_review",
     "pr_open",
     "merged",
     "trusted",
@@ -240,10 +308,10 @@
       "blocked"
     ],
     "handback": [
-      "sol_review",
+      "orchestrator_review",
       "blocked"
     ],
-    "sol_review": [
+    "orchestrator_review": [
       "active",
       "pr_open",
       "blocked"
@@ -267,7 +335,7 @@
       "launch_pending",
       "active",
       "handback",
-      "sol_review",
+      "orchestrator_review",
       "pr_open",
       "merged",
       "trusted"
@@ -278,13 +346,13 @@
     "automaticAdoption": false,
     "minimumEvidenceForAdoption": 2,
     "prohibitedAutomaticClasses": [
-      "architecture",
+      "adr",
+      "high_level_architecture",
       "model_governance",
-      "product_scope",
-      "release",
+      "release_policy",
       "repository_settings",
-      "security",
-      "protected_planning"
+      "protected_planning",
+      "requested_security_review"
     ],
     "legacyProtectedApprovals": [
       {

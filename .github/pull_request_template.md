@@ -58,7 +58,9 @@ Observability-Impact: none — <specific reason>
 Leave the next line unchanged for implementation-only pull requests. If this
 pull request changes a path protected by `.github/planning-governance.json`,
 replace `Not applicable` with the authority that did the planning work:
-`Sol Extra High`, or `Human` when a human owner authored or directed the
-change. Never attest as an authority that did not do the work.
+`Sol Extra High` for a reserved specialist decision, or `Human` when a human
+owner authored, directed or finally decided the change. Routine product plans,
+roadmaps, workflows and operational configuration are not protected merely by
+category. Never attest as an authority that did not do the work.
 
 Planning-Model: Not applicable

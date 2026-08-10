@@ -14,9 +14,61 @@ function validPolicy() {
     schemaVersion: 1,
     humanApprovalIdentifier: "Human",
     modelAuthority: {
-      orchestration: ["Sol Extra High"],
+      orchestration: ["Luna Extra High"],
       protectedPlanning: ["Sol Extra High"],
+      reservedSpecialist: ["Sol Extra High"],
       mechanicalAnalysis: ["Terra Medium", "Luna Extra High", "Sol Extra High"],
+    },
+    routineDelivery: {
+      accountableOrchestrator: "Luna Extra High",
+      modelRestrictedActions: false,
+      lowestCompetentModelAndEffort: true,
+      avoidRework: true,
+      delegatedSelfApproval: false,
+      actions: [
+        "product_planning",
+        "product_scope",
+        "roadmaps",
+        "task_launch",
+        "monitoring",
+        "sequencing",
+        "reconciliation",
+        "blocker_classification",
+        "handback_acceptance",
+        "delivery_decisions",
+        "next_actions",
+        "provider_concurrency",
+        "review",
+        "integration",
+        "publication",
+        "release_execution",
+        "retained_learning_promotion",
+      ],
+    },
+    reservedSpecialist: {
+      model: "Sol Extra High",
+      freshUserApprovalRequired: true,
+      decisionClasses: [
+        "adr",
+        "high_level_architecture",
+        "model_governance",
+        "release_policy",
+        "repository_settings",
+        "protected_planning",
+        "requested_security_review",
+      ],
+      securityReviewRequiresExplicitHumanRequest: true,
+      architectureScope: ["new_feature", "broad_architecture_reconsideration"],
+    },
+    adrGovernance: {
+      specialistModel: "Sol Extra High",
+      humanFinalDecision: true,
+      lunaMay: ["identify", "research", "draft", "request_amendment"],
+      solMustAssess: ["broader_context", "proposal_reason", "alternatives", "consequences"],
+      lunaMustRespectSpecialistDecision: true,
+      lunaMustPresentDecisionFaithfully: true,
+      historicalRecordsImmutable: true,
+      changedDecisionRequiresSupersedingAdr: true,
     },
     implementationRouting: {
       qualificationRequired: true,
@@ -100,17 +152,17 @@ function validPolicy() {
         pathAllowlist: true,
         runawayMonitoring: true,
         requiredResult: true,
-        solReview: true,
+        orchestratorReview: true,
       },
-      delegatedAuthorities: ["implementation"],
+      delegatedAuthorities: ["implementation", "routine_delivery"],
       prohibitedAuthorities: [
-        "orchestration",
+        "adr",
         "protected_planning",
-        "architecture",
-        "security",
-        "integration",
-        "publication",
-        "release",
+        "high_level_architecture",
+        "model_governance",
+        "release_policy",
+        "repository_settings",
+        "requested_security_review",
       ],
     },
     secondaryReview: {
@@ -120,13 +172,13 @@ function validPolicy() {
       authority: "advisory_only",
     },
     protectedDecisionClasses: [
-      "architecture",
+      "adr",
+      "high_level_architecture",
       "model_governance",
-      "product_scope",
-      "release",
+      "release_policy",
       "repository_settings",
-      "security",
       "protected_planning",
+      "requested_security_review",
     ],
     taskStatusSources: [
       "create_thread",
@@ -170,7 +222,7 @@ function validPolicy() {
       "launch_pending",
       "active",
       "handback",
-      "sol_review",
+      "orchestrator_review",
       "pr_open",
       "merged",
       "trusted",
@@ -182,26 +234,26 @@ function validPolicy() {
       planned: ["launch_pending", "blocked"],
       launch_pending: ["active", "blocked"],
       active: ["handback", "blocked"],
-      handback: ["sol_review", "blocked"],
-      sol_review: ["active", "pr_open", "blocked"],
+      handback: ["orchestrator_review", "blocked"],
+      orchestrator_review: ["active", "pr_open", "blocked"],
       pr_open: ["active", "merged", "blocked"],
       merged: ["trusted", "blocked"],
       trusted: ["reconciled", "blocked"],
       reconciled: [],
-      blocked: ["planned", "launch_pending", "active", "handback", "sol_review", "pr_open", "merged", "trusted"],
+      blocked: ["planned", "launch_pending", "active", "handback", "orchestrator_review", "pr_open", "merged", "trusted"],
     },
     learning: {
       automaticCandidateCapture: true,
       automaticAdoption: false,
       minimumEvidenceForAdoption: 2,
       prohibitedAutomaticClasses: [
-        "architecture",
+        "adr",
+        "high_level_architecture",
         "model_governance",
-        "product_scope",
-        "release",
+        "release_policy",
         "repository_settings",
-        "security",
         "protected_planning",
+        "requested_security_review",
       ],
       legacyProtectedApprovals: [
         { model: "Claude Opus Extra High", pullRequest: 131 },
@@ -216,7 +268,7 @@ function activeState() {
   return {
     schemaVersion: 1,
     actor: {
-      model: "Sol Extra High",
+      model: "Luna Extra High",
       role: "orchestration",
     },
     accessPreflight: {
@@ -511,6 +563,53 @@ describe("orchestration governance", () => {
     );
   });
 
+  it("accepts a bounded, freshly approved Sol specialist request", () => {
+    const state = activeState();
+    state.reservedSpecialist = {
+      model: "Sol Extra High",
+      role: "reserved_specialist",
+      decisionClass: "adr",
+      boundedRequest: "Assess ADR-0011 context, alternatives, and consequences.",
+      status: "complete",
+      userApproval: {
+        approved: true,
+        observedAt: "2026-08-10T18:30:00.000Z",
+      },
+    };
+    expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
+  });
+
+  it("rejects a Sol specialist request without fresh task-specific approval", () => {
+    const state = activeState();
+    state.reservedSpecialist = {
+      model: "Sol Extra High",
+      role: "reserved_specialist",
+      decisionClass: "model_governance",
+      boundedRequest: "Change the orchestration authority matrix.",
+      status: "requested",
+      userApproval: { approved: false, observedAt: "2026-08-10T18:30:00.000Z" },
+    };
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /fresh task-specific user approval/u,
+    );
+  });
+
+  it("rejects a security review not explicitly requested by the human", () => {
+    const state = activeState();
+    state.reservedSpecialist = {
+      model: "Sol Extra High",
+      role: "reserved_specialist",
+      decisionClass: "requested_security_review",
+      boundedRequest: "Review the authentication callback.",
+      status: "requested",
+      explicitHumanRequest: false,
+      userApproval: { approved: true, observedAt: "2026-08-10T18:30:00.000Z" },
+    };
+    expect(() => validateOperationalState(state, validPolicy())).toThrow(
+      /security review invocation requires an explicit human request/u,
+    );
+  });
+
   it("rejects a routing order that does not put qualified local Ollama first and Luna last", () => {
     const policy = validPolicy();
     policy.implementationRouting.providers = [
@@ -689,11 +788,43 @@ describe("orchestration governance", () => {
     expect(() => validateOperationalState(state, validPolicy())).not.toThrow();
   });
 
-  it("requires Sol to remain the only orchestration and protected-planning model", () => {
+  it("requires Luna to remain the default orchestrator", () => {
     const policy = validPolicy();
     policy.modelAuthority.orchestration.push("Claude Opus Extra High");
     expect(() => validateOrchestrationPolicy(policy)).toThrow(
-      /orchestration must remain reserved to Sol Extra High/u,
+      /default orchestration must remain assigned to Luna Extra High/u,
+    );
+  });
+
+  it("reserves only the owner-approved specialist decision classes to Sol", () => {
+    const policy = validPolicy();
+    policy.reservedSpecialist.decisionClasses.push("product_scope");
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /Sol specialist decision classes must match the reserved authority matrix/u,
+    );
+  });
+
+  it("keeps routine delivery model-open under Luna accountability", () => {
+    const policy = validPolicy();
+    policy.routineDelivery.modelRestrictedActions = true;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /routine delivery must remain model-open under Luna accountability/u,
+    );
+  });
+
+  it("requires explicit human request before a Sol security review", () => {
+    const policy = validPolicy();
+    policy.reservedSpecialist.securityReviewRequiresExplicitHumanRequest = false;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /security review must require an explicit human request/u,
+    );
+  });
+
+  it("enforces the human-final ADR workflow", () => {
+    const policy = validPolicy();
+    policy.adrGovernance.humanFinalDecision = false;
+    expect(() => validateOrchestrationPolicy(policy)).toThrow(
+      /ADR governance must keep Sol specialist assessment and the human final decision/u,
     );
   });
 
@@ -978,5 +1109,10 @@ describe("orchestration governance", () => {
     expect(() => validateOrchestrationPolicy(policy)).not.toThrow();
     expect(() => validateAdoptedControls(controls, policy)).not.toThrow();
     expect(() => validateOperationalState(state, policy)).not.toThrow();
+
+    const controlStatus = new Map(controls.controls.map((control) => [control.id, control.status]));
+    for (const retired of ["ORCH-002", "ORCH-003", "ORCH-011", "ORCH-012"]) {
+      expect(controlStatus.get(retired)).toBe("retired");
+    }
   });
 });

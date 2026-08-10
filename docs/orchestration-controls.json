@@ -17,7 +17,7 @@
     },
     {
       "id": "ORCH-002",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "model_governance",
       "summary": "Check model authority before any mutation and stop all orchestration, protected planning or governance work unless the active model is Sol Extra High.",
       "automaticPromotion": false,
@@ -27,11 +27,13 @@
       ],
       "issue": 74,
       "pullRequest": 77,
-      "approvedByModel": "Sol Extra High"
+      "approvedByModel": "Sol Extra High",
+      "retiredByIssue": 282,
+      "retirementReason": "ADR-0011 replaces Sol-only orchestration with Luna-first accountability and bounded Sol specialist authority."
     },
     {
       "id": "ORCH-003",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "protected_planning",
       "summary": "Capture operational lessons automatically as local candidates, but adopt durable controls only through evidence, an issue, Sol Extra High approval, tests, and a protected pull request.",
       "automaticPromotion": false,
@@ -41,7 +43,9 @@
       ],
       "issue": 74,
       "pullRequest": 77,
-      "approvedByModel": "Sol Extra High"
+      "approvedByModel": "Sol Extra High",
+      "retiredByIssue": 282,
+      "retirementReason": "ADR-0011 makes ordinary retained-learning promotion model-open under Luna while preserving specialist review only for reserved decision classes."
     },
     {
       "id": "ORCH-004",
@@ -149,7 +153,7 @@
     },
     {
       "id": "ORCH-011",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "model_governance",
       "summary": "Keep orchestration with Sol Extra High and route bounded implementation by exact provider, model and task-class capability; stop evaluation by pass five, avoid heuristic session-token caps, and intervene only on task-appropriate evidence of stalled progress.",
       "automaticPromotion": false,
@@ -160,11 +164,13 @@
       ],
       "issue": 189,
       "pullRequest": 191,
-      "approvedByModel": "Sol Extra High"
+      "approvedByModel": "Sol Extra High",
+      "retiredByIssue": 282,
+      "retirementReason": "ADR-0011 keeps capability routing but replaces Sol orchestration and mandatory Sol handback authority with Luna accountability and model-neutral review."
     },
     {
       "id": "ORCH-012",
-      "status": "adopted",
+      "status": "retired",
       "decisionClass": "model_governance",
       "summary": "Prefer the cheapest qualified idle implementation capacity, but permit the next qualified provider to take a separate ready issue when the cheaper provider is occupied and exact disjoint paths, satisfied dependencies, a material throughput benefit, bounded revalidation and the two-pull-request cap are evidenced.",
       "automaticPromotion": false,
@@ -175,7 +181,9 @@
       ],
       "issue": 193,
       "pullRequest": 195,
-      "approvedByModel": "Sol Extra High"
+      "approvedByModel": "Sol Extra High",
+      "retiredByIssue": 282,
+      "retirementReason": "ADR-0011 retains bounded provider concurrency while transferring its decisions and sequential integration from Sol to Luna."
     }
   ]
 }
