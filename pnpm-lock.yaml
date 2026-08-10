@@ -18,6 +18,12 @@ importers:
       '@napi-rs/canvas':
         specifier: 1.0.3
         version: 1.0.3
+      '@napi-rs/canvas-linux-x64-gnu':
+        specifier: 1.0.3
+        version: 1.0.3
+      '@napi-rs/canvas-linux-x64-musl':
+        specifier: 1.0.3
+        version: 1.0.3
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
