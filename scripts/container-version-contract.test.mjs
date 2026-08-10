@@ -139,6 +139,28 @@ describe("immutable container version identity", () => {
     }
   });
 
+  it("exposes the canonical banner as a quiet one-off image command", () => {
+    const fixture = versionFixture();
+    try {
+      const result = spawnSync(bash, [fixture.script, "--banner"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ORBIT_VERSION: "v9.9.9",
+          ORBIT_REVISION: "f".repeat(40),
+          ORBIT_CHANNEL: "latest",
+        },
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(
+        `${banner}Orbit v1.2.3 | channel=preview | revision=${"a".repeat(40)}\n`,
+      );
+      expect(result.stderr).toBe("");
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("does not print startup identity or the banner for one-off commands", () => {
     const fixture = versionFixture();
     try {
