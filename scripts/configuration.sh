@@ -241,7 +241,7 @@ migrate_file() {
     line_without_cr="${line%$'\r'}"
     replaced=0
     for key in "${managed_order[@]}"; do
-      if [[ "$line_without_cr" == "${key}="* ]]; then
+      if [[ "$line_without_cr" == "${key}="* || "$line_without_cr" == "# ${key}=" ]]; then
         printf '%s=%s%s' "$key" "${managed_values[$key]}" "$newline" >> "$temp" 2>/dev/null || {
           rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration;
         }

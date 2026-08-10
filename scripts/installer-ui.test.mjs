@@ -1,0 +1,381 @@
+import { spawn, spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
+
+function runHelper(modeArgs = [], env = {}) {
+  return spawnSync(
+    "bash",
+    [
+      "-c",
+      'source "$1"; installer_ui_init "${@:2}"; installer_ui_emit bootstrap installer starting initial begin 3',
+      "installer-ui-test",
+      helper,
+      ...modeArgs,
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, TERM: "xterm", ...env },
+    },
+  );
+}
+
+function runPty(body, input, env = {}) {
+  return spawnSync(
+    "script",
+    ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+    {
+      encoding: "utf8",
+      input,
+      env: { ...process.env, TERM: "xterm", ...env },
+    },
+  );
+}
+
+function runPtyTimed(body, input, env = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+      { env: { ...process.env, TERM: "xterm", ...env } },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
+    setTimeout(() => {
+      child.stdin.write(input);
+      child.stdin.end();
+    }, 200);
+    child.on("close", (status, signal) => {
+      clearTimeout(timeout);
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
+}
+
+describe("installer semantic UI", () => {
+  it("renders a bounded plain event with the canonical fields", () => {
+    const result = runHelper(["--plain"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      "phase=bootstrap component=installer state=starting reason=initial action=begin elapsed=3s\n",
+    );
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("rejects arbitrary field content instead of echoing untrusted values", () => {
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        'source "$1"; installer_ui_init --plain; installer_ui_emit bootstrap installer starting "SECRET_VALUE=do-not-print" begin 3',
+        "installer-ui-test",
+        helper,
+      ],
+      { encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("reason=unknown");
+    expect(result.stdout).not.toContain("SECRET_VALUE");
+    expect(result.stdout).not.toContain("do-not-print");
+  });
+
+  it.each([
+    ["non-TTY", {}],
+    ["NO_COLOR", { NO_COLOR: "1" }],
+    ["TERM=dumb", { TERM: "dumb" }],
+  ])("does not emit ANSI in %s mode", (_label, env) => {
+    const result = runHelper([], env);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("does not emit ANSI when output is redirected", () => {
+    const target = mkdtempSync(join(tmpdir(), "orbit-installer-ui-"));
+    const output = join(target, "output");
+    try {
+      const result = spawnSync(
+        "bash",
+        [
+          "-c",
+          'source "$1"; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3 > "$2"',
+          "installer-ui-test",
+          helper,
+          output,
+        ],
+        { encoding: "utf8", env: { ...process.env, TERM: "xterm" } },
+      );
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, "utf8")).not.toMatch(/\x1b\[/u);
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("uses ANSI only for an actual TTY when color is allowed", () => {
+    const colorEnv = { ...process.env, TERM: "xterm" };
+    delete colorEnv.NO_COLOR;
+    const result = spawnSync(
+      "script",
+      [
+        "-qec",
+        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
+        "/dev/null",
+      ],
+      { encoding: "utf8", env: colorEnv },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/\x1b\[/u);
+    expect(result.stdout).toContain("bootstrap");
+    expect(result.stdout).toContain("installer");
+    expect(result.stdout).not.toContain("phase=");
+  });
+
+  it.each([
+    ["NO_COLOR", { NO_COLOR: "1", TERM: "xterm" }],
+    ["TERM=dumb", { TERM: "dumb" }],
+  ])("refuses forced TTY color when %s disables it", (_label, overrides) => {
+    const env = { ...process.env, ...overrides };
+    if (!("NO_COLOR" in overrides)) delete env.NO_COLOR;
+    const result = spawnSync(
+      "script",
+      [
+        "-qec",
+        `source '${helper}'; installer_ui_init --tty; installer_ui_emit bootstrap installer starting initial begin 3`,
+        "/dev/null",
+      ],
+      { encoding: "utf8", env },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("selects menu rows with arrows and Enter without colour-only state", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; choice="$(installer_ui_select 3 "Choose" install install Install update Update repair Repair exit Exit)"; printf "\\nCHOICE=%s\\n" "$choice"',
+      "\x1b[B\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("> 1) Install");
+    expect(result.stdout).toContain("CHOICE=update");
+  });
+
+  it("supports numbered menu fallback on a dumb terminal", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; printf "CHOICE=%s\\n" "$choice"',
+      "2\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+    expect(result.stdout).toContain("CHOICE=update");
+  });
+
+  it("treats Escape as cancellation in the numbered fallback", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then printf "CHOICE=%s\\n" "$choice"; else printf "STATUS=%s\\n" "$?"; fi',
+      "\x1b\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130");
+    expect(result.stdout).not.toContain("CHOICE=");
+  });
+
+  it.each([
+    ["TERM=dumb", { TERM: "dumb" }],
+    ["plain mode", { ORBIT_INSTALLER_PLAIN: "1" }],
+  ])("uses sequence-free canonical text input for %s", (_label, env) => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "VALUE=%s\\n" "$value"',
+      "safe-value\r",
+      env,
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=safe-value");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("fits fixed menu labels to a narrow terminal using an ASCII fallback", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; choice="$(installer_ui_select 3 "Choose" install install "Install Orbit with a deliberately long descriptive label" update "Update Orbit with another deliberately long label")"; printf "CHOICE=%s\n" "$choice"',
+      "1\r",
+      { TERM: "dumb", COLUMNS: "32" },
+    );
+
+    expect(result.status).toBe(0);
+    const menuLines = result.stdout.split(/\r?\n/u).filter((line) => /^. \d\) /u.test(line));
+    expect(menuLines.length).toBeGreaterThanOrEqual(2);
+    expect(menuLines.every((line) => line.length <= 32)).toBe(true);
+    expect(result.stdout).toContain("...");
+    expect(result.stdout).not.toMatch(/[^\x00-\x7F]/u);
+  });
+
+  it("uses terminal cursor editing without persisting navigation sequences", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abcd\x1b[D\x1b[D\x08X\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=aXcd");
+    expect(result.stdout).not.toContain("[D[D");
+  });
+
+  it("keeps cursor editing available when colour is disabled", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abcd\x1b[D\x1b[D\x08X\r",
+      { NO_COLOR: "1", TERM: "xterm" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=aXcd");
+    expect(result.stdout).not.toContain("[D[D");
+  });
+
+  it("supports Home, End and Delete without inserting escape bytes", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abcd\x1b[H\x1b[3~X\x1b[F\x1b[D\x1b[3~\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=Xbc");
+    expect(result.stdout).not.toContain("[3~");
+  });
+
+  it("ignores unsupported escape sequences during text entry", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abc\x1b[999~def\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=abcdef");
+    expect(result.stdout).not.toContain("999");
+  });
+
+  it("consumes unsupported CSI parameters without inserting their bytes", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abc\x1b[1;5Cdef\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=abcdef");
+    expect(result.stdout).not.toMatch(/1;5C/u);
+  });
+
+  it("does not emit ANSI while editing text on a dumb terminal", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "ab\x1b[D X\r",
+      { TERM: "dumb" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=a Xb");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("consumes unsupported parameterized and SS3 escape sequences completely", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_text 3 "Value: " 64)"; printf "\\nVALUE=%s\\n" "$value"',
+      "abc\x1b[1;2A\x1bOA\x1b[?25lXYZ\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("VALUE=abcXYZ");
+    expect(result.stdout).not.toContain("1;2");
+    expect(result.stdout).not.toContain("25l");
+  });
+
+  it("rejects multiline bracketed paste as one unsafe value", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; if value="$(installer_ui_read_text 3 "Value: " 64)"; then printf "VALUE=%s\\n" "$value"; else printf "REJECTED=%s\\n" "$?"; fi',
+      "\x1b[200~first\r\nsecond\x1b[201~\r",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("REJECTED=2");
+    expect(result.stdout).not.toContain("VALUE=first");
+  });
+
+  it("rejects an incomplete bracketed paste at terminal EOF", async () => {
+    const result = await runPtyTimed(
+      'source "$1"; exec 3<>/dev/tty; if value="$(installer_ui_read_text 3 "Value: " 64)"; then printf "VALUE=%s\\n" "$value"; else printf "REJECTED=%s\\n" "$?"; fi',
+      "\x1b[200~partial",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("REJECTED=1");
+    expect(result.stdout).not.toContain("VALUE=partial");
+  });
+
+  it("keeps secret input out of terminal output and supports editing", () => {
+    const secret = "private-widget-secret";
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; value="$(installer_ui_read_secret 3 "Secret: " 64)"; printf "LENGTH=%s\\n" "${#value}"',
+      `${secret}\x1b[D\x7fX\r`,
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain(secret);
+    expect(result.stdout).toContain(`LENGTH=${secret.length}`);
+  });
+
+  it("restores terminal state when text entry is cancelled with Escape", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if value="$(installer_ui_read_text 3 "Value: " 64)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      "\x1b",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
+  });
+
+  it("restores terminal state when text entry reaches EOF", async () => {
+    const result = await runPtyTimed(
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if value="$(installer_ui_read_text 3 "Value: " 64)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      "\x04",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=1 RESTORED=yes");
+  });
+
+  it("restores terminal state when text entry is interrupted by a signal", () => {
+    const result = runPty(
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 0.2; kill -TERM "$target") & if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      "",
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
+  });
+});

@@ -37,11 +37,21 @@ From an empty directory on a Linux host with Docker Compose v2 and `curl`:
 curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-On a first install from a controlling terminal, the installer guides you
-through the public HTTPS Orbit origin, complete OIDC issuer, client ID, and a
-hidden OIDC client-secret entry. It refuses to start Compose until the core
-configuration is ready. Git is not required and the repository is not cloned:
-a deployment needs compose assets and a published image, not source or tests.
+On a capable controlling terminal, the installer opens the Orbit command
+centre with Install, Update, Repair, and Exit choices. Install guides the
+operator through a supported Standard, Document processing, Full local stack,
+or Custom profile, then collects the public HTTPS Orbit origin, complete OIDC
+issuer, client ID, and hidden OIDC client secret in private staging. The target
+is not changed until the final review is accepted. Repair is a non-mutating
+dispatch point until the bounded repair engine in issue #261 is delivered.
+Git is not required and the repository is not cloned: a deployment needs
+compose assets and a published image, not source or tests.
+
+For log-oriented or automated use, a downloaded installer also accepts
+`--plain` with one direct `--install`, `--update`, or `--repair` action.
+Install is accepted only for an empty or narrowly pre-provisioned target;
+Update is accepted only for a recognized deployment. Plain and redirected
+output is stable, line-oriented, and contains no terminal control sequences.
 
 Unattended installation is supported only with a complete, pre-provisioned
 `.env-orbit` and an existing non-empty regular
@@ -72,10 +82,12 @@ reference is never deployed.
 
 It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
 generates independent 256-bit session, PostgreSQL, and document-encryption
-secrets, validates the rendered Compose configuration, and starts the `orbit`
-application container, the official `orbit-postgres` PostgreSQL container, and
-the isolated official ClamAV scanner in the background, reporting fixed
-success or failure messages. Development and routine preview
+secrets, validates the rendered Compose configuration, and prepares the
+selected service images. Completion is withheld until PostgreSQL is healthy,
+Orbit's content-free `/api/health` contract reports ready, ClamAV is healthy,
+and each selected optional service passes its bounded probe. The final screen
+shows the safe public URL, version, channel, abbreviated revision, immutable
+digest, selected profile, and exact status/log commands. Development and routine preview
 images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
 only after a dedicated exact-image validation path is enabled for that
 architecture.
@@ -549,10 +561,11 @@ All supported runtime variables are documented in
 their direct variable or the corresponding `_FILE` variable. Do not configure
 both forms for the same setting.
 
-The persistent `.env-orbit` copy is arranged by required, installer-managed,
-ordinary, optional, and advanced groups. Keep optional examples commented
-until the whole related group is configured, then run
-`bash scripts/configure.sh --check` before starting or updating Orbit. The
+The generated `.env-orbit` is a concise operator file arranged into Core,
+Authentication, Generated secrets and keys, Deployment, Optional services,
+and Observability sections. Reference-only defaults and tuning examples remain
+in `.env-orbit.example`. Configure an optional group as a complete unit, then
+run `bash scripts/configure.sh --check` before starting or updating Orbit. The
 check reports only field names and readiness states, never values.
 
 Examples below demonstrate the expected shape. Generate real secrets; do not
@@ -595,7 +608,7 @@ and add a matching read-only secret mount to the Compose service.
 | `OIDC_ISSUER` | Orbit | HTTPS issuer/discovery URL for the OpenID Connect provider. | `https://auth.example.com/application/o/orbit/` |
 | `OIDC_CLIENT_ID` | Orbit | Client identifier registered with the identity provider. | `orbit` |
 | `OIDC_CLIENT_SECRET` | Orbit | Direct OIDC client secret. Leave empty when the file form is used. | `<provider-generated-secret>` |
-| `OIDC_CLIENT_SECRET_FILE` | Orbit | File containing the OIDC client secret. | `/run/secrets/orbit-oidc-client-secret` |
+| `OIDC_CLIENT_SECRET_FILE` | Orbit | File containing the OIDC client secret. | `/run/orbit-secrets/orbit-oidc-client-secret` |
 | `OIDC_CALLBACK_URL` | Orbit | Exact callback URI registered with the identity provider. | `https://orbit.example.com/api/auth/callback` |
 | `OIDC_SCOPES` | Orbit | Space-separated scopes requested during sign-in; must contain `openid`. | `openid profile email` |
 | `OIDC_EMAIL_CLAIM` | Orbit | ID-token claim containing the user email address. | `email` |
