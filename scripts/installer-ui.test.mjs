@@ -371,7 +371,7 @@ describe("installer semantic UI", () => {
 
   it("restores terminal state when text entry is interrupted by a signal", () => {
     const result = runPty(
-      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 0.2; kill -TERM "$target") & if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 1; kill -TERM "$target") & if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
       "",
     );
 
@@ -391,7 +391,7 @@ describe("installer semantic UI", () => {
 
   it("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
     const result = runPty(
-      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 0.2; kill -TERM "$target") & if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
+      'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; target="$BASHPID"; (sleep 1; kill -TERM "$target") & if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
       "",
     );
 
