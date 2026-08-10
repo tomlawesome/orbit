@@ -53,6 +53,15 @@ Install is accepted only for an empty or narrowly pre-provisioned target;
 Update is accepted only for a recognized deployment. Plain and redirected
 output is stable, line-oriented, and contains no terminal control sequences.
 
+`scripts/install.sh --simulate` (optionally combined with `--plain`) runs a
+safe, non-mutating rehearsal of the same command-centre renderer, menus, text
+and hidden-input widgets, and fixed representative success and failure
+presentation, so an owner can preview the experience without installing or
+updating Orbit. It never inspects or changes a target, never contacts Docker,
+curl, a registry, or an OIDC provider, and every value it shows is a labelled,
+synthetic placeholder. `--simulate` cannot be combined with `--install`,
+`--update`, or `--repair`.
+
 Unattended installation is supported only with a complete, pre-provisioned
 `.env-orbit` and an existing non-empty regular
 `.orbit-secrets/oidc-client-secret` file with mode `0600`. The environment file
