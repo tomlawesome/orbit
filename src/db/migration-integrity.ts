@@ -1,0 +1,97 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+export type SqlClient = { unsafe(query: string): Promise<Array<Record<string, unknown>>> };
+
+export type MigrationIntegrityCode = "database_floor" | "migration_integrity";
+
+export class MigrationIntegrityError extends Error {
+  readonly code: MigrationIntegrityCode;
+
+  constructor(code: MigrationIntegrityCode) {
+    super("Orbit migration integrity check failed");
+    this.name = "MigrationIntegrityError";
+    this.code = code;
+  }
+}
+
+const SUPPORTED_FLOOR_TAG = "0017_imap_recipient_alias_index";
+
+export function canonicalMigrationChecksum(content: string | Buffer): string {
+  return createHash("sha256").update(content.toString().replace(/\r\n/gu, "\n"), "utf8").digest("hex");
+}
+
+export async function readExpectedMigrationHashes(folder: string): Promise<Array<{ tag: string; hash: string }>> {
+  try {
+    const journal = JSON.parse(await readFile(join(folder, "meta", "_journal.json"), "utf8")) as {
+      entries?: Array<{ tag?: string }>;
+    };
+    if (!Array.isArray(journal.entries)) throw new MigrationIntegrityError("migration_integrity");
+    return await Promise.all(journal.entries.map(async (entry) => {
+      if (typeof entry.tag !== "string" || !/^[0-9]{4}_[A-Za-z0-9_-]+$/u.test(entry.tag)) {
+        throw new MigrationIntegrityError("migration_integrity");
+      }
+      return { tag: entry.tag, hash: canonicalMigrationChecksum(await readFile(join(folder, `${entry.tag}.sql`), "utf8")) };
+    }));
+  } catch (error) {
+    if (error instanceof MigrationIntegrityError) throw error;
+    throw new MigrationIntegrityError("migration_integrity");
+  }
+}
+
+async function hasExistingProductTables(client: SqlClient): Promise<boolean> {
+  const rows = await client.unsafe(
+    `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('users', 'households', 'memberships', 'sessions', 'documents')) AS present`,
+  );
+  return rows[0]?.present === true || rows[0]?.present === "true";
+}
+
+export async function readAppliedMigrationHashes(client: SqlClient): Promise<string[]> {
+  const rows = await client.unsafe('SELECT "hash" FROM "drizzle"."__drizzle_migrations" ORDER BY "id"');
+  return rows.map((row) => String(row.hash));
+}
+
+/** Confirms that the database journal is an exact expected prefix before migrate(). */
+export async function verifyMigrationIntegrity(client: SqlClient, folder: string): Promise<void> {
+  const expected = await readExpectedMigrationHashes(folder);
+  let applied: string[];
+  try {
+    applied = await readAppliedMigrationHashes(client);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "42P01") {
+      // A genuinely fresh database has neither the journal nor the product
+      // schema. Existing product data without a journal cannot be safely
+      // classified and therefore fails closed at the supported floor.
+      if (await hasExistingProductTables(client)) {
+        throw new MigrationIntegrityError("database_floor");
+      }
+      return;
+    }
+    throw new MigrationIntegrityError("migration_integrity");
+  }
+  const floorIndex = expected.findIndex((migration) => migration.tag === SUPPORTED_FLOOR_TAG);
+  if (applied.length === 0 && await hasExistingProductTables(client)) {
+    throw new MigrationIntegrityError("database_floor");
+  }
+  if (applied.length > 0 && (floorIndex < 0 || applied.length < floorIndex + 1)) {
+    throw new MigrationIntegrityError("database_floor");
+  }
+  if (applied.some((hash, index) => expected[index]?.hash !== hash)) {
+    throw new MigrationIntegrityError("migration_integrity");
+  }
+}
+
+/** Confirms the post-migration journal is exactly the image's full sequence. */
+export async function verifyMigrationJournalComplete(client: SqlClient, folder: string): Promise<void> {
+  const expected = await readExpectedMigrationHashes(folder);
+  let applied: string[];
+  try {
+    applied = await readAppliedMigrationHashes(client);
+  } catch {
+    throw new MigrationIntegrityError("migration_integrity");
+  }
+  if (applied.length !== expected.length || applied.some((hash, index) => hash !== expected[index]?.hash)) {
+    throw new MigrationIntegrityError("migration_integrity");
+  }
+}

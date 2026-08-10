@@ -502,6 +502,36 @@ Desktop navigation is not in scope there.
 - Signed-out privacy behaviour is unchanged.
 - Mobile density behaviour defined by ORB-FUT-002 is unaffected.
 
+## ORB-FUT-012 — Prebuilt, digest-pinned installation
+
+**Roadmap disposition:** Delivered as a v1.1 installation foundation
+**Priority:** High
+**Phase:** Post-v1 operations
+**Dependencies:** Immutable image publication and exact-digest promotion
+**Decision status:** Accepted in
+[ADR-0008](adr/0008-installer-resolved-release-digests.md)
+**Objective:** Make a source-less, non-interactive prebuilt install the
+supported default without ever deploying a mutable image reference.
+
+### Required outcome
+
+- Installation is one pasteable command that requires neither Git nor
+  interactive input.
+- The installer resolves the stable discovery tag, validates the returned
+  digest and records that immutable identity before deployment.
+- Deployment assets and the image come from the same release, while building
+  from source remains a separate explicit developer workflow.
+- Resolution fails closed rather than falling back to a mutable reference or a
+  local build when the expected digest or release assets are unavailable.
+- The installed image and compose configuration retain the existing secret,
+  authorization, backup and upgrade contracts.
+
+The accepted contract uses `latest` for stable discovery and `preview` for the
+protected candidate lane. A moving `dev` tag and an interactive
+stable/development installer choice are not part of this requirement; `dev`
+remains reserved and unpublished unless a later protected product/release
+decision explicitly adopts it.
+
 ## Foundations every future direction must preserve
 
 - Per-user email and browser-push reminder preferences.

@@ -22,7 +22,14 @@ function elapsedMilliseconds(startedAt: number): number {
 }
 
 function parserUnavailable(document: string, startedAt: number, reason: ParserFailure): AppError {
-  log.warn("document.parse", { document, outcome: "error", reason, ms: elapsedMilliseconds(startedAt) });
+  log.warn({
+    event: "document.parse",
+    state: "degraded",
+    reason,
+    action: "check_parser",
+    impact: "document_processing_blocked",
+    durationMs: elapsedMilliseconds(startedAt),
+  });
   return new AppError("parser_unavailable", "Document processing is unavailable", 503);
 }
 
@@ -102,7 +109,7 @@ export async function extractTextWithTika(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.tika.timeoutMs);
   const startedAt = Date.now();
-  log.info("document.parse", { document, outcome: "attempt" });
+  log.info({ event: "document.parse", state: "starting", action: "check_parser" });
   try {
     const response = await fetch(new URL("/tika", config.tika.url), {
       method: "PUT",
@@ -124,7 +131,12 @@ export async function extractTextWithTika(
     }
     const text = await readBoundedText(response.body, document, startedAt);
     // Character count only. Extracted text is hostile content and never logged.
-    log.info("document.parse", { document, outcome: "extracted", characters: text.length, ms: elapsedMilliseconds(startedAt) });
+    log.info({
+      event: "document.parse",
+      state: "ready",
+      action: "none",
+      durationMs: elapsedMilliseconds(startedAt),
+    });
     return text;
   } catch (error) {
     if (error instanceof AppError) throw error;

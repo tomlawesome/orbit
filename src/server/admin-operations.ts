@@ -13,6 +13,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { getConfigurationProblems } from "@/lib/configuration-problems";
 import {
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
@@ -210,6 +211,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
   const imapWorker = getImapIngestionWorkerHealth();
   const preflight = getImapProviderPreflightState(imapConfig, config);
   return {
+    configurationProblems: getConfigurationProblems(),
     notificationWorker: {
       started: worker.started,
       running: worker.running,
