@@ -58,6 +58,7 @@ readonly tika_readiness_probe='fetch("http://orbit-tika:9998/version", { cache: 
   .catch(() => process.exit(1));'
 
 plain_mode=0
+simulate_mode=0
 requested_action=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,9 +66,13 @@ while [[ $# -gt 0 ]]; do
       plain_mode=1
       shift
       ;;
+    --simulate)
+      simulate_mode=1
+      shift
+      ;;
     --install|--update|--repair)
       [[ -z "$requested_action" ]] || {
-        printf 'Usage: %s [--plain] [--install|--update|--repair]\n' "$0" >&2
+        printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
         exit 2
       }
       requested_action="${1#--}"
@@ -78,17 +83,41 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      printf 'Usage: %s [--plain] [--install|--update|--repair]\n' "$0" >&2
+      printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
       exit 2
       ;;
   esac
 done
 [[ $# -eq 0 ]] || {
-  printf 'Usage: %s [--plain] [--install|--update|--repair]\n' "$0" >&2
+  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
   exit 2
 }
+if [[ "$simulate_mode" == 1 && -n "$requested_action" ]]; then
+  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Orbit installer: --simulate cannot be combined with --install, --update or --repair.\n' >&2
+  exit 2
+fi
 if [[ "$plain_mode" == 1 ]]; then
   export ORBIT_INSTALLER_PLAIN=1
+fi
+
+# Simulation dispatches immediately after safe argument parsing and before
+# any target, deployment-environment, Docker/curl/timeout, registry/image/
+# OIDC, staging or transaction step. It only ever invokes the fixed sibling
+# simulation script (never a fetched, caller-supplied or symlinked path),
+# which in turn may only source the fixed sibling installer-ui.sh.
+if [[ "$simulate_mode" == 1 ]]; then
+  installer_script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)" ||
+    { printf 'Orbit installer: could not resolve the installer script directory for simulation.\n' >&2; exit 1; }
+  simulation_script="$installer_script_dir/installer-simulation.sh"
+  simulation_ui_script="$installer_script_dir/installer-ui.sh"
+  [[ -f "$simulation_script" && ! -L "$simulation_script" ]] ||
+    { printf 'Orbit installer: the simulation helper is missing or unsafe.\n' >&2; exit 1; }
+  [[ -f "$simulation_ui_script" && ! -L "$simulation_ui_script" ]] ||
+    { printf 'Orbit installer: the simulation UI helper is missing or unsafe.\n' >&2; exit 1; }
+  simulate_args=()
+  [[ "$plain_mode" == 1 ]] && simulate_args+=(--plain)
+  exec bash "$simulation_script" "${simulate_args[@]}"
 fi
 
 readiness_timeout_seconds="${ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS:-180}"
