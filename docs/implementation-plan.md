@@ -283,34 +283,33 @@ This section is the rolling commentary. It names where delivery actually is, so
 the next action is never inferred from memory. Update it whenever a slice
 changes state.
 
-- **Released train:** v1.1.0 from `main`
-  `ac7c64955b8a2a227259fdb33e35166f213c60e8`, promoted without rebuilding as
-  `ghcr.io/tomlawesome/orbit@sha256:92fb79336d997139002f94c52fd4767787767cc293147c12bbcfc25362a9237d`.
-- **Accepted branch position before this reconciliation PR:** `develop`
-  `c73ffb421c1bbbd911fc9ad11c4720e7b5b43eb7`, `preview`
-  `4ffed836d8646c33d13a0a7ada7db6571a37a2f4`, and the released `main` above.
-  GitHub refs remain the source of truth after this planning commit moves
-  `develop` forward.
-- **v1.1 closeout:** scanner recovery [#168](https://github.com/tomlawesome/orbit/issues/168)
-  and prebuilt installation [#117](https://github.com/tomlawesome/orbit/issues/117)
-  are accepted. The account-control residual [#192](https://github.com/tomlawesome/orbit/issues/192)
-  and its parent [#116](https://github.com/tomlawesome/orbit/issues/116) move to
-  the next release train. The superseded development-channel proposal
-  [#163](https://github.com/tomlawesome/orbit/issues/163) is not part of the
-  released contract: `preview` and `latest` are the only published discovery
-  tags, while `dev` remains reserved and unpublished.
-- **Next delivery sequence:** the product-tour documentation in
-  [#200](https://github.com/tomlawesome/orbit/issues/200) is delivered. Package
-  the missing backup and restore scripts in
-  [#232](https://github.com/tomlawesome/orbit/issues/232); require verified core
-  configuration in [#233](https://github.com/tomlawesome/orbit/issues/233)
-  before adding versioned configuration migrations in
-  [#234](https://github.com/tomlawesome/orbit/issues/234); then deliver #192 and
-  reconcile #116. Establish the proportional observability contract in
-  [#183](https://github.com/tomlawesome/orbit/issues/183) before the runtime
-  logging implementation [#206](https://github.com/tomlawesome/orbit/issues/206),
-  then address the independent local-tooling defect
-  [#101](https://github.com/tomlawesome/orbit/issues/101).
+- **Released train:** v1.2.0 from `main`
+  `515c77e1b6fe4b061b6ed4a9fbce2a168e876152`, promoted without rebuilding from
+  accepted preview source `49fcd6705f8f4c77ce4b4a6e7b00e7074b0ea2d3` as
+  `ghcr.io/tomlawesome/orbit@sha256:35ad7cea14f835b8e5b350faa0fcf711cbf95c517a2bad26f5fe72795a8aeb12`.
+- **Accepted branch position before this delivery:** `develop`
+  `6c2223a68c4c3199f1aa67b9525c1ddcc738f0bd`, `preview`
+  `49fcd6705f8f4c77ce4b4a6e7b00e7074b0ea2d3`, and the released `main` above.
+  GitHub refs remain authoritative after this planning change moves `develop`.
+- **Immediate owner-directed sequence:** deliver the installer command centre
+  [#260](https://github.com/tomlawesome/orbit/issues/260), then build the safe
+  diagnosis and repair engine [#261](https://github.com/tomlawesome/orbit/issues/261)
+  against #260's presentation and command-routing seam. These issues are
+  **sequenced**: they overlap the installer/configuration surface, and #261
+  supplies the Repair capability presented by #260. Keep one delivery pull
+  request in flight and close #260 only after its final #261 integration seam
+  is proved, so the command centre never ships a misleading Repair action.
+- **#260 implementation slices:** first add the bounded semantic event model,
+  renderer modes, canonical banner/configuration layout and privacy contracts;
+  then add terminal-safe widgets and guided install/update/profile choices;
+  then connect truthful service readiness, bounded diagnostics and the future
+  Repair dispatch; finally prove PTY, plain, interruption, exact-image guided
+  and unattended acceptance. Each slice is **sequenced** because later input,
+  rendering and acceptance tests depend on the earlier event vocabulary.
+- **#261 handoff boundary:** #260 owns terminal presentation, semantic events
+  and command dispatch only. #261 owns detection, repair planning, checkpoint,
+  credential reconciliation, mutation, rollback and post-repair verification.
+  Neither issue duplicates the other's security-sensitive logic.
 - **Deferred portfolio work:** [#75](https://github.com/tomlawesome/orbit/issues/75)
   awaits an explicit destination-repository decision. [#197](https://github.com/tomlawesome/orbit/issues/197)
   remains a bounded governance improvement rather than release scope.
