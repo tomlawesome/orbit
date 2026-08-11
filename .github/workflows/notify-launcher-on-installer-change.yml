@@ -1,0 +1,57 @@
+name: Notify launcher on installer change
+
+# orbit-launcher (github.com/tomlawesome/orbit-launcher) drives
+# scripts/install.sh interactively over a real terminal, and fetches it
+# live from this repository at runtime rather than vendoring a copy — so
+# a change to the installer's prompts, flags, or behavior here can break
+# launcher-driven installs the moment it reaches main, with no launcher
+# release in between. This workflow gives that repository a fast,
+# targeted signal: whenever an installer script changes on a long-lived
+# branch, fire a repository_dispatch that triggers orbit-launcher's
+# "Installer compatibility watch" workflow, which runs its real
+# PTY-driven live install/remove suite against this branch's script and
+# files an issue there if the contract broke. orbit-launcher also runs a
+# weekly scheduled check as a backstop, so a missed dispatch delays
+# detection rather than losing it.
+#
+# Requires the LAUNCHER_DISPATCH_TOKEN secret: a fine-grained PAT scoped
+# to the orbit-launcher repository only, with Contents read/write
+# permission (repository_dispatch is authorized via the Contents
+# permission). The default GITHUB_TOKEN cannot cross repositories.
+
+on:
+  push:
+    branches:
+      - develop
+      - preview
+      - main
+    paths:
+      - scripts/install.sh
+      - scripts/installer-ui.sh
+      - scripts/installer-simulation.sh
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch to orbit-launcher
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Fire repository_dispatch
+        env:
+          GH_TOKEN: ${{ secrets.LAUNCHER_DISPATCH_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::LAUNCHER_DISPATCH_TOKEN secret is not set — cannot notify orbit-launcher. Create a fine-grained PAT scoped to tomlawesome/orbit-launcher (Contents: read/write) and add it as a repository secret."
+            exit 1
+          fi
+          branch="${GITHUB_REF_NAME}"
+          gh api "repos/tomlawesome/orbit-launcher/dispatches" \
+            --method POST \
+            -f "event_type=orbit-installer-scripts-changed" \
+            -F "client_payload[branch]=${branch}" \
+            -F "client_payload[sha]=${GITHUB_SHA}"
+          echo "Dispatched orbit-installer-scripts-changed for ${branch}@${GITHUB_SHA} to tomlawesome/orbit-launcher."
