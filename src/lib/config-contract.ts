@@ -128,7 +128,6 @@ const HOSTNAME_PATTERN =
 
 function containsForbiddenCharacters(value: string): boolean {
   // Bash [[:cntrl:][:space:]]: any whitespace or control character.
-  // eslint-disable-next-line no-control-regex
   return /[\s\u0000-\u001f\u007f]/.test(value);
 }
 
