@@ -1,0 +1,15 @@
+stages:
+  - test
+
+static_and_unit_checks:
+  stage: test
+  image: node:22
+  variables:
+    ORBIT_TEST_COVERAGE: "true"
+    CI: "true"
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@11.9.0 --activate
+  script:
+    - pnpm install --frozen-lockfile
+    - bash scripts/test-backend.sh
