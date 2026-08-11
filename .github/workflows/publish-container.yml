@@ -405,6 +405,11 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
           printf 'ORBIT_IMAGE=%s\n' "${image_tag}" >> "${GITHUB_ENV}"
 
+      - name: Install acceptance exemplar
+        env:
+          ORBIT_ACCEPTANCE_IMAGE: ${{ steps.image.outputs.tag }}
+        run: bash scripts/test-install-acceptance.sh --red
+
       - name: Scan exact local image
         env:
           TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
