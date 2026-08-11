@@ -393,6 +393,19 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
+  it("TEMP DIAGNOSTIC: same signal test calling installer_ui_read_value directly, bypassing the installer_ui_read_text wrapper", () => {
+    const result = runPty(
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_read_value 3 "Value: " 64 text >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
+      "",
+    );
+    console.error(
+      `DEBUG text-entry-direct: status=${result.status} signal=${result.signal} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
+  });
+
   it("cancels the raw single-key menu with a lone Escape and restores the terminal", () => {
     const result = runPty(
       'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s CHOICE=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)" "${choice:-none}"',
