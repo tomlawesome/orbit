@@ -7,6 +7,7 @@ static_and_unit_checks:
   variables:
     ORBIT_TEST_COVERAGE: "true"
     CI: "true"
+    SHELL: "/bin/bash"
   before_script:
     - corepack enable
     - corepack prepare pnpm@11.9.0 --activate
