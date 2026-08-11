@@ -10,8 +10,8 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
 
 - **Extracted:** 2026-08-11 from `develop`, by directed agents with
   main-thread citation spot-checks.
-- **Totals:** 311 guarantees — 178 HIGH, 104 MEDIUM, 29 LOW.
-  Install/configuration family: 148 (83 HIGH). Backup/recovery/deploy
+- **Totals:** 312 guarantees — 178 HIGH, 105 MEDIUM, 29 LOW.
+  Install/configuration family: 149 (83 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -41,6 +41,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 10. Terminal raw-mode (`stty -echo -icanon`) and any prior INT/TERM/HUP trap are always restored on every exit path of `installer_ui_select` and `installer_ui_read_value` (success, error, interrupt, or read failure), so an interrupted install/configure run never leaves the operator's terminal echo-less or unresponsive to Ctrl-C. — installer-ui.sh:379-384,433-436,468-471,533-536 — category: recovery — criticality: MEDIUM
 11. TTY (colour/interactive) rendering mode is automatically downgraded to plain mode when stdout is not a terminal, `NO_COLOR` is set, or `TERM=dumb`, and can be forced to plain via `ORBIT_INSTALLER_PLAIN=1` — prevents raw ANSI escape codes from being written to logs, pipes, or non-color terminals. — installer-ui.sh:32-47 — category: input-validation — criticality: LOW
 12. `installer_ui_terminal_width` clamps any reported/derived terminal width to the range [20, 240] and falls back to `COLUMNS`/80 if the value is non-numeric, so a bogus `stty size` result cannot produce a malformed or unbounded render width. — installer-ui.sh:317-328 — category: input-validation — criticality: LOW
+13. The plain-mode status-line format and its field vocabulary are a documented, versioned machine interface ("engine event stream v0", consumed by orbit-launcher); vocabulary drift without a matching `docs/engine-events.md` update fails CI. — installer-ui.sh:86-110, docs/engine-events.md, scripts/engine-events.test.mjs — category: provenance/immutability — criticality: MEDIUM
 
 ## configuration.sh (invoked as a subprocess by configure.sh and install.sh — never sourced)
 
@@ -218,12 +219,12 @@ Status: COMPLETE. All six named scripts (`install.sh`, `configure.sh`, `configur
 | refusal/fail-closed | 15 | 15 | 6 | 36 |
 | input-validation | 6 | 18 | 6 | 30 |
 | secret-handling | 17 | 4 | 0 | 21 |
-| provenance/immutability | 16 | 4 | 0 | 20 |
+| provenance/immutability | 16 | 5 | 0 | 21 |
 | transactional/rollback | 14 | 2 | 0 | 16 |
 | permissions/ownership | 14 | 0 | 0 | 14 |
 | recovery | 1 | 4 | 1 | 6 |
 | idempotency | 0 | 3 | 2 | 5 |
-| **Total** | **83** | **50** | **15** | **148** |
+| **Total** | **83** | **51** | **15** | **149** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
