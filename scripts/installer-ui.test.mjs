@@ -19,7 +19,7 @@ const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 // back to firing after ~2s so a genuine regression still surfaces as a test
 // failure instead of a hang.
 const waitForTermTrapThenKill =
-  'target="$BASHPID"; (i=0; detected=no; while ((i<400)); do i=$((i+1)); line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then detected=yes; break; fi; sleep 0.005; done; printf "KILLDEBUG iter=%s detected=%s sigcgt=%s procstatus_readable=%s\\n" "$i" "$detected" "$sigcgt" "$([[ -r /proc/$target/status ]] && printf yes || printf no)"; kill -TERM "$target") &';
+  'target="$BASHPID"; (i=0; detected=no; while ((i<400)); do i=$((i+1)); line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then detected=yes; break; fi; sleep 0.005; done; dump="$(cat /proc/$target/status 2>/dev/null | tr "\\n" ";" | base64 -w0)"; printf "KILLDEBUG iter=%s detected=%s sigcgt=%s target=%s dump_b64=%s\\n" "$i" "$detected" "$sigcgt" "$target" "$dump"; kill -TERM "$target") &';
 
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
