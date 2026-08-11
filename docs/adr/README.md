@@ -5,8 +5,8 @@ issues track delivery work; ADRs do not contain changing implementation status.
 
 ## Governance
 
-- New or materially revised ADRs are protected planning work and require Sol
-  Extra High under the repository `AGENTS.md`.
+- New or materially revised ADRs are reviewed and accepted by the repository
+  owner under the working model in the repository `AGENTS.md`.
 - Use the next four-digit number and a short lowercase filename.
 - State the context, decision, consequences, alternatives, and supersession
   relationship.
@@ -25,3 +25,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0008: Installer-resolved release digests](0008-installer-resolved-release-digests.md)
 - [ADR-0009: Sol-governed, capability-routed implementation](0009-capability-routed-implementation.md)
 - [ADR-0010: Outage-recoverable document scanning](0010-outage-recoverable-document-scanning.md)
+- [ADR-0011: Operator experience as product, single-reviewer governance](0011-operator-experience-as-product.md)
