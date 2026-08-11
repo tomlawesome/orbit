@@ -78,10 +78,12 @@ by flow, behind the Phase 1 harness:
    hand off to the pinned CLI;
 3. ported flows in risk order — configure/check first, install, then
    backup/restore last, when the harness is most mature;
-4. the terminal UI, building on the semantic-event and command-routing seam
-   from the installer command centre
-   ([#260](https://github.com/tomlawesome/orbit/issues/260)) and repair engine
-   ([#261](https://github.com/tomlawesome/orbit/issues/261)).
+4. a structured machine interface — semantic events on stdout and stable
+   exit codes — consumed by the `orbit-launcher` project, which owns all
+   interactive presentation and drives the engine in place of raw
+   `install.sh`; the repair engine
+   ([#261](https://github.com/tomlawesome/orbit/issues/261)) is delivered
+   against this interface.
 
 Once a flow's port is in progress, no new operational guarantee is added to
 its Bash implementation.
@@ -97,8 +99,8 @@ scaffolding rather than setting a global percentage target.
 ### Phase 4 — Experience
 
 Finish the operator and product experience on the consolidated foundation:
-complete TUI flows, degraded-mode diagnostics, upgrade UX, and resumed product
-feature work.
+complete launcher journeys over the engine's structured events, degraded-mode
+diagnostics, upgrade UX, and resumed product feature work.
 
 ## Current position
 
@@ -109,13 +111,14 @@ state.
   `515c77e1b6fe4b061b6ed4a9fbce2a168e876152`, promoted without rebuilding from
   accepted preview source `49fcd6705f8f4c77ce4b4a6e7b00e7074b0ea2d3` as
   `ghcr.io/tomlawesome/orbit@sha256:35ad7cea14f835b8e5b350faa0fcf711cbf95c517a2bad26f5fe72795a8aeb12`.
-- **Active operator-experience track:** the installer command centre
-  [#260](https://github.com/tomlawesome/orbit/issues/260) and repair engine
-  [#261](https://github.com/tomlawesome/orbit/issues/261) continue as
-  sequenced work. Under ADR-0011 their semantic-event vocabulary, guarantees
-  and acceptance criteria are the durable deliverable; terminal presentation
-  code is expected to be ported to the Phase 2 CLI runtime rather than
-  polished indefinitely in Bash.
+- **Active operator-experience track:** the interactive command centre is
+  the dedicated `orbit-launcher` project (Go, Bubble Tea), which supersedes
+  the closed in-repo command centre
+  [#260](https://github.com/tomlawesome/orbit/issues/260) and currently
+  fetches and drives this repository's `install.sh`. The engine contract the
+  launcher consumes is what Phases 1–2 pin and port; the repair engine
+  [#261](https://github.com/tomlawesome/orbit/issues/261) is engine scope
+  here, surfaced through the launcher's Repair flow.
 - **Phase 0** is delivered by the governance-slimdown pull request that
   introduces this plan revision.
 - **Phase 1** starts with the guarantee catalogue and the exemplar harness
