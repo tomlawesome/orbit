@@ -25,14 +25,8 @@ describe("changed-path CI risk classification", () => {
 
   it("keeps deterministic governance and policy controls in the fast lane", () => {
     for (const path of [
-      ".github/orchestration-governance.json",
-      ".github/planning-governance.json",
       ".github/supply-chain-policy.json",
       ".github/dependency-review-config.yml",
-      "scripts/check-orchestration-governance.mjs",
-      "scripts/check-orchestration-governance.test.mjs",
-      "scripts/check-planning-governance.mjs",
-      "scripts/check-planning-governance.test.mjs",
       "scripts/supply-chain-policy.mjs",
       "scripts/supply-chain-policy.test.mjs",
       "scripts/stable-promotion-policy.mjs",

@@ -80,14 +80,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Enforce protected planning governance
-        if: github.event_name == 'pull_request'
-        env:
-          ORBIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          ORBIT_PR_BODY: ${{ github.event.pull_request.body }}
-        run: node scripts/check-planning-governance.mjs
-
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:

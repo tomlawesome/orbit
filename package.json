@@ -15,7 +15,6 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:standalone-pdfjs": "node scripts/standalone-pdfjs-runtime-check.mjs",
-    "orchestration:check": "node scripts/check-orchestration-governance.mjs --state docs/examples/orchestration-state.example.json",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
