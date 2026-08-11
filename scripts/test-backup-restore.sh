@@ -1,4 +1,25 @@
 #!/usr/bin/env bash
+# Backup/restore acceptance drill. Runs in CI against the container-validation
+# deployment (publish-container.yml) and asserts the operator guarantees
+# below, cited as Part 2 / script #entry in docs/installer-guarantees.md
+# (issue #290 coverage map; the drill predates the catalogue, so citations
+# are mapped per test function rather than per assertion):
+#
+#   run_valid_restore, assert_fixture_present   restore.sh #8 (single-transaction
+#     apply), #9 (row-to-blob correspondence — post-restore data equivalence)
+#   test_local_key_rejections                   restore.sh #6 (KEK fingerprint
+#     match refused before any mutation; wrong and missing key)
+#   make_corrupt_{manifest,hmac,checksum}_bundle  restore.sh #3, #6 (HMAC and
+#     checksum chain re-verified before the bundle is trusted)
+#   make_{missing,extra,truncated,size_mismatch}* variants  restore.sh #9
+#   test_missing_crypto_metadata                restore.sh #9 (transient or
+#     crypto-incomplete rows refuse a point-in-time restore)
+#   test_journal_publication_failures           restore.sh #15-#17 (crash-safe
+#     journal; late failure restores the previous journal)
+#   test_ordinary_rollback, checkpoint recovery restore.sh #13, #14, #19, #20
+#     (verified, durable, point-in-time checkpoint as the rollback target)
+#   recovery-bundle export/import path          export/import-recovery-bundle.sh
+#     entries (Part 2)
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
