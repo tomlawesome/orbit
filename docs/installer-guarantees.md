@@ -18,6 +18,10 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   harness scenarios cite entries here. Line numbers drift — treat the
   statement as the contract and the citation as the anchor at extraction
   time.
+- **Harness traceability:** acceptance scenarios (for example
+  `scripts/test-install-acceptance.sh`) cite the guarantees they assert as
+  `Part N / script #entry` in comments beside each assertion, so coverage
+  of this catalogue is greppable in both directions.
 
 ---
 
