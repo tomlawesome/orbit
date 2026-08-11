@@ -52,13 +52,3 @@ Observability-Impact: none — <specific reason>
       from the tracked diff.
 - [ ] No unmerged unique work must remain on the short-lived head branch; it
       may be deleted after protected merge and reconciliation.
-
-## Planning governance
-
-Leave the next line unchanged for implementation-only pull requests. If this
-pull request changes a path protected by `.github/planning-governance.json`,
-replace `Not applicable` with the authority that did the planning work:
-`Sol Extra High`, or `Human` when a human owner authored or directed the
-change. Never attest as an authority that did not do the work.
-
-Planning-Model: Not applicable
