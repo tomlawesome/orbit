@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -48,6 +48,7 @@ const deploymentAssets = [
   ".env-orbit.example",
   "config/tika-config.xml",
   "scripts/configure.sh",
+  "scripts/installer-ui.sh",
   "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
@@ -56,6 +57,13 @@ const deploymentAssets = [
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
+  "probe_ready() {",
+  '  local name="$1" failures="$2" counter_file="${FAKE_PROBE_COUNTER_DIR:?}/$1" count=0',
+  '  [[ ! -f "$counter_file" ]] || count="$(cat "$counter_file")"',
+  '  count=$((count + 1))',
+  '  printf "%s" "$count" > "$counter_file"',
+  '  ((count > failures))',
+  "}",
   "print_container_row() {",
   '  if [[ "${FAKE_DOCKER_TEMPLATE_DELIMITER:-}" == "|" ]]; then',
   "    printf '%s|%s|%s\\n' \"$1\" \"$2\" \"$3\"",
@@ -122,6 +130,33 @@ const fakeDockerScript = [
   '    if [[ "${FAKE_COMPOSE_CONFIG_FAIL:-}" == "1" && " $* " == *" config "* ]]; then',
   "      exit 23",
   "    fi",
+  '    if [[ "$*" == *"exec -T orbit-db"*"pg_isready"* ]]; then',
+  '      probe_ready database "${FAKE_DATABASE_HEALTH_FAILURES:-0}"',
+  "      exit $?",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-app"*"/api/health"* ]]; then',
+  '      probe_ready application "${FAKE_APP_HEALTH_FAILURES:-0}"',
+  "      exit $?",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-app true"* && "${FAKE_APP_CONTAINER_STOPPED:-0}" == "1" ]]; then',
+  "      exit 1",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-clamav"*"clamdscan --ping"* ]]; then',
+  '      probe_ready clamav "${FAKE_CLAMAV_HEALTH_FAILURES:-0}"',
+  "      exit $?",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-app"*"orbit-tika:9998/version"* ]]; then',
+  '      probe_ready tika "${FAKE_TIKA_HEALTH_FAILURES:-0}"',
+  "      exit $?",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-ollama"*"ollama list"* ]]; then',
+  '      probe_ready ollama "${FAKE_OLLAMA_HEALTH_FAILURES:-0}"',
+  "      exit $?",
+  "    fi",
+  '    if [[ "$*" == *"exec -T orbit-ollama"*"ollama pull"* ]]; then',
+  '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
+  "      exit $?",
+  "    fi",
   '    if [[ "${FAKE_COMPOSE_FAIL:-}" == "1" && " $* " != *" version "* && " $* " != *" config "* ]]; then',
   "      exit 23",
   "    fi",
@@ -132,6 +167,10 @@ const fakeDockerScript = [
   "    ;;",
   "  run)",
   "    args=(\"$@\")",
+  '    if [[ "$*" == *"--entrypoint /opt/orbit/scripts/container-entrypoint.sh"* ]]; then',
+  "      printf 'FAKE_CANONICAL_BANNER\\n'",
+  "      exit 0",
+  "    fi",
   '    [[ "${args[${#args[@]} - 2]:-}" == "-e" ]] || exit 24',
   "    interactive=0",
   '    for argument in "${args[@]}"; do',
@@ -243,6 +282,8 @@ const fakeCurlScript = [
   "    cat <<'SCRIPT' > \"$output\"",
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
+  'repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
+  'cd "$repo_dir"',
   "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
   "case \"${1:-}\" in",
   "  --check)",
@@ -255,6 +296,7 @@ const fakeCurlScript = [
   "    ;;",
   "  --init)",
   '    [[ "${FAKE_CONFIGURE_INIT_FAIL:-}" != "1" ]] || exit 42',
+  '    profile_lines="$(grep -E "^(COMPOSE_PROFILES|TIKA_URL|OLLAMA_MODEL)=" .env-orbit 2>/dev/null || true)"',
   '    if [[ "${FAKE_CONFIGURE_INIT_PROMPT:-}" == "1" ]]; then',
   "      exec {fake_tty_fd}<>/dev/tty",
   '      IFS= read -r -u "$fake_tty_fd" app_url || exit 1',
@@ -275,6 +317,7 @@ const fakeCurlScript = [
   "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
   "OIDC_CALLBACK_URL=${app_url}/api/auth/callback",
   "ENV",
+  '    [[ -z "$profile_lines" ]] || printf "%s\\n" "$profile_lines" >> .env-orbit',
   "    mkdir -p .orbit-secrets",
   "    chmod 700 .orbit-secrets",
   "    : > .orbit-secrets/oidc-client-secret",
@@ -297,6 +340,28 @@ const fakeCurlScript = [
   "    chmod 600 .orbit-secrets/oidc-client-secret",
   "    sed -i 's/^OIDC_CLIENT_SECRET=.*/OIDC_CLIENT_SECRET=/' .env-orbit",
   "    printf '%s\\n' 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret' >> .env-orbit",
+  "    exit 0",
+  "    ;;",
+  "  --set-deployment-profile)",
+  '    preset="${2:-}"',
+  '    model="${3:-}"',
+  '    profiles=""',
+  '    tika_url=""',
+  '    case "$preset" in',
+  "      standard) ;;",
+  '      processing) profiles="processing"; tika_url="http://orbit-tika:9998" ;;',
+  '      ai) profiles="ai" ;;',
+  '      full) profiles="processing,ai"; tika_url="http://orbit-tika:9998" ;;',
+  "      *) exit 2 ;;",
+  "    esac",
+  '    for assignment in "COMPOSE_PROFILES=$profiles" "TIKA_URL=$tika_url" "OLLAMA_MODEL=$model"; do',
+  '      key="${assignment%%=*}"',
+  '      if grep -q "^${key}=" .env-orbit; then',
+  '        sed -i "s|^${key}=.*|${assignment}|" .env-orbit',
+  "      else",
+  '        printf "%s\\n" "$assignment" >> .env-orbit',
+  "      fi",
+  "    done",
   "    exit 0",
   "    ;;",
   "esac",
@@ -338,6 +403,9 @@ const fakeCurlScript = [
   "set -Eeuo pipefail",
   "printf 'BACKUP_INVOKED\\n'",
   "SCRIPT",
+  "    ;;",
+  "  scripts/installer-ui.sh)",
+  '    cp -- "${FAKE_INSTALLER_UI_PATH:?}" "$output"',
   "    ;;",
   "  scripts/configuration.sh)",
   '    if [[ "${FAKE_USE_REAL_CONFIGURATION:-0}" == "1" ]]; then',
@@ -548,18 +616,19 @@ function readOptionalFile(path) {
   }
 }
 
-function runInstall(targetDir, envOverrides = {}) {
+function runInstall(targetDir, envOverrides = {}, args = []) {
   const binDir = makeFakeBin();
   const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
   const logPath = join(logDir, "calls.log");
   const priorEnvironment = readOptionalFile(join(targetDir, ".env-orbit"));
   const priorImage = /^ORBIT_IMAGE=([^\n]*)$/m.exec(priorEnvironment)?.[1] ?? resolvedReference;
-  const result = spawnSync("bash", [installScript], {
+  const result = spawnSync("bash", [installScript, ...args], {
     cwd: targetDir,
     encoding: "utf8",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
+      TERM: "xterm",
       ORBIT_REPOSITORY: repository,
       ORBIT_REGISTRY: registry,
       FAKE_IMAGE_REPOSITORY: imageRepository,
@@ -571,7 +640,9 @@ function runInstall(targetDir, envOverrides = {}) {
       FAKE_DOCKER_RUNNING_CONFIG_HASH: "f".repeat(64),
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
+      FAKE_PROBE_COUNTER_DIR: logDir,
       FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
+      FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
       FAKE_USE_REAL_CONFIGURATION: "0",
       FAKE_CONFIGURE_READY: "1",
       ...envOverrides,
@@ -581,17 +652,20 @@ function runInstall(targetDir, envOverrides = {}) {
   return { ...result, calls };
 }
 
-function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input = "") {
+function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input = "", args = []) {
   const binDir = makeFakeBin();
   const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
   const logPath = join(logDir, "calls.log");
-  const result = spawnSync("script", ["-qec", `exec </dev/null; bash ${installScript}`, "/dev/null"], {
+  const result = spawnSync("script", ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"], {
     cwd: targetDir,
     encoding: "utf8",
     input,
+    timeout: 10000,
+    killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
+      TERM: "xterm",
       ORBIT_REPOSITORY: repository,
       ORBIT_REGISTRY: registry,
       FAKE_IMAGE_REPOSITORY: imageRepository,
@@ -600,6 +674,8 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
       FAKE_DOCKER_VERSION: "v1.2.0",
       FAKE_ASSET_BASE: assetBase,
       FAKE_CALL_LOG: logPath,
+      FAKE_PROBE_COUNTER_DIR: logDir,
+      FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
       FAKE_CONFIGURE_READY: "0",
       ...envOverrides,
     },
@@ -608,7 +684,451 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
   return { ...result, calls };
 }
 
+function runInstallWithPromptedTerminalInput(
+  targetDir,
+  envOverrides = {},
+  interactions = [],
+  args = [],
+) {
+  const binDir = makeFakeBin();
+  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+  const logPath = join(logDir, "calls.log");
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
+      {
+        cwd: targetDir,
+        env: {
+          PATH: `${binDir}:${process.env.PATH}`,
+          HOME: process.env.HOME ?? tmpdir(),
+          TERM: "xterm",
+          ORBIT_REPOSITORY: repository,
+          ORBIT_REGISTRY: registry,
+          FAKE_IMAGE_REPOSITORY: imageRepository,
+          FAKE_DOCKER_DIGEST: digest,
+          FAKE_DOCKER_REVISION: revision,
+          FAKE_DOCKER_VERSION: "v1.2.0",
+          FAKE_ASSET_BASE: assetBase,
+          FAKE_CALL_LOG: logPath,
+          FAKE_PROBE_COUNTER_DIR: logDir,
+          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+          FAKE_CONFIGURE_READY: "0",
+          ...envOverrides,
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    let interactionIndex = 0;
+    let settled = false;
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const interaction = interactions[interactionIndex];
+      if (interaction && stdout.includes(interaction.after)) {
+        child.stdin.write(interaction.input);
+        interactionIndex += 1;
+        if (interactionIndex === interactions.length) child.stdin.end();
+      }
+    });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
+    child.on("close", (status, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        status,
+        signal,
+        stdout,
+        stderr,
+        calls: readOptionalFile(logPath),
+        promptedInteractions: interactionIndex,
+      });
+    });
+  });
+}
+
+function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args = []) {
+  const binDir = makeFakeBin();
+  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
+  const logPath = join(logDir, "calls.log");
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
+      {
+        cwd: targetDir,
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          TERM: "xterm",
+          ORBIT_REPOSITORY: repository,
+          ORBIT_REGISTRY: registry,
+          FAKE_IMAGE_REPOSITORY: imageRepository,
+          FAKE_DOCKER_DIGEST: digest,
+          FAKE_DOCKER_REVISION: revision,
+          FAKE_DOCKER_VERSION: "v1.2.0",
+          FAKE_DOCKER_APP_IMAGE: resolvedReference,
+          FAKE_ASSET_BASE: assetBase,
+          FAKE_CALL_LOG: logPath,
+          FAKE_PROBE_COUNTER_DIR: logDir,
+          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
+          FAKE_CONFIGURE_READY: "0",
+          ...envOverrides,
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
+    (async () => {
+      for (const [delay, input] of steps) {
+        await new Promise((stepResolve) => setTimeout(stepResolve, delay));
+        if (!child.stdin.destroyed) child.stdin.write(input);
+      }
+      child.stdin.end();
+    })().catch(reject);
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stdout, stderr, calls: readOptionalFile(logPath) });
+    });
+  });
+}
+
 describe("install.sh", () => {
+  it("rejects mismatched direct install and update modes before external actions", () => {
+    const existingTarget = makeTarget();
+    makeFullExistingDeployment(existingTarget);
+    const install = runInstall(existingTarget, {}, ["--install"]);
+    expect(install.status).not.toBe(0);
+    expect(install.stderr).toContain("use Update");
+    expect(install.calls).toBe("");
+
+    const emptyTarget = makeTarget();
+    const update = runInstall(emptyTarget, {}, ["--update"]);
+    expect(update.status).not.toBe(0);
+    expect(update.stderr).toContain("recognized existing Orbit deployment");
+    expect(update.calls).toBe("");
+    expect(targetEntries(emptyTarget)).toEqual([]);
+  });
+
+  it("keeps direct repair non-mutating until issue #261 supplies execution", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--plain", "--repair"]);
+
+    expect(result.status).toBe(3);
+    expect(`${result.stdout}${result.stderr}`).toContain("repair_unavailable");
+    expect(result.stdout).toContain("phase=rollback component=installer state=blocked reason=repair-unavailable action=repair");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("exits the interactive command centre without mutating the target", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\x1b[B\r");
+
+    expect(result.status).toBe(130);
+    expect(result.stdout).toContain("Greetings, what can we do for you today?");
+    expect(result.calls).not.toContain("config --quiet");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("keeps interactive repair non-mutating and bounded", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\r");
+
+    expect(result.status).toBe(3);
+    expect(`${result.stdout}${result.stderr}`).toContain("repair_unavailable");
+    expect(result.calls).not.toContain("config --quiet");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("cancels profile selection without creating files or services", async () => {
+    const targetDir = makeTarget();
+
+    const result = await runInstallWithPromptedTerminalInput(targetDir, {}, [
+      { after: "Greetings, what can we do for you today?", input: "\r" },
+      { after: "Choose a deployment profile", input: "\x1b" },
+    ]);
+
+    expect(result.status).toBe(130);
+    expect(result.promptedInteractions).toBe(2);
+    expect(result.calls).not.toContain("config --quiet");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("guides and persists the document-processing profile after final review", () => {
+    const targetDir = makeTarget();
+    const appUrl = "https://orbit.profile-test.internal";
+    const issuer = "https://auth.profile-test.internal/application/o/orbit/";
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      { FAKE_CONFIGURE_INIT_PROMPT: "1", TERM: "dumb" },
+      `1\n2\n1\n${appUrl}\n${issuer}\nprofile-client\nprofile-secret\n1\n`,
+    );
+
+    expect(result.status).toBe(0);
+    const environment = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(environment).toContain("COMPOSE_PROFILES=processing\n");
+    expect(environment).toContain("TIKA_URL=http://orbit-tika:9998\n");
+    expect(environment).toContain("OLLAMA_MODEL=\n");
+    expect(result.stdout).toContain("Ollama is optional local infrastructure");
+    expect(result.calls).toContain("up -d");
+  });
+
+  it("checks capacity and separately confirms a selected local model download", async () => {
+    const targetDir = makeTarget();
+    const model = "qwen3:8b";
+
+    const result = await runInstallWithTimedTerminalInput(
+      targetDir,
+      { TERM: "dumb" },
+      [
+        [800, "1\n"],
+        [150, "3\n"],
+        [150, `${model}\n`],
+        [150, "2\n"],
+        [150, "1\n"],
+        [800, "full-secret\n"],
+        [300, "1\n"],
+      ],
+    );
+
+    expect(result.status).toBe(0);
+    const environment = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(environment).toContain("COMPOSE_PROFILES=processing,ai\n");
+    expect(environment).toContain("TIKA_URL=http://orbit-tika:9998\n");
+    expect(environment).toContain(`OLLAMA_MODEL=${model}\n`);
+    expect(result.stdout).toContain("Host capacity check:");
+    expect(result.calls).toContain("pull orbit-tika");
+    expect(result.calls).toContain("pull orbit-ollama");
+    expect(result.calls).toContain("orbit-tika:9998/version");
+    expect(result.calls).toContain("exec -T orbit-ollama ollama list");
+    expect(result.calls).toContain(`exec -T orbit-ollama ollama pull ${model}`);
+    expect(result.stdout).not.toContain("full-secret");
+  });
+
+  it("fails a selected optional service with a stable bounded reason", () => {
+    const targetDir = makeTarget();
+    const appUrl = "https://orbit.processing-failure.internal";
+    const issuer = "https://auth.processing-failure.internal/application/o/orbit/";
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      {
+        FAKE_CONFIGURE_INIT_PROMPT: "1",
+        FAKE_TIKA_HEALTH_FAILURES: "99",
+        ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: "1",
+        ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "1",
+        TERM: "dumb",
+      },
+      `1\n2\n1\n${appUrl}\n${issuer}\nprocessing-client\nprocessing-secret\n1\n`,
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      "phase=optional component=tika state=failed reason=optional-unavailable action=repair",
+    );
+    expect(result.stdout).not.toContain("phase=complete component=installer state=completed");
+    expect(`${result.stdout}${result.stderr}`).not.toContain("processing-secret");
+  });
+
+  it("preserves an existing valid profile by default during interactive update", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    const environmentPath = join(targetDir, ".env-orbit");
+    writeFileSync(
+      environmentPath,
+      `${readFileSync(environmentPath, "utf8")}COMPOSE_PROFILES=processing\nTIKA_URL=http://orbit-tika:9998\nOLLAMA_MODEL=\n`,
+    );
+    chmodSync(environmentPath, 0o600);
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      { FAKE_CONFIGURE_READY: "1" },
+      "\r\r\r",
+    );
+
+    expect(result.status).toBe(0);
+    const updated = readFileSync(environmentPath, "utf8");
+    expect(updated).toContain("COMPOSE_PROFILES=processing\n");
+    expect(updated).toContain("TIKA_URL=http://orbit-tika:9998\n");
+    expect(updated).toContain("OLLAMA_MODEL=\n");
+    expect(result.stdout).toContain(`Current: schema=legacy/unknown version=legacy/unknown digest=sha256:${"c".repeat(64)} optional-profile=processing`);
+    expect(result.stdout).toContain(`Target: schema=v1 version=v1.2.0 digest=sha256:${digest} channel=latest`);
+    expect(result.calls).toContain("up -d");
+  });
+
+  it("renders ordered plain semantic events and the immutable image banner", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--plain"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+    const events = [
+      "phase=host component=host state=completed reason=host-tools action=check",
+      "phase=identity component=image state=completed reason=image-identity action=verify",
+      "phase=assets component=assets state=completed reason=assets-verified action=fetch",
+      "phase=configuration component=configuration state=completed reason=configuration-migration action=verify",
+      "phase=oidc component=oidc state=completed reason=provider-discovery action=verify",
+      "phase=compose component=compose state=completed reason=compose-validation action=check",
+      "phase=preparation component=application state=completed reason=service-preparation action=pull",
+      "phase=database component=database state=healthy reason=database-health action=health",
+      "phase=application component=application state=healthy reason=application-health action=health",
+      "phase=optional component=clamav state=healthy reason=optional-status action=health",
+      "phase=complete component=installer state=completed reason=deployment-ready action=complete",
+    ];
+    let previousIndex = -1;
+    for (const event of events) {
+      const index = result.stdout.indexOf(event);
+      expect(index).toBeGreaterThan(previousIndex);
+      previousIndex = index;
+    }
+    const bannerCall = result.calls
+      .split("\n")
+      .find((line) => line.includes("container-entrypoint.sh") && line.endsWith(" --banner"));
+    expect(bannerCall).toContain(resolvedReference);
+    expect(bannerCall).not.toContain(":preview");
+    expect(result.stdout).toContain("FAKE_CANONICAL_BANNER");
+  });
+
+  it("states fixed profile resource classes, optional boundaries and local privacy", () => {
+    const source = readFileSync(installScript, "utf8");
+
+    expect(source).toContain("standard relative resources");
+    expect(source).toContain("medium relative resources");
+    expect(source).toContain("high relative resources");
+    expect(source).toContain("Required Orbit core and private scanning stay enabled");
+    expect(source).toContain("document processing and local AI are optional services");
+    expect(source).toContain("private Compose network");
+    expect(source).toContain("not yet consumed by Orbit product workflows");
+  });
+
+  it("waits through transient database and application startup before reporting completion", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      FAKE_DATABASE_HEALTH_FAILURES: "1",
+      FAKE_APP_HEALTH_FAILURES: "2",
+      ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: "1",
+    }, ["--plain"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("phase=database component=database state=waiting reason=database-health action=wait");
+    expect(result.stdout).toContain("phase=application component=application state=waiting reason=application-health action=wait");
+    const readyIndex = result.stdout.indexOf("phase=application component=application state=healthy");
+    const completeIndex = result.stdout.indexOf("phase=complete component=installer state=completed");
+    expect(readyIndex).toBeGreaterThanOrEqual(0);
+    expect(completeIndex).toBeGreaterThan(readyIndex);
+    expect(result.calls.match(/\/api\/health/gu)).toHaveLength(3);
+  });
+
+  it("withholds completion and emits a bounded health-timeout failure", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      FAKE_APP_HEALTH_FAILURES: "99",
+      ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: "1",
+      ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "1",
+    }, ["--plain"]);
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      "phase=application component=application state=failed reason=health-timeout action=repair",
+    );
+    expect(result.stdout).not.toContain("phase=complete component=installer state=completed");
+    expect(result.stderr).toContain("Orbit did not report ready within the bounded startup window");
+    expect(result.stderr).not.toContain("APP_URL=");
+  });
+
+  it("classifies database readiness failure separately from application health", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {
+      FAKE_DATABASE_HEALTH_FAILURES: "99",
+      ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: "1",
+      ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: "1",
+    }, ["--plain"]);
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain(
+      "phase=database component=database state=failed reason=database-auth-migration action=repair",
+    );
+    expect(result.calls).not.toContain("/api/health");
+    expect(result.stdout).not.toContain("phase=complete component=installer state=completed");
+  });
+
+  it("prints only validated deployment identity and exact status commands after readiness", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--plain"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Public URL: https://orbit.install-test.internal");
+    expect(result.stdout).toContain("Version: v1.2.0");
+    expect(result.stdout).toContain("Channel: latest");
+    expect(result.stdout).toContain(`Revision: ${revision.slice(0, 12)}`);
+    expect(result.stdout).toContain(`Image digest: sha256:${digest}`);
+    expect(result.stdout).toContain("Optional profiles: standard");
+    expect(result.stdout).toContain("Status: docker compose --env-file .env-orbit ps");
+    expect(result.stdout).toContain("Logs: docker compose --env-file .env-orbit logs --tail 200");
+  });
+
+  it("rejects unsupported installer options before any external action", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--unsupported"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("rejects hostile display identity overrides before external action", () => {
+    for (const overrides of [
+      { ORBIT_CHANNEL: "latest\nSECRET=channel" },
+      { ORBIT_REPOSITORY: "owner/repo\u001b[31m" },
+      { ORBIT_REGISTRY: "registry.example\nSECRET=registry" },
+    ]) {
+      const targetDir = makeTarget();
+      const result = runInstall(targetDir, overrides);
+      expect(result.status).toBe(2);
+      expect(result.calls).toBe("");
+      expect(`${result.stdout}${result.stderr}`).not.toContain("SECRET=");
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/\x1b\[/u);
+      expect(targetEntries(targetDir)).toEqual([]);
+    }
+  });
+
+  it("sources the UI helper only from the immutable private staging area", () => {
+    const source = readFileSync(installScript, "utf8");
+
+    expect(source).toContain('candidate="$staging_dir/scripts/installer-ui.sh"');
+    expect(source).toContain('is_regular_non_symlink_file "$candidate"');
+    expect(source).not.toContain("installer_ui_local_path");
+    expect(source.indexOf('bash -n "$staging_dir/$script"')).toBeLessThan(
+      source.indexOf('load_installer_ui || fail'),
+    );
+  });
+
   it("uses literal delimiters for every Docker template/parser pair", () => {
     const source = readFileSync(installScript, "utf8");
 
@@ -687,7 +1207,9 @@ describe("install.sh", () => {
     const result = runInstall(targetDir, { FAKE_REQUIRE_INTERACTIVE: "1" });
 
     expect(result.status).toBe(0);
-    const parserCall = result.calls.split("\n").find((line) => line.startsWith("docker run"));
+    const parserCall = result.calls
+      .split("\n")
+      .find((line) => line.startsWith("docker run") && line.includes("--entrypoint node"));
     expect(parserCall).toContain("--interactive");
     expect(result.calls).toContain("curl oidc-discovery");
   });
@@ -702,7 +1224,8 @@ describe("install.sh", () => {
     const result = runInstallWithControllingTerminal(
       targetDir,
       { FAKE_CONFIGURE_INIT_PROMPT: "1" },
-      `${appUrl}\n${issuer}\n${clientId}\n${secret}\n`,
+      `${appUrl}\n${issuer}\n${clientId}\n${secret}\n1\n`,
+      ["--install"],
     );
 
     expect(result.status).toBe(0);
@@ -714,13 +1237,39 @@ describe("install.sh", () => {
     expect(readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe(secret);
     expect(result.calls).toContain("config --quiet");
     expect(result.calls).toContain("up -d");
-    const parserCall = result.calls.split("\n").find((line) => line.startsWith("docker run"));
+    const parserCall = result.calls
+      .split("\n")
+      .find((line) => line.startsWith("docker run") && line.includes("--entrypoint node"));
     expect(parserCall).toContain("--entrypoint node");
     expect(parserCall).toContain("--network none");
     expect(parserCall).toContain("--read-only");
     expect(parserCall).toContain("--cap-drop ALL");
     expect(parserCall).toContain("--security-opt no-new-privileges");
     expect(parserCall).not.toContain("auth.tty-install.internal");
+  });
+
+  it("keeps the target unchanged when the final guided review is cancelled", () => {
+    const targetDir = makeTarget();
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      { FAKE_CONFIGURE_INIT_PROMPT: "1" },
+      [
+        "https://orbit.cancelled-review.internal",
+        "https://auth.cancelled-review.internal/application/o/orbit/",
+        "cancelled-client",
+        "cancelled-secret",
+        "2",
+        "",
+      ].join("\n"),
+      ["--install"],
+    );
+
+    expect(result.status).toBe(130);
+    expect(result.stdout).toContain("Final review:");
+    expect(result.calls).not.toContain("config --quiet");
+    expect(result.calls).not.toContain("up -d");
+    expect(targetEntries(targetDir)).toEqual([]);
+    expect(`${result.stdout}${result.stderr}`).not.toContain("cancelled-secret");
   });
 
   it("reports successful preflight before the first service-start action", () => {
@@ -1471,6 +2020,7 @@ describe("install.sh", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("OIDC provider is unavailable");
+    expect(`${result.stdout}${result.stderr}`).toContain("reason=provider-unavailable action=retry");
     expect(result.stderr).not.toContain("auth.install-test.internal");
     expect(result.stderr).not.toContain("provider-body-secret");
     expect(result.calls).not.toContain("config --quiet");
@@ -1487,6 +2037,7 @@ describe("install.sh", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("OIDC provider configuration could not be validated");
+    expect(`${result.stdout}${result.stderr}`).toContain("reason=configuration-failure action=retry");
     expect(result.stderr).not.toContain("auth.install-test.internal");
     expect(result.calls).not.toContain("config --quiet");
     expect(result.calls).not.toContain("up -d");
@@ -1547,5 +2098,132 @@ describe("install.sh", () => {
     expect(result.status).not.toBe(0);
     expect(output).not.toContain("provider-body-secret");
     expect(output).not.toContain("auth.install-test.internal");
+  });
+});
+
+describe("install.sh --simulate", () => {
+  it("rejects --simulate combined with an installer action before any external action", () => {
+    const targetDir = makeTarget();
+
+    for (const action of ["--install", "--update", "--repair"]) {
+      const result = runInstall(targetDir, {}, ["--simulate", action]);
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("Usage:");
+      expect(result.calls).toBe("");
+    }
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("dispatches the plain simulation before target and deployment-environment validation, without files or external calls", () => {
+    const targetDir = makeTarget();
+    // A non-empty, non-recognizable target would fail validate_target for a
+    // real install/update; simulation must never reach that check.
+    writeFileSync(join(targetDir, "unrelated-file"), "not an Orbit deployment\n");
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstall(targetDir, { ORBIT_CHANNEL: "not a valid channel" }, ["--plain", "--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+    expect(result.stdout).toContain("simulation=true");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.stdout).not.toMatch(/\x1b\[/u);
+  });
+
+  it("chooses the fixed deterministic success path in plain mode", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstall(targetDir, {}, ["--plain", "--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("state=healthy");
+    expect(result.stdout).toContain("state=completed");
+    expect(result.stdout).toContain("SIMULATED-DIGEST-NOT-REAL");
+    expect(result.stdout).not.toContain(`sha256:${digest}`);
+    expect(result.calls).toBe("");
+  });
+
+  it("cancels the interactive simulation with a lone Escape at the top-level menu", () => {
+    const targetDir = makeTarget();
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.stdout).toContain("Simulation: Greetings");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+  });
+
+  it("cancels the interactive simulation with a lone Escape at the profile menu", () => {
+    const targetDir = makeTarget();
+    const beforeEntries = targetEntries(targetDir);
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\r\x1b", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual(beforeEntries);
+  });
+
+  it("exits the interactive simulation from the top-level Exit choice", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\x1b[B\r", ["--simulate"]);
+
+    expect(result.status).toBe(130);
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("keeps interactive Repair presentation-only and non-mutating in simulation", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(targetDir, {}, "\x1b[B\x1b[B\r", ["--simulate"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("repair_unavailable");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("walks the full interactive simulation to a fixed success scenario without mutation or external calls", () => {
+    const targetDir = makeTarget();
+    const secret = "not-a-real-credential";
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      {},
+      `\r\rhello-note\r${secret}\r\r\r`,
+      ["--simulate"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("hello-note");
+    expect(result.stdout).not.toContain(secret);
+    expect(result.stdout).toContain("healthy");
+    expect(result.stdout).toContain("completed");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
+  });
+
+  it("presents the fixed representative failure scenarios without a real error or credential", () => {
+    const targetDir = makeTarget();
+
+    const result = runInstallWithControllingTerminal(
+      targetDir,
+      {},
+      "\r\rnote\rsecret\r\r\x1b[B\r",
+      ["--simulate"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("database-auth-migration");
+    expect(result.stdout).toContain("No deployment occurred.");
+    expect(result.calls).toBe("");
+    expect(targetEntries(targetDir)).toEqual([]);
   });
 });
