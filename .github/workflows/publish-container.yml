@@ -408,7 +408,7 @@ jobs:
       - name: Install acceptance exemplar
         env:
           ORBIT_ACCEPTANCE_IMAGE: ${{ steps.image.outputs.tag }}
-        run: bash scripts/test-install-acceptance.sh --red
+        run: bash scripts/test-install-acceptance.sh --lifecycle --red
 
       - name: Scan exact local image
         env:
