@@ -19,7 +19,7 @@ const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 // back to firing after ~2s so a genuine regression still surfaces as a test
 // failure instead of a hang.
 const waitForTermTrapThenKill =
-  'target="$BASHPID"; (for i in $(seq 1 400); do line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then break; fi; sleep 0.005; done; kill -TERM "$target") &';
+  'target="$BASHPID"; (i=0; detected=no; while ((i<400)); do i=$((i+1)); line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then detected=yes; break; fi; sleep 0.005; done; printf "KILLDEBUG iter=%s detected=%s sigcgt=%s procstatus_readable=%s\\n" "$i" "$detected" "$sigcgt" "$([[ -r /proc/$target/status ]] && printf yes || printf no)"; kill -TERM "$target") &';
 
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
@@ -384,6 +384,10 @@ describe("installer semantic UI", () => {
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
     );
+    // TEMP DEBUG for issue #260 CI investigation — remove once root-caused.
+    console.error(
+      `DEBUG text-entry: status=${result.status} signal=${result.signal} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+    );
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
@@ -403,6 +407,10 @@ describe("installer semantic UI", () => {
     const result = runPty(
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
+    );
+    // TEMP DEBUG for issue #260 CI investigation — remove once root-caused.
+    console.error(
+      `DEBUG raw-menu: status=${result.status} signal=${result.signal} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
     );
 
     expect(result.status).toBe(0);
