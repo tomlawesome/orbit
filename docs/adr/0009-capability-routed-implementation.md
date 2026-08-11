@@ -1,6 +1,6 @@
 # ADR-0009: Sol-governed, capability-routed implementation
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-0011](0011-operator-experience-as-product.md)
 **Date:** 2026-08-01
 **Supersedes:** [ADR-0007](0007-dual-pipeline-agent-governance.md) and the
 implementation-provider selection in
