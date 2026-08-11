@@ -71,7 +71,7 @@ function runCheck(fixture: Fixture): { lines: string[]; status: number } {
   };
 }
 
-function factsFor(fixture: Fixture): OidcSecretFileFacts {
+function factsFor(_fixture: Fixture): OidcSecretFileFacts {
   const sandbox = sandboxes[sandboxes.length - 1];
   const secretsDirectory = join(sandbox, ".orbit-secrets");
   const secretFile = join(secretsDirectory, "oidc-client-secret");
