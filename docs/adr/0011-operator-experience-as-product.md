@@ -18,10 +18,12 @@ layer holds the project's most safety-critical guarantees: image-digest
 provenance, transactional configuration with rollback, fail-closed refusal of
 unsafe state, and recoverable restore. It is also deliberate product surface:
 the installer experience is intended to convey the thought and care in the
-solution, and the in-progress installer command centre (#260) and repair
-engine (#261) extend that intent. Product-grade ambitions were being built in
-the medium with the weakest testing, composition, and interactive-UI
-capabilities available to the project.
+solution. The dedicated `orbit-launcher` project (Go, Bubble Tea) now owns
+that interactive experience, superseding the in-repo Bash command centre
+(#260, closed); the launcher fetches and drives this repository's
+`install.sh`, so the operational engine it consumes is still the Bash layer —
+product-grade guarantees implemented in the medium with the weakest testing
+and composition capabilities available to the project.
 
 Second, the multi-model orchestration governance — planning authorities,
 attestation lines, provider qualification and routing records, orchestration
@@ -33,15 +35,18 @@ the human owner under branch protection.
 
 ## Decision
 
-1. **The installer and operator experience is first-class product surface.**
-   Its observable guarantees are contract, catalogued and preserved across any
-   reimplementation. The implementation will converge on the same TypeScript
-   runtime as the application: a single `orbit` administration CLI sharing the
-   application's configuration schemas, with a real terminal UI, and with Bash
-   reduced to a minimal digest-verified bootstrap. The semantic-event and
-   command-routing seam established by #260 is the portability boundary: event
-   vocabulary, guarantees, and acceptance criteria survive the runtime port;
-   presentation code is expected to be rewritten.
+1. **The operator experience is first-class product surface, split into
+   presentation and engine.** The separate `orbit-launcher` project (Go,
+   Bubble Tea) owns interactive presentation: the full-screen flows, guided
+   journeys, and install/update/repair/remove menus. This repository owns the
+   operational engine — the guarantees currently implemented in Bash — whose
+   observable behaviour is contract, catalogued and preserved across any
+   reimplementation. The engine converges on the application's TypeScript
+   runtime as a single non-interactive `orbit` administration CLI sharing the
+   application's configuration schemas and emitting structured semantic
+   events and stable exit codes for the launcher (and plain terminals) to
+   render. Guarantees, event vocabulary, and acceptance criteria are the
+   portability boundary; interactive presentation code lives in the launcher.
 2. **Guarantee parity is proven, not assumed.** An operational acceptance
    harness exercising install, upgrade, backup/restore, wrong-key refusal, and
    interrupted-recovery flows must pin current behaviour before any flow is
@@ -71,6 +76,8 @@ the human owner under branch protection.
 - ADR-0007 and ADR-0009 remain in history as superseded records; their
   narrower lesson — bounded delegated tasks with independent review and no
   self-approval — is retained in `AGENTS.md` without enforcement machinery.
+- #261's diagnosis-and-repair logic is engine scope in this repository,
+  surfaced through the launcher's Repair flow rather than an in-repo TUI.
 - Single-reviewer governance concentrates trust in branch protection and owner
   review. This is accepted: it matches how the project actually operates, and
   the removed machinery attested authorship rather than verifying correctness.
@@ -83,6 +90,11 @@ the human owner under branch protection.
 - **Treat the installer as incidental scripting and freeze it.** Rejected: the
   operator experience is a stated product goal, and freezing it in Bash leaves
   the highest-criticality guarantees permanently in the least testable layer.
-- **Rewrite operational tooling in Go or Rust for single-binary deployment.**
-  Rejected for now: a second toolchain reintroduces the split the decision
-  removes; the application's Node runtime is already a deployment requirement.
+- **Implement the engine in Go inside `orbit-launcher`.** Rejected: the
+  launcher deliberately owns presentation only, and Go is the right choice
+  there — a single static binary with no runtime dependency, installed before
+  anything else exists. But the engine validates the same configuration
+  contract the application consumes at runtime; implementing it in a second
+  language would split the single source of truth this decision exists to
+  create. The application's Node runtime is already a deployment requirement
+  wherever the engine runs.
