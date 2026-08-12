@@ -5,7 +5,7 @@ import {
   normalizeImapAttachmentName,
   validateImapAttachmentBytes,
 } from "./imap-attachment-validation";
-import { syntheticPdf } from "../../tests/support/synthetic-documents";
+import { syntheticPdf } from "../../../../tests/support/synthetic-documents";
 
 function structure(overrides: Record<string, unknown> = {}) {
   return {
