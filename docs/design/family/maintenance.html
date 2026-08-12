@@ -4,293 +4,294 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="family.css">
 <style>
-.sky g{animation:drowse 260s linear infinite}
-@keyframes drowse{to{transform:translateX(-24px)}}
-.sky .tw{animation:twinkle 4s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.12}to{opacity:.85}}
-.nebula{position:fixed;border-radius:50%;filter:blur(70px);pointer-events:none;z-index:0}
-.n1{left:8%;top:12%;width:34vw;height:22vw;background:#4b3a7a;opacity:.10}
-.n2{right:4%;top:52%;width:30vw;height:26vw;background:#1d3a6e;opacity:.12}
-.n3{left:30%;bottom:-8%;width:40vw;height:20vw;background:#5a2f18;opacity:.08}
-.meteor{position:fixed;width:150px;height:1px;z-index:1;opacity:0;
-        background:linear-gradient(90deg,transparent,#f4f0ff);transform:rotate(-28deg);
-        top:16%;left:12%;animation:meteor 11s linear infinite}
-@keyframes meteor{0%,80%{opacity:0;translate:0 0}82%{opacity:.9}92%{opacity:0;translate:260px 138px}100%{opacity:0}}
-.solar{position:relative;width:min(88vh,880px);height:min(88vh,880px);z-index:2}
-.solar svg{width:100%;height:100%}
-.crown{mix-blend-mode:screen;transform-origin:50% 50%}
-.c1{animation:spin 110s linear infinite}
-.c2{animation:spinr 160s linear infinite}
-.c3{animation:spin 70s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes spinr{to{transform:rotate(-360deg)}}
-.halo{transform-origin:50% 50%;animation:breathe-sun 5s ease-in-out infinite alternate}
-.halo.h2{animation-duration:7s;animation-delay:1.4s}
-@keyframes breathe-sun{from{transform:scale(1)}to{transform:scale(1.06)}}
-.sun-msg{font-family:var(--display);font-weight:600;fill:#0b1226}
+body{background:#060a18}
+.sky-drift-far{animation:driftf 200s linear infinite}
+.sky-drift-near{animation:driftn 120s linear infinite}
+@keyframes driftf{to{transform:translate(-60px,14px)}}
+@keyframes driftn{to{transform:translate(-110px,26px)}}
+.tw{animation:twinkle 5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.2}to{opacity:.85}}
+
+/* corona layers — every group breathes on its own period, nothing in sync */
+.corona-wide{animation:cbreathe 11s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes cbreathe{from{opacity:.8}to{opacity:1}}
+.streamers-a{transform-origin:800px 440px;animation:sway-a 47s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-a{from{transform:rotate(-1.6deg)}to{transform:rotate(1.9deg)}}
+.streamers-b{transform-origin:800px 440px;animation:sway-b 71s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-b{from{transform:rotate(1.4deg)}to{transform:rotate(-1.2deg)}}
+.streamers-b{animation-delay:-23s}
+.filaments{transform-origin:800px 440px;animation:sway-c 59s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-c{from{transform:rotate(.9deg);opacity:.75}to{transform:rotate(-1.3deg);opacity:1}}
+.prom{animation:flicker 7s ease-in-out infinite alternate}
+.prom.p2{animation-duration:9.5s;animation-delay:-3s}
+.prom.p3{animation-duration:6.2s;animation-delay:-1.4s}
+@keyframes flicker{from{opacity:.55}to{opacity:.95}}
+.ring-inner{animation:shimmer 8s ease-in-out infinite alternate}
+@keyframes shimmer{from{opacity:.75}to{opacity:1}}
+.horizon{animation:horiz 17s ease-in-out infinite alternate}
+@keyframes horiz{from{opacity:.75}to{opacity:1}}
+
+/* transit as the progress bar — the arc creeps, honestly slow */
+.progress{animation:transit 90s linear forwards}
+@keyframes transit{from{stroke-dasharray:52 48}to{stroke-dasharray:74 26}}
+
+/* the diamond ring — service returning; demo loops every 36s */
+.flare{opacity:0;animation:ringflash 36s linear infinite}
+@keyframes ringflash{
+  0%,60%{opacity:0;transform:scale(.2)}
+  63%{opacity:.6;transform:scale(.6)}
+  66%{opacity:1;transform:scale(1)}
+  72%{opacity:.5;transform:scale(1.15)}
+  77%,100%{opacity:0;transform:scale(.2)}
+}
+.flare{transform-origin:948px 348px;transform-box:view-box}
+.wash{opacity:0;animation:washflash 36s linear infinite;pointer-events:none}
+@keyframes washflash{
+  0%,61%{opacity:0}
+  66%{opacity:.96}
+  73%{opacity:.3}
+  78%,100%{opacity:0}
+}
+.ringflare{opacity:0;animation:ringlit 36s linear infinite}
+@keyframes ringlit{
+  0%,60%{opacity:0}
+  64%{opacity:1}
+  74%{opacity:.3}
+  79%,100%{opacity:0}
+}
+.msg{position:fixed;left:0;right:0;bottom:20vh;text-align:center;z-index:3;
+     font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+     text-transform:uppercase}
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
+@media (prefers-reduced-motion: reduce){
+  .flare,.wash,.ringflare{opacity:0!important}
+  .progress{stroke-dasharray:64 36}
+}
 </style></head><body>
+
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-<g fill="#e9edf8"><circle class="tw" style="animation-delay:4.9s" cx="518.0" cy="620.0" r="0.41" opacity="0.54"/>
-      <circle cx="1598.4" cy="263.4" r="0.58" opacity="0.17"/>
-      <circle cx="310.1" cy="24.2" r="1.02" opacity="0.3"/>
-      <circle cx="1304.9" cy="760.7" r="0.71" opacity="0.22"/>
-      <circle cx="556.3" cy="30.3" r="0.98" opacity="0.23"/>
-      <circle class="tw" style="animation-delay:5.9s" cx="238.0" cy="888.4" r="0.79" opacity="0.53"/>
-      <circle cx="1062.3" cy="249.7" r="0.53" opacity="0.25"/>
-      <circle cx="1178.6" cy="511.8" r="0.67" opacity="0.16"/>
-      <circle cx="561.7" cy="392.7" r="0.46" opacity="0.25"/>
-      <circle cx="472.7" cy="416.0" r="0.84" opacity="0.38"/>
-      <circle class="tw" style="animation-delay:1.3s" cx="1359.3" cy="294.9" r="0.49" opacity="0.27"/>
-      <circle cx="921.0" cy="476.2" r="0.69" opacity="0.19"/>
-      <circle cx="1201.6" cy="624.0" r="0.96" opacity="0.43"/>
-      <circle cx="1367.8" cy="35.1" r="0.57" opacity="0.34"/>
-      <circle cx="1121.5" cy="504.2" r="0.85" opacity="0.27"/>
-      <circle class="tw" style="animation-delay:2.8s" cx="390.1" cy="874.0" r="1.28" opacity="0.35"/>
-      <circle cx="205.5" cy="601.2" r="0.59" opacity="0.4"/>
-      <circle cx="445.6" cy="467.3" r="1.18" opacity="0.27"/>
-      <circle cx="855.9" cy="318.6" r="0.84" opacity="0.5"/>
-      <circle cx="787.9" cy="964.6" r="0.77" opacity="0.33"/>
-      <circle class="tw" style="animation-delay:0.1s" cx="1032.0" cy="501.1" r="1.0" opacity="0.27"/>
-      <circle cx="676.1" cy="64.4" r="0.62" opacity="0.39"/>
-      <circle cx="1104.5" cy="909.9" r="1.01" opacity="0.37"/>
-      <circle cx="550.9" cy="477.0" r="0.66" opacity="0.19"/>
-      <circle cx="855.7" cy="630.9" r="0.68" opacity="0.45"/>
-      <circle class="tw" style="animation-delay:1.6s" cx="847.9" cy="309.3" r="1.17" opacity="0.16"/>
-      <circle cx="513.6" cy="672.8" r="0.63" opacity="0.54"/>
-      <circle cx="168.2" cy="450.0" r="0.82" opacity="0.45"/>
-      <circle cx="406.8" cy="162.3" r="1.07" opacity="0.46"/>
-      <circle cx="920.3" cy="903.0" r="0.76" opacity="0.33"/>
-      <circle class="tw" style="animation-delay:0.5s" cx="797.8" cy="127.0" r="1.15" opacity="0.17"/>
-      <circle cx="1456.6" cy="451.9" r="0.53" opacity="0.51"/>
-      <circle cx="303.5" cy="453.3" r="0.41" opacity="0.21"/>
-      <circle cx="771.1" cy="700.9" r="0.52" opacity="0.45"/>
-      <circle cx="1031.0" cy="672.7" r="1.27" opacity="0.34"/>
-      <circle class="tw" style="animation-delay:1.6s" cx="7.7" cy="56.2" r="1.18" opacity="0.19"/>
-      <circle cx="1044.9" cy="737.1" r="1.08" opacity="0.37"/>
-      <circle cx="522.9" cy="901.4" r="0.42" opacity="0.25"/>
-      <circle cx="1579.3" cy="188.1" r="1.16" opacity="0.39"/>
-      <circle cx="1011.4" cy="633.0" r="0.8" opacity="0.49"/>
-      <circle class="tw" style="animation-delay:3.8s" cx="95.3" cy="285.6" r="1.09" opacity="0.45"/>
-      <circle cx="1103.5" cy="293.6" r="0.94" opacity="0.38"/>
-      <circle cx="1303.0" cy="229.8" r="0.66" opacity="0.28"/>
-      <circle cx="330.4" cy="728.2" r="0.84" opacity="0.18"/>
-      <circle cx="1428.0" cy="523.2" r="1.14" opacity="0.45"/>
-      <circle class="tw" style="animation-delay:4.8s" cx="637.0" cy="320.5" r="0.89" opacity="0.53"/>
-      <circle cx="1531.7" cy="572.0" r="0.89" opacity="0.27"/>
-      <circle cx="878.0" cy="556.9" r="1.09" opacity="0.49"/>
-      <circle cx="1441.9" cy="253.1" r="0.98" opacity="0.18"/>
-      <circle cx="449.5" cy="604.1" r="0.4" opacity="0.5"/>
-      <circle class="tw" style="animation-delay:0.5s" cx="862.4" cy="239.1" r="0.78" opacity="0.45"/>
-      <circle cx="1458.3" cy="657.6" r="0.88" opacity="0.23"/>
-      <circle cx="1000.4" cy="222.0" r="0.46" opacity="0.49"/>
-      <circle cx="560.2" cy="770.7" r="0.84" opacity="0.38"/>
-      <circle cx="618.9" cy="819.5" r="1.1" opacity="0.31"/>
-      <circle class="tw" style="animation-delay:3.6s" cx="891.5" cy="275.1" r="1.22" opacity="0.33"/>
-      <circle cx="919.4" cy="98.1" r="0.7" opacity="0.46"/>
-      <circle cx="942.5" cy="245.1" r="0.55" opacity="0.5"/>
-      <circle cx="1299.6" cy="884.7" r="0.56" opacity="0.37"/>
-      <circle cx="700.9" cy="425.7" r="0.72" opacity="0.41"/>
-      <circle class="tw" style="animation-delay:4.9s" cx="916.4" cy="73.4" r="0.44" opacity="0.22"/>
-      <circle cx="1377.6" cy="671.1" r="0.73" opacity="0.36"/>
-      <circle cx="1025.0" cy="171.8" r="1.26" opacity="0.52"/>
-      <circle cx="56.6" cy="254.9" r="0.65" opacity="0.49"/>
-      <circle cx="1454.3" cy="943.6" r="0.79" opacity="0.37"/>
-      <circle class="tw" style="animation-delay:5.3s" cx="315.8" cy="29.9" r="0.97" opacity="0.37"/>
-      <circle cx="1475.4" cy="537.9" r="0.45" opacity="0.38"/>
-      <circle cx="1490.1" cy="475.4" r="0.98" opacity="0.36"/>
-      <circle cx="716.1" cy="421.5" r="0.61" opacity="0.33"/>
-      <circle cx="1274.1" cy="740.7" r="0.43" opacity="0.24"/>
-      <circle class="tw" style="animation-delay:1.2s" cx="115.6" cy="91.2" r="0.41" opacity="0.44"/>
-      <circle cx="1058.5" cy="830.9" r="0.54" opacity="0.25"/>
-      <circle cx="187.4" cy="132.2" r="1.28" opacity="0.5"/>
-      <circle cx="1552.3" cy="184.4" r="0.78" opacity="0.37"/>
-      <circle cx="106.1" cy="646.9" r="1.19" opacity="0.52"/>
-      <circle class="tw" style="animation-delay:2.8s" cx="1384.2" cy="303.9" r="1.12" opacity="0.23"/>
-      <circle cx="117.2" cy="95.5" r="0.47" opacity="0.29"/>
-      <circle cx="1190.0" cy="558.9" r="0.55" opacity="0.27"/>
-      <circle cx="580.4" cy="115.9" r="0.55" opacity="0.53"/>
-      <circle cx="1250.0" cy="681.9" r="0.48" opacity="0.35"/>
-      <circle class="tw" style="animation-delay:3.7s" cx="1261.6" cy="820.7" r="0.6" opacity="0.3"/>
-      <circle cx="241.3" cy="602.5" r="0.47" opacity="0.48"/>
-      <circle cx="357.1" cy="364.1" r="1.03" opacity="0.39"/>
-      <circle cx="1581.9" cy="660.2" r="0.64" opacity="0.21"/>
-      <circle cx="1245.1" cy="724.6" r="0.57" opacity="0.48"/>
-      <circle class="tw" style="animation-delay:4.7s" cx="604.8" cy="181.7" r="0.54" opacity="0.33"/>
-      <circle cx="834.7" cy="302.9" r="0.98" opacity="0.16"/>
-      <circle cx="1174.3" cy="684.4" r="0.81" opacity="0.18"/>
-      <circle cx="648.5" cy="903.4" r="1.24" opacity="0.45"/>
-      <circle cx="1127.9" cy="982.3" r="0.64" opacity="0.5"/>
-      <circle class="tw" style="animation-delay:0.2s" cx="1463.5" cy="835.4" r="0.61" opacity="0.41"/>
-      <circle cx="377.0" cy="837.7" r="0.53" opacity="0.41"/>
-      <circle cx="315.9" cy="970.4" r="1.24" opacity="0.54"/>
-      <circle cx="941.9" cy="998.4" r="0.54" opacity="0.38"/>
-      <circle cx="162.6" cy="598.3" r="1.29" opacity="0.44"/>
-      <circle class="tw" style="animation-delay:4.6s" cx="1265.5" cy="905.1" r="1.18" opacity="0.4"/>
-      <circle cx="248.5" cy="250.0" r="1.05" opacity="0.44"/>
-      <circle cx="640.6" cy="468.7" r="0.7" opacity="0.47"/>
-      <circle cx="717.2" cy="329.3" r="0.6" opacity="0.33"/>
-      <circle cx="1415.3" cy="243.8" r="0.43" opacity="0.29"/>
-      <circle class="tw" style="animation-delay:1.8s" cx="568.5" cy="898.6" r="0.88" opacity="0.38"/>
-      <circle cx="647.8" cy="516.9" r="0.85" opacity="0.34"/>
-      <circle cx="1541.9" cy="597.4" r="0.72" opacity="0.44"/>
-      <circle cx="234.5" cy="114.6" r="0.75" opacity="0.36"/>
-      <circle cx="998.9" cy="115.1" r="0.98" opacity="0.52"/>
-      <circle class="tw" style="animation-delay:5.1s" cx="394.6" cy="393.0" r="0.86" opacity="0.47"/>
-      <circle cx="1035.3" cy="564.9" r="0.57" opacity="0.36"/>
-      <circle cx="128.6" cy="34.1" r="0.52" opacity="0.49"/>
-      <circle cx="421.3" cy="155.5" r="1.09" opacity="0.32"/>
-      <circle cx="195.6" cy="651.7" r="1.27" opacity="0.16"/>
-      <circle class="tw" style="animation-delay:2.5s" cx="1557.0" cy="558.8" r="1.07" opacity="0.39"/>
-      <circle cx="557.0" cy="745.8" r="0.8" opacity="0.44"/>
-      <circle cx="933.0" cy="825.9" r="0.79" opacity="0.27"/>
-      <circle cx="599.6" cy="555.1" r="1.04" opacity="0.39"/>
-      <circle cx="80.6" cy="991.1" r="0.79" opacity="0.19"/>
-      <circle class="tw" style="animation-delay:3.3s" cx="1244.7" cy="143.0" r="0.4" opacity="0.5"/>
-      <circle cx="978.7" cy="388.0" r="0.48" opacity="0.52"/>
-      <circle cx="40.9" cy="372.2" r="1.08" opacity="0.43"/>
-      <circle cx="238.9" cy="385.1" r="0.61" opacity="0.28"/>
-      <circle cx="322.9" cy="98.2" r="1.17" opacity="0.49"/>
-      <circle class="tw" style="animation-delay:5.2s" cx="629.0" cy="226.5" r="1.08" opacity="0.37"/>
-      <circle cx="847.8" cy="435.6" r="0.98" opacity="0.46"/>
-      <circle cx="1560.7" cy="645.1" r="0.86" opacity="0.35"/>
-      <circle cx="350.4" cy="172.1" r="1.05" opacity="0.33"/>
-      <circle cx="566.4" cy="494.2" r="0.57" opacity="0.18"/>
-      <circle class="tw" style="animation-delay:2.0s" cx="448.1" cy="496.5" r="0.84" opacity="0.47"/>
-      <circle cx="1081.6" cy="287.9" r="1.29" opacity="0.42"/>
-      <circle cx="751.3" cy="398.3" r="0.91" opacity="0.22"/>
-      <circle cx="1051.1" cy="896.7" r="1.11" opacity="0.21"/>
-      <circle cx="1066.8" cy="192.5" r="1.13" opacity="0.3"/>
-      <circle class="tw" style="animation-delay:1.5s" cx="724.8" cy="415.2" r="1.06" opacity="0.49"/>
-      <circle cx="1505.9" cy="226.3" r="0.43" opacity="0.47"/>
-      <circle cx="1466.3" cy="166.3" r="0.41" opacity="0.28"/>
-      <circle cx="74.8" cy="910.4" r="0.68" opacity="0.15"/>
-      <circle cx="869.8" cy="353.8" r="0.49" opacity="0.16"/>
-      <circle class="tw" style="animation-delay:5.4s" cx="697.8" cy="541.7" r="1.26" opacity="0.38"/>
-      <circle cx="635.0" cy="864.3" r="0.56" opacity="0.48"/>
-      <circle cx="677.8" cy="541.3" r="1.14" opacity="0.2"/>
-      <circle cx="960.3" cy="521.2" r="0.85" opacity="0.24"/>
-      <circle cx="1470.5" cy="349.5" r="0.9" opacity="0.24"/>
-      <circle class="tw" style="animation-delay:0.9s" cx="210.9" cy="344.2" r="0.44" opacity="0.55"/>
-      <circle cx="354.4" cy="457.4" r="0.73" opacity="0.26"/>
-      <circle cx="26.7" cy="184.9" r="1.12" opacity="0.27"/>
-      <circle cx="1239.8" cy="653.3" r="1.25" opacity="0.22"/>
-      <circle cx="924.8" cy="63.8" r="0.73" opacity="0.46"/>
-      <circle class="tw" style="animation-delay:3.3s" cx="743.8" cy="957.3" r="1.09" opacity="0.18"/>
-      <circle cx="440.1" cy="18.1" r="1.02" opacity="0.46"/>
-      <circle cx="261.5" cy="858.2" r="1.13" opacity="0.39"/>
-      <circle cx="849.1" cy="517.5" r="1.17" opacity="0.48"/>
-      <circle cx="527.9" cy="717.7" r="0.56" opacity="0.52"/></g></svg></div>
-<div class="nebula n1"></div><div class="nebula n2"></div><div class="nebula n3"></div>
-<div class="meteor"></div>
-<div class="stage"><div class="solar">
-<svg viewBox="0 0 700 700">
   <defs>
-    <radialGradient id="haloA" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#fff3d6" stop-opacity=".9"/>
-      <stop offset="34%" stop-color="#f0b429" stop-opacity=".55"/>
-      <stop offset="70%" stop-color="#e2772b" stop-opacity=".14"/>
-      <stop offset="100%" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="haloB" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#f0b429" stop-opacity=".35"/>
-      <stop offset="60%" stop-color="#e2772b" stop-opacity=".1"/>
-      <stop offset="100%" stop-opacity="0"/>
+    <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#eef2ff" stop-opacity=".5"/>
+      <stop offset="100%" stop-color="#eef2ff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <circle class="halo h2" cx="350" cy="350" r="330" fill="url(#haloB)"/>
-  <g class="crown c1" fill="#f0b429">
-        <path d="M 502 341 L 612 344 L 502 352 Z" opacity="0.07"/>
-        <path d="M 498 385 L 631 421 L 497 390 Z" opacity="0.131"/>
-        <path d="M 490 409 L 623 471 L 488 414 Z" opacity="0.073"/>
-        <path d="M 467 447 L 614 579 L 463 452 Z" opacity="0.091"/>
-        <path d="M 439 474 L 552 654 L 430 479 Z" opacity="0.116"/>
-        <path d="M 401 493 L 422 587 L 388 497 Z" opacity="0.101"/>
-        <path d="M 380 499 L 394 604 L 372 500 Z" opacity="0.174"/>
-        <path d="M 344 502 L 326 667 L 333 501 Z" opacity="0.112"/>
-        <path d="M 298 493 L 260 583 L 293 491 Z" opacity="0.089"/>
-        <path d="M 264 475 L 175 591 L 257 471 Z" opacity="0.142"/>
-        <path d="M 241 456 L 141 538 L 233 447 Z" opacity="0.158"/>
-        <path d="M 221 430 L 75 507 L 216 421 Z" opacity="0.183"/>
-        <path d="M 203 389 L 77 408 L 200 374 Z" opacity="0.077"/>
-        <path d="M 198 355 L 10 354 L 198 349 Z" opacity="0.128"/>
-        <path d="M 199 329 L 26 292 L 202 317 Z" opacity="0.14"/>
-        <path d="M 216 278 L 107 206 L 222 267 Z" opacity="0.143"/>
-        <path d="M 233 253 L 127 148 L 242 243 Z" opacity="0.192"/>
-        <path d="M 261 227 L 163 80 L 265 224 Z" opacity="0.158"/>
-        <path d="M 293 209 L 226 0 L 305 205 Z" opacity="0.1"/>
-        <path d="M 327 200 L 305 24 L 332 199 Z" opacity="0.125"/>
-        <path d="M 359 198 L 369 93 L 364 199 Z" opacity="0.168"/>
-        <path d="M 392 204 L 434 89 L 401 207 Z" opacity="0.182"/>
-        <path d="M 424 217 L 506 93 L 433 223 Z" opacity="0.184"/>
-        <path d="M 466 251 L 625 127 L 470 257 Z" opacity="0.118"/>
-        <path d="M 479 270 L 663 178 L 487 283 Z" opacity="0.081"/>
-        <path d="M 495 304 L 611 273 L 497 310 Z" opacity="0.128"/>
+  <g id="farstars" class="sky-drift-far" fill="#dfe6f7"></g>
+  <g id="nearstars" class="sky-drift-near"></g>
+</svg></div>
+
+<div class="world" style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+  <defs>
+    <!-- totality sky: the eerie 360-degree sunset around the whole horizon -->
+    <linearGradient id="duskband" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e2772b" stop-opacity="0"/>
+      <stop offset="55%" stop-color="#e2772b" stop-opacity=".1"/>
+      <stop offset="85%" stop-color="#f0a35a" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="#ffd9a0" stop-opacity=".3"/>
+    </linearGradient>
+    <radialGradient id="cornerwarm" cx="50%" cy="100%" r="70%">
+      <stop offset="0%" stop-color="#f0b429" stop-opacity=".2"/>
+      <stop offset="60%" stop-color="#e2772b" stop-opacity=".07"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- corona -->
+    <radialGradient id="coronaIn" cx="50%" cy="50%" r="50%">
+      <stop offset="38%" stop-color="#fff8ea" stop-opacity="0"/>
+      <stop offset="41%" stop-color="#fff8ea" stop-opacity=".85"/>
+      <stop offset="48%" stop-color="#ffedc8" stop-opacity=".4"/>
+      <stop offset="62%" stop-color="#f5d9a0" stop-opacity=".12"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coronaWide" cx="50%" cy="50%" r="50%">
+      <stop offset="24%" stop-color="#f7e8c8" stop-opacity=".3"/>
+      <stop offset="55%" stop-color="#e8d4ae" stop-opacity=".1"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="streamerFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffeec6" stop-opacity=".46"/>
+      <stop offset="45%" stop-color="#f2dcae" stop-opacity=".15"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="washg" cx="59.25%" cy="34.8%" r="85%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="30%" stop-color="#fff6e0"/>
+      <stop offset="70%" stop-color="#f8dca4" stop-opacity=".75"/>
+      <stop offset="100%" stop-color="#e8b25e" stop-opacity=".45"/>
+    </radialGradient>
+    <radialGradient id="moonshade" cx="42%" cy="60%" r="75%">
+      <stop offset="0%" stop-color="#0a0c13"/>
+      <stop offset="70%" stop-color="#050609"/>
+      <stop offset="100%" stop-color="#010203"/>
+    </radialGradient>
+    <radialGradient id="promg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb3a6" stop-opacity=".9"/>
+      <stop offset="55%" stop-color="#ff7d92" stop-opacity=".5"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="flareg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="18%" stop-color="#fff6e0" stop-opacity=".9"/>
+      <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="b2"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b4"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="b9" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="b18" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="18"/></filter>
+    <!-- entropy: turbulence-displaced streamer edges, then softened -->
+    <filter id="rough" x="-40%" y="-40%" width="180%" height="180%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.011 0.019" numOctaves="3" seed="11" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="34"/>
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="rough2" x="-40%" y="-40%" width="180%" height="180%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.02 0.008" numOctaves="3" seed="4" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="26"/>
+      <feGaussianBlur stdDeviation="2.5"/>
+    </filter>
+
+    <!-- one streamer petal, drawn once, placed many times -->
+    <path id="petal" d="M 0 -26 C 150 -58, 330 -40, 560 -10 C 330 22, 150 34, 0 26 Z"/>
+    <path id="petalLong" d="M 0 -20 C 210 -66, 430 -52, 700 -6 C 430 30, 210 40, 0 20 Z"/>
+    <path id="wisp" d="M 0 -8 C 160 -30, 300 -22, 430 -2 C 300 12, 160 16, 0 8 Z"/>
+  </defs>
+
+  <!-- horizon: sunset in every direction -->
+  <g class="horizon">
+    <rect x="0" y="700" width="1600" height="300" fill="url(#duskband)"/>
+    <ellipse cx="120" cy="1010" rx="560" ry="230" fill="url(#cornerwarm)" filter="url(#b18)"/>
+    <ellipse cx="1480" cy="1010" rx="560" ry="230" fill="url(#cornerwarm)" filter="url(#b18)"/>
+    <ellipse cx="800" cy="1030" rx="900" ry="200" fill="url(#cornerwarm)" filter="url(#b18)" opacity=".8"/>
   </g>
-  <g class="crown c2" fill="#e2882b">
-        <path d="M 500 339 Q 569 268 652 340 Q 569 268 500 351 Z" opacity="0.179"/>
-        <path d="M 492 399 Q 595 369 652 468 Q 595 369 488 410 Z" opacity="0.086"/>
-        <path d="M 471 438 Q 551 403 552 506 Q 551 403 466 445 Z" opacity="0.177"/>
-        <path d="M 424 480 Q 372 543 456 555 Q 372 543 413 486 Z" opacity="0.184"/>
-        <path d="M 377 497 Q 454 579 397 681 Q 454 579 365 499 Z" opacity="0.096"/>
-        <path d="M 323 498 Q 236 545 290 631 Q 236 545 314 496 Z" opacity="0.111"/>
-        <path d="M 277 481 Q 187 485 214 574 Q 187 485 268 475 Z" opacity="0.149"/>
-        <path d="M 236 448 Q 130 441 111 547 Q 130 441 233 443 Z" opacity="0.155"/>
-        <path d="M 212 409 Q 150 363 126 439 Q 150 363 209 402 Z" opacity="0.112"/>
-        <path d="M 200 357 Q 168 425 114 353 Q 168 425 200 347 Z" opacity="0.093"/>
-        <path d="M 209 299 Q 192 232 131 263 Q 192 232 212 291 Z" opacity="0.148"/>
-        <path d="M 236 252 Q 225 133 102 129 Q 225 133 240 248 Z" opacity="0.08"/>
-        <path d="M 263 228 Q 277 147 204 123 Q 277 147 275 220 Z" opacity="0.184"/>
-        <path d="M 325 202 Q 255 159 317 87 Q 255 159 337 201 Z" opacity="0.079"/>
-        <path d="M 365 201 Q 448 143 389 59 Q 448 143 375 202 Z" opacity="0.143"/>
-        <path d="M 423 219 Q 381 152 473 142 Q 381 152 429 223 Z" opacity="0.17"/>
-        <path d="M 457 244 Q 441 153 550 166 Q 441 153 464 252 Z" opacity="0.173"/>
-        <path d="M 492 300 Q 580 328 634 261 Q 580 328 495 310 Z" opacity="0.078"/>
+
+  <!-- wide corona haze -->
+  <g class="corona-wide">
+    <ellipse cx="800" cy="440" rx="760" ry="330" fill="url(#coronaWide)"/>
+    <circle cx="800" cy="440" r="430" fill="url(#coronaIn)"/>
   </g>
-  <g class="crown c3" fill="#ffd989">
-        <path d="M 500 352 L 586 364 L 499 366 Z" opacity="0.072"/>
-        <path d="M 498 375 L 551 390 L 496 384 Z" opacity="0.078"/>
-        <path d="M 493 395 L 546 416 L 491 401 Z" opacity="0.124"/>
-        <path d="M 485 415 L 514 437 L 480 426 Z" opacity="0.119"/>
-        <path d="M 463 448 L 515 501 L 458 454 Z" opacity="0.068"/>
-        <path d="M 440 470 L 473 527 L 431 476 Z" opacity="0.147"/>
-        <path d="M 414 486 L 428 536 L 402 491 Z" opacity="0.112"/>
-        <path d="M 393 494 L 408 562 L 386 496 Z" opacity="0.072"/>
-        <path d="M 370 499 L 371 572 L 359 500 Z" opacity="0.123"/>
-        <path d="M 336 499 L 329 540 L 330 499 Z" opacity="0.105"/>
-        <path d="M 305 493 L 289 532 L 300 491 Z" opacity="0.074"/>
-        <path d="M 297 490 L 274 531 L 287 486 Z" opacity="0.175"/>
-        <path d="M 266 474 L 232 514 L 259 470 Z" opacity="0.103"/>
-        <path d="M 238 449 L 187 487 L 233 444 Z" opacity="0.075"/>
-        <path d="M 223 430 L 156 459 L 216 418 Z" opacity="0.093"/>
-        <path d="M 212 408 L 130 434 L 208 398 Z" opacity="0.192"/>
-        <path d="M 205 387 L 118 405 L 203 382 Z" opacity="0.118"/>
-        <path d="M 201 366 L 122 365 L 200 354 Z" opacity="0.196"/>
-        <path d="M 203 321 L 119 297 L 205 311 Z" opacity="0.198"/>
-        <path d="M 209 298 L 165 271 L 215 284 Z" opacity="0.113"/>
-        <path d="M 217 281 L 189 260 L 222 273 Z" opacity="0.088"/>
-        <path d="M 243 245 L 185 180 L 248 240 Z" opacity="0.074"/>
-        <path d="M 256 233 L 236 198 L 264 227 Z" opacity="0.174"/>
-        <path d="M 272 222 L 252 169 L 285 215 Z" opacity="0.122"/>
-        <path d="M 300 209 L 281 127 L 312 205 Z" opacity="0.185"/>
-        <path d="M 334 201 L 336 146 L 346 200 Z" opacity="0.176"/>
-        <path d="M 363 201 L 372 157 L 371 201 Z" opacity="0.117"/>
-        <path d="M 392 206 L 416 147 L 401 209 Z" opacity="0.176"/>
-        <path d="M 406 211 L 436 150 L 413 214 Z" opacity="0.138"/>
-        <path d="M 440 230 L 475 200 L 451 239 Z" opacity="0.071"/>
-        <path d="M 459 247 L 508 208 L 464 253 Z" opacity="0.139"/>
-        <path d="M 474 265 L 526 240 L 480 276 Z" opacity="0.061"/>
-        <path d="M 488 291 L 560 264 L 490 296 Z" opacity="0.181"/>
-        <path d="M 495 313 L 565 300 L 497 319 Z" opacity="0.123"/>
+
+  <!-- streamers: pulled long at the equator, brushed short at the poles -->
+  <g class="streamers-a" filter="url(#rough)" fill="url(#streamerFade)">
+    <use href="#petalLong" transform="translate(800 440) rotate(4) translate(150 0)"/>
+    <use href="#petal"     transform="translate(800 440) rotate(-19) translate(152 0) scale(.9)"/>
+    <use href="#petalLong" transform="translate(800 440) rotate(168) translate(150 0) scale(1.06)"/>
+    <use href="#petal"     transform="translate(800 440) rotate(196) translate(152 0) scale(.84)"/>
+    <use href="#petal"     transform="translate(800 440) rotate(24) translate(150 0) scale(.62)"/>
+    <use href="#petal"     transform="translate(800 440) rotate(149) translate(150 0) scale(.58)"/>
   </g>
-  <circle class="halo" cx="350" cy="350" r="240" fill="url(#haloA)"/>
-  <circle cx="350" cy="350" r="150" fill="#fff3d6"/>
-  <circle cx="350" cy="350" r="150" fill="none" stroke="#f0b429" stroke-opacity=".7" stroke-width="2.5"/>
-  <text class="sun-msg" x="350" y="308" font-size="22" text-anchor="middle">There&rsquo;s a hiccup</text>
-  <text class="sun-msg" x="350" y="338" font-size="22" text-anchor="middle">in the flux capacitor,</text>
-  <text class="sun-msg" x="350" y="368" font-size="22" text-anchor="middle">but we&rsquo;ll be</text>
-  <text class="sun-msg" x="350" y="398" font-size="22" text-anchor="middle">right with you.</text>
-</svg>
-</div></div>
-<div class="vignette"></div>
-<div class="foot">dormant &middot; the corona keeps turning while the works go on</div>
+  <g class="streamers-b" filter="url(#rough2)" fill="url(#streamerFade)" opacity=".8">
+    <use href="#wisp" transform="translate(800 440) rotate(-8) translate(158 0) scale(1.15)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(13) translate(158 0)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(186) translate(158 0) scale(1.2)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(160) translate(158 0) scale(.9)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(-38) translate(154 0) scale(.55)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(212) translate(154 0) scale(.5)"/>
+  </g>
+
+  <!-- fine filaments and polar brushes: the iron-filing structure -->
+  <g class="filaments" stroke="#f4e6c6" fill="none" filter="url(#b2)">
+    <path d="M 962 420 C 1120 396, 1260 400, 1420 428" stroke-width="1.1" opacity=".2"/>
+    <path d="M 964 452 C 1130 470, 1280 476, 1450 460" stroke-width="1" opacity=".16"/>
+    <path d="M 960 478 C 1100 508, 1230 520, 1330 540" stroke-width=".9" opacity=".12"/>
+    <path d="M 638 424 C 480 400, 340 402, 180 432" stroke-width="1.1" opacity=".2"/>
+    <path d="M 636 456 C 470 476, 320 480, 160 462" stroke-width="1" opacity=".15"/>
+    <path d="M 642 486 C 500 514, 380 524, 290 546" stroke-width=".9" opacity=".12"/>
+    <g stroke-width=".9">
+      <path d="M 782 272 C 776 210, 770 160, 758 96" opacity=".15"/>
+      <path d="M 800 268 C 800 200, 802 150, 804 84" opacity=".18"/>
+      <path d="M 818 272 C 826 208, 834 158, 846 100" opacity=".15"/>
+      <path d="M 764 278 C 748 224, 734 180, 712 128" opacity=".11"/>
+      <path d="M 836 278 C 854 222, 868 178, 892 124" opacity=".11"/>
+      <path d="M 784 608 C 776 664, 768 710, 754 768" opacity=".14"/>
+      <path d="M 802 612 C 802 676, 804 724, 806 788" opacity=".17"/>
+      <path d="M 820 608 C 830 668, 840 714, 854 770" opacity=".14"/>
+      <path d="M 762 602 C 746 652, 732 694, 710 744" opacity=".1"/>
+      <path d="M 838 602 C 858 654, 872 696, 896 748" opacity=".1"/>
+    </g>
+  </g>
+
+  <!-- prominences: pink fire at the limb, behind the moon's edge -->
+  <g filter="url(#b4)">
+    <circle class="prom"    cx="678" cy="330" r="17" fill="url(#promg)"/>
+    <circle class="prom p2" cx="948" cy="512" r="21" fill="url(#promg)"/>
+    <circle class="prom p3" cx="742" cy="600" r="13" fill="url(#promg)"/>
+    <path class="prom p2" d="M 930 350 q 26 -30 44 -2 q -18 -14 -30 6 Z" fill="#ff9d9d" opacity=".6"/>
+  </g>
+
+  <!-- the moon: black, with the faintest earthshine mottle -->
+  <circle cx="800" cy="440" r="170" fill="url(#moonshade)"/>
+
+  <!-- chromosphere + photon ring -->
+  <circle cx="800" cy="440" r="170" fill="none" stroke="#ffb46a" stroke-width="7" opacity=".22" filter="url(#b9)"/>
+  <circle class="ring-inner" cx="800" cy="440" r="170" fill="none" stroke="#ffe9bd" stroke-width="3.2" opacity=".8" filter="url(#b2)"/>
+  <circle cx="800" cy="440" r="170" fill="none" stroke="#fffdf6" stroke-width="1.2" opacity=".95"/>
+
+  <!-- transit is the progress bar -->
+  <circle class="progress" pathLength="100" cx="800" cy="440" r="186" fill="none"
+          stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" opacity=".5"
+          transform="rotate(-90 800 440)"/>
+
+  <!-- the diamond ring: service returning (demo loops) -->
+  <g class="flare">
+    <circle cx="948" cy="348" r="230" fill="url(#flareg)"/>
+    <circle cx="948" cy="348" r="60" fill="url(#flareg)"/>
+    <circle cx="948" cy="348" r="9" fill="#ffffff"/>
+    <g stroke="#fff6e0" stroke-linecap="round">
+      <path d="M 948 208 L 948 488" stroke-width="2.4" opacity=".8"/>
+      <path d="M 808 348 L 1088 348" stroke-width="2.4" opacity=".8"/>
+      <path d="M 862 262 L 1034 434" stroke-width="1.2" opacity=".5"/>
+      <path d="M 1034 262 L 862 434" stroke-width="1.2" opacity=".5"/>
+    </g>
+  </g>
+  <circle class="ringflare" cx="800" cy="440" r="170" fill="none" stroke="#ffffff" stroke-width="3.4"/>
+  <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
+</svg></div>
+
+<div class="msg">maintenance — back soon</div>
+
+<svg class="grain" width="100%" height="100%"><filter id="gr">
+  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+  <feColorMatrix type="saturate" values="0"/>
+  <feComponentTransfer><feFuncA type="linear" slope="0.09"/></feComponentTransfer>
+  <feComposite operator="in" in2="SourceGraphic"/>
+</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+
+<div class="vignette" style="background:radial-gradient(ellipse at 50% 44%,transparent 46%,rgba(0,0,0,.42) 100%)"></div>
+<div class="foot">TOTALITY &middot; demo loops ~36s &middot; the diamond ring is the service returning</div>
+
+<script>
+// deterministic starfield — bright stars only; totality lets the day stars out
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(20260812);
+const far = document.getElementById("farstars"), near = document.getElementById("nearstars");
+const NS = "http://www.w3.org/2000/svg";
+const clearOf = (x, y) => Math.hypot(x - 800, y - 440) > 300;
+let made = 0;
+while (made < 90) {
+  const x = rng() * 1600, y = rng() * 1000;
+  if (!clearOf(x, y)) continue;
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
+  c.setAttribute("r", (0.4 + rng() * 0.6).toFixed(2));
+  c.setAttribute("opacity", (0.12 + rng() * 0.25).toFixed(2));
+  if (rng() < 0.16) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
+  far.appendChild(c); made++;
+}
+made = 0;
+while (made < 26) {
+  const x = rng() * 1600, y = rng() * 1000;
+  if (!clearOf(x, y)) continue;
+  const r = 1 + rng() * 0.9;
+  const g = document.createElementNS(NS, "circle");
+  g.setAttribute("cx", x.toFixed(1)); g.setAttribute("cy", y.toFixed(1));
+  g.setAttribute("r", (r * 4).toFixed(1)); g.setAttribute("fill", "url(#stargl)");
+  near.appendChild(g);
+  const c = document.createElementNS(NS, "circle");
+  c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
+  c.setAttribute("r", r.toFixed(2)); c.setAttribute("fill", "#eef2ff");
+  c.setAttribute("opacity", (0.45 + rng() * 0.4).toFixed(2));
+  if (rng() < 0.3) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
+  near.appendChild(c); made++;
+}
+</script>
 </body></html>

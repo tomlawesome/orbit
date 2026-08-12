@@ -12,7 +12,7 @@
 .world{position:fixed;inset:0;z-index:1}
 .world svg{width:100%;height:100%}
 /* first light: dawn breaks once on load */
-.dawnlayer{opacity:0;transition:opacity 2.6s ease}
+.dawnlayer{opacity:0;transition:opacity 3s ease}
 body.lit .dawnlayer{opacity:1}
 .rim{opacity:0;transition:opacity 2.2s ease .3s}
 body.lit .rim{opacity:1}
@@ -20,12 +20,25 @@ body.lit .rim{opacity:1}
          transition:opacity 1.8s ease 1.2s}
 body.lit .shimmer{opacity:.9}
 @keyframes sweep{to{stroke-dashoffset:-100}}
-.corona-fan{transform-origin:800px 918px;animation:sway 26s ease-in-out infinite alternate;
-            mix-blend-mode:screen}
-.corona-fan.f2{animation-duration:34s;animation-delay:4s}
-@keyframes sway{from{transform:rotate(-3.4deg)}to{transform:rotate(3.4deg)}}
-.scatter{animation:breathe-sun 6s ease-in-out infinite alternate}
-@keyframes breathe-sun{from{opacity:.75}to{opacity:1}}
+/* the point where the sun is about to break — blooms in, then breathes */
+.sunpt{opacity:0;transition:opacity 3.2s ease .5s}
+body.lit .sunpt{opacity:1}
+.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
+/* crepuscular rays: heavily blurred light shafts, two groups out of phase */
+.rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
+      transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
+      mix-blend-mode:screen}
+body.lit .rays{opacity:1;transform:scale(1,1)}
+.rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+@keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+@keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+.scatter{animation:breathe-band 9s ease-in-out infinite alternate}
+@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 .lockup{position:relative;z-index:3;text-align:center;top:-13vh}
 .lockup .glyph{margin-bottom:18px}
 .lockup .name{font:600 58px var(--display);letter-spacing:.015em;line-height:1}
@@ -192,55 +205,103 @@ body.lit .gate-wrap{opacity:1;transform:none}
     <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/>
     </linearGradient>
-    <radialGradient id="crest" cx="50%" cy="100%" r="65%">
-      <stop offset="0%" stop-color="#fff3d6" stop-opacity=".85"/>
-      <stop offset="28%" stop-color="#f0b429" stop-opacity=".45"/>
-      <stop offset="65%" stop-color="#e2772b" stop-opacity=".1"/>
+    <!-- the sun about to break the limb: white heart, gold bloom, ember haze -->
+    <radialGradient id="sun-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffedc2" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sun-mid" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f8c95e" stop-opacity=".55"/>
+      <stop offset="60%" stop-color="#f0b429" stop-opacity=".18"/>
       <stop offset="100%" stop-opacity="0"/>
     </radialGradient>
-    <filter id="soften" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="10"/>
+    <radialGradient id="sun-wide" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e2772b" stop-opacity=".3"/>
+      <stop offset="55%" stop-color="#c2571f" stop-opacity=".12"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rayg" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ffe4a8" stop-opacity=".26"/>
+      <stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="zod" cx="50%" cy="88%" r="75%">
+      <stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/>
+      <stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-opacity="0"/>
+      <stop offset="62%" stop-color="#3d2a4d" stop-opacity=".12"/>
+      <stop offset="86%" stop-color="#a2492a" stop-opacity=".2"/>
+      <stop offset="100%" stop-color="#e2772b" stop-opacity=".26"/>
+    </linearGradient>
+    <filter id="b2l"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b6l"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="b12l" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="b20l" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="20"/></filter>
+    <!-- entropy: rays are light through air, not vector wedges -->
+    <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="22"/>
+      <feGaussianBlur stdDeviation="17"/>
     </filter>
   </defs>
 
   <!-- dawn light behind the limb -->
   <g class="dawnlayer">
-    <ellipse cx="800" cy="945" rx="560" ry="300" fill="url(#crest)"/>
-    <g class="corona-fan" fill="#f0b429">
-        <path d="M 840 914 L 982 906 L 840 916 Z" opacity="0.156"/>
-        <path d="M 837 934 L 966 995 L 836 936 Z" opacity="0.166"/>
-        <path d="M 826 949 L 987 1163 L 823 951 Z" opacity="0.079"/>
-        <path d="M 806 958 L 829 1166 L 803 958 Z" opacity="0.199"/>
-        <path d="M 790 957 L 751 1074 L 786 956 Z" opacity="0.116"/>
-        <path d="M 772 947 L 637 1075 L 770 945 Z" opacity="0.194"/>
-        <path d="M 762 930 L 605 975 L 761 928 Z" opacity="0.137"/>
-        <path d="M 762 907 L 487 820 L 762 905 Z" opacity="0.089"/>
-        <path d="M 771 891 L 544 668 L 772 890 Z" opacity="0.163"/>
-        <path d="M 787 880 L 711 642 L 789 880 Z" opacity="0.172"/>
-        <path d="M 805 878 L 830 722 L 808 879 Z" opacity="0.091"/>
-        <path d="M 820 883 L 917 723 L 821 884 Z" opacity="0.115"/>
-        <path d="M 835 898 L 1093 772 L 837 902 Z" opacity="0.197"/>
+    <!-- the sky itself warms toward the horizon -->
+    <rect x="0" y="0" width="1600" height="1000" fill="url(#skywash)"/>
+    <!-- zodiacal light: a tall faint cone rising from the sunrise point -->
+    <ellipse class="zodiacal" cx="800" cy="640" rx="300" ry="480" fill="url(#zod)" filter="url(#b20l)"/>
+
+    <!-- crepuscular rays, two swaying fans out of phase -->
+    <g class="rays">
+      <g class="sway1" fill="url(#rayg)" filter="url(#rayrough)">
+        <path d="M 800 924 L 736 356 L 772 362 Z"/>
+        <path d="M 800 924 L 852 528 L 892 548 Z"/>
+        <path d="M 800 924 L 508 620 L 556 588 Z"/>
+        <path d="M 800 924 L 1096 448 L 1052 428 Z"/>
+        <path d="M 800 924 L 320 690 L 360 646 Z" opacity=".8"/>
+        <path d="M 800 924 L 1290 670 L 1244 630 Z" opacity=".8"/>
+      </g>
+      <g class="sway2" fill="url(#rayg)" filter="url(#rayrough)" opacity=".7">
+        <path d="M 800 924 L 646 404 L 680 390 Z"/>
+        <path d="M 800 924 L 962 560 L 928 544 Z"/>
+        <path d="M 800 924 L 404 610 L 448 574 Z"/>
+        <path d="M 800 924 L 1200 596 L 1156 562 Z"/>
+      </g>
     </g>
-    <g class="corona-fan f2" fill="#e2882b">
-        <path d="M 840 918 Q 893 890 944 922 Q 893 890 840 920 Z" opacity="0.178"/>
-        <path d="M 832 943 Q 865 1034 963 1050 Q 865 1034 831 944 Z" opacity="0.156"/>
-        <path d="M 805 958 Q 838 1037 821 1110 Q 838 1037 804 958 Z" opacity="0.172"/>
-        <path d="M 783 954 Q 720 998 722 1073 Q 720 998 781 953 Z" opacity="0.159"/>
-        <path d="M 763 933 Q 709 931 673 963 Q 709 931 762 930 Z" opacity="0.09"/>
-        <path d="M 761 908 Q 669 906 602 861 Q 669 906 762 906 Z" opacity="0.159"/>
-        <path d="M 778 885 Q 720 853 720 786 Q 720 853 781 883 Z" opacity="0.162"/>
-        <path d="M 804 878 Q 790 810 824 756 Q 790 810 807 879 Z" opacity="0.102"/>
-        <path d="M 831 893 Q 876 813 959 793 Q 876 813 832 894 Z" opacity="0.146"/>
+
+    <!-- atmospheric scattering hugging the limb: white heat to deep ember -->
+    <g class="scatter">
+      <circle cx="800" cy="3920" r="3122" fill="none" stroke="#7a2c18" stroke-opacity=".1" stroke-width="150" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3060" fill="none" stroke="#e2772b" stroke-opacity=".16" stroke-width="84" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".28" stroke-width="34" filter="url(#b12l)"/>
+      <circle cx="800" cy="3920" r="3010" fill="none" stroke="#ffd989" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>
+      <circle cx="800" cy="3920" r="3003" fill="none" stroke="#fff3d6" stroke-opacity=".65" stroke-width="4" filter="url(#b2l)"/>
     </g>
-    <g class="scatter" filter="url(#soften)">
-      <circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".16" stroke-width="46"/>
-      <circle cx="800" cy="3920" r="3072" fill="none" stroke="#e2772b" stroke-opacity=".09" stroke-width="70"/>
+
+    <!-- the point of first light -->
+    <g class="sunpt">
+      <g class="sunpt-breathe">
+        <circle cx="800" cy="922" r="520" fill="url(#sun-wide)"/>
+        <circle cx="800" cy="922" r="240" fill="url(#sun-mid)"/>
+        <circle cx="800" cy="920" r="86" fill="url(#sun-core)"/>
+        <circle cx="800" cy="919" r="20" fill="#fffdf6" filter="url(#b6l)"/>
+      </g>
+      <!-- limb brightening either side of the point -->
+      <path d="M 560 934 A 3000 3000 0 0 1 1040 934" fill="none" stroke="#ffedc2"
+            stroke-width="3" stroke-linecap="round" opacity=".7" filter="url(#b2l)"/>
     </g>
   </g>
 
   <!-- the planet: everything below the limb is night -->
   <circle cx="800" cy="3920" r="3000" fill="#04060e"/>
   <!-- rim light + travelling shimmer -->
+  <circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
+          stroke-width="6" stroke-opacity=".35" filter="url(#b6l)" class="rim"/>
   <circle class="rim" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
           stroke-width="2.4" stroke-opacity=".85"/>
   <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
@@ -252,6 +313,12 @@ body.lit .gate-wrap{opacity:1;transform:none}
 </div></div>
 <div class="gate-wrap"><button class="gate">Continue with your identity provider</button></div>
 <div class="below">PRIVATE &middot; SELF-HOSTED &middot; YOURS</div>
+<svg class="grain" width="100%" height="100%"><filter id="gr">
+  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+  <feColorMatrix type="saturate" values="0"/>
+  <feComponentTransfer><feFuncA type="linear" slope="0.08"/></feComponentTransfer>
+  <feComposite operator="in" in2="SourceGraphic"/>
+</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
 <div class="vignette"></div>
 <script>requestAnimationFrame(() => setTimeout(() => document.body.classList.add("lit"), 180));</script>
 </body></html>
