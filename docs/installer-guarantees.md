@@ -9,9 +9,10 @@ citation(s), a category, and a criticality (HIGH = data-loss or security
 boundary, MEDIUM = deployment correctness, LOW = UX).
 
 - **Extracted:** 2026-08-11 from `develop`, by directed agents with
-  main-thread citation spot-checks.
-- **Totals:** 312 guarantees — 178 HIGH, 105 MEDIUM, 29 LOW.
-  Install/configuration family: 149 (83 HIGH). Backup/recovery/deploy
+  main-thread citation spot-checks. `repair.sh` (issue #261 first slice,
+  `--check` only) was added 2026-08-12 following the same convention.
+- **Totals:** 325 guarantees — 182 HIGH, 110 MEDIUM, 33 LOW.
+  Install/configuration family: 162 (87 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -27,7 +28,7 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
 
 ## Part 1 — Install/configuration family
 
-Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library).
+Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library); `repair.sh` (issue #261 first slice, `--check` only) added 2026-08-12.
 Test files (`*.test.mjs`) and other scripts were explicitly excluded from the read.
 
 
@@ -198,11 +199,27 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 55. `docker compose config --quiet` must succeed — validating the fully composed configuration — before any service is started or the transaction is committed; invalid Compose configuration is caught and fails closed pre-commit. — install.sh:1539-1541 — category: refusal/fail-closed — criticality: HIGH
 56. The file transaction is marked committed (`file_transaction_committed=1`) only after OIDC discovery, configuration migration, and `compose config --quiet` have all already succeeded; any failure before this point triggers the `EXIT`-trap rollback of every file change made so far, and only once committed do image pulls and service startup (steps outside the file-rollback mechanism's scope) begin. — install.sh:1479-1550 — category: transactional/rollback — criticality: HIGH
 
+## repair.sh (read-only diagnosis entry point — issue #261, first slice; `--check` only, no planner/executor yet)
+
+1. Every `docker` invocation is limited to `docker ps`, `docker volume ls`, and `docker compose config` — never a command that creates, starts, stops, or deletes a container/volume/image — and the script never writes, creates, chmods, or deletes anything inside the installation directory (its only `mktemp` use is a caller-side capture of `configure.sh --check`'s stderr under `$TMPDIR`, immediately removed). — repair.sh:20-30,340-353 — category: refusal/fail-closed — criticality: HIGH
+2. Directory recognition is deliberately loose (any one of `.env-orbit`, `docker-compose.yml`, `.orbit-secrets`, or leftover `.orbit-install-staging.*` evidence, of any file type) rather than install.sh's strict binary check; if none of those fingerprints exist at all, diagnosis reports `not-orbit-directory` and exits 5 without attempting any further check, so it never reasons about an unrelated directory's contents. — repair.sh:225-244 — category: refusal/fail-closed — criticality: MEDIUM
+3. Configuration syntax/schema/secret readiness is never reimplemented: it is delegated entirely to `bash scripts/configure.sh --check` as an independent subprocess, and only its exit status plus whether it wrote to stderr is used to classify `configuration-incomplete` (readiness output only) vs `configuration-invalid` (a structural `fail()`). — repair.sh:327-353 — category: provenance/immutability — criticality: MEDIUM
+4. Stdout is restricted to a fixed enum vocabulary (`finding class=<reason-class> target=<target-class> severity=<info|warn|fail>` and a final `diagnosis result=... checked=... skipped=...` line) — no path, configured value, or secret is ever interpolated into a finding line. — repair.sh:32-42,194-223 — category: secret-handling — criticality: HIGH
+5. Findings are printed in a fixed `class_order`, not check-execution order, so the same on-disk/daemon state always produces byte-identical output regardless of which check happened to run first or which secret file was found broken first. — repair.sh:142-158,198-210 — category: idempotency — criticality: LOW
+6. Every docker-backed check is gated by one cheap, bounded probe (`timeout 5s docker ps -a`); any failure of the `docker` CLI, `timeout`, or the daemon is treated identically as `docker-unavailable` for every affected check, so a missing or unreachable Docker installation degrades diagnosis instead of hanging or crashing it. — repair.sh:375-391 — category: refusal/fail-closed — criticality: MEDIUM
+7. The `volume-retained-without-credentials` finding (the #261 fixed-project collision / SQLSTATE 28P01 precursor) is derived purely from a retained volume name match (`${project}_orbit-db-data`) and the local absence of the `postgres-password` secret file — it never opens a database connection, execs into a container, or reads/prints the secret's contents. — repair.sh:407-435 — category: secret-handling — criticality: HIGH
+8. `container-foreign-owner` only fires for a container carrying this deployment's own Compose project label without a known Orbit service label (`orbit-app`/`orbit-db`/`orbit-clamav`/`orbit-tika`/`orbit-ollama`); a container labelled as a recognized Orbit service is never reported as foreign. — repair.sh:138,437-460 — category: input-validation — criticality: MEDIUM
+9. `checked`/`skipped` in the final summary line are derived by subtracting from one fixed constant (`total_checks=13`) rather than incrementing two independent counters, so a check that could not run for any reason (docker unavailable, secrets directory invalid, project name unresolved) is guaranteed to be counted exactly once, never double-counted or dropped. — repair.sh:139,212 — category: idempotency — criticality: LOW
+10. `--check` and the accepted-but-inert `--plain` flag (in either order) are the only accepted arguments; any other flag or positional argument exits 2 with a usage message before touching the filesystem or Docker at all. — repair.sh:103-125 — category: input-validation — criticality: LOW
+11. Compose project-name derivation is read-only and never aborts the run: it mirrors install.sh's `derive_compose_project_name` precedence (configured `.env-orbit` value, then `$COMPOSE_PROJECT_NAME`, then a sanitized working-directory basename), but an unresolved name simply skips the docker-backed checks rather than failing diagnosis. — repair.sh:355-373 — category: refusal/fail-closed — criticality: LOW
+12. A symlinked managed file, secrets directory, or secret file is classified under its own distinct reason class (`managed-file-symlink` / folded into `secrets-directory-invalid` / folded into `secret-permissions`) checked before existence, so a symlinked managed path is never silently treated as merely "missing." — repair.sh:251-270,291-318 — category: permissions/ownership — criticality: HIGH
+13. The script is source-less by construction: it never sources `install.sh`, `configure.sh`, or `installer-ui.sh` — the only cross-script interaction is invoking `bash scripts/configure.sh --check` as an independent subprocess, so a change to those scripts' internal state can never leak into repair.sh's own execution environment. — repair.sh:11-18 — category: provenance/immutability — criticality: MEDIUM
+
 ---
 
 ## Summary
 
-Status: COMPLETE. All six named scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`) were read in full and catalogued. No `*.test.mjs` or other scripts were read.
+Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only). No `*.test.mjs` or other scripts were read.
 
 **Guarantee count by script**
 
@@ -213,22 +230,23 @@ Status: COMPLETE. All six named scripts (`install.sh`, `configure.sh`, `configur
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 12 |
+| repair.sh | 13 |
 | installer-simulation.sh | 8 |
-| **Total** | **148** |
+| **Total** | **161** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 15 | 15 | 6 | 36 |
-| input-validation | 6 | 18 | 6 | 30 |
-| secret-handling | 17 | 4 | 0 | 21 |
-| provenance/immutability | 16 | 5 | 0 | 21 |
+| refusal/fail-closed | 16 | 17 | 7 | 40 |
+| input-validation | 6 | 19 | 7 | 32 |
+| secret-handling | 19 | 4 | 0 | 23 |
+| provenance/immutability | 16 | 7 | 0 | 23 |
 | transactional/rollback | 14 | 2 | 0 | 16 |
-| permissions/ownership | 14 | 0 | 0 | 14 |
+| permissions/ownership | 15 | 0 | 0 | 15 |
 | recovery | 1 | 4 | 1 | 6 |
-| idempotency | 0 | 3 | 2 | 5 |
-| **Total** | **83** | **51** | **15** | **149** |
+| idempotency | 0 | 3 | 4 | 7 |
+| **Total** | **87** | **56** | **19** | **162** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
