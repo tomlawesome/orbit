@@ -71,8 +71,12 @@ fail on a global percentage.
 2. Use uncovered critical modules and branches to refine risk-ranked issues.
 3. Exclude generated declarations, tests, and intentionally declarative assets;
    do not exclude difficult production code merely to improve a number.
-4. After the PostgreSQL/API harness exists, set ratcheting thresholds that do
-   not permit regression from the measured baseline.
+4. Ratcheting thresholds are active (vitest.config.ts, issue #302): global
+   floors just under the measured baseline (29.5% statements, 2026-08-12)
+   plus per-layer floors for scaffolded layers (`src/lib` 60%,
+   `src/server/documents` 75%). CI fails on regression below a floor.
+   Floors are raised when a phase durably lifts a layer and are never
+   lowered to make a change pass; no floor is a target.
 5. Apply stronger expectations to security, authorization, lifecycle, and
    migration code than to declarative UI composition.
 
