@@ -1,0 +1,288 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — signed out</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="family.css">
+<style>
+/* seamless starfield drift — near layer reads clearly within a few seconds */
+.drift.far{animation:driftfar 640s linear infinite}
+.drift.near{animation:driftnear 205s linear infinite}
+@keyframes driftfar{to{transform:translateX(-1600px)}}
+@keyframes driftnear{to{transform:translateX(-1600px)}}
+.tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
+.world{position:fixed;inset:0;z-index:1}
+.world svg{width:100%;height:100%}
+.sky{opacity:0;transition:opacity 4s ease-in 2.4s}
+body.set .sky{opacity:1}
+
+/* the sun sinks and fades into the limb */
+.sunpt{transform-origin:800px 860px;opacity:1;transform:translateY(0) scaleY(1);
+       transition:opacity 3.2s ease-in .1s,transform 3.4s ease-in .1s}
+body.set .sunpt{opacity:0;transform:translateY(150px) scaleY(.45)}
+.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{opacity:.82}to{opacity:1}}
+
+/* crepuscular rays retract as the light source drops */
+.rays{transform-origin:800px 920px;opacity:1;transform:scale(1,1);
+      transition:opacity 2.8s ease-in .15s,transform 3s cubic-bezier(.4,0,.7,1) .15s;
+      mix-blend-mode:screen}
+body.set .rays{opacity:0;transform:scale(1,.12)}
+.rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+@keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+@keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+
+/* zodiacal cone fades with the day */
+.zodiacal-wrap{opacity:1;transition:opacity 3s ease .4s}
+body.set .zodiacal-wrap{opacity:0}
+.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+
+/* amber scattering fades as the day ends — this is the slowest-lingering day layer.
+   (opacity-only: a CSS scale transform on these giant radius-3000+ blurred rings hits a
+   filter/texture seam bug in Chromium, so the compression toward the horizon is carried
+   by the sun sinking and rays retracting instead) */
+.scatter-day{opacity:1;transition:opacity 5.4s ease-in .3s}
+body.set .scatter-day{opacity:0}
+.scatter-day-breathe{animation:breathe-band 9s ease-in-out infinite alternate}
+@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+
+.skywash-day{opacity:1;transition:opacity 5s ease-in .2s}
+body.set .skywash-day{opacity:0}
+
+.rim-day{opacity:1;transition:opacity 3s ease-in .2s}
+body.set .rim-day{opacity:0}
+
+/* ember scattering settles in and lingers as the after-glow — held back with ease-in so it
+   stays subdued through the middle of the sunset and only swings to full near the end,
+   overlapping and cooling against the day layer rather than snapping over it */
+.scatter-night{opacity:0;transition:opacity 4.8s ease-in 1.7s}
+body.set .scatter-night{opacity:1}
+.scatter-night-breathe{animation:breathe-ember 12s ease-in-out infinite alternate}
+@keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
+
+.skywash-night{opacity:0;transition:opacity 5.2s ease-in 1.3s}
+body.set .skywash-night{opacity:1}
+
+.rim-ember{opacity:0;transition:opacity 4s ease-in 2.1s}
+body.set .rim-ember{opacity:1}
+
+.shimmer-ember{stroke-dasharray:3 97;animation:sweep 34s linear infinite;opacity:0;
+               transition:opacity 3.2s ease-in 2.3s}
+body.set .shimmer-ember{opacity:.7}
+@keyframes sweep{to{stroke-dashoffset:-100}}
+
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
+.lockup{position:relative;z-index:3;text-align:center;top:-13vh}
+.lockup .glyph{margin-bottom:18px}
+.lockup .name{font:600 58px var(--display);letter-spacing:.015em;line-height:1}
+.gate-wrap{position:fixed;left:0;right:0;bottom:23vh;text-align:center;z-index:3;
+           opacity:0;transform:translateY(10px);transition:opacity 1.8s ease 2.6s,transform 1.8s ease 2.6s}
+body.set .gate-wrap{opacity:1;transform:none}
+.gate{font:600 14.5px var(--display);color:var(--bg);background:var(--accent);
+      border:0;border-radius:99px;padding:14px 34px;cursor:pointer;display:inline-block;
+      text-decoration:none;box-shadow:0 0 34px rgba(216,180,90,.2)}
+.gate:hover{filter:brightness(1.08)}
+.below{position:fixed;bottom:4.5vh;left:0;right:0;text-align:center;z-index:3;
+       font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.16em}
+@media (prefers-reduced-motion: reduce){
+  .sunpt,.rays,.zodiacal-wrap,.scatter-day,.skywash-day,.rim-day{
+    opacity:0!important;transform:none!important;transition:none}
+  .sky,.scatter-night,.skywash-night,.rim-ember,.shimmer-ember,.gate-wrap{
+    opacity:1!important;transform:none!important;transition:none}
+}
+</style></head><body>
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <g id="starfield"></g>
+</svg></div>
+<div class="world"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/>
+    </linearGradient>
+    <linearGradient id="rimg-ember" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d9713a"/><stop offset="100%" stop-color="#3a1830"/>
+    </linearGradient>
+    <!-- the late sun, still warm, about to go down -->
+    <radialGradient id="sun-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffedc2" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sun-mid" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f8c95e" stop-opacity=".55"/>
+      <stop offset="60%" stop-color="#f0b429" stop-opacity=".18"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sun-wide" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e2772b" stop-opacity=".3"/>
+      <stop offset="55%" stop-color="#c2571f" stop-opacity=".12"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rayg" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ffe4a8" stop-opacity=".26"/>
+      <stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="zod" cx="50%" cy="88%" r="75%">
+      <stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/>
+      <stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/>
+      <stop offset="100%" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="skywash-day" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-opacity="0"/>
+      <stop offset="62%" stop-color="#3d2a4d" stop-opacity=".12"/>
+      <stop offset="86%" stop-color="#a2492a" stop-opacity=".2"/>
+      <stop offset="100%" stop-color="#e2772b" stop-opacity=".26"/>
+    </linearGradient>
+    <!-- night wash: deep indigo above, one last ember kiss right at the horizon -->
+    <linearGradient id="skywash-night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-opacity="0"/>
+      <stop offset="55%" stop-color="#0d0a1e" stop-opacity=".3"/>
+      <stop offset="80%" stop-color="#241128" stop-opacity=".4"/>
+      <stop offset="100%" stop-color="#5c2414" stop-opacity=".32"/>
+    </linearGradient>
+    <filter id="b2l"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b6l"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="b12l" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="b20l" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="20"/></filter>
+    <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="22"/>
+      <feGaussianBlur stdDeviation="17"/>
+    </filter>
+  </defs>
+
+  <!-- day sky: late gold light, still up -->
+  <rect class="skywash-day" x="0" y="0" width="1600" height="1000" fill="url(#skywash-day)"/>
+  <g class="zodiacal-wrap">
+    <ellipse class="zodiacal" cx="800" cy="640" rx="300" ry="480" fill="url(#zod)" filter="url(#b20l)"/>
+  </g>
+
+  <g class="rays">
+    <g class="sway1" fill="url(#rayg)" filter="url(#rayrough)">
+      <path d="M 800 924 L 736 356 L 772 362 Z"/>
+      <path d="M 800 924 L 852 528 L 892 548 Z"/>
+      <path d="M 800 924 L 508 620 L 556 588 Z"/>
+      <path d="M 800 924 L 1096 448 L 1052 428 Z"/>
+      <path d="M 800 924 L 320 690 L 360 646 Z" opacity=".8"/>
+      <path d="M 800 924 L 1290 670 L 1244 630 Z" opacity=".8"/>
+    </g>
+    <g class="sway2" fill="url(#rayg)" filter="url(#rayrough)" opacity=".7">
+      <path d="M 800 924 L 646 404 L 680 390 Z"/>
+      <path d="M 800 924 L 962 560 L 928 544 Z"/>
+      <path d="M 800 924 L 404 610 L 448 574 Z"/>
+      <path d="M 800 924 L 1200 596 L 1156 562 Z"/>
+    </g>
+  </g>
+
+  <!-- amber scattering hugging the limb, day tone -->
+  <g class="scatter-day">
+    <g class="scatter-day-breathe">
+      <circle cx="800" cy="3920" r="3122" fill="none" stroke="#7a2c18" stroke-opacity=".1" stroke-width="150" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3060" fill="none" stroke="#e2772b" stroke-opacity=".16" stroke-width="84" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".28" stroke-width="34" filter="url(#b12l)"/>
+      <circle cx="800" cy="3920" r="3010" fill="none" stroke="#ffd989" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>
+      <circle cx="800" cy="3920" r="3003" fill="none" stroke="#fff3d6" stroke-opacity=".65" stroke-width="4" filter="url(#b2l)"/>
+    </g>
+  </g>
+
+  <!-- the sun, still up, about to go down -->
+  <g class="sunpt">
+    <g class="sunpt-breathe">
+      <circle cx="800" cy="862" r="520" fill="url(#sun-wide)"/>
+      <circle cx="800" cy="862" r="240" fill="url(#sun-mid)"/>
+      <circle cx="800" cy="860" r="86" fill="url(#sun-core)"/>
+      <circle cx="800" cy="859" r="20" fill="#fffdf6" filter="url(#b6l)"/>
+    </g>
+    <path d="M 560 934 A 3000 3000 0 0 1 1040 934" fill="none" stroke="#ffedc2"
+          stroke-width="3" stroke-linecap="round" opacity=".7" filter="url(#b2l)"/>
+  </g>
+
+  <!-- ember scattering hugging the limb, night tone: the after-glow that lingers -->
+  <g class="scatter-night">
+    <g class="scatter-night-breathe">
+      <circle cx="800" cy="3920" r="3122" fill="none" stroke="#241238" stroke-opacity=".14" stroke-width="150" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3060" fill="none" stroke="#7a2c18" stroke-opacity=".22" stroke-width="84" filter="url(#b20l)"/>
+      <circle cx="800" cy="3920" r="3026" fill="none" stroke="#b3441f" stroke-opacity=".32" stroke-width="34" filter="url(#b12l)"/>
+      <circle cx="800" cy="3920" r="3010" fill="none" stroke="#e2772b" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>
+      <circle cx="800" cy="3920" r="3003" fill="none" stroke="#f2a25a" stroke-opacity=".52" stroke-width="4" filter="url(#b2l)"/>
+    </g>
+  </g>
+
+  <!-- night wash climbs over the day as the sky darkens -->
+  <rect class="skywash-night" x="0" y="0" width="1600" height="1000" fill="url(#skywash-night)"/>
+
+  <!-- the planet: everything below the limb is night, always -->
+  <circle cx="800" cy="3920" r="3000" fill="#04060e"/>
+  <!-- day rim: gold, fades out -->
+  <circle class="rim-day" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
+          stroke-width="6" stroke-opacity=".35" filter="url(#b6l)"/>
+  <circle class="rim-day" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
+          stroke-width="2.4" stroke-opacity=".85"/>
+  <!-- ember rim: the cooling after-glow that stays -->
+  <circle class="rim-ember" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg-ember)"
+          stroke-width="6" stroke-opacity=".3" filter="url(#b6l)"/>
+  <circle class="rim-ember" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg-ember)"
+          stroke-width="2.2" stroke-opacity=".7"/>
+  <circle class="shimmer-ember" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
+          stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>
+</svg></div>
+<div class="stage"><div class="lockup">
+  <div class="glyph"><svg width="64" height="64" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="9"/><circle cx="163" cy="63.5" r="20" style="fill:var(--accent)"/></svg></div>
+  <div class="name">orbit</div>
+</div></div>
+<div class="gate-wrap"><a class="gate" href="login.html">Sign back in</a></div>
+<div class="below">SIGNED OUT</div>
+<svg class="grain" width="100%" height="100%"><filter id="gr">
+  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+  <feColorMatrix type="saturate" values="0"/>
+  <feComponentTransfer><feFuncA type="linear" slope="0.08"/></feComponentTransfer>
+  <feComposite operator="in" in2="SourceGraphic"/>
+</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+<div class="vignette"></div>
+<script>
+(function(){
+  var NS='http://www.w3.org/2000/svg';
+  function rng(seed){
+    var s=seed>>>0;
+    return function(){
+      s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;
+      return s/4294967296;
+    };
+  }
+  function makeLayer(container,cls,count,rMin,rMax,opMin,opMax,fill,twChance,seed){
+    var rand=rng(seed);
+    var wrap=document.createElementNS(NS,'g');
+    wrap.setAttribute('class','drift '+cls);
+    for(var copy=0;copy<2;copy++){
+      var g=document.createElementNS(NS,'g');
+      g.setAttribute('fill',fill);
+      if(copy===1) g.setAttribute('transform','translate(1600,0)');
+      for(var i=0;i<count;i++){
+        var c=document.createElementNS(NS,'circle');
+        var x=rand()*1600, y=rand()*1000;
+        var r=rMin+rand()*(rMax-rMin);
+        var op=opMin+rand()*(opMax-opMin);
+        c.setAttribute('cx',x.toFixed(1));
+        c.setAttribute('cy',y.toFixed(1));
+        c.setAttribute('r',r.toFixed(2));
+        c.setAttribute('opacity',op.toFixed(2));
+        if(rand()<twChance){
+          c.setAttribute('class','tw');
+          c.style.animationDelay=(rand()*6).toFixed(1)+'s';
+        }
+        g.appendChild(c);
+      }
+      wrap.appendChild(g);
+    }
+    container.appendChild(wrap);
+  }
+  var field=document.getElementById('starfield');
+  makeLayer(field,'far',120,0.4,0.9,0.1,0.36,'#e9edf8',0.14,7791);
+  makeLayer(field,'near',46,0.8,1.7,0.35,0.72,'#f4f0ff',0.25,3057);
+})();
+requestAnimationFrame(function(){setTimeout(function(){document.body.classList.add('set');},180);});
+</script>
+</body></html>
