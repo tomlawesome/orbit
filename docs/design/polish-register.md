@@ -27,9 +27,10 @@ silently.
 | ID | Name | Concept | Status |
 | --- | --- | --- | --- |
 | CON-1 | Belts = documents | A belted planet carries attached documents; clicking the belt opens the document view from the dial | ratified by owner 2026-08-13; in v11 |
-| CON-2 | Sub-systems & zoom | Assets (a car, a boiler, a property) as small orbital systems with their own centre; clicking the centre zooms into that asset's own dial | captured; strongest use = per-asset drill-down |
+| CON-2 | Sub-systems & zoom | Assets (a car, a boiler, a property) as small orbital systems with their own centre; clicking the centre zooms into that asset's own dial | **approved in concept** 2026-08-13; click model = CON-5 |
 | CON-3 | Shape = type | ● routine service · ◆ renewal/contract · ▲ inspection/certification; hollow = suggestion in any shape | in v11 |
-| CON-4 | Ambient count | The urgent count lives in the tab title and PWA app badge, never on the sky | recorded for implementation |
+| CON-4 | Ambient count | The urgent count lives in the tab title and PWA app badge, never on the sky | **approved** 2026-08-13 |
+| CON-5 | Click grammar | One verb per target, everywhere: planet-click = approach (manifest entry for items, zoom for asset centres); ring-click = documents; the hover callout states the affordances; asset centres show tiny moons so depth is visible before clicking; ESC/void/breadcrumb zooms out; touch follows the same grammar with long-press as hover | proposed, awaiting owner |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
