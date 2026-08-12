@@ -168,6 +168,19 @@ const fixtures: Record<string, Fixture> = {
   },
 };
 
+function runCli(): { lines: string[]; status: number } {
+  const sandbox = sandboxes[sandboxes.length - 1];
+  const cli = fileURLToPath(new URL("../cli/orbit.ts", import.meta.url));
+  const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
+  const result = spawnSync("node", [tsx, cli, "check", "--dir", sandbox], {
+    encoding: "utf8",
+  });
+  return {
+    lines: result.stdout.split("\n").filter(Boolean),
+    status: result.status ?? -1,
+  };
+}
+
 describe("config contract parity with configure.sh --check", () => {
   for (const [name, fixture] of Object.entries(fixtures)) {
     it(name, () => {
@@ -175,6 +188,10 @@ describe("config contract parity with configure.sh --check", () => {
       const contract = evaluateReadiness(fixture.record, factsFor(fixture));
       expect(contract.lines).toEqual(script.lines);
       expect(contract.ok).toBe(script.status === 0);
+      // Three-way: the orbit CLI's check must match the script byte for byte.
+      const cli = runCli();
+      expect(cli.lines).toEqual(script.lines);
+      expect(cli.status).toBe(script.status);
     });
   }
 });
