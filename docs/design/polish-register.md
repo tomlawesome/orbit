@@ -28,9 +28,12 @@ silently.
 | --- | --- | --- | --- |
 | CON-1 | Belts = documents | A belted planet carries attached documents; clicking the belt opens the document view from the dial | ratified by owner 2026-08-13; in v11 |
 | CON-2 | Sub-systems & zoom | Assets (a car, a boiler, a property) as small orbital systems with their own centre; clicking the centre zooms into that asset's own dial | **approved in concept** 2026-08-13; click model = CON-5 |
-| CON-3 | Shape = type | ● routine service · ◆ renewal/contract · ▲ inspection/certification; hollow = suggestion in any shape | in v11 |
+| CON-3 | Type language | All-circular (owner: everything is a planet): ● service · ◉ concentric = renewal · ◐ terminator = inspection · ○ hollow = suggestion | **approved**, in v12 (diamond/triangle removed) |
 | CON-4 | Ambient count | The urgent count lives in the tab title and PWA app badge, never on the sky | **approved** 2026-08-13 |
-| CON-5 | Click grammar | One verb per target, everywhere: planet-click = approach (manifest entry for items, zoom for asset centres); ring-click = documents; the hover callout states the affordances; asset centres show tiny moons so depth is visible before clicking; ESC/void/breadcrumb zooms out; touch follows the same grammar with long-press as hover | proposed, awaiting owner |
+| CON-5 | Click grammar | Simplified and **approved**: exactly one clickable thing per body — the planet (= approach; zoom for system centres). Everything else lives in the hover callout (documents chip etc.). Belts are passive badges. Touch: first tap = callout, second = approach | **approved**, in v12 |
+| CON-6 | Household constellation | Other households live in the backdrop as small dimmed living systems with cartographer annotations (rule under the name, veering to the system); clicking one zooms it to the centre and the previous main recedes | **approved**, canned transition in v12; dimmed status colours for at-a-glance cross-household health |
+| CON-7 | Drawers | Bounded status drawer from the left (container states + health checks, enums only — never versions/ports/paths/errors); the key as a list-drawer from the right | in v12 |
+| CON-8 | Planet light | Specular highlight facing the sun, soft atmospheres in status colour, inner sheen on suggestions | in v12 |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
