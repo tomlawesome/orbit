@@ -21,6 +21,16 @@ silently.
 
 | POL-10 | Storm state | Heavy load un-calms the sky: faster turbulent drift, deepened danger well, pulsing threshold, cooled sun | added in v10 |
 
+
+## Concepts (captured, not yet product scope)
+
+| ID | Name | Concept | Status |
+| --- | --- | --- | --- |
+| CON-1 | Belts = documents | A belted planet carries attached documents; clicking the belt opens the document view from the dial | ratified by owner 2026-08-13; in v11 |
+| CON-2 | Sub-systems & zoom | Assets (a car, a boiler, a property) as small orbital systems with their own centre; clicking the centre zooms into that asset's own dial | captured; strongest use = per-asset drill-down |
+| CON-3 | Shape = type | ● routine service · ◆ renewal/contract · ▲ inspection/certification; hollow = suggestion in any shape | in v11 |
+| CON-4 | Ambient count | The urgent count lives in the tab title and PWA app badge, never on the sky | recorded for implementation |
+
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
 is the memory of what was tried.
