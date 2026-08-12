@@ -1,3 +1,9 @@
+/**
+ * mail-in/core boundary: pure parsing logic only. No `getDb`/`db`/schema
+ * imports and no `imapflow` import — see src/server/mail-in/README.md.
+ * Moved as-is from src/server/imap-attachment-validation.ts as part of the
+ * #298 module split.
+ */
 import { detectDocumentMediaType, validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 /** Fixed defaults for hostile provider input. Values are intentionally not provider-controlled. */
