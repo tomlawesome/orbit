@@ -42,18 +42,31 @@ function scratchDir() {
 }
 
 // A `docker` shim covering every read-only subcommand repair.sh issues:
-//   - `docker ps -a` (bare)                          -> connectivity probe
-//   - `docker ps -a --filter ... --format ...`        -> container ownership
+//   - `docker ps -a` (bare)                             -> connectivity probe
+//   - `docker ps -a --filter project ... --format ...`    -> container ownership
+//   - `docker ps -a --filter project --filter service=orbit-db --format ...`
+//     / `...service=orbit-app...`                         -> per-service discovery
 //   - `docker compose --project-name X ... config --quiet` -> interpolation
-//   - `docker volume ls --filter ... --format ...`     -> volume retention
+//   - `docker volume ls --filter ... --format ...`         -> volume retention
+//   - `docker exec ... pg_isready ...` / `docker exec -e PGPASSWORD ... psql ...`
+//                                                           -> database reachability/auth
+//   - `docker inspect --format '{{.Config.Image}}|...' <id>` -> app image/health
 // `unavailable: true` makes every subcommand fail, simulating a missing or
 // unreachable Docker without needing to hide the real `docker` binary from
 // PATH (which shares a directory with bash/coreutils in this sandbox).
+//
+// Every invocation's full argv is appended to `argvLogPath` (when provided)
+// before dispatch, regardless of outcome, so tests can assert a secret value
+// never appears on any `docker` command line even when the scenario is
+// deliberately built to make repair.sh's own captured output leaky.
 function dockerShimScript({
   unavailable = false,
   volumes = [],
   containers = [],
   composeFails = false,
+  db = { present: true, ready: true, authResult: "ok" },
+  app = { present: true, image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64), health: "healthy" },
+  argvLogPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -62,14 +75,33 @@ function dockerShimScript({
   const containerLines = containers
     .map(({ id, service }) => `      printf '%s\\n' '${id}|${service}'`)
     .join("\n");
+  const dbId = db && db.present !== false ? (db.id ?? "1111aaaa2222") : "";
+  const appId = app && app.present !== false ? (app.id ?? "3333bbbb4444") : "";
+  const dbReadyExit = db && db.ready === false ? 1 : 0;
+  const authResult = (db && db.authResult) || "ok";
+  const appImage = (app && app.image) || "";
+  const appHealth = app && app.health !== undefined ? app.health : "healthy";
+  const logLine = argvLogPath
+    ? `printf '%s\\n' "$*" >> '${argvLogPath}' 2>/dev/null || true`
+    : "true";
   return [
     "#!/usr/bin/env bash",
     "set -Eeuo pipefail",
+    logLine,
     'case "${1:-}" in',
     "  ps)",
-    "    has_filter=0",
-    '    for a in "$@"; do [[ "$a" == "--filter" ]] && has_filter=1; done',
-    "    if [[ \"$has_filter\" == 1 ]]; then",
+    "    filter_count=0",
+    '    for a in "$@"; do [[ "$a" == "--filter" ]] && filter_count=$((filter_count + 1)); done',
+    '    joined="$*"',
+    '    if [[ "$filter_count" -ge 2 && "$joined" == *"service=orbit-db"* ]]; then',
+    `      ${dbId ? `printf '%s\\n' '${dbId}'` : "true"}`,
+    "      exit 0",
+    "    fi",
+    '    if [[ "$filter_count" -ge 2 && "$joined" == *"service=orbit-app"* ]]; then',
+    `      ${appId ? `printf '%s\\n' '${appId}'` : "true"}`,
+    "      exit 0",
+    "    fi",
+    '    if [[ "$filter_count" -ge 1 ]]; then',
     containerLines || "      true",
     "    fi",
     "    exit 0",
@@ -83,6 +115,33 @@ function dockerShimScript({
     "      exit 0",
     "    fi",
     "    exit 1",
+    "    ;;",
+    "  exec)",
+    '    joined="$*"',
+    '    if [[ "$joined" == *"pg_isready"* ]]; then',
+    `      exit ${dbReadyExit}`,
+    "    fi",
+    '    if [[ "$joined" == *"psql"* ]]; then',
+    '      case "' + authResult + '" in',
+    "        ok) exit 0 ;;",
+    "        mismatch)",
+    // Deliberately echoes the (env-forwarded) PGPASSWORD value into stderr,
+    // as a hostile/leaky client might, so tests can prove repair.sh never
+    // re-emits captured subprocess output even in the worst case.
+    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"orbit\" (shim-saw-password=%s)\\n' \"${PGPASSWORD:-}\" >&2",
+    "          exit 2",
+    "          ;;",
+    "        *)",
+    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: could not translate host name\\n' >&2",
+    "          exit 1",
+    "          ;;",
+    "      esac",
+    "    fi",
+    "    exit 1",
+    "    ;;",
+    "  inspect)",
+    `    printf '%s|%s\\n' '${appImage}' '${appHealth}'`,
+    "    exit 0",
     "    ;;",
     "esac",
     "exit 1",
@@ -139,6 +198,27 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
   return targetDir;
 }
 
+// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE (the shape
+// stale-container comparisons require — see the regex in
+// check_application_container in repair.sh). makeFixture()'s default
+// ORBIT_IMAGE ("orbit-local:abcdef123456") is deliberately not
+// digest-pinned so ordinary tests never accidentally exercise this
+// comparison.
+function writeDigestPinnedEnv(targetDir, orbitImage) {
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    `ORBIT_IMAGE=${orbitImage}`,
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET=repair-test-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
 function runRepair(targetDir, args, dockerOptions = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
@@ -182,7 +262,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=13 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=15 skipped=0"]);
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -221,7 +301,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=12",
+      "diagnosis result=failed checked=1 skipped=14",
     ]);
   });
 
@@ -334,7 +414,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=13 skipped=0",
+      "diagnosis result=attention checked=15 skipped=0",
     ]);
   });
 
@@ -432,7 +512,9 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=compose severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=database-volume severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=container severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=3");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=5");
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
@@ -466,5 +548,183 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain(targetDir);
     expect(result.stdout).not.toContain("repair-test-secret");
     expect(result.stdout).not.toContain(".env-orbit");
+  });
+
+  // --- Slice 2 (issue #261): database and application container diagnosis --
+  //
+  // makeFixture()'s default dockerShimScript() options simulate a fully
+  // healthy orbit-db + orbit-app (present, ready, authenticating, matching
+  // image, healthy), which is why every test above this point — none of
+  // which pass `db`/`app` docker options — stays healthy/unaffected by
+  // these new checks. The tests below override just `db`/`app` to exercise
+  // each new reason class in isolation.
+
+  it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { db: { present: false } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports database-unreachable (fail) when pg_isready does not succeed", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { db: { present: true, ready: false } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+  });
+
+  it("reports database-credential-mismatch (fail) for a 28P01-style auth failure — the motivating #261 failure", () => {
+    const targetDir = makeFixture();
+    const distinctPassword = "N0t-4-Re4l-Postgres-Password-XyZ99";
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
+    expect(result.stdout).not.toContain("database-unreachable");
+    expect(result.stdout).not.toContain(distinctPassword);
+    expect(result.stderr).not.toContain(distinctPassword);
+  });
+
+  it("reports no database finding when pg_isready and authentication both succeed", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "ok" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("database-unreachable");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports database-unreachable (fail), not credential-mismatch, for a non-auth psql error", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "other-error" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports stale-container (warn) when the running app image does not match ORBIT_IMAGE", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    const running = `ghcr.io/tomlawesome/orbit@sha256:${"b".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: running, health: "healthy" },
+    });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
+  });
+
+  it("does not report stale-container when the running app image matches ORBIT_IMAGE", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: pinned, health: "healthy" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("does not report stale-container when ORBIT_IMAGE is not digest-pinned (nothing safe to compare)", () => {
+    // makeFixture()'s default ORBIT_IMAGE ("orbit-local:abcdef123456") is a
+    // local build tag, not a digest-pinned reference; the comparison must
+    // stay silent rather than guess.
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: "something-else:latest", health: "healthy" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("reports application-unhealthy (fail) when the app container's health status is unhealthy", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "unhealthy" } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
+  });
+
+  it("does not report application-unhealthy while the app container is still starting", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "starting" } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("does not report application-unhealthy when the app container has no healthcheck at all", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "" } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("does not report a stale-container or application-unhealthy finding when the app container does not exist yet", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: false } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("never leaks the postgres-password secret value on stdout, stderr, or any docker argv, across every database scenario", () => {
+    const distinctPassword = "Zx9-Very-Distinct-Postgres-Secret-Q7";
+    const scenarios = [
+      { db: { present: false } },
+      { db: { present: true, ready: false } },
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { db: { present: true, ready: true, authResult: "ok" } },
+      { db: { present: true, ready: true, authResult: "other-error" } },
+    ];
+
+    for (const dockerOptions of scenarios) {
+      const targetDir = makeFixture();
+      writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+      chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+      const logDir = scratchDir();
+      const argvLogPath = join(logDir, "docker-argv.log");
+
+      const result = runRepair(targetDir, ["--check"], { ...dockerOptions, argvLogPath });
+
+      expect(result.stdout).not.toContain(distinctPassword);
+      expect(result.stderr).not.toContain(distinctPassword);
+      let argvLog = "";
+      try {
+        argvLog = readFileSync(argvLogPath, "utf8");
+      } catch {
+        argvLog = "";
+      }
+      expect(argvLog).not.toContain(distinctPassword);
+    }
   });
 });
