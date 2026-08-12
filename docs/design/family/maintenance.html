@@ -1,0 +1,129 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — maintenance — dormant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="family.css">
+<style>
+.sky g{animation:drowse 240s linear infinite}
+@keyframes drowse{from{transform:translateX(0)}to{transform:translateX(-30px)}}
+.dial{position:relative;width:420px;height:420px}
+.dial svg{width:100%;height:100%}
+.scaffold1{transform-origin:50% 50%;animation:spin 70s linear infinite}
+.scaffold2{transform-origin:50% 50%;animation:spinr 100s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinr{to{transform:rotate(-360deg)}}
+.msg{position:absolute;left:50%;top:63%;transform:translateX(-50%);text-align:center;width:320px}
+.msg b{font:600 19px var(--display)}
+.msg p{font:11.5px var(--mono);color:var(--ink-mid);margin-top:8px;line-height:1.8}
+</style></head><body>
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<g fill="#e9edf8"><circle cx="1217.3" cy="330.6" r="0.59" opacity="0.16"/>
+      <circle cx="372.4" cy="20.0" r="0.57" opacity="0.27"/>
+      <circle cx="81.7" cy="504.0" r="0.54" opacity="0.23"/>
+      <circle cx="61.0" cy="510.3" r="0.83" opacity="0.17"/>
+      <circle cx="229.6" cy="888.9" r="0.41" opacity="0.27"/>
+      <circle cx="1309.1" cy="883.9" r="0.92" opacity="0.15"/>
+      <circle cx="1001.8" cy="470.0" r="0.75" opacity="0.16"/>
+      <circle cx="1367.4" cy="307.8" r="0.74" opacity="0.09"/>
+      <circle cx="93.8" cy="885.1" r="0.61" opacity="0.15"/>
+      <circle cx="1577.1" cy="722.5" r="0.49" opacity="0.19"/>
+      <circle cx="772.9" cy="604.5" r="0.56" opacity="0.14"/>
+      <circle cx="1511.5" cy="596.1" r="0.73" opacity="0.22"/>
+      <circle cx="1203.5" cy="178.9" r="0.87" opacity="0.18"/>
+      <circle cx="240.8" cy="316.4" r="0.99" opacity="0.25"/>
+      <circle cx="1445.4" cy="500.6" r="0.78" opacity="0.16"/>
+      <circle cx="1175.6" cy="535.7" r="0.61" opacity="0.28"/>
+      <circle cx="801.5" cy="40.4" r="0.89" opacity="0.1"/>
+      <circle cx="447.9" cy="453.0" r="0.53" opacity="0.17"/>
+      <circle cx="703.8" cy="530.1" r="0.79" opacity="0.22"/>
+      <circle cx="80.6" cy="237.1" r="0.47" opacity="0.15"/>
+      <circle cx="731.1" cy="851.8" r="0.41" opacity="0.24"/>
+      <circle cx="249.2" cy="740.7" r="0.91" opacity="0.28"/>
+      <circle cx="921.0" cy="55.4" r="0.57" opacity="0.17"/>
+      <circle cx="1079.3" cy="968.6" r="0.93" opacity="0.09"/>
+      <circle cx="205.9" cy="651.6" r="0.52" opacity="0.2"/>
+      <circle cx="814.7" cy="545.0" r="0.61" opacity="0.26"/>
+      <circle cx="469.5" cy="360.9" r="0.5" opacity="0.14"/>
+      <circle cx="212.6" cy="639.4" r="0.41" opacity="0.13"/>
+      <circle cx="1292.7" cy="852.0" r="0.6" opacity="0.23"/>
+      <circle cx="1295.9" cy="650.2" r="0.77" opacity="0.23"/>
+      <circle cx="511.3" cy="331.0" r="0.55" opacity="0.13"/>
+      <circle cx="821.3" cy="539.3" r="0.51" opacity="0.1"/>
+      <circle cx="39.5" cy="213.1" r="0.49" opacity="0.2"/>
+      <circle cx="1298.7" cy="534.4" r="0.79" opacity="0.16"/>
+      <circle cx="119.1" cy="747.2" r="0.86" opacity="0.11"/>
+      <circle cx="496.8" cy="682.6" r="0.82" opacity="0.11"/>
+      <circle cx="619.4" cy="385.6" r="0.73" opacity="0.24"/>
+      <circle cx="234.3" cy="376.0" r="0.95" opacity="0.12"/>
+      <circle cx="282.7" cy="786.0" r="0.77" opacity="0.18"/>
+      <circle cx="733.5" cy="62.3" r="0.78" opacity="0.13"/>
+      <circle cx="706.2" cy="928.8" r="0.7" opacity="0.16"/>
+      <circle cx="564.1" cy="284.7" r="0.77" opacity="0.22"/>
+      <circle cx="184.5" cy="4.4" r="0.64" opacity="0.11"/>
+      <circle cx="957.9" cy="160.9" r="0.7" opacity="0.17"/>
+      <circle cx="1557.1" cy="320.1" r="0.56" opacity="0.15"/>
+      <circle cx="1054.8" cy="240.4" r="0.55" opacity="0.22"/>
+      <circle cx="847.3" cy="71.4" r="0.91" opacity="0.11"/>
+      <circle cx="474.1" cy="546.1" r="0.67" opacity="0.23"/>
+      <circle cx="237.2" cy="654.7" r="0.51" opacity="0.1"/>
+      <circle cx="1118.2" cy="776.0" r="0.46" opacity="0.09"/>
+      <circle cx="321.2" cy="574.7" r="0.42" opacity="0.27"/>
+      <circle cx="29.2" cy="742.1" r="0.88" opacity="0.16"/>
+      <circle cx="1304.0" cy="175.4" r="0.86" opacity="0.19"/>
+      <circle cx="1362.2" cy="794.0" r="0.87" opacity="0.25"/>
+      <circle cx="406.9" cy="31.4" r="0.5" opacity="0.23"/>
+      <circle cx="828.5" cy="493.6" r="0.68" opacity="0.09"/>
+      <circle cx="1481.6" cy="568.9" r="0.75" opacity="0.18"/>
+      <circle cx="1415.5" cy="472.6" r="0.72" opacity="0.24"/>
+      <circle cx="237.2" cy="825.8" r="0.77" opacity="0.15"/>
+      <circle cx="237.6" cy="515.2" r="0.58" opacity="0.08"/>
+      <circle cx="1319.4" cy="747.9" r="0.94" opacity="0.23"/>
+      <circle cx="649.5" cy="914.1" r="0.54" opacity="0.13"/>
+      <circle cx="749.8" cy="677.8" r="0.46" opacity="0.09"/>
+      <circle cx="1490.4" cy="13.9" r="0.85" opacity="0.17"/>
+      <circle cx="1535.8" cy="859.2" r="0.68" opacity="0.19"/>
+      <circle cx="1115.1" cy="261.4" r="0.41" opacity="0.28"/>
+      <circle cx="869.8" cy="799.9" r="0.72" opacity="0.1"/>
+      <circle cx="164.5" cy="234.7" r="0.98" opacity="0.24"/>
+      <circle cx="468.2" cy="446.4" r="0.98" opacity="0.18"/>
+      <circle cx="506.9" cy="528.7" r="0.5" opacity="0.19"/>
+      <circle cx="114.7" cy="520.3" r="0.47" opacity="0.09"/>
+      <circle cx="1208.2" cy="505.0" r="0.5" opacity="0.16"/>
+      <circle cx="1420.3" cy="361.1" r="0.56" opacity="0.18"/>
+      <circle cx="1432.4" cy="615.9" r="0.68" opacity="0.21"/>
+      <circle cx="564.4" cy="934.6" r="0.56" opacity="0.12"/>
+      <circle cx="780.0" cy="800.9" r="0.86" opacity="0.21"/>
+      <circle cx="3.4" cy="799.3" r="0.95" opacity="0.11"/>
+      <circle cx="314.3" cy="218.5" r="0.48" opacity="0.11"/>
+      <circle cx="803.3" cy="694.8" r="0.68" opacity="0.19"/>
+      <circle cx="1099.3" cy="824.9" r="0.98" opacity="0.22"/>
+      <circle cx="795.0" cy="56.3" r="0.58" opacity="0.12"/>
+      <circle cx="1534.9" cy="727.8" r="0.48" opacity="0.15"/>
+      <circle cx="674.9" cy="628.2" r="0.98" opacity="0.15"/>
+      <circle cx="1118.1" cy="412.8" r="0.94" opacity="0.18"/>
+      <circle cx="1226.7" cy="583.1" r="0.83" opacity="0.23"/>
+      <circle cx="624.6" cy="446.3" r="0.77" opacity="0.22"/>
+      <circle cx="948.5" cy="359.5" r="0.69" opacity="0.18"/>
+      <circle cx="610.2" cy="321.2" r="0.44" opacity="0.09"/>
+      <circle cx="249.0" cy="87.3" r="0.62" opacity="0.27"/>
+      <circle cx="641.2" cy="912.4" r="0.81" opacity="0.27"/></g></svg></div>
+<div class="stage"><div class="dial">
+<svg viewBox="0 0 380 380">
+  <defs><radialGradient id="ember" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#f0b429" stop-opacity=".55"/>
+    <stop offset="60%" stop-color="#b3691f" stop-opacity=".12"/>
+    <stop offset="100%" stop-opacity="0"/></radialGradient></defs>
+  <g class="scaffold1"><circle cx="190" cy="190" r="140" fill="none" stroke="var(--line)"
+     stroke-width="1.5" stroke-dasharray="28 46"/></g>
+  <g class="scaffold2"><circle cx="190" cy="190" r="118" fill="none" stroke="var(--line-soft)"
+     stroke-width="1" stroke-dasharray="12 58"/></g>
+  <circle cx="190" cy="190" r="26" fill="url(#ember)"/>
+  <circle cx="190" cy="190" r="6" fill="#f0b429" opacity=".85"/>
+</svg>
+<div class="msg"><b>Orbit is being serviced</b>
+  <p>your sky is safe and will return shortly<br>nothing needs you right now</p>
+</div></div></div>
+<div class="vignette"></div>
+<div class="foot">dormant &middot; the sun banked to ember; the ring under gentle scaffolding</div>
+</body></html>
