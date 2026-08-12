@@ -123,6 +123,11 @@ export type EnvOrbitRecord = Partial<Record<AllowedKey, string>>;
 export const CANONICAL_OIDC_SECRET_FILE_PATH =
   "/run/orbit-secrets/orbit-oidc-client-secret";
 
+// The one true callback path: the deployment contract derives the
+// registered callback from APP_URL with it, and the runtime derives the
+// default the same way (src/lib/env.ts).
+export const OIDC_CALLBACK_PATH = "/api/auth/callback";
+
 const HOSTNAME_PATTERN =
   /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
@@ -333,7 +338,7 @@ export function evaluateReadiness(
     isSet(record, "OIDC_CLIENT_ID") && isValidClientId(record.OIDC_CLIENT_ID as string);
   const callbackReady =
     appUrlReady &&
-    (record.OIDC_CALLBACK_URL ?? "") === `${normalizedAppUrl}/api/auth/callback`;
+    (record.OIDC_CALLBACK_URL ?? "") === `${normalizedAppUrl}${OIDC_CALLBACK_PATH}`;
 
   let oidcSecretReady = false;
   if (isSet(record, "OIDC_CLIENT_SECRET") && !isSet(record, "OIDC_CLIENT_SECRET_FILE")) {
