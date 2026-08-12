@@ -35,8 +35,10 @@ silently.
 | CON-7 | Drawers | Bounded status drawer from the left with edge words as the system (v15): left handle always present — status (green) / degraded (amber) / offline (red); right handle reads key; both ride their drawers; the key orb is retired | in v15 |
 | CON-8 | Planet light | Specular highlight facing the sun, soft atmospheres in status colour, inner sheen on suggestions | in v12 |
 
-| CON-9 | Page family personalities | One identity, distinct motion per page: login = the sunrise (dawn cresting a planetary horizon; v15 rethink) · 404 = the derelict (giant charted numerals behind; home burns warm at centre; derelict always passes behind; v15) · maintenance = the corona (streamer crowns, prominences, flux-capacitor copy; v15) · admin = observatory (instrumented, telemetric) · create = genesis (nebula condenses into a world) · settings-mail = relay (signal rings) | in v13 |
+| CON-9 | Page family personalities | One identity, distinct motion per page: login = first light (v16): the dawn breaks once on load, horizon at the floor, travelling rim shimmer, the name alone as hero — no strapline by owner decision · 404 = the derelict (giant charted numerals behind; home burns warm at centre; derelict always passes behind; v15) · maintenance = the corona, properly (v16): blended straight/wavy/fine crowns at three speeds, message inside the disc in the display face, living background · admin = observatory (instrumented, telemetric) · create = genesis (nebula condenses into a world) · settings-mail = relay (signal rings) | in v13 |
 | CON-10 | Mobile dialect | The dial owns the width; callouts/drawers/doc panel become bottom sheets (first tap = sheet, second = approach); households collapse into the other-skies strip | in v13 |
+
+| CON-11 | The strapline | "your year, in orbit" — for surfaces that want words (README, launcher splash, brand sheet); the login carries none: the hero is the name | **approved** 2026-08-13 |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
