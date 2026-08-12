@@ -32,10 +32,10 @@ silently.
 | CON-4 | Ambient count | The urgent count lives in the tab title and PWA app badge, never on the sky | **approved** 2026-08-13 |
 | CON-5 | Click grammar | Simplified and **approved**: exactly one clickable thing per body — the planet (= approach; zoom for system centres). Everything else lives in the hover callout (documents chip etc.). Belts are passive badges. Touch: first tap = callout, second = approach | **approved**, in v12 |
 | CON-6 | Household constellation | Other households live in the backdrop as small dimmed living systems with cartographer annotations (rule under the name, veering to the system); clicking one FLIES THE VIEWPORT to it — parallax camera, world slides opposite, target grows (v14 rework per owner) | **approved**; dimmed status colours for at-a-glance cross-household health |
-| CON-7 | Drawers | Bounded status drawer from the left with the degraded/offline word as its riding HANDLE (v14); the key as a list-drawer from the right | in v14 |
+| CON-7 | Drawers | Bounded status drawer from the left with edge words as the system (v15): left handle always present — status (green) / degraded (amber) / offline (red); right handle reads key; both ride their drawers; the key orb is retired | in v15 |
 | CON-8 | Planet light | Specular highlight facing the sun, soft atmospheres in status colour, inner sheen on suggestions | in v12 |
 
-| CON-9 | Page family personalities | One identity, distinct motion per page: login = approach (streaming stars) · 404 = adrift (still sky, tumbling body, beacon) · maintenance = dormant (ember sun, scaffolding ring) · admin = observatory (instrumented, telemetric) · create = genesis (nebula condenses into a world) · settings-mail = relay (signal rings) | in v13 |
+| CON-9 | Page family personalities | One identity, distinct motion per page: login = the sunrise (dawn cresting a planetary horizon; v15 rethink) · 404 = the derelict (giant charted numerals behind; home burns warm at centre; derelict always passes behind; v15) · maintenance = the corona (streamer crowns, prominences, flux-capacitor copy; v15) · admin = observatory (instrumented, telemetric) · create = genesis (nebula condenses into a world) · settings-mail = relay (signal rings) | in v13 |
 | CON-10 | Mobile dialect | The dial owns the width; callouts/drawers/doc panel become bottom sheets (first tap = sheet, second = approach); households collapse into the other-skies strip | in v13 |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
