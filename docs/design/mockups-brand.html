@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — brand mockups (proposal, issue #307)</title>
+<style>
+  :root{
+    --bg:#05070d; --bg-page:#0a0c12; --bg-panel:#0b0f1a;
+    --border:#1c2434; --border-soft:#151b28;
+    --text:#e7e9ee; --text-muted:#7c8699; --text-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--ui);
+       line-height:1.55;padding:56px 24px}
+  main{max-width:1100px;margin:0 auto}
+  h1{font-size:28px;font-weight:600;letter-spacing:-.02em}
+  .lead{color:var(--text-muted);max-width:620px;margin:10px 0 48px}
+  h2{font-size:15px;font-weight:600;color:var(--text-muted);
+     text-transform:uppercase;letter-spacing:.14em;margin:56px 0 20px}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+  .card{background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:12px;padding:28px}
+  .card h3{font-size:16px;font-weight:600;margin-bottom:6px}
+  .card p{font-size:13.5px;color:var(--text-muted)}
+  .stage{display:flex;align-items:center;justify-content:center;
+         height:220px;margin:18px 0}
+  .badge{display:inline-block;font:11px var(--mono);color:var(--accent);
+         border:1px solid var(--border);border-radius:99px;padding:2px 10px;
+         margin-bottom:14px}
+  .badge.rec{color:#05070d;background:var(--accent);border-color:var(--accent)}
+  .tiny{display:flex;gap:18px;align-items:center;justify-content:center;
+        padding:14px;border-top:1px solid var(--border-soft)}
+  .tiny span{font:11px var(--mono);color:var(--text-faint)}
+  .swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+  .sw{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .sw .chip{height:64px}
+  .sw .meta{padding:10px 12px;background:var(--bg-panel)}
+  .sw .meta b{display:block;font-size:12.5px;font-weight:600}
+  .sw .meta span{font:11px var(--mono);color:var(--text-muted)}
+  .wordmark{display:flex;align-items:center;gap:18px;justify-content:center;
+            padding:40px 0 8px}
+  .wordmark .wm-text{font-size:44px;font-weight:600;letter-spacing:.01em}
+  .note{font-size:13px;color:var(--text-faint);max-width:640px;margin-top:26px}
+  footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--border-soft);
+         font:12px var(--mono);color:var(--text-faint)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Orbit — the mark</h1>
+  <p class="lead">Three concepts for one identity: the year is the orbit, and a
+  household's obligations are the bodies moving around it. Concept A is
+  recommended — the logo, the dashboard hero, and the product explanation are
+  the same drawing.</p>
+
+  <h2>Concepts</h2>
+  <div class="row">
+
+    <div class="card">
+      <span class="badge rec">A · recommended — the year-ring</span>
+      <div class="stage">
+        <svg width="180" height="180" viewBox="0 0 200 200" role="img" aria-label="Year-ring mark">
+          <defs>
+            <radialGradient id="glowA" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".85"/>
+              <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="100" cy="100" r="72" fill="none" stroke="#1c2434" stroke-width="2"/>
+          <g stroke="#4a5468" stroke-width="2" stroke-linecap="round">
+            <line x1="100" y1="24" x2="100" y2="32"/><line x1="138" y1="34.2" x2="134" y2="41.1"/>
+            <line x1="165.8" y1="62" x2="158.9" y2="66"/><line x1="176" y1="100" x2="168" y2="100"/>
+            <line x1="165.8" y1="138" x2="158.9" y2="134"/><line x1="138" y1="165.8" x2="134" y2="158.9"/>
+            <line x1="100" y1="176" x2="100" y2="168"/><line x1="62" y1="165.8" x2="66" y2="158.9"/>
+            <line x1="34.2" y1="138" x2="41.1" y2="134"/><line x1="24" y1="100" x2="32" y2="100"/>
+            <line x1="34.2" y1="62" x2="41.1" y2="66"/><line x1="62" y1="34.2" x2="66" y2="41.1"/>
+          </g>
+          <circle cx="100" cy="100" r="7" fill="#e7e9ee" opacity=".9"/>
+          <circle cx="163" cy="63.5" r="16" fill="url(#glowA)"/>
+          <circle cx="163" cy="63.5" r="6" fill="#7dd3fc"/>
+          <circle cx="49" cy="151" r="4" fill="#7c8699"/>
+          <circle cx="100" cy="172" r="4" fill="#7c8699"/>
+        </svg>
+      </div>
+      <h3>The year, in orbit</h3>
+      <p>Twelve month ticks, the household at centre, tasks as bodies — the
+      nearest one glowing at perihelion. At full size it is the dashboard;
+      at 16px it simplifies to ring-plus-dot.</p>
+      <div class="tiny">
+        <svg width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#7c8699" stroke-width="2.5"/><circle cx="25" cy="9" r="4" fill="#7dd3fc"/></svg>
+        <svg width="16" height="16" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#7c8699" stroke-width="3"/><circle cx="25" cy="9" r="5" fill="#7dd3fc"/></svg>
+        <span>32 / 16 px favicon reductions</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="badge">B · the orbital O</span>
+      <div class="stage">
+        <svg width="240" height="120" viewBox="0 0 280 140" role="img" aria-label="Orbital O wordmark">
+          <g transform="translate(48,70)">
+            <ellipse cx="0" cy="0" rx="26" ry="26" fill="none" stroke="#e7e9ee" stroke-width="7"/>
+            <g transform="rotate(-18)">
+              <ellipse cx="0" cy="0" rx="46" ry="12" fill="none" stroke="#4a5468" stroke-width="2"/>
+              <circle cx="42" cy="-4.8" r="6" fill="#7dd3fc"/>
+            </g>
+          </g>
+          <text x="88" y="92" fill="#e7e9ee" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1">rbit</text>
+        </svg>
+      </div>
+      <h3>Wordmark-first</h3>
+      <p>The O is a body with its own satellite — quiet enough for headers
+      and documents. Pairs with concept A: ring as app mark, this as the
+      written identity.</p>
+      <div class="tiny"><span>works single-colour; no glow required</span></div>
+    </div>
+
+    <div class="card">
+      <span class="badge">C · refined arcs (conservative)</span>
+      <div class="stage">
+        <svg width="170" height="170" viewBox="0 0 256 256" role="img" aria-label="Refined arcs mark">
+          <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+          <circle cx="202" cy="70" r="10" fill="#7dd3fc"/>
+          <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+          <circle cx="31" cy="139" r="11" fill="#7c8699"/>
+          <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+          <circle cx="143" cy="216" r="11" fill="#4a5468"/>
+        </svg>
+      </div>
+      <h3>Today's gesture, tonight's palette</h3>
+      <p>The existing three-arc mark restated in the identity scale — accent
+      forward, depth behind. Keeps continuity with everything already
+      shipped, at the cost of the strongest concept.</p>
+      <div class="tiny"><span>lowest-risk evolution of public/orbit-mark.svg</span></div>
+    </div>
+  </div>
+
+  <h2>Wordmark lockup (A + B)</h2>
+  <div class="card">
+    <div class="wordmark">
+      <svg width="72" height="72" viewBox="0 0 200 200" aria-hidden="true">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#1c2434" stroke-width="4"/>
+        <circle cx="100" cy="100" r="7" fill="#e7e9ee"/>
+        <circle cx="163" cy="63.5" r="8" fill="#7dd3fc"/>
+      </svg>
+      <div>
+        <div class="wm-text">orbit</div>
+        <div style="font:12.5px var(--mono);color:var(--text-muted);letter-spacing:.08em">everything in your orbit, on track</div>
+      </div>
+    </div>
+    <p class="note">Lowercase wordmark, Inter 600, tight tracking. The strapline
+    sets in mono — the one place the launcher's terminal heritage shows in the
+    brand voice.</p>
+  </div>
+
+  <h2>Palette (validated)</h2>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#05070d"></div><div class="meta"><b>bg</b><span>#05070d</span></div></div>
+    <div class="sw"><div class="chip" style="background:#0b0f1a"></div><div class="meta"><b>bg-panel</b><span>#0b0f1a</span></div></div>
+    <div class="sw"><div class="chip" style="background:#1c2434"></div><div class="meta"><b>border</b><span>#1c2434</span></div></div>
+    <div class="sw"><div class="chip" style="background:#e7e9ee"></div><div class="meta"><b>text</b><span>#e7e9ee</span></div></div>
+    <div class="sw"><div class="chip" style="background:#7c8699"></div><div class="meta"><b>text-muted</b><span>#7c8699</span></div></div>
+    <div class="sw"><div class="chip" style="background:#7dd3fc"></div><div class="meta"><b>accent / upcoming</b><span>#7dd3fc</span></div></div>
+    <div class="sw"><div class="chip" style="background:#4ade80"></div><div class="meta"><b>ok — on track</b><span>#4ade80</span></div></div>
+    <div class="sw"><div class="chip" style="background:#f0b429"></div><div class="meta"><b>warm — due soon</b><span>#f0b429</span></div></div>
+    <div class="sw"><div class="chip" style="background:#f87171"></div><div class="meta"><b>overdue</b><span>#f87171</span></div></div>
+  </div>
+  <p class="note">Status set passes CVD-separation, normal-vision and contrast
+  checks on the panel surface (dataviz validator). The former orange tier is
+  retired — inseparable from amber for deuteranopic readers. Status colours
+  always ship with position and a text label, never alone.</p>
+
+  <footer>orbit · brand proposal · issue #307 · themes inherited from
+  orbit-launcher design v2–v5 · nothing here is implemented</footer>
+</main>
+</body>
+</html>

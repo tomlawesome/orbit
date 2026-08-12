@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — web UI v2: theme architecture (proposal, issue #307)</title>
+<style>
+  /* ---- Theme architecture: semantic tokens only; every theme is a pack. ---
+     Components never reference a raw colour — only these tokens. A new
+     theme is a new pack, not a new stylesheet. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --bg-page:#0a0c12; --panel:#0b0f1a; --panel-raised:#0f1524;
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171;
+    --ring-glow:1; --engrave:0;
+  }
+  [data-theme=starchart]{
+    --bg:#efe9db; --bg-page:#efe9db; --panel:#f7f3ea; --panel-raised:#fbf8f1;
+    --line:#d8cfba; --line-soft:#e4dcc9;
+    --ink:#1c2b4a; --ink-mid:#5d6a87; --ink-faint:#98a0b4;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458;
+    --upcoming:#2b6cb0;
+    --ring-glow:0; --engrave:1;
+  }
+  [data-theme=dawn]{
+    --bg:#eef1f6; --bg-page:#eef1f6; --panel:#ffffff; --panel-raised:#ffffff;
+    --line:#dde3ee; --line-soft:#e8edf5;
+    --ink:#1a2233; --ink-mid:#5d6b85; --ink-faint:#9aa5ba;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63;
+    --ring-glow:0; --engrave:0;
+  }
+  [data-theme=afterdark]{ --upcoming:var(--accent); }
+  [data-theme=dawn]{ --upcoming:#1f7ac2; }
+
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg-page);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;padding:36px 16px 80px;transition:background .35s,color .35s}
+  .frame-label{max-width:1180px;margin:0 auto;padding:0 6px 10px;
+               font:12px var(--mono);color:var(--ink-faint);
+               display:flex;align-items:center;gap:16px}
+  .themes{margin-left:auto;display:flex;gap:6px}
+  .themes button{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                 border:1px solid var(--line);border-radius:99px;padding:4px 12px;cursor:pointer}
+  .themes button[aria-pressed=true]{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+  .frame{max-width:1180px;margin:0 auto 56px;border:1px solid var(--line);
+         border-radius:18px;overflow:hidden;background:var(--bg);
+         transition:background .35s,border-color .35s}
+
+  .topbar{display:flex;align-items:center;gap:22px;padding:15px 30px;
+          border-bottom:1px solid var(--line-soft)}
+  .mark{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:.01em}
+  .household{font-size:13px;color:var(--ink-mid)}
+  .household b{color:var(--ink);font-weight:500}
+  .search{flex:1;max-width:320px;margin-left:auto}
+  .search input{width:100%;background:var(--panel);border:1px solid var(--line);
+                border-radius:9px;color:var(--ink-mid);font-size:13px;padding:7px 13px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--line);
+          display:grid;place-items:center;font-size:12px;color:var(--ink-mid)}
+
+  .home{display:grid;grid-template-columns:minmax(0,1fr) 430px}
+  .list-col{padding:36px 26px 44px 34px}
+  .ring-col{padding:36px 30px 44px 8px}
+  h1.page{font-size:26px;font-weight:550;letter-spacing:-.02em}
+  .page-sub{font-size:13.5px;color:var(--ink-mid);margin:6px 0 26px}
+  .page-sub b{color:var(--warm);font-weight:550}
+
+  .group{margin-bottom:30px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:2px}
+  .item{display:flex;align-items:center;gap:15px;border-radius:13px;
+        padding:13px 16px;margin-bottom:4px;border:1px solid transparent}
+  .item:hover{background:var(--panel-raised);border-color:var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .item .body{flex:1;min-width:0}
+  .item .body b{display:block;font-size:14.5px;font-weight:520}
+  .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  .when{text-align:right;min-width:92px}
+  .when b{display:block;font:500 13px var(--mono);font-variant-numeric:tabular-nums}
+  .when span{font:11px var(--mono);color:var(--ink-faint)}
+  .status-label{font:10px var(--mono);letter-spacing:.05em;border-radius:99px;
+                padding:2.5px 9px;border:1px solid var(--line);white-space:nowrap}
+  .s-over{color:var(--overdue)} .s-soon{color:var(--warm)}
+  .s-up{color:var(--upcoming)} .s-ok{color:var(--ok)}
+
+  .suggest{border:1px dashed var(--line);background:transparent}
+  .suggest .body span{color:var(--accent)}
+  .suggest .actions{display:flex;gap:8px}
+  .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+
+  .ring-card{padding:10px 6px;text-align:center}
+  .ring-title{font-size:14px;font-weight:600;margin-bottom:2px}
+  .ring-sub{font-size:12.5px;color:var(--ink-mid);margin-bottom:4px}
+  .legend{display:flex;gap:16px;justify-content:center;margin-top:2px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px;
+               font:11px var(--mono);color:var(--ink-mid)}
+  .legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .quiet{margin:18px 24px 0 2px;padding:15px 18px;border:1px solid var(--line-soft);
+         border-radius:13px;font-size:12.5px;color:var(--ink-mid)}
+  .quiet b{color:var(--ink);font-weight:520}
+
+  svg text{font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<p class="frame-label">Due Next · v2 — token-built theming; every theme is a pack, not a stylesheet
+  <span class="themes" role="group" aria-label="Theme">
+    <button onclick="setTheme('afterdark',this)" aria-pressed="true">after dark</button>
+    <button onclick="setTheme('starchart',this)" aria-pressed="false">star-chart</button>
+    <button onclick="setTheme('dawn',this)" aria-pressed="false">dawn</button>
+  </span>
+</p>
+
+<div class="frame">
+  <div class="topbar">
+    <div class="mark">
+      <svg width="24" height="24" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg>
+      orbit
+    </div>
+    <div class="household">Household · <b>Lawson Home</b></div>
+    <div class="search"><input placeholder="Search items, documents…" readonly></div>
+    <div class="avatar">TL</div>
+  </div>
+
+  <div class="home">
+    <div class="list-col">
+      <h1 class="page">Due next</h1>
+      <p class="page-sub">Wednesday 13 August · <b>3 things</b> need you this month · 14 quietly on track</p>
+
+      <div class="group">
+        <h3>Needs attention</h3>
+        <div class="item">
+          <span class="dot" style="background:var(--overdue)"></span>
+          <div class="body"><b>Gutter clearing</b><span>Home · yearly</span></div>
+          <span class="status-label s-over">overdue</span>
+          <div class="when"><b>28 Jul</b><span>16 days ago</span></div>
+        </div>
+        <div class="item">
+          <span class="dot" style="background:var(--warm)"></span>
+          <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · yearly</span></div>
+          <span class="status-label s-soon">due soon</span>
+          <div class="when"><b>29 Aug</b><span>in 16 days</span></div>
+        </div>
+        <div class="item">
+          <span class="dot" style="background:var(--warm)"></span>
+          <div class="body"><b>Boiler service</b><span>Home · yearly · British Gas</span></div>
+          <span class="status-label s-soon">due soon</span>
+          <div class="when"><b>04 Sep</b><span>in 22 days</span></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Suggested from your documents</h3>
+        <div class="item suggest">
+          <span class="dot" style="background:var(--accent)"></span>
+          <div class="body"><b>Home insurance renewal</b><span>Found in policy-schedule.pdf · renews 02 Oct</span></div>
+          <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>Later this year</h3>
+        <div class="item">
+          <span class="dot" style="background:var(--upcoming)"></span>
+          <div class="body"><b>Chimney sweep</b><span>Home · yearly</span></div>
+          <span class="status-label s-up">upcoming</span>
+          <div class="when"><b>12 Oct</b><span>in 2 months</span></div>
+        </div>
+        <div class="item">
+          <span class="dot" style="background:var(--ok)"></span>
+          <div class="body"><b>Smoke alarm batteries</b><span>Devices · every 6 months · done 12 Jun</span></div>
+          <span class="status-label s-ok">on track</span>
+          <div class="when"><b>12 Dec</b><span>in 4 months</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ring-col">
+      <div class="ring-card">
+        <div class="ring-title">Your year</div>
+        <div class="ring-sub">Everything in orbit · August at the top</div>
+        <svg width="380" height="380" viewBox="0 0 380 380" role="img"
+             aria-label="Year ring: household items placed by due date around the next twelve months">
+          <defs>
+            <radialGradient id="glow2" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".12"/>
+              <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+            </radialGradient>
+            <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity=".6"/>
+            </linearGradient>
+          </defs>
+          <circle cx="190" cy="190" r="168" style="opacity:var(--ring-glow)" fill="url(#glow2)"/>
+
+          <!-- engraved double ring -->
+          <circle cx="190" cy="190" r="140" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+          <circle cx="190" cy="190" r="136" fill="none" stroke="var(--line-soft)" stroke-width="1"/>
+
+          <!-- month ticks + labels -->
+          <g stroke="var(--line)" stroke-width="1.5">
+            <line x1="190" y1="46" x2="190" y2="56"/><line x1="262" y1="65.3" x2="257" y2="73.9"/>
+            <line x1="314.7" y1="118" x2="306.1" y2="123"/><line x1="334" y1="190" x2="324" y2="190"/>
+            <line x1="314.7" y1="262" x2="306.1" y2="257"/><line x1="262" y1="314.7" x2="257" y2="306.1"/>
+            <line x1="190" y1="334" x2="190" y2="324"/><line x1="118" y1="314.7" x2="123" y2="306.1"/>
+            <line x1="65.3" y1="262" x2="73.9" y2="257"/><line x1="46" y1="190" x2="56" y2="190"/>
+            <line x1="65.3" y1="118" x2="73.9" y2="123"/><line x1="118" y1="65.3" x2="123" y2="73.9"/>
+          </g>
+          <g font-size="9.5" fill="var(--ink-faint)" text-anchor="middle">
+            <text x="190" y="36">AUG</text><text x="269" y="57">SEP</text>
+            <text x="326" y="112">OCT</text><text x="346" y="194">NOV</text>
+            <text x="326" y="272">DEC</text><text x="269" y="329">JAN</text>
+            <text x="190" y="352">FEB</text><text x="111" y="329">MAR</text>
+            <text x="54" y="272">APR</text><text x="34" y="194">MAY</text>
+            <text x="54" y="112">JUN</text><text x="111" y="57">JUL</text>
+          </g>
+
+          <!-- now beam -->
+          <rect x="189.25" y="60" width="1.5" height="122" fill="url(#beam)"/>
+          <path d="M190 42 l6 10 h-12 Z" style="fill:var(--accent)"/>
+
+          <!-- motion trails (clockwise toward now) -->
+          <g fill="none" stroke-linecap="round">
+            <path d="M 148 61 A 140 140 0 0 1 162 53" stroke="var(--overdue)" stroke-opacity=".45" stroke-width="2"/>
+            <path d="M 204 50.7 A 140 140 0 0 1 218 53.8" stroke="var(--warm)" stroke-opacity=".45" stroke-width="2"/>
+            <path d="M 224 55.2 A 140 140 0 0 1 238 59.4" stroke="var(--warm)" stroke-opacity=".45" stroke-width="2"/>
+            <path d="M 276 84.5 A 140 140 0 0 1 287 94" stroke="var(--upcoming)" stroke-opacity=".4" stroke-width="2"/>
+          </g>
+
+          <!-- centre body -->
+          <circle cx="190" cy="190" r="7.5" style="fill:var(--ink)"/>
+          <text x="190" y="216" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+
+          <!-- bodies: position = due date; size + colour = urgency -->
+          <circle cx="166" cy="52" r="7" style="fill:var(--overdue)"/>
+          <circle cx="221" cy="54" r="6.5" style="fill:var(--warm)"/>
+          <circle cx="241" cy="61" r="6" style="fill:var(--warm)"/>
+          <circle cx="290" cy="97.5" r="5.5" style="fill:var(--upcoming)"/>
+          <circle cx="306" cy="123" r="5" style="fill:var(--upcoming);stroke:var(--bg);stroke-width:2;stroke-dasharray:2 2"/>
+          <g style="fill:var(--ok)">
+            <circle cx="322" cy="220" r="4.5"/><circle cx="295" cy="276" r="4.5"/>
+            <circle cx="244" cy="315" r="4.5"/><circle cx="170" cy="327" r="4.5"/>
+            <circle cx="106" cy="297" r="4.5"/><circle cx="64" cy="239" r="4.5"/>
+            <circle cx="55" cy="165" r="4.5"/><circle cx="82" cy="104" r="4.5"/>
+            <circle cx="134" cy="64" r="4.5"/>
+          </g>
+        </svg>
+        <div class="legend">
+          <span><i style="background:var(--overdue)"></i>overdue</span>
+          <span><i style="background:var(--warm)"></i>due soon</span>
+          <span><i style="background:var(--upcoming)"></i>upcoming</span>
+          <span><i style="background:var(--ok)"></i>on track</span>
+        </div>
+      </div>
+      <div class="quiet"><b>Motion, implied.</b> Each body carries a short trail in its
+      direction of travel; the dashed body is a document suggestion not yet accepted.
+      In star-chart the glow gives way to engraving — same tokens, different soul.</div>
+    </div>
+  </div>
+</div>
+
+<p class="frame-label">orbit · web UI v2 proposal · issue #307 · three theme packs from one token set · status palettes validated per theme</p>
+
+<script>
+function setTheme(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+</script>
+</body>
+</html>
