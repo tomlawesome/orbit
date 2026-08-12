@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Orbit repair mode — safe diagnostic slice (issue #261, first slice).
+# Orbit repair mode — safe diagnostic + planning slices (issue #261).
 #
-# Supported invocation for this slice: `bash scripts/repair.sh --check`
-# (also tolerates `--check --plain`/`--plain --check`). There is no
-# interactive planner or executor yet; that is later slices layered on top
-# of this read-only diagnosis contract.
+# Supported invocations through this slice:
+#   bash scripts/repair.sh --check [--plain]   (slices 1+2: read-only diagnosis)
+#   bash scripts/repair.sh --plan  [--plain]   (slice 3: read-only diagnosis,
+#                                               then a proposed, classified
+#                                               repair plan — still zero
+#                                               mutation)
+# `--plain` is tolerated on either side of `--check`/`--plan`. Exactly one of
+# `--check`/`--plan` is required; passing both, neither, or any other flag is
+# a usage error. There is no interactive confirmation or executor yet — that
+# is slice 4, layered on top of this same read-only diagnosis contract.
 #
 # This script is deliberately standalone and source-less: it never sources
 # install.sh, configure.sh or installer-ui.sh, and it copies only the
@@ -58,8 +64,8 @@ set -Eeuo pipefail
 # in-process to classify success/auth-failure/other-failure; it is never
 # printed, logged, or included in any finding.
 #
-# OUTPUT CONTRACT
-# ----------------
+# OUTPUT CONTRACT (--check)
+# ---------------------------
 # One finding per line:
 #   finding class=<reason-class> target=<target-class> severity=<info|warn|fail>
 # Enums only — stdout never contains a path, a configured value, or a
@@ -70,8 +76,8 @@ set -Eeuo pipefail
 # are grouped in a fixed class order (see `class_order` below) so that the
 # same on-disk/daemon state always produces byte-identical output.
 #
-# EXIT CODES
-# -----------
+# EXIT CODES (--check)
+# ----------------------
 #   0  healthy    — no findings at all
 #   3  attention  — only warn-severity findings (no fail-severity finding)
 #   4  failed     — at least one fail-severity finding
@@ -138,6 +144,173 @@ set -Eeuo pipefail
 #                                   exists but Docker reports its health
 #                                   status as `unhealthy`.
 #
+# PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
+# --------------------------------------------------------------------------
+# `--plan` runs exactly the same read-only diagnosis as `--check` above (the
+# same 19 reason classes, the same optional docker probes, the same
+# read-only-by-construction guarantees) and then, instead of printing
+# `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
+# from the findings and exits. It performs no filesystem write, no chmod, no
+# docker mutation, and no confirmation prompt — approval and execution are
+# the still-unbuilt slice 4. Every `--check` read-only guarantee documented
+# above holds identically under `--plan`.
+#
+# Severity gate — applied BEFORE the action-class mapping below:
+#   Only warn- and fail-severity findings are ever planned. An
+#   info-severity finding (today: `docker-unavailable`,
+#   `unrelated-resource-present`; also any future info-severity class)
+#   produces NO plan line at all and is not counted toward `actions` or
+#   `manual`. This exists because `--check` itself never lets an
+#   info-severity finding make the deployment anything other than
+#   `healthy` (see `print_check_output_and_exit`'s severity-to-`worst`
+#   mapping above) — `--plan` must not contradict that verdict for the
+#   identical on-disk/daemon state by treating a purely informational
+#   finding as a problem requiring manual intervention. Concretely: a
+#   diagnosis containing only info-severity findings (e.g. Docker
+#   unavailable, nothing else wrong) yields `plan result=empty actions=0
+#   manual=0` and exit 0 under `--plan`, matching `--check`'s
+#   `result=healthy` exit 0 for that same state.
+#
+# Output contract (--plan):
+#   One line per warn/fail-severity finding (see the severity gate above),
+#   in the same fixed `class_order`:
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required>
+#   A finding with no safe automatic action instead emits:
+#     plan action=manual resolves=<reason-class> mutation=none backup=not-required
+#   paired with one human-readable line on STDERR naming the exact safe
+#   manual step or evidence to collect for that reason class — field names
+#   only (e.g. "the target managed file", "the flagged container's
+#   labels"), never a path, a configured value, or a secret. A terminal line
+#   always follows on stdout:
+#     plan result=<empty|ready|manual-required> actions=<n> manual=<n>
+#   where `actions` counts emitted automatic-action lines and `manual`
+#   counts emitted `action=manual` lines (actions + manual == total
+#   PLANNED, i.e. warn/fail-severity, findings — info-severity findings are
+#   excluded from this count entirely, not merely uncounted extras).
+#   Output is plain deterministic text (no ANSI/cursor control) regardless
+#   of `--plain`, and is byte-identical for byte-identical findings, exactly
+#   like `--check`.
+#
+# Exit codes (--plan):
+#   0  empty           — no warn/fail-severity findings at all (nothing to
+#      plan; matches --check's own `healthy` verdict for the same state,
+#      even if info-severity findings such as docker-unavailable exist).
+#   3  plan-available   — at least one automatic (non-manual) action was
+#      planned, regardless of whether manual-only findings also exist
+#      alongside it.
+#   4  unplannable-failures-present — one or more warn/fail-severity
+#      findings exist but NONE of them has a safe automatic action (every
+#      plan line is `action=manual`).
+#   2  usage error.
+#   5  not-an-orbit-installation — identical trigger/meaning to `--check`;
+#      the single `not-orbit-directory` finding is fail-severity, so it
+#      still passes the severity gate and is planned as `action=manual`
+#      (and its manual-step line still printed) before the forced exit 5,
+#      so the same evidence is visible under either mode.
+#
+# Destructive actions are NEVER planned, in this slice or any later one.
+# Deleting a database/document volume or any other data-destroying recovery
+# lives outside ordinary repair in a separate exact-target workflow (see
+# issue #261's acceptance criteria) — this action-class table below has no
+# destructive entry and none will be added to it; an unplannable finding
+# always degrades to `action=manual`, never to a guessed destructive fix.
+#
+# Action-class mapping table (reason class -> action class), and the
+# mutation/backup rationale for each action class:
+#
+#   restore-transaction        <- staging-evidence-present
+#     mutation=reversible backup=required. Restoring a recognized prior
+#     managed-file transaction overwrites the *current* (possibly still
+#     valid) live managed files with the staged prior-good copies, so a
+#     fresh backup of the current live state is required before slice 4
+#     may perform this overwrite, even though the staging evidence itself
+#     already holds the content being restored.
+#
+#   fix-permissions             <- managed-file-permissions,
+#                                   secret-permissions,
+#                                   secrets-directory-invalid
+#     mutation=reversible backup=not-required. A mode-only change
+#     (chmod back to 600/700) never rewrites file content, so there is
+#     nothing to lose and nothing to back up; the change is trivially its
+#     own inverse.
+#
+#   regenerate-secret           <- secret-missing, ONLY for a generated
+#                                   non-user secret whose regeneration
+#                                   cannot invalidate retained encrypted
+#                                   state (session-secret, document-kek,
+#                                   oidc-client-secret; also
+#                                   postgres-password itself when no
+#                                   retained database volume is present —
+#                                   see the exception immediately below).
+#     mutation=reversible backup=not-required. The finding fires only when
+#     the secret file is absent/empty, so there is no valid prior secret
+#     content to lose or back up.
+#
+#     EXCEPTION — postgres-password is explicitly EXCLUDED from
+#     regenerate-secret whenever a `volume-retained-without-credentials`
+#     finding is also present in the same diagnosis (the #261 fixed-project
+#     collision: a retained `orbit-db-data` volume still holds the OLD
+#     role's password hash). Minting an unrelated new password there would
+#     not fix authentication — it would just create a second, still-broken
+#     credential. That specific secret-missing finding is instead planned
+#     as rotate-database-credential, below, so a retained-volume postgres
+#     password is NEVER auto-regenerated.
+#
+#   rotate-database-credential  <- database-credential-mismatch,
+#                                   volume-retained-without-credentials,
+#                                   and (per the exception above)
+#                                   secret-missing when target is
+#                                   postgres-password AND a retained volume
+#                                   is present.
+#     mutation=credential-rotation backup=required. This is the #261
+#     motivating recovery path: preserve/restore the original password
+#     file when available, or rotate the database role to the current
+#     generated secret through a verified local connection. A database
+#     password is NEVER reset merely because authentication failed; slice
+#     4's execution of this action class MUST first create and validate a
+#     private checkpoint before touching the role (see issue #261's
+#     "Transactions, verification and evidence" acceptance criteria) — the
+#     backup=required on every line of this action class is what encodes
+#     that requirement here, in the read-only plan, ahead of any executor.
+#
+#   restart-services             <- application-unhealthy, stale-container
+#     mutation=service-restart backup=not-required. Revalidating and
+#     restarting/recreating the minimum required Orbit service(s) touches
+#     running containers, not managed files or secrets, so there is no
+#     file-level backup to take.
+#
+#   rerun-configuration           <- configuration-incomplete,
+#                                    configuration-invalid
+#     mutation=none backup=not-required. repair.sh never re-implements or
+#     drives `configure.sh`; this action class only tells the operator to
+#     run `bash scripts/configure.sh` themselves, so no mutation happens as
+#     part of repair at all.
+#
+#   manual                        <- everything else: not-orbit-directory,
+#                                    managed-file-missing,
+#                                    managed-file-symlink,
+#                                    compose-interpolation-failed,
+#                                    container-foreign-owner,
+#                                    unrelated-resource-present,
+#                                    docker-unavailable,
+#                                    database-unreachable.
+#     mutation=none backup=not-required. Each of these findings lacks a
+#     safe automatic action — proving what to fix would require guessing
+#     (was a missing managed file ever created? is a foreign-labelled
+#     container really unrelated? is a database that refuses connections
+#     down for a fixable reason?) — so "cannot safely determine" wins over
+#     a guess, per issue #261's design constraints. Every manual-class plan
+#     line is paired with one stderr line naming the exact safe manual step
+#     or evidence to collect (fields, never values).
+#
+#     Two entries in this bucket — `unrelated-resource-present` and
+#     `docker-unavailable` — are today ALWAYS emitted at info severity by
+#     `--check` (see Steps 7-12 above), so the severity gate above removes
+#     them before this mapping is ever consulted: they are listed here for
+#     classification completeness (what they WOULD map to if a future
+#     change ever raised either to warn/fail), not because either produces
+#     a `plan action=manual` line under the current diagnosis.
+#
 # RESERVED CLASSES (explicitly out of scope for this slice — next slice)
 # --------------------------------------------------------------------------
 #   unsupported-schema, migration-failed, image-identity-mismatch
@@ -148,14 +321,22 @@ set -Eeuo pipefail
 # repair actions.
 
 usage() {
-  printf 'Usage: %s --check [--plain]\n' "$0" >&2
+  printf 'Usage: %s (--check|--plan) [--plain]\n' "$0" >&2
 }
 
 plain_mode=0
-check_mode=0
+mode=""
 for arg in "$@"; do
   case "$arg" in
-    --check) check_mode=1 ;;
+    --check|--plan)
+      # Exactly one of --check/--plan is accepted; a second (of either)
+      # is a usage error rather than a silent last-flag-wins override.
+      [[ -z "$mode" ]] || {
+        usage
+        exit 2
+      }
+      mode="${arg#--}"
+      ;;
     --plain) plain_mode=1 ;;
     *)
       usage
@@ -163,7 +344,7 @@ for arg in "$@"; do
       ;;
   esac
 done
-[[ "$check_mode" == 1 ]] || {
+[[ -n "$mode" ]] || {
   usage
   exit 2
 }
@@ -172,8 +353,8 @@ done
 : "$plain_mode"
 
 # Force cwd to this script's own containing installation directory, exactly
-# like configure.sh, so `bash scripts/repair.sh --check` is safe regardless
-# of the caller's working directory.
+# like configure.sh, so `bash scripts/repair.sh --check`/`--plan` is safe
+# regardless of the caller's working directory.
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
@@ -208,6 +389,67 @@ readonly -a class_order=(
   application-unhealthy
 )
 
+# Reason class -> action class for --plan (see the "Action-class mapping
+# table" in the header comment above for the full rationale). secret-missing
+# is deliberately absent here: its action class depends on which secret is
+# missing and, for postgres-password, on whether a retained-volume finding
+# is also present — see resolve_secret_missing_action below.
+readonly -A action_for_class=(
+  [managed-file-permissions]=fix-permissions
+  [secrets-directory-invalid]=fix-permissions
+  [secret-permissions]=fix-permissions
+  [configuration-incomplete]=rerun-configuration
+  [configuration-invalid]=rerun-configuration
+  [staging-evidence-present]=restore-transaction
+  [volume-retained-without-credentials]=rotate-database-credential
+  [database-credential-mismatch]=rotate-database-credential
+  [stale-container]=restart-services
+  [application-unhealthy]=restart-services
+  [not-orbit-directory]=manual
+  [managed-file-missing]=manual
+  [managed-file-symlink]=manual
+  [compose-interpolation-failed]=manual
+  [container-foreign-owner]=manual
+  [docker-unavailable]=manual
+  [unrelated-resource-present]=manual
+  [database-unreachable]=manual
+)
+
+# Action class -> mutation classification for --plan.
+readonly -A mutation_for_action=(
+  [restore-transaction]=reversible
+  [fix-permissions]=reversible
+  [regenerate-secret]=reversible
+  [rotate-database-credential]=credential-rotation
+  [restart-services]=service-restart
+  [rerun-configuration]=none
+  [manual]=none
+)
+
+# Action class -> backup requirement for --plan.
+readonly -A backup_for_action=(
+  [restore-transaction]=required
+  [fix-permissions]=not-required
+  [regenerate-secret]=not-required
+  [rotate-database-credential]=required
+  [restart-services]=not-required
+  [rerun-configuration]=not-required
+  [manual]=not-required
+)
+
+# One human-readable, value-free manual-step line per manual-class reason
+# class, printed to stderr alongside its `plan action=manual ...` line.
+readonly -A manual_guidance=(
+  [not-orbit-directory]="confirm this is really the intended Orbit installation directory before doing anything else here"
+  [managed-file-missing]="recreate the missing managed file from your install source; repair never fabricates a managed file's content"
+  [managed-file-symlink]="replace the symlinked managed file with a real regular file; repair never follows an unproven symlink"
+  [compose-interpolation-failed]="run docker compose config yourself to see the interpolation error, then correct the referenced managed-file field"
+  [container-foreign-owner]="inspect the flagged container's labels and confirm its Orbit ownership before anything touches this project"
+  [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
+  [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
+  [database-unreachable]="verify the database container/service is running and reachable, then re-run diagnosis; repair never starts a service to investigate"
+)
+
 declare -a findings=()
 checked=0
 
@@ -240,9 +482,17 @@ read_environment_value() {
 }
 
 # $1: "early" forces exit 5 (not-an-orbit-installation) regardless of
-# finding severity; anything else auto-derives the exit code from the
-# worst finding severity (0 healthy / 3 attention / 4 failed).
+# finding severity/plan result; anything else derives the exit code from
+# --check's worst finding severity or --plan's plan result, per mode.
 print_output_and_exit() {
+  if [[ "$mode" == plan ]]; then
+    print_plan_output_and_exit "$1"
+  else
+    print_check_output_and_exit "$1"
+  fi
+}
+
+print_check_output_and_exit() {
   local forced_exit="$1"
   local class entry fclass ftarget fseverity worst=healthy
 
@@ -270,6 +520,87 @@ print_output_and_exit() {
     healthy) exit 0 ;;
     attention) exit 3 ;;
     failed) exit 4 ;;
+  esac
+}
+
+# secret-missing's action class depends on which secret is missing: every
+# generated non-user secret regenerates safely, EXCEPT postgres-password
+# when a volume-retained-without-credentials finding is also present in
+# this same diagnosis (the #261 fixed-project collision) — that specific
+# finding must route to rotate-database-credential instead, so a
+# retained-volume postgres password is never auto-regenerated. See the
+# "regenerate-secret" / "rotate-database-credential" entries in the
+# header's action-class mapping table for the full rationale.
+resolve_secret_missing_action() {
+  local target="$1"
+  if [[ "$target" == postgres-password && "$volume_retained_without_credentials" == 1 ]]; then
+    printf 'rotate-database-credential'
+  else
+    printf 'regenerate-secret'
+  fi
+}
+
+print_plan_output_and_exit() {
+  local forced_exit="$1"
+  local class entry fclass ftarget fseverity action
+  local actions=0 manual=0 result
+  local volume_retained_without_credentials=0
+
+  for entry in "${findings[@]:-}"; do
+    [[ -n "$entry" ]] || continue
+    IFS='|' read -r fclass ftarget fseverity <<< "$entry"
+    [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+  done
+
+  for class in "${class_order[@]}"; do
+    for entry in "${findings[@]:-}"; do
+      [[ -n "$entry" ]] || continue
+      IFS='|' read -r fclass ftarget fseverity <<< "$entry"
+      [[ "$fclass" == "$class" ]] || continue
+      # Severity gate: an info-severity finding is never planned. --check
+      # itself never lets an info-severity finding make the deployment
+      # unhealthy, so --plan must not contradict that by treating it as a
+      # problem needing manual intervention either; it produces no plan
+      # line and is not counted toward actions or manual. See the "Severity
+      # gate" paragraph in the PLAN MODE header comment.
+      [[ "$fseverity" == info ]] && continue
+
+      if [[ "$fclass" == secret-missing ]]; then
+        action="$(resolve_secret_missing_action "$ftarget")"
+      else
+        action="${action_for_class[$fclass]:-manual}"
+      fi
+
+      printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
+        "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+
+      if [[ "$action" == manual ]]; then
+        manual=$((manual + 1))
+        if [[ -n "${manual_guidance[$fclass]:-}" ]]; then
+          printf 'manual step: %s (resolves=%s)\n' "${manual_guidance[$fclass]}" "$fclass" >&2
+        fi
+      else
+        actions=$((actions + 1))
+      fi
+    done
+  done
+
+  if [[ "$actions" -gt 0 ]]; then
+    result=ready
+  elif [[ "$manual" -gt 0 ]]; then
+    result="manual-required"
+  else
+    result=empty
+  fi
+  printf 'plan result=%s actions=%s manual=%s\n' "$result" "$actions" "$manual"
+
+  if [[ "$forced_exit" == early ]]; then
+    exit 5
+  fi
+  case "$result" in
+    empty) exit 0 ;;
+    ready) exit 3 ;;
+    manual-required) exit 4 ;;
   esac
 }
 
