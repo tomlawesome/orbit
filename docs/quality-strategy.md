@@ -115,8 +115,7 @@ dependencies outside the approved SPDX licence policy block integration.
 
 ### Risk-proportional pull-request lanes
 
-Every pull request runs planning governance, lint, type checking and the
-complete unit suite. Separate read-only workflows retain dependency-diff review
+Every pull request runs lint, type checking and the complete unit suite. Separate read-only workflows retain dependency-diff review
 and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
 
 | Lane | Additional evidence | Typical eligible change |
