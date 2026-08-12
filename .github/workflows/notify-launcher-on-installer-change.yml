@@ -20,6 +20,10 @@ name: Notify launcher on installer change
 # permission). The default GITHUB_TOKEN cannot cross repositories.
 
 on:
+  # Manual trigger for verifying the cross-repo round trip (PAT wiring,
+  # dispatch delivery, launcher-side compat run) without having to touch
+  # an installer script on a release branch.
+  workflow_dispatch: {}
   push:
     branches:
       - develop
