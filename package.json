@@ -15,7 +15,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:standalone-pdfjs": "node scripts/standalone-pdfjs-runtime-check.mjs",
-    "orchestration:check": "node scripts/check-orchestration-governance.mjs --state docs/examples/orchestration-state.example.json",
+    "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
@@ -47,6 +47,7 @@
     "drizzle-kit": "^0.31.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.11",
+    "happy-dom": "^20.11.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^4.0.0"
