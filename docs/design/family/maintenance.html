@@ -5,23 +5,23 @@
 <link rel="stylesheet" href="family.css">
 <style>
 body{background:#060a18}
-.sky-drift-far{animation:driftf 200s linear infinite}
-.sky-drift-near{animation:driftn 120s linear infinite}
-@keyframes driftf{to{transform:translate(-60px,14px)}}
-@keyframes driftn{to{transform:translate(-110px,26px)}}
+.sky-drift-far{animation:driftf 380s linear infinite}
+.sky-drift-near{animation:driftn 185s linear infinite}
+@keyframes driftf{to{transform:translateX(-1600px)}}
+@keyframes driftn{to{transform:translateX(-1600px)}}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.85}}
 
 /* corona layers — every group breathes on its own period, nothing in sync */
-.corona-wide{animation:cbreathe 11s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes cbreathe{from{opacity:.8}to{opacity:1}}
-.streamers-a{transform-origin:800px 440px;animation:sway-a 47s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-a{from{transform:rotate(-1.6deg)}to{transform:rotate(1.9deg)}}
-.streamers-b{transform-origin:800px 440px;animation:sway-b 71s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-b{from{transform:rotate(1.4deg)}to{transform:rotate(-1.2deg)}}
-.streamers-b{animation-delay:-23s}
-.filaments{transform-origin:800px 440px;animation:sway-c 59s ease-in-out infinite alternate;mix-blend-mode:screen}
-@keyframes sway-c{from{transform:rotate(.9deg);opacity:.75}to{transform:rotate(-1.3deg);opacity:1}}
+.corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes cbreathe{from{opacity:.66}to{opacity:1}}
+.streamers-a{transform-origin:800px 440px;animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1)}to{transform:rotate(3.8deg) scale(1.035)}}
+.streamers-b{transform-origin:800px 440px;animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-b{from{transform:rotate(3deg) scale(1.03)}to{transform:rotate(-2.8deg) scale(1)}}
+.streamers-b{animation-delay:-13s}
+.filaments{transform-origin:800px 440px;animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-c{from{transform:rotate(2deg);opacity:.6}to{transform:rotate(-2.6deg);opacity:1}}
 .prom{animation:flicker 7s ease-in-out infinite alternate}
 .prom.p2{animation-duration:9.5s;animation-delay:-3s}
 .prom.p3{animation-duration:6.2s;animation-delay:-1.4s}
@@ -45,6 +45,15 @@ body{background:#060a18}
   77%,100%{opacity:0;transform:scale(.2)}
 }
 .flare{transform-origin:948px 348px;transform-box:view-box}
+/* the shockwave ring racing out from third contact */
+.flarewave{opacity:0;transform-origin:948px 348px;transform-box:view-box;
+           animation:flarewave 36s linear infinite}
+@keyframes flarewave{
+  0%,62%{opacity:0;transform:scale(.3)}
+  64%{opacity:.8;transform:scale(1)}
+  74%{opacity:0;transform:scale(9)}
+  75%,100%{opacity:0;transform:scale(.3)}
+}
 .wash{opacity:0;animation:washflash 36s linear infinite;pointer-events:none}
 @keyframes washflash{
   0%,61%{opacity:0}
@@ -64,7 +73,7 @@ body{background:#060a18}
      text-transform:uppercase}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
-  .flare,.wash,.ringflare{opacity:0!important}
+  .flare,.wash,.ringflare,.flarewave{opacity:0!important}
   .progress{stroke-dasharray:64 36}
 }
 </style></head><body>
@@ -76,8 +85,8 @@ body{background:#060a18}
       <stop offset="100%" stop-color="#eef2ff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <g id="farstars" class="sky-drift-far" fill="#dfe6f7"></g>
-  <g id="nearstars" class="sky-drift-near"></g>
+  <g class="sky-drift-far" fill="#dfe6f7"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
+  <g class="sky-drift-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
 <div class="world" style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
@@ -187,6 +196,10 @@ body{background:#060a18}
     <use href="#wisp" transform="translate(800 440) rotate(160) translate(158 0) scale(.9)"/>
     <use href="#wisp" transform="translate(800 440) rotate(-38) translate(154 0) scale(.55)"/>
     <use href="#wisp" transform="translate(800 440) rotate(212) translate(154 0) scale(.5)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(31) translate(156 0) scale(.72)"/>
+    <use href="#wisp" transform="translate(800 440) rotate(174) translate(156 0) scale(.66)"/>
+    <use href="#petal" transform="translate(800 440) rotate(-9) translate(150 0) scale(.45)"/>
+    <use href="#petal" transform="translate(800 440) rotate(190) translate(150 0) scale(.4)"/>
   </g>
 
   <!-- fine filaments and polar brushes: the iron-filing structure -->
@@ -217,6 +230,8 @@ body{background:#060a18}
     <circle class="prom p2" cx="948" cy="512" r="21" fill="url(#promg)"/>
     <circle class="prom p3" cx="742" cy="600" r="13" fill="url(#promg)"/>
     <path class="prom p2" d="M 930 350 q 26 -30 44 -2 q -18 -14 -30 6 Z" fill="#ff9d9d" opacity=".6"/>
+    <circle class="prom p3" cx="636" cy="470" r="15" fill="url(#promg)"/>
+    <path class="prom" d="M 662 556 q -30 22 -12 44 q 2 -22 22 -30 Z" fill="#ff8fa8" opacity=".5"/>
   </g>
 
   <!-- the moon: black, with the faintest earthshine mottle -->
@@ -236,14 +251,21 @@ body{background:#060a18}
   <g class="flare">
     <circle cx="948" cy="348" r="230" fill="url(#flareg)"/>
     <circle cx="948" cy="348" r="60" fill="url(#flareg)"/>
-    <circle cx="948" cy="348" r="9" fill="#ffffff"/>
+    <!-- anamorphic streak with chromatic fringes -->
+    <ellipse cx="948" cy="348" rx="330" ry="7" fill="#ffd98a" opacity=".5" filter="url(#b9)"/>
+    <ellipse cx="948" cy="345" rx="290" ry="4" fill="#ff9a5e" opacity=".35" filter="url(#b4)"/>
+    <ellipse cx="948" cy="351" rx="290" ry="4" fill="#9ec5ff" opacity=".3" filter="url(#b4)"/>
+    <ellipse cx="948" cy="348" rx="190" ry="2.4" fill="#fffdf6" opacity=".95" filter="url(#b2)"/>
+    <!-- six-point glint -->
     <g stroke="#fff6e0" stroke-linecap="round">
-      <path d="M 948 208 L 948 488" stroke-width="2.4" opacity=".8"/>
-      <path d="M 808 348 L 1088 348" stroke-width="2.4" opacity=".8"/>
-      <path d="M 862 262 L 1034 434" stroke-width="1.2" opacity=".5"/>
-      <path d="M 1034 262 L 862 434" stroke-width="1.2" opacity=".5"/>
+      <path d="M 948 178 L 948 518" stroke-width="2.2" opacity=".75"/>
+      <path d="M 878 244 L 1018 452" stroke-width="1.1" opacity=".45"/>
+      <path d="M 1018 244 L 878 452" stroke-width="1.1" opacity=".45"/>
     </g>
+    <circle cx="948" cy="348" r="9" fill="#ffffff"/>
+    <circle cx="948" cy="348" r="16" fill="none" stroke="#ffffff" stroke-width="1" opacity=".55" filter="url(#b2)"/>
   </g>
+  <circle class="flarewave" cx="948" cy="348" r="30" fill="none" stroke="#ffe9bd" stroke-width="2"/>
   <circle class="ringflare" cx="800" cy="440" r="170" fill="none" stroke="#ffffff" stroke-width="3.4"/>
   <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
 </svg></div>
