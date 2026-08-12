@@ -35,6 +35,9 @@ silently.
 | CON-7 | Drawers | Bounded status drawer from the left (container states + health checks, enums only — never versions/ports/paths/errors); the key as a list-drawer from the right | in v12 |
 | CON-8 | Planet light | Specular highlight facing the sun, soft atmospheres in status colour, inner sheen on suggestions | in v12 |
 
+| CON-9 | Page family personalities | One identity, distinct motion per page: login = approach (streaming stars) · 404 = adrift (still sky, tumbling body, beacon) · maintenance = dormant (ember sun, scaffolding ring) · admin = observatory (instrumented, telemetric) · create = genesis (nebula condenses into a world) · settings-mail = relay (signal rings) | in v13 |
+| CON-10 | Mobile dialect | The dial owns the width; callouts/drawers/doc panel become bottom sheets (first tap = sheet, second = approach); households collapse into the other-skies strip | in v13 |
+
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
 is the memory of what was tried.
