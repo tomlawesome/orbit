@@ -118,6 +118,7 @@
   .item{scroll-margin-top:130px}
   .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
   .dialwrap{position:relative}
+  .dialwrap>svg{display:block} /* no baseline gap — the dial centre IS the hero centre */
   .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
   @keyframes rotor{from{transform:rotate(0)}to{transform:rotate(360deg)}}
   .breathe{animation:breathe 4.2s ease-in-out infinite}
@@ -337,6 +338,7 @@
      starfield streams past with parallax, the destination holds its place
      and grows as we approach. Nothing ever swaps. */
   .minisys{position:absolute;cursor:pointer;z-index:3;
+           transform-origin:118px 95px; /* the ring centre — flights pivot on it */
            transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s}
   .minisys:hover .msring{stroke-opacity:.9}
   .msring{transition:stroke-opacity .3s}
@@ -351,10 +353,14 @@
   /* v18.1: the destination rides the same camera motion as the world, so it
      arrives EXACTLY at centre screen, growing all the way — and the chart
      blooms out of its ring while it is still settling: one motion, no dwell */
+  /* the target flies home by its OWN rendered offset (clamped/relaxed), not
+     the raw galaxy delta — so its ring centre lands exactly on the dial sun */
   .hero.flying .minisys.target{opacity:1;
-    transform:translate(calc(var(--flyx)*-1),calc(var(--flyy)*-1)) scale(2.3)}
-  .minisys.dissolve{opacity:0!important;transition:opacity .4s ease!important}
+    transform:translate(calc(var(--tox)*-1),calc(var(--toy)*-1)) scale(2.3)}
+  .minisys.dissolve{opacity:0!important;transition:opacity .55s ease!important}
   .hero.flying.arriving .dialwrap{transform:none;opacity:1;transition:none}
+  /* v18.2: the dial GROWS out of the aligned centre — slow, deliberate */
+  @keyframes bloom{from{transform:scale(.28);opacity:0}28%{opacity:1}to{transform:scale(1);opacity:1}}
   .minisys.settle{animation:settle 1s ease .2s backwards}
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
@@ -698,8 +704,13 @@ function renderGalaxy(settle){
     div.className = "minisys" + (settle ? " settle" : "");
     div.setAttribute("role", "button");
     div.setAttribute("aria-label", "Fly to " + hh.name);
-    div.style.left = (w / 2 + ox - 105) + "px";
-    div.style.top = (h / 2 + oy - 80) + "px";
+    // anchored so the RING CENTRE (118,95 in the svg) sits at the bearing
+    // point — a flight translating by -delta therefore lands the ring centre
+    // EXACTLY on the hero centre, concentric with the dial's sun
+    div.style.left = (w / 2 + ox - 118) + "px";
+    div.style.top = (h / 2 + oy - 95) + "px";
+    div.style.setProperty("--tox", ox + "px");
+    div.style.setProperty("--toy", oy + "px");
     div.style.opacity = dim;
     const label = hh.name.toUpperCase();
     const tw = Math.min(150, label.length * 6.6);
@@ -729,16 +740,19 @@ function flyTo(key, mini){
   mini.classList.add("target");
   camera = key;
   pointSky();               // the starfield streams to the new truth
-  // one continuous motion: as the constellation settles into centre screen,
-  // the chart blooms out of its ring — overlapping, never sequential
+  // one continuous motion in two beats that overlap by a breath: the flight
+  // lands the ring centre EXACTLY concentric with the dial's sun, and only
+  // then does the chart grow out of that shared centre — slow and deliberate
   setTimeout(() => {
     document.getElementById("dial-name").textContent = GALAXY[key].name;
     document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
       (key === "lawson" ? "owner" : "member");
     hero.classList.add("arriving");   // dial pinned at centre, under the ring
     mini.classList.add("dissolve");   // the ring hands the centre to the chart
-    replayArrival();
-  }, 900);
+    const dial = document.querySelector(".dial");
+    dial.style.animation = "none"; void dial.offsetWidth;
+    dial.style.animation = "bloom 1.6s cubic-bezier(.22,.61,.21,1) 1";
+  }, 1120);
   setTimeout(() => {
     const wrap = hero.querySelector(".dialwrap");
     wrap.style.transition = "none";
@@ -748,7 +762,7 @@ function flyTo(key, mini){
     wrap.style.transition = "";
     renderGalaxy(true);     // home appears on the reverse bearing of the flight
     flying = false;
-  }, 1520);
+  }, 1600);
 }
 
 /* ---- starfield: generated, two depth layers ---- */
