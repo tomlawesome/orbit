@@ -348,7 +348,13 @@
                          opacity:0}
   .hero.flying .minisys{opacity:.08;
     transform:translate(calc(var(--flyx)*-1),calc(var(--flyy)*-1))}
-  .hero.flying .minisys.target{opacity:1;transform:scale(1.85)}
+  /* v18.1: the destination rides the same camera motion as the world, so it
+     arrives EXACTLY at centre screen, growing all the way — and the chart
+     blooms out of its ring while it is still settling: one motion, no dwell */
+  .hero.flying .minisys.target{opacity:1;
+    transform:translate(calc(var(--flyx)*-1),calc(var(--flyy)*-1)) scale(2.3)}
+  .minisys.dissolve{opacity:0!important;transition:opacity .4s ease!important}
+  .hero.flying.arriving .dialwrap{transform:none;opacity:1;transition:none}
   .minisys.settle{animation:settle 1s ease .2s backwards}
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
@@ -723,21 +729,26 @@ function flyTo(key, mini){
   mini.classList.add("target");
   camera = key;
   pointSky();               // the starfield streams to the new truth
+  // one continuous motion: as the constellation settles into centre screen,
+  // the chart blooms out of its ring — overlapping, never sequential
   setTimeout(() => {
     document.getElementById("dial-name").textContent = GALAXY[key].name;
     document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
       (key === "lawson" ? "owner" : "member");
-    // snap the (invisible) old chart home with transitions off, so nothing
-    // is seen catching up — the new dial simply arrives with its fanfare
+    hero.classList.add("arriving");   // dial pinned at centre, under the ring
+    mini.classList.add("dissolve");   // the ring hands the centre to the chart
+    replayArrival();
+  }, 900);
+  setTimeout(() => {
     const wrap = hero.querySelector(".dialwrap");
     wrap.style.transition = "none";
     hero.classList.remove("flying");
+    hero.classList.remove("arriving");
     void wrap.offsetWidth;
     wrap.style.transition = "";
     renderGalaxy(true);     // home appears on the reverse bearing of the flight
-    replayArrival();
     flying = false;
-  }, 1280);
+  }, 1520);
 }
 
 /* ---- starfield: generated, two depth layers ---- */
