@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — brand mockups, third pass (proposal, issue #307)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+    --bg:#070d1f; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.78);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --sun:#ffe9c4;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;padding:56px 24px}
+  main{max-width:1320px;margin:0 auto}
+  h1{font-family:var(--display);font-size:29px;font-weight:600;letter-spacing:-.01em}
+  .lead{color:var(--ink-mid);max-width:680px;margin:12px 0 16px}
+  .back-links{display:flex;gap:10px;margin-bottom:48px}
+  .back{display:inline-block;font:12.5px var(--mono);color:var(--accent);
+        text-decoration:none;border:1px solid var(--line);border-radius:99px;
+        padding:4px 12px}
+  .back:hover{border-color:var(--accent)}
+  h2{font-family:var(--display);font-size:15px;font-weight:600;color:var(--ink-mid);
+     text-transform:uppercase;letter-spacing:.14em;margin:58px 0 8px}
+  h2 .num{color:var(--accent)}
+  p.section-lead{color:var(--ink-mid);max-width:720px;font-size:13.5px;margin:0 0 22px}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
+  .card{background:var(--panel-raised);border:1px solid var(--line);
+        border-radius:14px;padding:26px}
+  .card h3{font-family:var(--display);font-size:15.5px;font-weight:600;margin-bottom:6px}
+  .card p{font-size:13px;color:var(--ink-mid)}
+  .badge{display:inline-block;font:11px var(--mono);color:var(--accent);
+         border:1px solid var(--line);border-radius:99px;padding:2px 10px;
+         margin-bottom:16px;letter-spacing:.02em}
+  .badge.rec{color:#0a0f22;background:var(--accent);border-color:var(--accent)}
+  .stage{display:flex;align-items:center;justify-content:center;
+         height:180px;margin:4px 0 14px}
+  .weave-mark, .depart-mark{overflow:visible;display:block}
+  .weave-mark .word{font-family:var(--display);font-weight:700;fill:var(--ink)}
+  .reduction-solo{display:flex;align-items:center;justify-content:center;gap:12px;
+                  padding:16px 0 2px;border-top:1px solid var(--line-soft);margin-top:14px}
+  .reduction-solo span{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.04em}
+  .note{font-size:12.5px;color:var(--ink-faint);max-width:900px;margin-top:28px}
+  .note code{color:var(--ink-mid)}
+  footer{margin-top:70px;padding-top:20px;border-top:1px solid var(--line-soft);
+         font:12px var(--mono);color:var(--ink-faint)}
+
+  /* Part 2 — departures */
+  .depart-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}
+  .depart-card{background:var(--panel-raised);border:1px solid var(--line);
+               border-radius:14px;padding:22px;text-align:center;
+               display:flex;flex-direction:column}
+  .depart-card .stage{height:150px}
+  .depart-card h4{font-family:var(--display);font-size:13.5px;font-weight:600;
+                  letter-spacing:.02em;margin-bottom:4px}
+  .depart-card p.cap{font-size:12px;color:var(--ink-mid);flex:1}
+  .depart-mark .plain-word{font-family:var(--display);font-weight:700;fill:var(--ink)}
+  .mini32{display:flex;align-items:center;justify-content:center;gap:10px;
+          padding-top:12px;margin-top:12px;border-top:1px solid var(--line-soft)}
+  .mini32 span{font:10px var(--mono);color:var(--ink-faint)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Orbit — the mark, third pass</h1>
+  <p class="lead">Both wordmark passes so far — concept B's small ring beside
+  the word and B′'s whole-word sweep, whose ring only ever ran behind on its
+  far arc and in front on its near one — were turned down. This round works
+  from the owner's own sketch instead: a large, noticeably tilted ring
+  threaded <em>through</em> the word, weaving in front of some strokes and
+  genuinely behind others, with a small world riding the ring near its
+  upper crossing. Part 1 pushes that one idea through four finishes. Part 2
+  sets it aside and tries five different ways the mark could carry the
+  identity instead.</p>
+  <div class="back-links">
+    <a class="back" href="mockups-brand-v2.html">← mockups-brand-v2.html (second pass)</a>
+    <a class="back" href="mockups-brand.html">← mockups-brand.html (first pass)</a>
+  </div>
+
+  <h2><span class="num">Part 1</span> — B³ · the threaded ring</h2>
+  <p class="section-lead">One geometry, hand-tuned once and reused by every
+  finish below: a wide ellipse tilted ~28°, pulled left and up from the
+  word's centre so its true apex — the ring's actual topmost point — sits
+  clear in the air above and right of the t. From the apex the ring sweeps
+  down and left: the moment its height crosses the word's tallest ascender,
+  paint order flips to <em>behind</em>; the moment it drops back past the
+  baseline, it flips to <em>front</em> again for the long way home under
+  the word and back up to the apex. Nothing about that flip is per-letter —
+  it's one continuous dive past real ink, so whichever strokes happen to
+  sit in the way (here: the t, the i, and the b) genuinely occlude the ring
+  where their ink is, and let it show through in the gaps between.</p>
+
+  <div class="row">
+
+    <div class="card">
+      <span class="badge rec">B³ · gold weave</span>
+      <div class="stage">
+        <svg class="weave-mark" data-mode="weave" data-colorway="gold" width="220" height="181" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark with a gold ring weaving in front of and behind the letters">
+          <defs>
+            <radialGradient id="g1h" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g1h)"/>
+          <circle class="planet" fill="#d8b45a"/>
+        </svg>
+      </div>
+      <h3>Gold weave</h3>
+      <p>The ring in one accent colour throughout — front and behind
+      segments read as the same material, so the weave is carried entirely
+      by occlusion, not by a colour or opacity cheat.</p>
+      <div class="reduction-solo">
+        <svg class="weave-mark" data-mode="weave" data-colorway="gold" width="140" height="115" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark, gold weave, small">
+          <defs>
+            <radialGradient id="g1s" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g1s)"/>
+          <circle class="planet" fill="#d8b45a"/>
+        </svg>
+        <span>~140px wide</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="badge">quiet</span>
+      <div class="stage">
+        <svg class="weave-mark" data-mode="weave" data-colorway="slate" width="220" height="181" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark with a muted slate ring and a gold planet">
+          <defs>
+            <radialGradient id="g2h" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g2h)"/>
+          <circle class="planet" fill="#d8b45a"/>
+        </svg>
+      </div>
+      <h3>Slate ring, gold planet</h3>
+      <p>Document-friendly: the ring recedes to ink-mid slate, the only
+      colour left is the planet itself, so the eye has exactly one warm
+      thing to land on.</p>
+      <div class="reduction-solo">
+        <svg class="weave-mark" data-mode="weave" data-colorway="slate" width="140" height="115" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark, slate weave, small">
+          <defs>
+            <radialGradient id="g2s" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#8791b3" stroke-width="3.6" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g2s)"/>
+          <circle class="planet" fill="#d8b45a"/>
+        </svg>
+        <span>~140px wide</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="badge">gaps</span>
+      <div class="stage">
+        <svg class="weave-mark" data-mode="gap" data-colorway="gold" width="220" height="181" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark, ring drawn in front with a small gap where it crosses the ascenders">
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+        </svg>
+      </div>
+      <h3>Threaded gaps</h3>
+      <p>No occlusion pass at all — the ring is one front layer with a
+      clean notch cut exactly where it would cross a stroke, so the letters
+      read as sitting <em>through</em> a slot in the ring rather than
+      blocking it.</p>
+      <div class="reduction-solo">
+        <svg class="weave-mark" data-mode="gap" data-colorway="gold" width="140" height="115" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark, gap variant, small">
+          <g class="ring-behind">
+            <path class="seg-behind" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="#d8b45a" stroke-width="4.2" stroke-linecap="round"/>
+          </g>
+        </svg>
+        <span>~140px wide</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <span class="badge">alive</span>
+      <div class="stage">
+        <svg class="weave-mark" data-mode="gradient" data-colorway="gold" width="220" height="181" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark with a glowing gradient ring, bright near the planet">
+          <defs>
+            <linearGradient class="ring-grad" id="rg4h">
+              <stop offset="0%" stop-color="#ffe9c4"/>
+              <stop offset="55%" stop-color="#d8b45a"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity=".25"/>
+            </linearGradient>
+            <radialGradient id="g4h" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="blur4h" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="4.5"/>
+            </filter>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind glow-echo" fill="none" stroke="url(#rg4h)" stroke-width="9" opacity=".45" filter="url(#blur4h)"/>
+            <path class="seg-behind" fill="none" stroke="url(#rg4h)" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main glow-echo" fill="none" stroke="url(#rg4h)" stroke-width="9" opacity=".45" filter="url(#blur4h)"/>
+            <path class="seg-top glow-echo" fill="none" stroke="url(#rg4h)" stroke-width="9" opacity=".45" filter="url(#blur4h)"/>
+            <path class="seg-main" fill="none" stroke="url(#rg4h)" stroke-width="4" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="url(#rg4h)" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g4h)"/>
+          <circle class="planet" fill="#ffe9c4"/>
+        </svg>
+      </div>
+      <h3>Gradient glow</h3>
+      <p>The stroke itself carries a gradient, brightest beside the planet
+      and fading toward the far side, plus a soft blurred echo of the ring
+      underneath — the version that reads as lit, not printed.</p>
+      <div class="reduction-solo">
+        <svg class="weave-mark" data-mode="gradient" data-colorway="gold" width="140" height="115" viewBox="0 0 340 280" role="img" aria-label="orbit wordmark, gradient glow, small">
+          <defs>
+            <linearGradient class="ring-grad" id="rg4s">
+              <stop offset="0%" stop-color="#ffe9c4"/>
+              <stop offset="55%" stop-color="#d8b45a"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity=".25"/>
+            </linearGradient>
+            <radialGradient id="g4s" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="blur4s" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="4.5"/>
+            </filter>
+          </defs>
+          <g class="ring-behind">
+            <path class="seg-behind glow-echo" fill="none" stroke="url(#rg4s)" stroke-width="9" opacity=".45" filter="url(#blur4s)"/>
+            <path class="seg-behind" fill="none" stroke="url(#rg4s)" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <text class="word" x="90" y="175" font-size="92">orbit</text>
+          <g class="ring-front">
+            <path class="seg-main glow-echo" fill="none" stroke="url(#rg4s)" stroke-width="9" opacity=".45" filter="url(#blur4s)"/>
+            <path class="seg-top glow-echo" fill="none" stroke="url(#rg4s)" stroke-width="9" opacity=".45" filter="url(#blur4s)"/>
+            <path class="seg-main" fill="none" stroke="url(#rg4s)" stroke-width="4" stroke-linecap="round"/>
+            <path class="seg-top" fill="none" stroke="url(#rg4s)" stroke-width="4" stroke-linecap="round"/>
+          </g>
+          <circle class="planet-glow" fill="url(#g4s)"/>
+          <circle class="planet" fill="#ffe9c4"/>
+        </svg>
+        <span>~140px wide</span>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="note"><b>Split points, not eyeballed per-mark:</b> every card
+  above shares one <code>buildWeaveMark()</code> pass. It measures the
+  rendered word's box and, for the letters most likely to carry an
+  ascender, the actual ink top via canvas metrics — not a guessed pixel
+  value. From those it builds one ellipse (tilt, radius factors and a
+  centre offset are the hand-tuned constants), samples it to find the true
+  apex, then walks forward from the apex until the curve's height crosses
+  the tallest ascender — that's where paint order flips to
+  <code>behind</code> — and walks on until it crosses the baseline, where
+  it flips back to <code>front</code>. Everywhere else the ring is front by
+  default, since there's no ink up there to hide it anyway. The only
+  numbers nudged by eye were the ellipse's tilt, size and centre — enough
+  attempts to get that one dive to land squarely on the ascenders instead
+  of floating clear of the word.</p>
+
+  <h2><span class="num">Part 2</span> — five departures</h2>
+  <p class="section-lead">Five different bets on what carries "orbit" if
+  the ring isn't the answer — each a single idea, pushed with the same
+  layered-glow craft bar as the rest of the family: no flat clip-art.</p>
+
+  <div class="depart-row">
+
+    <div class="depart-card">
+      <span class="badge">01</span>
+      <div class="stage">
+        <svg class="depart-mark" width="230" height="150" viewBox="0 0 300 200" role="img" aria-label="the word orbit spelled as a star constellation">
+          <defs>
+            <radialGradient id="starGlowSm" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#e9edf8" stop-opacity=".9"/>
+              <stop offset="100%" stop-color="#e9edf8" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="starGlowLg" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g fill="none" stroke="#243259" stroke-width="1">
+            <polyline points="20,80 15,105 22,128 38,138 54,130 58,105 50,82 34,74 20,80"/>
+            <polyline points="70,138 70,78 92,78 100,88 92,98 70,98"/>
+            <polyline points="112,138 112,78 134,78 141,88 134,98 112,98 141,98 148,118 141,138 112,138"/>
+            <polyline points="164,138 164,80"/>
+            <polyline points="188,80 214,80 201,80 201,138"/>
+          </g>
+          <g fill="#e9edf8">
+            <circle cx="20" cy="80" r="2.6"/><circle cx="15" cy="105" r="1.8"/>
+            <circle cx="22" cy="128" r="2.2"/><circle cx="38" cy="138" r="1.6"/>
+            <circle cx="54" cy="130" r="2"/><circle cx="58" cy="105" r="1.6"/>
+            <circle cx="50" cy="82" r="2.4"/><circle cx="34" cy="74" r="1.8"/>
+            <circle cx="70" cy="138" r="2"/><circle cx="70" cy="78" r="2.2"/>
+            <circle cx="92" cy="78" r="1.8"/><circle cx="100" cy="88" r="1.6"/>
+            <circle cx="92" cy="98" r="1.8"/>
+            <circle cx="112" cy="138" r="2.2"/><circle cx="112" cy="78" r="2.4"/>
+            <circle cx="134" cy="78" r="1.8"/><circle cx="141" cy="88" r="1.6"/>
+            <circle cx="134" cy="98" r="1.8"/><circle cx="141" cy="98" r="1.6"/>
+            <circle cx="148" cy="118" r="1.8"/><circle cx="141" cy="138" r="2"/>
+            <circle cx="164" cy="138" r="2.4"/>
+            <circle cx="188" cy="80" r="2"/><circle cx="214" cy="80" r="2"/>
+            <circle cx="201" cy="138" r="2.4"/>
+          </g>
+          <circle cx="164" cy="80" r="10" fill="url(#starGlowLg)"/>
+          <circle cx="164" cy="80" r="3.2" fill="#d8b45a"/>
+          <text x="150" y="178" text-anchor="middle" font-family="var(--mono)" font-size="13" letter-spacing="4" fill="#8791b3">ORBIT</text>
+          <path d="M 105 186 L 165 186 L 195 191" fill="none" stroke="#4d5878" stroke-width="1"/>
+          <path d="M 190 188 L 197 191 L 190 194" fill="none" stroke="#4d5878" stroke-width="1"/>
+        </svg>
+      </div>
+      <h4>The constellation</h4>
+      <p class="cap">Stars of varying weight, joined by survey lines that
+      loosely trace the letterforms; the mono label carries a veering
+      bearing-line beneath it, straight off the chart's own grammar.</p>
+    </div>
+
+    <div class="depart-card">
+      <span class="badge">02</span>
+      <div class="stage">
+        <svg class="depart-mark" width="230" height="150" viewBox="0 0 300 200" role="img" aria-label="a total eclipse mark beside the plain orbit wordmark">
+          <defs>
+            <radialGradient id="corGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".95"/>
+              <stop offset="55%" stop-color="#d8b45a" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="corBlur" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur stdDeviation="2.4"/>
+            </filter>
+          </defs>
+          <g transform="translate(64,100)">
+            <circle r="30" fill="url(#corGlow)"/>
+            <path d="M -2 -34 C 4 -46 -8 -50 -3 -60" stroke="#ffe9c4" stroke-width="1.6" fill="none" opacity=".8" filter="url(#corBlur)"/>
+            <path d="M 26 -18 C 40 -20 42 -34 54 -32" stroke="#ffe9c4" stroke-width="1.4" fill="none" opacity=".7" filter="url(#corBlur)"/>
+            <path d="M 22 22 C 32 30 30 44 42 48" stroke="#ffe9c4" stroke-width="1.4" fill="none" opacity=".7" filter="url(#corBlur)"/>
+            <circle r="21" fill="none" stroke="#ffe9c4" stroke-width="2" opacity=".95"/>
+            <circle r="18.5" fill="#05070f"/>
+          </g>
+          <text x="106" y="107" font-family="var(--display)" font-weight="700" font-size="42" fill="#e9edf8">orbit</text>
+        </svg>
+      </div>
+      <h4>Totality</h4>
+      <p class="cap">The maintenance identity distilled to an app-mark: a
+      black disc, a blazing thin ring, corona wisps — physics doing the
+      work a flat icon can't.</p>
+      <div class="mini32">
+        <svg width="32" height="32" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <radialGradient id="corGlow32" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="32" cy="32" r="24" fill="url(#corGlow32)"/>
+          <circle cx="32" cy="32" r="17" fill="none" stroke="#ffe9c4" stroke-width="2.4"/>
+          <circle cx="32" cy="32" r="14.5" fill="#05070f"/>
+        </svg>
+        <span>32px</span>
+      </div>
+    </div>
+
+    <div class="depart-card">
+      <span class="badge">03</span>
+      <div class="stage">
+        <svg class="depart-mark" width="230" height="150" viewBox="0 0 300 200" role="img" aria-label="the word orbit where the o is a miniature gravity-well dial">
+          <defs>
+            <radialGradient id="sunPt" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".95"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <g transform="translate(66,101)">
+            <circle r="38" fill="none" stroke="#243259" stroke-width="1.4"/>
+            <circle r="25" fill="none" stroke="#4d5878" stroke-width="1.2" stroke-dasharray="2.5 4"/>
+            <circle r="9" fill="url(#sunPt)"/>
+            <circle r="3.4" fill="#ffe9c4"/>
+            <circle cx="26.9" cy="-26.9" r="4" fill="#d8b45a"/>
+          </g>
+          <text x="102" y="118" font-family="var(--display)" font-weight="700" font-size="80" fill="#e9edf8">rbit</text>
+        </svg>
+      </div>
+      <h4>The dial O</h4>
+      <p class="cap">The o becomes the gravity-well dial itself — two
+      rings, a sun, one accent body, a dashed threshold — the rest of the
+      word plain so the system reads instantly.</p>
+      <div class="mini32">
+        <svg width="32" height="32" viewBox="0 0 64 64" aria-hidden="true">
+          <g transform="translate(32,32)">
+            <circle r="27" fill="none" stroke="#243259" stroke-width="2"/>
+            <circle r="17" fill="none" stroke="#4d5878" stroke-width="1.6" stroke-dasharray="2 4"/>
+            <circle r="6" fill="#ffe9c4"/>
+            <circle cx="19" cy="-19" r="3" fill="#d8b45a"/>
+          </g>
+        </svg>
+        <span>32px</span>
+      </div>
+    </div>
+
+    <div class="depart-card">
+      <span class="badge">04</span>
+      <div class="stage">
+        <svg class="depart-mark" width="230" height="150" viewBox="0 0 300 200" role="img" aria-label="the word orbit with a four-point glint star as the dot of the i">
+          <defs>
+            <linearGradient id="glintLine" x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity="0"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity=".8"/>
+            </linearGradient>
+            <radialGradient id="glintGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".9"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <text x="52" y="130" font-family="var(--display)" font-weight="700" font-size="80" fill="#e9edf8">orb<tspan>ı</tspan>t</text>
+          <line x1="177" y1="18" x2="177" y2="52" stroke="url(#glintLine)" stroke-width="1.6"/>
+          <circle cx="177" cy="60" r="11" fill="url(#glintGlow)"/>
+          <path d="M177 51 L180.4 57.6 L187 61 L180.4 64.4 L177 71 L173.6 64.4 L167 61 L173.6 57.6 Z" fill="#ffe9c4"/>
+        </svg>
+      </div>
+      <h4>North star</h4>
+      <p class="cap">No ring at all: the create star itself — the same
+      four-point glint from the sky's own top-centre — stands in for the
+      dot of the i, a thin glint rising above it.</p>
+      <div class="mini32">
+        <svg width="32" height="32" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <radialGradient id="glintGlow32" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".9"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="32" cy="32" r="19" fill="url(#glintGlow32)"/>
+          <path d="M32 14 L37 27 L50 32 L37 37 L32 50 L27 37 L14 32 L27 27 Z" fill="#ffe9c4"/>
+        </svg>
+        <span>32px</span>
+      </div>
+    </div>
+
+    <div class="depart-card">
+      <span class="badge">05</span>
+      <div class="stage">
+        <svg class="depart-mark" width="230" height="150" viewBox="0 0 300 200" role="img" aria-label="the word orbit with a comet streaking in and crossing the final t">
+          <defs>
+            <linearGradient id="cometTail" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity="0"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity=".85"/>
+            </linearGradient>
+            <radialGradient id="cometHead" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#ffe9c4" stop-opacity="1"/>
+              <stop offset="100%" stop-color="#ffe9c4" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="tailBlur" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="2"/>
+            </filter>
+          </defs>
+          <path class="tail-behind" d="M 14 8 C 50 26 84 72 118 122" fill="none" stroke="url(#cometTail)" stroke-width="2.4" opacity=".6" filter="url(#tailBlur)"/>
+          <text x="52" y="130" font-family="var(--display)" font-weight="700" font-size="80" fill="#e9edf8">orbit</text>
+          <path class="tail-front" d="M 118 122 C 150 148 190 96 206 92 C 216 89 224 96 230 104" fill="none" stroke="url(#cometTail)" stroke-width="2.8"/>
+          <circle cx="233" cy="107" r="9" fill="url(#cometHead)"/>
+          <circle cx="233" cy="107" r="3" fill="#ffe9c4"/>
+        </svg>
+      </div>
+      <h4>The comet T</h4>
+      <p class="cap">The word set plain; a comet streaks in from the
+      upper-left, its tail passing behind o and r, its bright head crossing
+      the final t at speed — motion held in a still.</p>
+    </div>
+
+  </div>
+
+  <footer>orbit · brand proposal, third pass · issue #307 · responds to
+  owner sketch and feedback on mockups-brand-v2.html · nothing here is
+  implemented</footer>
+</main>
+
+<script>
+(function(){
+  function ellipsePt(cx, cy, rx, ry, thetaDeg, tDeg){
+    var theta = thetaDeg * Math.PI/180, t = tDeg * Math.PI/180;
+    var cosT = Math.cos(theta), sinT = Math.sin(theta);
+    var ex = rx*Math.cos(t), ey = ry*Math.sin(t);
+    return { x: cx + ex*cosT - ey*sinT, y: cy + ex*sinT + ey*cosT };
+  }
+  function findApexT(cx,cy,rx,ry,thetaDeg){
+    var minY = Infinity, minT = 0;
+    for(var t = 0; t < 360; t += 0.1){
+      var p = ellipsePt(cx,cy,rx,ry,thetaDeg,t);
+      if(p.y < minY){ minY = p.y; minT = t; }
+    }
+    return minT;
+  }
+  function arcPath(cx,cy,rx,ry,thetaDeg,t1,t2){
+    if(t2 <= t1) t2 += 360;
+    var p1 = ellipsePt(cx,cy,rx,ry,thetaDeg,t1);
+    var p2 = ellipsePt(cx,cy,rx,ry,thetaDeg,t2);
+    var largeArc = (Math.abs(t2-t1) > 180) ? 1 : 0;
+    return 'M ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2) +
+           ' A ' + rx.toFixed(2) + ' ' + ry.toFixed(2) + ' ' + thetaDeg +
+           ' ' + largeArc + ' 1 ' + p2.x.toFixed(2) + ' ' + p2.y.toFixed(2);
+  }
+
+  // ---- hand-tuned constants: the whole family shares this one geometry ----
+  var RX_FACTOR   = 1.52;   // ring half-width vs half word width
+  var RY_EM       = 0.435;  // ring half-height, in font-size units
+  var THETA_DEG   = -28;    // tilt
+  var CX_SHIFT_EM = -0.283; // pull ring centre left of the word's centre
+  var CY_SHIFT_EM = 0.446;  // ring centre above the baseline
+  var PLANET_LEAD = 5;      // planet sits this many degrees before the dive
+
+  function buildWeaveMark(svg){
+    var text = svg.querySelector('.word');
+    if(!text) return;
+    var fontSize = parseFloat(text.getAttribute('font-size')) || 92;
+    var baselineY = parseFloat(text.getAttribute('y'));
+    var wordBBox = text.getBBox();
+
+    // real ink top for the tallest ascender in the word, measured (not
+    // guessed) via canvas metrics on the same font/weight/size as the SVG
+    // text, same technique used for the dotless-i tittle in v2.
+    var canvas = document.createElement('canvas');
+    var cctx = canvas.getContext('2d');
+    var cs = getComputedStyle(text);
+    cctx.font = cs.fontWeight + ' ' + fontSize + 'px ' + cs.fontFamily;
+    var inkTop = baselineY;
+    ['b','d','i','k','l','t'].forEach(function(ch){
+      var m = cctx.measureText(ch);
+      var top = baselineY - m.actualBoundingBoxAscent;
+      if(top < inkTop) inkTop = top;
+    });
+
+    var cx = wordBBox.x + wordBBox.width*0.5 + fontSize*CX_SHIFT_EM;
+    var cy = baselineY - fontSize*CY_SHIFT_EM;
+    var rx = wordBBox.width*0.5*RX_FACTOR;
+    var ry = fontSize*RY_EM;
+
+    var apexT = findApexT(cx,cy,rx,ry,THETA_DEG);
+
+    // walk forward from the apex until the ring's own height crosses the
+    // tallest ascender (enter — flip to behind) and then the baseline
+    // (exit — flip back to front). This is geometry, not a per-letter
+    // lookup: whatever strokes actually sit in that height range occlude
+    // the ring for real, and show it through wherever their ink doesn't
+    // reach the full width of their advance box.
+    var tEnter = null, tExit = null;
+    for(var step = 0; step <= 7200; step++){
+      var t = apexT + step*0.05;
+      var p = ellipsePt(cx,cy,rx,ry,THETA_DEG,t);
+      if(tEnter === null && p.y >= inkTop){ tEnter = t; }
+      if(tEnter !== null && p.y >= baselineY){ tExit = t; break; }
+    }
+    if(tEnter === null) tEnter = apexT + 90;
+    if(tExit === null) tExit = tEnter + 40;
+
+    var mode = svg.getAttribute('data-mode') || 'weave';
+
+    setD(svg, '.seg-top',  arcPath(cx,cy,rx,ry,THETA_DEG, apexT, tEnter));
+    setD(svg, '.seg-main', arcPath(cx,cy,rx,ry,THETA_DEG, tExit, apexT+360));
+
+    if(mode === 'gap'){
+      setD(svg, '.seg-behind', '');
+    } else {
+      setD(svg, '.seg-behind', arcPath(cx,cy,rx,ry,THETA_DEG, tEnter, tExit));
+    }
+
+    var planetT = apexT + Math.max(0, (tEnter - apexT) - PLANET_LEAD);
+    var pp = ellipsePt(cx,cy,rx,ry,THETA_DEG,planetT);
+    var r = fontSize * 0.085;
+    var planet = svg.querySelector('.planet');
+    var glow = svg.querySelector('.planet-glow');
+    if(planet){ planet.setAttribute('cx',pp.x); planet.setAttribute('cy',pp.y); planet.setAttribute('r',r); }
+    if(glow){ glow.setAttribute('cx',pp.x); glow.setAttribute('cy',pp.y); glow.setAttribute('r', r*3.1); }
+
+    if(mode === 'gradient'){
+      var grad = svg.querySelector('.ring-grad');
+      if(grad){
+        var farP = ellipsePt(cx,cy,rx,ry,THETA_DEG, planetT+180);
+        grad.setAttribute('gradientUnits','userSpaceOnUse');
+        grad.setAttribute('x1', pp.x); grad.setAttribute('y1', pp.y);
+        grad.setAttribute('x2', farP.x); grad.setAttribute('y2', farP.y);
+      }
+    }
+  }
+  function setD(svg, sel, d){
+    var els = svg.querySelectorAll(sel);
+    els.forEach(function(el){ el.setAttribute('d', d); });
+  }
+
+  // Space Grotesk is a webfont; if the geometry solve runs before it swaps
+  // in, it bakes the ring to the fallback font's (narrower) metrics and the
+  // real glyphs drift out from under it once the real font arrives. Build
+  // only once the font is actually ready, and rebuild once more after full
+  // load as a belt-and-braces guard against any late reflow.
+  function buildAll(){
+    document.querySelectorAll('.weave-mark').forEach(buildWeaveMark);
+  }
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(buildAll);
+  } else {
+    buildAll();
+  }
+  window.addEventListener('load', buildAll);
+})();
+</script>
+</body>
+</html>
