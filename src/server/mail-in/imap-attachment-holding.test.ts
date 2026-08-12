@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { syntheticPdf } from "../../tests/support/synthetic-documents";
+import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 
 const originalEnvironment = { ...process.env };

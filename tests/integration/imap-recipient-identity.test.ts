@@ -10,7 +10,7 @@ import {
   setImapClientFactoryForTests,
   type ImapIngestionConfig,
 } from "@/server/imap-ingestion";
-import { digestImapAliasConfiguration, digestImapRecipientAlias } from "@/server/imap-recipient";
+import { digestImapAliasConfiguration, digestImapRecipientAlias } from "@/server/mail-in/core/imap-recipient";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
 
