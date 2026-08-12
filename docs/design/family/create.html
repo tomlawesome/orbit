@@ -1,38 +1,75 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — new entry — genesis</title>
+<title>Orbit — new entry — one form, unfolding</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="family.css">
 <style>
-.wrap{display:grid;grid-template-columns:1fr 380px;gap:30px;align-items:center;
-      max-width:940px;width:100%;padding:0 30px}
-.nebula{position:relative;height:420px;display:grid;place-items:center;cursor:pointer}
-.blob{width:190px;height:190px;border-radius:50%;filter:blur(26px);opacity:.5;
-      background:radial-gradient(circle at 42% 40%, #8fb8ff 0%, #d8b45a44 55%, transparent 75%);
-      animation:churn 9s ease-in-out infinite alternate;transition:all 1.2s}
-@keyframes churn{from{transform:scale(1) rotate(0)}to{transform:scale(1.18) rotate(40deg)}}
-.nebula.condensed .blob{width:60px;height:60px;filter:blur(4px);opacity:.95;
-      background:radial-gradient(circle at 40% 36%, #fff8 0%, var(--upcoming) 40%, #26426e 90%)}
-.nebula .say{position:absolute;bottom:36px;font:11px var(--mono);color:var(--ink-faint);
-             letter-spacing:.1em;text-align:center}
-.nebula .ringed{position:absolute;width:120px;height:44px;border:1px solid var(--accent);
-      border-radius:50%;opacity:0;transform:rotate(-22deg);transition:opacity 1s .6s}
-.nebula.condensed .ringed{opacity:.7}
-.form{padding:26px 28px}
-.form h2{font:600 19px var(--display);margin-bottom:16px}
-.form label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
-            text-transform:uppercase;margin:13px 0 5px}
-.form input,.form select{width:100%;background:var(--panel);border:1px solid var(--line);
-       border-radius:9px;color:var(--ink);font-size:13.5px;padding:8px 12px}
-.types{display:flex;gap:8px}
-.types button{flex:1;font:11px var(--mono);color:var(--ink-mid);background:var(--panel);
-              border:1px solid var(--line);border-radius:9px;padding:7px 4px;cursor:pointer}
-.types button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
-.go{margin-top:20px;width:100%;padding:12px;border-radius:11px;border:0;cursor:pointer;
-    font:600 14px var(--display);color:var(--bg);background:var(--accent)}
-.sugg{font:10.5px var(--mono);color:var(--upcoming);margin-top:10px;opacity:0;transition:opacity .8s .8s}
-.wrap.suggested .sugg{opacity:1}
+body{overflow-y:auto;overflow-x:hidden}
+.sky svg{opacity:.55}
+.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;justify-content:center;
+       padding:64px 20px 96px}
+.card{width:100%;max-width:600px;padding:34px 38px}
+.card h2{font:600 22px var(--display)}
+.sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 26px}
+
+.field{margin-bottom:15px}
+.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+             text-transform:uppercase;margin:0 0 6px}
+.field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+.field input::placeholder{color:var(--ink-faint)}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}
+.field textarea{resize:vertical;line-height:1.5}
+.field.mono input{font-family:var(--mono)}
+
+.name-field input{font:500 17px var(--display);padding:13px 14px}
+
+.types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+              border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
+.types button:hover{color:var(--ink)}
+.types button[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:rgba(216,180,90,.08)}
+
+.dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:22px;text-align:center;
+          cursor:pointer;transition:border-color .2s,background .2s}
+.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04);outline:none}
+.dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
+.dropzone .dz-hint{font:10px var(--mono);color:var(--ink-faint);margin-top:7px;letter-spacing:.06em}
+
+.disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .4s ease,opacity .3s ease}
+.disclose.open{grid-template-rows:1fr;opacity:1}
+.disclose-inner{overflow:hidden}
+.disclose-content{padding-top:24px;margin-top:22px;border-top:1px solid var(--line-soft)}
+
+.docnote{display:none;font:10.5px var(--mono);color:var(--ink-faint);line-height:1.6;margin:0 0 18px}
+.docnote.show{display:block}
+
+.row2{display:flex;gap:14px}
+.row2>.field{flex:1;min-width:0}
+.daterow{display:flex;gap:14px}
+.daterow .f-date{flex:1.4}
+.daterow .f-recur{flex:1}
+
+.prefix-wrap{position:relative}
+.prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
+                      color:var(--ink-mid);font-size:13.5px;pointer-events:none}
+.prefix-wrap input{padding-left:24px}
+
+.field.sugg input,.field.sugg select{border-left:3px solid var(--accent)}
+.field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
+            color:var(--accent);letter-spacing:.04em}
+.field.sugg .tag{display:flex}
+.field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
+                   border-radius:6px;padding:2px 9px;cursor:pointer}
+.field .tag button:hover{filter:brightness(1.12)}
+
+.save-row{display:flex;align-items:center;gap:18px;margin-top:24px}
+.btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
+             font:600 14px var(--display);color:var(--bg);background:var(--accent)}
+.btn-primary:hover{filter:brightness(1.05)}
+.cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
+.cancel-link:hover{color:var(--ink-mid)}
 </style></head><body>
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
 <g fill="#e9edf8"><circle cx="173.1" cy="785.9" r="0.56" opacity="0.26"/>
@@ -125,37 +162,161 @@
       <circle cx="33.4" cy="635.3" r="0.78" opacity="0.25"/>
       <circle cx="703.3" cy="731.6" r="0.74" opacity="0.27"/>
       <circle cx="880.6" cy="672.9" r="0.76" opacity="0.14"/></g></svg></div>
-<div class="stage"><div class="wrap" id="wrap">
-  <div class="nebula" id="nebula" onclick="condense()" role="button"
-       aria-label="Drop a document to begin">
-    <div class="ringed"></div><div class="blob"></div>
-    <div class="say">DROP A DOCUMENT &middot; OR CLICK TO SIMULATE<br>matter becomes a world</div>
-  </div>
-  <form class="form glass" onsubmit="return false">
-    <h2>New orbit</h2>
-    <label>name</label><input id="f-name" placeholder="what needs keeping on track?">
-    <label>type</label><div class="types">
-      <button type="button" aria-pressed="true">&#9679; service</button>
-      <button type="button" aria-pressed="false">&#9678; renewal</button>
-      <button type="button" aria-pressed="false">&#9681; inspection</button></div>
-    <label>orbital period</label><select><option>1 year</option><option>6 months</option><option>2 years</option><option>once</option></select>
-    <label>next due</label><input id="f-due" placeholder="date">
-    <label>typical cost</label><input id="f-cost" placeholder="optional">
-    <div class="sugg">&#9670; suggested from your document &mdash; review before accepting</div>
-    <button class="go">Set into orbit</button>
+<div class="stage">
+  <form class="glass card" id="card" onsubmit="return false">
+    <h2>New entry</h2>
+    <div class="sub">add something to your orbit</div>
+
+    <div class="field name-field">
+      <label>name</label>
+      <input id="f-name" placeholder="what is it? — e.g. car insurance, boiler service" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label>type</label>
+      <div class="types" id="types">
+        <button type="button" data-type="service" aria-pressed="false">&#9679; service</button>
+        <button type="button" data-type="renewal" aria-pressed="false">&#9673; renewal</button>
+        <button type="button" data-type="inspection" aria-pressed="false">&#9681; inspection</button>
+        <button type="button" data-type="suggestion" aria-pressed="false">&#9675; suggestion</button>
+        <button type="button" data-type="document" aria-pressed="false">&#9670; document</button>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="drop a document to begin, or press enter to simulate">
+      <div class="dz-main">drop a document — we'll read what we can</div>
+      <div class="dz-hint mono">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</div>
+    </div>
+
+    <div class="disclose" id="disclose">
+      <div class="disclose-inner"><div class="disclose-content">
+
+        <div class="docnote mono" id="docnote">suggestions come from the document — nothing is saved until you accept</div>
+
+        <div class="row2">
+          <div class="field" id="field-provider">
+            <label>provider</label>
+            <input id="f-provider" placeholder="e.g. Aviva">
+            <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-provider">&#10003; accept</button></div>
+          </div>
+          <div class="field mono" id="field-ref">
+            <label>reference / policy no.</label>
+            <input id="f-ref" placeholder="e.g. POL-004471">
+            <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-ref">&#10003; accept</button></div>
+          </div>
+        </div>
+
+        <div class="daterow">
+          <div class="field f-date" id="field-date">
+            <label>key date</label>
+            <input id="f-date" type="date">
+            <div class="tag">&#9670; from document <button type="button" class="accept" data-accept="field-date">&#10003; accept</button></div>
+          </div>
+          <div class="field f-recur">
+            <label>recurrence</label>
+            <select id="f-recur">
+              <option value="once">one-off</option>
+              <option value="monthly">monthly</option>
+              <option value="yearly" selected>yearly</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row2">
+          <div class="field">
+            <label>cost</label>
+            <div class="prefix-wrap"><span class="prefix">&pound;</span>
+              <input id="f-cost" type="number" min="0" step="0.01" placeholder="0.00"></div>
+          </div>
+          <div class="field">
+            <label>reminder</label>
+            <select id="f-reminder">
+              <option value="7">1 week before</option>
+              <option value="14" selected>2 weeks before</option>
+              <option value="30">1 month before</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>assign to</label>
+          <select id="f-assign">
+            <option value="">household &middot; shared</option>
+            <option>Tom</option>
+            <option>Sarah</option>
+            <option>Isla</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>notes</label>
+          <textarea id="f-notes" rows="2" placeholder="anything else worth keeping"></textarea>
+        </div>
+
+        <div class="save-row">
+          <button type="submit" class="btn-primary">Add to orbit</button>
+          <a href="#" class="cancel-link">cancel</a>
+        </div>
+
+      </div></div>
+    </div>
   </form>
-</div></div>
+</div>
 <script>
-function condense(){
-  document.getElementById("nebula").classList.add("condensed");
-  document.getElementById("wrap").classList.add("suggested");
-  setTimeout(() => {
-    document.getElementById("f-name").value = "Home insurance renewal";
-    document.getElementById("f-due").value = "02 Oct 2026";
-    document.getElementById("f-cost").value = "~£400";
-  }, 900);
+var disclose = document.getElementById('disclose');
+var dropzone = document.getElementById('dropzone');
+var nameInput = document.getElementById('f-name');
+var docnote = document.getElementById('docnote');
+var typeButtons = document.querySelectorAll('#types button');
+
+function reveal(){
+  disclose.classList.add('open');
 }
+
+typeButtons.forEach(function(btn){
+  btn.addEventListener('click', function(){
+    typeButtons.forEach(function(b){ b.setAttribute('aria-pressed', 'false'); });
+    btn.setAttribute('aria-pressed', 'true');
+    reveal();
+  });
+});
+
+nameInput.addEventListener('input', function(){
+  if (nameInput.value.trim().length >= 3) reveal();
+});
+
+function markSuggested(fieldId){
+  var field = document.getElementById(fieldId);
+  field.classList.add('sugg');
+}
+
+function acceptSuggestion(fieldId){
+  document.getElementById(fieldId).classList.remove('sugg');
+}
+
+function simulateExtraction(){
+  reveal();
+  document.getElementById('f-provider').value = 'British Gas';
+  document.getElementById('f-ref').value = 'BG-88214-HC';
+  document.getElementById('f-date').value = '2026-11-02';
+  ['field-provider', 'field-ref', 'field-date'].forEach(markSuggested);
+  docnote.classList.add('show');
+}
+
+dropzone.addEventListener('click', simulateExtraction);
+dropzone.addEventListener('keydown', function(e){
+  if (e.key === 'Enter' || e.key === ' '){
+    e.preventDefault();
+    simulateExtraction();
+  }
+});
+
+document.querySelectorAll('.accept').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    acceptSuggestion(btn.getAttribute('data-accept'));
+  });
+});
 </script>
 <div class="vignette"></div>
-<div class="foot">genesis &middot; the drop-zone is a nebula; a document condenses it into a world</div>
+<div class="foot">new entry &middot; the form only grows once you've started &middot; nothing is assumed</div>
 </body></html>
