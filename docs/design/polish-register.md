@@ -14,10 +14,12 @@ silently.
 | POL-3 | Current-month glow | The present month's label reads a shade brighter | queued for v9 |
 | POL-4 | Bidirectional highlight | Hover a manifest row ↔ its dial body lights up | queued for v9 |
 | POL-5 | Constellations | Hovering a section header draws its bodies' constellation lines | queued for v9 |
-| POL-6 | Chart callout | Hover tooltip as a star-chart annotation: title + T±d + cost, thin leader line | queued for v9 (owner item) |
+| POL-6 | Chart callout | Glass-backed, 13.5px, quadrant-aware placement so the leader never crosses the cluster | revised in v10 |
 | POL-7 | Restored orbit | Completing an item drifts its body outward with a brief comet trail | queued for v9 |
-| POL-8 | The quiet state | Nothing due → centre reads "All quiet. Next approach in Nd." | queued for v9 |
+| POL-8 | The quiet state | Rewritten in v10: no words — danger fades, sun warms, stars thicken and twinkle, slow meteors | in v10 |
 | POL-9 | Command palette | explore-your-world field focuses on ⌘K; matches items and actions | queued for v9 |
+
+| POL-10 | Storm state | Heavy load un-calms the sky: faster turbulent drift, deepened danger well, pulsing threshold, cooled sun | added in v10 |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
