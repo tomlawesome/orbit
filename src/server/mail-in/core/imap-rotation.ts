@@ -1,3 +1,9 @@
+/**
+ * mail-in/core boundary: pure parsing logic only. No `getDb`/`db`/schema
+ * imports and no `imapflow` import — see src/server/mail-in/README.md.
+ * Moved as-is from src/server/imap-rotation.ts as part of the #298 module
+ * split.
+ */
 export type ImapRotationConfigState = {
   currentGeneration: number;
   currentCommitment: string;

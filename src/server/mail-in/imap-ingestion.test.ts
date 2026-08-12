@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getImapIngestionConfig, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
-import { getNotificationWorkerConfig } from "./notification-worker";
-import { deriveImapRecipientAlias } from "./imap-recipient";
+import { getNotificationWorkerConfig } from "../notification-worker";
+import { deriveImapRecipientAlias } from "./core/imap-recipient";
 
 const temporaryDirectories: string[] = [];
 
