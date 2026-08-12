@@ -16,12 +16,13 @@ silently.
 | POL-5 | Constellations | Hovering a section header draws its bodies' constellation lines | queued for v9 |
 | POL-6 | Chart callout | Glass-backed, 13.5px, quadrant-aware placement so the leader never crosses the cluster | revised in v10 |
 | POL-7 | Restored orbit | Completing an item drifts its body outward with a brief comet trail | queued for v9 |
-| POL-8 | The quiet state | Rewritten in v10: no words — danger fades, sun warms, stars thicken and twinkle, slow meteors | in v10 |
+| POL-8 | The quiet state | v19 rewrite: the CHART ITSELF fades to a whisper (chrome to 6%, name to 30%) — nothing needs you, so there is nothing to read; sun, far jade planets and the celebrating sky remain (v10 celebration kept: twinkle, meteors, no words) | rewritten in v19 |
 | POL-9 | Command palette | explore-your-world field focuses on ⌘K; matches items and actions | queued for v9 |
 
-| POL-10 | Storm state | Heavy load un-calms the sky: faster turbulent drift, deepened danger well, pulsing threshold, cooled sun | added in v10 |
+| POL-10 | Storm state | v19 rewrite: the camera leans IN — dial zooms 1.26 toward the trouble, far greens pushed out past the month ring (1.17 radial), danger ring thicker with glow, angry colours saturate and glow, meteors burn red/orange/gold; turbulent drift kept | rewritten in v19 |
 | POL-11 | Constant drift | Every page's starfield never sits still, and you never need to stare: drift is perceptible within 3–5 seconds (owner rule, v18), constant direction, and perfectly seamless — each depth layer is tiled and wraps over exactly one tile width (linear, no snap, no reversal); reduced-motion stills it | revised in v18 (was home-only, slower, in v17) |
 | POL-12 | Drawers retract on scroll | Scrolling down animates every open drawer (left/right/top) back to its closed edge; scrolling up leaves them alone | in v17 |
+| POL-14 | Planet material | Dial bodies are no longer flat tokens: ruby/jade/amber/sky radial materials (lit limb toward the sun, rich mid, deep edge) on the chart only — manifest dots, key swatches and status colours stay flat tokens for truth | in v19 |
 | POL-13 | The light stack | Craft standard for atmosphere pages (login, maintenance, 404s): every bright body is layered (core + blurred halos), edges are noise-displaced (feTurbulence + feDisplacementMap), whole-frame film grain, several slow animations on distinct periods so nothing beats in sync, depth via differential blur, vignette | in v17 |
 
 
