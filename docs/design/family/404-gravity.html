@@ -5,10 +5,10 @@
 <link rel="stylesheet" href="family.css">
 <style>
 body{background:#04070f}
-.sky-far{animation:driftf 190s linear infinite}
-.sky-near{animation:driftn 110s linear infinite}
-@keyframes driftf{to{transform:translate(-55px,10px)}}
-@keyframes driftn{to{transform:translate(-95px,20px)}}
+.sky-far{animation:driftf 370s linear infinite}
+.sky-near{animation:driftn 180s linear infinite}
+@keyframes driftf{to{transform:translateX(-1600px)}}
+@keyframes driftn{to{transform:translateX(-1600px)}}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.8}}
 
@@ -42,8 +42,8 @@ body{background:#04070f}
       <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <g id="farstars" class="sky-far" fill="#dbe2f5"></g>
-  <g id="nearstars" class="sky-near"></g>
+  <g class="sky-far" fill="#dbe2f5"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
+  <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
 <div style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
