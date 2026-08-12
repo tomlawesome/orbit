@@ -24,6 +24,21 @@ if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
   fi
 fi
 
+# docs/engine-events.md "Machine prompts (v0)". Opt-in only: byte-identical
+# to today's TTY prompting unless the caller sets this exact value. The
+# duplicated descriptor is opened here, before any command substitution, so
+# that machine_prompt_collect (invoked as `var="$(machine_prompt_collect ...)"`
+# below) can still write protocol lines to the real stdout from inside a
+# subshell whose own stdout is being captured by that substitution.
+machine_prompts=0
+if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" == machine ]]; then
+  machine_prompts=1
+fi
+machine_prompt_fd=""
+if [[ "$machine_prompts" == 1 ]]; then
+  exec {machine_prompt_fd}>&1
+fi
+
 run_configuration_preflight() {
   [[ -f scripts/configuration.sh ]] || return 0
   [[ ! -e "$environment_file" ]] && return 0
@@ -52,6 +67,10 @@ cleanup() {
   if [[ -n "$terminal_fd" ]]; then
     exec {terminal_fd}>&-
     terminal_fd=""
+  fi
+  if [[ -n "$machine_prompt_fd" ]]; then
+    exec {machine_prompt_fd}>&-
+    machine_prompt_fd=""
   fi
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
 }
@@ -492,6 +511,170 @@ prompt_oidc_client_id() {
   done
 }
 
+# --- Machine prompt mode (ORBIT_CONFIGURE_PROMPTS=machine) -------------------
+#
+# docs/engine-events.md "Machine prompts (v0)" documents the exact line
+# grammar and field/kind/reason vocabulary emitted here. Acceptance is
+# decided solely by the same validators the TTY prompts above call
+# (normalize_public_origin, validate_oidc_issuer, is_valid_client_id, and the
+# OIDC client secret's existing non-empty/size checks below); the
+# classify_*_rejection helpers only pick a reason label for an answer already
+# known to be rejected and never themselves gate acceptance.
+
+machine_prompt_field_kind() {
+  case "$1" in
+    APP_URL) printf 'url' ;;
+    OIDC_ISSUER) printf 'url' ;;
+    OIDC_CALLBACK_URL) printf 'url' ;;
+    OIDC_CLIENT_ID) printf 'text' ;;
+    OIDC_CLIENT_SECRET) printf 'secret' ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- reason vocabulary (docs/engine-events.md "Machine prompts (v0)") -------
+
+# Classifies a rejected URL-kind answer exactly the way normalize_public_origin
+# (allow_path=0, APP_URL) and validate_oidc_issuer (allow_path=1, OIDC_ISSUER)
+# parse one, using the same primitives those validators use.
+classify_url_rejection() {
+  local value="$1" allow_path="$2" host
+  if [[ -z "$value" ]]; then
+    printf 'empty'
+    return
+  fi
+  if contains_forbidden_characters "$value"; then
+    printf 'invalid-characters'
+    return
+  fi
+  case "$value" in
+    https://*) ;;
+    *)
+      printf 'not-https'
+      return
+      ;;
+  esac
+  case "$value" in
+    *@*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  case "$value" in
+    *'?'*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  case "$value" in
+    *'#'*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  host="${value#https://}"
+  if [[ "$allow_path" == 1 ]]; then
+    host="${host%%/*}"
+  else
+    host="${host%/}"
+    case "$host" in
+      */*)
+        printf 'not-absolute-url'
+        return
+        ;;
+    esac
+  fi
+  if [[ -z "$host" ]]; then
+    printf 'not-absolute-url'
+    return
+  fi
+  if is_forbidden_host "${host,,}"; then
+    printf 'forbidden-host'
+    return
+  fi
+  printf 'not-absolute-url'
+}
+
+classify_app_url_rejection() {
+  classify_url_rejection "$1" 0
+}
+
+classify_oidc_issuer_rejection() {
+  classify_url_rejection "$1" 1
+}
+
+classify_oidc_client_id_rejection() {
+  if [[ -z "$1" ]]; then
+    printf 'empty'
+  else
+    printf 'invalid-characters'
+  fi
+}
+
+# Mirrors, and never replaces, the non-empty/size checks set_oidc_secret
+# applies below after reading its answer; kept separate rather than shared so
+# machine mode can never change that function's existing default-path
+# behaviour.
+classify_oidc_secret_rejection() {
+  if [[ -z "$1" ]]; then
+    printf 'empty'
+  else
+    printf 'too-large'
+  fi
+}
+
+# --- end reason vocabulary ---------------------------------------------
+
+# validate_oidc_issuer and is_valid_client_id are plain predicates; wrap them
+# so machine_prompt_collect's validator callback can use the same "print the
+# accepted value, or print nothing and fail" contract normalize_public_origin
+# already implements directly.
+machine_validate_oidc_issuer() {
+  validate_oidc_issuer "$1" && printf '%s' "$1"
+}
+
+machine_validate_oidc_client_id() {
+  is_valid_client_id "$1" && printf '%s' "$1"
+}
+
+machine_validate_oidc_secret() {
+  local value="$1" bytes
+  [[ -n "$value" ]] || return 1
+  bytes="$(printf '%s' "$value" | wc -c | tr -d '[:space:]')"
+  [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+  [[ "$bytes" -le "$maximum_secret_bytes" ]] || return 1
+  printf '%s' "$value"
+}
+
+# Drives one machine-mode field to completion: emits a `prompt` line, reads
+# exactly one answer line from standard input, and emits `prompt-accept` or
+# `prompt-reject` per docs/engine-events.md. Never prints the answer itself.
+# Aborts (emits `prompt-abort` and returns failure, for the caller's existing
+# refusal path) after a third rejected attempt or on end-of-input.
+machine_prompt_collect() {
+  local field="$1" validator="$2" classifier="$3"
+  local kind attempt=1 input value reason
+  kind="$(machine_prompt_field_kind "$field")" || return 2
+  while ((attempt <= 3)); do
+    printf 'prompt field=%s kind=%s required=true attempt=%d\n' \
+      "$field" "$kind" "$attempt" >&"$machine_prompt_fd"
+    if ! IFS= read -r input; then
+      printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
+      return 1
+    fi
+    if value="$("$validator" "$input")"; then
+      printf 'prompt-accept field=%s\n' "$field" >&"$machine_prompt_fd"
+      printf '%s' "$value"
+      return 0
+    fi
+    reason="$("$classifier" "$input")"
+    printf 'prompt-reject field=%s reason=%s\n' "$field" "$reason" >&"$machine_prompt_fd"
+    attempt=$((attempt + 1))
+  done
+  printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
+  return 1
+}
+
 # Guided (--init) collection of the non-secret public URL and OIDC values.
 # Prompts interactively only when stdin/stdout are terminals; otherwise the
 # complete ORBIT_CONFIGURE_APP_URL / ORBIT_CONFIGURE_OIDC_ISSUER /
@@ -512,6 +695,16 @@ guided_init() {
     client_id="$ORBIT_CONFIGURE_OIDC_CLIENT_ID"
   elif [[ "$env_count" -gt 0 ]]; then
     fail "Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set."
+  elif [[ "$machine_prompts" == 1 ]]; then
+    if ! app_url="$(machine_prompt_collect APP_URL normalize_public_origin classify_app_url_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
+    if ! issuer="$(machine_prompt_collect OIDC_ISSUER machine_validate_oidc_issuer classify_oidc_issuer_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
+    if ! client_id="$(machine_prompt_collect OIDC_CLIENT_ID machine_validate_oidc_client_id classify_oidc_client_id_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
   elif open_controlling_terminal; then
     if ! app_url="$(prompt_app_url)"; then
       fail "Guided configuration was cancelled."
@@ -629,7 +822,11 @@ ensure_oidc_secret_placeholder() {
 set_oidc_secret() {
   local secret secret_bytes
 
-  if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
+  if [[ "$machine_prompts" == 1 ]]; then
+    if ! secret="$(machine_prompt_collect OIDC_CLIENT_SECRET machine_validate_oidc_secret classify_oidc_secret_rejection)"; then
+      fail "Could not read a complete OIDC client secret from standard input."
+    fi
+  elif [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
     open_controlling_terminal; then
     if [[ "$installer_ui_input_loaded" == 1 ]]; then
       secret="$(installer_ui_read_secret "$terminal_fd" 'OIDC client secret (input hidden): ' "$maximum_secret_bytes")" ||
