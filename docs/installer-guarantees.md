@@ -12,9 +12,12 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   main-thread citation spot-checks. `repair.sh` (issue #261 first slice,
   `--check` only) was added 2026-08-12 following the same convention; the
   #261 second slice (read-only database reachability/credential and
-  application container identity/health diagnosis) was added the same day.
-- **Totals:** 329 guarantees — 184 HIGH, 112 MEDIUM, 33 LOW.
-  Install/configuration family: 166 (89 HIGH). Backup/recovery/deploy
+  application container identity/health diagnosis) was added the same day;
+  the #261 third slice (`--plan` — a proposed, classified repair plan
+  derived from the same findings, still zero mutation) was added the same
+  day.
+- **Totals:** 337 guarantees — 189 HIGH, 115 MEDIUM, 33 LOW.
+  Install/configuration family: 174 (94 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -30,7 +33,7 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
 
 ## Part 1 — Install/configuration family
 
-Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library); `repair.sh` (issue #261, `--check` only) added 2026-08-12 — first slice (filesystem/secrets/Compose/volume/container-ownership diagnosis) then second slice (read-only database and application-container diagnosis) the same day.
+Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library); `repair.sh` (issue #261, `--check`/`--plan`) added 2026-08-12 — first slice (filesystem/secrets/Compose/volume/container-ownership diagnosis), then second slice (read-only database and application-container diagnosis), then third slice (`--plan` — a proposed, classified repair plan derived from the same findings, still zero mutation) the same day.
 Test files (`*.test.mjs`) and other scripts were explicitly excluded from the read.
 
 
@@ -201,7 +204,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 55. `docker compose config --quiet` must succeed — validating the fully composed configuration — before any service is started or the transaction is committed; invalid Compose configuration is caught and fails closed pre-commit. — install.sh:1539-1541 — category: refusal/fail-closed — criticality: HIGH
 56. The file transaction is marked committed (`file_transaction_committed=1`) only after OIDC discovery, configuration migration, and `compose config --quiet` have all already succeeded; any failure before this point triggers the `EXIT`-trap rollback of every file change made so far, and only once committed do image pulls and service startup (steps outside the file-rollback mechanism's scope) begin. — install.sh:1479-1550 — category: transactional/rollback — criticality: HIGH
 
-## repair.sh (read-only diagnosis entry point — issue #261; `--check` only, no planner/executor yet)
+## repair.sh (read-only diagnosis + planning entry point — issue #261; `--check`/`--plan`, no executor yet)
 
 1. Every `docker` invocation is limited to `docker ps`, `docker volume ls`, `docker compose config`, `docker inspect`, and (second slice) two narrowly-scoped `docker exec` client probes (`pg_isready`, `psql -c 'SELECT 1'`) issued only against this deployment's own orbit-db container — never a command that creates, starts, stops, or deletes a container/volume/image, and never SQL beyond a literal `SELECT 1` — and the script never writes, creates, chmods, or deletes anything inside the installation directory (its only `mktemp` use is a caller-side capture of `configure.sh --check`'s stderr under `$TMPDIR`, immediately removed). — repair.sh:20-44,364-377 — category: refusal/fail-closed — criticality: HIGH
 2. Directory recognition is deliberately loose (any one of `.env-orbit`, `docker-compose.yml`, `.orbit-secrets`, or leftover `.orbit-install-staging.*` evidence, of any file type) rather than install.sh's strict binary check; if none of those fingerprints exist at all, diagnosis reports `not-orbit-directory` and exits 5 without attempting any further check, so it never reasons about an unrelated directory's contents. — repair.sh:276-295 — category: refusal/fail-closed — criticality: MEDIUM
@@ -221,11 +224,22 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 16. `stale-container` only compares this deployment's running orbit-app container's image against a syntactically digest-pinned `ORBIT_IMAGE` value (`repo@sha256:<64 hex>`, the same pattern install.sh itself requires); a non-digest-pinned, missing, or unreadable `ORBIT_IMAGE` silently skips the comparison rather than guessing at drift. — repair.sh:588-616 — category: provenance/immutability — criticality: MEDIUM
 17. `application-unhealthy` fires only when Docker's own computed health status for this deployment's orbit-app container is exactly `unhealthy` (sourced from the image's built-in `HEALTHCHECK`, never a SQL/application-level probe run by this script) — a container still `starting`, one with no healthcheck configured, or one that does not exist yet is never reported as unhealthy. — repair.sh:582-621 — category: input-validation — criticality: MEDIUM
 
+**#261 third slice — `--plan` (still zero mutation)**
+
+18. `--check` and `--plan` are mutually exclusive: exactly one is required, and supplying both (in either order) or neither exits 2 with a usage message before any diagnosis runs, exactly like an unrecognised flag — `--plan` never silently falls back to `--check` behavior or vice versa. — repair.sh:292-322 — category: refusal/fail-closed — criticality: MEDIUM
+19. `--plan` maps every one of the 19 `--check` reason classes through one fixed, exhaustive `action_for_class` table to one of six safe automatic action classes (`restore-transaction`, `fix-permissions`, `regenerate-secret`, `rotate-database-credential`, `restart-services`, `rerun-configuration`) or to `manual` — the table has no destructive entry, and issue #261 requires that none ever be added: destructive recovery (e.g. deleting a database/document volume) is explicitly out of scope for ordinary repair and lives in a separate exact-target workflow. — repair.sh:366-411 — category: refusal/fail-closed — criticality: HIGH
+20. A missing `postgres-password` secret is planned as `regenerate-secret` only when no `volume-retained-without-credentials` finding accompanies it in the same diagnosis; when a database volume is retained, that same finding is instead planned as `rotate-database-credential` (never `regenerate-secret`), so repair is never planned to mint an unrelated new database password against data still encrypted/authenticated under the old one — the #261 fixed-project collision. — repair.sh:503-511 — category: secret-handling — criticality: HIGH
+21. Every `rotate-database-credential` plan line unconditionally carries `backup=required`, which is how the plan encodes — ahead of any executor — that slice 4 must create and validate a private database checkpoint before ever touching the role; a database password is never planned to be reset merely because authentication failed. — repair.sh:388-410,512-557 — category: transactional/rollback — criticality: HIGH
+22. Every `action=manual` plan line is paired with exactly one human-readable line on stderr, drawn from a fixed per-reason-class `manual_guidance` table naming only field-level concepts (e.g. "the flagged container's labels") — never a path, configured value, or secret — so an operator always learns the exact safe manual step even when repair itself cannot act. — repair.sh:411-421,540-546 — category: secret-handling — criticality: HIGH
+23. `--plan`'s exit code is derived from whether at least one automatic (non-manual) action was planned among the warn/fail-severity findings (3, regardless of any manual findings alongside it) versus warn/fail-severity findings existing with zero automatic actions (4) — never from finding severity beyond the pass/fail severity gate itself (guarantee 25) — so `echo $?` alone tells an automated caller whether unattended remediation is even on the table before any confirmation prompt exists. — repair.sh:548-566 — category: refusal/fail-closed — criticality: MEDIUM
+24. `--plan` stdout is restricted to the same enum-only vocabulary discipline as `--check` (`plan action=<action-class> resolves=<reason-class> mutation=<...> backup=<...>` plus a `plan result=... actions=... manual=...` terminal line), grouped by the same fixed `class_order`, so `--plan` output is byte-identical for byte-identical findings and never interpolates a path, configured value, or secret — every `--check` read-only/no-ANSI/determinism guarantee above holds identically under `--plan`. — repair.sh:512-566 — category: secret-handling — criticality: HIGH
+25. An info-severity finding (`docker-unavailable`, `unrelated-resource-present`) is excluded from `--plan` entirely — before the action-class mapping is even consulted — producing no `plan` line and counting toward neither `actions` nor `manual`; a diagnosis containing only info-severity findings therefore yields `plan result=empty actions=0 manual=0` and exit 0, identical to `--check`'s own `result=healthy` exit 0 for that same on-disk/daemon state, so the two modes never render contradictory verdicts (e.g. `--check` "healthy" against `--plan` "unplannable-failures-present") for one unchanged deployment. — repair.sh:524-531 — category: refusal/fail-closed — criticality: MEDIUM
+
 ---
 
 ## Summary
 
-Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only) and then extended in the same file for the #261 second slice (read-only database/application diagnosis). No `*.test.mjs` or other scripts were read.
+Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), and extended again for the #261 third slice (`--plan`, still zero mutation). No `*.test.mjs` or other scripts were read.
 
 **Guarantee count by script**
 
@@ -236,23 +250,23 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 12 |
-| repair.sh | 17 |
+| repair.sh | 25 |
 | installer-simulation.sh | 8 |
-| **Total** | **165** |
+| **Total** | **173** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 17 | 17 | 7 | 41 |
+| refusal/fail-closed | 18 | 20 | 7 | 45 |
 | input-validation | 6 | 20 | 7 | 33 |
-| secret-handling | 20 | 4 | 0 | 24 |
+| secret-handling | 23 | 4 | 0 | 27 |
 | provenance/immutability | 16 | 8 | 0 | 24 |
-| transactional/rollback | 14 | 2 | 0 | 16 |
+| transactional/rollback | 15 | 2 | 0 | 17 |
 | permissions/ownership | 15 | 0 | 0 | 15 |
 | recovery | 1 | 4 | 1 | 6 |
 | idempotency | 0 | 3 | 4 | 7 |
-| **Total** | **89** | **58** | **19** | **166** |
+| **Total** | **94** | **61** | **19** | **174** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
