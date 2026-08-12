@@ -29,6 +29,35 @@ set -Eeuo pipefail
 # and diagnosis continues with everything else that can still be checked
 # read-only.
 #
+# This slice adds exactly two more read-only primitives, both narrowly
+# scoped: `docker exec -T <this deployment's orbit-db container> pg_isready`
+# and `docker exec -T <same container> psql -c 'SELECT 1'`. Neither mutates
+# anything server-side (`pg_isready` opens and immediately closes a
+# connection; `SELECT 1` reads no table and touches no data) and both only
+# ever target the orbit-db container whose Compose project/service labels
+# were already proved to belong to this deployment (the same label proof
+# Step 10 uses). This is still within the read-only contract: it is a
+# client-side probe of reachability and authentication, not a database
+# mutation, a schema inspection, or an application-data query. The
+# PostgreSQL password never appears in argv or output — see "Database
+# credential handling" below.
+#
+# Database credential handling
+# ------------------------------
+# `psql`'s password must never be observable via `ps`, this script's own
+# stdout/stderr, or any docker/shell logging. It is passed with
+# `docker exec -e PGPASSWORD` (no `=value`): this form makes the Docker CLI
+# forward the value from its own inherited process environment rather than
+# placing it on the command line, so it never appears in argv. The password
+# is read from the `postgres-password` secret file into a `local` shell
+# variable scoped to a single function invocation, attached only as a
+# same-line prefix assignment on the `docker exec` command itself (so it is
+# never `export`ed into the rest of this script's environment), and is
+# reset to an empty string immediately after use. `set -x` is never enabled
+# anywhere in this script. The captured `psql` output is inspected only
+# in-process to classify success/auth-failure/other-failure; it is never
+# printed, logged, or included in any finding.
+#
 # OUTPUT CONTRACT
 # ----------------
 # One finding per line:
@@ -90,15 +119,33 @@ set -Eeuo pipefail
 #   unrelated-resource-present      — a database volume matching Orbit's
 #                                   naming pattern exists under a different
 #                                   Compose project than this deployment's.
+#   database-unreachable            — this deployment's orbit-db container is
+#                                   absent/not running, or is running but
+#                                   `pg_isready` did not succeed within the
+#                                   bounded probe.
+#   database-credential-mismatch    — `pg_isready` succeeded (the server is
+#                                   accepting connections) but authenticating
+#                                   with the managed `postgres-password`
+#                                   secret failed with a password/SQLSTATE
+#                                   28P01-style error — the motivating
+#                                   failure of issue #261.
+#   stale-container                 — this deployment's orbit-app container
+#                                   is running an image identity that does
+#                                   not match `ORBIT_IMAGE` in `.env-orbit`
+#                                   (the configuration was updated but the
+#                                   container was never recreated).
+#   application-unhealthy           — this deployment's orbit-app container
+#                                   exists but Docker reports its health
+#                                   status as `unhealthy`.
 #
 # RESERVED CLASSES (explicitly out of scope for this slice — next slice)
 # --------------------------------------------------------------------------
-#   database-unreachable, database-credential-mismatch, unsupported-schema,
-#   migration-failed, application-unhealthy, stale-container,
-#   image-identity-mismatch
-# This slice never opens a database connection, execs into a container, or
-# probes application health; those checks are reserved for the executor
-# slice that can safely pair them with repair actions.
+#   unsupported-schema, migration-failed, image-identity-mismatch
+# This slice still never inspects schema/migration state or a container's
+# registry-side image identity (as opposed to the locally pinned
+# `ORBIT_IMAGE` value, which stale-container above does check); those
+# remain reserved for the executor slice that can safely pair them with
+# repair actions.
 
 usage() {
   printf 'Usage: %s --check [--plain]\n' "$0" >&2
@@ -136,7 +183,7 @@ readonly secrets_directory=".orbit-secrets"
 readonly database_volume_key="orbit-db-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=13
+readonly total_checks=15
 readonly docker_probe_timeout=5s
 
 readonly -a class_order=(
@@ -155,6 +202,10 @@ readonly -a class_order=(
   container-foreign-owner
   volume-retained-without-credentials
   unrelated-resource-present
+  database-unreachable
+  database-credential-mismatch
+  stale-container
+  application-unhealthy
 )
 
 declare -a findings=()
@@ -456,6 +507,130 @@ if [[ "$resource_check_eligible" == 1 ]]; then
     [[ "$foreign" == 1 ]] && add_finding container-foreign-owner container fail
   else
     add_finding docker-unavailable container info
+  fi
+fi
+
+# --- Step 11: database reachability and credential match --------------------
+#
+# See the "READ-ONLY BY CONSTRUCTION" / "Database credential handling" notes
+# at the top of this file: only `pg_isready` and `psql -c 'SELECT 1'` are
+# ever exec'd, only inside this deployment's own orbit-db container (proved
+# by the same Compose project/service label discipline as Step 10), and the
+# password is never placed in argv, output, or a finding.
+check_database_reachability() {
+  local db_ids db_id pg_user=orbit pg_db=orbit candidate
+  local pg_password="" psql_output="" psql_status=0
+
+  if [[ "$env_status" == ok ]]; then
+    candidate="$(read_environment_value POSTGRES_USER 2>/dev/null || true)"
+    [[ "$candidate" =~ ^[A-Za-z0-9_]+$ ]] && pg_user="$candidate"
+    candidate="$(read_environment_value POSTGRES_DB 2>/dev/null || true)"
+    [[ "$candidate" =~ ^[A-Za-z0-9_]+$ ]] && pg_db="$candidate"
+  fi
+
+  db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=orbit-db" \
+    --format '{{.ID}}' 2>/dev/null || true)"
+  db_id=""
+  if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
+    db_id="$db_ids"
+  fi
+
+  if [[ -z "$db_id" ]] || ! timeout "$docker_probe_timeout" docker exec -T "$db_id" \
+    pg_isready -U "$pg_user" -d "$pg_db" >/dev/null 2>&1; then
+    add_finding database-unreachable database fail
+    return 0
+  fi
+
+  # Without a readable postgres-password secret there is nothing safe to
+  # authenticate with; secret-missing/volume-retained-without-credentials
+  # already cover that absence, so this check quietly stops here rather
+  # than guessing. (Bare `return` would propagate the failing test's exit
+  # status as this function's own return value and trip `set -e` at the
+  # call site below, so every early exit here is an explicit `return 0`.)
+  [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
+
+  pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
+  # -h forces a host (TCP) connection so PostgreSQL's password-based
+  # authentication is actually exercised; a bare local-socket connection
+  # would use "trust" auth inside the official postgres image and could
+  # never observe a credential mismatch.
+  psql_output="$(PGPASSWORD="$pg_password" timeout "$docker_probe_timeout" \
+    docker exec -e PGPASSWORD -T "$db_id" \
+    psql -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c 'SELECT 1' 2>&1)" || psql_status=$?
+  pg_password=""
+  if [[ "$psql_status" != 0 ]]; then
+    if [[ "${psql_output,,}" == *"password authentication failed"* ]]; then
+      add_finding database-credential-mismatch database fail
+    else
+      add_finding database-unreachable database fail
+    fi
+  fi
+  psql_output=""
+}
+
+if [[ "$resource_check_eligible" == 1 ]]; then
+  if [[ "$docker_available" == 1 ]]; then
+    checked=$((checked + 1))
+    check_database_reachability
+  else
+    add_finding docker-unavailable database info
+  fi
+fi
+
+# --- Step 12: application container image identity and health --------------
+#
+# Compares this deployment's running orbit-app container against the
+# locally pinned ORBIT_IMAGE (stale-container) and reads Docker's own
+# computed health status (application-unhealthy, from the HEALTHCHECK baked
+# into the published image). Both reads are `docker inspect` only; neither
+# execs into the container nor touches the registry (that registry-side
+# comparison is the still-reserved image-identity-mismatch class).
+check_application_container() {
+  local app_ids app_id pinned_image=""
+  local inspect_output="" actual_image="" health_status="" extra=""
+
+  if [[ "$env_status" == ok ]]; then
+    pinned_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
+    [[ "$pinned_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || pinned_image=""
+  fi
+
+  app_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=orbit-app" \
+    --format '{{.ID}}' 2>/dev/null || true)"
+  app_id=""
+  if [[ -n "$app_ids" && "$app_ids" != *$'\n'* && "$app_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
+    app_id="$app_ids"
+  fi
+  # Every early exit below is an explicit `return 0`, never a bare `return`:
+  # a bare `return` propagates the preceding failed test's exit status as
+  # this function's own return value, which would trip `set -e` at the
+  # call site (a bare `check_application_container` statement) below.
+  [[ -n "$app_id" ]] || return 0
+
+  inspect_output="$(timeout "$docker_probe_timeout" docker inspect \
+    --format '{{.Config.Image}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    "$app_id" 2>/dev/null || true)"
+  [[ "$inspect_output" != *$'\n'* ]] || return 0
+  IFS='|' read -r actual_image health_status extra <<< "$inspect_output"
+  [[ -z "$extra" ]] || return 0
+
+  if [[ -n "$pinned_image" && -n "$actual_image" && "$actual_image" != "$pinned_image" ]]; then
+    add_finding stale-container container warn
+  fi
+  if [[ "$health_status" == unhealthy ]]; then
+    add_finding application-unhealthy application fail
+  fi
+}
+
+if [[ "$resource_check_eligible" == 1 ]]; then
+  if [[ "$docker_available" == 1 ]]; then
+    checked=$((checked + 1))
+    check_application_container
+  else
+    add_finding docker-unavailable application info
   fi
 fi
 
