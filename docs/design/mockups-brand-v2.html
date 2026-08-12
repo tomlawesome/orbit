@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — brand mockups, second pass (proposal, issue #307)</title>
+<style>
+  :root{
+    --bg:#05070d; --bg-page:#0a0c12; --bg-panel:#0b0f1a;
+    --border:#1c2434; --border-soft:#151b28;
+    --text:#e7e9ee; --text-muted:#7c8699; --text-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171;
+    --paper:#f4f1e8; --paper-ink:#20242e; --paper-muted:#8b8474;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--ui);
+       line-height:1.55;padding:56px 24px}
+  main{max-width:1100px;margin:0 auto}
+  h1{font-size:28px;font-weight:600;letter-spacing:-.02em}
+  .lead{color:var(--text-muted);max-width:660px;margin:10px 0 14px}
+  .back{display:inline-block;font:12.5px var(--mono);color:var(--accent);
+        text-decoration:none;border:1px solid var(--border);border-radius:99px;
+        padding:4px 12px;margin-bottom:48px}
+  .back:hover{border-color:var(--accent)}
+  h2{font-size:15px;font-weight:600;color:var(--text-muted);
+     text-transform:uppercase;letter-spacing:.14em;margin:56px 0 20px}
+  .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+  .card{background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:12px;padding:28px}
+  .card h3{font-size:16px;font-weight:600;margin-bottom:6px}
+  .card p{font-size:13.5px;color:var(--text-muted)}
+  .stage{display:flex;align-items:center;justify-content:center;
+         height:220px;margin:18px 0}
+  .badge{display:inline-block;font:11px var(--mono);color:var(--accent);
+         border:1px solid var(--border);border-radius:99px;padding:2px 10px;
+         margin-bottom:14px}
+  .badge.rec{color:#05070d;background:var(--accent);border-color:var(--accent)}
+  .tiny{display:flex;gap:18px;align-items:center;justify-content:center;
+        padding:14px;border-top:1px solid var(--border-soft)}
+  .tiny span{font:11px var(--mono);color:var(--text-faint)}
+  .note{font-size:13px;color:var(--text-faint);max-width:640px;margin-top:26px}
+  footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--border-soft);
+         font:12px var(--mono);color:var(--text-faint)}
+
+  /* B' — hero */
+  .hero-card{padding:44px 28px 28px}
+  .hero-stage{display:flex;align-items:center;justify-content:center;
+              padding:20px 0 32px}
+  .orbit-mark{overflow:visible;display:block}
+
+  .strip-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-top:20px}
+  .strip{border:1px solid var(--border);border-radius:12px;padding:26px;
+         display:flex;align-items:center;justify-content:center;height:150px}
+  .strip.light{background:var(--paper)}
+  .strip.mono{background:var(--bg-panel)}
+  .strip-label{position:relative}
+  .strip-cap{text-align:center;font:11px var(--mono);color:var(--text-faint);margin-top:10px}
+  .strip.light + .strip-cap, .strip-cap.light{color:var(--paper-muted)}
+
+  .reductions{display:flex;gap:34px;align-items:center;justify-content:center;
+              padding:22px;border-top:1px solid var(--border-soft);margin-top:6px;flex-wrap:wrap}
+  .reductions .item{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .reductions span{font:11px var(--mono);color:var(--text-faint)}
+
+  /* C' — centre row */
+  .centre-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
+  .centre-card{background:var(--bg-panel);border:1px solid var(--border);
+               border-radius:12px;padding:24px;text-align:center}
+  .centre-card .stage{height:190px}
+  .centre-card h4{font-size:14px;font-weight:600;margin-bottom:4px}
+  .centre-card p.cap{font-size:12.5px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Orbit — the mark, second pass</h1>
+  <p class="lead">Two evolutions in response to the first review: concept B
+  redrawn so the orbit sweeps the whole word and the planet becomes the dot
+  of the i, and concept C — which the owner wants to keep — given a body at
+  its centre so the three arcs read as orbits around something, rather than
+  just three loose gestures.</p>
+  <a class="back" href="mockups-brand.html">← back to mockups-brand.html (v1)</a>
+
+  <h2>Concept B′ — the word in orbit</h2>
+  <div class="card hero-card">
+    <span class="badge rec">B′ · the word in orbit — dark</span>
+    <div class="hero-stage">
+      <svg class="orbit-mark" data-theme="hero" width="560" height="230" viewBox="0 0 620 260" role="img" aria-label="orbit wordmark with an orbit sweeping the whole word, the planet standing in for the dot of the i">
+        <defs>
+          <radialGradient id="glowHero" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".9"/>
+            <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <path class="arc-back" fill="none" stroke="#2a3348" stroke-width="3"/>
+        <text class="word" x="70" y="172" fill="#e7e9ee" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1.2">orb<tspan class="stem">ı</tspan>t</text>
+        <path class="arc-front" fill="none" stroke="#4a5468" stroke-width="3"/>
+        <circle class="planet-glow" fill="url(#glowHero)"/>
+        <circle class="planet" fill="#7dd3fc"/>
+      </svg>
+    </div>
+    <h3>Wordmark, orbit-first</h3>
+    <p>One continuous ellipse sweeps the full word, low and tilted; it passes
+    behind the letters on its far arc and back in front on its near arc. The
+    planet riding that path sits exactly where the tittle of the i belongs —
+    it doesn't sit near the i, it <em>is</em> the i's dot.</p>
+
+    <div class="strip-row">
+      <div>
+        <div class="strip light">
+          <svg class="orbit-mark" data-theme="light" width="300" height="120" viewBox="0 0 620 260" role="img" aria-label="orbit wordmark, light mode, on paper">
+            <defs>
+              <radialGradient id="glowLight" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#0f7ba0" stop-opacity=".55"/>
+                <stop offset="100%" stop-color="#0f7ba0" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <path class="arc-back" fill="none" stroke="#c9c1ac" stroke-width="3"/>
+            <text class="word" x="70" y="172" fill="#20242e" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1.2">orb<tspan class="stem">ı</tspan>t</text>
+            <path class="arc-front" fill="none" stroke="#8b8474" stroke-width="3"/>
+            <circle class="planet-glow" fill="url(#glowLight)"/>
+            <circle class="planet" fill="#0f7ba0"/>
+          </svg>
+        </div>
+        <p class="strip-cap light">light mode — #f4f1e8 paper, ink stroke, deeper accent for contrast</p>
+      </div>
+      <div>
+        <div class="strip mono">
+          <svg class="orbit-mark" data-theme="mono" width="300" height="120" viewBox="0 0 620 260" role="img" aria-label="orbit wordmark, single colour">
+            <path class="arc-back" fill="none" stroke="#e7e9ee" stroke-width="3" opacity=".32"/>
+            <text class="word" x="70" y="172" fill="#e7e9ee" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1.2">orb<tspan class="stem">ı</tspan>t</text>
+            <path class="arc-front" fill="none" stroke="#e7e9ee" stroke-width="3" opacity=".7"/>
+            <circle class="planet" fill="#e7e9ee"/>
+          </svg>
+        </div>
+        <p class="strip-cap">single-colour — one ink, depth from opacity only, no accent needed</p>
+      </div>
+    </div>
+
+    <div class="reductions">
+      <div class="item">
+        <svg class="orbit-mark" data-theme="hero" width="200" height="82" viewBox="0 0 620 260" role="img" aria-label="orbit wordmark, small reduction">
+          <defs>
+            <radialGradient id="glowSmall1" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".9"/>
+              <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <path class="arc-back" fill="none" stroke="#2a3348" stroke-width="3"/>
+          <text class="word" x="70" y="172" fill="#e7e9ee" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1.2">orb<tspan class="stem">ı</tspan>t</text>
+          <path class="arc-front" fill="none" stroke="#4a5468" stroke-width="3"/>
+          <circle class="planet-glow" fill="url(#glowSmall1)"/>
+          <circle class="planet" fill="#7dd3fc"/>
+        </svg>
+        <span>~200px wide</span>
+      </div>
+      <div class="item">
+        <svg class="orbit-mark" data-theme="hero" width="120" height="49" viewBox="0 0 620 260" role="img" aria-label="orbit wordmark, smallest reduction">
+          <defs>
+            <radialGradient id="glowSmall2" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".9"/>
+              <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <path class="arc-back" fill="none" stroke="#2a3348" stroke-width="3"/>
+          <text class="word" x="70" y="172" fill="#e7e9ee" font-family="Inter,system-ui,sans-serif" font-weight="600" font-size="64" letter-spacing="1.2">orb<tspan class="stem">ı</tspan>t</text>
+          <path class="arc-front" fill="none" stroke="#4a5468" stroke-width="3"/>
+          <circle class="planet-glow" fill="url(#glowSmall2)"/>
+          <circle class="planet" fill="#7dd3fc"/>
+        </svg>
+        <span>~120px wide</span>
+      </div>
+    </div>
+
+    <p class="note"><b>Geometry, not eyeballing:</b> the page measures the
+    dotless <code>ı</code>'s actual stem box at render time and places the
+    planet a fixed gap above it — the same spot a real tittle would sit. The
+    ellipse's rx, tilt and vertical centre are chosen for proportion (wide,
+    low, −8°); its ry is then <em>solved</em> so the curve passes through
+    that exact point, not nudged there by hand. The letter is set as the
+    Unicode dotless ı (U+0131) — a real "i" would leave its own tittle
+    sitting right next to the planet, reading as a rendering mistake rather
+    than a deliberate mark.</p>
+  </div>
+
+  <h2>Concept C′ — arcs with a heart</h2>
+  <div class="centre-row">
+    <div class="centre-card">
+      <span class="badge rec">strongest</span>
+      <div class="stage">
+        <svg width="170" height="170" viewBox="0 0 256 256" role="img" aria-label="Refined arcs mark with a gold sun at the centre">
+          <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+          <circle cx="202" cy="70" r="10" fill="#7dd3fc"/>
+          <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+          <circle cx="31" cy="139" r="11" fill="#7c8699"/>
+          <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+          <circle cx="143" cy="216" r="11" fill="#4a5468"/>
+          <defs>
+            <radialGradient id="sunGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d8b45a" stop-opacity=".85"/>
+              <stop offset="45%" stop-color="#d8b45a" stop-opacity=".25"/>
+              <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="126" cy="132" r="34" fill="url(#sunGlow)"/>
+          <circle cx="126" cy="132" r="14" fill="#d8b45a"/>
+        </svg>
+      </div>
+      <h4>Gold sun</h4>
+      <p class="cap">Accent-fill core with a soft layered glow — the arcs
+      read immediately as orbits around a warm body. Matches concept A's
+      perihelion glow.</p>
+    </div>
+
+    <div class="centre-card">
+      <span class="badge">quiet</span>
+      <div class="stage">
+        <svg width="170" height="170" viewBox="0 0 256 256" role="img" aria-label="Refined arcs mark with a plain ink-white core">
+          <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+          <circle cx="202" cy="70" r="10" fill="#7dd3fc"/>
+          <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+          <circle cx="31" cy="139" r="11" fill="#7c8699"/>
+          <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+          <circle cx="143" cy="216" r="11" fill="#4a5468"/>
+          <circle cx="126" cy="132" r="12" fill="#e7e9ee"/>
+        </svg>
+      </div>
+      <h4>Ink-white core</h4>
+      <p class="cap">No glow, no colour — a plain body at the centre.
+      Confirms the arcs still read as orbits with nothing more than a dot
+      to orbit around.</p>
+    </div>
+
+    <div class="centre-card">
+      <span class="badge">alternate</span>
+      <div class="stage">
+        <svg width="170" height="170" viewBox="0 0 256 256" role="img" aria-label="Refined arcs mark with a ringed planet at the centre">
+          <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+          <circle cx="202" cy="70" r="10" fill="#7dd3fc"/>
+          <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+          <circle cx="31" cy="139" r="11" fill="#7c8699"/>
+          <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+          <circle cx="143" cy="216" r="11" fill="#4a5468"/>
+          <g transform="translate(126,132) rotate(-14)">
+            <ellipse cx="0" cy="0" rx="24" ry="8" fill="none" stroke="#9aa4b8" stroke-width="1.6"/>
+            <circle cx="0" cy="0" r="16" fill="#7c8699"/>
+          </g>
+        </svg>
+      </div>
+      <h4>Ringed planet</h4>
+      <p class="cap">A larger muted body with a thin ring — more incident
+      than the sun, closer in spirit to concept A's household-at-centre
+      idea, but busier at small sizes.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <div class="tiny">
+      <svg width="32" height="32" viewBox="0 0 256 256" aria-hidden="true">
+        <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+        <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+        <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+        <defs>
+          <radialGradient id="sunGlow32" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#d8b45a" stop-opacity=".85"/>
+            <stop offset="100%" stop-color="#d8b45a" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="126" cy="132" r="46" fill="url(#sunGlow32)"/>
+        <circle cx="126" cy="132" r="20" fill="#d8b45a"/>
+      </svg>
+      <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden="true">
+        <path fill="#7dd3fc" opacity=".95" d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"/>
+        <path fill="#7c8699" d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"/>
+        <path fill="#4a5468" d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"/>
+        <circle cx="126" cy="132" r="24" fill="#d8b45a"/>
+      </svg>
+      <span>32 / 16 px favicon reductions — C′ with the gold sun centre</span>
+    </div>
+    <p class="note">At 16px the glow is dropped and the sun becomes a flat
+    dot — same simplification concept A's ring-plus-dot already relies on,
+    so the two marks degrade the same way at favicon scale.</p>
+  </div>
+
+  <footer>orbit · brand proposal, second pass · issue #307 · responds to
+  owner feedback on mockups-brand.html · nothing here is implemented</footer>
+</main>
+
+<script>
+(function(){
+  function buildOrbitMark(svg){
+    var text = svg.querySelector('.word');
+    var stem = svg.querySelector('.stem');
+    var planet = svg.querySelector('.planet');
+    var glow = svg.querySelector('.planet-glow');
+    var backArc = svg.querySelector('.arc-back');
+    var frontArc = svg.querySelector('.arc-front');
+    if(!text || !stem || !planet || !backArc || !frontArc) return;
+
+    var stemBBox = stem.getBBox();
+    var wordBBox = text.getBBox();
+    var fontSize = parseFloat(text.getAttribute('font-size')) || 64;
+    var baselineY = parseFloat(text.getAttribute('y'));
+
+    // getBBox() on a mid-run <tspan> reports the whole line's font-metrics
+    // box for y/height in this engine (verified: identical to the full
+    // word's bbox), not the glyph's own ink box — so the horizontal values
+    // (x/width) are trustworthy but the vertical ones are not. Measure the
+    // dotless ı's actual ink ascent with canvas instead, which is glyph-
+    // specific and matches the SVG's horizontal figures exactly when cross-
+    // checked.
+    var canvas = document.createElement('canvas');
+    var cctx = canvas.getContext('2d');
+    var cs = getComputedStyle(text);
+    cctx.font = cs.fontWeight + ' ' + fontSize + 'px ' + cs.fontFamily;
+    var stemMetrics = cctx.measureText('ı');
+    var stemTopY = baselineY - stemMetrics.actualBoundingBoxAscent;
+
+    var gap = fontSize * 0.14;   // space between the stem top and the dot
+    var r = fontSize * 0.078;    // planet radius
+
+    var stemCenterX = stemBBox.x + stemBBox.width / 2;
+    var tittleX = stemCenterX;
+    var tittleY = stemTopY - gap - r;
+
+    var cx = wordBBox.x + wordBBox.width / 2;
+    var cy = wordBBox.y + wordBBox.height * 0.5;
+    var thetaDeg = -8;
+    var theta = thetaDeg * Math.PI / 180;
+    var rx = (wordBBox.width / 2) * 1.2;
+
+    var dx = tittleX - cx, dy = tittleY - cy;
+    var cosT = Math.cos(theta), sinT = Math.sin(theta);
+    // rotate the tittle point into the ellipse's local (pre-rotation) frame
+    var localX = dx * cosT + dy * sinT;
+    var localY = -dx * sinT + dy * cosT;
+    var ratio = localX / rx;
+    var ry = Math.sqrt((localY * localY) / (1 - ratio * ratio));
+
+    var L = { x: cx - rx * cosT, y: cy - rx * sinT };
+    var R = { x: cx + rx * cosT, y: cy + rx * sinT };
+
+    backArc.setAttribute('d', 'M ' + L.x + ' ' + L.y + ' A ' + rx + ' ' + ry + ' ' + thetaDeg + ' 0 1 ' + R.x + ' ' + R.y);
+    frontArc.setAttribute('d', 'M ' + R.x + ' ' + R.y + ' A ' + rx + ' ' + ry + ' ' + thetaDeg + ' 0 1 ' + L.x + ' ' + L.y);
+
+    planet.setAttribute('cx', tittleX);
+    planet.setAttribute('cy', tittleY);
+    planet.setAttribute('r', r);
+    if(glow){
+      glow.setAttribute('cx', tittleX);
+      glow.setAttribute('cy', tittleY);
+      glow.setAttribute('r', r * 2.6);
+    }
+  }
+
+  document.querySelectorAll('.orbit-mark').forEach(buildOrbitMark);
+})();
+</script>
+</body>
+</html>

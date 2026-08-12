@@ -20,6 +20,9 @@ silently.
 | POL-9 | Command palette | explore-your-world field focuses on ⌘K; matches items and actions | queued for v9 |
 
 | POL-10 | Storm state | Heavy load un-calms the sky: faster turbulent drift, deepened danger well, pulsing threshold, cooled sun | added in v10 |
+| POL-11 | Constant drift | The home starfield never sits still: two depth layers on slow ease-in-out alternate drifts (210s/130s) with slight vertical component — the sense of floating in space, behind the chart; reduced-motion stills it | in v17 |
+| POL-12 | Drawers retract on scroll | Scrolling down animates every open drawer (left/right/top) back to its closed edge; scrolling up leaves them alone | in v17 |
+| POL-13 | The light stack | Craft standard for atmosphere pages (login, maintenance, 404s): every bright body is layered (core + blurred halos), edges are noise-displaced (feTurbulence + feDisplacementMap), whole-frame film grain, several slow animations on distinct periods so nothing beats in sync, depth via differential blur, vignette | in v17 |
 
 
 ## Concepts (captured, not yet product scope)
@@ -39,6 +42,12 @@ silently.
 | CON-10 | Mobile dialect | The dial owns the width; callouts/drawers/doc panel become bottom sheets (first tap = sheet, second = approach); households collapse into the other-skies strip | in v13 |
 
 | CON-11 | The strapline | "your year, in orbit" — for surfaces that want words (README, launcher splash, brand sheet); the login carries none: the hero is the name | **approved** 2026-08-13 |
+
+| CON-12 | The north star | Creation lives in the sky: one star at top centre, slightly brighter with a four-point glint; hover names it (create); click slides a full-width top drawer down (entry types as circular chips, a document drop-target, link to the full form). The star is the drawer's handle and rides the slide — the fourth edge word. Drag a file onto the star = straight into the document flow | in v17, per owner direction 2026-08-11 |
+| CON-13 | The fixed galaxy | Households are permanent coordinates in a shared map (product cap: a user belongs to at most 5). You never see your own constellation — you're inside it. Flying moves the CAMERA: the starfield streams with parallax (each household owns an absolute sky offset, so flights animate between truths and never snap), the destination holds its bearing and grows, and after arrival the departed home appears on the reverse bearing. Backdrops clamp to the visible sky along true bearings, dim with distance, and relax apart when narrow viewports fold bearings together | in v17; supersedes the v14/15 swap behaviour per owner: "it's a constellation in a galaxy with its own place" |
+| CON-14 | 404, three ways | Owner wants all three built to choose from: (1) gravity well — the black hole is the 0, lensed arch, Doppler disc, spaghettified inner 4, infalling page debris; (2) conjunction — the 0 is a ring planet, the 4s orbit off-axis and tumble, aligning legibly every 20s, line: "Not in this world…"; (3) uncharted — past the survey limit the digits are a constellation labelled in the chart's own grammar, with a plotted course home. Option: ship one, rotate the others as easter eggs | all three in v17; decision pending |
+| CON-15 | Totality | Maintenance is a total eclipse: the corona only a black sun can show (physics justifies the awe), eclipse-dark sky with daytime stars and a 360° horizon sunset, the moon's transit doubles as the progress bar, and service returning is the diamond-ring flash flooding the page with light. Copy is three words: "maintenance — back soon" | in v17; replaces the v16 bright-sun corona |
+| CON-16 | Status colour truth | degraded gets its own orange token (--degraded), clearly hotter than the gold accent so it never reads as normal; the key handle wears plain ink; the right-edge handle keeps its type clear of overlay scrollbars | in v17 |
 
 Removal procedure: delete the POL-n blocks from the current mockup/product
 code, flip the row to `removed (date, reason)`. Keep the row — the register
