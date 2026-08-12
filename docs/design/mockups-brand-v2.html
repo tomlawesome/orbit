@@ -102,10 +102,14 @@
       </svg>
     </div>
     <h3>Wordmark, orbit-first</h3>
-    <p>One continuous ellipse sweeps the full word, low and tilted; it passes
-    behind the letters on its far arc and back in front on its near arc. The
-    planet riding that path sits exactly where the tittle of the i belongs —
-    it doesn't sit near the i, it <em>is</em> the i's dot.</p>
+    <p>One continuous ellipse sweeps the whole word on a proper incline —
+    wide enough to run slightly past the o on one end and the t on the
+    other, tilted enough that it reads as an orbit and not a flat coin. Its
+    apex, the highest point of the ring, <em>is</em> the tittle: the planet
+    sits exactly where the dot of the i belongs, not merely near it. From
+    there the ring runs the length of the word and back, its low point
+    passing just under the r, close beneath the baseline. It passes behind
+    the letters on its far arc and back in front on its near arc.</p>
 
     <div class="strip-row">
       <div>
@@ -176,13 +180,19 @@
 
     <p class="note"><b>Geometry, not eyeballing:</b> the page measures the
     dotless <code>ı</code>'s actual stem box at render time and places the
-    planet a fixed gap above it — the same spot a real tittle would sit. The
-    ellipse's rx, tilt and vertical centre are chosen for proportion (wide,
-    low, −8°); its ry is then <em>solved</em> so the curve passes through
-    that exact point, not nudged there by hand. The letter is set as the
-    Unicode dotless ı (U+0131) — a real "i" would leave its own tittle
-    sitting right next to the planet, reading as a rendering mistake rather
-    than a deliberate mark.</p>
+    planet a fixed gap above it — the same spot a real tittle would sit —
+    and that point is fixed as the ellipse's <em>apex</em>, its literal
+    topmost point, not just a point the curve happens to pass near. A
+    second point, close under the "r", is fixed as the ellipse's low point.
+    The ring's width (rx) is chosen first — wide enough to clear the word,
+    slightly past the o and the t — and because a wide, gently tilted
+    ellipse has no single algebraic fit for both an exact apex and an exact
+    low point at once, the tilt and centre are found by a numeric search
+    over the family of ellipses that hold the apex exact, picking whichever
+    member lands closest to the low-point target. Nothing here is nudged by
+    hand. The letter is set as the Unicode dotless ı (U+0131) — a real "i"
+    would leave its own tittle sitting right next to the planet, reading as
+    a rendering mistake rather than a deliberate mark.</p>
   </div>
 
   <h2>Concept C′ — arcs with a heart</h2>
@@ -325,19 +335,78 @@
     var tittleX = stemCenterX;
     var tittleY = stemTopY - gap - r;
 
-    var cx = wordBBox.x + wordBBox.width / 2;
-    var cy = wordBBox.y + wordBBox.height * 0.5;
-    var thetaDeg = -8;
-    var theta = thetaDeg * Math.PI / 180;
-    var rx = (wordBBox.width / 2) * 1.2;
+    // The ring sweeps the whole word: a wide ellipse, gently tilted, whose
+    // two ends are raised/lowered rather than a small ring squeezed between
+    // two points. It's still solved, not eyeballed, from the same two
+    // targets as before — the APEX (topmost point of the ellipse, where the
+    // planet/tittle sits) and the LOW point (bottommost point, held under
+    // the "r" — the word's 2nd letter, character index 1 in "o","r","b",
+    // "ı","t" — close beneath the baseline) — but this time rx is fixed
+    // first, wide enough to run slightly past the o and the t, and the
+    // remaining parameters (tilt, ry, centre) are found by a numeric search
+    // rather than a closed form, because for a fixed wide rx there's no
+    // single algebraic solution — only a family of ellipses that put the
+    // apex exactly on target, and the search picks the member of that
+    // family whose low point lands closest to under the r.
+    var rExtent = text.getExtentOfChar(1);
+    var lowTargetX = rExtent.x + rExtent.width / 2;
+    var lowTargetY = baselineY + fontSize * 0.375;
 
-    var dx = tittleX - cx, dy = tittleY - cy;
+    var apex = { x: tittleX, y: tittleY };
+    var rx = (wordBBox.width / 2) * 1.19;
+
+    // For a given tilt and a given centre x (cx), requiring the apex to be
+    // exactly on the ellipse AND exactly its topmost point (horizontal
+    // tangent there — not just a point the curve passes through) pins cy
+    // and ry: substituting the tangent condition
+    // (ry^2/rx^2 = tan(theta) * Ly/Lx) into the point-on-ellipse equation
+    // ((Lx/rx)^2 + (Ly/ry)^2 = 1) leaves one quadratic in cy, solvable in
+    // closed form. What's left open is theta and cx — that 2D space is
+    // where the search runs, scoring each candidate by how close its
+    // (forced-antipodal) low point lands to the under-the-r target.
+    function solveForCxTheta(thetaDeg, cx){
+      var theta = thetaDeg * Math.PI / 180;
+      var cosT = Math.cos(theta), sinT = Math.sin(theta), tanT = Math.tan(theta);
+      var dx = apex.x - cx;
+      var c2 = cosT * cosT, s2 = sinT * sinT, cs = cosT * sinT;
+      // Lx^2 and Lx*Ly, expanded as quadratics in u = apex.y - cy
+      var qA = s2 + cs / tanT;
+      var qB = 2 * dx * cs + dx * (c2 - s2) / tanT;
+      var qC = dx * dx * c2 - dx * dx * cs / tanT - rx * rx;
+      var disc = qB * qB - 4 * qA * qC;
+      if(disc < 0) return null;
+      var sq = Math.sqrt(disc);
+      var best = null;
+      [(-qB + sq) / (2 * qA), (-qB - sq) / (2 * qA)].forEach(function(u){
+        var cy = apex.y - u;
+        if(!(cy > apex.y)) return; // apex must be the topmost (min-y) point, not the bottommost
+        var Lx = dx * cosT + u * sinT;
+        var Ly = -dx * sinT + u * cosT;
+        var ry2 = tanT * rx * rx * Ly / Lx;
+        if(!(ry2 > 0)) return;
+        var ry = Math.sqrt(ry2);
+        var lowX = 2 * cx - apex.x, lowY = 2 * cy - apex.y;
+        var err = (lowX - lowTargetX) * (lowX - lowTargetX) + (lowY - lowTargetY) * (lowY - lowTargetY);
+        if(!best || err < best.err) best = { cx: cx, cy: cy, ry: ry, err: err };
+      });
+      return best;
+    }
+
+    var best = null;
+    for(var searchTheta = -16; searchTheta <= -8; searchTheta += 0.1){
+      for(var cxTry = wordBBox.x + wordBBox.width / 2 - 30; cxTry <= wordBBox.x + wordBBox.width / 2 + 30; cxTry += 0.2){
+        var candidate = solveForCxTheta(searchTheta, cxTry);
+        if(candidate && (!best || candidate.err < best.err)){
+          best = candidate;
+          best.thetaDeg = searchTheta;
+        }
+      }
+    }
+
+    var thetaDeg = best.thetaDeg;
+    var theta = thetaDeg * Math.PI / 180;
     var cosT = Math.cos(theta), sinT = Math.sin(theta);
-    // rotate the tittle point into the ellipse's local (pre-rotation) frame
-    var localX = dx * cosT + dy * sinT;
-    var localY = -dx * sinT + dy * cosT;
-    var ratio = localX / rx;
-    var ry = Math.sqrt((localY * localY) / (1 - ratio * ratio));
+    var cx = best.cx, cy = best.cy, ry = best.ry;
 
     var L = { x: cx - rx * cosT, y: cy - rx * sinT };
     var R = { x: cx + rx * cosT, y: cy + rx * sinT };

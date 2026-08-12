@@ -5,16 +5,20 @@
 <link rel="stylesheet" href="family.css">
 <style>
 /* 404 — planetary conjunction: a ringed world (the 0) with two "4"s tumbling on
-   inclined elliptical orbits. Every 20s (lcm of 10s + 20s periods) they both land
-   on the horizontal axis through the planet, upright, and it reads 404 for ~1.8s. */
+   inclined, eccentric orbits (offset circles, planet off-centre) so each glyph's
+   far arc genuinely swings behind the ring disc and its near arc swings in front.
+   Orbit A: 20s. Orbit B: 40s. Every 40s (their lcm) both land on the horizontal
+   axis through the planet, upright, in front, and it reads 404 for ~2.75s. Motion
+   is a single smooth ease (near-standstill at conjunction, gentle floaty coast at
+   speed, easing back to standstill) — no piecewise speed jumps. */
 
 body{overflow:hidden}
 
 /* ---------- starfield, two depth layers, independent slow drift ---------- */
 .sky{position:fixed;inset:-5%;pointer-events:none;overflow:hidden;z-index:0}
 .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.drift-far{animation:driftFar 210s linear infinite}
-.drift-near{animation:driftNear 145s linear infinite}
+.drift-far{animation:driftFar 320s linear infinite}
+.drift-near{animation:driftNear 160s linear infinite}
 @keyframes driftFar{from{transform:translateX(0)}to{transform:translateX(-1600px)}}
 @keyframes driftNear{from{transform:translateX(0)}to{transform:translateX(-1600px)}}
 .star-far{fill:#c9d3f2;opacity:var(--o);animation-name:twA;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-direction:alternate}
@@ -47,13 +51,13 @@ body{overflow:hidden}
 .glyph-mid{filter:url(#glyphGlowSoft)}
 .glyph-halo{filter:url(#glyphGlowWide)}
 
-.conj-glow{animation:conjGlow 20s linear infinite}
+.conj-glow{animation:conjGlow 40s linear infinite}
 @keyframes conjGlow{
   0%{filter:brightness(2) saturate(1.15)}
-  7%{filter:brightness(2) saturate(1.15)}
-  12%{filter:brightness(1) saturate(1)}
-  88%{filter:brightness(1) saturate(1)}
-  93%{filter:brightness(2) saturate(1.15)}
+  3.5%{filter:brightness(2) saturate(1.15)}
+  6%{filter:brightness(1) saturate(1)}
+  94%{filter:brightness(1) saturate(1)}
+  96.5%{filter:brightness(2) saturate(1.15)}
   100%{filter:brightness(2) saturate(1.15)}
 }
 
@@ -159,9 +163,65 @@ body{overflow:hidden}
   </filter>
 </defs>
 
-<!-- ===== orbit guides (barely visible) ===== -->
-<g transform="translate(800,460) rotate(-14)"><ellipse class="orbit-path" cx="0" cy="0" rx="300" ry="185"/></g>
-<g transform="translate(800,460) rotate(11)"><ellipse class="orbit-path" cx="0" cy="0" rx="450" ry="240"/></g>
+<!-- ===== orbit guides (barely visible) — offset circles: planet sits off-centre so
+     each orbit's far arc genuinely passes close behind the ring disc ===== -->
+<g transform="translate(800,460) rotate(-14)"><circle class="orbit-path" cx="0" cy="102.5" r="197.5"/></g>
+<g transform="translate(800,460) rotate(11)"><circle class="orbit-path" cx="0" cy="187.5" r="272.5"/></g>
+
+<!-- ===== orbit A — behind copy: renders BEHIND the planet in doc order, so it is
+     genuinely occluded by the opaque ring while it crosses the far arc. Scaled
+     .85 / capped at .6 opacity for the "farther away" read. Same path + timing
+     as the front copy below, so the two are always co-located. ===== -->
+<g transform="translate(800,460) rotate(-14)">
+  <g class="glyph conj-glow" id="orbitA-behind" opacity="0">
+    <animate attributeName="opacity" dur="20s" repeatCount="indefinite"
+      keyTimes="0.00000;0.61368;0.61868;0.68019;0.68519;1.00000" values="0;0;0.6;0.6;0;0"/>
+    <animateMotion dur="20s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M 189.623,47.278 A 197.5,197.5 0 1,1 -189.623,157.722 A 197.5,197.5 0 1,1 189.623,47.278"/>
+    <g transform="scale(.85)">
+      <g>
+        <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+          keyTimes="0.00000;0.13750;0.16089;0.18427;0.20766;0.23105;0.25444;0.27782;0.30121;0.32460;0.34798;0.37137;0.39476;0.41815;0.44153;0.46492;0.48831;0.51169;0.53508;0.55847;0.58185;0.60524;0.62863;0.65202;0.67540;0.69879;0.72218;0.74556;0.76895;0.79234;0.81573;0.83911;0.86250;1.00000"
+          values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+          dur="10s" repeatCount="indefinite"/>
+        <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#e0b768">4</text>
+        <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#f3dfa8">4</text>
+        <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="url(#stoneGradA)">4</text>
+      </g>
+    </g>
+  </g>
+</g>
+
+<!-- ===== orbit B — behind copy, same scheme, 40s period ===== -->
+<g transform="translate(800,460) rotate(11)">
+  <g class="glyph conj-glow" id="orbitB-behind" opacity="0">
+    <animate attributeName="opacity" dur="40s" repeatCount="indefinite"
+      keyTimes="0.00000;0.27622;0.27872;0.34246;0.34496;1.00000" values="0;0;0.6;0.6;0;0"/>
+    <animateMotion dur="40s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.03438;0.06442;0.09446;0.12450;0.15454;0.18458;0.21462;0.24466;0.27470;0.30474;0.33478;0.36482;0.39486;0.42490;0.45494;0.48498;0.51502;0.54506;0.57510;0.60514;0.63518;0.66522;0.69526;0.72530;0.75534;0.78538;0.81542;0.84546;0.87550;0.90554;0.93558;0.96562;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M -232.375,45.169 A 272.5,272.5 0 1,1 232.375,329.831 A 272.5,272.5 0 1,1 -232.375,45.169"/>
+    <g transform="scale(.85)">
+      <g>
+        <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+          keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+          values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+          dur="20s" repeatCount="indefinite"/>
+        <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#b9986a">4</text>
+        <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#dcc79a">4</text>
+        <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="url(#stoneGradB)">4</text>
+      </g>
+    </g>
+  </g>
+</g>
 
 <!-- ===== the planet — a ringed "0" ===== -->
 <g transform="translate(800,460)">
@@ -185,16 +245,22 @@ body{overflow:hidden}
   </g>
 </g>
 
-<!-- ===== orbit A — inner, fast, 10s, tilt -14deg, glyph starts on the horizontal axis right of the planet ===== -->
+<!-- ===== orbit A — front copy: renders AFTER the planet (always on top), full
+     scale/opacity, visible on the near arc. Inner, 20s, tilt -14deg, glyph starts
+     on the horizontal axis right of the planet. ===== -->
 <g transform="translate(800,460) rotate(-14)">
-  <g class="glyph conj-glow">
-    <animateMotion dur="10s" repeatCount="indefinite" rotate="0" calcMode="linear"
-      keyTimes="0;0.14;0.24;0.76;0.86;1" keyPoints="0;0.02;0.16;0.84;0.98;1"
-      path="M 278.13,69.34 A300,185 0 1,1 -278.13,-69.34 A300,185 0 1,1 278.13,69.34"/>
+  <g class="glyph conj-glow" id="orbitA-front" opacity="1">
+    <animate attributeName="opacity" dur="20s" repeatCount="indefinite"
+      keyTimes="0.00000;0.61368;0.61868;0.68019;0.68519;1.00000" values="1;1;0;0;1;1"/>
+    <animateMotion dur="20s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M 189.623,47.278 A 197.5,197.5 0 1,1 -189.623,157.722 A 197.5,197.5 0 1,1 189.623,47.278"/>
     <g>
       <animateTransform attributeName="transform" type="rotate" calcMode="linear"
-        keyTimes="0;0.14;0.24;0.76;0.86;1" values="0;7.2;57.6;302.4;352.8;360"
-        dur="5s" repeatCount="indefinite"/>
+        keyTimes="0.00000;0.13750;0.16089;0.18427;0.20766;0.23105;0.25444;0.27782;0.30121;0.32460;0.34798;0.37137;0.39476;0.41815;0.44153;0.46492;0.48831;0.51169;0.53508;0.55847;0.58185;0.60524;0.62863;0.65202;0.67540;0.69879;0.72218;0.74556;0.76895;0.79234;0.81573;0.83911;0.86250;1.00000"
+        values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+        dur="10s" repeatCount="indefinite"/>
       <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
             font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#e0b768">4</text>
       <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
@@ -205,16 +271,21 @@ body{overflow:hidden}
   </g>
 </g>
 
-<!-- ===== orbit B — outer, slow, 20s, tilt +11deg, glyph starts on the horizontal axis left of the planet ===== -->
+<!-- ===== orbit B — front copy. Outer, 40s, tilt +11deg, glyph starts on the
+     horizontal axis left of the planet. ===== -->
 <g transform="translate(800,460) rotate(11)">
-  <g class="glyph conj-glow">
-    <animateMotion dur="20s" repeatCount="indefinite" rotate="0" calcMode="linear"
-      keyTimes="0;0.07;0.12;0.88;0.93;1" keyPoints="0;0.02;0.16;0.84;0.98;1"
-      path="M -422.79,82.18 A450,240 0 1,1 422.79,-82.18 A450,240 0 1,1 -422.79,82.18"/>
+  <g class="glyph conj-glow" id="orbitB-front" opacity="1">
+    <animate attributeName="opacity" dur="40s" repeatCount="indefinite"
+      keyTimes="0.00000;0.27622;0.27872;0.34246;0.34496;1.00000" values="1;1;0;0;1;1"/>
+    <animateMotion dur="40s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.03438;0.06442;0.09446;0.12450;0.15454;0.18458;0.21462;0.24466;0.27470;0.30474;0.33478;0.36482;0.39486;0.42490;0.45494;0.48498;0.51502;0.54506;0.57510;0.60514;0.63518;0.66522;0.69526;0.72530;0.75534;0.78538;0.81542;0.84546;0.87550;0.90554;0.93558;0.96562;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M -232.375,45.169 A 272.5,272.5 0 1,1 232.375,329.831 A 272.5,272.5 0 1,1 -232.375,45.169"/>
     <g>
       <animateTransform attributeName="transform" type="rotate" calcMode="linear"
-        keyTimes="0;0.07;0.12;0.88;0.93;1" values="0;7.2;57.6;302.4;352.8;360"
-        dur="10s" repeatCount="indefinite"/>
+        keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+        values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+        dur="20s" repeatCount="indefinite"/>
       <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
             font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#b9986a">4</text>
       <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"

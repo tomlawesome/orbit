@@ -4,9 +4,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="family.css">
 <style>
-.sky .far{animation:appr 150s linear infinite}
-.sky .near{animation:appr 80s linear infinite}
-@keyframes appr{to{transform:translate(-70px,30px)}}
+/* v18: drift you can clock in a few seconds — seamless wrap over a tiled
+   field, constant direction, never a snap */
+.sky .far{animation:appr 360s linear infinite}
+.sky .near{animation:appr 180s linear infinite}
+@keyframes appr{to{transform:translateX(-1600px)}}
 .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 .world{position:fixed;inset:0;z-index:1}
@@ -56,7 +58,7 @@ body.lit .gate-wrap{opacity:1;transform:none}
 }
 </style></head><body>
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-<g class="far" fill="#e9edf8"><circle class="tw" style="animation-delay:3.9s" cx="1265.7" cy="832.5" r="0.84" opacity="0.14"/>
+<g class="far" fill="#e9edf8"><g id="lg-fartile"><circle class="tw" style="animation-delay:3.9s" cx="1265.7" cy="832.5" r="0.84" opacity="0.14"/>
       <circle cx="1141.9" cy="658.3" r="0.75" opacity="0.31"/>
       <circle cx="903.2" cy="721.6" r="0.42" opacity="0.27"/>
       <circle cx="1019.8" cy="902.8" r="0.66" opacity="0.17"/>
@@ -155,8 +157,8 @@ body.lit .gate-wrap{opacity:1;transform:none}
       <circle class="tw" style="animation-delay:5.6s" cx="175.8" cy="488.8" r="0.75" opacity="0.2"/>
       <circle cx="733.8" cy="520.4" r="0.72" opacity="0.23"/>
       <circle cx="1299.9" cy="224.0" r="0.55" opacity="0.22"/>
-      <circle cx="1308.9" cy="946.7" r="0.57" opacity="0.29"/></g>
-<g class="near" fill="#f4f0ff"><circle cx="584.1" cy="212.4" r="1.5" opacity="0.63"/>
+      <circle cx="1308.9" cy="946.7" r="0.57" opacity="0.29"/></g><use href="#lg-fartile" x="1600"/></g>
+<g class="near" fill="#f4f0ff"><g id="lg-neartile"><circle cx="584.1" cy="212.4" r="1.5" opacity="0.63"/>
       <circle cx="781.6" cy="127.5" r="1.14" opacity="0.35"/>
       <circle cx="693.5" cy="882.3" r="0.84" opacity="0.66"/>
       <circle cx="560.9" cy="836.7" r="1.01" opacity="0.47"/>
@@ -199,7 +201,7 @@ body.lit .gate-wrap{opacity:1;transform:none}
       <circle cx="694.2" cy="963.8" r="1.35" opacity="0.66"/>
       <circle cx="211.3" cy="896.9" r="1.58" opacity="0.58"/>
       <circle cx="1387.1" cy="450.4" r="0.86" opacity="0.61"/>
-      <circle cx="428.7" cy="438.0" r="0.89" opacity="0.45"/></g></svg></div>
+      <circle cx="428.7" cy="438.0" r="0.89" opacity="0.45"/></g><use href="#lg-neartile" x="1600"/></g></svg></div>
 <div class="world"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
   <defs>
     <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1">
