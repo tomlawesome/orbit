@@ -154,7 +154,7 @@ describe("IMAP config handling — previous alias generation edge cases", () => 
       IMAP_ALIAS_PREVIOUS_EXPIRES_AT: expiresAt,
     }));
     expect(config.aliasPrevious).toMatchObject({ generation: 1 });
-    expect(config.aliasPrevious?.expiresAt.toISOString()).toBe(expiresAt);
+    expect(config.aliasPrevious?.expiresAt?.toISOString()).toBe(expiresAt);
   });
 });
 
