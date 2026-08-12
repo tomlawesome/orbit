@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { evaluateReadiness, type OidcSecretFileFacts } from "../lib/config-contract";
@@ -34,13 +34,27 @@ function gatherOidcSecretFacts(deployDir: string): OidcSecretFileFacts {
 
 function commandCheck(deployDir: string): never {
   const environmentFile = join(deployDir, ".env-orbit");
-  const fileLstat = lstatSync(environmentFile, { throwIfNoEntry: false });
-  if (!fileLstat || !fileLstat.isFile() || fileLstat.isSymbolicLink()) {
+  // Open first with O_NOFOLLOW, then verify and read through the same
+  // descriptor: the safety check and the content read cannot be split by a
+  // file swap (CodeQL js/file-system-race).
+  let descriptor: number;
+  try {
+    descriptor = openSync(environmentFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
     fail("configuration_syntax");
   }
-  if ((fileLstat.mode & 0o777) !== 0o600) fail("configuration_syntax");
+  let content: string;
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
+      fail("configuration_syntax");
+    }
+    content = readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
 
-  const parsed = parseEnvOrbitContent(readFileSync(environmentFile, "utf8"));
+  const parsed = parseEnvOrbitContent(content);
   if (!parsed.ok) fail(parsed.code);
 
   const facts = gatherOidcSecretFacts(deployDir);
