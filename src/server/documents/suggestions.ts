@@ -97,8 +97,10 @@ function extractDates(bounded: string): string[] {
 
 export function proposalFromText(text: string, filename: string): DocumentProposal {
   const bounded = text.slice(0, MAX_EXTRACTED_CHARACTERS);
+  // The capture must contain a digit so label words ("reference") are never
+  // mistaken for the reference itself.
   const referenceMatch = bounded.match(
-    /(?:policy|account|reference)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z0-9-]{5,80})/iu,
+    /(?:policy|account|invoice|licence|license|customer|membership|reference)\s*(?:no\.?|number|ref\.?|reference|#)?\s*[:#]?\s*([A-Z-]*\d[A-Z0-9-]{3,79})/iu,
   )?.[1];
   const providerMatch = bounded.match(
     /(?:provider|insurer|supplier)\s*[:\-]\s*([^\r\n]{2,160})/iu,
