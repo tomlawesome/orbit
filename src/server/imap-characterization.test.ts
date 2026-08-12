@@ -25,14 +25,14 @@ import {
   classifyImapBodyStructure,
   normalizeImapAttachmentName,
   validateImapAttachmentBytes,
-} from "@/server/imap-attachment-validation";
+} from "@/server/mail-in/core/imap-attachment-validation";
 import {
   deriveImapRecipientAlias,
   matchImapRecipientAliasGeneration,
   normalizeImapRecipientAlias,
   parseTrustedRecipientHeader,
-} from "@/server/imap-recipient";
-import { decideImapRotationState, ImapRotationStaleError } from "@/server/imap-rotation";
+} from "@/server/mail-in/core/imap-recipient";
+import { decideImapRotationState, ImapRotationStaleError } from "@/server/mail-in/core/imap-rotation";
 import {
   getImapIngestionConfig,
   imapAttachmentRetryDelayMs,
