@@ -10,12 +10,13 @@ import {
   openSync,
   readFileSync,
   readSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import {
   BackupRestoreCliRefusal,
@@ -57,11 +58,21 @@ import {
   deriveRestorePaths,
   recoverRestore,
 } from "../lib/restore-engine";
+import { formatEngineEventLine } from "../lib/engine-event";
+import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "../lib/install-orchestrator";
+import { createInstallDockerAdapter } from "../lib/install-docker-adapter";
+import { checkCurlAvailable, createInstallAssetFetchAdapter, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
+import { createInstallConfigurationScriptAdapter, createInstallGuidedConfigurationAdapter } from "../lib/install-script-adapters";
+import { ComposeProjectNameRefusal, deriveComposeProjectName } from "../lib/target-identity";
+import type { MachinePromptAnswerProvider } from "../lib/guided-configuration";
 
-// The orbit engine CLI (ADR-0011, issue #294). First flow: `check` — the
+// The orbit engine CLI (ADR-0011, issue #294). Flows: `check` — the
 // value-free readiness report, output-identical to `configure.sh --check`
-// (proven by src/lib/config-contract.parity.test.ts). Non-interactive by
-// design; interactive presentation belongs to orbit-launcher.
+// (proven by src/lib/config-contract.parity.test.ts); `install`/`update` —
+// issue #295 slice 5's orchestrated install/update flow
+// (src/lib/install-orchestrator.ts), driven with the shipped subprocess
+// adapters below. Non-interactive by design; interactive presentation
+// belongs to orbit-launcher.
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -742,6 +753,197 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
   }
 }
 
+// `orbit install --dir <deployment>` / `orbit update --dir <deployment>`
+// (issue #295 slice 5): drives install-orchestrator.ts's runInstall with the
+// real subprocess adapters (install-docker-adapter.ts, install-curl-
+// adapter.ts, install-script-adapters.ts). Explicit invocation only — unlike
+// `check`, which defaults an omitted --dir to the current directory,
+// install/update refuse outright without one: these flows mutate a real
+// deployment target, so silently defaulting to cwd is a materially higher-
+// stakes mistake than for a read-only readiness report.
+
+/** install.sh:134-138 (ORBIT_CHANNEL). */
+const CHANNEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** install.sh:138-141 (ORBIT_REPOSITORY). */
+const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+/** install.sh:142-145 (ORBIT_REGISTRY). */
+const REGISTRY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$/;
+/** install.sh:125-126 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
+const READINESS_TIMEOUT_PATTERN = /^[1-9][0-9]{0,2}$/;
+/** install.sh:130 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
+const READINESS_POLL_PATTERN = /^[1-9]$/;
+
+interface InstallEnvironmentConfig {
+  repository: string;
+  registry: string;
+  channel: string;
+  readinessTimeoutSeconds: number;
+  readinessPollSeconds: number;
+}
+
+/**
+ * Reads and validates ORBIT_REPOSITORY/ORBIT_REGISTRY/ORBIT_CHANNEL/
+ * ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS/ORBIT_INSTALLER_POLL_INTERVAL_SECONDS
+ * exactly the way install.sh does at its own top-of-script argument/env
+ * validation (install.sh:13-15,123-145) — install-orchestrator.ts itself
+ * has no reason to own environment-variable parsing (it takes an already-
+ * validated context), so this is this CLI's own responsibility, the same
+ * way it already owns `--dir` parsing for `check`. Fails closed with
+ * install.sh's own messages on anything invalid.
+ */
+function resolveInstallEnvironmentConfig(env: NodeJS.ProcessEnv): InstallEnvironmentConfig {
+  const repository = env.ORBIT_REPOSITORY ?? "tomlawesome/orbit";
+  const registry = env.ORBIT_REGISTRY ?? "ghcr.io";
+  const channel = env.ORBIT_CHANNEL ?? "latest";
+  const readinessTimeoutRaw = env.ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS ?? "180";
+  const readinessPollRaw = env.ORBIT_INSTALLER_POLL_INTERVAL_SECONDS ?? "2";
+
+  if (!READINESS_TIMEOUT_PATTERN.test(readinessTimeoutRaw) || Number(readinessTimeoutRaw) > 900) {
+    fail("orbit: ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS must be between 1 and 900.");
+  }
+  if (!READINESS_POLL_PATTERN.test(readinessPollRaw)) {
+    fail("orbit: ORBIT_INSTALLER_POLL_INTERVAL_SECONDS must be between 1 and 9.");
+  }
+  if (!CHANNEL_PATTERN.test(channel)) {
+    fail("orbit: ORBIT_CHANNEL is invalid.");
+  }
+  if (!REPOSITORY_PATTERN.test(repository)) {
+    fail("orbit: ORBIT_REPOSITORY is invalid.");
+  }
+  if (!REGISTRY_PATTERN.test(registry)) {
+    fail("orbit: ORBIT_REGISTRY is invalid.");
+  }
+
+  return {
+    repository,
+    registry,
+    channel,
+    readinessTimeoutSeconds: Number(readinessTimeoutRaw),
+    readinessPollSeconds: Number(readinessPollRaw),
+  };
+}
+
+/** install.sh's own `basename -- "$(pwd -P)"` fallback (install.sh:453) — `pwd -P` resolves symlinks in the cwd; realpathSync mirrors that for an arbitrary --dir target. */
+function deriveFallbackBasename(targetDir: string): string {
+  let resolved = targetDir;
+  try {
+    resolved = realpathSync(targetDir);
+  } catch {
+    // targetDir was just created if it didn't already exist (see
+    // commandInstallOrUpdate below), so this only matters if realpath
+    // itself fails for some other reason — fall back to the literal path.
+  }
+  return basename(resolved);
+}
+
+// stageGuidedInstallConfiguration/prepareConfiguration only ever call
+// `answers.answer` when hasControllingTerminal is true
+// (guided-configuration.ts), and this CLI always passes false below (see
+// InstallOrchestratorContext.hasControllingTerminal's own doc in
+// install-orchestrator.ts and docs/adr-notes/295-install-port-plan.md's
+// Flags section) — collecting real answer values from CLI flags/environment
+// for an interactive-equivalent surface is explicitly deferred to a future
+// slice. This provider exists only so the type is satisfied; reaching it is
+// a programming error, not an expected runtime path.
+const UNREACHABLE_ANSWERS: MachinePromptAnswerProvider = {
+  answer(): never {
+    throw new Error("orbit: interactive guided configuration is not available from this CLI yet");
+  },
+};
+
+function commandInstallOrUpdate(action: "install" | "update", deployDirArg: string | undefined): void {
+  if (!deployDirArg) {
+    fail(`orbit: ${action} requires --dir <deployment>`);
+  }
+  const targetDir = resolve(deployDirArg);
+  if (!existsSync(targetDir)) {
+    mkdirSync(targetDir, { recursive: true });
+  } else if (!statSync(targetDir).isDirectory()) {
+    fail(`orbit: ${targetDir} is not a directory.`);
+  }
+
+  const config = resolveInstallEnvironmentConfig(process.env);
+  const fallbackBasename = deriveFallbackBasename(targetDir);
+  const requestedComposeProjectName = process.env.COMPOSE_PROJECT_NAME;
+
+  // Best-effort initial value only: createInstallDockerAdapter needs some
+  // starting --project-name at construction time, before
+  // verify_database_volume_safety's own resolution (possibly a proven
+  // pre-existing volume's own label) has run. install-orchestrator.ts calls
+  // adapters.docker.setComposeProjectName with the final resolved value
+  // immediately once that resolution completes and before any `compose`-
+  // wrapped call — see that module's own comment at the call site. A
+  // ComposeProjectNameRefusal here is deliberately swallowed: runInstall's
+  // own internal call raises the identical refusal as a graceful
+  // {status:"failed"} outcome, printed below like every other failure.
+  let initialComposeProjectName = fallbackBasename;
+  try {
+    initialComposeProjectName = deriveComposeProjectName(targetDir, requestedComposeProjectName, fallbackBasename).composeProjectName;
+  } catch (error) {
+    if (!(error instanceof ComposeProjectNameRefusal)) throw error;
+  }
+
+  const docker = createInstallDockerAdapter({
+    cwd: targetDir,
+    envFile: ".env-orbit",
+    composeProjectName: initialComposeProjectName,
+  });
+  const assetFetchAdapter = createInstallAssetFetchAdapter({ cwd: targetDir });
+
+  const adapters: InstallOrchestratorAdapters = {
+    docker,
+    fetchAsset: (url, destinationPath) => assetFetchAdapter.fetchAsset(url, destinationPath),
+    checkCurlAvailable: () => checkCurlAvailable({ cwd: targetDir }),
+    oidcFetch: createInstallOidcFetchAdapter({ cwd: targetDir }),
+    configurationScript: createInstallConfigurationScriptAdapter({ cwd: targetDir }),
+    guidedConfiguration: createInstallGuidedConfigurationAdapter({ cwd: targetDir }),
+    answers: UNREACHABLE_ANSWERS,
+  };
+
+  const context: InstallOrchestratorContext = {
+    targetDir,
+    requestedAction: action,
+    repository: config.repository,
+    registry: config.registry,
+    channel: config.channel,
+    requestedComposeProjectName,
+    fallbackBasename,
+    // This CLI has no controlling terminal to hand a spawned configure.sh
+    // the way install.sh's own `exec {fd}<>/dev/tty` does — see
+    // InstallOrchestratorContext's own doc in install-orchestrator.ts.
+    hasControllingTerminal: false,
+    readinessTimeoutSeconds: config.readinessTimeoutSeconds,
+    readinessPollSeconds: config.readinessPollSeconds,
+  };
+
+  const startedAt = Date.now();
+  runInstall(context, adapters, (event) => {
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    process.stdout.write(`${formatEngineEventLine(event, elapsedSeconds)}\n`);
+  })
+    .then((outcome) => {
+      if (outcome.status === "ok") {
+        process.stdout.write(
+          `orbit: ${action} complete. resolvedReference=${outcome.resolvedReference} version=${outcome.imageVersion} profile=${outcome.selectedProfile}\n`,
+        );
+        process.exit(0);
+      }
+      if (outcome.status === "cancelled") {
+        process.stderr.write(`orbit: ${action} cancelled.\n`);
+        process.exit(130);
+      }
+      process.stderr.write(`orbit: ${outcome.message}\n`);
+      for (const line of outcome.guidance ?? []) {
+        process.stderr.write(`${line}\n`);
+      }
+      process.exit(1);
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(`orbit: unexpected error during ${action}: ${(error as Error).message}\n`);
+      process.exit(1);
+    });
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -759,22 +961,32 @@ function main(): void {
     return;
   }
 
-  let deployDir = process.cwd();
+  let deployDirArg: string | undefined;
   const commandArgs: string[] = [];
   for (let index = 0; index < rest.length; index += 1) {
     if (rest[index] === "--dir" && rest[index + 1]) {
-      deployDir = resolve(rest[index + 1]);
+      deployDirArg = rest[index + 1];
       index += 1;
     } else {
       commandArgs.push(rest[index]);
     }
   }
+  // check/backup/restore/bundle commands operate on an existing deployment,
+  // so an omitted --dir defaults to cwd; install/update mutate a real
+  // target and require --dir explicitly — see commandInstallOrUpdate's own
+  // header comment for why that deliberately does not default to cwd.
+  const deployDir = deployDirArg !== undefined ? resolve(deployDirArg) : process.cwd();
 
   try {
     switch (command) {
       case "check":
         if (commandArgs.length > 0) fail(`orbit: unknown option ${commandArgs[0]}`);
         commandCheck(deployDir);
+        break;
+      case "install":
+      case "update":
+        if (commandArgs.length > 0) fail(`orbit: unknown option ${commandArgs[0]}`);
+        commandInstallOrUpdate(command, deployDirArg);
         break;
       case "backup":
         commandBackup(deployDir, commandArgs);
@@ -792,8 +1004,8 @@ function main(): void {
         failUsage();
     }
   } catch (error) {
-    // Every refusal class in the three modules this CLI wires together
-    // throws a stable, category-only message (no secret material, no
+    // Every refusal class in the modules this CLI wires together throws a
+    // stable, category-only message (no secret material, no
     // attacker-controlled path/member names — asserted by each module's own
     // no-leak sweep), so surfacing `error.message` directly here is safe;
     // anything else is a genuine bug and should keep its stack trace.
@@ -805,7 +1017,7 @@ function main(): void {
 }
 
 function failUsage(): never {
-  fail("orbit: supported commands: check, backup, restore, export-recovery-bundle, import-recovery-bundle [--dir <deployment>]");
+  fail("orbit: supported commands: check, backup, restore, export-recovery-bundle, import-recovery-bundle [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>");
 }
 
 main();
