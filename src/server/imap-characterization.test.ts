@@ -374,19 +374,29 @@ describe("normalizeImapRecipientAlias — address-shape normalization", () => {
   const key = { generation: 3, secret: "normalize-test-alias-secret-at-least-32-chars" };
   const userId = "9c3b6f0a-2222-4aaa-8bbb-000000000003";
 
-  it("unwraps angle brackets, and folds domain/token case but requires a literal lowercase 'orbit+' prefix", () => {
+  it("unwraps angle brackets, and folds domain/token/prefix case alike (#336: case-fold the 'orbit+' prefix)", () => {
     const alias = deriveImapRecipientAlias(userId, domain, key);
     const atIndex = alias.indexOf("@");
     const token = alias.slice("orbit+".length, atIndex);
     const wrapped = `<orbit+${token.toUpperCase()}@${domain.toUpperCase()}>`;
     expect(normalizeImapRecipientAlias(wrapped, domain)).toBe(alias.toLowerCase());
 
-    // NOTE (flagged, not fixed): unlike the token and domain, the "orbit+"
-    // literal itself is matched case-sensitively (no /i on ALIAS_LOCAL_PART).
-    // A relay that uppercases the whole local part (e.g. "ORBIT+token") would
-    // make an otherwise-valid alias fail normalization entirely.
-    const upperPrefix = `ORBIT+${token}@${domain}`;
-    expect(normalizeImapRecipientAlias(upperPrefix, domain)).toBeUndefined();
+    // BEHAVIOUR CHANGE (#336 decision, 2026-08-13, fixing characterization
+    // oddity #9 from #298): the "orbit+" literal is now folded the same way
+    // as the token and domain (ALIAS_LOCAL_PART gained the /i flag). Gmail,
+    // Outlook, and Mailcow all deliver sub-addressed mail with the local part
+    // treated case-insensitively, so a relay/sender that upcases the address
+    // must still attribute correctly instead of silently losing attribution.
+    // This test previously pinned the OLD (case-sensitive-prefix) behaviour;
+    // it now pins the new, intentional, case-insensitive-prefix behaviour.
+    for (const prefix of ["Orbit+", "ORBIT+", "oRbIt+"]) {
+      expect(normalizeImapRecipientAlias(`${prefix}${token}@${domain}`, domain)).toBe(alias.toLowerCase());
+    }
+
+    // A wrong prefix (not just wrong case) must still be refused.
+    for (const wrongPrefix of ["orbitx+", "orbi+"]) {
+      expect(normalizeImapRecipientAlias(`${wrongPrefix}${token}@${domain}`, domain)).toBeUndefined();
+    }
   });
 
   it("accepts a comma-bearing header value as one literal string, but normalization then rejects it as malformed", () => {

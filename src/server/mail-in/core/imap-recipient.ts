@@ -16,7 +16,15 @@ export type TrustedRecipientHeaderResult =
   | { kind: "value"; value: string }
   | { kind: "missing" | "duplicate" | "folded" | "malformed" };
 
-const ALIAS_LOCAL_PART = /^orbit\+([A-Za-z0-9_-]{43})$/u;
+// The "orbit+" literal is matched case-insensitively (/i), same as the token
+// and domain are folded a few lines down via .toLowerCase(): Gmail, Outlook,
+// and Mailcow all deliver sub-addressed mail with the local part treated
+// case-insensitively, so a sender/relay that upcases the address (e.g.
+// "Orbit+token@..." or "ORBIT+token@...") must still attribute correctly
+// instead of silently landing in the unattributed-mail fallback (#336 decision,
+// characterization oddity #9 from #298). This only folds the fixed "orbit+"
+// prefix; it does not widen what counts as a valid token.
+const ALIAS_LOCAL_PART = /^orbit\+([A-Za-z0-9_-]{43})$/iu;
 const HEADER_NAME = /^[A-Za-z0-9-]{1,80}$/u;
 const MAX_TRUSTED_HEADER_VALUE_BYTES = 512;
 
