@@ -1,0 +1,643 @@
+import { createHmac } from "node:crypto";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  BACKUP_BUNDLE_FORMAT_VERSION,
+  BACKUP_BUNDLE_MEMBERS,
+  MIN_RECOVERY_PASSPHRASE_LENGTH,
+  RECOVERY_BUNDLE_FORMAT_VERSION,
+  RECOVERY_BUNDLE_MEMBERS,
+  RECOVERY_KEY_ENCRYPTION_ALGORITHM,
+  RecoveryBundleRefusal,
+  SECURE_DIRECTORY_MODE,
+  SECURE_FILE_MODE,
+  buildBackupManifest,
+  buildRecoveryManifest,
+  computeBundleHmac,
+  createTar,
+  decryptDocumentKek,
+  documentKekFingerprint,
+  encryptDocumentKek,
+  extractTar,
+  isValidBundleHmac,
+  isValidDocumentKekFingerprint,
+  isValidDocumentKekHex,
+  isValidPassphrase,
+  listTarEntriesVerbose,
+  listTarMembers,
+  manifestDeclares,
+  passphrasesMatch,
+  readManifestField,
+  requireMatchingPassphrase,
+  requireValidPassphrase,
+  sha256Buffer,
+  sha256File,
+  validateBackupBundleLayout,
+  validateBackupManifestAndAuth,
+  validateDocumentArchiveEntries,
+  validateRecoveryBundleLayout,
+  validateRecoveryManifestFormatVersion,
+  verifyBundleHmac,
+  verifyChecksumsFile,
+  verifyRecoveryBundleChecksums,
+  writeSecretFile,
+} from "./recovery-bundle";
+
+// Ported from scripts/recovery-crypto.mjs, scripts/backup.sh's validate_bundle
+// / validate_document_archive, and scripts/export-recovery-bundle.sh /
+// scripts/import-recovery-bundle.sh (issue #296 slice 1). Guarantee numbers
+// cited below are from docs/installer-guarantees.md, Part 2. See
+// docs/adr-notes/296-backup-port-plan.md for the slice this belongs to and
+// byte-for-byte parity coverage against the real scripts
+// (recovery-bundle.parity.test.ts).
+
+let workDir: string;
+
+beforeEach(() => {
+  workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-bundle-"));
+});
+
+afterEach(() => {
+  rmSync(workDir, { recursive: true, force: true });
+});
+
+const KEK_A = "a".repeat(64);
+const KEK_B = "b".repeat(64);
+
+function mode(path: string): number {
+  return lstatSync(path).mode & 0o777;
+}
+
+describe("permission constants", () => {
+  it("matches backup.sh #21 / export-recovery-bundle.sh #9 (private work directories)", () => {
+    expect(SECURE_DIRECTORY_MODE).toBe(0o700);
+  });
+
+  it("matches import-recovery-bundle.sh #11/#16 (secret-bearing members)", () => {
+    expect(SECURE_FILE_MODE).toBe(0o600);
+  });
+});
+
+describe("writeSecretFile", () => {
+  it("forces the final mode before any content is written, never briefly world-readable", () => {
+    const path = join(workDir, "document-kek");
+    writeSecretFile(path, `${KEK_A}\n`, 0o600);
+    expect(mode(path)).toBe(0o600);
+    expect(readFileSync(path, "utf8")).toBe(`${KEK_A}\n`);
+  });
+});
+
+describe("passphrase validation (recovery-crypto.mjs #1, export-recovery-bundle.sh #6-7)", () => {
+  it("MIN_RECOVERY_PASSPHRASE_LENGTH is 12", () => {
+    expect(MIN_RECOVERY_PASSPHRASE_LENGTH).toBe(12);
+  });
+
+  it("accepts a 12-character passphrase and refuses an 11-character one", () => {
+    expect(isValidPassphrase("x".repeat(12))).toBe(true);
+    expect(isValidPassphrase("x".repeat(11))).toBe(false);
+    expect(() => requireValidPassphrase("x".repeat(11))).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("requires the confirmation to match exactly (typo protection, #7)", () => {
+    expect(passphrasesMatch("correct-horse-battery", "correct-horse-battery")).toBe(true);
+    expect(passphrasesMatch("correct-horse-battery", "correct-horse-batteryy")).toBe(false);
+    expect(() => requireMatchingPassphrase("a".repeat(12), "b".repeat(12))).toThrow(RecoveryBundleRefusal);
+  });
+});
+
+describe("ORBKEK envelope crypto (recovery-crypto.mjs #2-9)", () => {
+  it("round-trips a valid document KEK through encrypt/decrypt", () => {
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    const recovered = decryptDocumentKek(envelope, "correct-horse-battery-staple");
+    expect(recovered.toString("ascii")).toBe(KEK_A);
+  });
+
+  it("produces a different envelope every time (fresh salt/IV never reused, #3)", () => {
+    const first = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    const second = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    expect(first.equals(second)).toBe(false);
+  });
+
+  it("refuses to encrypt a non-hex key (#2)", () => {
+    expect(() => encryptDocumentKek("not-hex", "correct-horse-battery-staple")).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("refuses to encrypt under a too-short passphrase, independent of any caller check (#1)", () => {
+    let error: unknown;
+    try {
+      encryptDocumentKek(KEK_A, "short");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("passphrase-too-short");
+  });
+
+  it("refuses a too-short or bad-magic envelope before any cryptographic operation (#6)", () => {
+    expect(() => decryptDocumentKek(Buffer.from("short"), "correct-horse-battery-staple")).toThrow(RecoveryBundleRefusal);
+    const badMagic = Buffer.concat([Buffer.from("NOTMAGIC"), Buffer.alloc(64)]);
+    let error: unknown;
+    try {
+      decryptDocumentKek(badMagic, "correct-horse-battery-staple");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("invalid-envelope");
+  });
+
+  it("reports a wrong passphrase generically, not a detailed crypto error (#7)", () => {
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    let error: unknown;
+    try {
+      decryptDocumentKek(envelope, "wrong-passphrase-wrong-passphrase");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("wrong-passphrase");
+    expect((error as Error).message).not.toMatch(/passphrase-wrong-passphrase/);
+  });
+
+  it("reports tampered ciphertext the same as a wrong passphrase (GCM auth-tag failure, #7)", () => {
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    const tampered = Buffer.from(envelope);
+    tampered[tampered.length - 1] ^= 0xff;
+    let error: unknown;
+    try {
+      decryptDocumentKek(tampered, "correct-horse-battery-staple");
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("wrong-passphrase");
+  });
+
+  it("never leaks the passphrase or key material in a refusal message", () => {
+    const secretPassphrase = "correct-horse-battery-staple";
+    const envelope = encryptDocumentKek(KEK_A, secretPassphrase);
+    let message = "";
+    try {
+      decryptDocumentKek(envelope, "another-wrong-passphrase-value");
+    } catch (caught) {
+      message = (caught as Error).message;
+    }
+    expect(message).not.toContain(secretPassphrase);
+    expect(message).not.toContain(KEK_A);
+  });
+});
+
+describe("HMAC bundle authentication (recovery-crypto.mjs #12-13, backup.sh #5,#7,#16)", () => {
+  it("computes a base64 HMAC matching the format check", () => {
+    const hmac = computeBundleHmac(KEK_A, Buffer.from("manifest-and-checksums"));
+    expect(isValidBundleHmac(hmac)).toBe(true);
+  });
+
+  it("is deterministic for identical inputs (unlike the ORBKEK envelope)", () => {
+    const content = Buffer.from("manifest-and-checksums");
+    expect(computeBundleHmac(KEK_A, content)).toBe(computeBundleHmac(KEK_A, content));
+  });
+
+  it("verifies successfully when the HMAC matches", () => {
+    const content = Buffer.from("manifest-and-checksums");
+    const hmac = computeBundleHmac(KEK_A, content);
+    expect(() => verifyBundleHmac(KEK_A, content, hmac)).not.toThrow();
+  });
+
+  it("refuses when the content has been tampered with after signing (#7)", () => {
+    const hmac = computeBundleHmac(KEK_A, Buffer.from("original-content"));
+    expect(() => verifyBundleHmac(KEK_A, Buffer.from("tampered-content"), hmac)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("refuses a malformed HMAC value before comparing", () => {
+    expect(() => verifyBundleHmac(KEK_A, Buffer.from("x"), "not-base64!!")).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("uses a key-separated sub-key, not the raw document KEK (#12)", () => {
+    // If the raw KEK were used directly as the HMAC key, this would equal a
+    // plain HMAC-SHA256(KEK_A, content); it must not.
+    const content = Buffer.from("manifest-and-checksums");
+    const naive = createHmac("sha256", Buffer.from(KEK_A, "hex")).update(content).digest("base64");
+    expect(computeBundleHmac(KEK_A, content)).not.toBe(naive);
+  });
+});
+
+describe("document KEK fingerprint (recovery-crypto.mjs #15, backup.sh #6)", () => {
+  it("is a deterministic 64-char lowercase hex sha256 of the key", () => {
+    const fingerprint = documentKekFingerprint(KEK_A);
+    expect(isValidDocumentKekFingerprint(fingerprint)).toBe(true);
+    expect(documentKekFingerprint(KEK_A)).toBe(fingerprint);
+  });
+
+  it("differs for a different key", () => {
+    expect(documentKekFingerprint(KEK_A)).not.toBe(documentKekFingerprint(KEK_B));
+  });
+
+  it("never appears verbatim as the raw key in its own output", () => {
+    expect(documentKekFingerprint(KEK_A)).not.toBe(KEK_A);
+  });
+});
+
+describe("key format validation", () => {
+  it("isValidDocumentKekHex accepts 64 hex chars and rejects anything else", () => {
+    expect(isValidDocumentKekHex(KEK_A)).toBe(true);
+    expect(isValidDocumentKekHex(`${KEK_A}0`)).toBe(false);
+    expect(isValidDocumentKekHex("not-hex-at-all-not-hex-at-all-not-hex-at-all-not-hex-at-all1234")).toBe(false);
+  });
+});
+
+describe("checksum helpers", () => {
+  it("sha256File matches sha256Buffer of the same content", () => {
+    const path = join(workDir, "sample.txt");
+    writeFileSync(path, "sample content");
+    expect(sha256File(path)).toBe(sha256Buffer(Buffer.from("sample content")));
+  });
+});
+
+describe("manifest text (byte-for-byte format)", () => {
+  it("buildBackupManifest matches backup.sh's field order exactly", () => {
+    const content = buildBackupManifest({
+      createdAt: "2026-08-13T00:00:00Z",
+      databaseDump: "database.dump",
+      documentsArchive: "documents.tar.enc",
+      documentsEncryption: "aes-256-cbc-pbkdf2-sha256-iter-600000",
+      documentKekSha256: documentKekFingerprint(KEK_A),
+    });
+    expect(content).toBe(
+      `format_version=${BACKUP_BUNDLE_FORMAT_VERSION}\n` +
+        "created_at=2026-08-13T00:00:00Z\n" +
+        "database_dump=database.dump\n" +
+        "documents_archive=documents.tar.enc\n" +
+        "documents_encryption=aes-256-cbc-pbkdf2-sha256-iter-600000\n" +
+        `document_kek_sha256=${documentKekFingerprint(KEK_A)}\n`,
+    );
+  });
+
+  it("buildRecoveryManifest matches export-recovery-bundle.sh's printf exactly", () => {
+    expect(buildRecoveryManifest()).toBe(
+      `format_version=${RECOVERY_BUNDLE_FORMAT_VERSION}\nkey_encryption=${RECOVERY_KEY_ENCRYPTION_ALGORITHM}\n`,
+    );
+  });
+
+  it("manifestDeclares does an exact single-line match, not a substring search", () => {
+    const content = "format_version=1\ncreated_at=2026-08-13T00:00:00Z\n";
+    expect(manifestDeclares(content, "format_version", "1")).toBe(true);
+    expect(manifestDeclares(content, "format_version", "10")).toBe(false);
+    expect(manifestDeclares(content, "created_at", "2026-08-13T00:00:00")).toBe(false);
+  });
+
+  it("readManifestField returns the field value or undefined", () => {
+    const content = "format_version=1\ncreated_at=2026-08-13T00:00:00Z\n";
+    expect(readManifestField(content, "created_at")).toBe("2026-08-13T00:00:00Z");
+    expect(readManifestField(content, "missing_field")).toBeUndefined();
+  });
+});
+
+function buildBackupBundleFixture(dir: string, documentKekHex: string): string {
+  mkdirSync(dir, { recursive: true });
+  const manifest = buildBackupManifest({
+    createdAt: "2026-08-13T00:00:00Z",
+    databaseDump: "database.dump",
+    documentsArchive: "documents.tar.enc",
+    documentsEncryption: "aes-256-cbc-pbkdf2-sha256-iter-600000",
+    documentKekSha256: documentKekFingerprint(documentKekHex),
+  });
+  writeFileSync(join(dir, "manifest"), manifest);
+  writeFileSync(join(dir, "database.dump"), "fake-pg-dump-bytes");
+  writeFileSync(join(dir, "documents.tar.enc"), "fake-encrypted-documents-bytes");
+  const checksums =
+    `${sha256File(join(dir, "database.dump"))}  database.dump\n` +
+    `${sha256File(join(dir, "documents.tar.enc"))}  documents.tar.enc\n`;
+  writeFileSync(join(dir, "checksums.sha256"), checksums);
+  const manifestAndChecksums = Buffer.concat([Buffer.from(manifest), Buffer.from(checksums)]);
+  writeFileSync(join(dir, "manifest.hmac"), computeBundleHmac(documentKekHex, manifestAndChecksums));
+  const tarPath = join(dir, "..", "bundle.tar");
+  createTar(dir, tarPath, [...BACKUP_BUNDLE_MEMBERS]);
+  return tarPath;
+}
+
+describe("backup bundle layout (backup.sh #11-13)", () => {
+  it("accepts a bundle with exactly the five expected members", () => {
+    const dir = join(workDir, "valid-bundle");
+    const tarPath = buildBackupBundleFixture(dir, KEK_A);
+    expect(() => validateBackupBundleLayout(tarPath)).not.toThrow();
+    expect([...listTarMembers(tarPath)].sort()).toEqual([...BACKUP_BUNDLE_MEMBERS].sort());
+  });
+
+  it("refuses a bundle missing an expected member", () => {
+    const dir = join(workDir, "missing-member");
+    mkdirSync(dir, { recursive: true });
+    for (const name of BACKUP_BUNDLE_MEMBERS) writeFileSync(join(dir, name), "x");
+    const tarPath = join(workDir, "missing-member.tar");
+    createTar(dir, tarPath, BACKUP_BUNDLE_MEMBERS.filter((name) => name !== "manifest.hmac"));
+    let error: unknown;
+    try {
+      validateBackupBundleLayout(tarPath);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("unexpected-members");
+  });
+
+  it("refuses a bundle with an extra, attacker-controlled member", () => {
+    const dir = join(workDir, "extra-member");
+    mkdirSync(dir, { recursive: true });
+    for (const name of BACKUP_BUNDLE_MEMBERS) writeFileSync(join(dir, name), "x");
+    writeFileSync(join(dir, "attacker-controlled"), "x");
+    const tarPath = join(workDir, "extra-member.tar");
+    createTar(dir, tarPath, [...BACKUP_BUNDLE_MEMBERS, "attacker-controlled"]);
+    expect(() => validateBackupBundleLayout(tarPath)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("refuses a bundle containing a symlink entry (#12)", () => {
+    const dir = join(workDir, "symlink-member");
+    mkdirSync(dir, { recursive: true });
+    for (const name of BACKUP_BUNDLE_MEMBERS) {
+      if (name === "manifest.hmac") continue;
+      writeFileSync(join(dir, name), "x");
+    }
+    writeFileSync(join(dir, "real-target"), "x");
+    symlinkSync(join(dir, "real-target"), join(dir, "manifest.hmac"));
+    const tarPath = join(workDir, "symlink-member.tar");
+    createTar(dir, tarPath, [...BACKUP_BUNDLE_MEMBERS]);
+    let error: unknown;
+    try {
+      validateBackupBundleLayout(tarPath);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
+  });
+});
+
+describe("document archive path allow-list (backup.sh #8-10)", () => {
+  const HASH = "a".repeat(64);
+
+  it("accepts the directory scaffolding plus a correctly-prefixed object", () => {
+    const entries = [
+      { typeChar: "d", name: "./" },
+      { typeChar: "d", name: "./objects/" },
+      { typeChar: "d", name: "./objects/aa/" },
+      { typeChar: "d", name: "./objects/aa/aa/" },
+      { typeChar: "-", name: `./objects/aa/aa/${HASH}.bin` },
+      { typeChar: "d", name: "./staging/" },
+    ];
+    expect(() => validateDocumentArchiveEntries(entries)).not.toThrow();
+  });
+
+  it("accepts a staging object", () => {
+    expect(() => validateDocumentArchiveEntries([{ typeChar: "-", name: `./staging/${HASH}.bin` }])).not.toThrow();
+  });
+
+  it("refuses an object whose directory prefix does not match its own hash (#9)", () => {
+    let error: unknown;
+    try {
+      validateDocumentArchiveEntries([{ typeChar: "-", name: `./objects/bb/bb/${HASH}.bin` }]);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("misplaced-object");
+  });
+
+  it("refuses an unexpected path (path traversal / injection attempt, #8)", () => {
+    expect(() => validateDocumentArchiveEntries([{ typeChar: "-", name: "../../etc/passwd" }])).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("refuses a symlink or special file even at an otherwise-valid path (#10)", () => {
+    let error: unknown;
+    try {
+      validateDocumentArchiveEntries([{ typeChar: "l", name: `./objects/aa/aa/${HASH}.bin` }]);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
+  });
+});
+
+describe("backup bundle manifest + HMAC + checksum verification (backup.sh #7,#14-17)", () => {
+  it("accepts a validly-built bundle", () => {
+    const dir = join(workDir, "valid");
+    buildBackupBundleFixture(dir, KEK_A);
+    const fields = validateBackupManifestAndAuth(dir, KEK_A);
+    expect(fields.documentKekSha256).toBe(documentKekFingerprint(KEK_A));
+    expect(fields.databaseDump).toBe("database.dump");
+  });
+
+  it("refuses when the bundle was encrypted with a different document KEK ('wrong key', #15)", () => {
+    const dir = join(workDir, "wrong-key");
+    buildBackupBundleFixture(dir, KEK_A);
+    let error: unknown;
+    try {
+      validateBackupManifestAndAuth(dir, KEK_B);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("wrong-key");
+  });
+
+  it("refuses an unsupported format_version (#14)", () => {
+    const dir = join(workDir, "bad-version");
+    buildBackupBundleFixture(dir, KEK_A);
+    writeFileSync(join(dir, "manifest"), readFileSync(join(dir, "manifest"), "utf8").replace("format_version=1", "format_version=2"));
+    let error: unknown;
+    try {
+      validateBackupManifestAndAuth(dir, KEK_A);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("unsupported-format-version");
+  });
+
+  it("refuses a tampered manifest (HMAC no longer matches, corrupt-manifest scenario)", () => {
+    const dir = join(workDir, "corrupt-manifest");
+    buildBackupBundleFixture(dir, KEK_A);
+    writeFileSync(join(dir, "manifest"), `${readFileSync(join(dir, "manifest"), "utf8")}corruption\n`);
+    let error: unknown;
+    try {
+      validateBackupManifestAndAuth(dir, KEK_A);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("hmac-mismatch");
+  });
+
+  it("refuses a tampered manifest.hmac (corrupt-hmac scenario)", () => {
+    const dir = join(workDir, "corrupt-hmac");
+    buildBackupBundleFixture(dir, KEK_A);
+    writeFileSync(join(dir, "manifest.hmac"), `${readFileSync(join(dir, "manifest.hmac"), "utf8")}x`);
+    expect(() => validateBackupManifestAndAuth(dir, KEK_A)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("refuses a tampered checksums.sha256 (corrupt-checksum scenario, #17)", () => {
+    const dir = join(workDir, "corrupt-checksum");
+    buildBackupBundleFixture(dir, KEK_A);
+    const originalChecksums = readFileSync(join(dir, "checksums.sha256"), "utf8");
+    const tamperedChecksums = originalChecksums.replace(/^[0-9a-f]{64}(?=  database\.dump)/m, "0".repeat(64));
+    writeFileSync(join(dir, "checksums.sha256"), tamperedChecksums);
+    // Re-sign the tampered manifest+checksums so the failure under test is
+    // specifically the checksum-vs-content mismatch, not the HMAC.
+    const manifest = readFileSync(join(dir, "manifest"), "utf8");
+    const manifestAndChecksums = Buffer.concat([Buffer.from(manifest), Buffer.from(tamperedChecksums)]);
+    writeFileSync(join(dir, "manifest.hmac"), computeBundleHmac(KEK_A, manifestAndChecksums));
+    let error: unknown;
+    try {
+      validateBackupManifestAndAuth(dir, KEK_A);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("checksum-mismatch");
+  });
+
+  it("verifyChecksumsFile is exercised directly and refuses a missing file", () => {
+    const dir = join(workDir, "missing-checksummed-file");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "checksums.sha256"), `${"0".repeat(64)}  does-not-exist\n`);
+    expect(() => verifyChecksumsFile(dir, join(dir, "checksums.sha256"))).toThrow(RecoveryBundleRefusal);
+  });
+});
+
+function buildRecoveryBundleFixture(dir: string, innerBundleContent: Buffer, kekEnvelope: Buffer): string {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "manifest"), buildRecoveryManifest());
+  writeFileSync(join(dir, "orbit-backup.tar"), innerBundleContent);
+  writeFileSync(join(dir, "document-kek.enc"), kekEnvelope);
+  const checksums =
+    `${sha256File(join(dir, "orbit-backup.tar"))}  orbit-backup.tar\n` +
+    `${sha256File(join(dir, "document-kek.enc"))}  document-kek.enc\n`;
+  writeFileSync(join(dir, "checksums.sha256"), checksums);
+  const tarPath = join(dir, "..", "recovery-bundle.tar");
+  createTar(dir, tarPath, [...RECOVERY_BUNDLE_MEMBERS]);
+  return tarPath;
+}
+
+describe("recovery bundle layout (import-recovery-bundle.sh #5-7)", () => {
+  it("accepts a bundle with exactly the four expected members", () => {
+    const dir = join(workDir, "valid-recovery");
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    const tarPath = buildRecoveryBundleFixture(dir, Buffer.from("fake-inner-backup-tar-bytes"), envelope);
+    expect(() => validateRecoveryBundleLayout(tarPath)).not.toThrow();
+  });
+
+  it("refuses a bundle with an unexpected member set (test_recovery_bundle_diagnostics)", () => {
+    const dir = join(workDir, "unexpected-member");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "attacker-controlled-member"), "attacker-controlled-content\n");
+    const tarPath = join(workDir, "unexpected-member.tar");
+    createTar(dir, tarPath, ["attacker-controlled-member"]);
+    let error: unknown;
+    try {
+      validateRecoveryBundleLayout(tarPath);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("unexpected-members");
+    expect((error as Error).message).not.toContain("attacker-controlled-member");
+  });
+
+  it("refuses a bundle containing a symlink entry (#6)", () => {
+    const dir = join(workDir, "recovery-symlink");
+    mkdirSync(dir, { recursive: true });
+    for (const name of RECOVERY_BUNDLE_MEMBERS) {
+      if (name === "document-kek.enc") continue;
+      writeFileSync(join(dir, name), "x");
+    }
+    writeFileSync(join(dir, "real-target"), "x");
+    symlinkSync(join(dir, "real-target"), join(dir, "document-kek.enc"));
+    const tarPath = join(workDir, "recovery-symlink.tar");
+    createTar(dir, tarPath, [...RECOVERY_BUNDLE_MEMBERS]);
+    let error: unknown;
+    try {
+      validateRecoveryBundleLayout(tarPath);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
+  });
+});
+
+describe("recovery bundle manifest and checksums (import-recovery-bundle.sh #8-9)", () => {
+  it("accepts a matching format_version and passes checksum verification", () => {
+    const dir = join(workDir, "recovery-valid");
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    buildRecoveryBundleFixture(dir, Buffer.from("fake-inner-backup-tar-bytes"), envelope);
+    expect(() => validateRecoveryManifestFormatVersion(dir)).not.toThrow();
+    expect(() => verifyRecoveryBundleChecksums(dir)).not.toThrow();
+  });
+
+  it("refuses an unsupported format_version (#8)", () => {
+    const dir = join(workDir, "recovery-bad-version");
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    buildRecoveryBundleFixture(dir, Buffer.from("fake-inner-backup-tar-bytes"), envelope);
+    writeFileSync(join(dir, "manifest"), "format_version=2\nkey_encryption=aes-256-gcm-scrypt-n131072-r8-p1\n");
+    let error: unknown;
+    try {
+      validateRecoveryManifestFormatVersion(dir);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("unsupported-format-version");
+  });
+
+  it("refuses a corrupt checksum (corrupt-recovery-checksum scenario, #9)", () => {
+    const dir = join(workDir, "recovery-bad-checksum");
+    const envelope = encryptDocumentKek(KEK_A, "correct-horse-battery-staple");
+    buildRecoveryBundleFixture(dir, Buffer.from("fake-inner-backup-tar-bytes"), envelope);
+    const bad = readFileSync(join(dir, "checksums.sha256"), "utf8").replace(/^[0-9a-f]{64}(?=  orbit-backup\.tar)/m, "0".repeat(64));
+    writeFileSync(join(dir, "checksums.sha256"), bad);
+    let error: unknown;
+    try {
+      verifyRecoveryBundleChecksums(dir);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("checksum-mismatch");
+    expect((error as Error).message).not.toContain("orbit-backup.tar");
+  });
+});
+
+describe("end-to-end recovery bundle round trip", () => {
+  it("wraps and unwraps a document KEK across a full recovery-bundle-shaped fixture", () => {
+    const passphrase = "correct-horse-battery-staple";
+    const envelope = encryptDocumentKek(KEK_A, passphrase);
+    const dir = join(workDir, "round-trip");
+    const tarPath = buildRecoveryBundleFixture(dir, Buffer.from("inner-bundle-bytes"), envelope);
+
+    validateRecoveryBundleLayout(tarPath);
+    const extractDir = join(workDir, "round-trip-extracted");
+    mkdirSync(extractDir);
+    extractTar(tarPath, extractDir);
+    validateRecoveryManifestFormatVersion(extractDir);
+    verifyRecoveryBundleChecksums(extractDir);
+    const recoveredEnvelope = readFileSync(join(extractDir, "document-kek.enc"));
+    const recoveredKey = decryptDocumentKek(recoveredEnvelope, passphrase);
+    expect(recoveredKey.toString("ascii")).toBe(KEK_A);
+  });
+});
+
+describe("listTarEntriesVerbose", () => {
+  it("parses type characters for regular files and directories", () => {
+    const dir = join(workDir, "listing");
+    mkdirSync(join(dir, "sub"), { recursive: true });
+    writeFileSync(join(dir, "sub", "file.txt"), "x");
+    const tarPath = join(workDir, "listing.tar");
+    createTar(dir, tarPath, ["sub"]);
+    const entries = listTarEntriesVerbose(tarPath);
+    expect(entries.some((entry) => entry.typeChar === "d")).toBe(true);
+    expect(entries.some((entry) => entry.typeChar === "-" && entry.name.endsWith("file.txt"))).toBe(true);
+  });
+});
