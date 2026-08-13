@@ -81,6 +81,7 @@ for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
 type ExpectedIndex = { table: string; columns: string[]; unique: boolean };
 export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
+  audit_household_activity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "created_at"], unique: false },
   audit_household_entity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "entity_id"], unique: false },
   document_crypto_storage_key_unique: { table: "document_crypto", columns: ["storage_key"], unique: true },
   document_draft_document_unique: { table: "document_drafts", columns: ["document_id"], unique: true },

@@ -13,7 +13,7 @@ import { extractTextWithTika } from "@/server/documents/tika";
 import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
-import { acquireActiveHouseholdLock } from "@/server/workspace-access";
+import { acquireActiveHouseholdLock, validUuid } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
 
@@ -63,6 +63,9 @@ async function findDuplicates(householdId: string, documentId: string, proposal:
 }
 
 async function requireDocumentMember(userId: string, documentId: string) {
+  // A malformed id must fail the same bounded way an unknown one does,
+  // rather than reach the uuid column as text and 500 (#383).
+  if (!validUuid(documentId)) throw new AppError("document_not_found", "That document is not available", 404);
   const [record] = await getDb().select({ id: documents.id, householdId: documents.householdId, displayName: documents.displayName, mediaType: documents.mediaType, lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, administrator: users.isInstanceAdmin, member: memberships.userId })
     .from(documents)
     .innerJoin(households, eq(households.id, documents.householdId))
@@ -137,6 +140,9 @@ export async function approveDocumentDraft(
   mode: "create" | "merge" | "attach",
   targetItemId?: string,
 ) {
+  // A malformed id must fail the same bounded way an unknown one does,
+  // rather than reach the uuid column as text and 500 (#383).
+  if (!validUuid(draftId)) throw new AppError("draft_not_found", "That draft is not available", 404);
   const [draft] = await getDb().select().from(documentDrafts).where(eq(documentDrafts.id, draftId)).limit(1);
   if (!draft || draft.status !== "pending_review") throw new AppError("draft_not_found", "That draft is not available", 404);
   const record = await requireDocumentMember(userId, draft.documentId);

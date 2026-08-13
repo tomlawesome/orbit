@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, dueEvents, items, reminderRules } from "@/db/schema";
+import { auditLog, dueEvents, items, notificationStates, reminderRules } from "@/db/schema";
 import { GET as readWorkspace } from "@/app/api/workspace/route";
 import { POST as applyWorkspaceCommand } from "@/app/api/workspace/commands/route";
 import { cleanupIntegrationEnvironment, createIntegrationFixture, requestForSession } from "./support/fixtures";
@@ -146,6 +146,102 @@ describe("conflict-safe item lifecycle", () => {
     expect(snapshot.item).toMatchObject({ title: "Updated boiler cover", version: 3, renewalDate: "2027-01-20" });
     expect(snapshot.events.filter((event) => event.completedAt == null)).toHaveLength(1);
     expect(snapshot.reminders.map((reminder) => reminder.daysBefore).sort((left, right) => right - left)).toEqual([14, 3]);
+  });
+
+  it("scopes the item history feed to entityType 'item' audit rows, not merely rows that happen to parse as an activity (#383)", async () => {
+    const fixture = await createIntegrationFixture("item-activity-entity-filter");
+    const owner = await fixture.session("owner");
+    await upsertScheduledItem(fixture, owner);
+
+    // Shaped exactly like a real activity payload (so the old code's
+    // app-side itemActivitySchema.safeParse alone would have accepted it),
+    // but on a non-"item" audit row -- the feed must be scoped by
+    // entityType in the query, not merely by whether changes.activity
+    // parses.
+    const impostorActivity = activity(fixture.item.id, "cancelled");
+    await getDb().insert(auditLog).values({
+      householdId: fixture.household.id,
+      actorUserId: fixture.users.owner.id,
+      entityType: "document",
+      entityId: fixture.item.id,
+      action: "document_available",
+      changes: { activity: impostorActivity },
+    });
+
+    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    expect(reload.status).toBe(200);
+    const workspace = await json(reload);
+    const household = (workspace.workspace as { households: Array<{ activities: Array<Record<string, unknown>> }> }).households[0];
+    expect(household.activities.map((entry) => entry.id)).not.toContain(impostorActivity.id);
+  });
+
+  it("marks a batch of notifications read in one command, deduplicated, without dropping a concurrent single dismiss (#383)", async () => {
+    const fixture = await createIntegrationFixture("notification-read-all-batch");
+    const owner = await fixture.session("owner");
+    const notificationIds = Array.from({ length: 12 }, (_, index) => `${fixture.item.id}:2026-12-${String(index + 1).padStart(2, "0")}:due-today`);
+    const duplicatedIds = [...notificationIds, ...notificationIds];
+
+    const readAll = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "notification.read-all", householdId: fixture.household.id, notificationIds: duplicatedIds }),
+    }));
+    expect(readAll.status).toBe(200);
+
+    const dismissedId = `${fixture.item.id}:2026-12-31:overdue`;
+    const dismiss = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "notification.dismiss", householdId: fixture.household.id, notificationId: dismissedId }),
+    }));
+    expect(dismiss.status).toBe(200);
+
+    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    const workspace = await json(reload);
+    const household = (workspace.workspace as { households: Array<{ readNotificationIds: string[]; dismissedNotificationIds: string[] }> }).households[0];
+    expect(new Set(household.readNotificationIds)).toEqual(new Set(notificationIds));
+    expect(household.readNotificationIds).toHaveLength(notificationIds.length);
+    expect(household.dismissedNotificationIds).toEqual([dismissedId]);
+
+    // Re-running the same batch is an idempotent upsert, not a duplicate insert.
+    const rerun = await applyWorkspaceCommand(requestForSession(owner, commandUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "notification.read-all", householdId: fixture.household.id, notificationIds }),
+    }));
+    expect(rerun.status).toBe(200);
+    const rereload = await json(await readWorkspace(requestForSession(owner, workspaceUrl)));
+    const rehousehold = (rereload.workspace as { households: Array<{ readNotificationIds: string[] }> }).households[0];
+    expect(rehousehold.readNotificationIds).toHaveLength(notificationIds.length);
+  });
+
+  it("clamps items and notification ids to the outbound schema cap instead of 422ing on stored data no write path enforces (#383)", async () => {
+    const fixture = await createIntegrationFixture("workspace-read-clamp");
+    const owner = await fixture.session("owner");
+
+    // No write path enforces the 500-item / 2000-notification-id caps that
+    // householdWorkspaceSchema re-validates on read, so a household can
+    // reach these volumes through nothing more than ordinary, uncapped
+    // writes; bulk-inserting directly here stands in for that accumulation.
+    await getDb().insert(items).values(Array.from({ length: 501 }, () => ({
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      title: "Overflow item",
+      currency: "GBP",
+    })));
+    await getDb().insert(notificationStates).values(Array.from({ length: 2_001 }, (_, index) => ({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      notificationId: `overflow-${index}`,
+      readAt: new Date(),
+    })));
+
+    const reload = await readWorkspace(requestForSession(owner, workspaceUrl));
+    expect(reload.status).toBe(200);
+    const workspace = await json(reload);
+    const household = (workspace.workspace as { households: Array<{ items: unknown[]; readNotificationIds: string[] }> }).households[0];
+    expect(household.items.length).toBeLessThanOrEqual(500);
+    expect(household.readNotificationIds.length).toBeLessThanOrEqual(2_000);
   });
 
   it("increments the item version exactly once for an accepted transition", async () => {

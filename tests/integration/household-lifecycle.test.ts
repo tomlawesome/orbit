@@ -8,6 +8,7 @@ import {
   documentCrypto,
   documentDrafts,
   documents,
+  documentStagingObjects,
   households,
   items,
   memberships,
@@ -20,7 +21,8 @@ import { GET as workspace } from "@/app/api/workspace/route";
 import { hardDeleteHousehold, purgeExpiredHouseholds, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
 import { addHouseholdMember, transferHouseholdOwnership } from "@/server/workspace-repository";
 import { LocalDocumentStorage } from "@/server/documents/storage";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
+import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { reconcileDocumentStorage } from "@/server/document-worker";
 import { createPortableArchive, reconcilePortableArchiveStorage } from "@/server/portable-archive-repository";
@@ -41,6 +43,11 @@ import {
   createIntegrationFixture,
   requestForSession,
 } from "./support/fixtures";
+
+vi.mock("@/server/documents/scanner", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/documents/scanner")>(),
+  scanFileWithClamAv: vi.fn(),
+}));
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -151,6 +158,42 @@ async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof create
   }), itemDocumentsContext(fixture.household.id, fixture.item.id));
   expect(response.status).toBe(201);
   return { session, documentId: (await response.json() as { document: { id: string } }).document.id };
+}
+
+/** Runs `work` with scanning required, restoring the scanner mock and config afterward. */
+async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
+  const previous = process.env.DOCUMENT_SCAN_MODE;
+  process.env.DOCUMENT_SCAN_MODE = "required";
+  resetDocumentConfigForTests();
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.DOCUMENT_SCAN_MODE;
+    else process.env.DOCUMENT_SCAN_MODE = previous;
+    resetDocumentConfigForTests();
+    vi.mocked(scanFileWithClamAv).mockReset();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+  }
+}
+
+/** Uploads through a simulated scanner outage so the document stalls in `scanning` with only staged ciphertext (#383). */
+async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
+  vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+  const session = await fixture.session("member");
+  const contents = syntheticPdf();
+  const response = await uploadDocument(requestForSession(session, `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`, {
+    method: "POST",
+    headers: {
+      "content-length": String(contents.length),
+      "content-type": "application/pdf",
+      "x-orbit-filename": encodeURIComponent("staged-document.pdf"),
+    },
+    body: contents as unknown as BodyInit,
+  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+  expect(response.status).toBe(202);
+  const payload = await response.json() as { document: { id: string; lifecycle: string } };
+  expect(payload.document.lifecycle).toBe("scanning");
+  return { session, documentId: payload.document.id };
 }
 
 describe("transactional household lifecycle", () => {
@@ -610,6 +653,55 @@ describe("transactional household lifecycle", () => {
       eq(auditLog.action, "household_hard_deleted"),
     ))).toEqual([{
       changes: { reason: "administrator_requested", storageCleanup: "complete" },
+    }]);
+  });
+
+  it("removes scanner-recovery staging ciphertext on hard delete instead of leaving it behind a 'complete' tombstone (#383)", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-storage-staging");
+    const { documentId } = await withRequiredScanMode(() => uploadStagedDocument(fixture));
+    const [staged] = await getDb().select({ storageKey: documentStagingObjects.storageKey })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+    expect(staged?.storageKey).toBeTruthy();
+    const config = getDocumentConfig();
+    const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+    expect(await documentStorage.stagingExists(staged!.storageKey)).toBe(true);
+
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+    await hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name);
+
+    expect(await getDb().select({ id: households.id }).from(households).where(eq(households.id, fixture.household.id))).toHaveLength(0);
+    expect(await getDb().select({ documentId: documentStagingObjects.documentId })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    expect(await documentStorage.stagingExists(staged!.storageKey)).toBe(false);
+    expect(await getDb().select({ changes: auditLog.changes }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_hard_deleted"),
+    ))).toEqual([{
+      changes: { reason: "administrator_requested", storageCleanup: "complete" },
+    }]);
+  });
+
+  it("removes scanner-recovery staging ciphertext on retention purge instead of leaving it behind a 'complete' tombstone (#383)", async () => {
+    const fixture = await createIntegrationFixture("lifecycle-retention-staging");
+    const { documentId } = await withRequiredScanMode(() => uploadStagedDocument(fixture));
+    const [staged] = await getDb().select({ storageKey: documentStagingObjects.storageKey })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+    const config = getDocumentConfig();
+    const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+    expect(await documentStorage.stagingExists(staged!.storageKey)).toBe(true);
+
+    await requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, fixture.household.name);
+    await getDb().update(households).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(households.id, fixture.household.id));
+    await purgeExpiredHouseholds();
+
+    expect(await getDb().select({ documentId: documentStagingObjects.documentId })
+      .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    expect(await documentStorage.stagingExists(staged!.storageKey)).toBe(false);
+    expect(await getDb().select({ changes: auditLog.changes }).from(auditLog).where(and(
+      eq(auditLog.entityId, fixture.household.id),
+      eq(auditLog.action, "household_purged"),
+    ))).toEqual([{
+      changes: { reason: "retention_expired", storageCleanup: "complete" },
     }]);
   });
 
