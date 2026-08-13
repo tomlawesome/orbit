@@ -307,3 +307,125 @@ update this document in the same pull request (enforced by
 `scripts/engine-prompts.test.mjs`, mirroring
 `scripts/engine-events.test.mjs` above). Renaming or removing a value is a
 breaking change requiring a version bump and coordination with consumers.
+
+## Machine prompts: backup/restore/recovery (v0)
+
+The backup/restore/recovery-bundle family
+(`orbit backup`/`orbit restore`/`orbit export-recovery-bundle`/
+`orbit import-recovery-bundle`, `src/cli/orbit.ts`, issue #296 slice 4) has
+its own interactive passphrase and confirmation prompts, ported from
+`export-recovery-bundle.sh`/`import-recovery-bundle.sh`/`restore.sh`'s own
+`read -s`/`read -p` prompts. This is the vocabulary extension the #296
+slice plan (`docs/adr-notes/296-backup-port-plan.md`) calls "extending that
+vocabulary is this slice's job" — a second, independent instance of the
+"Machine prompts (v0)" section above's exact line grammar, scoped to this
+CLI family rather than `configure.sh`'s guided fields (which remain exactly
+as documented above, unaffected).
+
+Setting `ORBIT_RECOVERY_PROMPTS=machine` in the CLI's own environment
+switches these commands' passphrase/confirmation prompts to the same
+machine-readable line grammar `ORBIT_CONFIGURE_PROMPTS=machine` uses for
+`configure.sh`: prompt lines on stdout, one answer line read from stdin per
+prompt, bounded at three attempts, `prompt-abort` (or end-of-input) routing
+into the same refusal path a cancelled interactive prompt takes. Without
+this variable set, these commands prompt on the real controlling terminal
+instead (masked input for `kind=secret` fields, matching `read -s`) and
+refuse if stdin is not a terminal — this variable and its TTY-mode
+default do not change anything about `configure.sh`'s own
+`ORBIT_CONFIGURE_PROMPTS=machine` contract above, and vice versa.
+
+### Line grammar
+
+Identical grammar to the "Machine prompts (v0)" section above:
+
+```
+prompt field=<FIELD> kind=<KIND> required=true attempt=<n>
+prompt-reject field=<FIELD> reason=<REASON>
+prompt-accept field=<FIELD>
+prompt-abort field=<FIELD>
+```
+
+The same `attempt` bounds (starts at `1`, bounded at `3`, `prompt-abort` on
+the third rejection or end-of-input) and `required=true`-only-in-v0 rule
+apply, implemented by `src/lib/recovery-prompts.ts`'s
+`collectMachinePromptField`.
+
+### recovery field
+
+```
+RECOVERY_PASSPHRASE
+RECOVERY_PASSPHRASE_CONFIRM
+IMPORT_CONFIRMATION
+RESTORE_CONFIRMATION
+```
+
+`RECOVERY_PASSPHRASE_CONFIRM` is only collected by
+`orbit export-recovery-bundle` (matching `export-recovery-bundle.sh`'s own
+read-then-confirm entry); `orbit import-recovery-bundle`'s own passphrase
+entry has no confirmation step (matching `import-recovery-bundle.sh`, which
+reads the recovery passphrase once). `IMPORT_CONFIRMATION` is
+`orbit import-recovery-bundle`'s literal `IMPORT RECOVERY` phrase
+(`import-recovery-bundle.sh` guarantee #19). `RESTORE_CONFIRMATION` is
+`orbit restore`'s literal `RESTORE` phrase (`restore.sh` guarantee #46) —
+also collected a second time, independently, inside
+`orbit import-recovery-bundle` itself, because `import-recovery-bundle.sh`
+invokes its own inner `restore.sh` without `--yes`/
+`ORBIT_NONINTERACTIVE_RESTORE`, so the inner script's confirmation prompt
+genuinely fires again (see Flags, `docs/adr-notes/296-backup-port-plan.md`,
+Slice 4).
+
+### recovery kind
+
+```
+secret
+text
+```
+
+`RECOVERY_PASSPHRASE` and `RECOVERY_PASSPHRASE_CONFIRM` are `kind=secret`;
+`IMPORT_CONFIRMATION` and `RESTORE_CONFIRMATION` are `kind=text` (a typed
+literal phrase, not itself sensitive, but still never echoed back in any
+protocol line — see Security below).
+
+### recovery reason-class
+
+```
+empty
+too-short
+mismatch
+no-match
+```
+
+- `empty` — the answer line was blank (any field).
+- `too-short` — `RECOVERY_PASSPHRASE` was under the existing 12-character
+  minimum (`recovery-bundle.ts`'s `MIN_RECOVERY_PASSPHRASE_LENGTH`,
+  matching `export-recovery-bundle.sh`/`recovery-crypto.mjs`'s own
+  defense-in-depth check).
+- `mismatch` — `RECOVERY_PASSPHRASE_CONFIRM` did not exactly equal the
+  already-accepted `RECOVERY_PASSPHRASE`.
+- `no-match` — `IMPORT_CONFIRMATION`/`RESTORE_CONFIRMATION` was not exactly
+  the required literal phrase.
+
+### Security
+
+Identical contract to the "Machine prompts (v0)" section above: no prompt
+line, for any field, ever carries the prompted value itself — only the
+fixed field/kind/reason vocabulary. `RECOVERY_PASSPHRASE`/
+`RECOVERY_PASSPHRASE_CONFIRM` are never echoed, logged, or passed to any
+subprocess's argument list or environment; `src/lib/recovery-prompts.test.ts`
+and `src/cli/orbit.test.ts` both assert a supplied passphrase never appears
+in any protocol line or in the CLI's own stdout/stderr.
+
+### Validation
+
+Every answer is accepted or rejected by the same validators
+`src/lib/backup-restore-cli.ts`'s orchestration itself enforces a second
+time as defense-in-depth (`requireValidPassphrase`,
+`requireMatchingPassphrase`, and the literal-phrase equality checks) — the
+`reason` classification is a diagnostic-only second pass, exactly as the
+"Machine prompts (v0)" section above already establishes for
+`configure.sh`'s own fields.
+
+Additions to this section's `recovery field`, `recovery kind` or
+`recovery reason-class` are allowed within v0 and must update this document
+in the same pull request. Renaming or removing a value is a breaking change
+requiring a version bump and coordination with consumers.
