@@ -6,8 +6,10 @@ import {
   buildBackupManifest,
   buildRecoveryManifest,
   computeBundleHmac,
+  decryptDocumentArchive,
   decryptDocumentKek,
   documentKekFingerprint,
+  encryptDocumentArchive,
   encryptDocumentKek,
   passphrasesMatch,
   requireMatchingPassphrase,
@@ -71,6 +73,16 @@ describe("determinism", () => {
     },
     20_000,
   );
+
+  it("contrast: the document-archive envelope is also deliberately non-deterministic (fresh salt every call, backup.sh #27)", () => {
+    const plaintext = Buffer.from("fake document tar bytes for determinism fixture");
+    const outputs = Array.from({ length: 5 }, () => encryptDocumentArchive(plaintext, KEK).toString("hex"));
+    expect(new Set(outputs).size).toBe(5);
+    // ...but every one of them decrypts back to the identical plaintext.
+    for (const hex of outputs) {
+      expect(decryptDocumentArchive(Buffer.from(hex, "hex"), KEK)).toEqual(plaintext);
+    }
+  });
 });
 
 describe("secrets are never printed (SECURITY: no plaintext secret in any thrown message)", () => {
@@ -138,5 +150,18 @@ describe("secrets are never printed (SECURITY: no plaintext secret in any thrown
       error = caught;
     }
     assertNoSecretLeak(error, [a, b]);
+  });
+
+  it("a document-KEK decryption failure never leaks the key or the plaintext document bytes (backup.sh #19)", () => {
+    const plaintext = Buffer.from("sensitive document tar bytes that must never leak");
+    const envelope = encryptDocumentArchive(plaintext, KEK);
+    const wrongKey = "d".repeat(64);
+    let error: unknown;
+    try {
+      decryptDocumentArchive(envelope, wrongKey);
+    } catch (caught) {
+      error = caught;
+    }
+    assertNoSecretLeak(error, [KEK, wrongKey, plaintext.toString("utf8")]);
   });
 });
