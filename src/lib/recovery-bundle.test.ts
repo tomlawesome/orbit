@@ -1,8 +1,9 @@
 import { createHmac } from "node:crypto";
+import * as fs from "node:fs";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BACKUP_BUNDLE_FORMAT_VERSION,
@@ -23,6 +24,7 @@ import {
   decryptDocumentKek,
   documentKekFingerprint,
   encryptDocumentArchive,
+  encryptDocumentArchiveToFile,
   encryptDocumentKek,
   extractTar,
   isValidBundleHmac,
@@ -309,6 +311,186 @@ describe("checksum helpers", () => {
     const path = join(workDir, "sample.txt");
     writeFileSync(path, "sample content");
     expect(sha256File(path)).toBe(sha256Buffer(Buffer.from("sample content")));
+  });
+
+  // #383: sha256File used to be `createHash("sha256").update(readFileSync(path))`,
+  // which both materialises the whole file at once and hard-fails
+  // (ERR_FS_FILE_TOO_LARGE) above 2 GiB regardless of available memory. It
+  // is now a chunked O_NOFOLLOW readSync loop, the same incremental shape
+  // `sha256sum` itself uses. A file large enough to actually exceed 2 GiB is
+  // impractical in a test; these instead prove the *mechanism* (chunked
+  // reads, never one huge allocation) via instrumentation, plus a
+  // large-but-tractable real file that stays within an asserted memory
+  // bound.
+  describe("sha256File streams in bounded chunks (#383)", () => {
+    it("never allocates a read buffer anywhere near the file's size, however large the file is (mechanism instrumentation)", () => {
+      // Node's builtin "node:fs" module namespace can't be spied on directly
+      // under Vitest's ESM runtime ("Module namespace is not configurable in
+      // ESM"), so this instruments the one thing sha256File *does* touch
+      // that's spy-able: Buffer allocation. A whole-file-buffering
+      // implementation (the old `readFileSync(path)`) allocates a buffer
+      // sized to the file; the chunked implementation must never allocate
+      // anywhere near that, regardless of how large the file is.
+      const path = join(workDir, "chunked.bin");
+      const size = 6 * 1024 * 1024;
+      const content = Buffer.alloc(size, 7);
+      writeFileSync(path, content);
+
+      const allocSpy = vi.spyOn(Buffer, "allocUnsafe");
+      try {
+        const digest = sha256File(path);
+        expect(digest).toBe(sha256Buffer(content));
+
+        expect(allocSpy).toHaveBeenCalled();
+        for (const call of allocSpy.mock.calls) {
+          const requestedSize = call[0] as number;
+          expect(requestedSize).toBeLessThan(size);
+        }
+      } finally {
+        allocSpy.mockRestore();
+      }
+    });
+
+    it("digests a 100 MB file without an RSS spike proportional to its size", () => {
+      const path = join(workDir, "large.bin");
+      const size = 100 * 1024 * 1024;
+      writeFileSync(path, Buffer.alloc(size, 9));
+
+      const before = process.memoryUsage().rss;
+      const digest = sha256File(path);
+      const after = process.memoryUsage().rss;
+
+      expect(digest).toMatch(/^[0-9a-f]{64}$/);
+      // A whole-file buffering approach needs to grow the process's memory
+      // by roughly the file's size (100 MB) to hold it; the chunked
+      // implementation never holds more than ~1 MB at once, so RSS growth
+      // attributable to the read itself should be a small fraction of that.
+      expect(after - before).toBeLessThan(40 * 1024 * 1024);
+    }, 30_000);
+
+    it("refuses to follow a symlink (O_NOFOLLOW discipline, matching readRegularFileNoFollow)", () => {
+      const target = join(workDir, "target.txt");
+      writeFileSync(target, "target content");
+      const link = join(workDir, "link.txt");
+      symlinkSync(target, link);
+      expect(() => sha256File(link)).toThrow();
+    });
+  });
+});
+
+// #383: encryptDocumentArchive holds the plaintext, the ciphertext, and a
+// concatenated header+ciphertext copy in memory simultaneously —
+// encryptDocumentArchiveToFile is the bounded-memory sibling createBackupBundle
+// now uses, streaming plaintext -> cipher -> ciphertext through fixed-size
+// chunks while producing the exact same `Salted__`+salt+ciphertext format
+// (proven here by round-tripping through the existing decryptDocumentArchive,
+// which is itself parity-tested against real `openssl` in
+// recovery-bundle.parity.test.ts).
+describe("encryptDocumentArchiveToFile streams in bounded chunks (#383)", () => {
+  it("round-trips a multi-chunk plaintext through decryptDocumentArchive", () => {
+    // (Buffer.allocUnsafe instrumentation, as used for sha256File above, was
+    // tried here too but made pbkdf2Sync's 600,000 iterations pathologically
+    // slow under a global spy; the mechanism is instead covered by
+    // sha256File's instrumentation test plus the real 100 MB memory-bound
+    // test below, which exercises the identical chunked read/cipher loop.
+    // Note: comparing multi-MB buffers with Vitest's `toEqual` is itself
+    // catastrophically slow — element-by-element deep equality, not a native
+    // memcmp — so buffer content here is compared with `.equals()`, not
+    // `toEqual`.)
+    const plaintextPath = join(workDir, "documents.tar");
+    const outputPath = join(workDir, "documents.tar.enc");
+    const size = 6 * 1024 * 1024;
+    const content = Buffer.alloc(size, 3);
+    writeFileSync(plaintextPath, content);
+
+    encryptDocumentArchiveToFile(plaintextPath, KEK_A, outputPath);
+
+    const encrypted = readFileSync(outputPath);
+    // Never buffers plaintext-sized output growth beyond the format's own
+    // ~16-byte CBC padding overhead.
+    expect(encrypted.length).toBeLessThanOrEqual(size + 8 /* magic */ + 8 /* salt */ + 16 /* CBC padding block */);
+    expect(decryptDocumentArchive(encrypted, KEK_A).equals(content)).toBe(true);
+  });
+
+  it("produces output decryptDocumentArchive accepts, byte-identical in shape to encryptDocumentArchive's in-memory output for the same plaintext/key (modulo the random salt)", () => {
+    const plaintextPath = join(workDir, "documents-small.tar");
+    const outputPath = join(workDir, "documents-small.tar.enc");
+    const content = Buffer.from("a small document archive fixture\n");
+    writeFileSync(plaintextPath, content);
+
+    encryptDocumentArchiveToFile(plaintextPath, KEK_A, outputPath);
+    const streamed = readFileSync(outputPath);
+    const buffered = encryptDocumentArchive(content, KEK_A);
+
+    expect(streamed.length).toBe(buffered.length);
+    expect(streamed.subarray(0, 8)).toEqual(buffered.subarray(0, 8)); // "Salted__" magic
+    expect(decryptDocumentArchive(streamed, KEK_A)).toEqual(content);
+  });
+
+  it("digests/encrypts a 100 MB plaintext without an RSS spike proportional to its size", () => {
+    const plaintextPath = join(workDir, "large-documents.tar");
+    const outputPath = join(workDir, "large-documents.tar.enc");
+    const size = 100 * 1024 * 1024;
+    writeFileSync(plaintextPath, Buffer.alloc(size, 4));
+
+    const before = process.memoryUsage().rss;
+    encryptDocumentArchiveToFile(plaintextPath, KEK_A, outputPath);
+    const after = process.memoryUsage().rss;
+
+    expect(after - before).toBeLessThan(60 * 1024 * 1024);
+
+    const outputStat = fs.statSync(outputPath);
+    expect(outputStat.size).toBeLessThanOrEqual(size + 8 + 8 + 16);
+  }, 30_000);
+});
+
+// #383 (addon): checksums.sha256 member names must be plain basenames.
+// verifyChecksumsFile previously joined `(.+)` straight onto extractedDir
+// with no confinement check, and for the outer recovery bundle this content
+// is read (verifyRecoveryBundleChecksums, called from
+// runImportRecoveryBundle before decryptDocumentKek) before any secret
+// material is verified — deliberately so, since the module comment on
+// verifyRecoveryBundleChecksums notes that layer's checksums.sha256 is not
+// HMAC-authenticated. A `../`-laden member name let a maliciously crafted
+// recovery bundle turn `orbit import-recovery-bundle` into a digest-guessing
+// / existence oracle against arbitrary paths outside the extraction
+// directory (or hang against a device file).
+describe("verifyChecksumsFile rejects path-traversal member names (#383)", () => {
+  it("refuses a member name containing a directory traversal, without ever hashing the escaped path", () => {
+    const dir = join(workDir, "traversal-target");
+    mkdirSync(dir, { recursive: true });
+    const outsideSecret = join(workDir, "outside-secret.txt");
+    writeFileSync(outsideSecret, "a secret that must never be probed via checksums.sha256\n");
+    const outsideDigest = sha256File(outsideSecret);
+
+    const checksumsPath = join(dir, "checksums.sha256");
+    writeFileSync(checksumsPath, `${outsideDigest}  ../outside-secret.txt\n`);
+
+    let error: unknown;
+    try {
+      verifyChecksumsFile(dir, checksumsPath);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("checksum-mismatch");
+  });
+
+  it("refuses a member name that is an absolute-looking path", () => {
+    const dir = join(workDir, "traversal-absolute");
+    mkdirSync(dir, { recursive: true });
+    const checksumsPath = join(dir, "checksums.sha256");
+    writeFileSync(checksumsPath, `${"0".repeat(64)}  /etc/passwd\n`);
+    expect(() => verifyChecksumsFile(dir, checksumsPath)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("still accepts a legitimate plain-basename member name", () => {
+    const dir = join(workDir, "traversal-legit");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "database.dump"), "fixture dump bytes");
+    const checksumsPath = join(dir, "checksums.sha256");
+    writeFileSync(checksumsPath, `${sha256File(join(dir, "database.dump"))}  database.dump\n`);
+    expect(() => verifyChecksumsFile(dir, checksumsPath)).not.toThrow();
   });
 });
 
