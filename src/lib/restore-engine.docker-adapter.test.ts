@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   type RestorePaths,
   RestoreEngineRefusal,
   RestoreRun,
+  createDockerComposeRestoreAdapter,
   deriveRestorePaths,
   loadRestoreJournal,
   preflightValidateBundle,
@@ -69,6 +70,10 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
   restoreActiveDatabaseOk = true;
   restoreDumpToDatabaseOk = true;
   resetScanLeasesOk = true;
+  /** #383: records every dropStageDatabase(name) call, in order, so tests can assert cleanup ran even when createStageDatabase itself failed. */
+  dropCalls: string[] = [];
+  /** #383: when set, createStageDatabase throws this once per matching name instead of succeeding — simulates restore.sh's own "CREATE DATABASE fails/refuses" case. */
+  createStageDatabaseThrowsFor: string | undefined;
   private appRunning = true;
   private readonly stageContents = new Map<string, CorrespondenceReports>();
   private liveReports: CorrespondenceReports;
@@ -100,10 +105,15 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
     this.appRunning = true;
     return true;
   }
-  createStageDatabase(): void {
-    // No-op: restoreDumpToDatabase records the staged content directly.
+  createStageDatabase(name: string): void {
+    if (this.createStageDatabaseThrowsFor === name) {
+      this.createStageDatabaseThrowsFor = undefined;
+      throw new Error(`simulated CREATE DATABASE failure for ${name}`);
+    }
+    // Otherwise a no-op: restoreDumpToDatabase records the staged content directly.
   }
   dropStageDatabase(name: string): void {
+    this.dropCalls.push(name);
     this.stageContents.delete(name);
   }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
@@ -397,6 +407,53 @@ describe("recoverRestore (`--recover` equivalent, restore.sh:798-831, guarantees
   });
 });
 
+// --- (3) #383: a failed/refused createStageDatabase must still be dropped --
+//
+// restore.sh:545-546/811-812 assign `stage_database=...` *before* calling
+// create_stage_database, so its EXIT trap's unconditional (DROP-IF-EXISTS)
+// drop_stage_database always fires — even when CREATE itself refused or
+// only partially succeeded server-side. The TS port previously recorded
+// `this.stageDatabase`/the local `stage` only *after* createStageDatabase
+// returned (verifyCheckpointArtifactsCorrespond) or called it entirely
+// outside any try/finally (preflightValidateBundle), so a throwing
+// createStageDatabase left the stage database undropped forever — the next
+// attempt with the same restoreId/stagingId would then fail CREATE with a
+// "database already exists" the engine can never clean up on its own.
+
+describe("stage-database cleanup on a failing/refusing createStageDatabase (#383)", () => {
+  it("verifyCheckpointArtifactsCorrespond (via createCheckpoint) still drops the stage database when createStageDatabase throws", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    const expectedStage = `orbit_restore_checkpoint_stage_${run.restoreId}`;
+    adapter.createStageDatabaseThrowsFor = expectedStage;
+
+    expect(() => run.createCheckpoint()).toThrow("simulated CREATE DATABASE failure");
+    // The whole point of the fix: even though createStageDatabase never
+    // succeeded, the (idempotent, DROP-IF-EXISTS) cleanup still ran for the
+    // exact stage name that would have been created — nothing is leaked for
+    // the next attempt to trip over.
+    expect(adapter.dropCalls).toContain(expectedStage);
+  });
+
+  it("preflightValidateBundle still drops the stage database when createStageDatabase throws", () => {
+    const stagedDocumentsRoot = join(sandbox, "staged-documents");
+    buildDocumentTree(stagedDocumentsRoot, ORIGINAL_KEY, 10);
+    const databaseDumpPath = join(sandbox, "staged-database.dump");
+    writeFileSync(databaseDumpPath, JSON.stringify(reportsFor(ORIGINAL_KEY, 10)));
+
+    const adapter = new FakeRestoreAdapter(join(sandbox, "unused-live-documents"), ORIGINAL_KEY, 10);
+    const stagingId = "preflight-stage-create-fails";
+    const expectedStage = `orbit_restore_stage_${stagingId}`;
+    adapter.createStageDatabaseThrowsFor = expectedStage;
+
+    expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId })).toThrow("simulated CREATE DATABASE failure");
+    expect(adapter.dropCalls).toContain(expectedStage);
+  });
+});
+
 describe("preflightValidateBundle (restore.sh:334-353, guarantees #7-10)", () => {
   it("accepts a staged bundle whose database and documents correspond, touching no live state", () => {
     const stagedDocumentsRoot = join(sandbox, "staged-documents");
@@ -421,5 +478,75 @@ describe("preflightValidateBundle (restore.sh:334-353, guarantees #7-10)", () =>
     expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId: "preflight-test-2" })).toThrow(RestoreEngineRefusal);
     // Live documents are completely untouched by a preflight-only check.
     expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+});
+
+// --- createDockerComposeRestoreAdapter: PATH-shim, no real daemon — psql
+// maxBuffer (#383) ----------------------------------------------------------
+//
+// queryReport/queryActiveReport spawn `docker compose exec ... psql` with
+// stdio "pipe" and previously no explicit maxBuffer, so Node's 1 MiB default
+// applied: once a correspondence report's stdout exceeded it, spawnSync
+// SIGTERMed the child (status=null, error.code=ENOBUFS) and the adapter
+// refused as "query-report-failed" — indistinguishable from a genuine query
+// failure. A real crypto-correspondence report row is ~120 bytes, so this
+// bites at roughly 8,700 document_crypto rows, an ordinary size for a
+// multi-year household. This drives a fake `docker` executable (mirroring
+// recovery-bundle.docker-adapter.test.ts's own PATH-shim technique) that
+// emits a synthetic >1 MiB psql report and asserts it comes back intact.
+
+const fakePsqlDockerScript = [
+  "#!/usr/bin/env bash",
+  // Deliberately no `-o pipefail`: the `yes | head -c` pipeline below is
+  // *expected* to have `yes` killed by SIGPIPE once `head` stops reading —
+  // under pipefail that would make the pipeline itself "fail" and abort the
+  // script under `-e`, even though the report is emitted correctly.
+  "set -Eeu",
+  'joined="$*"',
+  'case "$joined" in',
+  "  *psql*)",
+  // Emits a report well past Node's old 1 MiB spawnSync maxBuffer default,
+  // shaped like real correspondence rows (uuid|64-hex|size|lifecycle).
+  '    yes "11111111-1111-4111-8111-111111111111|deadbeef|1024|available" | head -c 3145728',
+  "    exit 0",
+  "    ;;",
+  "  *)",
+  "    exit 99",
+  "    ;;",
+  "esac",
+  "",
+].join("\n");
+
+function makeFakePsqlDockerBin(): string {
+  const binDir = mkdtempSync(join(tmpdir(), "orbit-restore-psql-fakebin-"));
+  writeFileSync(join(binDir, "docker"), fakePsqlDockerScript);
+  chmodSync(join(binDir, "docker"), 0o755);
+  return binDir;
+}
+
+describe("createDockerComposeRestoreAdapter's psql maxBuffer (#383)", () => {
+  let binDir: string;
+  let envFile: string;
+
+  beforeEach(() => {
+    binDir = makeFakePsqlDockerBin();
+    envFile = join(sandbox, ".env-orbit-psql-maxbuffer");
+    writeFileSync(envFile, "FAKE=1\n");
+  });
+
+  afterEach(() => {
+    rmSync(binDir, { recursive: true, force: true });
+  });
+
+  it("queryReport returns a >1 MiB report intact instead of refusing query-report-failed", () => {
+    const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
+    const report = adapter.queryReport("orbit_restore_stage_test", CORRESPONDENCE_QUERIES.crypto);
+    expect(report.length).toBeGreaterThan(1024 * 1024);
+  });
+
+  it("queryActiveReport returns a >1 MiB report intact instead of refusing query-report-failed", () => {
+    const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
+    const report = adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto);
+    expect(report.length).toBeGreaterThan(1024 * 1024);
   });
 });
