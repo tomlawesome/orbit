@@ -1106,6 +1106,107 @@ run_check() {
   return "$overall_status"
 }
 
+# --- Engine delegation (issue #294) -----------------------------------------
+#
+# scripts/engine-check.sh established the pattern this section extends
+# (docs/engine-events.md, "In-container engine invocation (v0)"): host bash
+# remains the only thing that ever runs `docker`; the bundled orbit CLI
+# ships inside the already-resolved orbit-app image and is invoked as a
+# disposable `docker compose run --rm --no-deps` one-off, never handed the
+# Docker socket. `ORBIT_CONFIGURE_ENGINE=container` is this section's own
+# opt-in gate — engine-check.sh's `ORBIT_ENGINE_CHECK=container` sibling —
+# so every existing caller (unset, the default) keeps running the exact
+# bash logic below byte-for-byte; `engine_delegation_ready` always returns
+# false when unset, so every `if engine_delegation_ready; then ... else
+# <original bash> fi` site takes its `else` branch unconditionally. See
+# docs/adr-notes/294-configure-write-port-plan.md for the full design and
+# its flags (in particular: why a real controlling-terminal TTY session is
+# never delegated, and why the very first `.env-orbit` creation on a fresh
+# checkout always stays bash-only).
+
+engine_configure_project_name() {
+  local candidate="" line
+  if [[ -f "$environment_file" && ! -L "$environment_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "COMPOSE_PROJECT_NAME="* ]]; then
+        candidate="${line#*=}"
+      fi
+    done < "$environment_file"
+  fi
+  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$COMPOSE_PROJECT_NAME"
+    return 0
+  fi
+  candidate="$(basename -- "$(pwd -P)" 2>/dev/null || true)"
+  candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' 2>/dev/null || true)"
+  while [[ "$candidate" == [-_]* ]]; do
+    candidate="${candidate:1}"
+  done
+  if [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
+# True only when every precondition for a real, working one-off is met:
+# opted in, docker present, a valid *and already locally present* ORBIT_IMAGE
+# (bootstrap ordering: install.sh always resolves/pulls the image before
+# ever invoking configure.sh, but a bare `bash scripts/configure.sh` run on
+# a fresh checkout — before any image exists — must keep working exactly as
+# it does today), a derivable Compose project name, and — the first-run
+# boundary — an *already-existing* `.env-orbit` (docker compose's own
+# `--env-file` requires the file to exist; the very first creation of
+# `.env-orbit` on a brand-new deployment is therefore never delegated,
+# always bash, matching guarantee #6 exactly either way).
+engine_delegation_ready() {
+  [[ "${ORBIT_CONFIGURE_ENGINE:-}" == container ]] || return 1
+  command -v docker >/dev/null 2>&1 || return 1
+  [[ -f "$environment_file" && ! -L "$environment_file" ]] || return 1
+  [[ -n "${ORBIT_IMAGE:-}" ]] || return 1
+  is_valid_orbit_image "$ORBIT_IMAGE" || return 1
+  docker image inspect "$ORBIT_IMAGE" >/dev/null 2>&1 || return 1
+  engine_configure_project_name >/dev/null || return 1
+  return 0
+}
+
+# Runs the bundled orbit CLI's `configure` command as a disposable one-off
+# against this deployment directory, mounted read-write at /orbit-deploy —
+# the first :rw mount in the documented invocation contract (every command
+# shipped before issue #294 was read-only). `ORBIT_IMAGE` and, when set, the
+# machine-prompt/env-triad guided-configuration inputs are forwarded via -e
+# only when actually present, mirroring engine-check.sh's own minimal-surface
+# convention; stdin/stdout are left exactly as this script inherited them
+# (never redirected here), so a machine-prompt exchange or a piped OIDC
+# secret answer flows straight through to the container unchanged.
+run_engine() {
+  local project=""
+  project="$(engine_configure_project_name)" || return 5
+  local -a extra_env=(-e "ORBIT_IMAGE=$ORBIT_IMAGE")
+  if [[ "$machine_prompts" == 1 ]]; then
+    extra_env+=(-e "ORBIT_CONFIGURE_PROMPTS=machine")
+  fi
+  local env_var
+  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID; do
+    if [[ -n "${!env_var:-}" ]]; then
+      extra_env+=(-e "${env_var}=${!env_var}")
+    fi
+  done
+  local exit_code=0
+  docker compose --project-name "$project" --env-file "$environment_file" \
+    run --rm --no-deps -T --entrypoint node \
+    "${extra_env[@]}" \
+    --volume "$repo_dir:/orbit-deploy:rw" \
+    orbit-app /opt/orbit/cli/orbit.js configure "$@" --dir /orbit-deploy || exit_code=$?
+  return "$exit_code"
+}
+
+# --- end engine delegation ---------------------------------------------------
+
 case "${1:-}" in
   "")
     ;;
@@ -1125,6 +1226,19 @@ case "${1:-}" in
       usage
       exit 2
     fi
+    # Delegation is scoped to the two shapes with no real controlling-
+    # terminal interaction: the fully-scripted ORBIT_CONFIGURE_* env triad,
+    # and the #297 machine-prompt grammar (the container speaks it itself
+    # over this script's own inherited stdio — see run_engine's own
+    # comment). A real human TTY session always stays bash-only.
+    if [[ "$machine_prompts" == 1 || (
+      -n "${ORBIT_CONFIGURE_APP_URL:-}" &&
+      -n "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" &&
+      -n "${ORBIT_CONFIGURE_OIDC_CLIENT_ID:-}"
+    ) ]] && engine_delegation_ready; then
+      run_engine --init
+      exit $?
+    fi
     guided_init
     exit 0
     ;;
@@ -1133,6 +1247,20 @@ case "${1:-}" in
       usage
       exit 2
     fi
+    # Delegation is scoped the same way --init is above: the #297
+    # machine-prompt grammar, or a plain non-terminal stdin pipe (bash's own
+    # final fallback branch in set_oidc_secret below) — both are a simple,
+    # blind byte stream with no real controlling-terminal interaction, so
+    # the container can read the same one line this script would have read
+    # itself. ORBIT_CONFIGURE_TTY_INPUT=1 and an interactive `[[ -t 0 ]]`
+    # session always stay bash-only (see docs/adr-notes/
+    # 294-configure-write-port-plan.md's Flags section).
+    if [[ ( "$machine_prompts" == 1 || (
+      "${ORBIT_CONFIGURE_TTY_INPUT:-}" != 1 && ! -t 0
+    ) ) ]] && engine_delegation_ready; then
+      run_engine --set-oidc-secret
+      exit $?
+    fi
     set_oidc_secret
     exit 0
     ;;
@@ -1140,6 +1268,10 @@ case "${1:-}" in
     if [[ $# -lt 2 || $# -gt 3 ]]; then
       usage
       exit 2
+    fi
+    if engine_delegation_ready; then
+      run_engine --set-deployment-profile "$2" "${3:-}"
+      exit $?
     fi
     if ! set_deployment_profile "$2" "${3:-}"; then
       usage
@@ -1153,15 +1285,23 @@ case "${1:-}" in
     ;;
 esac
 
-ensure_environment_file
-run_configuration_preflight
-persist_orbit_image
-ensure_secrets_directory
-ensure_secret_file "$secrets_directory/session-secret"
-ensure_secret_file "$secrets_directory/postgres-password"
-# A 32-byte hexadecimal KEK is generated only when absent and is never printed.
-ensure_secret_file "$secrets_directory/document-kek"
-ensure_oidc_secret_placeholder
+if engine_delegation_ready; then
+  run_engine || fail "Configuration failed; restoring the previous deployment."
+else
+  ensure_environment_file
+  run_configuration_preflight
+  persist_orbit_image
+  ensure_secrets_directory
+  ensure_secret_file "$secrets_directory/session-secret"
+  ensure_secret_file "$secrets_directory/postgres-password"
+  # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
+  ensure_secret_file "$secrets_directory/document-kek"
+  ensure_oidc_secret_placeholder
+fi
+# ensure_vapid_keys always runs here, delegated or not: it is the one
+# sub-step that genuinely needs `docker` to run/build an image, which the
+# containerized engine can never do (issue #295's hard architectural
+# boundary — "the engine can never manage the Docker socket. Ever.").
 ensure_vapid_keys
 
 printf 'Orbit configuration is ready. Existing values were preserved.\n'
