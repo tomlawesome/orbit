@@ -20,7 +20,7 @@ import { AppError } from "@/lib/app-error";
 import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
-import { uploadItemDocument } from "@/server/document-repository";
+import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
 const proposalFields = [
@@ -354,6 +354,18 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       continue;
     }
     if (attachment.status === "assigned" && attachment.assignedDocumentId && attachment.purgePending) {
+      // The document assigned on a previous attempt may still be in scanner
+      // recovery (or have since been rejected); only the fully durable
+      // `available` document makes the held mail copy redundant. Purging
+      // here regardless of that state is #383 finding 4 in its retry form:
+      // it would destroy the only remaining copy while recovery is still in
+      // flight. Leave the attachment `assigned`/`purgePending` untouched so
+      // a later retry, once the document is available, purges safely.
+      if (!await isDocumentAvailable(attachment.assignedDocumentId)) {
+        pending.push(attachment.id);
+        failureCode ??= "scanner_unavailable";
+        continue;
+      }
       try {
         await purgeHeldImapAttachment(attachment.storageKey);
         const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
@@ -396,6 +408,14 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         continue attachmentLoop;
       }
       if (latest.status === "assigned" && latest.assignedDocumentId && latest.purgePending) {
+        // Same recovery-in-flight guard as above (#383 finding 4): a
+        // concurrent claimant may have assigned this attachment to a
+        // document that is not yet available.
+        if (!await isDocumentAvailable(latest.assignedDocumentId)) {
+          pending.push(latest.id);
+          failureCode ??= "scanner_unavailable";
+          continue attachmentLoop;
+        }
         try {
           await purgeHeldImapAttachment(latest.storageKey);
           const [cleared] = await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null, updatedAt: new Date() })
@@ -460,6 +480,18 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       if (!assignedRow) {
         pending.push(attachment.id);
         failureCode ??= "attachment_state_changed";
+        continue;
+      }
+      if (document.recoverable) {
+        // The scanner is unavailable and `uploadItemDocument` staged this
+        // upload for outage recovery rather than completing it (#383
+        // finding 4): the attachment is left `assigned`/`purgePending` so a
+        // later retry can purge once the document reaches `available`, but
+        // the held mail-side copy is the only durable copy right now and
+        // must not be destroyed, and the approval must not be reported as
+        // attached.
+        pending.push(attachment.id);
+        failureCode ??= "scanner_unavailable";
         continue;
       }
       try {

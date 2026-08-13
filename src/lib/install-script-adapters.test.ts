@@ -222,6 +222,8 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
         hasControllingTerminal: true,
         environmentFile: stagingEnvironmentFile,
         secretsDirectory: stagingSecretsDirectory,
+        targetEnvironmentFile: join(sandbox, "target", ".env-orbit"),
+        targetSecretsDirectory: join(sandbox, "target", ".orbit-secrets"),
         configureScript,
         orbitImage: VAPID_FIXTURE_TAG,
         profileChange: false,

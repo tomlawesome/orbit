@@ -98,6 +98,19 @@ function emptyDocumentsTar(dir: string): Buffer {
   return readFileSync(tarPath);
 }
 
+/** A documents tar containing one real, large object, honoring the objects/xx/yy/<hash>.bin layout validateDocumentArchiveEntries requires. */
+function largeDocumentsTar(dir: string, sizeBytes: number): Buffer {
+  const scaffoldDir = join(dir, "large-documents-scaffold");
+  const storageKey = "ab".repeat(32); // 64 hex chars; its own "ab"/"ab" prefix directories match slice(0,4).
+  const objectDir = join(scaffoldDir, "objects", storageKey.slice(0, 2), storageKey.slice(2, 4));
+  mkdirSync(objectDir, { recursive: true });
+  mkdirSync(join(scaffoldDir, "staging"), { recursive: true });
+  writeFileSync(join(objectDir, `${storageKey}.bin`), Buffer.alloc(sizeBytes, 6));
+  const tarPath = join(dir, "large-documents-scaffold.tar");
+  createTar(scaffoldDir, tarPath, ["."]);
+  return readFileSync(tarPath);
+}
+
 describe("createBackupBundle (in-memory fake adapter, no process spawning)", () => {
   it("produces a bundle that validateBackupBundleContents accepts, and always calls stop/start exactly once", () => {
     const sandbox = newSandbox("orbit-create-bundle-happy-");
@@ -121,6 +134,70 @@ describe("createBackupBundle (in-memory fake adapter, no process spawning)", () 
     extractTar(finalTarPath, extractedDir);
     const fields = validateBackupBundleContents(extractedDir, KEK_A, { pgRestoreListOk: () => true });
     expect(fields.documentKekSha256).toBe(documentKekFingerprint(KEK_A));
+  });
+
+  // #383: createBackupBundle used to read the whole collected documents.tar
+  // into one Buffer (readRegularFileNoFollow) and then hold plaintext,
+  // ciphertext, and a concatenated header+ciphertext copy simultaneously
+  // (encryptDocumentArchive's Buffer.concat calls) — roughly 3-4x the
+  // document tree's size resident at once, enough to OOM a real household's
+  // backup on a modest home server. It now streams documents.tar straight
+  // through encryption to disk (encryptDocumentArchiveToFile). A multi-GB
+  // reproduction is impractical in a test; this uses a large-but-tractable
+  // 80 MB document tree and asserts the RSS growth attributable to
+  // createBackupBundle stays a small fraction of that.
+  it("streams the collected document archive through encryption without an RSS spike proportional to its size (#383)", () => {
+    const sandbox = newSandbox("orbit-create-bundle-large-documents-");
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+    const size = 80 * 1024 * 1024;
+    const adapter = new FakeAdapter({ documentsTarBuilder: () => largeDocumentsTar(sandbox, size) });
+    const originalDocumentsTar = adapter.documentsTarBytes;
+
+    const before = process.memoryUsage().rss;
+    const result = createBackupBundle(backupDirectory, finalTarPath, KEK_A, adapter, "2026-08-13T00:00:00Z");
+    const after = process.memoryUsage().rss;
+
+    // The old buffered path needed roughly 3-4x the 80 MB document tree
+    // resident at once; the streaming path never holds more than one
+    // bounded chunk, so growth attributable to this call should be a small
+    // fraction of the tree's own size.
+    expect(after - before).toBeLessThan(size / 2);
+
+    expect(result.finalTarPath).toBe(finalTarPath);
+    expect(existsSync(finalTarPath)).toBe(true);
+    validateBackupBundleLayout(finalTarPath);
+    const extractedDir = join(sandbox, "extracted-large");
+    mkdirSync(extractedDir);
+    extractTar(finalTarPath, extractedDir);
+    const fields = validateBackupBundleContents(extractedDir, KEK_A, { pgRestoreListOk: () => true });
+    expect(fields.documentKekSha256).toBe(documentKekFingerprint(KEK_A));
+    // Round-trips byte-for-byte through the streaming encrypt + the
+    // (unmodified) buffered decrypt path. `.equals()`, not `toEqual` — deep
+    // equality on multi-MB buffers is catastrophically slow in Vitest.
+    const roundTripped = readFileSync(join(extractedDir, "documents.tar"));
+    expect(roundTripped.equals(originalDocumentsTar)).toBe(true);
+  }, 30_000);
+
+  it("publishes the bundle at mode 0600 regardless of the ambient umask (issue #383 finding 5: backup.sh's `umask 077` was never ported)", () => {
+    const sandbox = newSandbox("orbit-create-bundle-mode-");
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+    const adapter = new FakeAdapter({ documentsTarBuilder: () => emptyDocumentsTar(sandbox) });
+
+    // A permissive ambient umask, as a root/operator shell commonly has —
+    // before the fix, a plain `tar -cf` honoured this and the bundle
+    // (containing the unencrypted database.dump) landed at 0644.
+    const previousUmask = process.umask(0o022);
+    try {
+      createBackupBundle(backupDirectory, finalTarPath, KEK_A, adapter, "2026-08-13T00:00:00Z");
+    } finally {
+      process.umask(previousUmask);
+    }
+
+    expect(lstatSync(finalTarPath).mode & 0o777).toBe(0o600);
   });
 
   it("restarts the app even when dumpDatabase throws mid-backup (EXIT-trap equivalent, backup.sh #23)", () => {

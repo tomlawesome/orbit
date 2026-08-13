@@ -1051,6 +1051,56 @@ fi
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+# EXIT trap (Ctrl-C, SIGTERM, or any other abrupt termination during
+# --execute). Unlike install.sh/restore.sh/backup.sh/configure.sh, whose
+# trapped `cleanup` performs an actual rollback, this one performs cleanup
+# ONLY, never a blind rollback: restore-transaction's authoritative backup
+# (staging_root/rollback/original) is left untouched by every one of its own
+# failure paths and is never routed through the private recovery directory
+# alone (see "Private recovery directory" above), so a rerun of `--execute
+# --safe-only`/`--dangerous` — not an automatic action taken here, with no
+# visibility into which of several possibly-interrupted commands got how far
+# — is always the correct next step. What this trap does:
+#   - removes this run's own private recovery directory if one was opened,
+#     so an interrupted run never leaves an orphaned mode-700 copy of live
+#     secrets behind forever (the same removal cleanup_recovery_dir already
+#     performs at the end of every normal run); its path is still never
+#     printed, preserving the "Privacy" contract above;
+#   - if rotate-database-credential's steps were in flight, prints the same
+#     step-failure recovery guidance (checkpoint bundle location, and the
+#     staged new-credential path once step 2 has run) the synchronous
+#     failure path already prints, so an interrupted run is never silent.
+# Defensive `${var:-...}` reads throughout: this trap can fire before any of
+# these variables are assigned (e.g. a failure on the very next line), and
+# must never itself fail under `set -u`.
+cleanup() {
+  local exit_status=$?
+
+  if [[ -n "${recovery_dir:-}" ]]; then
+    printf 'Orbit repair: interrupted before completion; this run left a private recovery copy in place, now removed. Re-run "repair.sh --plan" to see current state, then "--execute" again if repairs are still needed.\n' >&2
+    cleanup_recovery_dir
+  fi
+
+  if [[ "${dangerous_batch_in_progress:-0}" == 1 ]]; then
+    printf 'Orbit repair: interrupted during the dangerous batch'"'"'s credential rotation.\n' >&2
+    if [[ -n "${checkpoint_bundle_path:-}" ]]; then
+      printf 'Orbit repair: the pre-rotation credential remains recoverable from the checkpoint at %s\n' \
+        "$checkpoint_bundle_path" >&2
+      printf 'Orbit repair: (decrypt it with your checkpoint passphrase — see "EXECUTE MODE (--execute --dangerous)" in scripts/repair.sh for the exact command).\n' >&2
+    fi
+    if [[ -e "${staged_postgres_password_path:-/nonexistent}" ]]; then
+      printf 'Orbit repair: a newly rotated credential is already staged at %s;\n' \
+        "$staged_postgres_password_path" >&2
+      printf 'Orbit repair: move it into place as %s/postgres-password if the database still accepts it.\n' \
+        "${secrets_directory:-.orbit-secrets}" >&2
+    fi
+  fi
+
+  exit "$exit_status"
+}
+
+trap cleanup EXIT
+
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
@@ -1104,6 +1154,8 @@ readonly -a restore_transaction_paths=(
   scripts/configuration.sh
   scripts/backup.sh
   scripts/restore.sh
+  scripts/repair.sh
+  scripts/engine-check.sh
   .env-orbit
   .orbit-secrets
 )
@@ -1204,6 +1256,10 @@ recovery_dir=""
 declare -A service_restart_result=()
 
 # dangerous-batch state (--execute --dangerous only; unused otherwise).
+# $dangerous_batch_in_progress is read by the EXIT trap (see "cleanup" above
+# the argument-parsing block) to know whether an abrupt termination happened
+# while rotate-database-credential's steps were in flight.
+dangerous_batch_in_progress=0
 safe_batch_exit_code=0
 dangerous_exit_code=0
 dangerous_failure_reason=none
@@ -1937,6 +1993,21 @@ do_restore_transaction() {
   is_real_non_symlink_directory "$staging_root/rollback/original" || return 1
   has_mode "$staging_root/rollback/original" 700 || return 1
 
+  # install.sh writes $staging_root/committed the moment its own transaction
+  # commits (immediately before the long image-pull/health-wait phase — see
+  # its own comment there). A staging directory bearing that marker was left
+  # behind by an install that already succeeded, not an interrupted one, so
+  # restoring from it would silently revert a completed update/rotation back
+  # to the pre-update files (issue #383 finding 2). Refuse loudly instead of
+  # guessing: this is exactly the kind of leftover a human operator must
+  # look at, not something this script may ever act on automatically.
+  if [[ -e "$staging_root/committed" ]]; then
+    printf 'Orbit repair: refusing restore-transaction; %s is marked committed by a completed install.\n' \
+      "$staging_root" >&2
+    printf 'Orbit repair: this staging directory was left behind after installation already succeeded; restoring from it would revert that update. Remove it manually once you have confirmed the current deployment is correct.\n' >&2
+    return 1
+  fi
+
   ensure_recovery_dir || return 1
 
   for path in "${restore_transaction_paths[@]}"; do
@@ -2400,10 +2471,24 @@ declare -A dangerous_step_fn=(
 # Independently callable per step — see the "Stage-two dangerous-step
 # iterator" note near RESERVED CLASSES above for why this indirection
 # (rather than one monolithic function) is deliberate.
+#
+# restart-services is special-cased here: do_restart_services memoizes its
+# result per service (issue #383 finding 1) so that two safe-batch findings
+# resolving to the same restart don't restart the container twice in one
+# run. But that memo must never survive into the dangerous batch's own
+# restart-services step — if the safe batch already restarted orbit-app
+# (e.g. for application-unhealthy) before rotate-database-credential's own
+# step 4 runs, the memo would make step 4 a silent no-op and the container
+# would never pick up the freshly rotated credential. Clearing it right
+# before this dispatch guarantees the post-rotation restart always
+# executes, regardless of what ran earlier in the same --execute call.
 run_dangerous_step() {
   local step="$1" fn
   fn="${dangerous_step_fn[$step]:-}"
   [[ -n "$fn" ]] || return 1
+  if [[ "$step" == restart-services ]]; then
+    unset 'service_restart_result[orbit-app]'
+  fi
   "$fn"
 }
 
@@ -2547,8 +2632,14 @@ execute_dangerous_batch() {
   # Approved: rotate-database-credential is currently the only dangerous
   # action class, so every deferred entry shares one execution instance and
   # outcome (mirrors do_restart_services's own once-per-run dedup above).
+  # $dangerous_batch_in_progress brackets the call so the EXIT trap (see
+  # "cleanup" above the argument-parsing block) knows whether an abrupt
+  # termination happened mid-rotation and owes the operator the same
+  # recovery guidance a synchronous step failure already prints.
   local step_status=0
+  dangerous_batch_in_progress=1
   run_rotate_database_credential_steps || step_status=$?
+  dangerous_batch_in_progress=0
 
   local line_result done_count=0 failed_count=0
   if [[ "$step_status" == 0 ]]; then

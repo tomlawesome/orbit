@@ -65,7 +65,10 @@ function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructur
   const fetches: string[] = [];
   const downloads: string[] = [];
   const client = {
-    mailbox: { uidValidity: 77 },
+    // Comfortably above every UID this fixture's fake mailboxes use, so
+    // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
+    // never skips these tests' fetch calls.
+    mailbox: { uidValidity: 77, uidNext: 1_000_000 },
     async connect() {},
     async logout() {},
     async getMailboxLock() { return { release() {} }; },

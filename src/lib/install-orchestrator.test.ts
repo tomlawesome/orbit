@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -262,7 +262,7 @@ function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
 }
 
 /** fetchAsset never mkdir's its own destination's parent — mirroring install-curl-adapter.ts's real createInstallAssetFetchAdapter exactly, so this suite would fail loudly if install-orchestrator.ts's own per-asset mkdir (install.sh:1406-1407) regressed. */
-function fakeFetchAsset(overrides: { failFor?: string; emptyFor?: string; scriptContentFor?: Record<string, string> } = {}) {
+function fakeFetchAsset(overrides: { failFor?: string; emptyFor?: string; unreadableFor?: string; scriptContentFor?: Record<string, string> } = {}) {
   return (url: string, destinationPath: string): { ok: boolean } => {
     // Strips "https://raw.githubusercontent.com/<owner>/<repo>/<revision>/"
     // — 6 segments once split on "/" ("https:", "", "raw.githubusercontent.com",
@@ -276,6 +276,11 @@ function fakeFetchAsset(overrides: { failFor?: string; emptyFor?: string; script
     }
     if (overrides.emptyFor && assetName.endsWith(overrides.emptyFor)) content = "";
     writeFileSync(destinationPath, content);
+    // Unreadable, but still a non-empty regular file — passes the
+    // fetch-time lstat/size checks (install.sh:1410-1412) so this
+    // simulates an I/O failure surfacing only later, at commit time
+    // (readFileSync in the DEPLOYMENT_ASSETS loop, issue #383).
+    if (overrides.unreadableFor && assetName.endsWith(overrides.unreadableFor)) chmodSync(destinationPath, 0o000);
     return { ok: true };
   };
 }
@@ -574,6 +579,67 @@ describe("runInstall — database volume safety wiring (guarantees #13-18)", () 
     expect(outcome).toMatchObject({ status: "failed", phase: "host" });
     if (outcome.status === "failed") expect(outcome.message).toContain("Could not determine a safe Docker Compose project name");
   });
+
+  it("labels a second-call-site (post-configuration) database-volume-safety refusal as configuration/configuration-failure/retry, not database/database-auth-migration/repair (issue #383 addon finding 2c)", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir);
+    const scenario = buildScenario(targetDir, {
+      context: { requestedAction: "update" },
+      docker: {
+        volumesByKeySubstring: "renamed-project_orbit-db-data",
+        volumeLabels: "renamed-project|orbit-db-data",
+        containersByVolume: "aaaaaaaaaaaa|renamed-project|orbit-db",
+        containersByProject: "bbbbbbbbbbbb|renamed-project|orbit-app",
+        containerImage: RESOLVED_REFERENCE,
+        volumeProjectLabel: "renamed-project",
+        // The first call (before configuration/prepareConfiguration) sees
+        // the volume under its original name; by the second call
+        // (install.sh:1481-1482's TOCTOU re-check) it has been renamed,
+        // so listVolumesExactName's own re-check throws
+        // DatabaseVolumeSafetyRefusal — install.sh's own installer_ui_phase
+        // is still "configuration" at this point (last set at :950-951,
+        // not reassigned to "database" until :1164-1166, much later).
+        volumesExactName: "a-different-volume-now",
+      },
+    });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration", reason: "configuration-failure", action: "retry" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("changed during installation");
+  });
+
+  it("labels a POSTGRES_PASSWORD_FILE-changed refusal as configuration/configuration-failure/retry too (issue #383 addon finding 2c)", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir);
+    const scenario = buildScenario(targetDir, {
+      context: { requestedAction: "update" },
+      docker: {
+        volumesByKeySubstring: "renamed-project_orbit-db-data",
+        volumeLabels: "renamed-project|orbit-db-data",
+        containersByVolume: "aaaaaaaaaaaa|renamed-project|orbit-db",
+        containersByProject: "bbbbbbbbbbbb|renamed-project|orbit-app",
+        containerImage: RESOLVED_REFERENCE,
+        volumeProjectLabel: "renamed-project",
+        volumesExactName: "renamed-project_orbit-db-data",
+        onCall: (call) => {
+          // Tamper with the live secret right when the second
+          // verify_database_volume_safety call site's own re-check
+          // (listVolumesExactName) runs — after InstallTransaction.begin()
+          // already backed up the original content, and just before
+          // verifyDatabasePasswordPreserved compares live-vs-backup.
+          if (call.method === "listVolumesExactName") {
+            writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "tampered-password", { mode: 0o600 });
+          }
+        },
+      },
+    });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration", reason: "configuration-failure", action: "retry" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("POSTGRES_PASSWORD_FILE changed");
+  });
 });
 
 describe("runInstall — image identity resolution (guarantees #41-44)", () => {
@@ -630,6 +696,59 @@ describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
     expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
     if (outcome.status === "failed") expect(outcome.message).toContain("failed a syntax check");
   });
+
+  it("installs deployment assets at mode 0644, not the secret-file 0600 default (issue #383: Compose-mounted config/tika-config.xml must stay readable by the non-root orbit-tika container)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir);
+
+    const outcome = await scenario.run();
+
+    expect(outcome.status).toBe("ok");
+    for (const asset of ["docker-compose.yml", "config/tika-config.xml", "scripts/configure.sh", "scripts/backup.sh"]) {
+      const mode = statSync(join(targetDir, asset)).mode & 0o777;
+      expect(mode, `${asset} mode`).toBe(0o644);
+    }
+    // The secret-bearing environment file/secrets tree are unaffected.
+    expect(statSync(join(targetDir, ".env-orbit")).mode & 0o777).toBe(0o600);
+  });
+
+  it("emits a terminal failed event (not an escaped throw) when a fetched asset becomes unreadable before commit (issue #383 addon finding 1)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { fetchAsset: { unreadableFor: "docker-compose.yml" } });
+
+    // Before the fix: the readFileSync inside the DEPLOYMENT_ASSETS commit
+    // loop threw a plain EACCES Error with no try/catch anywhere above it,
+    // so it propagated straight out of runInstall as a rejected promise
+    // instead of a `{status:"failed"}` outcome — no terminal `state=failed`
+    // event, violating this module's own "never throws for an expected
+    // refusal" contract.
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
+    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
+  });
+});
+
+describe("runInstall — terminal failed event coverage for transaction refusals (issue #383 addon finding 1)", () => {
+  it("emits a terminal failed event (not an escaped throw) when an asset directory is unsafe to create into", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir);
+    // config/ already exists as a symlink — ensureManagedDirectory refuses
+    // (InstallTransactionRefusal) once the transaction is already open;
+    // buildManagedPaths never preflights asset directories the way
+    // install.sh's own preflight_final_paths does, so this is only
+    // reachable mid-transaction.
+    symlinkSync(newTarget(), join(targetDir, "config"));
+    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("Refusing to install into config");
+    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
+  });
 });
 
 describe("runInstall — guided configuration wiring (guarantees #30-32)", () => {
@@ -674,6 +793,20 @@ describe("runInstall — prepare_configuration wiring (guarantee #24)", () => {
       expect(outcome.guidance?.[0]).toContain("configuration fields requiring attention: OIDC_CLIENT_SECRET");
       expect(outcome.guidance?.length).toBe(4);
     }
+  });
+
+  it("emits configuration/configuration starting then running around prepareConfiguration, distinct from the later completed event (install.sh:952,1007, issue #383 addon finding 4)", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir);
+    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome.status).toBe("ok");
+    const configurationEvents = scenario.events.filter((event) => event.phase === "configuration" && event.component === "configuration");
+    expect(configurationEvents.map((event) => event.state)).toEqual(["starting", "running", "completed"]);
+    expect(configurationEvents[0]).toMatchObject({ reason: "configuration-migration", action: "configure" });
+    expect(configurationEvents[1]).toMatchObject({ reason: "configuration-migration", action: "verify" });
   });
 });
 
@@ -733,6 +866,40 @@ describe("runInstall — transactional commit (guarantee #56) and rollback safet
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${RESOLVED_REFERENCE}`);
     expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
   });
+
+  it("surfaces the preserved staging directory in the failure guidance when rollback itself fails (install.sh:395, issue #383 addon finding 3)", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir);
+    // config/ as a symlink both refuses ensureManagedDirectory (the original
+    // failure) and, because config/tika-config.xml's managedWasPresent is
+    // false, makes rollback's own first pass find a symlinked parent for
+    // that same path — a genuine rollback failure, not just the initial
+    // refusal (install-transaction.ts:371-373's own "symlinked-parent").
+    symlinkSync(newTarget(), join(targetDir, "config"));
+    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
+    if (outcome.status === "failed") {
+      expect(outcome.guidance).toBeDefined();
+      const preservedLine = outcome.guidance?.find((line) => line.includes("recovery staging preserved at"));
+      expect(preservedLine).toBeDefined();
+      expect(preservedLine).toMatch(/\.orbit-install-staging\./);
+      // The path it points to must actually exist as recovery evidence —
+      // rollback partially succeeded (every managed path other than
+      // config/tika-config.xml was restored), but the one genuine failure
+      // is exactly why dispose() refused to delete the staging directory,
+      // so it must still be there for an operator to inspect.
+      const match = /recovery staging preserved at (.+)\.$/.exec(preservedLine!);
+      expect(match).toBeTruthy();
+      const stagingDir = match![1];
+      expect(existsSync(stagingDir)).toBe(true);
+      expect(existsSync(join(stagingDir, "rollback"))).toBe(true);
+    }
+    const blockedEvent = scenario.events.find((event) => event.phase === "rollback");
+    expect(blockedEvent).toMatchObject({ state: "blocked" });
+  });
 });
 
 describe("runInstall — service start and bounded health-wait wiring (guarantees #33-39)", () => {
@@ -754,6 +921,15 @@ describe("runInstall — service start and bounded health-wait wiring (guarantee
     const outcome = await scenario.run();
     expect(outcome).toMatchObject({ status: "failed", phase: "host" });
     expect(scenario.docker.calls.some((call) => call.method === "composeDown")).toBe(false);
+  });
+
+  it("labels a `compose up` failure docker-host/repair, not the phase's default retry action (install.sh:1172's fail_with docker-host repair, issue #383 addon finding 2b)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir, { docker: { composeUpOk: false } });
+
+    const outcome = await scenario.run();
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "docker-host", action: "repair" });
   });
 
   it("fails closed when the database never becomes healthy within the bounded window", async () => {
@@ -781,6 +957,26 @@ describe("runInstall — service start and bounded health-wait wiring (guarantee
     if (stoppedOutcome.status === "failed") expect(stoppedOutcome.message).toContain("stopped before it could report ready");
   });
 
+  it("gives the alive-but-not-ready and dead-container branches distinct reason/action, matching install.sh's own two fail_with calls (install.sh:1177-1184, issue #383 addon finding 2a)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const stillRunning = buildScenario(targetDir, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: true } });
+    const stillRunningOutcome = await stillRunning.run();
+    expect(stillRunningOutcome).toMatchObject({ status: "failed", reason: "health-timeout", action: "repair" });
+
+    const targetDir2 = newTarget();
+    writePreprovisionedTarget(targetDir2);
+    const stopped = buildScenario(targetDir2, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: false } });
+    const stoppedOutcome = await stopped.run();
+    // Before the fix: both branches called fail("application","application",msg)
+    // with no explicit reason/action, so defaultFailureReason("application")
+    // gave "health-timeout" here too — byte-identical to the alive branch,
+    // even though probeApplicationLiveness() exists specifically to tell
+    // the two apart.
+    expect(stoppedOutcome).toMatchObject({ status: "failed", reason: "application-startup", action: "repair" });
+    expect(stoppedOutcome).not.toMatchObject({ reason: "health-timeout" });
+  });
+
   it("fails closed when the private scanner (clamav, always-on) never becomes healthy", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
@@ -801,5 +997,26 @@ describe("runInstall — service start and bounded health-wait wiring (guarantee
     expect(calledMethods).not.toContain("probeTikaHealth");
     expect(calledMethods).not.toContain("probeOllamaHealth");
     expect(calledMethods).not.toContain("pullOllamaModel");
+  });
+
+  it("emits a state=healthy event for every probed component the moment it becomes healthy (install.sh:1112, issue #383 addon finding 4)", async () => {
+    const targetDir = newTarget();
+    writeRecognizedDeploymentTarget(targetDir, { COMPOSE_PROFILES: "processing,ai", TIKA_URL: "http://orbit-tika:9998", OLLAMA_MODEL: "llama3" });
+    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
+
+    const outcome = await scenario.run();
+
+    expect(outcome.status).toBe("ok");
+    // Before the fix: grep -rn '"healthy"' src/ found the string only in
+    // engine-event.ts's own vocabulary list — the engine never actually
+    // emitted it, so a mission console could never flip a component green.
+    const healthyEvents = scenario.events.filter((event) => event.state === "healthy");
+    expect(healthyEvents).toEqual([
+      { phase: "database", component: "database", state: "healthy", reason: "database-health", action: "health" },
+      { phase: "application", component: "application", state: "healthy", reason: "application-health", action: "health" },
+      { phase: "optional", component: "clamav", state: "healthy", reason: "optional-status", action: "health" },
+      { phase: "optional", component: "tika", state: "healthy", reason: "optional-status", action: "health" },
+      { phase: "optional", component: "ollama", state: "healthy", reason: "optional-status", action: "health" },
+    ]);
   });
 });

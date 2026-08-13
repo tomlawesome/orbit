@@ -8,6 +8,7 @@ import {
   runConfigurationPreflight,
 } from "./configuration-migration";
 import {
+  DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
   DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
@@ -254,6 +255,17 @@ export async function runInstall(
 ): Promise<InstallOutcome> {
   const clock = adapters.clock ?? realClock();
 
+  // install.sh's cleanup trap prints "rollback incomplete; recovery staging
+  // preserved at %s" (install.sh:395) whenever rollback_transaction fails —
+  // the staging directory is then the only copy of whatever the transaction
+  // was about to replace (e.g. the operator's original .env-orbit/
+  // .orbit-secrets). The outcome describing *why* the transaction failed in
+  // the first place is already returned by the time dispose() (in the
+  // `finally` below) discovers rollback also failed, so the last
+  // fail()-built outcome is tracked here and given a chance to gain that
+  // extra guidance line before it reaches the caller (issue #383).
+  let lastFailure: InstallOutcomeFailed | undefined;
+
   function fail(
     phase: string,
     component: string,
@@ -265,7 +277,9 @@ export async function runInstall(
     const resolvedReason = reason ?? defaultFailureReason(phase);
     const resolvedAction = action ?? defaultFailureAction(phase);
     onEvent({ phase, component, state: "failed", reason: resolvedReason, action: resolvedAction });
-    return { status: "failed", phase, component, reason: resolvedReason, action: resolvedAction, message, guidance };
+    const outcome: InstallOutcomeFailed = { status: "failed", phase, component, reason: resolvedReason, action: resolvedAction, message, guidance };
+    lastFailure = outcome;
+    return outcome;
   }
 
   onEvent({ phase: "host", component: "host", state: "starting", reason: "host-tools", action: "check" });
@@ -418,6 +432,11 @@ export async function runInstall(
         hasControllingTerminal: context.hasControllingTerminal,
         environmentFile: join(scratchDir, ENVIRONMENT_FILE),
         secretsDirectory: join(scratchDir, SECRETS_DIRECTORY),
+        // Guarantee #30's precondition guard must see the target's own
+        // pre-existing files, not the always-empty scratch staging basis
+        // above (issue #383).
+        targetEnvironmentFile: join(context.targetDir, ENVIRONMENT_FILE),
+        targetSecretsDirectory: join(context.targetDir, SECRETS_DIRECTORY),
         configureScript: join(scratchDir, "scripts", "configure.sh"),
         orbitImage: identity.resolvedReference,
         profileChange,
@@ -471,29 +490,52 @@ export async function runInstall(
         configurationMigrationCompleted = true;
       }
 
-      // Create asset directories (install.sh:1450-1459, guarantee #51).
-      for (const directory of assetDirectories) {
-        transaction.ensureManagedDirectory(directory);
-      }
+      // Create asset directories (install.sh:1450-1459, guarantee #51), move
+      // any staged guided-install configuration into place
+      // (install.sh:1460-1465, guarantee #52), and move every fetched asset
+      // into place (install.sh:1467-1474). install.sh routes every mkdir/mv
+      // failure here through its own `fail` (`|| fail "..."` on each mkdir/
+      // mv), so a refusal (e.g. a symlinked or stray `config`/`scripts`
+      // directory — buildManagedPaths never preflights asset directories,
+      // unlike install.sh's own preflight_final_paths) or an I/O error
+      // (ENOSPC, a failed read/rename) here must land as a terminal
+      // `state=failed` event too, not escape runInstall as a raw throw that
+      // skips fail() entirely (issue #383).
+      try {
+        for (const directory of assetDirectories) {
+          transaction.ensureManagedDirectory(directory);
+        }
 
-      // Move guided-install configuration into place (install.sh:1460-1465, guarantee #52).
-      if (guidedStaged) {
-        transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
-        transaction.commitMove(ENVIRONMENT_FILE, "file");
-        stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
-        transaction.commitMove(SECRETS_DIRECTORY, "directory");
-      }
+        if (guidedStaged) {
+          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
+          transaction.commitMove(ENVIRONMENT_FILE, "file");
+          stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
+          transaction.commitMove(SECRETS_DIRECTORY, "directory");
+        }
 
-      // Move every fetched asset into place (install.sh:1467-1474).
-      for (const asset of DEPLOYMENT_ASSETS) {
-        const content = readFileSync(join(scratchDir, asset));
-        transaction.writeStagedFile(asset, content);
-        transaction.commitMove(asset, "file");
+        // Assets are not secret-bearing (unlike the environment file/secrets
+        // tree above) and install.sh installs them at the ambient umask
+        // (typically 0644, never chmodded) — writeStagedFile's
+        // SECURE_FILE_MODE (0600) default is for secrets only, so pass
+        // DEPLOYMENT_ASSET_FILE_MODE explicitly (issue #383).
+        for (const asset of DEPLOYMENT_ASSETS) {
+          const content = readFileSync(join(scratchDir, asset));
+          transaction.writeStagedFile(asset, content, DEPLOYMENT_ASSET_FILE_MODE);
+          transaction.commitMove(asset, "file");
+        }
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        return fail("compose", "compose", error.message);
       }
 
       // prepare_configuration (install.sh:947-1008) — runs against the
       // target's own just-installed scripts/configure.sh, not the scratch
       // copy (see guided-configuration.ts's PrepareConfigurationContext doc).
+      // install.sh:952/1007 bracket this whole function with its own
+      // starting/running events (distinct from the "completed" event this
+      // port already emits once configuration-migration itself finishes,
+      // below) — never wired through this port until now (issue #383).
+      onEvent({ phase: "configuration", component: "configuration", state: "starting", reason: "configuration-migration", action: "configure" });
       const prepared = await prepareConfiguration(
         {
           environmentFile: finalEnvironmentFile,
@@ -511,6 +553,7 @@ export async function runInstall(
       if (prepared.status === "failed") {
         return fail("configuration", "configuration", prepared.message, "configuration-failure", "retry", prepared.guidance);
       }
+      onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
 
       // Second verify_database_volume_safety call site (install.sh:1481,
       // guarantee #17's TOCTOU re-check) + verify_database_password_preserved
@@ -526,13 +569,23 @@ export async function runInstall(
         );
       } catch (error) {
         if (!(error instanceof DatabaseVolumeSafetyRefusal)) throw error;
-        return fail("database", "database", error.message);
+        // install.sh's phase/component are still "configuration" here
+        // (installer_ui_phase/component are set to configuration at
+        // install.sh:950-951 and not reassigned before this second
+        // verify_database_volume_safety call at :1481-1482 — the next
+        // reassignment is installer_ui_phase=database at :1164-1166, which
+        // comes later, around wait_for_deployment_readiness), so this is
+        // `configuration-failure`/`retry`, never the database phase's
+        // `database-auth-migration`/`repair` defaults (issue #383).
+        return fail("configuration", "configuration", error.message, "configuration-failure", "retry");
       }
       if (!verifyDatabasePasswordPreserved(transaction, context.targetDir, volumeState.databaseVolumeSeen)) {
         return fail(
-          "database",
-          "database",
+          "configuration",
+          "configuration",
           "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose.",
+          "configuration-failure",
+          "retry",
         );
       }
 
@@ -569,21 +622,28 @@ export async function runInstall(
       onEvent({ phase: "oidc", component: "oidc", state: "completed", reason: "provider-discovery", action: "verify" });
 
       // Persist the resolved digest into ORBIT_IMAGE (install.sh:1495-1536,
-      // guarantees #53-54).
-      const currentContent = readFileSync(finalEnvironmentFile, "utf8");
-      const orbitImageLine = `ORBIT_IMAGE=${identity.resolvedReference}`;
-      const lines = currentContent.split("\n");
-      let sawKey = false;
-      const rewritten = lines.map((line) => {
-        if (line.startsWith("ORBIT_IMAGE=")) {
-          sawKey = true;
-          return orbitImageLine;
-        }
-        return line;
-      });
-      const finalContent = sawKey ? rewritten.join("\n") : `${currentContent.replace(/\n$/, "")}\n${orbitImageLine}\n`;
-      transaction.writeStagedFile(ENVIRONMENT_FILE, finalContent, 0o600);
-      transaction.commitMove(ENVIRONMENT_FILE, "file");
+      // guarantees #53-54) — same fail-closed discipline as the mkdir/mv
+      // block above (issue #383): a read/write/rename failure here must
+      // still emit a terminal `state=failed` event.
+      try {
+        const currentContent = readFileSync(finalEnvironmentFile, "utf8");
+        const orbitImageLine = `ORBIT_IMAGE=${identity.resolvedReference}`;
+        const lines = currentContent.split("\n");
+        let sawKey = false;
+        const rewritten = lines.map((line) => {
+          if (line.startsWith("ORBIT_IMAGE=")) {
+            sawKey = true;
+            return orbitImageLine;
+          }
+          return line;
+        });
+        const finalContent = sawKey ? rewritten.join("\n") : `${currentContent.replace(/\n$/, "")}\n${orbitImageLine}\n`;
+        transaction.writeStagedFile(ENVIRONMENT_FILE, finalContent, 0o600);
+        transaction.commitMove(ENVIRONMENT_FILE, "file");
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        return fail("compose", "compose", error.message);
+      }
 
       // docker compose config --quiet (install.sh:1539-1541, guarantee #55)
       // — must succeed *before* the transaction is marked committed
@@ -603,6 +663,18 @@ export async function runInstall(
       const disposal = transaction.dispose();
       if (!committed && !disposal.rollbackSucceeded) {
         onEvent({ phase: "rollback", component: "installer", state: "blocked", reason: "rollback", action: "repair" });
+        // install.sh:395's exact operator-facing line — the staging
+        // directory disposal just discovered is the only remaining copy of
+        // whatever the transaction was about to replace. `lastFailure` is
+        // the same object already returned by whichever `fail()` call
+        // triggered this `finally`; mutating its `guidance` here is still
+        // visible to the caller once this `finally` completes (issue #383).
+        if (disposal.preservedStagingDirectory && lastFailure) {
+          lastFailure.guidance = [
+            ...(lastFailure.guidance ?? []),
+            `Orbit installer: rollback incomplete; recovery staging preserved at ${disposal.preservedStagingDirectory}.`,
+          ];
+        }
       }
     }
 
@@ -654,7 +726,10 @@ export async function runInstall(
     onEvent({ phase: "database", component: "database", state: "starting", reason: "database-health", action: "start" });
     if (!adapters.docker.composeUp()) {
       if (targetWasEmpty) adapters.docker.composeDown();
-      return fail("host", "host", "Orbit services could not be created or started.");
+      // install.sh:1172's `fail_with docker-host repair` — defaultFailureReason("host")
+      // already matches ("docker-host"), but defaultFailureAction("host") is
+      // "retry", not the "repair" bash actually routes this to (issue #383).
+      return fail("host", "host", "Orbit services could not be created or started.", "docker-host", "repair");
     }
     const databaseHealthy = await waitForComponentHealth({
       probe: () => adapters.docker.probeDatabaseHealth(),
@@ -662,6 +737,7 @@ export async function runInstall(
       pollSeconds: context.readinessPollSeconds,
       clock,
       onWaiting: () => onEvent({ phase: "database", component: "database", state: "waiting", reason: "database-health", action: "wait" }),
+      onHealthy: () => onEvent({ phase: "database", component: "database", state: "healthy", reason: "database-health", action: "health" }),
     });
     if (!databaseHealthy) {
       return fail("database", "database", "The database did not become healthy within the bounded startup window.");
@@ -674,15 +750,27 @@ export async function runInstall(
       pollSeconds: context.readinessPollSeconds,
       clock,
       onWaiting: () => onEvent({ phase: "application", component: "application", state: "waiting", reason: "application-health", action: "wait" }),
+      onHealthy: () => onEvent({ phase: "application", component: "application", state: "healthy", reason: "application-health", action: "health" }),
     });
     if (!applicationHealthy) {
       if (adapters.docker.probeApplicationLiveness()) {
+        // install.sh:1177-1179's alive-but-not-ready branch is `fail_with
+        // health-timeout repair` — already exactly defaultFailureReason/
+        // Action("application"), so no explicit override is needed, but
+        // this is deliberately still distinct from the dead branch below.
         return fail("application", "application", "Orbit did not report ready within the bounded startup window.");
       }
+      // install.sh:1184's dead-container branch is `fail_with
+      // application-startup repair` — a different reason than the
+      // alive-but-not-ready branch above, so probeApplicationLiveness()'s
+      // whole point (telling the two apart) isn't lost once it reaches the
+      // event stream (issue #383).
       return fail(
         "application",
         "application",
         "Orbit stopped before it could report ready; the bounded status does not claim an unproven cause.",
+        "application-startup",
+        "repair",
       );
     }
 
@@ -693,6 +781,7 @@ export async function runInstall(
       pollSeconds: context.readinessPollSeconds,
       clock,
       onWaiting: () => onEvent({ phase: "optional", component: "clamav", state: "waiting", reason: "optional-status", action: "health" }),
+      onHealthy: () => onEvent({ phase: "optional", component: "clamav", state: "healthy", reason: "optional-status", action: "health" }),
     });
     if (!clamavHealthy) {
       return fail("optional", "clamav", "The private scanner did not become healthy within the bounded startup window.");
@@ -706,6 +795,7 @@ export async function runInstall(
         pollSeconds: context.readinessPollSeconds,
         clock,
         onWaiting: () => onEvent({ phase: "optional", component: "tika", state: "waiting", reason: "optional-status", action: "health" }),
+        onHealthy: () => onEvent({ phase: "optional", component: "tika", state: "healthy", reason: "optional-status", action: "health" }),
       });
       if (!tikaHealthy) {
         return fail("optional", "tika", "The selected document-processing service did not become healthy within the bounded startup window.");
@@ -722,6 +812,7 @@ export async function runInstall(
         pollSeconds: context.readinessPollSeconds,
         clock,
         onWaiting: () => onEvent({ phase: "optional", component: "ollama", state: "waiting", reason: "optional-status", action: "health" }),
+        onHealthy: () => onEvent({ phase: "optional", component: "ollama", state: "healthy", reason: "optional-status", action: "health" }),
       });
       if (!ollamaHealthy) {
         return fail("optional", "ollama", "The selected local-model service did not become healthy within the bounded startup window.");
