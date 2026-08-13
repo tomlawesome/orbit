@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -67,6 +68,15 @@ function dockerShimScript({
   db = { present: true, ready: true, authResult: "ok" },
   app = { present: true, image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64), health: "healthy" },
   argvLogPath = "",
+  // --execute's restart-services support: `restartFails` makes every
+  // `docker restart` invocation fail (exit 1); `healthMarkerPath`, when
+  // set, makes a successful `docker restart` write a marker file, and
+  // makes subsequent `docker inspect` report `healthy` once that marker
+  // exists — this is what lets a test prove the post-execution
+  // re-diagnosis honestly reflects a real restart rather than a canned
+  // answer.
+  restartFails = false,
+  healthMarkerPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -84,6 +94,9 @@ function dockerShimScript({
   const logLine = argvLogPath
     ? `printf '%s\\n' "$*" >> '${argvLogPath}' 2>/dev/null || true`
     : "true";
+  const appHealthExpr = healthMarkerPath
+    ? `if [[ -e '${healthMarkerPath}' ]]; then printf 'healthy'; else printf '%s' '${appHealth}'; fi`
+    : `printf '%s' '${appHealth}'`;
   return [
     "#!/usr/bin/env bash",
     "set -Eeuo pipefail",
@@ -140,8 +153,13 @@ function dockerShimScript({
     "    exit 1",
     "    ;;",
     "  inspect)",
-    `    printf '%s|%s\\n' '${appImage}' '${appHealth}'`,
+    `    app_health="$(${appHealthExpr})"`,
+    `    printf '%s|%s\\n' '${appImage}' "$app_health"`,
     "    exit 0",
+    "    ;;",
+    "  restart)",
+    restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
+    healthMarkerPath && !restartFails ? "    exit 0" : "",
     "    ;;",
     "esac",
     "exit 1",
@@ -219,13 +237,21 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
   chmodSync(join(targetDir, ".env-orbit"), 0o600);
 }
 
-function runRepair(targetDir, args, dockerOptions = {}) {
+function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
-    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir() },
+    input,
+    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
   });
+}
+
+// Snapshots every path/mode/mtime under targetDir, for asserting "zero
+// mutation" (declined/EOF confirmation, or a not-in-safe-set-only plan)
+// the same way the --check suite above already does.
+function treeSnapshot(targetDir) {
+  return spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" }).stdout;
 }
 
 function lines(stdout) {
@@ -1172,5 +1198,525 @@ describe("scripts/repair.sh --plan", () => {
       argvLog = "";
     }
     expect(argvLog).not.toContain(distinctPassword);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --execute --safe-only (issue #261, slice 4 stage one)
+// ---------------------------------------------------------------------------
+
+function mode(path) {
+  return (statSync(path).mode & 0o777).toString(8);
+}
+
+// Builds a leftover `.orbit-install-staging.*` directory shaped like
+// install.sh's own prepare_rollback_area: rollback/original/<path>, mode
+// 700 throughout. `envBackupLines`, when given, becomes the staged
+// .env-orbit backup content restore-transaction should restore live.
+function makeStagingTransaction(targetDir, { envBackupLines } = {}) {
+  const stagingDir = join(targetDir, ".orbit-install-staging.abc123");
+  const originalDir = join(stagingDir, "rollback", "original");
+  mkdirSync(originalDir, { recursive: true, mode: 0o700 });
+  chmodSync(stagingDir, 0o700);
+  chmodSync(join(stagingDir, "rollback"), 0o700);
+  chmodSync(originalDir, 0o700);
+  if (envBackupLines) {
+    writeFileSync(join(originalDir, ".env-orbit"), envBackupLines.join("\n") + "\n");
+    chmodSync(join(originalDir, ".env-orbit"), 0o600);
+  }
+  return stagingDir;
+}
+
+describe("scripts/repair.sh --execute --safe-only", () => {
+  // --- usage / flag contract -------------------------------------------
+
+  it("rejects --execute without --safe-only, explaining stage two is not implemented", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+    expect(result.stderr).toContain("--safe-only");
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects --safe-only without --execute", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--safe-only"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --execute --safe-only combined with --check", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--safe-only", "--check"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --safe-only combined with --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan", "--safe-only"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  // --- not-an-orbit-installation forces exit 5, same as --check/--plan --
+
+  it("reports not-orbit-directory as a skipped manual action and forces exit 5", () => {
+    const targetDir = scratchDir();
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(5);
+    expect(lines(result.stdout)).toEqual([
+      "execute action=manual resolves=not-orbit-directory result=skipped",
+      "execution result=empty done=0 failed=0",
+      "finding class=not-orbit-directory target=directory severity=fail",
+      "diagnosis result=failed checked=1 skipped=14",
+    ]);
+  });
+
+  // --- healthy / empty-plan case ------------------------------------------
+
+  it("reports execution result=empty for a fully healthy target, exit 0", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual([
+      "execution result=empty done=0 failed=0",
+      "diagnosis result=healthy checked=15 skipped=0",
+    ]);
+  });
+
+  // --- unactionable: a plan exists but nothing is in the safe set --------
+
+  it("reports execution result=unactionable when every planned action is outside the safe set, without prompting", () => {
+    const targetDir = makeFixture();
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: false } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=manual resolves=database-unreachable result=skipped");
+    expect(result.stdout).toContain("execution result=unactionable done=0 failed=0");
+    expect(result.stdout).not.toContain("plan action=");
+    expect(result.stdout).not.toContain("prompt");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- automation contract: non-interactive proceeds without any prompt --
+
+  it("proceeds without any confirmation preview or prompt line under non-interactive automation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toContain("plan action=");
+    expect(result.stdout).not.toContain("prompt");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  // --- fix-permissions ------------------------------------------------------
+
+  it("fix-permissions: chmods a loosely-permissioned .env-orbit back to 600", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("fix-permissions: chmods a loosely-permissioned secret file back to 600", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=secret-permissions result=done");
+    expect(mode(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe("600");
+  });
+
+  it("fix-permissions: chmods a loosely-permissioned .orbit-secrets directory back to 700", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o755);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=fix-permissions resolves=secrets-directory-invalid result=done",
+    );
+    expect(mode(join(targetDir, ".orbit-secrets"))).toBe("700");
+  });
+
+  it("fix-permissions: refuses to chmod through a symlinked secret, reporting failed and leaving the symlink untouched", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const realTarget = join(targetDir, "real-secret-target");
+    writeFileSync(realTarget, "outside-content");
+    chmodSync(realTarget, 0o600);
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    symlinkSync(realTarget, join(targetDir, ".orbit-secrets", "postgres-password"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=secret-permissions result=failed");
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    const linkStat = statSync(join(targetDir, ".orbit-secrets", "postgres-password"), { throwIfNoEntry: false });
+    expect(linkStat).toBeTruthy();
+    expect(
+      spawnSync("test", ["-L", join(targetDir, ".orbit-secrets", "postgres-password")]).status,
+    ).toBe(0);
+  });
+
+  // --- restore-transaction ---------------------------------------------------
+
+  it("restore-transaction: restores a staged prior .env-orbit over the current live copy and removes the staging directory on success", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: [
+        "APP_URL=https://orbit.old-good-state.internal",
+        "ORBIT_IMAGE=orbit-local:oldgood",
+        "COMPOSE_PROJECT_NAME=repairtest",
+      ],
+    });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=done",
+    );
+    const restoredEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(restoredEnv).toContain("APP_URL=https://orbit.old-good-state.internal");
+    expect(restoredEnv).toContain("ORBIT_IMAGE=orbit-local:oldgood");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout).toBe(
+      "",
+    );
+  });
+
+  it("restore-transaction: removes a live managed path that has no staged backup (created by the interrupted transaction)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    // docker-compose.mail.yml exists live but was never backed up: per
+    // install.sh's own managed_was_present bookkeeping, that means it did
+    // not exist before the interrupted transaction and must be removed.
+    writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services: {}\n");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=done",
+    );
+    expect(statSync(join(targetDir, "docker-compose.mail.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  it("restore-transaction: self-restores every path it already touched and leaves the staging directory intact when a later path fails", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    // Stage a backup for scripts/configure.sh too (so it's a path this
+    // action will also try to touch), then make the live scripts/
+    // directory read-only so removing scripts/configure.sh fails partway
+    // through the same restore-transaction action, after .env-orbit (which
+    // sorts first in the fixed allowlist) has already been replaced.
+    mkdirSync(join(stagingDir, "rollback", "original", "scripts"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(stagingDir, "rollback", "original", "scripts", "configure.sh"), configureScriptSource);
+    chmodSync(join(stagingDir, "rollback", "original", "scripts", "configure.sh"), 0o600);
+    const beforeEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    chmodSync(join(targetDir, "scripts"), 0o555);
+
+    let result;
+    try {
+      result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    } finally {
+      chmodSync(join(targetDir, "scripts"), 0o755);
+    }
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=failed",
+    );
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(beforeEnv);
+    expect(
+      spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout,
+    ).not.toBe("");
+  });
+
+  // --- restart-services -------------------------------------------------------
+
+  it("restart-services: restarts the orbit-app container exactly once even when both stale-container and application-unhealthy fire, and the re-diagnosis honestly reflects it", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit@sha256:" + "1".repeat(64));
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+    const healthMarkerPath = join(scratch, "healed");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      app: {
+        image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64),
+        health: "unhealthy",
+      },
+      argvLogPath,
+      healthMarkerPath,
+    });
+
+    expect(result.stdout).toContain("execute action=restart-services resolves=stale-container result=done");
+    expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=done");
+    expect(result.stdout).toContain("execution result=complete done=2 failed=0");
+    // Honest re-diagnosis: application-unhealthy clears (the shim's health
+    // marker simulates the restart curing the healthcheck), but a plain
+    // `docker restart` never changes the running image, so
+    // stale-container's underlying cause is untouched and it honestly
+    // persists in the re-diagnosis below the terminal execution line — the
+    // tool never pretends a restart fixed something it structurally
+    // cannot fix.
+    const reDiagnosis = result.stdout.slice(result.stdout.indexOf("execution result="));
+    expect(reDiagnosis).not.toContain("finding class=application-unhealthy");
+    expect(reDiagnosis).toContain("finding class=stale-container target=container severity=warn");
+
+    let argvLog = "";
+    try {
+      argvLog = readFileSync(argvLogPath, "utf8");
+    } catch {
+      argvLog = "";
+    }
+    const restartCount = argvLog.split("\n").filter((line) => line.startsWith("restart ")).length;
+    expect(restartCount).toBe(1);
+  });
+
+  it("restart-services: reports failed when the docker restart command itself fails", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      app: { health: "unhealthy" },
+      restartFails: true,
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=failed");
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+  });
+
+  // --- out-of-safe-set findings are always reported skipped, never executed --
+
+  it("reports regenerate-secret-eligible findings as skipped and leaves the secret absent", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=skipped");
+    expect(statSync(join(targetDir, ".orbit-secrets", "session-secret"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  it("reports rotate-database-credential findings as skipped and never touches the postgres-password secret", () => {
+    const distinctPassword = "Zx9-Very-Distinct-Postgres-Secret-Execute";
+    const targetDir = makeFixture({ withConfigure: false });
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      argvLogPath,
+    });
+
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=database-credential-mismatch result=skipped",
+    );
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toContain(
+      distinctPassword,
+    );
+    expect(result.stdout).not.toContain(distinctPassword);
+    expect(result.stderr).not.toContain(distinctPassword);
+    let argvLog = "";
+    try {
+      argvLog = readFileSync(argvLogPath, "utf8");
+    } catch {
+      argvLog = "";
+    }
+    expect(argvLog).not.toContain(distinctPassword);
+  });
+
+  it("reports manual findings as skipped and never fabricates a missing managed file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, "docker-compose.yml"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+    expect(statSync(join(targetDir, "docker-compose.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // --- confirmation model: machine prompts (ORBIT_REPAIR_PROMPTS=machine) --
+
+  it("machine prompts: shows the plan preview, then prompt/prompt-accept, and executes on a bare 'y'", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.stdout).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(result.stdout).toContain("prompt field=safe-batch kind=confirm required=true attempt=1");
+    expect(result.stdout).toContain("prompt-accept field=safe-batch");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("machine prompts: a non-'y' answer aborts with zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=skipped");
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("machine prompts: EOF (no answer line) aborts with zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- confirmation model: interactive TTY (ORBIT_REPAIR_TTY_INPUT=1 test hook) --
+
+  it("interactive prompt: accepting with 'y' executes the safe batch", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Proceed?");
+    expect(result.stdout).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("interactive prompt: declining with 'n' leaves the deployment unmutated", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("interactive prompt: EOF (Ctrl-D) leaves the deployment unmutated", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- determinism / no-ANSI / privacy, mirroring the --check/--plan suites --
+
+  it("produces byte-identical output across repeated declined runs", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const first = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+    const second = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.status).toBe(second.status);
+  });
+
+  it("never emits ANSI or cursor-control bytes", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toMatch(/\x1b/u);
+    expect(result.stderr).not.toMatch(/\x1b/u);
+  });
+
+  it("never discloses a path, configured value, or secret on stdout or stderr under --execute", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain("repair-test-secret");
+    expect(result.stdout).not.toContain(".env-orbit");
+    expect(result.stderr).not.toContain(targetDir);
   });
 });
