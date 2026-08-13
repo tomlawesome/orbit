@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +12,9 @@ import {
   buildRecoveryManifest,
   computeBundleHmac,
   createTar,
+  decryptDocumentArchive,
   documentKekFingerprint,
+  encryptDocumentArchive,
   encryptDocumentKek,
   decryptDocumentKek,
   sha256File,
@@ -46,10 +48,18 @@ import {
 //
 // Neither (2) nor (3) attempts parity for the *later* Docker-dependent
 // checks (HMAC verification via the app container, document-KEK fingerprint
-// match, pg_restore --list, or the document archive's AES-256-CBC decrypt) —
-// those remain out of scope for this Docker-free slice; see the module
-// comment in src/lib/recovery-bundle.ts and Flags in
-// docs/adr-notes/296-backup-port-plan.md.
+// match, or pg_restore --list) — those are exercised instead via
+// recovery-bundle.docker-adapter.test.ts's PATH-shim seam (issue #296 slice
+// 2), since they genuinely need a live daemon and cannot be spawned
+// Docker-free.
+//
+//   4. (slice 2) The AES-256-CBC/PBKDF2-SHA256 document-archive envelope
+//      (backup.sh:128-130,156-157) is not a Bash script at all — it is a
+//      direct `openssl enc` invocation, so the strongest parity available is
+//      spawning the real, unmodified `openssl` binary with the exact
+//      argument list backup.sh uses, both directions: an envelope produced
+//      by `encryptDocumentArchive` decrypted by real `openssl`, and one
+//      produced by real `openssl` decrypted by `decryptDocumentArchive`.
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const nodeCryptoScript = join(repoRoot, "scripts", "recovery-crypto.mjs");
@@ -69,6 +79,7 @@ function newSandbox(prefix: string): string {
 }
 
 const KEK_A = "a".repeat(64);
+const KEK_B = "b".repeat(64);
 
 // --- (1) recovery-crypto.mjs subprocess parity -----------------------------
 
@@ -140,6 +151,110 @@ describe("recovery-crypto.mjs subprocess parity", () => {
     expect(bashResult.status).not.toBe(0);
     expect(bashResult.stderr).toContain("passphrase verification failed");
     expect(() => decryptDocumentKek(envelope, "a-completely-wrong-passphrase-value")).toThrow();
+  });
+});
+
+// --- (4) AES-256-CBC document-archive crypto parity against real `openssl` -
+
+function opensslEncrypt(plaintextPath: string, keyFilePath: string, outputPath: string): { status: number; stderr: string } {
+  // backup.sh:156-157's exact argument list.
+  const result = spawnSync(
+    "openssl",
+    [
+      "enc",
+      "-aes-256-cbc",
+      "-pbkdf2",
+      "-iter",
+      "600000",
+      "-md",
+      "sha256",
+      "-salt",
+      "-pass",
+      `file:${keyFilePath}`,
+      "-in",
+      plaintextPath,
+      "-out",
+      outputPath,
+    ],
+    { encoding: "utf8" },
+  );
+  return { status: result.status ?? -1, stderr: result.stderr ?? "" };
+}
+
+function opensslDecrypt(encryptedPath: string, keyFilePath: string, outputPath: string): { status: number; stderr: string } {
+  // backup.sh:128-130's exact argument list.
+  const result = spawnSync(
+    "openssl",
+    [
+      "enc",
+      "-d",
+      "-aes-256-cbc",
+      "-pbkdf2",
+      "-iter",
+      "600000",
+      "-md",
+      "sha256",
+      "-pass",
+      `file:${keyFilePath}`,
+      "-in",
+      encryptedPath,
+      "-out",
+      outputPath,
+    ],
+    { encoding: "utf8" },
+  );
+  return { status: result.status ?? -1, stderr: result.stderr ?? "" };
+}
+
+describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Docker)", () => {
+  it("TS-encrypt then openssl-decrypt: a plaintext round-trips through both implementations", () => {
+    const sandbox = newSandbox("orbit-document-archive-parity-encrypt-");
+    const keyFilePath = join(sandbox, "document-kek");
+    writeFileSync(keyFilePath, `${KEK_A}\n`);
+    const plaintext = Buffer.from("fake document tar bytes, byte-for-byte round trip fixture\n");
+
+    const envelope = encryptDocumentArchive(plaintext, KEK_A);
+    const envelopePath = join(sandbox, "documents.tar.enc");
+    writeFileSync(envelopePath, envelope);
+
+    const decryptedPath = join(sandbox, "documents.tar");
+    const result = opensslDecrypt(envelopePath, keyFilePath, decryptedPath);
+    expect(result.status).toBe(0);
+    expect(readFileSync(decryptedPath)).toEqual(plaintext);
+  });
+
+  it("openssl-encrypt then TS-decrypt: an envelope produced by the real binary is decryptable by recovery-bundle.ts", () => {
+    const sandbox = newSandbox("orbit-document-archive-parity-decrypt-");
+    const keyFilePath = join(sandbox, "document-kek");
+    writeFileSync(keyFilePath, `${KEK_A}\n`);
+    const plaintextPath = join(sandbox, "documents.tar");
+    const plaintext = Buffer.from("another fixture, produced by openssl this time\n");
+    writeFileSync(plaintextPath, plaintext);
+
+    const envelopePath = join(sandbox, "documents.tar.enc");
+    const result = opensslEncrypt(plaintextPath, keyFilePath, envelopePath);
+    expect(result.status).toBe(0);
+
+    const decrypted = decryptDocumentArchive(readFileSync(envelopePath), KEK_A);
+    expect(decrypted).toEqual(plaintext);
+  });
+
+  it("a wrong document KEK is refused by both implementations (openssl: nonzero exit; TS: RecoveryBundleRefusal)", () => {
+    const sandbox = newSandbox("orbit-document-archive-parity-wrong-key-");
+    const keyFilePath = join(sandbox, "document-kek");
+    writeFileSync(keyFilePath, `${KEK_A}\n`);
+    const wrongKeyFilePath = join(sandbox, "document-kek-wrong");
+    writeFileSync(wrongKeyFilePath, `${KEK_B}\n`);
+    const plaintextPath = join(sandbox, "documents.tar");
+    writeFileSync(plaintextPath, "fixture content for the wrong-key case\n");
+
+    const envelopePath = join(sandbox, "documents.tar.enc");
+    expect(opensslEncrypt(plaintextPath, keyFilePath, envelopePath).status).toBe(0);
+
+    const decryptedPath = join(sandbox, "documents.tar.decrypted-with-wrong-key");
+    const opensslResult = opensslDecrypt(envelopePath, wrongKeyFilePath, decryptedPath);
+    expect(opensslResult.status).not.toBe(0);
+    expect(() => decryptDocumentArchive(readFileSync(envelopePath), KEK_B)).toThrow(/Document archive decryption failed/);
   });
 });
 
