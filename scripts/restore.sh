@@ -735,9 +735,33 @@ validate_correspondence_reports() {
   done
 }
 
+# docker-compose.yml publishes orbit-app as
+# "${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000" (configure.sh
+# writes both keys into the Deployment section of .env-orbit as operator
+# knobs). A hardcoded 127.0.0.1:3000 probe only works on the default
+# deployment; honor the same two keys and the same defaulting compose uses,
+# reading them straight from $environment_file (never from the parent
+# shell's environment, exactly like compose's own --env-file).
+health_probe_url() {
+  local bind_address port
+
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="${bind_address:-0.0.0.0}"
+  port="${port:-3000}"
+
+  # 0.0.0.0 means "listen on every interface"; it is not itself a
+  # connectable address, so probe via loopback there, same as any other
+  # client on the host would have to.
+  [[ "$bind_address" == "0.0.0.0" ]] && bind_address="127.0.0.1"
+
+  printf 'http://%s:%s/api/health' "$bind_address" "$port"
+}
+
 wait_for_health() {
-  local health_deadline=$((SECONDS + 45))
-  until curl --fail --silent --max-time 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1; do
+  local health_deadline=$((SECONDS + 45)) probe_url
+  probe_url="$(health_probe_url)"
+  until curl --fail --silent --max-time 2 "$probe_url" >/dev/null 2>&1; do
     (( SECONDS < health_deadline )) || return 1
     sleep 1
   done
