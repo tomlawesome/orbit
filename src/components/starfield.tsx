@@ -1,6 +1,6 @@
 /**
  * The drifting starfield behind the hero-sky dial (issue #327, spec:
- * docs/design/v19/home.html, POL-11 "constant drift"). Two tiled depth
+ * design/v19/home.html, POL-11 "constant drift"). Two tiled depth
  * layers of generated stars, each duplicated once and translated by
  * exactly one tile width so the loop is seamless (no snap, no reversal);
  * drift is perceptible within a few seconds at these durations (the v18
@@ -48,7 +48,7 @@ function generateStars(
   }));
 }
 
-// Same seeds/counts/ranges as the v19 mockup's generator (docs/design/v19/home.html).
+// Same seeds/counts/ranges as the v19 mockup's generator (design/v19/home.html).
 const FAR_STARS = generateStars(17170812, 95, [0.4, 0.9], [0.12, 0.35]);
 const NEAR_STARS = generateStars(88451913, 46, [0.8, 1.5], [0.3, 0.7]);
 

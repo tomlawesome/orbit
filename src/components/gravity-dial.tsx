@@ -16,8 +16,8 @@ import {
 } from "@/lib/dial-geometry";
 
 /**
- * The gravity-well dial (issue #326, spec: v19 — docs/design/v19/home.html,
- * docs/design/polish-register.md). This is the SVG chart only: the
+ * The gravity-well dial (issue #326, spec: v19 — design/v19/home.html,
+ * design/polish-register.md). This is the SVG chart only: the
  * manifest list remains the accessible source of truth (CON-5 / the v19
  * aria-label), and the hover callout is #327's concern — this component
  * only reports hover via `onBodyHover` for a host to render one.
