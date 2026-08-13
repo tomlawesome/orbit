@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — the mark: decision card</title>
+<title>Orbit — the mark: ratified</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#070d1f;--panel:#0b1226;--line:#243259;--ink:#e9edf8;--mid:#8791b3;--faint:#4d5878;
@@ -33,11 +33,11 @@ svg{overflow:visible;display:block}
 @keyframes spinback{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.tr{animation:none}}
 </style></head><body>
-<h1>The mark — decision card</h1>
-<p class="lead">Not a new concept: the proposal is that Orbit's mark is the one it already
-uses — the gravity-well dial, miniaturised. The year is the ring, the planet is the thing
-approaching, the household burns at the centre. The word sets plain because the mark
-carries everything. Below: how much dress the same drawing can wear, from hero to favicon.</p>
+<h1>The mark — ratified</h1>
+<p class="lead">Decided (owner, 2026-08-13): the mark is the ring and the planet —
+nothing else, ever. Two clear geometric shapes, so the identity survives any medium and
+any size. The only dressing the mark ever wears is the planet's 3D body (and, at hero
+sizes, its glow); there is never anything inside the ring. The word sets plain.</p>
 <a class="back" href="mockups-web-v19.html">← v19 index</a>
 
 <div class="card">
@@ -66,20 +66,12 @@ carries everything. Below: how much dress the same drawing can wear, from hero t
           <stop offset="100%" stop-color="#d8b45a" stop-opacity=".55"/>
         </linearGradient>
       </defs>
-      <!-- the year ring -->
-      <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".85"/>
-      <!-- the well: a faint inner threshold, the household at centre -->
-      <circle cx="100" cy="100" r="34" fill="none" stroke="#d8b45a" stroke-opacity=".28"
-              stroke-width="1.6" stroke-dasharray="2.5 5"/>
-      <circle cx="100" cy="100" r="17" fill="url(#sunglow)"/>
-      <circle cx="100" cy="100" r="6" fill="var(--sun)"/>
-      <!-- the approach: motion held in a still (trail rides the ring behind the planet) -->
+      <!-- the ring and the planet. nothing else, ever. -->
+      <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".9"/>
       <g class="tr">
-        <path d="M 118.6 30.5 A 72 72 0 0 1 162.4 64" fill="none" stroke="url(#trail)"
-              stroke-width="7" stroke-linecap="round" opacity=".8"/>
         <circle cx="163" cy="63.5" r="30" fill="url(#plglow)"/>
-        <circle cx="163" cy="63.5" r="15" fill="url(#pbody)"/>
-        <circle cx="158" cy="58" r="4.5" fill="rgba(255,255,255,.5)"/>
+        <circle cx="163" cy="63.5" r="16" fill="url(#pbody)"/>
+        <circle cx="157.5" cy="57.5" r="5" fill="rgba(255,255,255,.5)"/>
       </g>
     </svg>
     <div class="word">orbit</div>
@@ -89,22 +81,19 @@ carries everything. Below: how much dress the same drawing can wear, from hero t
   <div class="row">
     <div class="cell">
       <svg width="92" height="92" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".85"/>
-        <circle cx="100" cy="100" r="34" fill="none" stroke="#d8b45a" stroke-opacity=".28" stroke-width="1.6" stroke-dasharray="2.5 5"/>
-        <circle cx="100" cy="100" r="17" fill="url(#sunglow)"/><circle cx="100" cy="100" r="6" fill="var(--sun)"/>
-        <path d="M 118.6 30.5 A 72 72 0 0 1 162.4 64" fill="none" stroke="url(#trail)" stroke-width="7" stroke-linecap="round" opacity=".8"/>
-        <circle cx="163" cy="63.5" r="30" fill="url(#plglow)"/><circle cx="163" cy="63.5" r="15" fill="url(#pbody)"/>
-        <circle cx="158" cy="58" r="4.5" fill="rgba(255,255,255,.5)"/>
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".9"/>
+        <circle cx="163" cy="63.5" r="30" fill="url(#plglow)"/><circle cx="163" cy="63.5" r="16" fill="url(#pbody)"/>
+        <circle cx="157.5" cy="57.5" r="5" fill="rgba(255,255,255,.5)"/>
       </svg>
-      <small>FULL DRESS · hero, splash</small>
+      <small>HERO · 3D body + glow</small>
     </div>
     <div class="cell">
       <svg width="92" height="92" viewBox="0 0 200 200">
         <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="8"/>
-        <circle cx="100" cy="100" r="6.5" fill="var(--sun)" opacity=".9"/>
-        <circle cx="163" cy="63.5" r="17" fill="#d8b45a"/>
+        <circle cx="163" cy="63.5" r="17" fill="url(#pbody)"/>
+        <circle cx="157.5" cy="57.5" r="5" fill="rgba(255,255,255,.45)"/>
       </svg>
-      <small>STANDARD · chrome (today's login)</small>
+      <small>STANDARD · chrome — 3D body, no glow</small>
     </div>
     <div class="cell">
       <svg width="92" height="92" viewBox="0 0 200 200">
@@ -121,8 +110,7 @@ carries everything. Below: how much dress the same drawing can wear, from hero t
       <div class="hlock">
         <svg width="44" height="44" viewBox="0 0 200 200">
           <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="9"/>
-          <circle cx="100" cy="100" r="7" fill="var(--sun)" opacity=".9"/>
-          <circle cx="163" cy="63.5" r="19" fill="#d8b45a"/>
+          <circle cx="163" cy="63.5" r="19" fill="url(#pbody)"/>
         </svg>
         <span class="word">orbit</span>
       </div>
@@ -133,7 +121,6 @@ carries everything. Below: how much dress the same drawing can wear, from hero t
         <div class="hlock">
           <svg width="44" height="44" viewBox="0 0 200 200">
             <circle cx="100" cy="100" r="72" fill="none" stroke="#5d6a87" stroke-width="9"/>
-            <circle cx="100" cy="100" r="7" fill="#1c2b4a"/>
             <circle cx="163" cy="63.5" r="19" fill="#b4842c"/>
           </svg>
           <span class="word" style="color:#1c2b4a">orbit</span>
@@ -172,14 +159,15 @@ carries everything. Below: how much dress the same drawing can wear, from hero t
     </div>
   </div>
 
-  <p class="note"><b>Why this is the mark:</b> it's the product miniaturised, not a logo
-  invented beside it. The full-dress version carries the whole identity — the year ring,
-  the threshold, the household sun, a planet mid-approach with its trail (and on the real
-  splash it slowly orbits) — while every reduction sheds detail in the same order the
-  product itself does. The word never performs; it just names the drawing.
-  <br><br><b>What it replaces:</b> the three-arc gesture mark (pre-star-chart era) retires;
-  all bespoke wordmark treatments are dropped.</p>
+  <p class="note"><b>The rule:</b> the mark is exactly two geometric shapes — the ring and
+  the planet. Nothing ever sits inside the ring. The geometry is identical at every size
+  and in every medium; the only thing that changes is dress: at hero sizes the planet
+  wears its 3D body and glow (and slowly orbits on live surfaces), in chrome it keeps the
+  3D body, and in one-ink contexts both shapes go flat. Because the shapes are pure
+  geometry, the identity survives print, embroidery, favicons and dark/light alike.
+  <br><br><b>What it replaces:</b> the three-arc gesture mark retires; all bespoke
+  wordmark treatments are dropped; the word always sets plain.</p>
 </div>
 
-<div class="foot">orbit · the mark · decision card · issue #307 · the hero planet drifts once per 40s — motion is part of the mark</div>
+<div class="foot">orbit · the mark · RATIFIED 2026-08-13 · issue #307 · ring + planet, nothing else, ever · the hero planet drifts once per 40s</div>
 </body></html>
