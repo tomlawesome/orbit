@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -198,20 +198,42 @@ function verifyDatabasePasswordPreserved(transaction: InstallTransaction, target
   if (!databaseVolumeSeen) return true;
   const live = join(targetDir, SECRETS_DIRECTORY, "postgres-password");
   const backup = join(transaction.originalDir, SECRETS_DIRECTORY, "postgres-password");
-  if (!hasMode(live, 0o600)) return false;
+  // Single O_NOFOLLOW descriptor for the live secret: the mode check and the
+  // content read must observe the same file (no stat-then-open pair).
+  let descriptor: number;
   try {
-    return readFileSync(backup).equals(readFileSync(live));
+    descriptor = openSync(live, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch {
     return false;
+  }
+  try {
+    if ((fstatSync(descriptor).mode & 0o777) !== 0o600) return false;
+    return readFileSync(descriptor).equals(readFileSync(backup));
+  } catch {
+    return false;
+  } finally {
+    closeSync(descriptor);
   }
 }
 
 function stageSecretsDirectoryTree(transaction: InstallTransaction, sourceDir: string, relativeDir: string): void {
   for (const entry of readdirSync(sourceDir)) {
     const sourcePath = join(sourceDir, entry);
-    const stat = lstatSync(sourcePath);
-    if (!stat.isFile()) continue;
-    transaction.writeStagedFile(join(relativeDir, entry), readFileSync(sourcePath), stat.mode & 0o777);
+    // Single O_NOFOLLOW descriptor per entry: the type/mode probe and the
+    // content read must observe the same file (no lstat-then-read pair).
+    let descriptor: number;
+    try {
+      descriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch {
+      continue;
+    }
+    try {
+      const stat = fstatSync(descriptor);
+      if (!stat.isFile()) continue;
+      transaction.writeStagedFile(join(relativeDir, entry), readFileSync(descriptor), stat.mode & 0o777);
+    } finally {
+      closeSync(descriptor);
+    }
   }
   chmodSync(join(transaction.stagingDir, relativeDir), 0o700);
 }
