@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -341,6 +341,52 @@ function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
     encoding: "utf8",
     input,
     env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+  });
+}
+
+// Async counterpart to runRepair, for tests that need to interact with a
+// still-running repair.sh — e.g. sending it input, waiting for a specific
+// prompt to appear, and THEN signaling it — none of which spawnSync (fully
+// synchronous, all input supplied upfront) can express.
+function spawnRepair(targetDir, args, dockerOptions = {}, { env } = {}) {
+  const binDir = makeFakeBin(dockerOptions);
+  const child = spawn("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
+    cwd: targetDir,
+    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exited = new Promise((resolve) => {
+    child.on("close", (status, signal) => resolve({ status, signal, stdoutText: () => stdout, stderrText: () => stderr }));
+  });
+  return { child, exited, stdoutSoFar: () => stdout, stderrSoFar: () => stderr };
+}
+
+// Resolves once `predicate(accumulatedStderr)` first becomes true, or
+// rejects after `timeoutMs` — used to wait for a specific prompt to appear
+// on a spawnRepair() child's stderr before acting on it (e.g. sending a
+// signal), without a fixed sleep.
+function waitForStderr(spawned, predicate, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    if (predicate(spawned.stderrSoFar())) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for stderr predicate")), timeoutMs);
+    const handler = () => {
+      if (predicate(spawned.stderrSoFar())) {
+        clearTimeout(timer);
+        spawned.child.stderr.off("data", handler);
+        resolve();
+      }
+    };
+    spawned.child.stderr.on("data", handler);
   });
 }
 
@@ -1310,7 +1356,10 @@ function mode(path) {
 // install.sh's own prepare_rollback_area: rollback/original/<path>, mode
 // 700 throughout. `envBackupLines`, when given, becomes the staged
 // .env-orbit backup content restore-transaction should restore live.
-function makeStagingTransaction(targetDir, { envBackupLines } = {}) {
+// `committed`, when true, drops install.sh's own commit marker (issue #383
+// finding 2) into the staging directory, marking it as belonging to an
+// install that already succeeded rather than one that was interrupted.
+function makeStagingTransaction(targetDir, { envBackupLines, committed = false } = {}) {
   const stagingDir = join(targetDir, ".orbit-install-staging.abc123");
   const originalDir = join(stagingDir, "rollback", "original");
   mkdirSync(originalDir, { recursive: true, mode: 0o700 });
@@ -1320,6 +1369,9 @@ function makeStagingTransaction(targetDir, { envBackupLines } = {}) {
   if (envBackupLines) {
     writeFileSync(join(originalDir, ".env-orbit"), envBackupLines.join("\n") + "\n");
     chmodSync(join(originalDir, ".env-orbit"), 0o600);
+  }
+  if (committed) {
+    writeFileSync(join(stagingDir, "committed"), "");
   }
   return stagingDir;
 }
@@ -1555,6 +1607,89 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(
       spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout,
     ).not.toBe("");
+  });
+
+  // issue #383 finding 2: a leftover `.orbit-install-staging.*` directory is
+  // not necessarily evidence of an INTERRUPTED transaction — install.sh only
+  // starts the long image-pull/health-wait phase after its own transaction
+  // has already committed, and a host crash during that phase can leave
+  // staging behind next to a successfully installed deployment. Before this
+  // fix, restore-transaction could not tell the two cases apart and would
+  // silently revert a completed install/update back to the pre-update
+  // files. The worst-case variant the verifier reproduced: a path with no
+  // staged backup (`.orbit-secrets`, exactly what a first-time install's own
+  // bookkeeping produces for a brand-new secrets directory) was treated as
+  // "created by the interrupted transaction" and deleted outright, with only
+  // a private recovery copy — cleaned up before the run even finished —
+  // ever holding a copy. install.sh now writes a `committed` marker into the
+  // staging directory at the moment its own transaction commits; repair.sh
+  // must refuse restore-transaction outright whenever that marker is
+  // present, touching nothing.
+  it("finding 2 (issue #383): refuses restore-transaction outright when the staging directory is marked committed, and .orbit-secrets survives untouched", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    // Mirrors the verifier's worst-case repro: .orbit-secrets has NO staged
+    // backup under rollback/original (exactly what a fresh install's own
+    // prepare_rollback_area records for a brand-new secrets directory —
+    // managed_was_present=0), so an interrupted-transaction reading of this
+    // same staging directory would treat it as "created by the transaction"
+    // and remove it.
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+      committed: true,
+    });
+    const beforeEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    const beforeSecretNames = readdirSync(join(targetDir, ".orbit-secrets")).sort();
+    const beforePostgresPassword = readFileSync(
+      join(targetDir, ".orbit-secrets", "postgres-password"),
+      "utf8",
+    );
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=failed",
+    );
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    // Loud, not silent: an operator running this must be told why, on
+    // stderr (stdout stays enum-only per the stdout contract).
+    expect(result.stderr).toContain("refusing restore-transaction");
+    expect(result.stderr).toContain("committed");
+    expect(result.stderr).not.toBe("");
+
+    // Nothing was touched: the completed install's .env-orbit is untouched...
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(beforeEnv);
+    // ...and — the critical regression — .orbit-secrets was never deleted.
+    expect(existsSync(join(targetDir, ".orbit-secrets"))).toBe(true);
+    expect(readdirSync(join(targetDir, ".orbit-secrets")).sort()).toEqual(beforeSecretNames);
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toBe(
+      beforePostgresPassword,
+    );
+    expect(mode(join(targetDir, ".orbit-secrets"))).toBe("700");
+    // The staging directory itself is left in place for manual review, not
+    // silently swallowed either.
+    expect(
+      spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" })
+        .stdout,
+    ).not.toBe("");
+  });
+
+  it("restore-transaction still restores normally when the staging directory has no commit marker (a genuinely interrupted transaction)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+      committed: false,
+    });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=done",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
+      "APP_URL=https://orbit.old-good-state.internal",
+    );
   });
 
   // --- restart-services -------------------------------------------------------
@@ -2519,5 +2654,122 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
     // Exactly one trailing diagnosis block, not one per batch.
     expect(lines(result.stdout).filter((line) => line.startsWith("diagnosis result="))).toHaveLength(1);
+  });
+
+  // issue #383 finding 1: do_restart_services memoizes per service in
+  // $service_restart_result, and execute_repair resets that memo only ONCE
+  // before both batches run. On a deployment with BOTH
+  // database-credential-mismatch (dangerous -> rotate-database-credential,
+  // whose step 4 reuses do_restart_services) and application-unhealthy
+  // (safe -> restart-services) — the exact #261 motivating combination,
+  // since a bad credential is precisely what makes the app's own
+  // healthcheck fail — `--execute --safe-only --dangerous` used to run the
+  // safe batch's restart first, memoize it `done`, and then have the
+  // rotation's own step 4 hit that memo and skip the restart entirely: the
+  // run reported complete/done with the container still holding the
+  // pre-rotation password. The fix clears the memo immediately before the
+  // dangerous batch's own restart-services dispatch, so the post-rotation
+  // restart always actually runs.
+  it("finding 1 (issue #383): the post-rotation restart is not skipped by an earlier safe-batch restart in the same --safe-only --dangerous run", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const argvLogPath = join(scratchDir(), "argv.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { health: "unhealthy" },
+        argvLogPath,
+      },
+      {
+        input: `y\nrotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=done");
+    expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=database-credential-mismatch result=done",
+    );
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+
+    const argvLog = readFileSync(argvLogPath, "utf8");
+    const argvLines = lines(argvLog);
+    const restartIndexes = argvLines
+      .map((line, index) => (line.startsWith("restart ") ? index : -1))
+      .filter((index) => index !== -1);
+    const alterRoleIndex = argvLines.findIndex((line) => line.includes(" -f -"));
+
+    // The bug reproduced with exactly one restart, issued BEFORE the ALTER
+    // ROLE (the safe batch's own restart, with the dangerous batch's step 4
+    // silently skipped by the stale memo). The fix requires two restarts:
+    // the safe batch's, then a second one strictly AFTER the credential
+    // rotation, so the container actually picks up the new password.
+    expect(restartIndexes).toHaveLength(2);
+    expect(alterRoleIndex).toBeGreaterThan(-1);
+    expect(restartIndexes[0]).toBeLessThan(alterRoleIndex);
+    expect(restartIndexes[1]).toBeGreaterThan(alterRoleIndex);
+  });
+});
+
+// issue #383 finding 4: unlike install.sh/restore.sh/backup.sh/configure.sh
+// (all `trap cleanup EXIT`), repair.sh registered no trap at all, so an
+// abrupt termination (Ctrl-C, SIGTERM) mid-`--execute` left this run's own
+// private recovery directory (`.orbit-repair-recovery.*`, holding plaintext
+// copies of whatever restore-transaction had touched so far) behind
+// forever, with no message to the operator. The fix adds `trap cleanup
+// EXIT`, mirroring the other scripts' shape: it removes the recovery
+// directory (the same removal cleanup_recovery_dir already performs at the
+// end of every normal run) and prints interrupt guidance, without ever
+// printing the recovery directory's own path (the "Privacy" contract is
+// unchanged).
+describe("scripts/repair.sh EXIT trap (issue #383 finding 4)", () => {
+  it("removes its own private recovery directory and prints interrupt guidance when killed mid-run, instead of leaving it behind silently", async () => {
+    const targetDir = makeCredentialMismatchFixture();
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+
+    const spawned = spawnRepair(
+      targetDir,
+      ["--execute", "--safe-only", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    try {
+      // Approve the safe batch: restore-transaction runs, which opens this
+      // run's private recovery directory (the only action class that ever
+      // needs one — see "Private recovery directory" in repair.sh's own
+      // header). Then wait for the dangerous batch's own typed-word prompt
+      // — the natural pause point after the recovery directory exists but
+      // before execute_repair's own end-of-run cleanup_recovery_dir has had
+      // a chance to run.
+      await waitForStderr(spawned, (text) => text.includes("Proceed? [y/N]"));
+      spawned.child.stdin.write("y\n");
+      await waitForStderr(spawned, (text) => text.includes("type 'rotate'"));
+
+      // Confirm the recovery directory genuinely exists before the kill —
+      // otherwise this test would trivially pass for the wrong reason.
+      const beforeKill = readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-recovery."));
+      expect(beforeKill).toHaveLength(1);
+
+      spawned.child.kill("SIGTERM");
+      const result = await spawned.exited;
+
+      expect(result.signal).toBe("SIGTERM");
+      expect(result.stderrText()).toContain("interrupted before completion");
+      // Never discloses the recovery directory's own path, killed or not.
+      expect(result.stderrText()).not.toContain(beforeKill[0]);
+      const afterKill = readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-recovery."));
+      expect(afterKill).toHaveLength(0);
+    } finally {
+      if (!spawned.child.killed) {
+        spawned.child.kill("SIGKILL");
+      }
+    }
   });
 });
