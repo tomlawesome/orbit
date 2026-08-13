@@ -25,6 +25,7 @@ import { describe, expect, it } from "vitest";
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
+const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
 
 const fakeOpensslScript = [
@@ -84,6 +85,8 @@ function makeFixture(envOrbitContent) {
   mkdirSync(join(targetDir, "scripts"));
   writeFileSync(join(targetDir, "scripts", "configure.sh"), configureScriptSource);
   chmodSync(join(targetDir, "scripts", "configure.sh"), 0o755);
+  writeFileSync(join(targetDir, "scripts", "installer-ui.sh"), installerUiSource);
+  chmodSync(join(targetDir, "scripts", "installer-ui.sh"), 0o755);
   writeFileSync(join(targetDir, ".env-orbit.example"), environmentExampleSource);
   if (envOrbitContent !== undefined) {
     writeFileSync(join(targetDir, ".env-orbit"), envOrbitContent);
@@ -110,7 +113,7 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
 function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides = {}, input = "") {
   const binDir = makeFakeBin();
   const command = `exec </dev/null; bash ${join(targetDir, "scripts", "configure.sh")} ${args.join(" ")}`;
-  return spawnSync("script", ["-qec", command, "/dev/null"], {
+  return spawnSync("script", ["-qeE", "never", "-c", command, "/dev/null"], {
     cwd: targetDir,
     encoding: "utf8",
     input,
@@ -204,6 +207,8 @@ describe(".env-orbit.example", () => {
       "COMPOSE_PROFILES",
       "POSTGRES_DB",
       "POSTGRES_USER",
+      "TIKA_URL",
+      "OLLAMA_MODEL",
       "IMAP_ENABLED",
     ]);
   });
@@ -239,6 +244,97 @@ describe(".env-orbit.example", () => {
 });
 
 describe("configure.sh", () => {
+  it("creates a concise operator environment while leaving reference-only defaults in the example", () => {
+    const targetDir = makeFixture(undefined);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    const environment = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(environment).toContain("# --- Core ---\n");
+    expect(environment).toContain("# --- Authentication ---\n");
+    expect(environment).toContain("# --- Deployment ---\n");
+    expect(environment).toContain("# --- Optional services ---\n");
+    expect(environment).toContain("# OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n");
+    expect(environment).toContain("# ORBIT_CONFIG_APPLIED_VERSION=\n");
+    expect(environment).toContain("# ORBIT_CONFIG_APPLIED_DIGEST=\n");
+    expect(environment).toContain("# COMPOSE_PROJECT_NAME=\n");
+    expect(environment).not.toContain("TIKA_TIMEOUT_MS");
+    expect(environment).not.toContain("Advanced: limits and tuning");
+    expect(environment.split("\n").length).toBeLessThan(40);
+    expect(environmentExampleSource).toContain("# TIKA_TIMEOUT_MS=45000");
+  });
+
+  it.each([
+    ["standard", "", "", ""],
+    ["processing", "processing", "http://orbit-tika:9998", ""],
+    ["ai", "ai", "", "granite-local:3b"],
+    ["full", "processing,ai", "http://orbit-tika:9998", "granite-local:3b"],
+  ])("persists the %s deployment profile atomically", (preset, profiles, tikaUrl, model) => {
+    const initial = [
+      "# operator comment stays",
+      "UNMANAGED_VALUE=keep-me",
+      "COMPOSE_PROFILES=old",
+      "TIKA_URL=old",
+      "OLLAMA_MODEL=old",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+    const args = ["--set-deployment-profile", preset];
+    if (model) args.push(model);
+
+    const result = runConfigure(targetDir, args);
+
+    expect(result.status).toBe(0);
+    if (model) expect(result.stdout).not.toContain(model);
+    const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(updated.match(/^COMPOSE_PROFILES=.*$/gm)).toEqual([`COMPOSE_PROFILES=${profiles}`]);
+    expect(updated.match(/^TIKA_URL=.*$/gm)).toEqual([`TIKA_URL=${tikaUrl}`]);
+    expect(updated.match(/^OLLAMA_MODEL=.*$/gm)).toEqual([`OLLAMA_MODEL=${model}`]);
+    expect(updated).toContain("# operator comment stays\nUNMANAGED_VALUE=keep-me");
+
+    const rerun = runConfigure(targetDir, args);
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(updated);
+  });
+
+  it("leaves the environment unchanged when atomic profile staging fails", () => {
+    const initial = [
+      "# operator comment stays",
+      "UNMANAGED_VALUE=keep-me",
+      "COMPOSE_PROFILES=old",
+      "TIKA_URL=old",
+      "OLLAMA_MODEL=old",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(
+      targetDir,
+      ["--set-deployment-profile", "processing"],
+      { ORBIT_TEST_FAIL_UPDATE_CHMOD: "1" },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("rejects missing or hostile local-model identifiers without mutation or disclosure", () => {
+    const initial = "COMPOSE_PROFILES=\nTIKA_URL=\nOLLAMA_MODEL=\n";
+    const targetDir = makeFixture(initial);
+
+    const missing = runConfigure(targetDir, ["--set-deployment-profile", "full"]);
+    expect(missing.status).toBe(2);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+
+    const hostileValue = "private-model;print-secret";
+    const hostile = runConfigure(targetDir, ["--set-deployment-profile", "full", hostileValue]);
+    expect(hostile.status).toBe(2);
+    expect(`${hostile.stdout}${hostile.stderr}`).not.toContain(hostileValue);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+  });
+
   it("updates an existing active ORBIT_IMAGE assignment atomically", () => {
     const initial = [
       "UNRELATED_KEY=keep-me",
@@ -315,6 +411,68 @@ describe("configure.sh", () => {
     expect(updated).toContain("ORBIT_IMAGE=orbit-local:abcdef123456");
     expect(updated).toContain("VAPID_PUBLIC_KEY=fake-public-key");
     expect(updated).toContain("VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key");
+  });
+
+  it("preserves an existing file's final newline state around managed updates", () => {
+    const initial = [
+      "ORBIT_IMAGE=old-registry.example/orbit@sha256:" + "a".repeat(64),
+      "# operator comment retained",
+      "UNMANAGED_VALUE=keep-me",
+      "VAPID_PUBLIC_KEY=existing-public-key",
+      "VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "vapid-private-key"), "existing-private-key\n");
+    chmodSync(join(targetDir, ".orbit-secrets", "vapid-private-key"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe([
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "# operator comment retained",
+      "UNMANAGED_VALUE=keep-me",
+      "VAPID_PUBLIC_KEY=existing-public-key",
+      "VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key",
+    ].join("\n"));
+  });
+
+  it("places the canonical OIDC client secret file key in the authentication section", () => {
+    const initial = [
+      "# --- Required: public URL and authentication --------------------------------",
+      "APP_URL=https://orbit.configure-test.internal",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET=",
+      "# File-backed form, set only by `scripts/configure.sh --set-oidc-secret`",
+      "# OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "# unmanaged comment remains",
+      "UNMANAGED_VALUE=keep-me",
+      "OIDC_CLIENT_SECRET_FILE=/old/noncanonical/location",
+      "",
+    ].join("\n");
+    const targetDir = makeFixture(initial);
+
+    const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "new-secret-value\n");
+
+    expect(result.status).toBe(0);
+    const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(updated.indexOf("OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret"))
+      .toBeGreaterThan(updated.indexOf("OIDC_CLIENT_SECRET="));
+    expect(updated.indexOf("OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret"))
+      .toBeLessThan(updated.indexOf("OIDC_CALLBACK_URL="));
+    expect(updated).toContain("# File-backed form, set only by `scripts/configure.sh --set-oidc-secret`");
+    expect(updated).not.toContain("# OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret");
+    expect(updated).toContain("# unmanaged comment remains\nUNMANAGED_VALUE=keep-me");
+    expect(updated.match(/^OIDC_CLIENT_SECRET_FILE=.*$/gm)).toEqual([
+      "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+    ]);
+
+    const rerun = runConfigure(targetDir, ["--set-oidc-secret"], {}, "replacement-secret-value\n");
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(updated);
   });
 
   it("keeps .env-orbit restricted to owner-only permissions", () => {
@@ -850,8 +1008,8 @@ describe("configure.sh", () => {
       const result = runConfigureWithControllingTerminal(
         targetDir,
         ["--init"],
-        {},
-        `${validAppUrl}\n${validIssuer}\n${validClientId}\n`,
+        { TERM: "xterm" },
+        `${validAppUrl}\n${validIssuer}\n${validClientId}X\x1b[D\x1b[3~\r`,
       );
 
       expect(result.status).toBe(0);

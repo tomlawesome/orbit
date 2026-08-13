@@ -1,0 +1,2523 @@
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+
+// This suite runs repair.sh from copied fixtures in temporary directories:
+// like configure.sh, repair.sh forces its own cwd to its containing
+// checkout (`dirname "$0"/..`), so it must never be pointed at the real
+// repository. A fake `docker` executable is placed ahead of the real one on
+// PATH (this sandbox has a real Docker CLI installed) for every invocation,
+// so no test ever reaches a real daemon, container, volume, or image.
+
+const scriptsDir = dirname(fileURLToPath(import.meta.url));
+const repoDir = join(scriptsDir, "..");
+const repairScriptSource = readFileSync(join(scriptsDir, "repair.sh"), "utf8");
+const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
+const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
+const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
+
+const scratchDirs = [];
+
+afterEach(() => {
+  while (scratchDirs.length > 0) {
+    rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  }
+});
+
+function scratchDir() {
+  const dir = mkdtempSync(join(tmpdir(), "orbit-repair-"));
+  scratchDirs.push(dir);
+  return dir;
+}
+
+// A `docker` shim covering every read-only subcommand repair.sh issues:
+//   - `docker ps -a` (bare)                             -> connectivity probe
+//   - `docker ps -a --filter project ... --format ...`    -> container ownership
+//   - `docker ps -a --filter project --filter service=orbit-db --format ...`
+//     / `...service=orbit-app...`                         -> per-service discovery
+//   - `docker compose --project-name X ... config --quiet` -> interpolation
+//   - `docker volume ls --filter ... --format ...`         -> volume retention
+//   - `docker exec ... pg_isready ...` / `docker exec -e PGPASSWORD ... psql ...`
+//                                                           -> database reachability/auth
+//   - `docker inspect --format '{{.Config.Image}}|...' <id>` -> app image/health
+// `unavailable: true` makes every subcommand fail, simulating a missing or
+// unreachable Docker without needing to hide the real `docker` binary from
+// PATH (which shares a directory with bash/coreutils in this sandbox).
+//
+// Every invocation's full argv is appended to `argvLogPath` (when provided)
+// before dispatch, regardless of outcome, so tests can assert a secret value
+// never appears on any `docker` command line even when the scenario is
+// deliberately built to make repair.sh's own captured output leaky.
+// The real scripts/recovery-crypto.mjs (issue #296 slice 1) — the ORBKEK01
+// CLI repair.sh's stage-two checkpoint step shells out to inside a one-off
+// orbit-app container. The fake `docker` shim below dispatches a
+// `compose ... run ... --entrypoint node orbit-app
+// /opt/orbit/scripts/recovery-crypto.mjs <encrypt|decrypt> <path>` straight
+// to this REAL script (with the real `node` already on PATH — this suite
+// shims `docker` only), remapping the fixed container-internal paths
+// repair.sh uses back to host paths, so no real Docker daemon or built
+// image is ever required to exercise the actual ORBKEK01 crypto.
+const recoveryCryptoScriptPath = join(scriptsDir, "recovery-crypto.mjs");
+
+function dockerShimScript({
+  unavailable = false,
+  volumes = [],
+  containers = [],
+  composeFails = false,
+  db = { present: true, ready: true, authResult: "ok" },
+  app = { present: true, image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64), health: "healthy" },
+  argvLogPath = "",
+  // --execute's restart-services support: `restartFails` makes every
+  // `docker restart` invocation fail (exit 1); `healthMarkerPath`, when
+  // set, makes a successful `docker restart` write a marker file, and
+  // makes subsequent `docker inspect` report `healthy` once that marker
+  // exists — this is what lets a test prove the post-execution
+  // re-diagnosis honestly reflects a real restart rather than a canned
+  // answer.
+  restartFails = false,
+  healthMarkerPath = "",
+  // --execute --dangerous's rotate-database-credential support:
+  // `alterRoleFails` makes every script-mode `psql -f -` exec'd for the
+  // rotate-credential step fail (exit 1), simulating that step itself
+  // failing after a successful checkpoint. `recoveryCryptoFails` makes
+  // every `compose run ... recovery-crypto.mjs ...` invocation fail
+  // outright (exit 1) BEFORE dispatching to the real script, simulating a
+  // Docker/compose-level failure distinct from a crypto-level one (e.g. a
+  // bad passphrase, which the real script itself already reports via its
+  // own nonzero exit — no separate flag needed for that case).
+  alterRoleFails = false,
+  recoveryCryptoFails = false,
+  // When set, a successful rotate-credential exec touches this marker
+  // file, and the psql-auth branch reports `ok` (regardless of
+  // `db.authResult`) once the marker exists — mirroring `healthMarkerPath`
+  // above, this is what lets a test prove the post-execution re-diagnosis
+  // honestly reflects a real rotation rather than a canned answer.
+  dbAuthMarkerPath = "",
+  // The rotate-credential step delivers its SQL (including the fresh
+  // credential) over `psql -f -`'s STDIN, never argv (see the coordinator
+  // review this fixes: the SQL must never appear in `docker`/`psql` argv,
+  // observable via /proc). When set, the shim's `-f -` branch captures
+  // exactly what it received on its own stdin into this path, so a test can
+  // assert the rotation SQL genuinely arrived via stdin (not argv, and not
+  // simply absent because the call never happened).
+  execStdinLogPath = "",
+} = {}) {
+  if (unavailable) {
+    return "#!/usr/bin/env bash\nexit 1\n";
+  }
+  const volumeLines = volumes.map((name) => `    printf '%s\\n' '${name}'`).join("\n");
+  const containerLines = containers
+    .map(({ id, service }) => `      printf '%s\\n' '${id}|${service}'`)
+    .join("\n");
+  const dbId = db && db.present !== false ? (db.id ?? "1111aaaa2222") : "";
+  const appId = app && app.present !== false ? (app.id ?? "3333bbbb4444") : "";
+  const dbReadyExit = db && db.ready === false ? 1 : 0;
+  const authResult = (db && db.authResult) || "ok";
+  const appImage = (app && app.image) || "";
+  const appHealth = app && app.health !== undefined ? app.health : "healthy";
+  const alterRoleExit = alterRoleFails ? 1 : 0;
+  const logLine = argvLogPath
+    ? `printf '%s\\n' "$*" >> '${argvLogPath}' 2>/dev/null || true`
+    : "true";
+  const appHealthExpr = healthMarkerPath
+    ? `if [[ -e '${healthMarkerPath}' ]]; then printf 'healthy'; else printf '%s' '${appHealth}'; fi`
+    : `printf '%s' '${appHealth}'`;
+  const composeRunLines = [
+    // "run" can appear at any position after --project-name/--env-file, so
+    // this scans the whole argv rather than checking a fixed index.
+    "    is_run=0",
+    '    for a in "$@"; do [[ "$a" == "run" ]] && is_run=1; done',
+    '    if [[ "$is_run" == 1 ]]; then',
+    '      args=("$@")',
+    "      idx=0",
+    "      recovery_op=''",
+    "      recovery_path=''",
+    "      volume_src=''",
+    "      volume_dst=''",
+    '      while [[ "$idx" -lt "${#args[@]}" ]]; do',
+    '        a="${args[$idx]}"',
+    '        case "$a" in',
+    "          --volume)",
+    "            idx=$((idx + 1))",
+    '            vol="${args[$idx]:-}"',
+    '            volume_src="${vol%%:*}"',
+    '            rest="${vol#*:}"',
+    '            volume_dst="${rest%%:*}"',
+    "            ;;",
+    "          encrypt|decrypt)",
+    '            recovery_op="$a"',
+    "            idx=$((idx + 1))",
+    '            recovery_path="${args[$idx]:-}"',
+    "            ;;",
+    "        esac",
+    "        idx=$((idx + 1))",
+    "      done",
+    '      if [[ -n "$recovery_op" ]]; then',
+    recoveryCryptoFails ? "        exit 1" : "        true",
+    '        real_path="$recovery_path"',
+    '        if [[ -n "$volume_src" && "$recovery_path" == "$volume_dst" ]]; then',
+    '          real_path="$volume_src"',
+    '        elif [[ "$recovery_path" == "/run/secrets/orbit-postgres-password" ]]; then',
+    '          real_path=".orbit-secrets/postgres-password"',
+    "        fi",
+    `        exec node '${recoveryCryptoScriptPath}' "$recovery_op" "$real_path"`,
+    "      fi",
+    "    fi",
+  ].join("\n");
+  return [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    logLine,
+    'case "${1:-}" in',
+    "  ps)",
+    "    filter_count=0",
+    '    for a in "$@"; do [[ "$a" == "--filter" ]] && filter_count=$((filter_count + 1)); done',
+    '    joined="$*"',
+    '    if [[ "$filter_count" -ge 2 && "$joined" == *"service=orbit-db"* ]]; then',
+    `      ${dbId ? `printf '%s\\n' '${dbId}'` : "true"}`,
+    "      exit 0",
+    "    fi",
+    '    if [[ "$filter_count" -ge 2 && "$joined" == *"service=orbit-app"* ]]; then',
+    `      ${appId ? `printf '%s\\n' '${appId}'` : "true"}`,
+    "      exit 0",
+    "    fi",
+    '    if [[ "$filter_count" -ge 1 ]]; then',
+    containerLines || "      true",
+    "    fi",
+    "    exit 0",
+    "    ;;",
+    "  compose)",
+    composeRunLines,
+    composeFails ? "    exit 1" : "    exit 0",
+    "    ;;",
+    "  volume)",
+    '    if [[ "${2:-}" == "ls" ]]; then',
+    volumeLines || "      true",
+    "      exit 0",
+    "    fi",
+    "    exit 1",
+    "    ;;",
+    "  exec)",
+    '    joined="$*"',
+    '    if [[ "$joined" == *"pg_isready"* ]]; then',
+    `      exit ${dbReadyExit}`,
+    "    fi",
+    // The rotate-credential step's script-mode invocation
+    // (`psql -v ON_ERROR_STOP=1 ... -f -`) is fingerprinted by the literal
+    // trailing " -f -" token, never by SQL text (there is none in argv —
+    // that is exactly the property under test). This exec call is the ONLY
+    // one repair.sh ever pipes real stdin content into, so reading it here
+    // is safe: the other exec branches below never touch stdin, and so
+    // never race with repair.sh's own prompt reads on its primary stdin.
+    '    if [[ "$joined" == *" -f -"* ]]; then',
+    execStdinLogPath ? `      cat > '${execStdinLogPath}'` : "      cat > /dev/null",
+    alterRoleExit === 0 && dbAuthMarkerPath ? `      : > '${dbAuthMarkerPath}'` : "      true",
+    `      exit ${alterRoleExit}`,
+    "    fi",
+    '    if [[ "$joined" == *"psql"* ]]; then',
+    dbAuthMarkerPath
+      ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
+      : `      effective_auth_result="${authResult}"`,
+    '      case "$effective_auth_result" in',
+    "        ok) exit 0 ;;",
+    "        mismatch)",
+    // Deliberately echoes the (env-forwarded) PGPASSWORD value into stderr,
+    // as a hostile/leaky client might, so tests can prove repair.sh never
+    // re-emits captured subprocess output even in the worst case.
+    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"orbit\" (shim-saw-password=%s)\\n' \"${PGPASSWORD:-}\" >&2",
+    "          exit 2",
+    "          ;;",
+    "        *)",
+    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: could not translate host name\\n' >&2",
+    "          exit 1",
+    "          ;;",
+    "      esac",
+    "    fi",
+    "    exit 1",
+    "    ;;",
+    "  inspect)",
+    `    app_health="$(${appHealthExpr})"`,
+    `    printf '%s|%s\\n' '${appImage}' "$app_health"`,
+    "    exit 0",
+    "    ;;",
+    "  restart)",
+    restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
+    healthMarkerPath && !restartFails ? "    exit 0" : "",
+    "    ;;",
+    "esac",
+    "exit 1",
+    "",
+  ].join("\n");
+}
+
+function makeFakeBin(dockerOptions) {
+  const binDir = mkdtempSync(join(tmpdir(), "orbit-repair-fakebin-"));
+  scratchDirs.push(binDir);
+  writeFileSync(join(binDir, "docker"), dockerShimScript(dockerOptions));
+  chmodSync(join(binDir, "docker"), 0o755);
+  return binDir;
+}
+
+// Builds a target directory that repair.sh --check reports as fully
+// healthy: recognized managed files, a valid .orbit-secrets with all four
+// managed secrets, and (when `withConfigure` is true) a configure.sh that
+// reports the deployment as ready.
+function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecrets = true } = {}) {
+  const targetDir = scratchDir();
+  mkdirSync(join(targetDir, "scripts"));
+  writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+  chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+  if (withConfigure) {
+    writeFileSync(join(targetDir, "scripts", "configure.sh"), configureScriptSource);
+    chmodSync(join(targetDir, "scripts", "configure.sh"), 0o755);
+    writeFileSync(join(targetDir, "scripts", "installer-ui.sh"), installerUiSource);
+    chmodSync(join(targetDir, "scripts", "installer-ui.sh"), 0o755);
+    writeFileSync(join(targetDir, ".env-orbit.example"), environmentExampleSource);
+  }
+  if (withComposeAndEnv) {
+    writeFileSync(join(targetDir, "docker-compose.yml"), "services:\n  orbit-app:\n    image: busybox\n");
+    const envLines = [
+      "APP_URL=https://orbit.repair-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=repair-test-client",
+      "OIDC_CLIENT_SECRET=repair-test-secret",
+      "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+      "COMPOSE_PROJECT_NAME=repairtest",
+      "",
+    ].join("\n");
+    writeFileSync(join(targetDir, ".env-orbit"), envLines);
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+  }
+  if (withSecrets) {
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    for (const name of ["session-secret", "postgres-password", "document-kek", "oidc-client-secret"]) {
+      writeFileSync(join(targetDir, ".orbit-secrets", name), "a".repeat(64) + "\n");
+      chmodSync(join(targetDir, ".orbit-secrets", name), 0o600);
+    }
+  }
+  return targetDir;
+}
+
+// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE (the shape
+// stale-container comparisons require — see the regex in
+// check_application_container in repair.sh). makeFixture()'s default
+// ORBIT_IMAGE ("orbit-local:abcdef123456") is deliberately not
+// digest-pinned so ordinary tests never accidentally exercise this
+// comparison.
+function writeDigestPinnedEnv(targetDir, orbitImage) {
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    `ORBIT_IMAGE=${orbitImage}`,
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET=repair-test-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
+function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
+  const binDir = makeFakeBin(dockerOptions);
+  return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
+    cwd: targetDir,
+    encoding: "utf8",
+    input,
+    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+  });
+}
+
+// Snapshots every path/mode/mtime under targetDir, for asserting "zero
+// mutation" (declined/EOF confirmation, or a not-in-safe-set-only plan)
+// the same way the --check suite above already does.
+function treeSnapshot(targetDir) {
+  return spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" }).stdout;
+}
+
+function lines(stdout) {
+  return stdout.split("\n").filter(Boolean);
+}
+
+describe("scripts/repair.sh --check", () => {
+  it("rejects an invocation without --check", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, []);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects an unrecognised argument", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--bogus"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("tolerates --plain in either order around --check", () => {
+    const targetDir = makeFixture();
+    const first = runRepair(targetDir, ["--check", "--plain"]);
+    const second = runRepair(targetDir, ["--plain", "--check"]);
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(first.stdout).toBe(second.stdout);
+  });
+
+  it("reports a fully healthy sandbox with exit 0 and no findings", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=15 skipped=0"]);
+  });
+
+  it("never emits ANSI or cursor-control bytes", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--check"]);
+    expect(result.stdout).not.toMatch(/\x1b/u);
+    expect(result.stderr).not.toMatch(/\x1b/u);
+  });
+
+  it("produces byte-identical output across repeated runs", () => {
+    const targetDir = makeFixture();
+    const first = runRepair(targetDir, ["--check"]);
+    const second = runRepair(targetDir, ["--check"]);
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.status).toBe(second.status);
+  });
+
+  it("never mutates the sandbox tree (identical path/mode/mtime snapshot before and after)", () => {
+    const targetDir = makeFixture();
+    const before = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
+    const result = runRepair(targetDir, ["--check"]);
+    const after = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
+
+    expect(result.status).toBe(0);
+    expect(after.stdout).toBe(before.stdout);
+  });
+
+  it("reports not-orbit-directory and exits 5 for a directory with no Orbit fingerprint", () => {
+    const targetDir = scratchDir();
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(5);
+    expect(lines(result.stdout)).toEqual([
+      "finding class=not-orbit-directory target=directory severity=fail",
+      "diagnosis result=failed checked=1 skipped=14",
+    ]);
+  });
+
+  it("reports managed-file-missing for an absent .env-orbit", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".env-orbit"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=managed-file-missing target=environment-file severity=fail");
+    expect(result.stdout).toContain("diagnosis result=failed");
+  });
+
+  it("reports managed-file-symlink for a symlinked .env-orbit", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const realFile = join(targetDir, "real-env-orbit");
+    writeFileSync(realFile, "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(realFile, 0o600);
+    rmSync(join(targetDir, ".env-orbit"));
+    symlinkSync(realFile, join(targetDir, ".env-orbit"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=managed-file-symlink target=environment-file severity=fail");
+  });
+
+  it("reports managed-file-permissions for a loosely-permissioned .env-orbit", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=managed-file-permissions target=environment-file severity=fail");
+  });
+
+  it("reports secrets-directory-invalid for a wrong-permission .orbit-secrets", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o755);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secrets-directory-invalid target=secrets-directory severity=fail");
+  });
+
+  it("reports secrets-directory-invalid for a symlinked .orbit-secrets", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const realDir = join(targetDir, "real-secrets");
+    mkdirSync(realDir, { mode: 0o700 });
+    rmSync(join(targetDir, ".orbit-secrets"), { recursive: true, force: true });
+    symlinkSync(realDir, join(targetDir, ".orbit-secrets"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secrets-directory-invalid target=secrets-directory severity=fail");
+  });
+
+  it("reports secret-missing (warn) for an absent managed secret file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
+  });
+
+  it("reports secret-missing (warn) for an empty managed secret file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "");
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stdout).toContain("finding class=secret-missing target=session-secret severity=warn");
+  });
+
+  it("reports secret-permissions (fail) for a loosely-permissioned secret file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-permissions target=postgres-password severity=fail");
+  });
+
+  it("reports secret-permissions (fail) for a symlinked secret file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const realFile = join(targetDir, "real-document-kek");
+    writeFileSync(realFile, "b".repeat(64));
+    chmodSync(realFile, 0o600);
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+    symlinkSync(realFile, join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-permissions target=document-kek severity=fail");
+  });
+
+  it("reports staging-evidence-present (warn) for a leftover installer staging directory", () => {
+    const targetDir = makeFixture();
+    mkdirSync(join(targetDir, ".orbit-install-staging.abcdef"), { mode: 0o700 });
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(3);
+    expect(lines(result.stdout)).toEqual([
+      "finding class=staging-evidence-present target=staging severity=warn",
+      "diagnosis result=attention checked=15 skipped=0",
+    ]);
+  });
+
+  it("reports configuration-incomplete when configure.sh --check fails without stderr output", () => {
+    const targetDir = makeFixture();
+    writeFileSync(
+      join(targetDir, ".env-orbit"),
+      "APP_URL=https://orbit.repair-test.internal\n",
+    );
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-incomplete target=configuration severity=fail");
+  });
+
+  it("reports configuration-invalid when configure.sh --check fails with stderr output", () => {
+    const targetDir = makeFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+  });
+
+  it("reports compose-interpolation-failed when docker compose config fails", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--check"], { composeFails: true });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=compose-interpolation-failed target=compose severity=fail");
+  });
+
+  it("reports volume-retained-without-credentials for the #261 fixed-project collision", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-missing target=postgres-password severity=warn");
+    expect(result.stdout).toContain(
+      "finding class=volume-retained-without-credentials target=database-volume severity=fail",
+    );
+  });
+
+  it("does not report volume-retained-without-credentials when the credential is present", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("volume-retained-without-credentials");
+  });
+
+  it("reports unrelated-resource-present for a volume belonging to a different Compose project", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["someother_orbit-db-data"] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("finding class=unrelated-resource-present target=database-volume severity=info");
+  });
+
+  it("reports container-foreign-owner for a container in-project without a known Orbit service label", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      containers: [{ id: "0123456789ab", service: "not-an-orbit-service" }],
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=container-foreign-owner target=container severity=fail");
+  });
+
+  it("does not report container-foreign-owner for a recognized Orbit service", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      containers: [{ id: "0123456789ab", service: "orbit-db" }],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("container-foreign-owner");
+  });
+
+  it("reports docker-unavailable for every docker-backed check when docker cannot be used", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { unavailable: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("finding class=docker-unavailable target=compose severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=database-volume severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=container severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=5");
+  });
+
+  it("groups findings by the fixed class order regardless of discovery order", () => {
+    const targetDir = makeFixture();
+    // Triggers, in filesystem-discovery order: secret-missing (step 3) before
+    // staging-evidence-present (step 4) before compose-interpolation-failed
+    // (step 8) — but the fixed class order prints managed-file-* classes
+    // ahead of secret-missing, and staging-evidence-present ahead of
+    // compose-interpolation-failed, regardless of check execution order.
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
+
+    const result = runRepair(targetDir, ["--check"], { composeFails: true });
+    const findingClasses = lines(result.stdout)
+      .filter((line) => line.startsWith("finding "))
+      .map((line) => line.match(/class=([a-z-]+)/u)[1]);
+
+    expect(findingClasses).toEqual([
+      "secret-missing",
+      "staging-evidence-present",
+      "compose-interpolation-failed",
+    ]);
+  });
+
+  it("never discloses a path, configured value, or secret on stdout", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".env-orbit"));
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain("repair-test-secret");
+    expect(result.stdout).not.toContain(".env-orbit");
+  });
+
+  // --- Slice 2 (issue #261): database and application container diagnosis --
+  //
+  // makeFixture()'s default dockerShimScript() options simulate a fully
+  // healthy orbit-db + orbit-app (present, ready, authenticating, matching
+  // image, healthy), which is why every test above this point — none of
+  // which pass `db`/`app` docker options — stays healthy/unaffected by
+  // these new checks. The tests below override just `db`/`app` to exercise
+  // each new reason class in isolation.
+
+  it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { db: { present: false } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports database-unreachable (fail) when pg_isready does not succeed", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { db: { present: true, ready: false } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+  });
+
+  it("reports database-credential-mismatch (fail) for a 28P01-style auth failure — the motivating #261 failure", () => {
+    const targetDir = makeFixture();
+    const distinctPassword = "N0t-4-Re4l-Postgres-Password-XyZ99";
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
+    expect(result.stdout).not.toContain("database-unreachable");
+    expect(result.stdout).not.toContain(distinctPassword);
+    expect(result.stderr).not.toContain(distinctPassword);
+  });
+
+  it("reports no database finding when pg_isready and authentication both succeed", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "ok" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("database-unreachable");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports database-unreachable (fail), not credential-mismatch, for a non-auth psql error", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "other-error" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-unreachable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+  });
+
+  it("reports stale-container (warn) when the running app image does not match ORBIT_IMAGE", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    const running = `ghcr.io/tomlawesome/orbit@sha256:${"b".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: running, health: "healthy" },
+    });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
+  });
+
+  it("does not report stale-container when the running app image matches ORBIT_IMAGE", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: pinned, health: "healthy" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("does not report stale-container when ORBIT_IMAGE is not digest-pinned (nothing safe to compare)", () => {
+    // makeFixture()'s default ORBIT_IMAGE ("orbit-local:abcdef123456") is a
+    // local build tag, not a digest-pinned reference; the comparison must
+    // stay silent rather than guess.
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: "something-else:latest", health: "healthy" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("reports application-unhealthy (fail) when the app container's health status is unhealthy", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "unhealthy" } });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
+  });
+
+  it("does not report application-unhealthy while the app container is still starting", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "starting" } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("does not report application-unhealthy when the app container has no healthcheck at all", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: true, health: "" } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("does not report a stale-container or application-unhealthy finding when the app container does not exist yet", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { app: { present: false } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("stale-container");
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("never leaks the postgres-password secret value on stdout, stderr, or any docker argv, across every database scenario", () => {
+    const distinctPassword = "Zx9-Very-Distinct-Postgres-Secret-Q7";
+    const scenarios = [
+      { db: { present: false } },
+      { db: { present: true, ready: false } },
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { db: { present: true, ready: true, authResult: "ok" } },
+      { db: { present: true, ready: true, authResult: "other-error" } },
+    ];
+
+    for (const dockerOptions of scenarios) {
+      const targetDir = makeFixture();
+      writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+      chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+      const logDir = scratchDir();
+      const argvLogPath = join(logDir, "docker-argv.log");
+
+      const result = runRepair(targetDir, ["--check"], { ...dockerOptions, argvLogPath });
+
+      expect(result.stdout).not.toContain(distinctPassword);
+      expect(result.stderr).not.toContain(distinctPassword);
+      let argvLog = "";
+      try {
+        argvLog = readFileSync(argvLogPath, "utf8");
+      } catch {
+        argvLog = "";
+      }
+      expect(argvLog).not.toContain(distinctPassword);
+    }
+  });
+});
+
+// --- Slice 3 (issue #261): --plan — a proposed, classified repair plan ----
+//
+// --plan runs the identical read-only diagnosis as --check (same shims,
+// same fixtures) and turns the resulting findings into `plan ...` lines
+// instead of `finding ...` lines. These tests reuse makeFixture()/
+// runRepair()/dockerShimScript() from the --check suite above rather than
+// re-deriving fixture-building logic.
+
+describe("scripts/repair.sh --plan", () => {
+  it("rejects an invocation combining --check and --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--check", "--plan"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects an invocation combining --plan and --check (reverse order)", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan", "--check"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("reports an empty plan (exit 0) for a fully healthy sandbox", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
+    expect(result.stderr).toBe("");
+  });
+
+  it("tolerates --plain in either order around --plan and produces identical output", () => {
+    const targetDir = makeFixture();
+    const first = runRepair(targetDir, ["--plan", "--plain"]);
+    const second = runRepair(targetDir, ["--plain", "--plan"]);
+    expect(first.status).toBe(0);
+    expect(second.status).toBe(0);
+    expect(first.stdout).toBe(second.stdout);
+  });
+
+  it("never emits ANSI or cursor-control bytes under --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan"]);
+    expect(result.stdout).not.toMatch(/\x1b/u);
+    expect(result.stderr).not.toMatch(/\x1b/u);
+  });
+
+  it("produces byte-identical --plan output across repeated runs", () => {
+    const targetDir = makeFixture();
+    const first = runRepair(targetDir, ["--plan"]);
+    const second = runRepair(targetDir, ["--plan"]);
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.status).toBe(second.status);
+  });
+
+  it("never mutates the sandbox tree under --plan (identical path/mode/mtime snapshot before and after)", () => {
+    const targetDir = makeFixture();
+    const before = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
+    const result = runRepair(targetDir, ["--plan"]);
+    const after = spawnSync("find", [targetDir, "-printf", "%p %m %T@\n"], { encoding: "utf8" });
+
+    expect(result.status).toBe(0);
+    expect(after.stdout).toBe(before.stdout);
+  });
+
+  it("plans not-an-orbit-installation as manual and still exits 5", () => {
+    const targetDir = scratchDir();
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(5);
+    expect(lines(result.stdout)).toEqual([
+      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required",
+      "plan result=manual-required actions=0 manual=1",
+    ]);
+    expect(result.stderr).toContain("resolves=not-orbit-directory");
+  });
+
+  it("plans staging-evidence-present as restore-transaction (reversible, backup required)", () => {
+    const targetDir = makeFixture();
+    mkdirSync(join(targetDir, ".orbit-install-staging.abcdef"), { mode: 0o700 });
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=restore-transaction resolves=staging-evidence-present mutation=reversible backup=required",
+    );
+    expect(lines(result.stdout).at(-1)).toBe("plan result=ready actions=1 manual=0");
+  });
+
+  it("plans managed-file-permissions as fix-permissions (reversible, no backup needed)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=fix-permissions resolves=managed-file-permissions mutation=reversible backup=not-required",
+    );
+  });
+
+  it("plans secrets-directory-invalid as fix-permissions", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o755);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=fix-permissions resolves=secrets-directory-invalid mutation=reversible backup=not-required",
+    );
+  });
+
+  it("plans secret-permissions as fix-permissions", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=fix-permissions resolves=secret-permissions mutation=reversible backup=not-required",
+    );
+  });
+
+  it("plans a missing non-database secret as regenerate-secret (no backup needed)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+    );
+  });
+
+  it("plans a missing postgres-password as regenerate-secret when no volume is retained", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+
+    // No `volumes` option passed to the docker shim: nothing is retained.
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+    );
+    expect(result.stdout).not.toContain("rotate-database-credential");
+  });
+
+  it("plans a missing postgres-password as rotate-database-credential (never regenerate-secret) when the volume is retained — the #261 fixed-project collision", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+
+    const result = runRepair(targetDir, ["--plan"], { volumes: ["repairtest_orbit-db-data"] });
+
+    expect(result.status).toBe(3);
+    const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
+    expect(planLines).toEqual([
+      "plan action=rotate-database-credential resolves=secret-missing mutation=credential-rotation backup=required",
+      "plan action=rotate-database-credential resolves=volume-retained-without-credentials mutation=credential-rotation backup=required",
+    ]);
+    expect(result.stdout).not.toContain("regenerate-secret");
+    expect(lines(result.stdout).at(-1)).toBe("plan result=ready actions=2 manual=0");
+  });
+
+  it("plans volume-retained-without-credentials as rotate-database-credential when the secrets directory itself is invalid", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o755);
+
+    const result = runRepair(targetDir, ["--plan"], { volumes: ["repairtest_orbit-db-data"] });
+
+    expect(result.stdout).toContain(
+      "plan action=rotate-database-credential resolves=volume-retained-without-credentials mutation=credential-rotation backup=required",
+    );
+    // secrets-directory-invalid suppresses the individual secret-missing check
+    // (see repair.sh Step 3), so only one rotate-database-credential line
+    // appears here, alongside the fix-permissions line for the directory itself.
+    expect(result.stdout).toContain(
+      "plan action=fix-permissions resolves=secrets-directory-invalid mutation=reversible backup=not-required",
+    );
+  });
+
+  it("plans database-credential-mismatch as rotate-database-credential — the motivating #261 failure", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: true, authResult: "mismatch" } });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=rotate-database-credential resolves=database-credential-mismatch mutation=credential-rotation backup=required",
+    );
+  });
+
+  it("plans application-unhealthy as restart-services", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan"], { app: { present: true, health: "unhealthy" } });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=restart-services resolves=application-unhealthy mutation=service-restart backup=not-required",
+    );
+  });
+
+  it("plans stale-container as restart-services", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    const running = `ghcr.io/tomlawesome/orbit@sha256:${"b".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--plan"], { app: { present: true, image: running, health: "healthy" } });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=restart-services resolves=stale-container mutation=service-restart backup=not-required",
+    );
+  });
+
+  it("plans configuration-incomplete as rerun-configuration (no mutation)", () => {
+    const targetDir = makeFixture();
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=rerun-configuration resolves=configuration-incomplete mutation=none backup=not-required",
+    );
+  });
+
+  it("plans configuration-invalid as rerun-configuration (no mutation)", () => {
+    const targetDir = makeFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=rerun-configuration resolves=configuration-invalid mutation=none backup=not-required",
+    );
+  });
+
+  // --- manual-class findings: no safe automatic action -----------------
+
+  const manualScenarios = [
+    {
+      name: "managed-file-missing",
+      resolves: "managed-file-missing",
+      setup: (targetDir) => rmSync(join(targetDir, ".env-orbit")),
+      dockerOptions: {},
+      withConfigure: false,
+    },
+    {
+      name: "managed-file-symlink",
+      resolves: "managed-file-symlink",
+      setup: (targetDir) => {
+        const realFile = join(targetDir, "real-env-orbit");
+        writeFileSync(realFile, "APP_URL=https://orbit.repair-test.internal\n");
+        chmodSync(realFile, 0o600);
+        rmSync(join(targetDir, ".env-orbit"));
+        symlinkSync(realFile, join(targetDir, ".env-orbit"));
+      },
+      dockerOptions: {},
+      withConfigure: false,
+    },
+    {
+      name: "compose-interpolation-failed",
+      resolves: "compose-interpolation-failed",
+      setup: () => {},
+      dockerOptions: { composeFails: true },
+      withConfigure: true,
+    },
+    {
+      name: "container-foreign-owner",
+      resolves: "container-foreign-owner",
+      setup: () => {},
+      dockerOptions: { containers: [{ id: "0123456789ab", service: "not-an-orbit-service" }] },
+      withConfigure: true,
+    },
+    {
+      name: "database-unreachable",
+      resolves: "database-unreachable",
+      setup: () => {},
+      dockerOptions: { db: { present: false } },
+      withConfigure: true,
+    },
+    // Note: unrelated-resource-present and docker-unavailable are
+    // deliberately NOT in this table — both are always info-severity
+    // findings under --check, and the severity gate (see the "Severity
+    // gate" section of the --plan header comment) means an info-severity
+    // finding is never planned at all, not even as `action=manual`. See
+    // the dedicated "severity gate" tests below instead.
+  ];
+
+  for (const scenario of manualScenarios) {
+    it(`plans ${scenario.name} as manual, with a matching stderr manual-step line`, () => {
+      const targetDir = makeFixture({ withConfigure: scenario.withConfigure });
+      scenario.setup(targetDir);
+
+      const result = runRepair(targetDir, ["--plan"], scenario.dockerOptions);
+
+      expect(result.stdout).toContain(
+        `plan action=manual resolves=${scenario.resolves} mutation=none backup=not-required`,
+      );
+      expect(result.stderr).toContain(`resolves=${scenario.resolves}`);
+      expect(result.stderr.length).toBeGreaterThan(0);
+    });
+  }
+
+  // --- severity gate: info-severity findings are never planned ----------
+  //
+  // --check itself never lets an info-severity finding (docker-unavailable,
+  // unrelated-resource-present) make the deployment anything other than
+  // `healthy` (exit 0). --plan must not contradict that verdict for the
+  // identical state: an info-only diagnosis must also come back
+  // `result=empty` / exit 0, not `manual-required` / exit 4.
+
+  it("plans docker-unavailable (info-only) as an empty plan, exit 0 — matches --check's healthy verdict for the same state", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--plan"], { unavailable: true });
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
+    expect(result.stdout).not.toContain("docker-unavailable");
+    expect(result.stderr).toBe("");
+  });
+
+  it("plans unrelated-resource-present (info-only) as an empty plan, exit 0 — matches --check's healthy verdict for the same state", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--plan"], { volumes: ["someother_orbit-db-data"] });
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual(["plan result=empty actions=0 manual=0"]);
+    expect(result.stdout).not.toContain("unrelated-resource-present");
+    expect(result.stderr).toBe("");
+  });
+
+  it("plans only the fail-severity finding when an info-severity and a fail-severity finding are both present", () => {
+    const targetDir = makeFixture();
+    // unrelated-resource-present (info, from the mismatched-project volume)
+    // alongside database-unreachable (fail, from the absent orbit-db
+    // container): only the fail-severity finding should be planned.
+    const result = runRepair(targetDir, ["--plan"], {
+      volumes: ["someother_orbit-db-data"],
+      db: { present: false },
+    });
+
+    expect(result.status).toBe(4);
+    expect(lines(result.stdout)).toEqual([
+      "plan action=manual resolves=database-unreachable mutation=none backup=not-required",
+      "plan result=manual-required actions=0 manual=1",
+    ]);
+    expect(result.stdout).not.toContain("unrelated-resource-present");
+  });
+
+  // --- exit-code semantics: 3 = at least one automatic action planned, --
+  // --- 4 = findings exist but none of them has an automatic action ------
+
+  it("exits 3 (plan-available) when automatic actions and manual findings are both present", () => {
+    const targetDir = makeFixture();
+    // staging-evidence-present -> restore-transaction (automatic) alongside
+    // database-unreachable -> manual (no automatic action).
+    mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
+
+    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+
+    expect(result.status).toBe(3);
+    const summary = lines(result.stdout).at(-1);
+    expect(summary).toBe("plan result=ready actions=1 manual=1");
+  });
+
+  it("exits 4 (unplannable-failures-present) when findings exist but none has an automatic action", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--plan"], { db: { present: false } });
+
+    expect(result.status).toBe(4);
+    expect(lines(result.stdout)).toEqual([
+      "plan action=manual resolves=database-unreachable mutation=none backup=not-required",
+      "plan result=manual-required actions=0 manual=1",
+    ]);
+  });
+
+  it("groups plan lines by the fixed class order regardless of discovery order", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    mkdirSync(join(targetDir, ".orbit-install-staging.xyz"), { mode: 0o700 });
+
+    const result = runRepair(targetDir, ["--plan"], { composeFails: true });
+    const resolvesClasses = lines(result.stdout)
+      .filter((line) => line.startsWith("plan action="))
+      .map((line) => line.match(/resolves=([a-z-]+)/u)[1]);
+
+    expect(resolvesClasses).toEqual(["secret-missing", "staging-evidence-present", "compose-interpolation-failed"]);
+  });
+
+  it("never discloses a path, configured value, or secret on stdout or stderr under --plan", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".env-orbit"));
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain("repair-test-secret");
+    expect(result.stdout).not.toContain(".env-orbit");
+    expect(result.stderr).not.toContain(targetDir);
+    expect(result.stderr).not.toContain(".env-orbit");
+  });
+
+  it("never leaks the postgres-password secret value on stdout, stderr, or any docker argv under --plan", () => {
+    const distinctPassword = "Zx9-Very-Distinct-Postgres-Secret-Q7-Plan";
+    const targetDir = makeFixture();
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+    const logDir = scratchDir();
+    const argvLogPath = join(logDir, "docker-argv.log");
+
+    const result = runRepair(targetDir, ["--plan"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      argvLogPath,
+    });
+
+    expect(result.stdout).not.toContain(distinctPassword);
+    expect(result.stderr).not.toContain(distinctPassword);
+    let argvLog = "";
+    try {
+      argvLog = readFileSync(argvLogPath, "utf8");
+    } catch {
+      argvLog = "";
+    }
+    expect(argvLog).not.toContain(distinctPassword);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --execute --safe-only (issue #261, slice 4 stage one)
+// ---------------------------------------------------------------------------
+
+function mode(path) {
+  return (statSync(path).mode & 0o777).toString(8);
+}
+
+// Builds a leftover `.orbit-install-staging.*` directory shaped like
+// install.sh's own prepare_rollback_area: rollback/original/<path>, mode
+// 700 throughout. `envBackupLines`, when given, becomes the staged
+// .env-orbit backup content restore-transaction should restore live.
+function makeStagingTransaction(targetDir, { envBackupLines } = {}) {
+  const stagingDir = join(targetDir, ".orbit-install-staging.abc123");
+  const originalDir = join(stagingDir, "rollback", "original");
+  mkdirSync(originalDir, { recursive: true, mode: 0o700 });
+  chmodSync(stagingDir, 0o700);
+  chmodSync(join(stagingDir, "rollback"), 0o700);
+  chmodSync(originalDir, 0o700);
+  if (envBackupLines) {
+    writeFileSync(join(originalDir, ".env-orbit"), envBackupLines.join("\n") + "\n");
+    chmodSync(join(originalDir, ".env-orbit"), 0o600);
+  }
+  return stagingDir;
+}
+
+describe("scripts/repair.sh --execute --safe-only", () => {
+  // --- usage / flag contract -------------------------------------------
+
+  it("rejects --execute without --safe-only, explaining stage two is not implemented", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+    expect(result.stderr).toContain("--safe-only");
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects --safe-only without --execute", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--safe-only"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --execute --safe-only combined with --check", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--safe-only", "--check"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --safe-only combined with --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan", "--safe-only"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  // --- not-an-orbit-installation forces exit 5, same as --check/--plan --
+
+  it("reports not-orbit-directory as a skipped manual action and forces exit 5", () => {
+    const targetDir = scratchDir();
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(5);
+    expect(lines(result.stdout)).toEqual([
+      "execute action=manual resolves=not-orbit-directory result=skipped",
+      "execution result=empty done=0 failed=0",
+      "finding class=not-orbit-directory target=directory severity=fail",
+      "diagnosis result=failed checked=1 skipped=14",
+    ]);
+  });
+
+  // --- healthy / empty-plan case ------------------------------------------
+
+  it("reports execution result=empty for a fully healthy target, exit 0", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual([
+      "execution result=empty done=0 failed=0",
+      "diagnosis result=healthy checked=15 skipped=0",
+    ]);
+  });
+
+  // --- unactionable: a plan exists but nothing is in the safe set --------
+
+  it("reports execution result=unactionable when every planned action is outside the safe set, without prompting", () => {
+    const targetDir = makeFixture();
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], { db: { present: false } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=manual resolves=database-unreachable result=skipped");
+    expect(result.stdout).toContain("execution result=unactionable done=0 failed=0");
+    expect(result.stdout).not.toContain("plan action=");
+    expect(result.stdout).not.toContain("prompt");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- automation contract: non-interactive proceeds without any prompt --
+
+  it("proceeds without any confirmation preview or prompt line under non-interactive automation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toContain("plan action=");
+    expect(result.stdout).not.toContain("prompt");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  // --- fix-permissions ------------------------------------------------------
+
+  it("fix-permissions: chmods a loosely-permissioned .env-orbit back to 600", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("fix-permissions: chmods a loosely-permissioned secret file back to 600", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=secret-permissions result=done");
+    expect(mode(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe("600");
+  });
+
+  it("fix-permissions: chmods a loosely-permissioned .orbit-secrets directory back to 700", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".orbit-secrets"), 0o755);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=fix-permissions resolves=secrets-directory-invalid result=done",
+    );
+    expect(mode(join(targetDir, ".orbit-secrets"))).toBe("700");
+  });
+
+  it("fix-permissions: refuses to chmod through a symlinked secret, reporting failed and leaving the symlink untouched", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const realTarget = join(targetDir, "real-secret-target");
+    writeFileSync(realTarget, "outside-content");
+    chmodSync(realTarget, 0o600);
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    symlinkSync(realTarget, join(targetDir, ".orbit-secrets", "postgres-password"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=secret-permissions result=failed");
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    const linkStat = statSync(join(targetDir, ".orbit-secrets", "postgres-password"), { throwIfNoEntry: false });
+    expect(linkStat).toBeTruthy();
+    expect(
+      spawnSync("test", ["-L", join(targetDir, ".orbit-secrets", "postgres-password")]).status,
+    ).toBe(0);
+  });
+
+  // --- restore-transaction ---------------------------------------------------
+
+  it("restore-transaction: restores a staged prior .env-orbit over the current live copy and removes the staging directory on success", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: [
+        "APP_URL=https://orbit.old-good-state.internal",
+        "ORBIT_IMAGE=orbit-local:oldgood",
+        "COMPOSE_PROJECT_NAME=repairtest",
+      ],
+    });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=done",
+    );
+    const restoredEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    expect(restoredEnv).toContain("APP_URL=https://orbit.old-good-state.internal");
+    expect(restoredEnv).toContain("ORBIT_IMAGE=orbit-local:oldgood");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout).toBe(
+      "",
+    );
+  });
+
+  it("restore-transaction: removes a live managed path that has no staged backup (created by the interrupted transaction)", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    // docker-compose.mail.yml exists live but was never backed up: per
+    // install.sh's own managed_was_present bookkeeping, that means it did
+    // not exist before the interrupted transaction and must be removed.
+    writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services: {}\n");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=done",
+    );
+    expect(statSync(join(targetDir, "docker-compose.mail.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  it("restore-transaction: self-restores every path it already touched and leaves the staging directory intact when a later path fails", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    // Stage a backup for scripts/configure.sh too (so it's a path this
+    // action will also try to touch), then make the live scripts/
+    // directory read-only so removing scripts/configure.sh fails partway
+    // through the same restore-transaction action, after .env-orbit (which
+    // sorts first in the fixed allowlist) has already been replaced.
+    mkdirSync(join(stagingDir, "rollback", "original", "scripts"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(stagingDir, "rollback", "original", "scripts", "configure.sh"), configureScriptSource);
+    chmodSync(join(stagingDir, "rollback", "original", "scripts", "configure.sh"), 0o600);
+    const beforeEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    chmodSync(join(targetDir, "scripts"), 0o555);
+
+    let result;
+    try {
+      result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    } finally {
+      chmodSync(join(targetDir, "scripts"), 0o755);
+    }
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=staging-evidence-present result=failed",
+    );
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(beforeEnv);
+    expect(
+      spawnSync("bash", ["-c", `ls -d '${targetDir}'/.orbit-install-staging.* 2>/dev/null`], { encoding: "utf8" }).stdout,
+    ).not.toBe("");
+  });
+
+  // --- restart-services -------------------------------------------------------
+
+  it("restart-services: restarts the orbit-app container exactly once even when both stale-container and application-unhealthy fire, and the re-diagnosis honestly reflects it", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit@sha256:" + "1".repeat(64));
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+    const healthMarkerPath = join(scratch, "healed");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      app: {
+        image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64),
+        health: "unhealthy",
+      },
+      argvLogPath,
+      healthMarkerPath,
+    });
+
+    expect(result.stdout).toContain("execute action=restart-services resolves=stale-container result=done");
+    expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=done");
+    expect(result.stdout).toContain("execution result=complete done=2 failed=0");
+    // Honest re-diagnosis: application-unhealthy clears (the shim's health
+    // marker simulates the restart curing the healthcheck), but a plain
+    // `docker restart` never changes the running image, so
+    // stale-container's underlying cause is untouched and it honestly
+    // persists in the re-diagnosis below the terminal execution line — the
+    // tool never pretends a restart fixed something it structurally
+    // cannot fix.
+    const reDiagnosis = result.stdout.slice(result.stdout.indexOf("execution result="));
+    expect(reDiagnosis).not.toContain("finding class=application-unhealthy");
+    expect(reDiagnosis).toContain("finding class=stale-container target=container severity=warn");
+
+    let argvLog = "";
+    try {
+      argvLog = readFileSync(argvLogPath, "utf8");
+    } catch {
+      argvLog = "";
+    }
+    const restartCount = argvLog.split("\n").filter((line) => line.startsWith("restart ")).length;
+    expect(restartCount).toBe(1);
+  });
+
+  it("restart-services: reports failed when the docker restart command itself fails", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      app: { health: "unhealthy" },
+      restartFails: true,
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("execute action=restart-services resolves=application-unhealthy result=failed");
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+  });
+
+  // --- out-of-safe-set findings are always reported skipped, never executed --
+
+  it("reports regenerate-secret-eligible findings as skipped and leaves the secret absent", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=skipped");
+    expect(statSync(join(targetDir, ".orbit-secrets", "session-secret"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  it("reports rotate-database-credential findings as skipped and never touches the postgres-password secret", () => {
+    const distinctPassword = "Zx9-Very-Distinct-Postgres-Secret-Execute";
+    const targetDir = makeFixture({ withConfigure: false });
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), `${distinctPassword}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+    const scratch = scratchDir();
+    const argvLogPath = join(scratch, "docker-argv.log");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      argvLogPath,
+    });
+
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=database-credential-mismatch result=skipped",
+    );
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8")).toContain(
+      distinctPassword,
+    );
+    expect(result.stdout).not.toContain(distinctPassword);
+    expect(result.stderr).not.toContain(distinctPassword);
+    let argvLog = "";
+    try {
+      argvLog = readFileSync(argvLogPath, "utf8");
+    } catch {
+      argvLog = "";
+    }
+    expect(argvLog).not.toContain(distinctPassword);
+  });
+
+  it("reports manual findings as skipped and never fabricates a missing managed file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, "docker-compose.yml"));
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+    expect(statSync(join(targetDir, "docker-compose.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // --- confirmation model: machine prompts (ORBIT_REPAIR_PROMPTS=machine) --
+
+  it("machine prompts: shows the plan preview, then prompt/prompt-accept, and executes on a bare 'y'", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.stdout).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(result.stdout).toContain("prompt field=safe-batch kind=confirm required=true attempt=1");
+    expect(result.stdout).toContain("prompt-accept field=safe-batch");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("machine prompts: a non-'y' answer aborts with zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=skipped");
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("machine prompts: EOF (no answer line) aborts with zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- confirmation model: interactive TTY (ORBIT_REPAIR_TTY_INPUT=1 test hook) --
+
+  it("interactive prompt: accepting with 'y' executes the safe batch", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("Proceed?");
+    expect(result.stdout).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  it("interactive prompt: declining with 'n' leaves the deployment unmutated", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("interactive prompt: EOF (Ctrl-D) leaves the deployment unmutated", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  // --- determinism / no-ANSI / privacy, mirroring the --check/--plan suites --
+
+  it("produces byte-identical output across repeated declined runs", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const first = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+    const second = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(first.stdout).toBe(second.stdout);
+    expect(first.status).toBe(second.status);
+  });
+
+  it("never emits ANSI or cursor-control bytes", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toMatch(/\x1b/u);
+    expect(result.stderr).not.toMatch(/\x1b/u);
+  });
+
+  it("never discloses a path, configured value, or secret on stdout or stderr under --execute", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain("repair-test-secret");
+    expect(result.stdout).not.toContain(".env-orbit");
+    expect(result.stderr).not.toContain(targetDir);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --execute --dangerous (issue #261, slice 5, stage two:
+// rotate-database-credential) — owner decisions on issue #261:
+//   - "Slice 4 decisions (owner, 2026-08-13)" — two-stage execution,
+//     checkpoints are passphrase-encrypted ORBKEK01 recovery bundles.
+//   - "Slice 4 approval model (owner, 2026-08-13)" — hybrid confirmation,
+//     dangerous actions require the operator to TYPE THE ACTION WORD,
+//     dangerous actions are never automatable.
+//   - "Stage two approved for build (owner, 2026-08-13)" — checkpoint
+//     first, typed action word, never non-interactive, post-execution
+//     re-diagnosis, #297 machine-prompt style.
+//   - "Recorded intention (owner)" — step iterator, both execution styles
+//     must remain structurally possible.
+// ---------------------------------------------------------------------------
+
+const ROTATE_PASSPHRASE = "correct-horse-battery-staple";
+const ORIGINAL_POSTGRES_PASSWORD = "a".repeat(64);
+const HEX_SECRET_PATTERN = /^[0-9a-f]{64}$/;
+
+// The exact, closed set of stdout line SHAPES this script may ever emit —
+// used for schema-blind "stdout stays enums-only" assertions (issue #261
+// stage-two contract-discipline requirement): every line of stdout, in
+// every scenario, must match one of these, never a bespoke path/value/
+// secret-carrying line.
+const STDOUT_LINE_PATTERNS = [
+  /^finding class=[a-z-]+ target=[a-z-]+ severity=(info|warn|fail)$/,
+  /^diagnosis result=(healthy|attention|failed) checked=\d+ skipped=\d+$/,
+  /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart) backup=(required|not-required)$/,
+  /^execute action=[a-z-]+ resolves=[a-z-]+ result=(done|failed|skipped)$/,
+  /^execution result=(empty|complete|unactionable|declined|failed) done=\d+ failed=\d+$/,
+  /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed)$/,
+  /^prompt field=[a-z-]+ kind=(confirm|typed-word|secret) required=true attempt=\d+$/,
+  /^prompt-accept field=[a-z-]+$/,
+  /^prompt-reject field=[a-z-]+ reason=[a-z-]+$/,
+  /^prompt-abort field=[a-z-]+$/,
+];
+
+function expectStdoutIsEnumOnly(stdout) {
+  for (const line of lines(stdout)) {
+    expect(STDOUT_LINE_PATTERNS.some((pattern) => pattern.test(line)), `unexpected stdout line: ${line}`).toBe(true);
+  }
+}
+
+// A deployment with exactly one warn/fail finding — database-credential-mismatch
+// — the #261 "motivating failure" fixture (mirrors the existing --plan/
+// --execute --safe-only tests' own setup), and always a valid 64-hex
+// postgres-password so the checkpoint step has something real to preserve.
+function makeCredentialMismatchFixture() {
+  const targetDir = makeFixture({ withConfigure: false });
+  return targetDir;
+}
+
+function findCheckpointDir(targetDir) {
+  const match = readdirSync(targetDir).find((name) => name.startsWith(".orbit-repair-checkpoint."));
+  return match ? join(targetDir, match) : null;
+}
+
+function findCheckpointBundle(targetDir) {
+  const dir = findCheckpointDir(targetDir);
+  if (!dir) return null;
+  const member = readdirSync(dir).find((name) => name.endsWith(".orbkek"));
+  return member ? join(dir, member) : null;
+}
+
+const stagedPasswordPath = (targetDir) => join(targetDir, ".orbit-secrets", ".repair-staged-postgres-password");
+
+describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two)", () => {
+  // --- usage / flag contract ------------------------------------------------
+
+  it("rejects --dangerous without --execute", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--dangerous"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --execute --dangerous combined with --check", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--dangerous", "--check"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --dangerous combined with --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan", "--dangerous"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("accepts --execute --dangerous alone (without --safe-only) as a valid invocation", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--dangerous"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
+  });
+
+  // --- never automatable (Slice 4 approval-model decision: "dangerous
+  // actions are never automatable"; no flag combination bypasses approval) --
+
+  it("--execute --safe-only alone (no --dangerous) still only ever reports rotate-database-credential as skipped, with zero checkpoint activity", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=database-credential-mismatch result=skipped",
+    );
+    expect(findCheckpointDir(targetDir)).toBeNull();
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("refuses the dangerous batch under a genuinely non-interactive invocation, stable exit 6, reason=non-interactive, zero mutation, no prompt shown", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const before = treeSnapshot(targetDir);
+    const argvLogPath = join(scratchDir(), "argv.log");
+
+    const result = runRepair(targetDir, ["--execute", "--dangerous"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      argvLogPath,
+    });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=skipped");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
+    expect(result.stdout).not.toContain("prompt field=");
+    expect(findCheckpointDir(targetDir)).toBeNull();
+    expect(treeSnapshot(targetDir)).toBe(before);
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toContain("ALTER ROLE");
+  });
+
+  it("combined --safe-only --dangerous, non-interactive: the safe batch still runs unattended while the dangerous batch is refused — each batch is independent", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // adds a fixable managed-file-permissions finding
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only", "--dangerous"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(findCheckpointDir(targetDir)).toBeNull();
+  });
+
+  // --- typed-word approval gate (owner: "operator must TYPE THE ACTION
+  // WORD... a non-standard input, so muscle-memory Enter can never fire it")
+
+  it("a bare Enter (empty input) refuses the dangerous action, exit 6, zero mutation", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("EOF during the typed-word prompt refuses the dangerous action, exit 6, zero mutation", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("any word other than the exact literal 'rotate' refuses (case-sensitive: 'Rotate'/'ROTATE'/'y' all refuse)", () => {
+    for (const word of ["Rotate", "ROTATE", "y", "yes"]) {
+      const targetDir = makeCredentialMismatchFixture();
+      const result = runRepair(
+        targetDir,
+        ["--execute", "--dangerous"],
+        { db: { present: true, ready: true, authResult: "mismatch" } },
+        { input: `${word}\n${word}\n${word}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+      );
+      expect(result.status).toBe(6);
+      expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    }
+  });
+
+  it("bounded re-prompt: a wrong word on attempt 1, then the correct word on attempt 2, proceeds", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        input: `nope\nrotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stderr).toContain("attempt(s) remaining");
+  });
+
+  it("machine prompts: the typed-word field is bounded at exactly 3 attempts, then prompt-abort", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "no\nno\nno\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(6);
+    const promptLines = lines(result.stdout).filter((line) => line.startsWith("prompt field=action-word"));
+    const rejectLines = lines(result.stdout).filter((line) => line.startsWith("prompt-reject field=action-word"));
+    expect(promptLines).toEqual([
+      "prompt field=action-word kind=typed-word required=true attempt=1",
+      "prompt field=action-word kind=typed-word required=true attempt=2",
+      "prompt field=action-word kind=typed-word required=true attempt=3",
+    ]);
+    // configure.sh's own machine_prompt_collect convention (see
+    // engine-prompts.test.mjs "aborts after a third rejected answer"): all
+    // 3 attempts are individually rejected, THEN prompt-abort follows —
+    // there is no 4th prompt.
+    expect(rejectLines).toHaveLength(3);
+    expect(result.stdout).toContain("prompt-abort field=action-word");
+    expect(result.stdout).not.toContain("prompt-accept field=action-word");
+  });
+
+  it("machine prompts: an empty answer for the typed-word field is classified reason=empty, a wrong word reason=mismatch", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "\nwrong\nwrong\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.stdout).toContain("prompt-reject field=action-word reason=empty");
+    expect(result.stdout).toContain("prompt-reject field=action-word reason=mismatch");
+  });
+
+  // --- checkpoint-before-rotation ordering & ORBKEK01 format (owner:
+  // "Checkpoints are passphrase-encrypted recovery bundles... write the
+  // checkpoint in the ORBKEK01 recovery-bundle format... no new formats") --
+
+  it("the happy path: typed word + matching passphrase rotates the credential, and proves checkpoint-before-rotation ordering end to end", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+    const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, argvLogPath, execStdinLogPath },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    // Post-execution re-diagnosis reflects a REAL rotation (the shim only
+    // reports the database auth as healthy once the ALTER ROLE step actually
+    // ran — see dbAuthMarkerPath), not a canned answer: the mismatch finding
+    // is gone from the re-diagnosis's own `finding ...` lines (it still
+    // legitimately appears earlier, in the `plan`/`execute` lines that
+    // resolved it), and the trailing diagnosis is the very last thing
+    // printed, reporting the deployment healthy.
+    expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=14 skipped=1");
+    expect(existsSync(dbAuthMarkerPath)).toBe(true);
+
+    // The local secret was actually rotated to a fresh 64-hex value, distinct
+    // from the original.
+    const newPassword = readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim();
+    expect(newPassword).toMatch(HEX_SECRET_PATTERN);
+    expect(newPassword).not.toBe(ORIGINAL_POSTGRES_PASSWORD);
+    expect(mode(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe("600");
+
+    // The staged intermediate file was moved into place, not left behind.
+    expect(existsSync(stagedPasswordPath(targetDir))).toBe(false);
+
+    // The checkpoint bundle: ORBKEK01 format, correct permissions, kept
+    // (never cleaned up, unlike the stage-one private recovery directory).
+    const checkpointDir = findCheckpointDir(targetDir);
+    expect(checkpointDir).not.toBeNull();
+    expect(mode(checkpointDir)).toBe("700");
+    const bundlePath = findCheckpointBundle(targetDir);
+    expect(bundlePath).not.toBeNull();
+    expect(mode(bundlePath)).toBe("600");
+    expect(readFileSync(bundlePath).subarray(0, 8).toString("ascii")).toBe("ORBKEK01");
+
+    // The restart step actually ran.
+    const argvLog = readFileSync(argvLogPath, "utf8");
+    expect(argvLog).toMatch(/^restart /m);
+
+    // The rotation SQL — including the fresh credential — was delivered
+    // ONLY over psql's stdin (`-f -`), never as `docker`/`psql` argv:
+    // neither the literal statement text nor any 64-hex-char candidate
+    // (which would be the credential) ever appears in the argv log, even
+    // though the exec call for it did happen (proven by the `-f -` fixture
+    // matching in the log below).
+    expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(argvLog).toMatch(/ -f -(\s|$)/m);
+
+    // ...and it DID genuinely arrive over stdin: the shim's `-f -` branch
+    // captured exactly what repair.sh piped into it.
+    const execStdin = readFileSync(execStdinLogPath, "utf8");
+    expect(execStdin).toContain(`ALTER ROLE "orbit" WITH PASSWORD '${newPassword}'`);
+
+    expectStdoutIsEnumOnly(result.stdout);
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stdout).not.toContain(ORIGINAL_POSTGRES_PASSWORD);
+    expect(result.stdout).not.toContain(newPassword);
+    expect(result.stderr).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stderr).not.toContain(newPassword);
+    // repair.sh prints the checkpoint directory as the relative path it
+    // created it under (never the absolute host path) — see "Privacy"
+    // above; assert on that basename rather than the absolute path.
+    expect(result.stderr).toContain(basename(checkpointDir));
+  });
+
+  it("checkpoint precedes rotation: when the checkpoint itself cannot be created, no rotation SQL is ever sent (argv or stdin) and the credential is never touched", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        recoveryCryptoFails: true,
+        argvLogPath,
+        execStdinLogPath,
+      },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
+    expect(
+      readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim(),
+    ).toBe(ORIGINAL_POSTGRES_PASSWORD);
+    expect(findCheckpointDir(targetDir)).toBeNull(); // the failed attempt's own directory is cleaned up
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/ -f -(\s|$)/m); // the rotate-credential exec never even ran
+    expect(argvLog).not.toContain("restart");
+    // No rotation SQL was received over stdin either — the shim's `-f -`
+    // branch (the only thing that would have written this file) was never
+    // reached at all.
+    expect(existsSync(execStdinLogPath)).toBe(false);
+  });
+
+  it("when the current postgres-password secret is missing/invalid, the checkpoint step is a documented no-op (no passphrase prompt) and rotation still proceeds", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    // Overwrite with non-hex content: repair.sh's own diagnosis never
+    // content-validates secrets (only presence/mode), so this still reaches
+    // rotate-database-credential the same way an entirely-missing secret
+    // would (per the header's "Checkpoint — the checkpoint step is a
+    // documented no-op" note), without requiring a full missing-secret
+    // fixture rebuild.
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "not-a-valid-hex-secret\n");
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "rotate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stderr).toContain("proceeding without a content checkpoint");
+    expect(result.stderr).not.toContain("checkpoint passphrase");
+    expect(findCheckpointDir(targetDir)).toBeNull();
+  });
+
+  // --- rotation-step failure: guidance + checkpoint preserved + stable exit -
+
+  it("rotation-step failure (the rotate-credential exec fails after a successful checkpoint): guidance referencing the checkpoint, checkpoint preserved, credential/config untouched, stable exit 4", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        alterRoleFails: true,
+        argvLogPath,
+        execStdinLogPath,
+      },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
+
+    // The checkpoint from BEFORE the failed step is preserved (never
+    // cleaned up), and its path is named in stderr recovery guidance.
+    const checkpointDir = findCheckpointDir(targetDir);
+    expect(checkpointDir).not.toBeNull();
+    expect(existsSync(findCheckpointBundle(targetDir))).toBe(true);
+    expect(result.stderr).toContain("stage two step 'rotate-credential' failed");
+    expect(result.stderr).toContain(basename(checkpointDir));
+    expect(result.stderr).toContain("checkpoint passphrase");
+
+    // The live secret was never overwritten (update-config never ran).
+    expect(
+      readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim(),
+    ).toBe(ORIGINAL_POSTGRES_PASSWORD);
+
+    // restart-services never ran (the sequence stopped at rotate-credential).
+    const argvLog = readFileSync(argvLogPath, "utf8");
+    expect(argvLog).not.toMatch(/^restart /m);
+
+    // The rotate-credential exec DID happen (the checkpoint had already
+    // succeeded), and its SQL — including the staged credential — still
+    // arrived only over stdin, never argv, even on this failing attempt.
+    expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(existsSync(execStdinLogPath)).toBe(true);
+    expect(readFileSync(execStdinLogPath, "utf8")).toContain('ALTER ROLE "orbit" WITH PASSWORD');
+
+    expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stdout).not.toContain(checkpointDir);
+  });
+
+  // --- passphrase rule enforcement (owner: "existing ≥12-char rule,
+  // prompted twice") -----------------------------------------------------
+
+  it("a too-short passphrase is rejected and re-prompted; correcting it on the next attempt still succeeds", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        input: `rotate\nshort\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stderr).toContain("at least 12 characters");
+  });
+
+  it("a too-short passphrase, never corrected within 3 attempts, fails the checkpoint step (reason=checkpoint-failed, exit 4), not the approval gate", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "rotate\nshort\nshort\nshort\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
+    expect(
+      readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim(),
+    ).toBe(ORIGINAL_POSTGRES_PASSWORD);
+  });
+
+  it("a mismatched passphrase confirmation is rejected and re-prompted; a matching confirmation on the next attempt still succeeds", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        input: `rotate\n${ROTATE_PASSPHRASE}\nwrong-confirmation-value\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stderr).toContain("did not match");
+  });
+
+  it("a mismatched passphrase confirmation, never corrected within 3 attempts, fails the checkpoint step (exit 4)", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        // The passphrase-entry field is satisfied on its first attempt
+        // (accepted immediately, ≥12 characters); all 3 remaining answer
+        // lines go to the confirmation field, and MUST each differ from
+        // ROTATE_PASSPHRASE (never re-using the correct value) so none of
+        // them accidentally matches and short-circuits the exhaustion.
+        input: `rotate\n${ROTATE_PASSPHRASE}\nwrong-confirm-1\nwrong-confirm-2\nwrong-confirm-3\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
+  });
+
+  it("machine prompts: a blank passphrase is reason=empty, a too-short-but-nonempty passphrase is reason=too-short", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "rotate\n\nshort\nshort\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.stdout).toContain("prompt-reject field=checkpoint-passphrase reason=empty");
+    expect(result.stdout).toContain("prompt-reject field=checkpoint-passphrase reason=too-short");
+  });
+
+  it("machine prompts: a passphrase-confirmation mismatch is reason=mismatch", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        input: `rotate\n${ROTATE_PASSPHRASE}\nnope\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      },
+    );
+
+    expect(result.stdout).toContain("prompt-reject field=checkpoint-passphrase-confirm reason=mismatch");
+    expect(result.status).toBe(0);
+  });
+
+  // --- machine-prompt grammar (#297 style; schema-blind — grammar shape,
+  // not hardcoded text where the grammar forbids it) ----------------------
+
+  it("machine prompts: emits the full field/kind/attempt grammar for action-word, checkpoint-passphrase and checkpoint-passphrase-confirm, and never the answer itself", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.stdout).toContain("prompt field=action-word kind=typed-word required=true attempt=1");
+    expect(result.stdout).toContain("prompt-accept field=action-word");
+    expect(result.stdout).toContain("prompt field=checkpoint-passphrase kind=secret required=true attempt=1");
+    expect(result.stdout).toContain("prompt-accept field=checkpoint-passphrase");
+    expect(result.stdout).toContain("prompt field=checkpoint-passphrase-confirm kind=secret required=true attempt=1");
+    expect(result.stdout).toContain("prompt-accept field=checkpoint-passphrase-confirm");
+    expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stdout).not.toContain("rotate\n"); // the typed word itself is never echoed as a value either
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("machine prompts: EOF during the checkpoint-passphrase field aborts that field and refuses (checkpoint-failed)", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "rotate\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("prompt-abort field=checkpoint-passphrase");
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=checkpoint-failed");
+  });
+
+  // --- post-execution re-diagnosis always runs, on every terminal outcome --
+
+  it("post-execution re-diagnosis runs and is the final thing printed, even when the dangerous batch was refused", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(targetDir, ["--execute", "--dangerous"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=/);
+  });
+
+  it("post-execution re-diagnosis runs and is the final thing printed, even when the dangerous batch failed", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, alterRoleFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(lines(result.stdout).at(-1)).toMatch(/^diagnosis result=/);
+  });
+
+  // --- stdout stays enums-only in every scenario --------------------------
+
+  it("stdout is enum-lines-only for a refused (non-interactive) run", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const result = runRepair(targetDir, ["--execute", "--dangerous"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+    });
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("stdout is enum-lines-only for a declined (wrong-word) interactive run", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: "no\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("stdout is enum-lines-only for a failed rotation step", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, alterRoleFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+    expectStdoutIsEnumOnly(result.stdout);
+  });
+
+  it("never discloses the checkpoint directory path, the passphrase, or either credential value on stdout, across the full happy path", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stdout).not.toContain(ORIGINAL_POSTGRES_PASSWORD);
+  });
+
+  // --- combined safe + dangerous batches in one invocation -----------------
+
+  it("both batches together: an interactively-approved safe fix and an interactively-approved dangerous rotation both execute, under one final re-diagnosis", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // adds managed-file-permissions (safe)
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      {
+        input: `y\nrotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`,
+        env: { ORBIT_REPAIR_TTY_INPUT: "1" },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execution result=complete done=1 failed=0");
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    // Exactly one trailing diagnosis block, not one per batch.
+    expect(lines(result.stdout).filter((line) => line.startsWith("diagnosis result="))).toHaveLength(1);
+  });
+});

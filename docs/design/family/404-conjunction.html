@@ -1,0 +1,312 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — planetary conjunction</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="family.css">
+<style>
+/* 404 — planetary conjunction: a ringed world (the 0) with two "4"s tumbling on
+   inclined, eccentric orbits (offset circles, planet off-centre) so each glyph's
+   far arc genuinely swings behind the ring disc and its near arc swings in front.
+   Orbit A: 20s. Orbit B: 40s. Every 40s (their lcm) both land on the horizontal
+   axis through the planet, upright, in front, and it reads 404 for ~2.75s. Motion
+   is a single smooth ease (near-standstill at conjunction, gentle floaty coast at
+   speed, easing back to standstill) — no piecewise speed jumps. */
+
+body{overflow:hidden}
+
+/* ---------- starfield, two depth layers, independent slow drift ---------- */
+.sky{position:fixed;inset:-5%;pointer-events:none;overflow:hidden;z-index:0}
+.sky svg{position:absolute;inset:0;width:100%;height:100%}
+.drift-far{animation:driftFar 320s linear infinite}
+.drift-near{animation:driftNear 160s linear infinite}
+@keyframes driftFar{from{transform:translateX(0)}to{transform:translateX(-1600px)}}
+@keyframes driftNear{from{transform:translateX(0)}to{transform:translateX(-1600px)}}
+.star-far{fill:#c9d3f2;opacity:var(--o);animation-name:twA;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-direction:alternate}
+.star-near{fill:#eef1fb;opacity:var(--o);animation-name:twA;animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-direction:alternate}
+.tw-a{animation-duration:3.4s}
+.tw-b{animation-duration:4.7s}
+.tw-c{animation-duration:6.1s}
+.tw-d{animation-duration:5.3s}
+@keyframes twA{from{opacity:calc(var(--o) * .45)}to{opacity:calc(var(--o) * 1.4)}}
+
+/* ---------- nebula wash, far behind everything, dim + blurred ---------- */
+.nebula{position:fixed;inset:0;z-index:0;pointer-events:none;mix-blend-mode:screen;opacity:.5}
+.nebula .blobA{animation:nebDriftA 64s ease-in-out infinite alternate}
+.nebula .blobB{animation:nebDriftB 88s ease-in-out infinite alternate}
+@keyframes nebDriftA{from{transform:translate(-18px,-8px) scale(1)}to{transform:translate(22px,14px) scale(1.06)}}
+@keyframes nebDriftB{from{transform:translate(16px,10px) scale(1.02)}to{transform:translate(-20px,-16px) scale(0.97)}}
+
+/* ---------- orbital scene ---------- */
+.orbit-stage{position:fixed;inset:0;display:grid;place-items:center;z-index:1;pointer-events:none}
+.orbit-stage svg{width:100%;height:100%;max-width:1600px;max-height:1000px;overflow:visible}
+
+.orbit-path{fill:none;stroke:var(--ink-faint);stroke-width:1;stroke-dasharray:1.5 8;opacity:.08}
+
+.ring-core{animation:ringBreathe 17s ease-in-out infinite}
+.ring-halo{animation:haloBreathe 23s ease-in-out infinite}
+@keyframes ringBreathe{0%,100%{opacity:.9}50%{opacity:1}}
+@keyframes haloBreathe{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.8;transform:scale(1.035)}}
+
+.glyph-core{filter:url(#glyphCrisp)}
+.glyph-mid{filter:url(#glyphGlowSoft)}
+.glyph-halo{filter:url(#glyphGlowWide)}
+
+.conj-glow{animation:conjGlow 40s linear infinite}
+@keyframes conjGlow{
+  0%{filter:brightness(2) saturate(1.15)}
+  3.5%{filter:brightness(2) saturate(1.15)}
+  6%{filter:brightness(1) saturate(1)}
+  94%{filter:brightness(1) saturate(1)}
+  96.5%{filter:brightness(2) saturate(1.15)}
+  100%{filter:brightness(2) saturate(1.15)}
+}
+
+/* ---------- film grain ---------- */
+.grain{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:.06}
+
+/* ---------- vignette, slow ambient breathe ---------- */
+.vignette{animation:vigBreathe 26s ease-in-out infinite alternate;z-index:2}
+@keyframes vigBreathe{
+  from{background:radial-gradient(ellipse at 50% 42%,transparent 52%,rgba(0,0,0,.32) 100%)}
+  to{background:radial-gradient(ellipse at 50% 42%,transparent 58%,rgba(0,0,0,.4) 100%)}
+}
+
+/* ---------- copy ---------- */
+.epilogue{position:fixed;left:0;right:0;bottom:64px;text-align:center;z-index:4}
+.epilogue .tagline{font:14px/1.6 var(--display);letter-spacing:.14em;color:var(--ink-mid);
+                    text-transform:none}
+.epilogue .home{display:inline-block;margin-top:14px;font:11px var(--mono);letter-spacing:.1em;
+                 color:var(--accent);text-decoration:none;border-bottom:1px solid var(--line);
+                 padding-bottom:4px}
+.epilogue .home:hover{border-color:var(--accent)}
+
+@media (prefers-reduced-motion: reduce){
+  .drift-far,.drift-near,.star-far,.star-near,.ring-core,.ring-halo,
+  .nebula .blobA,.nebula .blobB,.vignette,.conj-glow{animation:none!important}
+}
+</style></head><body>
+
+<div class="nebula">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <radialGradient id="nebA" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#2a3a6e" stop-opacity=".35"/>
+        <stop offset="100%" stop-color="#2a3a6e" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="nebB" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#4a2f52" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#4a2f52" stop-opacity="0"/>
+      </radialGradient>
+      <filter id="nebBlur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="60"/></filter>
+    </defs>
+    <ellipse class="blobA" cx="380" cy="720" rx="420" ry="300" fill="url(#nebA)" filter="url(#nebBlur)"/>
+    <ellipse class="blobB" cx="1260" cy="220" rx="380" ry="260" fill="url(#nebB)" filter="url(#nebBlur)"/>
+  </svg>
+</div>
+
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <g class="drift-far">
+    <g transform="translate(0,0)"><circle class="star-far tw-a" cx="1023.1" cy="25.0" r="0.41" style="--o:0.1;animation-delay:0.0s"/><circle class="star-far tw-b" cx="1178.4" cy="676.7" r="0.66" style="--o:0.07;animation-delay:0.37s"/><circle class="star-far tw-c" cx="675.1" cy="29.8" r="0.39" style="--o:0.14;animation-delay:0.74s"/><circle class="star-far tw-d" cx="42.5" cy="198.8" r="0.56" style="--o:0.15;animation-delay:1.11s"/><circle class="star-far tw-a" cx="352.7" cy="589.3" r="0.62" style="--o:0.06;animation-delay:1.48s"/><circle class="star-far tw-b" cx="1289.3" cy="698.1" r="0.44" style="--o:0.08;animation-delay:1.85s"/><circle class="star-far tw-c" cx="1531.5" cy="336.6" r="0.34" style="--o:0.08;animation-delay:2.22s"/><circle class="star-far tw-d" cx="1356.0" cy="603.7" r="0.62" style="--o:0.18;animation-delay:2.59s"/><circle class="star-far tw-a" cx="858.0" cy="973.1" r="0.45" style="--o:0.15;animation-delay:2.96s"/><circle class="star-far tw-b" cx="1327.0" cy="618.5" r="0.64" style="--o:0.15;animation-delay:3.33s"/><circle class="star-far tw-c" cx="1127.3" cy="45.8" r="0.39" style="--o:0.11;animation-delay:3.7s"/><circle class="star-far tw-d" cx="127.7" cy="232.8" r="0.34" style="--o:0.1;animation-delay:4.07s"/><circle class="star-far tw-a" cx="1017.1" cy="364.8" r="0.45" style="--o:0.09;animation-delay:4.44s"/><circle class="star-far tw-b" cx="427.2" cy="936.7" r="0.56" style="--o:0.16;animation-delay:4.81s"/><circle class="star-far tw-c" cx="273.8" cy="729.1" r="0.37" style="--o:0.12;animation-delay:5.18s"/><circle class="star-far tw-d" cx="1583.2" cy="640.0" r="0.52" style="--o:0.17;animation-delay:5.55s"/><circle class="star-far tw-a" cx="1348.6" cy="776.0" r="0.39" style="--o:0.07;animation-delay:5.92s"/><circle class="star-far tw-b" cx="504.7" cy="267.7" r="0.38" style="--o:0.21;animation-delay:0.29s"/><circle class="star-far tw-c" cx="1402.2" cy="314.7" r="0.56" style="--o:0.12;animation-delay:0.66s"/><circle class="star-far tw-d" cx="1463.3" cy="458.9" r="0.41" style="--o:0.1;animation-delay:1.03s"/><circle class="star-far tw-a" cx="898.2" cy="262.7" r="0.53" style="--o:0.2;animation-delay:1.4s"/><circle class="star-far tw-b" cx="639.0" cy="219.3" r="0.7" style="--o:0.14;animation-delay:1.77s"/><circle class="star-far tw-c" cx="145.5" cy="47.1" r="0.34" style="--o:0.16;animation-delay:2.14s"/><circle class="star-far tw-d" cx="1267.3" cy="422.2" r="0.33" style="--o:0.12;animation-delay:2.51s"/><circle class="star-far tw-a" cx="1593.8" cy="529.1" r="0.69" style="--o:0.2;animation-delay:2.88s"/><circle class="star-far tw-b" cx="18.4" cy="720.7" r="0.57" style="--o:0.15;animation-delay:3.25s"/><circle class="star-far tw-c" cx="426.9" cy="641.0" r="0.34" style="--o:0.13;animation-delay:3.62s"/><circle class="star-far tw-d" cx="726.0" cy="953.8" r="0.65" style="--o:0.1;animation-delay:3.99s"/><circle class="star-far tw-a" cx="800.9" cy="178.7" r="0.67" style="--o:0.2;animation-delay:4.36s"/><circle class="star-far tw-b" cx="477.5" cy="638.9" r="0.54" style="--o:0.08;animation-delay:4.73s"/><circle class="star-far tw-c" cx="1220.0" cy="539.4" r="0.61" style="--o:0.14;animation-delay:5.1s"/><circle class="star-far tw-d" cx="0.9" cy="324.2" r="0.31" style="--o:0.21;animation-delay:5.47s"/><circle class="star-far tw-a" cx="1406.0" cy="831.7" r="0.42" style="--o:0.07;animation-delay:5.84s"/><circle class="star-far tw-b" cx="1404.8" cy="946.9" r="0.33" style="--o:0.14;animation-delay:0.21s"/><circle class="star-far tw-c" cx="110.7" cy="760.6" r="0.61" style="--o:0.08;animation-delay:0.58s"/><circle class="star-far tw-d" cx="760.5" cy="549.8" r="0.41" style="--o:0.2;animation-delay:0.95s"/><circle class="star-far tw-a" cx="677.0" cy="211.8" r="0.52" style="--o:0.18;animation-delay:1.32s"/><circle class="star-far tw-b" cx="321.8" cy="311.7" r="0.7" style="--o:0.16;animation-delay:1.69s"/><circle class="star-far tw-c" cx="701.0" cy="517.6" r="0.35" style="--o:0.1;animation-delay:2.06s"/><circle class="star-far tw-d" cx="540.9" cy="588.3" r="0.39" style="--o:0.1;animation-delay:2.43s"/><circle class="star-far tw-a" cx="113.6" cy="631.1" r="0.39" style="--o:0.2;animation-delay:2.8s"/><circle class="star-far tw-b" cx="1375.4" cy="70.9" r="0.4" style="--o:0.17;animation-delay:3.17s"/><circle class="star-far tw-c" cx="342.8" cy="132.3" r="0.67" style="--o:0.15;animation-delay:3.54s"/><circle class="star-far tw-d" cx="756.3" cy="784.6" r="0.62" style="--o:0.09;animation-delay:3.91s"/><circle class="star-far tw-a" cx="155.1" cy="431.1" r="0.47" style="--o:0.13;animation-delay:4.28s"/><circle class="star-far tw-b" cx="1166.5" cy="673.4" r="0.69" style="--o:0.08;animation-delay:4.65s"/><circle class="star-far tw-c" cx="644.2" cy="339.3" r="0.64" style="--o:0.1;animation-delay:5.02s"/><circle class="star-far tw-d" cx="304.3" cy="448.6" r="0.47" style="--o:0.1;animation-delay:5.39s"/><circle class="star-far tw-a" cx="399.7" cy="923.3" r="0.48" style="--o:0.2;animation-delay:5.76s"/><circle class="star-far tw-b" cx="880.5" cy="50.6" r="0.7" style="--o:0.19;animation-delay:0.13s"/><circle class="star-far tw-c" cx="1550.4" cy="926.4" r="0.64" style="--o:0.09;animation-delay:0.5s"/><circle class="star-far tw-d" cx="777.0" cy="213.7" r="0.46" style="--o:0.07;animation-delay:0.87s"/><circle class="star-far tw-a" cx="606.4" cy="985.3" r="0.41" style="--o:0.19;animation-delay:1.24s"/><circle class="star-far tw-b" cx="728.0" cy="423.0" r="0.68" style="--o:0.22;animation-delay:1.61s"/><circle class="star-far tw-c" cx="889.2" cy="718.4" r="0.36" style="--o:0.11;animation-delay:1.98s"/><circle class="star-far tw-d" cx="1549.9" cy="579.2" r="0.52" style="--o:0.18;animation-delay:2.35s"/><circle class="star-far tw-a" cx="91.5" cy="584.2" r="0.5" style="--o:0.2;animation-delay:2.72s"/><circle class="star-far tw-b" cx="251.9" cy="960.8" r="0.33" style="--o:0.09;animation-delay:3.09s"/><circle class="star-far tw-c" cx="952.1" cy="675.2" r="0.39" style="--o:0.08;animation-delay:3.46s"/><circle class="star-far tw-d" cx="1424.5" cy="246.2" r="0.54" style="--o:0.16;animation-delay:3.83s"/><circle class="star-far tw-a" cx="670.8" cy="583.7" r="0.51" style="--o:0.21;animation-delay:4.2s"/><circle class="star-far tw-b" cx="326.8" cy="716.2" r="0.4" style="--o:0.12;animation-delay:4.57s"/><circle class="star-far tw-c" cx="1074.7" cy="300.0" r="0.43" style="--o:0.18;animation-delay:4.94s"/><circle class="star-far tw-d" cx="116.1" cy="458.3" r="0.7" style="--o:0.22;animation-delay:5.31s"/><circle class="star-far tw-a" cx="117.2" cy="213.2" r="0.41" style="--o:0.21;animation-delay:5.68s"/><circle class="star-far tw-b" cx="1409.4" cy="879.3" r="0.45" style="--o:0.09;animation-delay:0.05s"/><circle class="star-far tw-c" cx="1334.0" cy="703.5" r="0.54" style="--o:0.22;animation-delay:0.42s"/><circle class="star-far tw-d" cx="1046.4" cy="7.8" r="0.63" style="--o:0.11;animation-delay:0.79s"/><circle class="star-far tw-a" cx="1061.4" cy="938.9" r="0.35" style="--o:0.08;animation-delay:1.16s"/><circle class="star-far tw-b" cx="171.3" cy="553.2" r="0.41" style="--o:0.16;animation-delay:1.53s"/></g>
+    <g transform="translate(1600,0)"><circle class="star-far tw-a" cx="1023.1" cy="25.0" r="0.41" style="--o:0.1;animation-delay:0.0s"/><circle class="star-far tw-b" cx="1178.4" cy="676.7" r="0.66" style="--o:0.07;animation-delay:0.37s"/><circle class="star-far tw-c" cx="675.1" cy="29.8" r="0.39" style="--o:0.14;animation-delay:0.74s"/><circle class="star-far tw-d" cx="42.5" cy="198.8" r="0.56" style="--o:0.15;animation-delay:1.11s"/><circle class="star-far tw-a" cx="352.7" cy="589.3" r="0.62" style="--o:0.06;animation-delay:1.48s"/><circle class="star-far tw-b" cx="1289.3" cy="698.1" r="0.44" style="--o:0.08;animation-delay:1.85s"/><circle class="star-far tw-c" cx="1531.5" cy="336.6" r="0.34" style="--o:0.08;animation-delay:2.22s"/><circle class="star-far tw-d" cx="1356.0" cy="603.7" r="0.62" style="--o:0.18;animation-delay:2.59s"/><circle class="star-far tw-a" cx="858.0" cy="973.1" r="0.45" style="--o:0.15;animation-delay:2.96s"/><circle class="star-far tw-b" cx="1327.0" cy="618.5" r="0.64" style="--o:0.15;animation-delay:3.33s"/><circle class="star-far tw-c" cx="1127.3" cy="45.8" r="0.39" style="--o:0.11;animation-delay:3.7s"/><circle class="star-far tw-d" cx="127.7" cy="232.8" r="0.34" style="--o:0.1;animation-delay:4.07s"/><circle class="star-far tw-a" cx="1017.1" cy="364.8" r="0.45" style="--o:0.09;animation-delay:4.44s"/><circle class="star-far tw-b" cx="427.2" cy="936.7" r="0.56" style="--o:0.16;animation-delay:4.81s"/><circle class="star-far tw-c" cx="273.8" cy="729.1" r="0.37" style="--o:0.12;animation-delay:5.18s"/><circle class="star-far tw-d" cx="1583.2" cy="640.0" r="0.52" style="--o:0.17;animation-delay:5.55s"/><circle class="star-far tw-a" cx="1348.6" cy="776.0" r="0.39" style="--o:0.07;animation-delay:5.92s"/><circle class="star-far tw-b" cx="504.7" cy="267.7" r="0.38" style="--o:0.21;animation-delay:0.29s"/><circle class="star-far tw-c" cx="1402.2" cy="314.7" r="0.56" style="--o:0.12;animation-delay:0.66s"/><circle class="star-far tw-d" cx="1463.3" cy="458.9" r="0.41" style="--o:0.1;animation-delay:1.03s"/><circle class="star-far tw-a" cx="898.2" cy="262.7" r="0.53" style="--o:0.2;animation-delay:1.4s"/><circle class="star-far tw-b" cx="639.0" cy="219.3" r="0.7" style="--o:0.14;animation-delay:1.77s"/><circle class="star-far tw-c" cx="145.5" cy="47.1" r="0.34" style="--o:0.16;animation-delay:2.14s"/><circle class="star-far tw-d" cx="1267.3" cy="422.2" r="0.33" style="--o:0.12;animation-delay:2.51s"/><circle class="star-far tw-a" cx="1593.8" cy="529.1" r="0.69" style="--o:0.2;animation-delay:2.88s"/><circle class="star-far tw-b" cx="18.4" cy="720.7" r="0.57" style="--o:0.15;animation-delay:3.25s"/><circle class="star-far tw-c" cx="426.9" cy="641.0" r="0.34" style="--o:0.13;animation-delay:3.62s"/><circle class="star-far tw-d" cx="726.0" cy="953.8" r="0.65" style="--o:0.1;animation-delay:3.99s"/><circle class="star-far tw-a" cx="800.9" cy="178.7" r="0.67" style="--o:0.2;animation-delay:4.36s"/><circle class="star-far tw-b" cx="477.5" cy="638.9" r="0.54" style="--o:0.08;animation-delay:4.73s"/><circle class="star-far tw-c" cx="1220.0" cy="539.4" r="0.61" style="--o:0.14;animation-delay:5.1s"/><circle class="star-far tw-d" cx="0.9" cy="324.2" r="0.31" style="--o:0.21;animation-delay:5.47s"/><circle class="star-far tw-a" cx="1406.0" cy="831.7" r="0.42" style="--o:0.07;animation-delay:5.84s"/><circle class="star-far tw-b" cx="1404.8" cy="946.9" r="0.33" style="--o:0.14;animation-delay:0.21s"/><circle class="star-far tw-c" cx="110.7" cy="760.6" r="0.61" style="--o:0.08;animation-delay:0.58s"/><circle class="star-far tw-d" cx="760.5" cy="549.8" r="0.41" style="--o:0.2;animation-delay:0.95s"/><circle class="star-far tw-a" cx="677.0" cy="211.8" r="0.52" style="--o:0.18;animation-delay:1.32s"/><circle class="star-far tw-b" cx="321.8" cy="311.7" r="0.7" style="--o:0.16;animation-delay:1.69s"/><circle class="star-far tw-c" cx="701.0" cy="517.6" r="0.35" style="--o:0.1;animation-delay:2.06s"/><circle class="star-far tw-d" cx="540.9" cy="588.3" r="0.39" style="--o:0.1;animation-delay:2.43s"/><circle class="star-far tw-a" cx="113.6" cy="631.1" r="0.39" style="--o:0.2;animation-delay:2.8s"/><circle class="star-far tw-b" cx="1375.4" cy="70.9" r="0.4" style="--o:0.17;animation-delay:3.17s"/><circle class="star-far tw-c" cx="342.8" cy="132.3" r="0.67" style="--o:0.15;animation-delay:3.54s"/><circle class="star-far tw-d" cx="756.3" cy="784.6" r="0.62" style="--o:0.09;animation-delay:3.91s"/><circle class="star-far tw-a" cx="155.1" cy="431.1" r="0.47" style="--o:0.13;animation-delay:4.28s"/><circle class="star-far tw-b" cx="1166.5" cy="673.4" r="0.69" style="--o:0.08;animation-delay:4.65s"/><circle class="star-far tw-c" cx="644.2" cy="339.3" r="0.64" style="--o:0.1;animation-delay:5.02s"/><circle class="star-far tw-d" cx="304.3" cy="448.6" r="0.47" style="--o:0.1;animation-delay:5.39s"/><circle class="star-far tw-a" cx="399.7" cy="923.3" r="0.48" style="--o:0.2;animation-delay:5.76s"/><circle class="star-far tw-b" cx="880.5" cy="50.6" r="0.7" style="--o:0.19;animation-delay:0.13s"/><circle class="star-far tw-c" cx="1550.4" cy="926.4" r="0.64" style="--o:0.09;animation-delay:0.5s"/><circle class="star-far tw-d" cx="777.0" cy="213.7" r="0.46" style="--o:0.07;animation-delay:0.87s"/><circle class="star-far tw-a" cx="606.4" cy="985.3" r="0.41" style="--o:0.19;animation-delay:1.24s"/><circle class="star-far tw-b" cx="728.0" cy="423.0" r="0.68" style="--o:0.22;animation-delay:1.61s"/><circle class="star-far tw-c" cx="889.2" cy="718.4" r="0.36" style="--o:0.11;animation-delay:1.98s"/><circle class="star-far tw-d" cx="1549.9" cy="579.2" r="0.52" style="--o:0.18;animation-delay:2.35s"/><circle class="star-far tw-a" cx="91.5" cy="584.2" r="0.5" style="--o:0.2;animation-delay:2.72s"/><circle class="star-far tw-b" cx="251.9" cy="960.8" r="0.33" style="--o:0.09;animation-delay:3.09s"/><circle class="star-far tw-c" cx="952.1" cy="675.2" r="0.39" style="--o:0.08;animation-delay:3.46s"/><circle class="star-far tw-d" cx="1424.5" cy="246.2" r="0.54" style="--o:0.16;animation-delay:3.83s"/><circle class="star-far tw-a" cx="670.8" cy="583.7" r="0.51" style="--o:0.21;animation-delay:4.2s"/><circle class="star-far tw-b" cx="326.8" cy="716.2" r="0.4" style="--o:0.12;animation-delay:4.57s"/><circle class="star-far tw-c" cx="1074.7" cy="300.0" r="0.43" style="--o:0.18;animation-delay:4.94s"/><circle class="star-far tw-d" cx="116.1" cy="458.3" r="0.7" style="--o:0.22;animation-delay:5.31s"/><circle class="star-far tw-a" cx="117.2" cy="213.2" r="0.41" style="--o:0.21;animation-delay:5.68s"/><circle class="star-far tw-b" cx="1409.4" cy="879.3" r="0.45" style="--o:0.09;animation-delay:0.05s"/><circle class="star-far tw-c" cx="1334.0" cy="703.5" r="0.54" style="--o:0.22;animation-delay:0.42s"/><circle class="star-far tw-d" cx="1046.4" cy="7.8" r="0.63" style="--o:0.11;animation-delay:0.79s"/><circle class="star-far tw-a" cx="1061.4" cy="938.9" r="0.35" style="--o:0.08;animation-delay:1.16s"/><circle class="star-far tw-b" cx="171.3" cy="553.2" r="0.41" style="--o:0.16;animation-delay:1.53s"/></g>
+  </g>
+  <g class="drift-near">
+    <g transform="translate(0,0)"><circle class="star-near tw-a" cx="1148.2" cy="203.6" r="1.11" style="--o:0.31;animation-delay:0.0s"/><circle class="star-near tw-b" cx="781.7" cy="905.3" r="1.28" style="--o:0.25;animation-delay:0.37s"/><circle class="star-near tw-c" cx="677.7" cy="276.7" r="0.6" style="--o:0.47;animation-delay:0.74s"/><circle class="star-near tw-d" cx="1019.4" cy="262.0" r="1.19" style="--o:0.4;animation-delay:1.11s"/><circle class="star-near tw-a" cx="684.3" cy="9.7" r="0.66" style="--o:0.51;animation-delay:1.48s"/><circle class="star-near tw-b" cx="1446.3" cy="545.6" r="1.27" style="--o:0.41;animation-delay:1.85s"/><circle class="star-near tw-c" cx="237.0" cy="127.4" r="0.85" style="--o:0.52;animation-delay:2.22s"/><circle class="star-near tw-d" cx="1273.8" cy="860.7" r="1.32" style="--o:0.29;animation-delay:2.59s"/><circle class="star-near tw-a" cx="399.2" cy="102.8" r="1.22" style="--o:0.51;animation-delay:2.96s"/><circle class="star-near tw-b" cx="650.2" cy="620.7" r="0.72" style="--o:0.53;animation-delay:3.33s"/><circle class="star-near tw-c" cx="1383.4" cy="976.2" r="1.25" style="--o:0.51;animation-delay:3.7s"/><circle class="star-near tw-d" cx="39.7" cy="736.6" r="0.87" style="--o:0.53;animation-delay:4.07s"/><circle class="star-near tw-a" cx="1283.6" cy="864.1" r="1.25" style="--o:0.31;animation-delay:4.44s"/><circle class="star-near tw-b" cx="1259.8" cy="108.1" r="1.3" style="--o:0.5;animation-delay:4.81s"/><circle class="star-near tw-c" cx="355.9" cy="816.6" r="0.97" style="--o:0.32;animation-delay:5.18s"/><circle class="star-near tw-d" cx="1272.6" cy="227.6" r="0.62" style="--o:0.28;animation-delay:5.55s"/><circle class="star-near tw-a" cx="525.2" cy="864.4" r="1.37" style="--o:0.31;animation-delay:5.92s"/><circle class="star-near tw-b" cx="1026.4" cy="399.7" r="1.38" style="--o:0.4;animation-delay:0.29s"/><circle class="star-near tw-c" cx="1502.8" cy="115.3" r="1.38" style="--o:0.28;animation-delay:0.66s"/><circle class="star-near tw-d" cx="1540.1" cy="265.5" r="0.69" style="--o:0.36;animation-delay:1.03s"/><circle class="star-near tw-a" cx="1165.7" cy="313.7" r="1.08" style="--o:0.39;animation-delay:1.4s"/><circle class="star-near tw-b" cx="616.3" cy="576.6" r="0.8" style="--o:0.45;animation-delay:1.77s"/><circle class="star-near tw-c" cx="2.7" cy="925.6" r="1.03" style="--o:0.46;animation-delay:2.14s"/><circle class="star-near tw-d" cx="1187.1" cy="670.6" r="0.89" style="--o:0.24;animation-delay:2.51s"/><circle class="star-near tw-a" cx="1062.8" cy="330.2" r="0.85" style="--o:0.5;animation-delay:2.88s"/><circle class="star-near tw-b" cx="1151.6" cy="300.3" r="0.85" style="--o:0.35;animation-delay:3.25s"/><circle class="star-near tw-c" cx="643.8" cy="295.7" r="0.7" style="--o:0.36;animation-delay:3.62s"/><circle class="star-near tw-d" cx="1504.6" cy="677.3" r="1.32" style="--o:0.42;animation-delay:3.99s"/><circle class="star-near tw-a" cx="481.5" cy="547.9" r="0.6" style="--o:0.31;animation-delay:4.36s"/><circle class="star-near tw-b" cx="687.8" cy="580.0" r="1.12" style="--o:0.37;animation-delay:4.73s"/><circle class="star-near tw-c" cx="707.5" cy="213.7" r="0.98" style="--o:0.52;animation-delay:5.1s"/><circle class="star-near tw-d" cx="1273.6" cy="169.7" r="0.67" style="--o:0.39;animation-delay:5.47s"/><circle class="star-near tw-a" cx="1012.7" cy="335.2" r="1.25" style="--o:0.47;animation-delay:5.84s"/><circle class="star-near tw-b" cx="1076.5" cy="224.6" r="0.76" style="--o:0.23;animation-delay:0.21s"/><circle class="star-near tw-c" cx="391.7" cy="475.1" r="1.28" style="--o:0.24;animation-delay:0.58s"/><circle class="star-near tw-d" cx="663.1" cy="629.8" r="0.76" style="--o:0.45;animation-delay:0.95s"/><circle class="star-near tw-a" cx="791.0" cy="244.0" r="1.12" style="--o:0.22;animation-delay:1.32s"/><circle class="star-near tw-b" cx="1201.5" cy="770.0" r="0.69" style="--o:0.36;animation-delay:1.69s"/><circle class="star-near tw-c" cx="281.4" cy="958.0" r="1.01" style="--o:0.24;animation-delay:2.06s"/><circle class="star-near tw-d" cx="398.7" cy="848.3" r="0.97" style="--o:0.48;animation-delay:2.43s"/><circle class="star-near tw-a" cx="1068.1" cy="987.9" r="1.08" style="--o:0.53;animation-delay:2.8s"/><circle class="star-near tw-b" cx="1426.3" cy="612.7" r="1.18" style="--o:0.39;animation-delay:3.17s"/><circle class="star-near tw-c" cx="1328.9" cy="547.9" r="1.32" style="--o:0.47;animation-delay:3.54s"/><circle class="star-near tw-d" cx="759.5" cy="259.2" r="0.8" style="--o:0.43;animation-delay:3.91s"/><circle class="star-near tw-a" cx="1225.3" cy="521.3" r="1.1" style="--o:0.31;animation-delay:4.28s"/><circle class="star-near tw-b" cx="124.0" cy="285.7" r="0.82" style="--o:0.33;animation-delay:4.65s"/><circle class="star-near tw-c" cx="864.2" cy="138.4" r="0.79" style="--o:0.45;animation-delay:5.02s"/><circle class="star-near tw-d" cx="1130.3" cy="64.2" r="0.93" style="--o:0.4;animation-delay:5.39s"/><circle class="star-near tw-a" cx="665.2" cy="206.8" r="0.94" style="--o:0.52;animation-delay:5.76s"/><circle class="star-near tw-b" cx="934.5" cy="695.5" r="1.29" style="--o:0.47;animation-delay:0.13s"/><circle class="star-near tw-c" cx="608.6" cy="5.9" r="0.88" style="--o:0.47;animation-delay:0.5s"/><circle class="star-near tw-d" cx="1365.5" cy="953.4" r="0.94" style="--o:0.47;animation-delay:0.87s"/><circle class="star-near tw-a" cx="873.8" cy="603.3" r="0.78" style="--o:0.29;animation-delay:1.24s"/><circle class="star-near tw-b" cx="697.3" cy="29.0" r="0.87" style="--o:0.44;animation-delay:1.61s"/><circle class="star-near tw-c" cx="646.9" cy="165.0" r="0.97" style="--o:0.26;animation-delay:1.98s"/></g>
+    <g transform="translate(1600,0)"><circle class="star-near tw-a" cx="1148.2" cy="203.6" r="1.11" style="--o:0.31;animation-delay:0.0s"/><circle class="star-near tw-b" cx="781.7" cy="905.3" r="1.28" style="--o:0.25;animation-delay:0.37s"/><circle class="star-near tw-c" cx="677.7" cy="276.7" r="0.6" style="--o:0.47;animation-delay:0.74s"/><circle class="star-near tw-d" cx="1019.4" cy="262.0" r="1.19" style="--o:0.4;animation-delay:1.11s"/><circle class="star-near tw-a" cx="684.3" cy="9.7" r="0.66" style="--o:0.51;animation-delay:1.48s"/><circle class="star-near tw-b" cx="1446.3" cy="545.6" r="1.27" style="--o:0.41;animation-delay:1.85s"/><circle class="star-near tw-c" cx="237.0" cy="127.4" r="0.85" style="--o:0.52;animation-delay:2.22s"/><circle class="star-near tw-d" cx="1273.8" cy="860.7" r="1.32" style="--o:0.29;animation-delay:2.59s"/><circle class="star-near tw-a" cx="399.2" cy="102.8" r="1.22" style="--o:0.51;animation-delay:2.96s"/><circle class="star-near tw-b" cx="650.2" cy="620.7" r="0.72" style="--o:0.53;animation-delay:3.33s"/><circle class="star-near tw-c" cx="1383.4" cy="976.2" r="1.25" style="--o:0.51;animation-delay:3.7s"/><circle class="star-near tw-d" cx="39.7" cy="736.6" r="0.87" style="--o:0.53;animation-delay:4.07s"/><circle class="star-near tw-a" cx="1283.6" cy="864.1" r="1.25" style="--o:0.31;animation-delay:4.44s"/><circle class="star-near tw-b" cx="1259.8" cy="108.1" r="1.3" style="--o:0.5;animation-delay:4.81s"/><circle class="star-near tw-c" cx="355.9" cy="816.6" r="0.97" style="--o:0.32;animation-delay:5.18s"/><circle class="star-near tw-d" cx="1272.6" cy="227.6" r="0.62" style="--o:0.28;animation-delay:5.55s"/><circle class="star-near tw-a" cx="525.2" cy="864.4" r="1.37" style="--o:0.31;animation-delay:5.92s"/><circle class="star-near tw-b" cx="1026.4" cy="399.7" r="1.38" style="--o:0.4;animation-delay:0.29s"/><circle class="star-near tw-c" cx="1502.8" cy="115.3" r="1.38" style="--o:0.28;animation-delay:0.66s"/><circle class="star-near tw-d" cx="1540.1" cy="265.5" r="0.69" style="--o:0.36;animation-delay:1.03s"/><circle class="star-near tw-a" cx="1165.7" cy="313.7" r="1.08" style="--o:0.39;animation-delay:1.4s"/><circle class="star-near tw-b" cx="616.3" cy="576.6" r="0.8" style="--o:0.45;animation-delay:1.77s"/><circle class="star-near tw-c" cx="2.7" cy="925.6" r="1.03" style="--o:0.46;animation-delay:2.14s"/><circle class="star-near tw-d" cx="1187.1" cy="670.6" r="0.89" style="--o:0.24;animation-delay:2.51s"/><circle class="star-near tw-a" cx="1062.8" cy="330.2" r="0.85" style="--o:0.5;animation-delay:2.88s"/><circle class="star-near tw-b" cx="1151.6" cy="300.3" r="0.85" style="--o:0.35;animation-delay:3.25s"/><circle class="star-near tw-c" cx="643.8" cy="295.7" r="0.7" style="--o:0.36;animation-delay:3.62s"/><circle class="star-near tw-d" cx="1504.6" cy="677.3" r="1.32" style="--o:0.42;animation-delay:3.99s"/><circle class="star-near tw-a" cx="481.5" cy="547.9" r="0.6" style="--o:0.31;animation-delay:4.36s"/><circle class="star-near tw-b" cx="687.8" cy="580.0" r="1.12" style="--o:0.37;animation-delay:4.73s"/><circle class="star-near tw-c" cx="707.5" cy="213.7" r="0.98" style="--o:0.52;animation-delay:5.1s"/><circle class="star-near tw-d" cx="1273.6" cy="169.7" r="0.67" style="--o:0.39;animation-delay:5.47s"/><circle class="star-near tw-a" cx="1012.7" cy="335.2" r="1.25" style="--o:0.47;animation-delay:5.84s"/><circle class="star-near tw-b" cx="1076.5" cy="224.6" r="0.76" style="--o:0.23;animation-delay:0.21s"/><circle class="star-near tw-c" cx="391.7" cy="475.1" r="1.28" style="--o:0.24;animation-delay:0.58s"/><circle class="star-near tw-d" cx="663.1" cy="629.8" r="0.76" style="--o:0.45;animation-delay:0.95s"/><circle class="star-near tw-a" cx="791.0" cy="244.0" r="1.12" style="--o:0.22;animation-delay:1.32s"/><circle class="star-near tw-b" cx="1201.5" cy="770.0" r="0.69" style="--o:0.36;animation-delay:1.69s"/><circle class="star-near tw-c" cx="281.4" cy="958.0" r="1.01" style="--o:0.24;animation-delay:2.06s"/><circle class="star-near tw-d" cx="398.7" cy="848.3" r="0.97" style="--o:0.48;animation-delay:2.43s"/><circle class="star-near tw-a" cx="1068.1" cy="987.9" r="1.08" style="--o:0.53;animation-delay:2.8s"/><circle class="star-near tw-b" cx="1426.3" cy="612.7" r="1.18" style="--o:0.39;animation-delay:3.17s"/><circle class="star-near tw-c" cx="1328.9" cy="547.9" r="1.32" style="--o:0.47;animation-delay:3.54s"/><circle class="star-near tw-d" cx="759.5" cy="259.2" r="0.8" style="--o:0.43;animation-delay:3.91s"/><circle class="star-near tw-a" cx="1225.3" cy="521.3" r="1.1" style="--o:0.31;animation-delay:4.28s"/><circle class="star-near tw-b" cx="124.0" cy="285.7" r="0.82" style="--o:0.33;animation-delay:4.65s"/><circle class="star-near tw-c" cx="864.2" cy="138.4" r="0.79" style="--o:0.45;animation-delay:5.02s"/><circle class="star-near tw-d" cx="1130.3" cy="64.2" r="0.93" style="--o:0.4;animation-delay:5.39s"/><circle class="star-near tw-a" cx="665.2" cy="206.8" r="0.94" style="--o:0.52;animation-delay:5.76s"/><circle class="star-near tw-b" cx="934.5" cy="695.5" r="1.29" style="--o:0.47;animation-delay:0.13s"/><circle class="star-near tw-c" cx="608.6" cy="5.9" r="0.88" style="--o:0.47;animation-delay:0.5s"/><circle class="star-near tw-d" cx="1365.5" cy="953.4" r="0.94" style="--o:0.47;animation-delay:0.87s"/><circle class="star-near tw-a" cx="873.8" cy="603.3" r="0.78" style="--o:0.29;animation-delay:1.24s"/><circle class="star-near tw-b" cx="697.3" cy="29.0" r="0.87" style="--o:0.44;animation-delay:1.61s"/><circle class="star-near tw-c" cx="646.9" cy="165.0" r="0.97" style="--o:0.26;animation-delay:1.98s"/></g>
+  </g>
+</svg></div>
+
+<div class="orbit-stage"><svg viewBox="0 0 1600 1000">
+<defs>
+  <radialGradient id="planetHalo" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#d8b45a" stop-opacity=".32"/>
+    <stop offset="38%" stop-color="#8fb8ff" stop-opacity=".12"/>
+    <stop offset="100%" stop-color="#8fb8ff" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="ringLit" x1="18%" y1="12%" x2="86%" y2="90%">
+    <stop offset="0%" stop-color="#fdf3d6"/>
+    <stop offset="30%" stop-color="#d8b45a"/>
+    <stop offset="58%" stop-color="#8a6a38"/>
+    <stop offset="82%" stop-color="#3c2f22"/>
+    <stop offset="100%" stop-color="#150f0a"/>
+  </linearGradient>
+  <radialGradient id="ringShadow" cx="68%" cy="72%" r="55%">
+    <stop offset="0%" stop-color="#000" stop-opacity=".55"/>
+    <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="stoneGradA" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#fbeecb"/>
+    <stop offset="45%" stop-color="#e0b768"/>
+    <stop offset="100%" stop-color="#7c5c31"/>
+  </linearGradient>
+  <linearGradient id="stoneGradB" x1="0%" y1="0%" x2="0%" y2="100%">
+    <stop offset="0%" stop-color="#e9dcc0"/>
+    <stop offset="45%" stop-color="#b9986a"/>
+    <stop offset="100%" stop-color="#5f4a30"/>
+  </linearGradient>
+  <filter id="glyphCrisp" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation=".4"/></filter>
+  <filter id="glyphGlowSoft" x="-140%" y="-140%" width="380%" height="380%"><feGaussianBlur stdDeviation="6"/></filter>
+  <filter id="glyphGlowWide" x="-220%" y="-220%" width="540%" height="540%"><feGaussianBlur stdDeviation="16"/></filter>
+  <filter id="ringRimBlur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="3.2"/></filter>
+  <filter id="ringHaloBlur" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="22"/></filter>
+  <clipPath id="ringClip">
+    <path fill-rule="evenodd" d="M 0,-120 A120,120 0 1,1 0,120 A120,120 0 1,1 0,-120
+                                 M 0,-64 A64,64 0 1,0 0,64 A64,64 0 1,0 0,-64"/>
+  </clipPath>
+  <filter id="grainFilter" x="0" y="0" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" result="noise"/>
+    <feColorMatrix in="noise" type="saturate" values="0" result="mono"/>
+    <feComponentTransfer in="mono">
+      <feFuncR type="linear" slope="1.6" intercept="-0.25"/>
+      <feFuncG type="linear" slope="1.6" intercept="-0.25"/>
+      <feFuncB type="linear" slope="1.6" intercept="-0.25"/>
+    </feComponentTransfer>
+  </filter>
+</defs>
+
+<!-- ===== orbit guides (barely visible) — offset circles: planet sits off-centre so
+     each orbit's far arc genuinely passes close behind the ring disc ===== -->
+<g transform="translate(800,460) rotate(-14)"><circle class="orbit-path" cx="0" cy="102.5" r="197.5"/></g>
+<g transform="translate(800,460) rotate(11)"><circle class="orbit-path" cx="0" cy="187.5" r="272.5"/></g>
+
+<!-- ===== orbit A — behind copy: renders BEHIND the planet in doc order, so it is
+     genuinely occluded by the opaque ring while it crosses the far arc. Scaled
+     .85 / capped at .6 opacity for the "farther away" read. Same path + timing
+     as the front copy below, so the two are always co-located. ===== -->
+<g transform="translate(800,460) rotate(-14)">
+  <g class="glyph conj-glow" id="orbitA-behind" opacity="0">
+    <animate attributeName="opacity" dur="20s" repeatCount="indefinite"
+      keyTimes="0.00000;0.61368;0.61868;0.68019;0.68519;1.00000" values="0;0;0.6;0.6;0;0"/>
+    <animateMotion dur="20s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M 189.623,47.278 A 197.5,197.5 0 1,1 -189.623,157.722 A 197.5,197.5 0 1,1 189.623,47.278"/>
+    <g transform="scale(.85)">
+      <g>
+        <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+          keyTimes="0.00000;0.13750;0.16089;0.18427;0.20766;0.23105;0.25444;0.27782;0.30121;0.32460;0.34798;0.37137;0.39476;0.41815;0.44153;0.46492;0.48831;0.51169;0.53508;0.55847;0.58185;0.60524;0.62863;0.65202;0.67540;0.69879;0.72218;0.74556;0.76895;0.79234;0.81573;0.83911;0.86250;1.00000"
+          values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+          dur="10s" repeatCount="indefinite"/>
+        <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#e0b768">4</text>
+        <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#f3dfa8">4</text>
+        <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="url(#stoneGradA)">4</text>
+      </g>
+    </g>
+  </g>
+</g>
+
+<!-- ===== orbit B — behind copy, same scheme, 40s period ===== -->
+<g transform="translate(800,460) rotate(11)">
+  <g class="glyph conj-glow" id="orbitB-behind" opacity="0">
+    <animate attributeName="opacity" dur="40s" repeatCount="indefinite"
+      keyTimes="0.00000;0.27622;0.27872;0.34246;0.34496;1.00000" values="0;0;0.6;0.6;0;0"/>
+    <animateMotion dur="40s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.03438;0.06442;0.09446;0.12450;0.15454;0.18458;0.21462;0.24466;0.27470;0.30474;0.33478;0.36482;0.39486;0.42490;0.45494;0.48498;0.51502;0.54506;0.57510;0.60514;0.63518;0.66522;0.69526;0.72530;0.75534;0.78538;0.81542;0.84546;0.87550;0.90554;0.93558;0.96562;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M -232.375,45.169 A 272.5,272.5 0 1,1 232.375,329.831 A 272.5,272.5 0 1,1 -232.375,45.169"/>
+    <g transform="scale(.85)">
+      <g>
+        <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+          keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+          values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+          dur="20s" repeatCount="indefinite"/>
+        <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#b9986a">4</text>
+        <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#dcc79a">4</text>
+        <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+              font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="url(#stoneGradB)">4</text>
+      </g>
+    </g>
+  </g>
+</g>
+
+<!-- ===== the planet — a ringed "0" ===== -->
+<g transform="translate(800,460)">
+  <circle class="ring-halo" r="205" fill="url(#planetHalo)" filter="url(#ringHaloBlur)"/>
+  <g class="ring-core">
+    <path d="M 0,-120 A120,120 0 1,1 0,120 A120,120 0 1,1 0,-120
+             M 0,-64 A64,64 0 1,0 0,64 A64,64 0 1,0 0,-64"
+          fill-rule="evenodd" fill="url(#ringLit)"/>
+    <path d="M 0,-120 A120,120 0 1,1 0,120 A120,120 0 1,1 0,-120
+             M 0,-64 A64,64 0 1,0 0,64 A64,64 0 1,0 0,-64"
+          fill-rule="evenodd" fill="url(#ringShadow)" style="mix-blend-mode:multiply"/>
+    <g clip-path="url(#ringClip)" opacity=".5">
+      <circle r="76" fill="none" stroke="#fdf3d6" stroke-width="1" opacity=".18"/>
+      <circle r="88" fill="none" stroke="#150f0a" stroke-width="1.5" opacity=".22"/>
+      <circle r="100" fill="none" stroke="#fdf3d6" stroke-width="1" opacity=".12"/>
+      <circle r="110" fill="none" stroke="#150f0a" stroke-width="2" opacity=".28"/>
+      <ellipse cx="-30" cy="-46" rx="46" ry="20" fill="#fff6df" opacity=".16"/>
+    </g>
+    <circle r="120" fill="none" stroke="#fde9b8" stroke-width="1.4" opacity=".5" filter="url(#ringRimBlur)"/>
+    <circle r="64" fill="none" stroke="#0a0710" stroke-width="2" opacity=".6" filter="url(#ringRimBlur)"/>
+  </g>
+</g>
+
+<!-- ===== orbit A — front copy: renders AFTER the planet (always on top), full
+     scale/opacity, visible on the near arc. Inner, 20s, tilt -14deg, glyph starts
+     on the horizontal axis right of the planet. ===== -->
+<g transform="translate(800,460) rotate(-14)">
+  <g class="glyph conj-glow" id="orbitA-front" opacity="1">
+    <animate attributeName="opacity" dur="20s" repeatCount="indefinite"
+      keyTimes="0.00000;0.61368;0.61868;0.68019;0.68519;1.00000" values="1;1;0;0;1;1"/>
+    <animateMotion dur="20s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M 189.623,47.278 A 197.5,197.5 0 1,1 -189.623,157.722 A 197.5,197.5 0 1,1 189.623,47.278"/>
+    <g>
+      <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+        keyTimes="0.00000;0.13750;0.16089;0.18427;0.20766;0.23105;0.25444;0.27782;0.30121;0.32460;0.34798;0.37137;0.39476;0.41815;0.44153;0.46492;0.48831;0.51169;0.53508;0.55847;0.58185;0.60524;0.62863;0.65202;0.67540;0.69879;0.72218;0.74556;0.76895;0.79234;0.81573;0.83911;0.86250;1.00000"
+        values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+        dur="10s" repeatCount="indefinite"/>
+      <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#e0b768">4</text>
+      <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="#f3dfa8">4</text>
+      <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="66" fill="url(#stoneGradA)">4</text>
+    </g>
+  </g>
+</g>
+
+<!-- ===== orbit B — front copy. Outer, 40s, tilt +11deg, glyph starts on the
+     horizontal axis left of the planet. ===== -->
+<g transform="translate(800,460) rotate(11)">
+  <g class="glyph conj-glow" id="orbitB-front" opacity="1">
+    <animate attributeName="opacity" dur="40s" repeatCount="indefinite"
+      keyTimes="0.00000;0.27622;0.27872;0.34246;0.34496;1.00000" values="1;1;0;0;1;1"/>
+    <animateMotion dur="40s" repeatCount="indefinite" rotate="0" calcMode="linear"
+      keyTimes="0.00000;0.03438;0.06442;0.09446;0.12450;0.15454;0.18458;0.21462;0.24466;0.27470;0.30474;0.33478;0.36482;0.39486;0.42490;0.45494;0.48498;0.51502;0.54506;0.57510;0.60514;0.63518;0.66522;0.69526;0.72530;0.75534;0.78538;0.81542;0.84546;0.87550;0.90554;0.93558;0.96562;1.00000"
+      keyPoints="0.0000;0.0000;0.0003;0.0024;0.0078;0.0175;0.0325;0.0531;0.0797;0.1122;0.1505;0.1942;0.2427;0.2954;0.3514;0.4098;0.4698;0.5302;0.5902;0.6486;0.7046;0.7573;0.8058;0.8495;0.8878;0.9203;0.9469;0.9675;0.9825;0.9922;0.9976;0.9997;1.0000;1.0000"
+      path="M -232.375,45.169 A 272.5,272.5 0 1,1 232.375,329.831 A 272.5,272.5 0 1,1 -232.375,45.169"/>
+    <g>
+      <animateTransform attributeName="transform" type="rotate" calcMode="linear"
+        keyTimes="0.00000;0.06875;0.09657;0.12440;0.15222;0.18004;0.20786;0.23569;0.26351;0.29133;0.31915;0.34698;0.37480;0.40262;0.43044;0.45827;0.48609;0.51391;0.54173;0.56956;0.59738;0.62520;0.65302;0.68085;0.70867;0.73649;0.76431;0.79214;0.81996;0.84778;0.87560;0.90343;0.93125;1.00000"
+        values="0.00;0.00;0.12;0.88;2.81;6.31;11.69;19.11;28.68;40.39;54.19;69.91;87.38;106.34;126.50;147.54;169.12;190.88;212.46;233.50;253.66;272.62;290.09;305.81;319.61;331.32;340.89;348.31;353.69;357.19;359.12;359.88;360.00;360.00"
+        dur="20s" repeatCount="indefinite"/>
+      <text class="glyph-halo" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#b9986a">4</text>
+      <text class="glyph-mid" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="#dcc79a">4</text>
+      <text class="glyph-core" x="0" y="0" text-anchor="middle" dominant-baseline="central"
+            font-family="'Space Grotesk',sans-serif" font-weight="600" font-size="54" fill="url(#stoneGradB)">4</text>
+    </g>
+  </g>
+</g>
+
+</svg></div>
+
+<svg class="grain" viewBox="0 0 1600 1000" preserveAspectRatio="none">
+  <rect width="1600" height="1000" filter="url(#grainFilter)"/>
+</svg>
+
+<div class="vignette"></div>
+
+<div class="epilogue">
+  <p class="tagline">Not in this world&hellip;</p>
+  <a class="home" href="../v15/home.html">plot a course home &rarr;</a>
+</div>
+
+</body></html>

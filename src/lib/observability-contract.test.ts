@@ -8,8 +8,8 @@ const boundedRuntimeSources = [
   "../lib/app-error.ts",
   "../server/notification-worker.ts",
   "../server/document-worker.ts",
-  "../server/imap-ingestion.ts",
-  "../server/imap-receipt-worker.ts",
+  "../server/mail-in/imap-ingestion.ts",
+  "../server/mail-in/imap-receipt-worker.ts",
 ];
 
 describe("bounded runtime observability contract", () => {

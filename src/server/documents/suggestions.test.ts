@@ -63,3 +63,34 @@ describe("hostile document suggestion boundary", () => {
     });
   });
 });
+
+describe("real-world date formats (#308 review)", () => {
+  it("extracts day-first numeric dates as UK deployments write them", () => {
+    expect(proposalFromText("Renewal date: 04/09/2026", "policy.pdf").dates)
+      .toEqual(["2026-09-04"]);
+    expect(proposalFromText("Due 4/9/2026 and again 05.10.2026", "policy.pdf").dates)
+      .toEqual(["2026-09-04", "2026-10-05"]);
+  });
+
+  it("extracts written-month dates in both orders", () => {
+    expect(proposalFromText("MOT expires 4 September 2026", "mot.pdf").dates)
+      .toEqual(["2026-09-04"]);
+    expect(proposalFromText("Valid until Sep 4, 2026", "mot.pdf").dates)
+      .toEqual(["2026-09-04"]);
+    expect(proposalFromText("Service on 04 Sept 2026", "boiler.pdf").dates)
+      .toEqual(["2026-09-04"]);
+  });
+
+  it("rejects impossible calendar dates and keeps output bounded", () => {
+    expect(proposalFromText("Broken 32/13/2026 date", "x.pdf").dates).toEqual([]);
+    expect(proposalFromText("29/02/2025 is not a leap day", "x.pdf").dates).toEqual([]);
+    const many = Array.from({ length: 40 }, (_v, index) =>
+      `Due 0${(index % 8) + 1}/0${(index % 8) + 1}/202${index % 7}`).join(" ");
+    expect(proposalFromText(many, "x.pdf").dates.length).toBeLessThanOrEqual(12);
+  });
+
+  it("still extracts ISO dates and deduplicates across formats", () => {
+    expect(proposalFromText("2026-09-04 also written 04/09/2026", "x.pdf").dates)
+      .toEqual(["2026-09-04"]);
+  });
+});
