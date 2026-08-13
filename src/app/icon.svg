@@ -1,12 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="15" fill="#111229"/>
-  <path d="M14 28C17 15 29 10 41 14" fill="none" stroke="#22e7d3" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="14" cy="28" r="3.2" fill="#22e7d3"/>
-  <path d="M39 13C52 17 56 29 51 40" fill="none" stroke="#715cff" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="39" cy="13" r="3.2" fill="#715cff"/>
-  <path d="M51 40C44 52 29 55 19 47" fill="none" stroke="#ff4fa3" stroke-width="4" stroke-linecap="round"/>
-  <circle cx="51" cy="40" r="3.2" fill="#ff4fa3"/>
-  <path d="M21 32 32 22l11 10v14c0 2-2 4-4 4H25c-2 0-4-2-4-4V32Z" fill="#f7f4ff" stroke="#111229" stroke-width="3" stroke-linejoin="round"/>
-  <path d="m18.5 33 13.5-12 13.5 12" fill="none" stroke="#f7f4ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M29 50V40c0-2 1-3 3-3s3 1 3 3v10" fill="#ff4fa3"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="orbit-icon-title">
+  <title id="orbit-icon-title">Orbit</title>
+
+  <!-- The same three flat shapes as public/orbit-mark.svg — ring, planet,
+       plain centre — with no badge plate behind them: a plate would be a
+       fourth shape. Only the proportions change for the 16px tab strip: the
+       ring is thicker and the centre and planet are larger relative to the
+       ring, so all three survive as separate marks at a 4x reduction.
+
+       Colour is self-contained, as a favicon's must be. Unlike the in-app mark,
+       this one sits in the browser's tab strip, which does follow the OS scheme,
+       so the scheme queries below are worth having: they pick the exact ratified
+       per-surface trio. The defaults are the mark's scheme-agnostic values, so a
+       browser that reports no scheme for an SVG icon still gets a legible one. -->
+  <style>
+    :root {
+      --ring: #7b86a6;
+      --planet: #ac8129;
+      --centre: #7b86a6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --ring: #a7b0cc; --planet: #d8b45a; --centre: #ffe9c4; }
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --ring: #5d6a87; --planet: #b4842c; --centre: #1c2b4a; }
+    }
+  </style>
+
+  <circle cx="32" cy="32" r="21" fill="none" stroke="var(--ring)" stroke-width="5.5" />
+  <circle cx="32" cy="32" r="4.5" fill="var(--centre)" />
+  <!-- Same bearing as the full-dress mark, re-solved onto this ring radius. -->
+  <circle cx="50.2" cy="21.5" r="8.5" fill="var(--planet)" />
 </svg>
