@@ -1,6 +1,9 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
-Status: proposed (slices 1-4 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-5 implemented; the bootstrap flip itself — issue
+#295's own release decision to switch `install.sh`'s dispatch or
+`orbit-launcher`'s fetch target to the CLI path — has not happened). This is
+a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan
 changes; it is not meant to be a permanent record like `docs/adr/`.
@@ -454,6 +457,192 @@ facts.
   the persisted secret file's content while asserting the secret value
   itself never appears in the child process's stdout or stderr).
 
+## Slice 5 — full orchestration and explicit CLI entry points (this PR)
+
+**Scope.** `src/lib/install-orchestrator.ts`: `runInstall`, the single
+function that drives slices 1-4's pure modules plus this slice's own new
+pure modules through install.sh's exact main-flow sequencing
+(install.sh:1259-1556) against caller-injected adapters. Four supporting
+pure modules new to this slice:
+
+- `src/lib/image-resolution.ts`: `resolveImageIdentity`, mirroring
+  install.sh's inline digest/revision/version/banner resolution
+  (install.sh:1264-1310 — this sequence has no named bash function of its
+  own, unlike everything ported by slices 1-4).
+- `src/lib/deployment-assets.ts`: the `deployment_assets`/`deployment_scripts`
+  array literals and their directory/managed-path derivation
+  (install.sh:1313-1342), transcribed and extraction-parity-tested rather
+  than behaviourally ported (there is no decision logic here, just fixed
+  data).
+- `src/lib/deployment-profile.ts`: `isValidLocalModel`, `currentDeploymentProfile`
+  (install.sh:617-661), and `resolveNonInteractiveProfileSelection` — the
+  *only* branch of `resolve_installer_action`/`choose_deployment_profile`
+  this slice drives (see Non-goals).
+- `src/lib/health-wait.ts`: `waitForComponentHealth`, mirroring
+  `wait_for_component_health`'s outer wall-clock wait loop
+  (install.sh:1107-1123) against an injected `Clock` so it needs no real
+  sleeping in tests.
+- `src/lib/engine-event.ts`: the plain-mode `phase=... component=...
+  state=... reason=... action=... elapsed=Ns` line format and vocabulary
+  (docs/engine-events.md), ported from `installer-ui.sh`'s `installer_ui_emit`
+  (installer-ui.sh guarantee #1) — this is how `runInstall`'s `onEvent`
+  callback satisfies issue #295's own acceptance criterion ("Uses the #260
+  semantic-event vocabulary for all user-facing progress").
+
+This slice also ships the production adapters every earlier slice
+deliberately left as an interface with no implementation (see "Deferral
+accounting" below): `src/lib/install-docker-adapter.ts`,
+`src/lib/install-curl-adapter.ts`, and `src/lib/install-script-adapters.ts`.
+Every adapter method spawns a fixed argv array via `spawnSync`/`spawn` —
+never a shell string — mirroring issue #296's own
+`createDockerCompose*Adapter` convention.
+
+Finally, `src/cli/orbit.ts` gains two explicit commands: `orbit install --dir
+<deployment>` and `orbit update --dir <deployment>`, wiring the real
+adapters and `runInstall` together, gathering and validating
+`ORBIT_REPOSITORY`/`ORBIT_REGISTRY`/`ORBIT_CHANNEL`/`COMPOSE_PROJECT_NAME`/
+`ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS`/`ORBIT_INSTALLER_POLL_INTERVAL_SECONDS`
+from the environment exactly as install.sh's own top-of-script checks do
+(install.sh:13-20,123-145), and printing the `engine-event.ts`-formatted
+event stream plus install.sh's own failure/guidance text to stdout/stderr.
+Unlike `check`, which defaults an omitted `--dir` to the current directory,
+`install`/`update` refuse outright without one — see Flags.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 1 / install.sh): 19 (`verify_database_password_preserved` — deferred by
+slice 2, now ported as `verifyDatabasePasswordPreserved` in
+install-orchestrator.ts, driven against `InstallTransaction.originalDir` and
+the second `verifyDatabaseVolumeSafety` call site together, exactly the
+combination slice 2 said this required), 21 (install/update target-action
+guard), 23 (`current_deployment_profile`), 24 (non-interactive configuration
+guidance — now actually surfaced to the caller; see Flags for the bug this
+fixed), 25-29 (OIDC discovery and configuration migration, now driven by
+shipped adapters instead of only a parity test's local reference adapter),
+30-32 (guided configuration, likewise), 33 (bounded health probes — Node's
+own `spawnSync` timeout, not GNU `timeout`; see Flags), 34 (embedded
+`app_readiness_probe` JS, byte-parity-tested), 35 (`wait_for_component_health`'s
+outer wait loop), 36 (per-profile service-image skip), 37 (`compose down`
+only on a failed fresh install, never a failed update), 38 (liveness-probe
+disambiguation), 40 (docker/curl availability — GNU `timeout` dropped, see
+Flags), 41-44 (image identity resolution), 45 (fixed asset allowlist +
+`bash -n` syntax check — see Flags for a real bug this slice found and
+fixed), 46-51 (transaction preflight/backup/TOCTOU-recheck, reused unchanged
+from slice 1 via `InstallTransaction`), 50 (preflight+migrate before any
+asset is installed, both call sites' `configuration_migration_completed`-
+guarded sequencing — the one piece slice 3 explicitly deferred to this
+slice), 52-54 (atomic staged writes, reused from slice 1), 55-56 (Compose
+config validation gating commit; commit as the sole rollback authority,
+service startup outside the file transaction's scope).
+
+**Non-goals for slice 5**: 20/39 (the `ai`/`full` profile's separate,
+explicitly-confirmed model-download step) — this CLI never collects a
+requested-model-to-pull value at all (`context` has no such field), so
+`prepare_service_images`'s model-pull branch is simply never reached; not a
+narrowed guarantee (nothing *incorrectly* downloads a model), but a real
+capability gap relative to install.sh's interactive path, tracked here for
+visibility. 22 (the `repair` action) is not wired into this CLI at all —
+`InstallOrchestratorContext.requestedAction` only accepts `"install"` and
+`"update"`; issue #261's repair execution work is a separate track per the
+top-level plan's own citation of it. The interactive profile-selection
+wizard (`choose_deployment_profile`) and a real, answer-collecting
+`GuidedConfigurationAdapter.confirmApply`/`MachinePromptAnswerProvider`
+surface remain unimplemented from the CLI's side: `src/cli/orbit.ts` always
+passes `hasControllingTerminal: false` and an adapter whose `answer()`
+throws (documented as unreachable, since guided configuration self-skips
+entirely and `prepareConfiguration`'s guided-fallback branch is likewise
+never taken when there is no controlling terminal) — collecting real answer
+values from CLI flags/environment/a future interactive UI, and distinguishing
+a declined review from an input-channel failure again (slice 4's own
+`confirmApply` collapsing, still unresolved), are deferred beyond this
+5-slice plan entirely. The bootstrap flip itself — switching `install.sh`'s
+dispatch or `orbit-launcher`'s fetch target to this CLI path — is
+unattempted here, per the top-level plan's own explicit release-decision
+gating on the full Phase 1 acceptance harness passing against the CLI entry
+point.
+
+**Testing and parity strategy.**
+
+- **Unit tests** for each new pure module (`deployment-assets.test.ts`,
+  `deployment-profile.parity.test.ts`, `engine-event.test.ts`,
+  `health-wait.test.ts`, `image-resolution.test.ts`) — extraction parity for
+  the two modules with a direct bash counterpart to awk-extract
+  (`deployment-assets.ts`'s array literals, `deployment-profile.ts`'s
+  `is_valid_local_model`/`current_deployment_profile`), byte-parity against
+  `docs/engine-events.md`'s own vocabulary lists for `engine-event.ts`, and
+  fixture/fake-clock unit coverage for the two with no bash counterpart to
+  extract (`image-resolution.ts`'s inline resolution sequence,
+  `health-wait.ts`'s wait loop).
+- **Shipped-adapter argv coverage**
+  (`install-docker-adapter.docker-adapter.test.ts`,
+  `install-curl-adapter.test.ts`): a fake `docker`/`curl` binary (a bash
+  script, not Node — `docker compose --env-file <path>` collides with
+  Node 20.6+'s own `--env-file` CLI-flag interception, so the fake must be
+  bash) put first on `PATH` logs every invocation's exact argv, asserted
+  against install.sh's own cited call sites for every method — including
+  `install-docker-adapter.ts`'s reuse of slice 2's own
+  `VolumeOwnershipAdapter`/`DatabaseVolumeSafetyAdapter` argv shapes, so the
+  now-shipped adapter is checked against the exact interface slice 2's
+  parity test already proved correct.
+- **Shipped-adapter byte parity**
+  (`install-docker-adapter.parity.test.ts`): the three embedded Node source
+  strings this adapter ships (`app_readiness_probe`, `tika_readiness_probe`,
+  `oidc_discovery_parser`) are awk-extracted verbatim from the live
+  install.sh and compared byte-for-byte — these are the exact bytes the
+  resolved Orbit image's own container runs, so a literal byte-compare is
+  the correct strategy rather than a behavioural comparison.
+  `deployment-assets.test.ts` uses the same awk-extraction technique for the
+  `deployment_assets`/`deployment_scripts` array literals.
+- **Shipped-adapter whole-script coverage**
+  (`install-script-adapters.test.ts`): unlike the docker/curl adapters
+  above (PATH-shimmed fakes), `configuration.sh` and `configure.sh` already
+  have real, independently-invocable entry points, so this test spawns the
+  *real, unmodified* scripts directly through the shipped adapters — not a
+  parity test's own local, unshipped reference adapter — including a real
+  `ORBIT_CONFIGURE_PROMPTS=machine` exchange for the guided-install path,
+  proving the shipped `runMachinePromptSession` driving loop actually
+  completes a live, multi-round subprocess exchange correctly, not just a
+  hand-rolled stub. A real (not fake) `docker build --target vapid-generator`
+  fixture image lets `configure.sh`'s own VAPID-key generation step run
+  without a registry pull or `git rev-parse`.
+- **Orchestrator driven-flow coverage**
+  (`install-orchestrator.test.ts`): install.sh's main flow has no
+  standalone entry point at all (it *is* the whole script), so there is
+  nothing to awk-extract or spawn for `runInstall` itself the way every
+  other parity test in this port works — this suite instead proves
+  `runInstall` *sequences and wires* slices 1-4's already-proven pure
+  modules correctly, against fully synchronous/immediate fake adapters (a
+  fake `Clock` drives `health-wait.ts` deterministically, matching
+  `health-wait.test.ts`'s own pattern — no real sleeping or subprocess I/O
+  anywhere in this suite): a full success path for both a pre-provisioned
+  fresh install and an update against a recognized existing deployment, a
+  full guided-install success path with a controlling terminal, and one
+  test per major fail-closed short-circuit (target/action guards, host-tool
+  availability, database-volume-safety wiring — including that a genuine
+  adapter bug propagates as a rejected promise rather than being swallowed
+  into a graceful failure — image identity, asset fetch/syntax-check,
+  guided-configuration cancellation/failure, non-interactive configuration
+  guidance, OIDC discovery, transactional rollback-on-failure and
+  no-rollback-after-commit, service-start teardown-on-fresh-install-only,
+  and health-probe timeout/liveness-disambiguation). One test directly
+  proves the Compose-project-name live-reassignment fix (see Flags): an
+  update against a target whose fallback basename differs from a
+  pre-existing volume's own proven Compose project label ends up issuing
+  every `compose pull`/`compose up` call with the *discovered* name, not the
+  stale fallback the adapter was originally constructed with.
+- **CLI wiring coverage** (`src/cli/orbit.install.test.ts`): spawns the real
+  `orbit install`/`orbit update` commands as a subprocess (the same
+  `node <tsx> src/cli/orbit.ts <command>` technique
+  `config-contract.parity.test.ts` already established for `check`), with an
+  explicit `timeout` on every spawn. This suite does not re-prove
+  `install-orchestrator.ts`'s own logic or any single adapter's argv shape
+  (already covered above) — only that the CLI layer itself is wired
+  correctly: `--dir` is required (refuses without it, unlike `check`),
+  every environment variable is validated with install.sh's own exact
+  messages, an absent target directory is created, and a real `runInstall()`
+  actually runs end-to-end as a subprocess against a fake `docker` on `PATH`,
+  observable via documented exit codes and the plain-mode event stream on
+  stdout.
+
 ## Flags (bash characterized, not changed)
 
 ### Slice 1
@@ -605,3 +794,223 @@ facts.
   `print_noninteractive_configuration_guidance`'s ported logic during this
   port; all four are confirmed byte-for-byte against the extracted,
   unmodified install.sh source.
+
+### Slice 5
+
+**Deferral accounting** (every "no production adapter ships" / "reasonable
+template, not exported" note from slices 2-4, resolved by name):
+
+- Slice 2's `database-volume-safety.ts` docker adapters
+  (`VolumeOwnershipAdapter`/`DatabaseVolumeSafetyAdapter`): shipped as part
+  of `install-docker-adapter.ts`, using the exact argv shapes documented in
+  `database-volume-safety.ts`'s own method comments —
+  `install-docker-adapter.docker-adapter.test.ts` asserts this directly
+  against slice 2's own documented format strings.
+- Slice 2's `verify_database_password_preserved` (guarantee #19): shipped as
+  `verifyDatabasePasswordPreserved` in `install-orchestrator.ts`, driven
+  against `InstallTransaction.originalDir` and the second
+  `verifyDatabaseVolumeSafety` call site together — exactly the combination
+  slice 2 said this guarantee needed and which neither module alone could
+  provide.
+- Slice 3's `OidcDiscoveryFetchAdapter` (curl half): shipped as
+  `createInstallOidcFetchAdapter` in `install-curl-adapter.ts`.
+- Slice 3's `OidcDiscoverySandboxAdapter` (sandboxed-container half):
+  shipped as `validateOidcDiscoverySandbox` in `install-docker-adapter.ts`.
+  Its second, separate open of `documentPath` deliberately does not add its
+  own `O_NOFOLLOW` re-check on top of `oidc-discovery.ts`'s own
+  `verifyDiscoveryFileSafety` — per that module's own doc, this mirrors
+  install.sh's own two-open sequence exactly, a documented boundary, not an
+  oversight.
+- Slice 3's `ConfigurationScriptAdapter`: shipped as
+  `createInstallConfigurationScriptAdapter` in `install-script-adapters.ts`,
+  driven entirely through `configuration-migration.ts`'s own
+  `buildPreflightArgv`/`buildMigrateArgv` — `install-script-adapters.test.ts`
+  spawns the real, unmodified `configuration.sh` through it.
+- Slice 3's own deferred sequencing non-goal ("does not encode install.sh's
+  own sequencing of *when* preflight/migration run relative to asset
+  staging"): now owned by `install-orchestrator.ts`, which reproduces
+  install.sh's exact `configuration_migration_completed`-guarded
+  two-call-site logic (install.sh:1443-1448/1484-1487) — the first call site
+  runs only for an *existing* `.env-orbit`, before any fetched asset is
+  moved into place; the second runs only if the first never did.
+- Slice 4's `GuidedConfigurationAdapter`: shipped as
+  `createInstallGuidedConfigurationAdapter` in `install-script-adapters.ts`.
+  `runInit`/`runSetOidcSecret` drive a real `ORBIT_CONFIGURE_PROMPTS=machine`
+  exchange via the shipped `runMachinePromptSession`, proven against the
+  real, unmodified `configure.sh` in `install-script-adapters.test.ts` —
+  not just the parity test's own local, unshipped reference adapter.
+- Slice 4's "where `configureScript` points" non-goal: resolved by
+  `install-orchestrator.ts` — the staging directory's own copy
+  (`scratchDir/scripts/configure.sh`) for `stageGuidedInstallConfiguration`,
+  the target's own just-installed tree
+  (`<targetDir>/scripts/configure.sh`) for `prepareConfiguration`, exactly
+  as slice 4's own module comment anticipated.
+- Slice 4's "sourcing real answer values for a `MachinePromptAnswerProvider`",
+  "implementing `confirmApply` as an actual CLI prompt", and "the
+  interactive profile-selection wizard" (`choose_deployment_profile`):
+  **not** resolved by this slice — see Non-goals above. `src/cli/orbit.ts`
+  hardcodes `hasControllingTerminal: false` and an answer provider that
+  throws if ever reached (confirmed unreachable by
+  `install-orchestrator.test.ts`'s own guided-configuration tests, which
+  only exercise the machine-prompt path with `hasControllingTerminal: true`
+  supplied directly to `runInstall`, not through the CLI). A future slice
+  beyond this 5-slice plan owns adding a real interactive/CLI-flag answer
+  surface.
+- Slice 4's `confirmApply` two-outcomes-collapsed-into-one simplification:
+  unchanged and still unresolved, for the same reason — the shipped
+  adapter's `confirmApply` always resolves `"apply"` and is unreachable from
+  this CLI today, so there is nothing yet to distinguish "operator declined"
+  from "input channel failed" for.
+
+**Real discrepancies found and fixed during this slice** (not process/tooling
+notes, unlike most items above — see the git history for the exact diffs):
+
+- **Missing scratch-directory `mkdir -p` before nested asset fetches.** The
+  inherited `install-orchestrator.ts` fetched every `deployment_assets`
+  entry into `scratchDir` without first creating the asset's own parent
+  directory the way install.sh does unconditionally before every fetch
+  (install.sh:1406-1407, guarantee #45). Since `config/tika-config.xml` and
+  every `scripts/*` entry live in a subdirectory that does not otherwise
+  exist yet, a real `curl --output` into that path fails immediately with
+  exit 23 (confirmed by direct reproduction against the real `curl`
+  binary) — every real install/update run would have failed at the very
+  first nested asset, before ever reaching `docker`. Fixed by adding the
+  same unconditional per-asset `mkdirSync(dirname(destination), {recursive:
+  true})` install.sh itself performs; `install-orchestrator.test.ts`'s own
+  success-path tests use a fake `fetchAsset` that (like the real adapter)
+  never creates its own destination directory, so they now serve as
+  regression coverage for this fix.
+- **Stale Compose project name in the shipped docker adapter.**
+  `createInstallDockerAdapter` captured `composeProjectName` once at
+  construction time; install.sh's own `compose()` helper
+  (install.sh:258-260) instead reads the bash global `$compose_project_name`
+  fresh on every call, so a later reassignment
+  (`verify_database_volume_safety`'s own `compose_project_name =
+  $discovered_project`, install.sh:573, when a pre-existing volume's proven
+  owner differs from the name a fallback derivation would have produced) is
+  observed by every subsequent `compose` call in bash but would have been
+  silently ignored by the TS adapter, constructed before that resolution
+  could possibly be known. Fixed by making `composeProjectName` mutable
+  inside `createInstallDockerAdapter` and adding a
+  `setComposeProjectName(name)` method to `InstallDockerAdapter`;
+  `install-orchestrator.ts` calls it immediately after the first
+  `verifyDatabaseVolumeSafety` call resolves the final name and before any
+  `compose`-wrapped method is ever invoked (the ordering install.sh itself
+  guarantees, since `derive_compose_project_name` only ever runs once, at
+  the very top of `verify_database_volume_safety`, itself the first `docker`
+  call site in the whole script). `install-orchestrator.test.ts` and
+  `install-docker-adapter.docker-adapter.test.ts` both cover this directly.
+- **`ComposeProjectNameRefusal` uncaught inside `install-orchestrator.ts`'s
+  first `verifyDatabaseVolumeSafety` call.** `deriveComposeProjectName`
+  (called from inside `verifyDatabaseVolumeSafety`'s own first-call branch,
+  per slice 2's own design) throws `ComposeProjectNameRefusal` directly,
+  never wrapped in a `DatabaseVolumeSafetyRefusal` — a gap the inherited
+  orchestrator's original blanket `catch (error) { return fail(...,
+  (error as DatabaseVolumeSafetyRefusal).message) }` happened to paper over
+  by reading `.message` off *any* thrown value, refusal or not (see the next
+  item). Once that blanket catch was tightened, this became a real
+  unhandled-rejection risk: fixed by catching both refusal types at that one
+  call site, since bash's own `derive_compose_project_name` failing there is
+  exactly as fatal, at exactly the same phase, as any other
+  `verify_database_volume_safety` refusal.
+- **Overly broad `catch (error)` blocks that would have swallowed genuine
+  programming errors into graceful `{status:"failed"}` outcomes.** Four call
+  sites in the inherited `install-orchestrator.ts` caught *any* thrown value
+  from `validateTarget`/`verifyDatabaseVolumeSafety`/`InstallTransaction.begin`
+  and blindly cast it to the one documented refusal type before reading
+  `.message` — contradicting this module's own header comment ("Never
+  throws for an expected refusal ... only a genuine programming error
+  propagates"). A real bug in an injected adapter (a null dereference, for
+  example) would have been silently reported as an ordinary installer
+  failure instead of surfacing as the loud, distinguishable crash it should
+  be. Fixed with explicit `instanceof` checks that rethrow anything not a
+  documented refusal class; `install-orchestrator.test.ts` asserts a
+  simulated adapter bug now rejects the returned promise rather than
+  resolving to `"failed"`.
+- **Lost non-interactive configuration remediation guidance (guarantee
+  #24).** The inherited orchestrator computed `prepared.guidance` (the four
+  lines `noninteractiveConfigurationGuidance` produces) and then discarded
+  it — emitting one redundant `blocked` event per guidance line (with no
+  free-text field to actually carry the guidance itself; engine events are
+  fixed-vocabulary only, per `engine-event.ts`'s own module comment) instead
+  of surfacing the text anywhere the caller could print it, unlike
+  install.sh's own direct `printf ... >&2` calls. Fixed by adding an
+  optional `guidance?: string[]` field to `InstallOutcomeFailed`, threading
+  `prepared.guidance` through to it, and having `src/cli/orbit.ts` print
+  each line to stderr on a `"failed"` outcome — the same information
+  install.sh's own remediation text conveys, now actually reachable.
+  `install-orchestrator.test.ts` and `orbit.install.test.ts` both assert on
+  the surfaced guidance text.
+
+**Other flags (process/tooling notes and deliberate narrowings, not
+correctness bugs):**
+
+- **GNU `timeout` dropped from the host-tool preflight (guarantee #40's
+  `timeout` half).** `install-docker-adapter.ts`'s bounded health probes use
+  `spawnSync`'s own `timeout`/`killSignal` options rather than shelling out
+  to GNU `timeout` (install.sh's own `bounded_compose_probe`, guarantee
+  #33) — the probe is still force-killed within a bounded window, but the
+  two-stage TERM-then-KILL grace period install.sh's `--kill-after=1s` gives
+  a probe process is not independently reproduced, and this CLI's own host
+  preflight (`checkDockerAvailable`/`checkCurlAvailable`) never checks for a
+  `timeout` binary at all. A deliberate adapter-level implementation
+  difference (documented in `install-docker-adapter.ts`'s own header
+  comment since slice 5's first draft), not a new finding, restated here
+  for the plan doc's own completeness.
+- **`.orbit-install-scratch.*` has no `repair.sh` recognition.**
+  `install-orchestrator.ts` uses a second, separate scratch directory
+  (`.orbit-install-scratch.*`, cleaned up in a `finally` block) for asset
+  download/validation and guided-configuration staging, distinct from
+  `InstallTransaction`'s own `.orbit-install-staging.*` recovery area — a
+  deliberate two-directory design already flagged when this slice's own
+  modules were first drafted (see that module's header comment). A hard
+  `SIGKILL` during the scratch-directory phase (before the file transaction
+  begins) leaves that directory behind with no equivalent operator-facing
+  recognition: `scripts/repair.sh`'s `staging-evidence-present` finding
+  (issue #261) only knows about the `.orbit-install-staging.*` prefix.
+  Flagging for owner awareness — extending `repair.sh` to recognize both
+  prefixes, or unifying the two directories the way install.sh's own single
+  `staging_dir` does, is a reasonable follow-up but out of scope for this
+  slice.
+- **Image-identity progress events collapsed relative to install.sh's own
+  interstitial timing.** install.sh emits `identity image running
+  image-identity inspect` *between* resolving the digest and running the
+  banner-verification container (install.sh:1306), so a banner failure
+  still shows a `running` event before the eventual `failed` one.
+  `install-orchestrator.ts` instead emits `running` and `completed` back to
+  back only after `resolveImageIdentity` (which performs the banner check
+  internally) has already fully succeeded — a banner failure therefore
+  never reaches a `running` event at all in this port. Not a guarantee
+  violation (the fixed-vocabulary event stream's own guarantee is about
+  value validation, not exact interstitial timing), but a real, minor
+  divergence from install.sh's own event sequence; restructuring
+  `image-resolution.ts` to accept a progress callback would fix it at the
+  cost of the module's current from-fakes purity, judged not worth it for
+  this slice.
+- **Transaction-begin failures are always labeled phase `compose`.**
+  `InstallTransaction.begin()` failures (an extremely rare TOCTOU-shaped
+  race — a managed path became unsafe between `validateTarget` and here)
+  are reported via `fail("compose", "compose", ...)` regardless of what
+  install.sh's own `installer_ui_phase` would actually have been at the
+  equivalent point (`assets`, or `configuration` if guided-install staging
+  ran) — a simplification, not a rearchitecting of install.sh's own
+  context-dependent phase tracking at that one rare call site. The
+  resulting default reason/action (`configuration-failure`/`retry`) is
+  still a reasonable characterization of the failure; flagging the label
+  imprecision for owner visibility rather than reproducing install.sh's own
+  phase-state machine exactly for one rare path.
+- **20/39's model-pull-after-confirmation guarantee is never exercised, not
+  violated.** Since this CLI never collects a requested-model value, the
+  `ai`/`full` profile's separate confirmed-download branch
+  (`prepare_service_images`'s `model_pull_requested` check) is simply always
+  skipped — see Non-goals above.
+- **22 (the `repair` action) remains entirely unwired.** `orbit repair` is
+  not a recognized command; issue #261's repair execution work is a
+  separate track, unchanged by this slice.
+- No behavioral discrepancy was found in `deployment-assets.ts`,
+  `deployment-profile.ts`'s two extracted functions, `image-resolution.ts`'s
+  regex/sequencing, `health-wait.ts`'s wait loop, or `engine-event.ts`'s
+  vocabulary lists during this slice's audit of the inherited code — the
+  five items above (three real bugs, two swallowed-exception risks) were
+  all found in `install-orchestrator.ts` and `install-docker-adapter.ts`
+  specifically.
