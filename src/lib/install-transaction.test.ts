@@ -345,3 +345,18 @@ describe("interruption evidence, no dispose() ever called (mirrors a hard SIGKIL
     expect(existsSync(tx.stagingDir)).toBe(false);
   });
 });
+
+describe("commit marker (issue #383 finding 2, install.sh:1569-1582 parity)", () => {
+  it("writes a `committed` marker file into the staging directory at commit, and not before", () => {
+    const target = mkdtempSync(join(tmpdir(), "orbit-tx-marker-"));
+    try {
+      const tx = InstallTransaction.begin(target, []);
+      expect(existsSync(join(tx.stagingDir, "committed"))).toBe(false);
+      tx.commit();
+      expect(existsSync(join(tx.stagingDir, "committed"))).toBe(true);
+      tx.dispose();
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+});
