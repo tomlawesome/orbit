@@ -93,6 +93,50 @@ describe("waitForComponentHealth (install.sh:1107-1123, guarantee #35)", () => {
     expect(waitingCount).toBe(1);
   });
 
+  it("invokes onHealthy exactly once, immediately before returning true (install.sh:1112, issue #383 addon finding 4)", async () => {
+    const clock = fakeClock();
+    let attempts = 0;
+    let healthyCount = 0;
+    let waitingCount = 0;
+    const result = await waitForComponentHealth({
+      probe: () => {
+        attempts += 1;
+        return attempts >= 3;
+      },
+      timeoutSeconds: 10,
+      pollSeconds: 1,
+      clock,
+      onWaiting: () => {
+        waitingCount += 1;
+      },
+      onHealthy: () => {
+        healthyCount += 1;
+      },
+    });
+    expect(result).toBe(true);
+    expect(healthyCount).toBe(1);
+    // Before the fix: no hook existed at all, so a consumer could never
+    // distinguish "still polling" from "just became healthy" — only
+    // onWaiting fired, once per failed attempt.
+    expect(waitingCount).toBe(2);
+  });
+
+  it("never invokes onHealthy when the deadline passes without a successful probe", async () => {
+    const clock = fakeClock();
+    let healthyCount = 0;
+    const result = await waitForComponentHealth({
+      probe: () => false,
+      timeoutSeconds: 3,
+      pollSeconds: 9,
+      clock,
+      onHealthy: () => {
+        healthyCount += 1;
+      },
+    });
+    expect(result).toBe(false);
+    expect(healthyCount).toBe(0);
+  });
+
   it("supports an async probe", async () => {
     const clock = fakeClock();
     const result = await waitForComponentHealth({

@@ -180,6 +180,26 @@ describe("createBackupBundle (in-memory fake adapter, no process spawning)", () 
     expect(roundTripped.equals(originalDocumentsTar)).toBe(true);
   }, 30_000);
 
+  it("publishes the bundle at mode 0600 regardless of the ambient umask (issue #383 finding 5: backup.sh's `umask 077` was never ported)", () => {
+    const sandbox = newSandbox("orbit-create-bundle-mode-");
+    const backupDirectory = join(sandbox, "backups");
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const finalTarPath = join(backupDirectory, "orbit-20260813-000000.tar");
+    const adapter = new FakeAdapter({ documentsTarBuilder: () => emptyDocumentsTar(sandbox) });
+
+    // A permissive ambient umask, as a root/operator shell commonly has —
+    // before the fix, a plain `tar -cf` honoured this and the bundle
+    // (containing the unencrypted database.dump) landed at 0644.
+    const previousUmask = process.umask(0o022);
+    try {
+      createBackupBundle(backupDirectory, finalTarPath, KEK_A, adapter, "2026-08-13T00:00:00Z");
+    } finally {
+      process.umask(previousUmask);
+    }
+
+    expect(lstatSync(finalTarPath).mode & 0o777).toBe(0o600);
+  });
+
   it("restarts the app even when dumpDatabase throws mid-backup (EXIT-trap equivalent, backup.sh #23)", () => {
     const sandbox = newSandbox("orbit-create-bundle-dump-fails-");
     const backupDirectory = join(sandbox, "backups");

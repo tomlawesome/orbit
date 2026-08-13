@@ -36,6 +36,8 @@ export interface WaitForComponentHealthOptions {
   clock: Clock;
   /** Called once per unsuccessful probe attempt, before the next sleep — install.sh's own `waiting` status event. */
   onWaiting?: () => void;
+  /** Called once, immediately before returning `true` — install.sh's own `healthy` status event (install.sh:1112, guarantee #35), a documented part of the fixed engine-event vocabulary (docs/engine-events.md) that was never wired through this port (issue #383). */
+  onHealthy?: () => void;
 }
 
 /**
@@ -48,11 +50,14 @@ export interface WaitForComponentHealthOptions {
  * clamping the final sleep so it never overshoots the deadline.
  */
 export async function waitForComponentHealth(options: WaitForComponentHealthOptions): Promise<boolean> {
-  const { probe, timeoutSeconds, pollSeconds, clock, onWaiting } = options;
+  const { probe, timeoutSeconds, pollSeconds, clock, onWaiting, onHealthy } = options;
   const deadline = clock.nowSeconds() + timeoutSeconds;
 
   while (true) {
-    if (await probe()) return true;
+    if (await probe()) {
+      onHealthy?.();
+      return true;
+    }
     onWaiting?.();
     const remaining = deadline - clock.nowSeconds();
     if (remaining <= 0) return false;

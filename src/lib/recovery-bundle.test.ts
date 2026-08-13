@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -655,6 +656,62 @@ describe("document archive path allow-list (backup.sh #8-10)", () => {
     }
     expect(error).toBeInstanceOf(RecoveryBundleRefusal);
     expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
+  });
+
+  describe("hostile member names (issue #383 finding 4: tar -tvf column parsing must not truncate names containing a space)", () => {
+    /**
+     * Builds a real archive with a single member whose stored name is
+     * `hostileName`, using GNU tar's `--transform` to rename it at archive
+     * -creation time (no path on the real filesystem is ever created with
+     * that literal name, so this stays entirely inside the sandbox).
+     */
+    function buildArchiveWithHostileMemberName(hostileName: string): string {
+      const sourceDir = join(workDir, "hostile-source");
+      mkdirSync(sourceDir, { recursive: true });
+      writeFileSync(join(sourceDir, "f"), "x");
+      const tarPath = join(workDir, "hostile.tar");
+      const result = spawnSync("tar", ["-cf", tarPath, "--transform", `s@^f$@${hostileName}@`, "-C", sourceDir, "f"], { encoding: "utf8" });
+      if (result.status !== 0) throw new Error(`test setup: tar --transform failed: ${result.stderr}`);
+      return tarPath;
+    }
+
+    it("listTarEntriesVerbose reports the member's real, full name — never the tail after its last space", () => {
+      const hostileName = `pwn-file ./staging/${HASH}.bin`;
+      const tarPath = buildArchiveWithHostileMemberName(hostileName);
+
+      const entries = listTarEntriesVerbose(tarPath);
+
+      expect(entries).toHaveLength(1);
+      // Before the fix: name parsing took everything after the line's last
+      // space, so this reported `./staging/<hash>.bin` — a
+      // STAGING_PATH_PATTERN-matching name that was never the archive's
+      // actual member name.
+      expect(entries[0].name).toBe(hostileName);
+    });
+
+    it("validateDocumentArchiveEntries refuses a hostile member whose truncated tail would otherwise match the staging allow-list", () => {
+      const hostileName = `pwn-file ./staging/${HASH}.bin`;
+      const tarPath = buildArchiveWithHostileMemberName(hostileName);
+
+      const entries = listTarEntriesVerbose(tarPath);
+      let error: unknown;
+      try {
+        validateDocumentArchiveEntries(entries);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+      expect((error as RecoveryBundleRefusal).code).toBe("link-or-special-entry");
+    });
+
+    it("refuses a hostile member whose space-separated tail would otherwise match the objects allow-list", () => {
+      const hostileName = `pwn-file ./objects/${HASH.slice(0, 2)}/${HASH.slice(2, 4)}/${HASH}.bin`;
+      const tarPath = buildArchiveWithHostileMemberName(hostileName);
+
+      const entries = listTarEntriesVerbose(tarPath);
+      expect(entries[0].name).toBe(hostileName);
+      expect(() => validateDocumentArchiveEntries(entries)).toThrow(RecoveryBundleRefusal);
+    });
   });
 });
 
