@@ -37,6 +37,16 @@ const PLATFORM_KEYS = new Set([
   // alongside `orbit restore --yes` for unattended restore (guarantee #46).
   "ORBIT_RECOVERY_PROMPTS",
   "ORBIT_NONINTERACTIVE_RESTORE",
+  // orbit configure's own machine-prompt/scripted-guided-init toggles
+  // (issue #294, src/cli/orbit.ts / src/lib/configure-engine.ts), mirroring
+  // configure.sh's own identically-named, identically-scoped environment
+  // variables (configure.sh's guided_init dispatch): never written to
+  // .env-orbit, so out of the deployment configuration contract entirely,
+  // same reasoning as ORBIT_RECOVERY_PROMPTS above.
+  "ORBIT_CONFIGURE_PROMPTS",
+  "ORBIT_CONFIGURE_APP_URL",
+  "ORBIT_CONFIGURE_OIDC_ISSUER",
+  "ORBIT_CONFIGURE_OIDC_CLIENT_ID",
 ]);
 
 function sourceFiles(dir: string): string[] {
