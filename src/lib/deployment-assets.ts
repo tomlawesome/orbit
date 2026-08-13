@@ -10,7 +10,15 @@ import type { ManagedPath } from "./install-transaction";
 // "extraction fails loudly if renamed" discipline every parity test in this
 // port uses, rather than a behavioural bash-vs-TS comparison.
 
-/** install.sh:1313-1323's deployment_assets array, in the installer's own fetch order. */
+/**
+ * install.sh:1313-1325's deployment_assets array, in the installer's own
+ * fetch order. scripts/repair.sh and scripts/engine-check.sh were added by
+ * issue #383's shipping-gap fix: both are operator-facing host scripts
+ * meant to run directly against a deployed target (repair.sh's own header;
+ * engine-check.sh's header states it works "exactly like configure.sh/
+ * repair.sh"), so omitting them here left every deployed target without
+ * `bash scripts/repair.sh`/`bash scripts/engine-check.sh` ever working.
+ */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
   "docker-compose.mail.yml",
@@ -22,15 +30,19 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
+  "scripts/repair.sh",
+  "scripts/engine-check.sh",
 ];
 
-/** install.sh:1324-1330's deployment_scripts array — the subset that must pass `bash -n` before being sourced/executed (guarantee #45). */
+/** install.sh:1326-1334's deployment_scripts array — the subset that must pass `bash -n` before being sourced/executed (guarantee #45). */
 export const DEPLOYMENT_SCRIPTS: readonly string[] = [
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
   "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
+  "scripts/repair.sh",
+  "scripts/engine-check.sh",
 ];
 
 export const ENVIRONMENT_FILE = ".env-orbit";
