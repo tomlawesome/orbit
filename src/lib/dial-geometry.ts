@@ -1,6 +1,6 @@
 /**
  * Pure polar maths for the gravity-well dial (issue #326, spec: v19,
- * docs/design/v19/home.html). No DOM, no tokens, no React — every export
+ * design/v19/home.html). No DOM, no tokens, no React — every export
  * here is a plain function of numbers/strings so it can be unit tested in
  * isolation from rendering.
  *

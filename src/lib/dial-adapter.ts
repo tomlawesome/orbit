@@ -6,7 +6,7 @@
  * mirroring dial-geometry.ts's own boundary, so the mapping decisions are
  * unit-testable in isolation from rendering.
  *
- * Spec: docs/design/v19/home.html, docs/design/polish-register.md.
+ * Spec: design/v19/home.html, design/polish-register.md.
  */
 
 import type { DialItem, DialItemStatus, DialItemType } from "@/components/gravity-dial";
