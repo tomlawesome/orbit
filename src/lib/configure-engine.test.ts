@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -32,6 +32,22 @@ import {
 // Ported from scripts/configure.sh's write flows (issue #294, completing the
 // port begun for --check). Guarantee numbers below cite
 // docs/installer-guarantees.md's `configure.sh` section (items 1-33).
+
+/**
+ * Single O_NOFOLLOW descriptor for a test assertion that needs both a
+ * file's mode and its content — never a separate stat-then-readFile pair on
+ * the same path (CodeQL js/file-system-race), mirroring src/lib/
+ * restore-engine.ts's readFileNoFollow/regularFileSizeNoFollow discipline.
+ */
+function statAndReadNoFollow(path: string): { mode: number; content: string } {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(descriptor);
+    return { mode: stat.mode & 0o777, content: readFileSync(descriptor, "utf8") };
+  } finally {
+    closeSync(descriptor);
+  }
+}
 
 const EXAMPLE_CONTENT = `ORBIT_CONFIG_SCHEMA_VERSION=1
 
@@ -276,8 +292,9 @@ describe("ensureSecretFile", () => {
     const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`);
     expect(result.generated).toBe(true);
     const path = join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret");
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readFileSync(path, "utf8")).toMatch(/^[0-9a-f]{64}\n$/);
+    const { mode, content } = statAndReadNoFollow(path);
+    expect(mode).toBe(0o600);
+    expect(content).toMatch(/^[0-9a-f]{64}\n$/);
   });
 
   it("guarantee #15: preserves an existing valid secret byte-for-byte", () => {

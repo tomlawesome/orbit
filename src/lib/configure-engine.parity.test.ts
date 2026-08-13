@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -167,6 +167,30 @@ function normalizeVapidEnvLines(content: string): string {
 }
 
 /**
+ * Single O_NOFOLLOW descriptor for a mode+content snapshot — never a
+ * separate stat-then-readFile pair on the same path (CodeQL
+ * js/file-system-race), mirroring src/lib/restore-engine.ts's
+ * readFileNoFollow/regularFileSizeNoFollow discipline. Returns undefined
+ * for anything not a regular file (including "doesn't exist"), so callers
+ * can treat open-failure and non-regular-file uniformly.
+ */
+function statAndReadNoFollow(path: string): { mode: number; content: string } | undefined {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return undefined;
+  }
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) return undefined;
+    return { mode: stat.mode & 0o777, content: readFileSync(descriptor, "utf8") };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
  * Snapshots exactly the paths configure.sh's write flows own — .env-orbit
  * and .orbit-secrets/* — as relative-path -> {mode, content}. Deliberately
  * scoped rather than a whole-tree walk: both fixtures also carry
@@ -180,12 +204,11 @@ function snapshotConfigureOutputs(root: string): Record<string, { mode: number; 
   const snapshot: Record<string, { mode: number; content: string }> = {};
 
   const envPath = join(root, ENVIRONMENT_FILE_NAME);
-  try {
-    const stat = statSync(envPath);
-    snapshot[ENVIRONMENT_FILE_NAME] = { mode: stat.mode & 0o777, content: normalizeVapidEnvLines(readFileSync(envPath, "utf8")) };
-  } catch {
-    /* absent on both sides for scenarios that never create it */
+  const envSnapshot = statAndReadNoFollow(envPath);
+  if (envSnapshot) {
+    snapshot[ENVIRONMENT_FILE_NAME] = { mode: envSnapshot.mode, content: normalizeVapidEnvLines(envSnapshot.content) };
   }
+  /* absent on both sides for scenarios that never create it */
 
   const secretsDir = join(root, SECRETS_DIRECTORY_NAME);
   let entries: string[] = [];
@@ -198,10 +221,9 @@ function snapshotConfigureOutputs(root: string): Record<string, { mode: number; 
     if (name.startsWith(".installing") || name.startsWith(".vapid.installing") || name.includes("vapid")) continue;
     const relative = `${SECRETS_DIRECTORY_NAME}/${name}`;
     const full = join(secretsDir, name);
-    const stat = statSync(full);
-    if (!stat.isFile()) continue;
-    const content = readFileSync(full, "utf8");
-    snapshot[relative] = { mode: stat.mode & 0o777, content: normalizeGeneratedSecretContent(relative, content) };
+    const fileSnapshot = statAndReadNoFollow(full);
+    if (!fileSnapshot) continue;
+    snapshot[relative] = { mode: fileSnapshot.mode, content: normalizeGeneratedSecretContent(relative, fileSnapshot.content) };
   }
   return snapshot;
 }

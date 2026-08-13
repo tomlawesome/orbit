@@ -3,7 +3,6 @@ import {
   chmodSync,
   closeSync,
   constants,
-  existsSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -648,16 +647,24 @@ export type ConfigurePreflightOutcome =
  * comment). File-safety (regular, non-symlink, mode 600) is re-checked here
  * the same way src/cli/orbit.ts's commandCheck does: a single O_NOFOLLOW
  * descriptor so the safety check and the content read cannot be split by a
- * file swap.
+ * file swap. Deliberately not a separate existsSync-then-open pair (CodeQL
+ * js/file-system-race): "does the file exist" is answered by the same
+ * openSync call that reads it, dispatching on its own failure code —
+ * mirroring recovery-bundle.ts's readRegularFileNoFollow, whose own comment
+ * notes "a dangling/symlink path surfaces as ELOOP/ENOENT from the single
+ * open call itself." Only a true ENOENT (nothing at this path at all) skips
+ * preflight, matching bash's `[[ ! -e ]]`; a symlinked `.env-orbit` (ELOOP)
+ * fails closed here rather than bash's own dangling-symlink-only skip —
+ * strictly more conservative, not a behavioral regression.
  */
 export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutcome {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
-  if (!existsSync(envPath)) return { ok: true };
 
   let descriptor: number;
   try {
     descriptor = openSync(envPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: true };
     return { ok: false, code: "preflight-failed" };
   }
   let content: string;
