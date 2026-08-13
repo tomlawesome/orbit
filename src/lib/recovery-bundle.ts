@@ -3,16 +3,24 @@ import {
   closeSync,
   constants,
   fchmodSync,
+  fstatSync,
+  linkSync,
   lstatSync,
+  mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
+  rmSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
+import { join } from "node:path";
 import {
   createCipheriv,
   createDecipheriv,
   createHash,
   createHmac,
+  pbkdf2Sync,
   randomBytes,
   scryptSync,
   timingSafeEqual,
@@ -31,13 +39,21 @@ import {
 //     backup bundle plus a passphrase-wrapped document KEK)
 //
 // This module is pure filesystem/crypto logic: no Docker, no network, no
-// Postgres. It deliberately stops short of two backup-bundle checks that
-// require a live deployment — `pg_restore --list` validity of the embedded
-// database dump (backup.sh guarantee #18) and decrypting/re-validating the
-// AES-256-CBC document archive itself (guarantees #19-20, #27-28) — both are
-// left to a later slice per docs/adr-notes/296-backup-port-plan.md. Every
-// guarantee number cited below is from docs/installer-guarantees.md, Part 2,
-// and is re-asserted by name in the *.test.ts files alongside this module.
+// Postgres, except where a thin adapter (BackupDockerAdapter, below) is
+// injected at the call site for the handful of operations that genuinely
+// need a live deployment — `pg_restore --list`, `pg_dump`, and the
+// document-tar collection. Every guarantee number cited below is from
+// docs/installer-guarantees.md, Part 2, and is re-asserted by name in the
+// *.test.ts files alongside this module.
+//
+// Slice 2 (issue #296) adds the AES-256-CBC/PBKDF2-SHA256 document-archive
+// encryption (byte-compatible with `openssl enc -pbkdf2`, backup.sh
+// #19-20,27-28), completes backup.sh's validate_bundle end-to-end via the
+// `pg_restore --list` liveness check (#18), and ports create_bundle's
+// packaging orchestration (#21-34) — both using BackupDockerAdapter to keep
+// the Docker/Postgres edge thin and injectable, mirroring how
+// src/lib/config-contract.ts keeps filesystem facts injected rather than
+// probed inline. See docs/adr-notes/296-backup-port-plan.md.
 
 // ---------------------------------------------------------------------------
 // Permission semantics (mirrors src/lib/install-transaction.ts's discipline)
@@ -84,7 +100,15 @@ export type RecoveryBundleRefusalCode =
   | "invalid-recovered-key"
   | "passphrase-too-short"
   | "passphrase-mismatch"
-  | "invalid-key-file";
+  | "invalid-key-file"
+  | "document-archive-invalid"
+  | "database-archive-invalid"
+  | "empty-database-dump"
+  | "database-dump-failed"
+  | "document-archive-collection-failed"
+  | "app-stop-failed"
+  | "app-start-failed"
+  | "bundle-already-exists";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -379,8 +403,88 @@ export const BACKUP_BUNDLE_FORMAT_VERSION = "1";
 /** backup.sh #13: exactly these five members, no more, no fewer. */
 export const BACKUP_BUNDLE_MEMBERS = ["checksums.sha256", "database.dump", "documents.tar.enc", "manifest", "manifest.hmac"] as const;
 
-/** The algorithm identifier backup.sh's manifest records for the document archive (guarantee #27); not yet implemented by this slice — see the module comment. */
+/** The algorithm identifier backup.sh's manifest records for the document archive (guarantee #27). */
 export const DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM = "aes-256-cbc-pbkdf2-sha256-iter-600000";
+
+// ---------------------------------------------------------------------------
+// Document-archive payload crypto (backup.sh #19-20,27-28) — byte-compatible
+// with `openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -pass
+// file:<document-kek-file>` (backup.sh:128-130,156-157 / restore.sh:145-147).
+// OpenSSL's `-pass file:PATH` reads PATH's first line (delimited by `\n`,
+// not trimmed of trailing `\r`) verbatim as the passphrase; the document-KEK
+// file is a 64-hex-char line with a trailing `\n` on every real deployment,
+// so the already-validated `documentKekHex` string (see isValidDocumentKekHex)
+// is exactly that passphrase. With `-pbkdf2`, OpenSSL derives key||iv (48
+// bytes for aes-256-cbc: 32 key + 16 IV) in one PBKDF2-HMAC-SHA256 call
+// keyed by the passphrase and the envelope's own 8-byte salt, then splits
+// the output — verified byte-for-byte both directions against the real
+// `openssl` binary in recovery-bundle.parity.test.ts.
+// ---------------------------------------------------------------------------
+
+const DOCUMENT_ARCHIVE_MAGIC = Buffer.from("Salted__", "ascii");
+const DOCUMENT_ARCHIVE_SALT_BYTES = 8;
+const DOCUMENT_ARCHIVE_PBKDF2_ITERATIONS = 600_000;
+const DOCUMENT_ARCHIVE_KEY_BYTES = 32;
+const DOCUMENT_ARCHIVE_IV_BYTES = 16;
+
+function deriveDocumentArchiveKeyIv(documentKekHex: string, salt: Buffer): { key: Buffer; iv: Buffer } {
+  const derived = pbkdf2Sync(
+    documentKekHex,
+    salt,
+    DOCUMENT_ARCHIVE_PBKDF2_ITERATIONS,
+    DOCUMENT_ARCHIVE_KEY_BYTES + DOCUMENT_ARCHIVE_IV_BYTES,
+    "sha256",
+  );
+  return { key: derived.subarray(0, DOCUMENT_ARCHIVE_KEY_BYTES), iv: derived.subarray(DOCUMENT_ARCHIVE_KEY_BYTES) };
+}
+
+/**
+ * encrypt (backup.sh:156-157): AES-256-CBC-encrypts `plaintext` (the
+ * document tar) under a key/IV pair PBKDF2-derived from `documentKekHex` and
+ * a fresh random 8-byte salt, prefixed with OpenSSL's own `Salted__` +
+ * salt header so the output is byte-identical to what `openssl enc
+ * -pbkdf2 -salt` would produce for the same salt (guarantee #27).
+ */
+export function encryptDocumentArchive(plaintext: Buffer, documentKekHex: string): Buffer {
+  const salt = randomBytes(DOCUMENT_ARCHIVE_SALT_BYTES);
+  const { key, iv } = deriveDocumentArchiveKeyIv(documentKekHex, salt);
+  try {
+    const cipher = createCipheriv("aes-256-cbc", key, iv);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    return Buffer.concat([DOCUMENT_ARCHIVE_MAGIC, salt, ciphertext]);
+  } finally {
+    key.fill(0);
+    iv.fill(0);
+  }
+}
+
+/**
+ * decrypt (backup.sh:128-130 / restore.sh:145-147): rejects an envelope
+ * that is too short or missing the `Salted__` header before any
+ * cryptographic operation, and reports any decryption failure (wrong key,
+ * truncated/tampered ciphertext — AES-CBC has no built-in authentication,
+ * so this surfaces as a PKCS#7 padding error) with the same generic
+ * refusal the Bash scripts give, never a raw OpenSSL diagnostic
+ * (guarantees #19-20).
+ */
+export function decryptDocumentArchive(envelope: Buffer, documentKekHex: string): Buffer {
+  const headerBytes = DOCUMENT_ARCHIVE_MAGIC.length + DOCUMENT_ARCHIVE_SALT_BYTES;
+  if (envelope.length < headerBytes || !envelope.subarray(0, DOCUMENT_ARCHIVE_MAGIC.length).equals(DOCUMENT_ARCHIVE_MAGIC)) {
+    refuse("document-archive-invalid", "Document archive decryption failed.");
+  }
+  const salt = envelope.subarray(DOCUMENT_ARCHIVE_MAGIC.length, headerBytes);
+  const ciphertext = envelope.subarray(headerBytes);
+  const { key, iv } = deriveDocumentArchiveKeyIv(documentKekHex, salt);
+  try {
+    const decipher = createDecipheriv("aes-256-cbc", key, iv);
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch {
+    refuse("document-archive-invalid", "Document archive decryption failed.");
+  } finally {
+    key.fill(0);
+    iv.fill(0);
+  }
+}
 
 export interface BackupManifestFields {
   createdAt: string;
@@ -513,6 +617,304 @@ export function verifyChecksumsFile(extractedDir: string, checksumsPath: string)
     if (actualDigest !== expectedDigest) {
       refuse("checksum-mismatch", "A bundle member is corrupt.");
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// BackupDockerAdapter — the thin, injectable edge over the handful of
+// operations that genuinely need a live Docker/Postgres deployment
+// (`pg_restore --list`, `pg_dump`, the document-tar collection, and
+// stopping/starting `orbit-app` around a point-in-time backup). Mirrors the
+// plan's "thin injected adapter" shape (docs/adr-notes/296-backup-port-plan.md):
+// the orchestration functions below (validateBackupBundleContents,
+// createBackupBundle) depend only on this interface, never on `docker`
+// directly, so they are fully testable with an in-memory fake and require no
+// live daemon. createDockerComposeBackupAdapter is the real implementation,
+// spawning the exact `docker compose ...` argument lists backup.sh uses
+// (:30-32,126-127,147,149-157) — its own shape is exercised in
+// recovery-bundle.docker-adapter.test.ts via a PATH-shim fake `docker`
+// executable, never a real daemon.
+// ---------------------------------------------------------------------------
+
+export interface BackupDockerAdapter {
+  /** compose.sh:147/176-177 — `compose stop/start orbit-app`, for a cross-resource point-in-time backup. */
+  stopApp(): void;
+  startApp(): void;
+  /** backup.sh:149-152 — `pg_dump` piped to `outputPath`; refuses on a nonzero exit or an empty result (#24). */
+  dumpDatabase(outputPath: string): void;
+  /** backup.sh:126-127,153 — `pg_restore --list` against `dumpPath`; a boolean predicate, matching Bash's non-distinguishing "invalid" refusal on any nonzero exit (#18,#25). */
+  pgRestoreListOk(dumpPath: string): boolean;
+  /** backup.sh:154 — `tar -C /var/lib/orbit/documents -cf -` collected via a one-off `orbit-app` container, written to `outputPath`. */
+  collectDocumentsArchive(outputPath: string): void;
+}
+
+export interface DockerComposeAdapterOptions {
+  /** The `--env-file` path passed to every `docker compose` invocation, mirroring backup.sh's `compose()` helper. */
+  envFile: string;
+  /** Working directory for the `docker` subprocess (defaults to the current process's cwd, matching backup.sh's own `cd "$repo_dir"`). */
+  cwd?: string;
+  /** Overrides the `docker` executable name/path. Defaults to `"docker"`. */
+  dockerBinary?: string;
+  /**
+   * Environment for the `docker` subprocess (defaults to `process.env`). The
+   * PATH-shim test seam: tests prepend a directory holding a fake `docker`
+   * executable to `PATH` here instead of mutating `process.env` globally —
+   * see recovery-bundle.docker-adapter.test.ts, following the same technique
+   * as scripts/configure.test.mjs's `fakeDockerScript`.
+   */
+  env?: NodeJS.ProcessEnv;
+}
+
+function openWriteSecretDescriptor(path: string, mode: number = SECURE_FILE_MODE): number {
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
+  fchmodSync(descriptor, mode);
+  return descriptor;
+}
+
+/**
+ * Opens `path` for reading with a single `O_NOFOLLOW` descriptor and returns
+ * its contents — deliberately not a separate `lstat`-then-`open`/`readFile`
+ * pair, so there is no window between checking the path is not a symlink and
+ * reading its content (CodeQL js/file-system-race). A dangling/symlink path
+ * surfaces as `ELOOP`/`ENOENT` from the single `open` call itself.
+ */
+function readRegularFileNoFollow(path: string): Buffer {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stats = fstatSync(descriptor);
+    if (!stats.isFile()) throw new Error("not a regular file");
+    const buffer = Buffer.alloc(stats.size);
+    let readTotal = 0;
+    while (readTotal < buffer.length) {
+      const bytesRead = readSync(descriptor, buffer, readTotal, buffer.length - readTotal, readTotal);
+      if (bytesRead === 0) break;
+      readTotal += bytesRead;
+    }
+    return buffer.subarray(0, readTotal);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/**
+ * The real BackupDockerAdapter: spawns the literal `docker compose` argument
+ * lists backup.sh uses, over the exact fixed command shape (no shell
+ * interpolation of caller-controlled data beyond the two path/envFile
+ * arguments Node's `spawnSync` array form passes as discrete argv entries,
+ * never through a shell).
+ */
+export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOptions): BackupDockerAdapter {
+  const dockerBinary = options.dockerBinary ?? "docker";
+  const cwd = options.cwd;
+  const env = options.env ?? process.env;
+  const composeArgs = (...args: string[]): string[] => ["compose", "--env-file", options.envFile, ...args];
+
+  return {
+    stopApp(): void {
+      const result = spawnSync(dockerBinary, composeArgs("stop", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
+      if (result.status !== 0) refuse("app-stop-failed", "The Orbit application could not be stopped for the backup.");
+    },
+    startApp(): void {
+      const result = spawnSync(dockerBinary, composeArgs("start", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
+      if (result.status !== 0) refuse("app-start-failed", "The Orbit application could not be restarted after the backup.");
+    },
+    dumpDatabase(outputPath: string): void {
+      const descriptor = openWriteSecretDescriptor(outputPath);
+      try {
+        const result = spawnSync(
+          dockerBinary,
+          composeArgs(
+            "exec",
+            "-T",
+            "orbit-db",
+            "sh",
+            "-c",
+            'exec pg_dump --format=custom --compress=6 --no-owner --no-acl --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
+          ),
+          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
+        );
+        if (result.status !== 0) refuse("database-dump-failed", "PostgreSQL could not be dumped.");
+        if (fstatSync(descriptor).size === 0) refuse("empty-database-dump", "PostgreSQL produced an empty backup.");
+      } finally {
+        closeSync(descriptor);
+      }
+    },
+    pgRestoreListOk(dumpPath: string): boolean {
+      const descriptor = openSync(dumpPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const result = spawnSync(dockerBinary, composeArgs("exec", "-T", "orbit-db", "pg_restore", "--list"), {
+          cwd,
+          env,
+          stdio: [descriptor, "ignore", "ignore"],
+        });
+        return result.status === 0;
+      } finally {
+        closeSync(descriptor);
+      }
+    },
+    collectDocumentsArchive(outputPath: string): void {
+      const descriptor = openWriteSecretDescriptor(outputPath);
+      try {
+        const result = spawnSync(
+          dockerBinary,
+          composeArgs("run", "--rm", "--no-deps", "--entrypoint", "tar", "orbit-app", "-C", "/var/lib/orbit/documents", "-cf", "-", "."),
+          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
+        );
+        if (result.status !== 0) refuse("document-archive-collection-failed", "The document archive could not be collected.");
+      } finally {
+        closeSync(descriptor);
+      }
+    },
+  };
+}
+
+/**
+ * Completes backup.sh's validate_bundle end-to-end (:118-131): everything
+ * validateBackupManifestAndAuth already covers (manifest/HMAC/checksums),
+ * plus the `pg_restore --list` liveness check on the embedded database dump
+ * (#18) and decrypting + re-validating the document archive against the
+ * same path allow-list (#19-20). `extractedDir` is caller-managed scratch
+ * space (already produced by extractTar), matching
+ * validateBackupManifestAndAuth's own convention.
+ */
+export function validateBackupBundleContents(
+  extractedDir: string,
+  documentKekHex: string,
+  adapter: Pick<BackupDockerAdapter, "pgRestoreListOk">,
+): BackupManifestFields {
+  const fields = validateBackupManifestAndAuth(extractedDir, documentKekHex);
+
+  if (!adapter.pgRestoreListOk(join(extractedDir, "database.dump"))) {
+    refuse("database-archive-invalid", "The bundle database dump is invalid.");
+  }
+
+  const encrypted = readRegularFileNoFollow(join(extractedDir, "documents.tar.enc"));
+  const plaintext = decryptDocumentArchive(encrypted, documentKekHex);
+  const documentsTarPath = join(extractedDir, "documents.tar");
+  const descriptor = openWriteSecretDescriptor(documentsTarPath);
+  try {
+    writeSync(descriptor, plaintext);
+  } finally {
+    closeSync(descriptor);
+  }
+  validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
+
+  return fields;
+}
+
+/**
+ * `mv --no-clobber`-equivalent publish, but race-free: `link` succeeds
+ * atomically only if `finalPath` does not already exist (POSIX `EEXIST`),
+ * unlike a `stat`-then-`rename` check, which has a window an attacker could
+ * win. `temporaryPath` and `finalPath` must be on the same filesystem
+ * (both under the backup directory, matching backup.sh:139-140,173-175's own
+ * same-directory `.installing` convention). Divergence from backup.sh flagged
+ * in docs/adr-notes/296-backup-port-plan.md: `mv --no-clobber`'s own
+ * existence check is not itself race-free; this is a race-free mechanism for
+ * the same never-overwrite-an-existing-backup behavior (guarantee #32).
+ */
+export function publishBundleAtomically(temporaryPath: string, finalPath: string): void {
+  try {
+    linkSync(temporaryPath, finalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      refuse("bundle-already-exists", "A backup with this name already exists.");
+    }
+    throw error;
+  }
+  unlinkSync(temporaryPath);
+}
+
+export interface CreateBackupBundleResult {
+  finalTarPath: string;
+  manifestFields: BackupManifestFields;
+}
+
+/**
+ * Ports backup.sh's create_bundle (:135-179) end-to-end: stop the app for a
+ * cross-resource point-in-time backup (#22), dump the database and collect
+ * the document archive via the injected adapter, encrypt the documents
+ * (#27) and delete the plaintext immediately (#28), build and HMAC-sign the
+ * manifest+checksums (#29-30), package the five-member tar, validate it
+ * (#31), and publish it atomically without clobbering an existing
+ * same-named backup (#32-33) — always restarting the app on the way out
+ * (#23,#34), success or failure, matching the EXIT-trap discipline of the
+ * Bash original via `finally`.
+ *
+ * `backupDirectory` must already exist as the private (0700) work directory
+ * (backup.sh:136-138) — creating it is the caller's responsibility, same
+ * convention as extractedDir elsewhere in this module. `createdAt` is
+ * injected (not read from `Date.now()` internally) to keep this function
+ * deterministic and testable, matching the module's existing philosophy of
+ * injected facts over inline probing.
+ */
+export function createBackupBundle(
+  backupDirectory: string,
+  finalTarPath: string,
+  documentKekHex: string,
+  adapter: BackupDockerAdapter,
+  createdAt: string,
+): CreateBackupBundleResult {
+  const workDir = mkdtempSync(join(backupDirectory, ".orbit-backup."));
+  const temporaryPath = `${finalTarPath}.installing`;
+  let published = false;
+
+  adapter.stopApp();
+  try {
+    const dbDumpPath = join(workDir, "database.dump");
+    const documentsTarPath = join(workDir, "documents.tar");
+    const encryptedDocumentsPath = join(workDir, "documents.tar.enc");
+    const manifestPath = join(workDir, "manifest");
+    const checksumsPath = join(workDir, "checksums.sha256");
+    const hmacPath = join(workDir, "manifest.hmac");
+
+    adapter.dumpDatabase(dbDumpPath);
+    if (!adapter.pgRestoreListOk(dbDumpPath)) {
+      refuse("database-archive-invalid", "The bundle database dump is invalid.");
+    }
+
+    adapter.collectDocumentsArchive(documentsTarPath);
+    validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
+
+    const plaintext = readRegularFileNoFollow(documentsTarPath);
+    const encrypted = encryptDocumentArchive(plaintext, documentKekHex);
+    writeSecretFile(encryptedDocumentsPath, encrypted);
+    unlinkSync(documentsTarPath);
+
+    const fingerprint = documentKekFingerprint(documentKekHex);
+    const manifestFields: BackupManifestFields = {
+      createdAt,
+      databaseDump: "database.dump",
+      documentsArchive: "documents.tar.enc",
+      documentsEncryption: DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM,
+      documentKekSha256: fingerprint,
+    };
+    const manifest = buildBackupManifest(manifestFields);
+    const checksums =
+      `${sha256File(dbDumpPath)}  database.dump\n` + `${sha256File(encryptedDocumentsPath)}  documents.tar.enc\n`;
+    writeSecretFile(checksumsPath, checksums);
+    const manifestAndChecksums = Buffer.concat([Buffer.from(manifest), Buffer.from(checksums)]);
+    const hmac = computeBundleHmac(documentKekHex, manifestAndChecksums);
+    writeSecretFile(hmacPath, hmac);
+    writeSecretFile(manifestPath, manifest);
+
+    createTar(workDir, temporaryPath, [...BACKUP_BUNDLE_MEMBERS]);
+    listTarMembers(temporaryPath); // backup.sh #31: validate the completed bundle before treating it as the deliverable.
+
+    publishBundleAtomically(temporaryPath, finalTarPath);
+    published = true;
+
+    return { finalTarPath, manifestFields };
+  } finally {
+    if (!published) {
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // Nothing to clean up if the tar was never produced.
+      }
+    }
+    rmSync(workDir, { recursive: true, force: true });
+    adapter.startApp();
   }
 }
 
