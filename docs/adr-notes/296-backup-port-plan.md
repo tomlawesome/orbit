@@ -1,6 +1,6 @@
 # #296 slice plan: port backup, restore, and recovery-bundle flows to the orbit CLI
 
-Status: proposed (slices 1-3 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-4 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #296 so each slice lands as an
 independently reviewable pull request, following the same convention as
 `docs/adr-notes/295-install-port-plan.md`. Update it as slices land or the
@@ -415,6 +415,202 @@ own orchestration — `RestoreRun`'s `rollbackDocumentKekFile` option is the
 callee-side seam that future slice already needs, ported now since it's
 free), and `check_capacity`'s disk-space preflight arithmetic — all slice 4.
 
+## Slice 4 — recovery-bundle orchestration and CLI wiring (this PR)
+
+**Scope.** The plan's own slice 4 line item names five things: a
+machine-prompt protocol extension, the live document-KEK swap-with-
+rollback, and four real CLI entry points, "gated on" the full Phase 1
+acceptance harness plus live cross-implementation round-trip evidence. This
+sandbox has no live Docker/Postgres deployment (the same constraint slices
+2-3 already hit — see their own Flags), so that gate is unreachable here;
+the narrowest faithful reading taken for this slice is *the orchestration
+that ties slices 1-3 together into the backup/restore flows, wired onto
+real, explicit-invocation-only CLI commands, characterized as thoroughly as
+a Docker-free sandbox allows* — not a live-Docker-gated release decision
+(see Flags for how "the bootstrap flip" specifically was narrowed). Slices
+1-3 already ported every crypto/format primitive and the full checkpoint/
+journal/rollback state machine; this slice's own new code is genuinely just
+orchestration plus the two pieces slice 3 explicitly deferred:
+
+- **`checkRestoreCapacity`** (`src/lib/restore-engine.ts`) — `check_capacity`
+  (restore.sh:355-397), explicitly deferred by slice 3's own Flags. Pure
+  arithmetic over an injected `RestoreCapacityFacts` (guarantee #12's
+  numeric-measurement gate applies to every field before the three space
+  checks in #11 run); `directoryUsageKib`/`filesystemAvailableKib` are new
+  host-side `du -sk`/`df -Pk`-Avail-column reimplementations (the same
+  "reimplement in Node rather than shell out" discipline `sha256File`
+  already established over `sha256sum`), and `RestoreDockerAdapter` gained
+  three new container-measurement methods
+  (`measureLiveDatabaseSizeBytes`/`measureLiveDocumentTreeKib`/
+  `measureDocumentVolumeAvailableKib`), implemented for real in
+  `createDockerComposeRestoreAdapter` with restore.sh's exact `psql`/`du`/
+  `df` command shapes.
+- **`src/lib/recovery-prompts.ts`** — the machine-prompt protocol extension
+  the plan calls out as "this slice's job, not slice 1's": four new fields
+  (`RECOVERY_PASSPHRASE`, `RECOVERY_PASSPHRASE_CONFIRM`,
+  `IMPORT_CONFIRMATION`, `RESTORE_CONFIRMATION`) added to
+  `docs/engine-events.md`'s existing "Machine prompts (v0)" line grammar,
+  reusing the identical `prompt`/`prompt-reject`/`prompt-accept`/
+  `prompt-abort` shape and bounded-3-attempt protocol `configure.sh`'s own
+  `ORBIT_CONFIGURE_PROMPTS=machine` mode established — pure, injected-I/O
+  logic (`MachinePromptDriver`), no process/stdio access itself.
+- **`src/lib/backup-restore-cli.ts`** — the orchestration module the slice
+  is named for, composing recovery-bundle.ts + restore-engine.ts only
+  (no new crypto, no new mutation primitive):
+  - `verifyBackupBundle` — `backup.sh`'s `validate_bundle` end-to-end
+    (regular-file check, layout, extraction, `validateBackupBundleContents`),
+    the one piece slice 1-2 left as separate building blocks; reused by
+    `orbit backup --verify`, restore's own bundle load, and
+    export-recovery-bundle.sh's guarantee #4 (source bundle must verify
+    before a recovery bundle is made from it).
+  - `runBackup` — `create_bundle`'s outer wrapper (timestamp + private
+    work-directory setup) around slice 2's already-complete
+    `createBackupBundle`.
+  - `stageAndPreflightRestoreBundle` — `prepare_staged_bundle`
+    (restore.sh:334-353, guarantees #7-10): `verifyBackupBundle` + staging
+    the document tree + slice 3's `preflightValidateBundle`.
+  - `runRestore` — restore.sh's actual main flow (:897-933): private-backup-
+    directory setup and symlink refusal (guarantee #44, restore.sh:886-889
+    — discovered missing during this slice's own test-writing and folded in
+    as `ensureBackupDirectorySafe`, not a late patch to a shipped path),
+    the unfinished-restore journal refusal (#45), `stageAndPreflightRestoreBundle`,
+    `checkRestoreCapacity` (#11-12), a `confirm: () => boolean` callback
+    invoked **exactly once, at restore.sh's own confirmation point** — after
+    preflight/capacity pass, immediately before the checkpoint (guarantee
+    #46) — and then `RestoreRun`'s `createCheckpoint`/`cutoverDocuments`/
+    `cutoverDatabase`/`finalize`, with `dispose()` always run in a `finally`
+    (restore.sh's `trap cleanup EXIT` equivalent, matching #47-48). Every
+    mutating step is still exactly the journaled `RestoreRun` sequence
+    slice 3 characterized — this function adds no new mutation path, only
+    the preflight/capacity/confirmation steps around it.
+  - `runExportRecoveryBundle` — `export-recovery-bundle.sh`'s orchestration:
+    `verifyBackupBundle` on the source (#4), passphrase length/confirmation
+    (#6-7), `encryptDocumentKek`, manifest/checksums, four-member tar,
+    `publishBundleAtomically`.
+  - `runImportRecoveryBundle` — `import-recovery-bundle.sh`'s orchestration,
+    including the live document-KEK swap-with-automatic-rollback: layout/
+    manifest/checksum validation, `decryptDocumentKek` (its own
+    invalid-recovered-key check covers guarantee #14 without a second
+    check here), the "IMPORT RECOVERY" confirmation gate, the current-KEK
+    regular-file check, `stopApp` + rename-swap the live KEK file (never a
+    copy — matching `mv`'s atomicity), then `runRestore` on the inner
+    bundle with `rollbackDocumentKekFile` pointed at the preserved previous
+    key (wiring slice 3's already-built callee-side seam to its real
+    caller for the first time) and a **second, independent** `confirmRestore`
+    callback (see Flags for why this is deliberately not the same gate as
+    `importConfirmed`). On success the previous key is removed; on failure
+    with no restore-journal evidence the key swap is reverted and the app
+    restarted (matching `import-recovery-bundle.sh:21-30`); on failure with
+    journal evidence present, the swap is left in place and the caller is
+    told to run `orbit restore --recover` (matching :114-119) — no
+    additional guessing.
+- **Real CLI entry points** (`src/cli/orbit.ts`): `orbit backup [--verify
+  <backup.tar>]`, `orbit restore [--yes] <backup.tar> | orbit restore
+  --recover`, `orbit export-recovery-bundle <backup.tar>`, `orbit
+  import-recovery-bundle <recovery.tar>` — every one explicit-invocation
+  only (reachable only by typing its exact command name; `main()`'s
+  dispatch has no default/fallthrough case that runs any of them), and every
+  one refuses cleanly without its required argument(s) before touching the
+  filesystem (`src/cli/orbit.test.ts`). Passphrase/confirmation collection
+  supports both a real interactive terminal (masked synchronous raw-mode
+  read for secrets, matching `read -s`) and `ORBIT_RECOVERY_PROMPTS=machine`
+  (this slice's new env var, mirroring `ORBIT_CONFIGURE_PROMPTS=machine`).
+  `--dir` is the CLI's own existing path-resolution mechanism (established
+  by `check` in issue #294), reused rather than the Bash scripts'
+  `ORBIT_ENV_FILE`/`ORBIT_BACKUP_DIR`/`ORBIT_SECRETS_DIR` — see Flags.
+  **No Bash script is invoked, modified, or wired as a fallback by any of
+  this** — `scripts/backup.sh`, `scripts/restore.sh`,
+  `scripts/export-recovery-bundle.sh`, and `scripts/import-recovery-bundle.sh`
+  remain byte-identical to develop and are not on any path this slice adds.
+
+**The hidden `__restore-engine-rehearse` interruption rehearsal now drives
+the orchestrated flow, not just `RestoreRun` directly.** Per this slice's
+brief, the SIGKILL rehearsal matrix (`restore-engine.interruption.test.ts`,
+unchanged, still 4 tests) is extended by rewriting
+`commandRestoreEngineRehearse`'s forward branch to call `runRestore` itself
+— the exact function `orbit restore` calls — against a real backup bundle
+built via `runBackup` (not a hand-assembled tar), so the staged-bundle
+preflight and `checkRestoreCapacity` genuinely run ahead of the checkpoint
+under a real, self-delivered `SIGKILL`, for the first time. All four
+existing interruption tests (three hard-kill stages plus the no-journal
+`--recover` case) pass unchanged against this rewritten, more complete code
+path — the observable journal/checkpoint contract slice 3 characterized did
+not change, only the harness that exercises it now goes further.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 2): `restore.sh` #11-12 (`check_capacity`, this slice's own headline
+deferred item), #43-48 (usage validation, the backup-directory/restore-root
+symlink guard, the unfinished-restore journal refusal, the confirmation
+gate, the strictly-ordered journaled phases, and completed-only-after-every-
+step-succeeds); `export-recovery-bundle.sh` #1-14 (the full export flow,
+already-proven primitives now actually wired end-to-end); `import-recovery-
+bundle.sh` #1-25 (the full import flow including the live-KEK-swap-with-
+rollback and the unfinished-restore-evidence refusal, :114-119).
+
+**Non-goals for slice 4**: the Phase 1 acceptance harness
+(`scripts/test-backup-restore.sh`) run against the CLI entry point, and
+live cross-implementation round-trip evidence (a Bash-created bundle
+restored by the CLI, and vice versa) — both explicitly require a live
+Docker/Postgres deployment this sandbox does not have, the same constraint
+slices 2-3's own Flags already recorded for their own Docker-adapter argv
+shapes. What *is* provided instead, Docker-free, per Flags below: a whole
+orchestration-produced recovery bundle's wrapped key decrypted by the real,
+unmodified `recovery-crypto.mjs`, and `import-recovery-bundle.sh`'s own
+unmodified archive/checksum/manifest preflight (which runs entirely before
+its first Docker call) accepting a bundle this slice's `runExportRecoveryBundle`
+produced. Any actual "bootstrap flip" — flipping a Bash script's own
+dispatch, or making any of these CLI commands reachable by default — is out
+of scope; see Flags.
+
+**Testing and parity strategy.**
+
+- **Unit tests**: `src/lib/restore-engine.capacity.test.ts` (23 tests) —
+  `checkRestoreCapacity`'s exact boundary thresholds for all three space
+  checks, the numeric-measurement gate (#12), and `directoryUsageKib`/
+  `filesystemAvailableKib` against real temporary filesystems.
+  `src/lib/recovery-prompts.test.ts` (20 tests) — every validator/
+  classifier, the line-grammar's attempt-bounded retry/abort behavior, and
+  a sweep asserting a secret-kind field's prompted value never appears in
+  any protocol line. `src/lib/backup-restore-cli.test.ts` (19 tests) —
+  every orchestration function against a trivial in-memory
+  `RestoreDockerAdapter`/`BackupDockerAdapter` fake (no process spawning),
+  covering: bundle verification success/corruption/wrong-key,
+  `runRestore`'s journal-exists/capacity/confirmation refusal ordering
+  (including asserting `confirm()` is never called until preflight and
+  capacity both already passed), the full checkpoint→cutover→finalize
+  lifecycle via the orchestration entry point, and
+  `runImportRecoveryBundle`'s complete refusal matrix — unconfirmed import
+  (KEK untouched), inner-restore failure with no journal evidence (KEK
+  reverted, app restarted), inner-restore failure *with* journal evidence
+  (KEK left in place, `rollback-failed` journal asserted present), a
+  pre-existing unfinished restore (refused before any decryption), and a
+  wrong passphrase. `src/cli/orbit.test.ts` (16 tests) — every command
+  spawned as a real subprocess: no default/implied execution, refusal
+  without required arguments before any filesystem mutation, machine-prompt
+  mode reached correctly, and a sweep asserting a supplied passphrase never
+  appears in the CLI's own stdout/stderr.
+- **Parity**: `check_capacity`'s exact arithmetic (headroom constants and
+  all three thresholds) is `awk`-extracted from the real, unmodified
+  `restore.sh` and *executed as a real Bash subprocess* against PATH-shim
+  fake `du`/`stat`/`df` executables and an inline fake `compose` shell
+  function (extending `restore-engine.parity.test.ts`, 4 new describe
+  blocks / boundary-value comparisons, same technique
+  `checkpoint_sha256`'s own parity test already established) — both
+  implementations are proven to accept/refuse at the identical KiB
+  boundary for all three space checks.
+  `src/lib/backup-restore-cli.parity.test.ts` (3 tests) provides the
+  Docker-free cross-implementation evidence available in this sandbox (see
+  Non-goals above): the real `recovery-crypto.mjs decrypt`, spawned
+  directly, decrypts a `document-kek.enc` this slice's own
+  `runExportRecoveryBundle` produced (both directions of key correctness:
+  right passphrase succeeds, wrong passphrase is refused identically), and
+  the real, unmodified `import-recovery-bundle.sh` is spawned against a
+  bundle `runExportRecoveryBundle` produced, asserting its own archive/
+  manifest/checksum preflight (which runs entirely before its first Docker
+  call) never reports a structural failure against it — proving the
+  orchestration's bundle shape is byte-for-byte what the Bash script
+  expects, up to the boundary a live daemon is required to cross.
+
 ## Flags (bash characterized, not changed)
 
 - The recovery bundle's own `checksums.sha256` is **not** HMAC-signed or
@@ -543,3 +739,97 @@ free), and `check_capacity`'s disk-space preflight arithmetic — all slice 4.
   `restore.sh` for anything in this slice's scope during this port; the
   items above are characterization/process notes and one explicitly
   deferred non-goal (`check_capacity`), not correctness concerns.
+- **(slice 4) "The bootstrap flip" was deliberately narrowed, not
+  implemented.** The plan's slice 4 line item (written before slice 3
+  landed) names "the bootstrap flip" alongside the CLI entry points, and
+  frames the whole slice as "gated on the full Phase 1 acceptance harness
+  ... passing against the CLI entry point." Neither is reachable in this
+  sandbox (no live Docker/Postgres), and — independent of the sandbox
+  limit — the task this slice was implemented under holds a stricter
+  safety bar than the plan's own wording: any shipped CLI entry point "must
+  be explicit-invocation only (no default/implied execution)." A literal
+  "bootstrap flip" (making `orbit restore` etc. reachable by default, or
+  changing what a Bash script itself dispatches to) is the opposite of
+  that. The narrowest faithful reading taken here: ship the four real,
+  independently-invokable CLI commands with full orchestration behind them,
+  characterize everything Docker-free reach allows, and leave the live-
+  Docker acceptance-harness gate and any actual default-execution flip as
+  an explicit, separate, future release decision — exactly the shape
+  issue #295's own slice 5 (`docs/adr-notes/295-install-port-plan.md`)
+  describes for the install flow's own bootstrap flip, which likewise has
+  not landed yet. Flagging for owner awareness since this is a narrower
+  scope than the plan's literal words, not a smaller one than the safety
+  bar this port has held to throughout.
+- **(slice 4)** The TS CLI's path resolution (`resolveBackupRestorePaths`)
+  uses only `--dir` (`check`'s own existing convention from issue #294),
+  not the Bash scripts' `ORBIT_ENV_FILE`/`ORBIT_BACKUP_DIR`/
+  `ORBIT_SECRETS_DIR` environment-variable overrides. This is a
+  deliberate simplification for internal consistency within the CLI
+  (`check` already established `--dir` as the one mechanism, before this
+  slice existed) rather than a newly discovered constraint — flagging in
+  case the env-var override mechanism is wanted for CLI parity with the
+  Bash scripts' own operator-facing surface before these commands are
+  promoted beyond explicit invocation.
+- **(slice 4)** `readTtyMaskedLine`/`readTtyLine` read directly from `fd 0`
+  (requiring `process.stdin.isTTY`) rather than reopening `/dev/tty`
+  independently of stdin's own redirection state, unlike every relevant
+  Bash prompt (`export-recovery-bundle.sh`/`import-recovery-bundle.sh`/
+  `restore.sh` all explicitly `</dev/tty` their prompts). This is safe
+  specifically because none of this slice's orchestration pipes a secret
+  into a subprocess's stdin the way `export-recovery-bundle.sh`/
+  `import-recovery-bundle.sh` pipe the passphrase into
+  `recovery-crypto.mjs`'s container invocation (`printf '%s' "$x" |
+  compose run ...`) — the document-KEK envelope crypto is pure host-side
+  TypeScript now (slice 1's own already-flagged divergence), so nothing
+  here needs stdin reserved for a downstream pipe. Same "an interactive
+  terminal is required" refusal behavior for a non-terminal, a simpler
+  mechanism.
+- **(slice 4)** `runRestore`'s `confirm` parameter is a callback invoked
+  exactly once, immediately before the checkpoint — not a precomputed
+  boolean — specifically so a caller (the CLI) never has to ask an operator
+  to confirm a restore that the staged-bundle preflight or
+  `checkRestoreCapacity` would have refused anyway, matching restore.sh's
+  own control-flow order (`prepare_staged_bundle` → `check_capacity` →
+  the `Type RESTORE to continue` prompt → `create_checkpoint`) exactly.
+  Asserted directly in `backup-restore-cli.test.ts` (`confirm()` is never
+  called when the journal-exists or capacity checks fail first).
+- **(slice 4)** `runImportRecoveryBundle`'s `confirmRestore` is a genuinely
+  **separate** confirmation from `importConfirmed`, not a simplification
+  down to one gate. `import-recovery-bundle.sh:105` invokes the inner
+  `bash scripts/restore.sh "$temporary_directory/orbit-backup.tar"` with
+  neither `--yes` nor `ORBIT_NONINTERACTIVE_RESTORE` set, so the inner
+  script's own "Type RESTORE to continue" prompt (guarantee #46) fires a
+  *second* time on top of the outer "Type IMPORT RECOVERY to continue"
+  prompt — two distinct confirmations for one operator action in the real
+  Bash flow today, faithfully preserved rather than collapsed for a
+  smoother CLI UX. Flagging in case a single combined confirmation is
+  wanted as a deliberate, tracked UX improvement in a later change — this
+  port characterizes current behavior, it doesn't improve on it silently.
+- **(slice 4)** `runRestore` (via `ensureBackupDirectorySafe`) now performs
+  restore.sh's own `mkdir -p "$backup_directory"; chmod 700 ...` plus the
+  backup-directory/restore-root symlink refusal (guarantee #44,
+  restore.sh:886-889) as its own first step, rather than leaving it to each
+  caller. This was discovered missing while writing this slice's own
+  `runImportRecoveryBundle` tests — the earliest version of `runRestore`
+  assumed the caller had already done this (matching slice 3's own
+  `RestoreRun.prepare`, which reasonably leaves `restoreRoot` setup to its
+  direct caller) — and was folded in before any test exercised the gap in
+  a way that would have hidden it, not discovered via a shipped-path bug.
+- **(slice 4)** `checkRestoreCapacity`'s host-side `directoryUsageKib`/
+  `filesystemAvailableKib` reimplement `du -sk`/`df -Pk`'s Avail column in
+  Node (`st_blocks`/`statfsSync`'s `bavail`) rather than shelling out to
+  `du`/`df`, the same "reimplement rather than shell out" precedent
+  `sha256File` already set over `sha256sum` (slice 1's own Flags). Unlike
+  `tar`/`openssl`, there is no fixed byte-for-byte output format these two
+  utilities need to match — the value is an inherently host/filesystem-
+  dependent measurement feeding a `>=` comparison — so the parity evidence
+  for this slice is the *arithmetic formula* (headroom constants,
+  thresholds), proven via real-Bash-subprocess execution against
+  PATH-shimmed fake `du`/`stat`/`df`, not byte-identical real-utility
+  output.
+- No behavioral discrepancy was found between `backup-restore-cli.ts`'s
+  orchestration and the corresponding Bash scripts for anything in this
+  slice's scope during this port; the items above are characterization/
+  process notes and the two explicitly deferred non-goals (the live-Docker
+  acceptance harness and any actual bootstrap flip), not correctness
+  concerns.

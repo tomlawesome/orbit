@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { sha256File } from "./recovery-bundle";
-import { CORRESPONDENCE_QUERIES, SCAN_RECOVERY_LEASES_SQL } from "./restore-engine";
+import { CORRESPONDENCE_QUERIES, RESTORE_CAPACITY_HEADROOM_KIB, SCAN_RECOVERY_LEASES_SQL, checkRestoreCapacity } from "./restore-engine";
 
 // Byte-for-byte / literal-execution parity between restore.sh and this
 // module's restore.sh-derived constants (issue #296 slice 3), following the
@@ -149,5 +149,169 @@ describe("load_recovery_journal format-validation regex parity", () => {
     expect(extracted).toContain("[A-Za-z0-9_-]+");
     expect(extracted).toContain("checkpointed|documents-replaced|database-restored|rollback-failed");
     expect(extracted).toContain('"600"'); // mode-600 permission check this module's loadRestoreJournal also enforces.
+  });
+});
+
+describe("check_capacity parity (extracted and executed as a real Bash subprocess, guarantees #11-12)", () => {
+  // check_capacity (restore.sh:355-397) is deferred by slice 3, in scope for
+  // slice 4 (docs/adr-notes/296-backup-port-plan.md). Its own `du`/`stat`/
+  // `df` calls (host-side) and `compose exec`/`compose run` calls
+  // (container-side psql/du/df) are all replaced by PATH-shim fakes and an
+  // inline `compose` shell function — the same "spawn the real, unmodified
+  // function body against fakes" technique checkpoint_sha256's own parity
+  // test above uses, extended to a function with more external dependents.
+  // No Docker daemon is reached; the function body itself is never edited.
+  let driverDir: string;
+
+  afterEach(() => {
+    if (driverDir) rmSync(driverDir, { recursive: true, force: true });
+  });
+
+  interface CapacityScenario {
+    stagedKib: number;
+    backupBytes: number;
+    databaseBytes: number;
+    documentKib: number;
+    hostAvailableKib: number;
+    tempAvailableKib: number;
+    volumeAvailableKib: number;
+  }
+
+  function runExtractedCheckCapacity(scenario: CapacityScenario): { status: number | null; stderr: string } {
+    driverDir = mkdtempSync(join(tmpdir(), "orbit-check-capacity-parity-"));
+    const binDir = join(driverDir, "bin");
+    mkdirSync(binDir, { recursive: true });
+
+    const backupDirectory = join(driverDir, "backup-directory");
+    const temporaryDirectory = join(driverDir, "temporary-directory");
+    mkdirSync(join(temporaryDirectory, "staged-documents"), { recursive: true });
+    mkdirSync(backupDirectory, { recursive: true });
+    const backupFile = join(driverDir, "backup-file.tar");
+    writeFileSync(backupFile, "x");
+
+    // Fakes: `du`/`stat` each have exactly one host-side call site in
+    // check_capacity, so a single fixed value suffices; `df` has two
+    // (backup_directory vs. temporary_directory), distinguished by its path
+    // argument, matching real `df -Pk <path>`'s own argv shape.
+    writeFileSync(join(binDir, "du"), `#!/bin/sh\nprintf '%s\\t%s\\n' "${scenario.stagedKib}" "$*"\n`, { mode: 0o755 });
+    writeFileSync(join(binDir, "stat"), `#!/bin/sh\nprintf '%s\\n' "${scenario.backupBytes}"\n`, { mode: 0o755 });
+    writeFileSync(
+      join(binDir, "df"),
+      [
+        "#!/bin/sh",
+        `case "$2" in`,
+        `  "${backupDirectory}") avail="${scenario.hostAvailableKib}" ;;`,
+        `  "${temporaryDirectory}") avail="${scenario.tempAvailableKib}" ;;`,
+        `  *) avail=0 ;;`,
+        "esac",
+        `printf 'Filesystem 1024-blocks Used Available Capacity Mounted-on\\nfake 1 1 %s 1%% /\\n' "$avail"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    for (const name of ["du", "stat", "df"]) chmodSync(join(binDir, name), 0o755);
+
+    const extracted = extractFunction("check_capacity");
+    const driverPath = join(driverDir, "driver.sh");
+    writeFileSync(
+      driverPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -Eeuo pipefail",
+        `backup_directory=${JSON.stringify(backupDirectory)}`,
+        `temporary_directory=${JSON.stringify(temporaryDirectory)}`,
+        `backup_file=${JSON.stringify(backupFile)}`,
+        "fail() { printf '%s\\n' \"$*\" >&2; exit 1; }",
+        "compose() {",
+        '  case "$*" in',
+        "    *pg_database_size*) printf '%s' " + JSON.stringify(String(scenario.databaseBytes)) + " ;;",
+        `    *"du -sk /var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.documentKib))} ;;`,
+        `    *"df -Pk /var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.volumeAvailableKib))} ;;`,
+        "    *) return 1 ;;",
+        "  esac",
+        "}",
+        extracted,
+        "check_capacity",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const result = spawnSync("bash", [driverPath], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+    });
+    return { status: result.status, stderr: result.stderr };
+  }
+
+  function tsCapacityOk(scenario: CapacityScenario): boolean {
+    try {
+      checkRestoreCapacity({
+        stagedDocumentsKib: scenario.stagedKib,
+        backupBytes: scenario.backupBytes,
+        currentDatabaseBytes: scenario.databaseBytes,
+        currentDocumentKib: scenario.documentKib,
+        hostAvailableKib: scenario.hostAvailableKib,
+        tempAvailableKib: scenario.tempAvailableKib,
+        volumeAvailableKib: scenario.volumeAvailableKib,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const comfortable: CapacityScenario = {
+    stagedKib: 100,
+    backupBytes: 100 * 1024,
+    databaseBytes: 50 * 1024,
+    documentKib: 40,
+    hostAvailableKib: 10_000_000,
+    tempAvailableKib: 10_000_000,
+    volumeAvailableKib: 10_000_000,
+  };
+
+  it("both implementations accept the same comfortably-provisioned measurements", () => {
+    const bashResult = runExtractedCheckCapacity(comfortable);
+    expect(bashResult.status).toBe(0);
+    expect(tsCapacityOk(comfortable)).toBe(true);
+  });
+
+  it("both implementations refuse at the exact same backup-directory threshold (backup+db+doc+2*staged+2*64MiB headroom)", () => {
+    const requiredKib =
+      Math.ceil(comfortable.backupBytes / 1024) + Math.ceil(comfortable.databaseBytes / 1024) + comfortable.documentKib + comfortable.stagedKib * 2 + RESTORE_CAPACITY_HEADROOM_KIB * 2;
+
+    const atThreshold = { ...comfortable, hostAvailableKib: requiredKib };
+    const belowThreshold = { ...comfortable, hostAvailableKib: requiredKib - 1 };
+
+    expect(runExtractedCheckCapacity(atThreshold).status).toBe(0);
+    expect(tsCapacityOk(atThreshold)).toBe(true);
+
+    expect(runExtractedCheckCapacity(belowThreshold).status).not.toBe(0);
+    expect(tsCapacityOk(belowThreshold)).toBe(false);
+  });
+
+  it("both implementations refuse at the exact same temp-filesystem threshold (staged+doc+64MiB headroom)", () => {
+    const requiredKib = comfortable.stagedKib + comfortable.documentKib + RESTORE_CAPACITY_HEADROOM_KIB;
+    const atThreshold = { ...comfortable, tempAvailableKib: requiredKib };
+    const belowThreshold = { ...comfortable, tempAvailableKib: requiredKib - 1 };
+
+    expect(runExtractedCheckCapacity(atThreshold).status).toBe(0);
+    expect(tsCapacityOk(atThreshold)).toBe(true);
+
+    expect(runExtractedCheckCapacity(belowThreshold).status).not.toBe(0);
+    expect(tsCapacityOk(belowThreshold)).toBe(false);
+  });
+
+  it("both implementations refuse at the exact same document-volume threshold (volumeAvailable + currentDocument >= staged)", () => {
+    const requiredVolumeAvailable = comfortable.stagedKib - comfortable.documentKib;
+    const atThreshold = { ...comfortable, volumeAvailableKib: requiredVolumeAvailable };
+    const belowThreshold = { ...comfortable, volumeAvailableKib: requiredVolumeAvailable - 1 };
+
+    expect(runExtractedCheckCapacity(atThreshold).status).toBe(0);
+    expect(tsCapacityOk(atThreshold)).toBe(true);
+
+    expect(runExtractedCheckCapacity(belowThreshold).status).not.toBe(0);
+    expect(tsCapacityOk(belowThreshold)).toBe(false);
   });
 });

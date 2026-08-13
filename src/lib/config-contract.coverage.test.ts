@@ -25,6 +25,18 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_ACCEPTANCE_OIDC",
   "ORBIT_CAPTURE_PRODUCT_TOUR",
   "ORBIT_SKIP_E2E",
+  // CLI-invocation-only operational toggles (issue #296 slice 4,
+  // src/cli/orbit.ts) — never written to .env-orbit, so out of the
+  // deployment configuration contract entirely, mirroring the Bash
+  // scripts' own non-contract operational env vars (e.g. restore.sh's
+  // ORBIT_NONINTERACTIVE_RESTORE, configure.sh's ORBIT_CONFIGURE_PROMPTS).
+  // ORBIT_RECOVERY_PROMPTS=machine switches orbit backup/restore/export-
+  // recovery-bundle/import-recovery-bundle's passphrase/confirmation
+  // prompts to the machine-readable line grammar (docs/engine-events.md,
+  // "Machine prompts"); ORBIT_NONINTERACTIVE_RESTORE=true is required
+  // alongside `orbit restore --yes` for unattended restore (guarantee #46).
+  "ORBIT_RECOVERY_PROMPTS",
+  "ORBIT_NONINTERACTIVE_RESTORE",
 ]);
 
 function sourceFiles(dir: string): string[] {
