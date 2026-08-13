@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "test:standalone-pdfjs": "node scripts/standalone-pdfjs-runtime-check.mjs",
     "orbit": "node_modules/tsx/dist/cli.mjs src/cli/orbit.ts",
+    "build:cli": "node scripts/bundle-orbit-cli.mjs",
     "db:generate": "node scripts/run-with-orbit-env.mjs node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node scripts/run-with-orbit-env.mjs node_modules/tsx/dist/cli.mjs src/db/migrate.ts"
   },
@@ -45,6 +46,7 @@
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "4.1.10",
     "drizzle-kit": "^0.31.0",
+    "esbuild": "0.28.1",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.11",
     "happy-dom": "^20.11.2",
