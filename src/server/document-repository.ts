@@ -25,6 +25,7 @@ import {
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
+import { validUuid } from "@/server/workspace-access";
 
 function operationalDocumentReason(value: string): OperationalReason {
   return (operationalReasons as readonly string[]).includes(value)
@@ -140,6 +141,13 @@ async function requireHouseholdAndItemAccess(
 }
 
 async function requireDocumentAccess(userId: string, documentId: string) {
+  // A malformed id must fail the same way an unknown-but-well-formed one
+  // does: postgres.js runs with prepare: false, so an invalid uuid literal
+  // reaches PostgreSQL as text and raises a driver error the route handler
+  // cannot classify, surfacing as a 500 instead of the intended 404 (#383).
+  if (!validUuid(documentId)) {
+    throw new AppError("document_not_found", "That document is not available", 404);
+  }
   const [record] = await getDb()
     .select({
       id: documents.id,
@@ -277,6 +285,24 @@ export async function listItemDocuments(
       recoveryStatus: recoverable && row.recoveryJobStatus === "failed" ? "manual" : recoverable ? "retrying" : null,
     }, config.scanMode);
   });
+}
+
+/**
+ * Whether a document's content has durably reached `available`: the boundary
+ * before which no other holder of its bytes may treat its own copy as
+ * redundant and destroy it (#383 finding 4). A document that is still
+ * `scanning` (including scanner-outage recovery) or has been `rejected` is
+ * not yet — or will never be — safe to treat as the sole retained copy.
+ */
+export async function isDocumentAvailable(documentId: string): Promise<boolean> {
+  const config = getDocumentConfig();
+  const [row] = await getDb()
+    .select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1);
+  if (!row) return false;
+  return isDocumentContentReady(row, config.scanMode, "download");
 }
 
 async function reserveDocumentMetadata(input: {

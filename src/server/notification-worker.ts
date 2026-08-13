@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import nodemailer from "nodemailer";
 import webPush from "web-push";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
@@ -57,6 +58,7 @@ export const notificationFailureCategories = [
   "push_unavailable",
   "recipient_preferences_disabled",
   "household_pending_deletion",
+  "membership_removed",
   "unknown",
 ] as const;
 
@@ -172,6 +174,7 @@ export function deliveryFailureState(
     "push_unsubscribed",
     "recipient_preferences_disabled",
     "household_pending_deletion",
+    "membership_removed",
   ].includes(category)) return "cancelled";
   return attempts >= maxAttempts ? "failed" : "retry";
 }
@@ -220,16 +223,33 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
   };
 }
 
-/** Builds a TLS-pinned Nodemailer transport without exposing provider details. */
+/**
+ * Builds a TLS-pinned Nodemailer transport without exposing provider details.
+ *
+ * nodemailer's `createTransport(urlString, secondArgument)` only ever reads
+ * `secondArgument` as *mail* defaults (e.g. a default `from`) — never as
+ * connection/transport options — whenever the first argument is a URL
+ * string (see `nodemailer/lib/nodemailer.js` and `Mailer`'s constructor).
+ * Passing `requireTLS`, `tls`, or the timeout bounds there is silently
+ * discarded (#383 finding 1's fix depends on the timeouts actually taking
+ * effect, which surfaced this). nodemailer's own URL parser does read
+ * connection options from the URL's query string
+ * (`shared.parseConnectionUrl`, including a `tls.<key>` nested form), so
+ * that is the supported way to carry them through a URL-shaped transporter.
+ */
 export function createSmtpTransport(config: NotificationWorkerConfig, timeouts = true): ReturnType<typeof nodemailer.createTransport> {
-  let hostname: string | undefined;
-  try { hostname = new URL(config.smtpUrl).hostname; } catch { /* verification returns a safe failure below */ }
-  return nodemailer.createTransport(config.smtpUrl, {
-    secure: config.smtpSecurity === "implicit_tls",
-    requireTLS: config.smtpSecurity === "starttls",
-    tls: { minVersion: "TLSv1.2", rejectUnauthorized: true, ...(hostname ? { servername: hostname } : {}) },
-    ...(timeouts ? { connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 5_000 } : {}),
-  });
+  let url: URL;
+  try { url = new URL(config.smtpUrl); } catch { return nodemailer.createTransport(config.smtpUrl); }
+  url.searchParams.set("requireTLS", String(config.smtpSecurity === "starttls"));
+  url.searchParams.set("tls.minVersion", "TLSv1.2");
+  url.searchParams.set("tls.rejectUnauthorized", "true");
+  if (url.hostname) url.searchParams.set("tls.servername", url.hostname);
+  if (timeouts) {
+    url.searchParams.set("connectionTimeout", "5000");
+    url.searchParams.set("greetingTimeout", "5000");
+    url.searchParams.set("socketTimeout", "5000");
+  }
+  return nodemailer.createTransport(url.toString());
 }
 
 /** Verifies SMTP TLS and authentication only; it never sends a message. */
@@ -297,7 +317,78 @@ export function enabledDeliveryChannels(input: {
   return channels;
 }
 
+/** True for IPv4 addresses reserved for loopback, link-local, or private use. */
+function isPrivateOrReservedIPv4(address: string): boolean {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 192 && b === 0 && parts[2] === 0) return true;
+  return false;
+}
+
+/** True for IPv6 addresses reserved for loopback, link-local, or unique-local use. */
+function isPrivateOrReservedIPv6(address: string): boolean {
+  const normalized = address.toLowerCase();
+  if (normalized === "::1" || normalized === "::") return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(normalized)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(normalized)) return true;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized);
+  if (mapped) return isPrivateOrReservedIPv4(mapped[1]);
+  return false;
+}
+
+/**
+ * Web-push subscription endpoints are supplied by authenticated members
+ * (`/api/push/subscriptions`, validated there only as a well-formed URL)
+ * and are handed straight to `web-push`, which issues an outbound HTTPS
+ * POST built from the endpoint's own host and port (#383 finding 2). This
+ * mirrors the outbound-boundary discipline the Tika adapter applies before
+ * every fetch (src/server/documents/tika.ts): never let externally
+ * influenced input reach an outbound request unconstrained. Real push
+ * services are always `https:` on the default port, so this rejects
+ * exactly the shapes a legitimate subscription never has.
+ */
+export function isAllowedPushEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  if (url.port && url.port !== "443") return false;
+  // The WHATWG URL parser keeps IPv6 hosts bracketed (`[::1]`); node:net's
+  // isIP does not recognise the brackets, so they are stripped only for
+  // the address-family checks below.
+  const hostname = url.hostname.toLowerCase();
+  const addressCandidate = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return false;
+  const ipVersion = isIP(addressCandidate);
+  if (ipVersion === 4) return !isPrivateOrReservedIPv4(addressCandidate);
+  if (ipVersion === 6) return !isPrivateOrReservedIPv6(addressCandidate);
+  return true;
+}
+
 async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Promise<void> {
+  // #383 finding 1: without a date predicate this join is instance-wide and
+  // time-unbounded, so every open due_event × reminder_rule × membership row
+  // pays a per-row householdReminderTime() call (a fresh Intl.DateTimeFormat
+  // construction, ~150µs) below even though almost all of them are nowhere
+  // near firing. Push a generous calendar-date window into SQL first — the
+  // exact instant is still resolved and checked precisely afterwards, this
+  // predicate only bounds *which rows* pay that cost. The slop on both sides
+  // covers the full catch-up window plus the +/-1 day a household timezone
+  // can shift the UTC reminder instant off the naive calendar date.
+  const windowFloor = new Date(now.getTime() - notificationCatchUpWindowMs - 24 * 60 * 60_000);
+  const windowCeiling = new Date(now.getTime() + 24 * 60 * 60_000);
+  const windowFloorDate = windowFloor.toISOString().slice(0, 10);
+  const windowCeilingDate = windowCeiling.toISOString().slice(0, 10);
+
   const candidates = await db
     .select({
       eventId: dueEvents.id,
@@ -324,6 +415,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
       eq(items.status, "active"),
       isNull(users.disabledAt),
       isNull(households.deletionRequestedAt),
+      sql`(${dueEvents.dueDate}::date - ${reminderRules.daysBefore}) between ${windowFloorDate}::date and ${windowCeilingDate}::date`,
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
@@ -400,7 +492,13 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
   return {
     async sendEmail(notification) {
       if (!transporter) {
-        transporter = createSmtpTransport(config, false);
+        // Bounded to the same 5s connect/greeting/socket timeouts as the
+        // verification path (#383 finding 1): this send runs inside the
+        // household lifecycle advisory lock (dispatchUnderHouseholdLifecycleLock),
+        // so an unbounded transporter lets a blackholed SMTP provider hold
+        // that lock — and therefore every ordinary workspace write for the
+        // household — for nodemailer's default minutes instead of seconds.
+        transporter = createSmtpTransport(config);
       }
       await transporter.sendMail({
         from: notification.from,
@@ -538,6 +636,12 @@ async function deliverClaimed(
       householdDeletionRequestedAt: households.deletionRequestedAt,
       completedAt: dueEvents.completedAt,
       userDisabledAt: users.disabledAt,
+      // #383 finding 4: a delivery already queued (pending/retry/reclaimed
+      // after a lease expiry) is not cancelled when the recipient is
+      // removed from the household, so this is re-checked at send time
+      // instead of trusting the membership that was true when the row was
+      // materialized.
+      isMember: sql<boolean>`${memberships.userId} is not null`,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
       userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
     })
@@ -547,6 +651,10 @@ async function deliverClaimed(
     .innerJoin(items, eq(items.id, dueEvents.itemId))
     .innerJoin(households, eq(households.id, notificationDeliveries.householdId))
     .leftJoin(userPreferences, eq(userPreferences.userId, notificationDeliveries.userId))
+    .leftJoin(memberships, and(
+      eq(memberships.householdId, notificationDeliveries.householdId),
+      eq(memberships.userId, notificationDeliveries.userId),
+    ))
     .where(and(
       inArray(notificationDeliveries.id, claimed.map((delivery) => delivery.id)),
       eq(notificationDeliveries.status, "processing"),
@@ -573,13 +681,13 @@ async function deliverClaimed(
       const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
         : delivery.userPushEnabled;
-      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule) {
+      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule || !delivery.isMember) {
         await cancelDelivery(
           db,
           delivery.id,
           leaseToken,
           now,
-          delivery.householdDeletionRequestedAt ? "household_pending_deletion" : null,
+          delivery.householdDeletionRequestedAt ? "household_pending_deletion" : (!delivery.isMember ? "membership_removed" : null),
         );
         continue;
       }
@@ -629,6 +737,19 @@ async function deliverClaimed(
           await failDelivery(db, delivery.id, leaseToken, delivery.attempts, config.maxAttempts, "push_unsubscribed", now, retryDelay);
           continue;
         }
+        // #383 finding 3: a send to one subscription cannot be undone once
+        // it succeeds. Previously, any other subscription's transient
+        // failure threw out of this closure, rolling back the whole
+        // dispatch transaction and leaving the delivery in `retry` — so the
+        // next attempt resent to every still-active subscription, including
+        // the one that had already received it. The whole delivery is now
+        // only retried (which necessarily means resending to everyone
+        // still active) when nothing got through at all; once at least one
+        // device has genuinely received the reminder, the delivery
+        // completes and any subscription that failed transiently is simply
+        // not retried for this reminder, rather than risking a duplicate
+        // send to a device that already got it.
+        let transientPushFailure: unknown = null;
         if (!await dispatchUnderHouseholdLifecycleLock(
           db,
           {
@@ -640,7 +761,16 @@ async function deliverClaimed(
           currentTime,
           leaseDurationMs,
           async (transaction) => {
+            let delivered = false;
             for (const subscription of subscriptions) {
+              if (!isAllowedPushEndpoint(subscription.endpoint)) {
+                // #383 finding 2: never make the outbound request at all for
+                // an endpoint that fails the boundary check; treat it like a
+                // permanently dead subscription instead of attempting delivery.
+                await transaction.update(pushSubscriptions).set({ revokedAt: now })
+                  .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
+                continue;
+              }
               try {
                 await providers.sendPush({
                   target: {
@@ -653,6 +783,7 @@ async function deliverClaimed(
                     url: "/",
                   },
                 });
+                delivered = true;
               } catch (error) {
                 const statusCode = (error as { statusCode?: number }).statusCode;
                 if (statusCode === 404 || statusCode === 410) {
@@ -660,12 +791,22 @@ async function deliverClaimed(
                     .where(and(eq(pushSubscriptions.id, subscription.id), isNull(pushSubscriptions.revokedAt)));
                   continue;
                 }
-                throw error;
+                transientPushFailure = error;
               }
             }
+            if (!delivered && transientPushFailure) throw transientPushFailure;
           },
           beforeProviderDispatch,
         )) continue;
+        if (transientPushFailure) {
+          // The delivery already committed as "sent" above (at least one
+          // subscription received it); this only records, for admin
+          // diagnostics, that another subscription did not — never the
+          // provider error itself (`failDelivery`'s bounded-vocabulary rule).
+          await db.update(notificationDeliveries)
+            .set({ lastError: categorizeProviderError("web_push", transientPushFailure) })
+            .where(eq(notificationDeliveries.id, delivery.id));
+        }
       }
     } catch (error) {
       await failDelivery(

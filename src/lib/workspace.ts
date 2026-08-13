@@ -12,7 +12,7 @@ import {
 
 export const WORKSPACE_VERSION = 1;
 
-const optionalText = (maximum: number) => z.string().trim().max(maximum).optional();
+export const optionalText = (maximum: number) => z.string().trim().max(maximum).optional();
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const activityKinds = [
   "created",

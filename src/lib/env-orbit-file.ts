@@ -34,8 +34,17 @@ function isValidValue(value: string): boolean {
   if (value.length > 4096) return false;
   if (!isControlFree(value)) return false;
   if (/^\s|\s$/.test(value)) return false;
-  // Forms ambiguous to Compose or a shell-like dotenv parser.
-  return !/[$`"'#\\]/.test(value);
+  // Mirrors scripts/configuration.sh's validate_value exactly (#383): $ and
+  // ` are ambiguous to Compose's env-file parser anywhere (interpolation,
+  // unescapable by a preceding backslash); a leading quote is ambiguous
+  // because Compose treats it as opening a value that can run on and
+  // consume following lines; a `#` is only a comment marker when preceded
+  // by whitespace. A quote elsewhere in the value, or a backslash anywhere,
+  // is passed through literally and no longer needs blanket rejection.
+  if (/[$`]/.test(value)) return false;
+  if (/^['"]/.test(value)) return false;
+  if (/\s#/.test(value)) return false;
+  return true;
 }
 
 function isValidComposeProjectName(value: string): boolean {

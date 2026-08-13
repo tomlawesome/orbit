@@ -9,6 +9,7 @@ tmp
 .env-orbit
 .env-orbit.*
 .orbit-secrets
+backups
 coverage
 docs
 README.md

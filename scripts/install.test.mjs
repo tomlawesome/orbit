@@ -52,6 +52,8 @@ const deploymentAssets = [
   "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
+  "scripts/repair.sh",
+  "scripts/engine-check.sh",
 ];
 
 const fakeDockerScript = [
@@ -425,6 +427,20 @@ const fakeCurlScript = [
   "printf 'RESTORE_INVOKED\\n'",
   "SCRIPT",
   "    ;;",
+  "  scripts/repair.sh)",
+  "    cat <<'SCRIPT' > \"$output\"",
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  "printf 'REPAIR_INVOKED\\n'",
+  "SCRIPT",
+  "    ;;",
+  "  scripts/engine-check.sh)",
+  "    cat <<'SCRIPT' > \"$output\"",
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  "printf 'ENGINE_CHECK_INVOKED\\n'",
+  "SCRIPT",
+  "    ;;",
   "  *)",
   "    printf 'fake content for %s\\n' \"$asset\" > \"$output\"",
   "    ;;",
@@ -660,10 +676,12 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     cwd: targetDir,
     encoding: "utf8",
     input,
-    // 30s, not 10s: under parallel CI load with coverage instrumentation the
-    // PTY session can exceed 10s, and the SIGKILL surfaces as status null
-    // instead of the asserted exit code (observed on PRs #368 and #372).
-    timeout: 30000,
+    // 90s, not 10s: under parallel CI load with coverage instrumentation the
+    // PTY session can exceed even 30s (observed at 10s on PRs #368/#372 and
+    // again at 30s on PR #390), and the SIGKILL surfaces as status null
+    // instead of the asserted exit code. A genuine hang still fails — load
+    // contention never should.
+    timeout: 90000,
     killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
@@ -1373,18 +1391,43 @@ describe("install.sh", () => {
     expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
+    // issue #383 shipping gap: repair.sh and engine-check.sh must be fetched
+    // and installed onto every deployed target exactly like backup.sh/
+    // restore.sh, or `bash scripts/repair.sh`/`bash scripts/engine-check.sh`
+    // fails with "no such file" on any real deployment despite both scripts
+    // being fully operator-facing (repair.sh's own header documents running
+    // it directly against a deployed target; engine-check.sh's header
+    // states it is "exactly like configure.sh/repair.sh").
+    expect(existsSync(join(targetDir, "scripts", "repair.sh"))).toBe(true);
+    expect(existsSync(join(targetDir, "scripts", "engine-check.sh"))).toBe(true);
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
+    expect(lstatSync(join(targetDir, "scripts", "repair.sh")).isFile()).toBe(true);
+    expect(lstatSync(join(targetDir, "scripts", "engine-check.sh")).isFile()).toBe(true);
     expect(result.calls).toContain(`scripts/backup.sh`);
     expect(result.calls).toContain(`scripts/restore.sh`);
+    expect(result.calls).toContain(`scripts/repair.sh`);
+    expect(result.calls).toContain(`scripts/engine-check.sh`);
     expect(result.stdout).not.toContain("BACKUP_INVOKED");
     expect(result.stdout).not.toContain("RESTORE_INVOKED");
+    expect(result.stdout).not.toContain("REPAIR_INVOKED");
+    expect(result.stdout).not.toContain("ENGINE_CHECK_INVOKED");
     const backup = spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
       encoding: "utf8",
     });
     expect(backup.status).toBe(0);
     expect(backup.stdout).toBe("BACKUP_INVOKED\n");
+    const repair = spawnSync("bash", [join(targetDir, "scripts", "repair.sh")], {
+      encoding: "utf8",
+    });
+    expect(repair.status).toBe(0);
+    expect(repair.stdout).toBe("REPAIR_INVOKED\n");
+    const engineCheck = spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
+      encoding: "utf8",
+    });
+    expect(engineCheck.status).toBe(0);
+    expect(engineCheck.stdout).toBe("ENGINE_CHECK_INVOKED\n");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
@@ -1397,6 +1440,36 @@ describe("install.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Refusing to install here");
     expect(result.calls).toBe("");
+  });
+
+  // issue #383 (install.sh:270 finding, verified/fixed alongside the
+  // deep-review findings above): staging_dir is created directly inside the
+  // target ("./.orbit-install-staging.XXXXXX") and target_is_empty globs
+  // with dotglob, so a leftover staging directory from an earlier attempt
+  // that was SIGKILLed/OOM-killed/power-lost (never ran the EXIT trap's own
+  // cleanup) makes an otherwise-empty target look non-empty on every
+  // subsequent run. Before this fix, that produced only the generic
+  // "not empty and not a recognizable Orbit deployment" refusal, with no
+  // mention of the hidden directory actually responsible — the operator had
+  // to go looking for it themselves. The fix names it explicitly instead;
+  // it deliberately never auto-removes it, so this still refuses (target
+  // validation's safety contract is unchanged), it just tells the operator
+  // what is blocking the retry and that it is safe to remove once confirmed
+  // no install is still in progress.
+  it("names a leftover .orbit-install-staging.* directory in the refusal instead of the generic message (issue #383)", () => {
+    const targetDir = makeTarget();
+    mkdirSync(join(targetDir, ".orbit-install-staging.abc123"), { mode: 0o700 });
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("A previous install attempt was interrupted");
+    expect(result.stderr).toContain(".orbit-install-staging.abc123");
+    expect(result.stderr).not.toContain("not a recognizable Orbit deployment");
+    expect(result.calls).toBe("");
+    // Never auto-removed: only a human may confirm no install is still in
+    // progress before deleting it.
+    expect(existsSync(join(targetDir, ".orbit-install-staging.abc123"))).toBe(true);
   });
 
   it("rejects a target whose existing-deployment marker is a symlink", () => {
