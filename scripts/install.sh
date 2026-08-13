@@ -425,6 +425,23 @@ validate_target() {
     target_was_empty=1
     return
   fi
+  # A leftover `.orbit-install-staging.*` directory here means an earlier
+  # install attempt was interrupted hard enough (SIGKILL, OOM, power loss)
+  # that the EXIT trap's own `rm -rf -- "$staging_dir"` never ran — an
+  # ordinary Ctrl-C/SIGTERM already cleans this up via `cleanup` above.
+  # Left in place, it makes an otherwise-empty target fail every one of the
+  # checks above (issue #383, install.sh:270 finding). Name it explicitly
+  # here instead of folding it into the generic refusal below, so the
+  # operator is not left doing filesystem archaeology to find what is
+  # blocking a retry; deliberately never auto-removed by this script, since
+  # only a human can confirm no other install is concurrently in progress.
+  local -a leftover_staging=()
+  shopt -s nullglob dotglob
+  leftover_staging=(.orbit-install-staging.*)
+  shopt -u nullglob dotglob
+  if [[ ${#leftover_staging[@]} -gt 0 ]]; then
+    fail "A previous install attempt was interrupted and left ${leftover_staging[*]} behind in this directory. Review its contents, then remove it (safe once you have confirmed no install is still in progress) and retry."
+  fi
   fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
 }
 
@@ -1322,6 +1339,8 @@ readonly deployment_assets=(
   "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
+  "scripts/repair.sh"
+  "scripts/engine-check.sh"
 )
 readonly deployment_scripts=(
   "scripts/configure.sh"
@@ -1329,6 +1348,8 @@ readonly deployment_scripts=(
   "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
+  "scripts/repair.sh"
+  "scripts/engine-check.sh"
 )
 declare -a asset_directories=()
 declare -A asset_directory_seen=()
@@ -1546,6 +1567,19 @@ installer_ui_event compose compose completed compose-validation check
 printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.\n'
 
 file_transaction_committed=1
+
+# Record the commit in the staging directory itself, not just in this
+# process's memory. If the host dies during the image-pull/health-wait phase
+# below (the longest phase of an install), the EXIT trap's own rollback never
+# runs and this staging directory can survive next to a successfully
+# installed deployment. repair.sh treats any leftover
+# ".orbit-install-staging.*" as evidence of an INTERRUPTED transaction and
+# offers to restore from it; without this marker it cannot tell that
+# transaction apart from one that already committed, and would silently
+# revert a successful install/update back to the pre-update files (issue
+# #383 finding 2). repair.sh's do_restore_transaction refuses outright when
+# this marker is present.
+: > "$staging_dir/committed" || fail "Could not record the installer's commit marker."
 
 prepare_service_images
 wait_for_deployment_readiness
