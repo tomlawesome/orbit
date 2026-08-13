@@ -29,10 +29,9 @@ import {
 } from "@/lib/domain";
 import { householdNotifications, type HouseholdNotification } from "@/lib/notifications";
 import {
-  colourways,
   textSizes,
-  themeModes,
-  urgencyPalettes,
+  themePackInfo,
+  themePacks,
   type ThemePreference,
 } from "@/lib/preferences";
 import { useWorkspace } from "@/lib/preview-workspace";
@@ -75,10 +74,6 @@ const textSizeLabels = {
   comfortable: { name: "Comfortable", detail: "Larger and easier to scan" },
   large: { name: "Large", detail: "Maximum in-app text size" },
   "extra-large": { name: "Extra large", detail: "Maximum readability without browser zoom" },
-} as const;
-const urgencyPaletteLabels = {
-  classic: { name: "Traditional", detail: "Red, orange, yellow and green" },
-  themed: { name: "Theme matched", detail: "Urgency colours adapt to your colourway" },
 } as const;
 
 function AuthenticationGate({
@@ -155,10 +150,8 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const [notice, setNotice] = useState<Notice | null>(null);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const themePreference = usePersistedThemePreference(session.user);
-  const themeMode = themePreference.mode;
-  const colourway = themePreference.colourway;
+  const theme = themePreference.theme;
   const textSize = themePreference.textSize;
-  const urgencyPalette = themePreference.urgencyPalette;
   const emailNotifications = themePreference.emailNotifications;
   const pushNotifications = themePreference.pushNotifications;
   const activeItems = household.items.filter((item) => item.status === "active");
@@ -553,7 +546,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
 
   if (mode === "settings") {
     return (
-      <main className="settings-page" data-theme={colourway} data-mode={themeMode} data-text-size={textSize} data-urgency-palette={urgencyPalette}>
+      <main className="settings-page" data-theme={theme} data-text-size={textSize}>
         <header className="settings-page-header">
           <button className="settings-return-button" onClick={navigateHomeWithFocus}>
             <Icon name="chevron" /> Return to Orbit
@@ -605,24 +598,13 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
         <section className="settings-section-region" id={settingsSectionIds.appearance} aria-labelledby={`${settingsSectionIds.appearance}-heading`}>
           <h2 id={`${settingsSectionIds.appearance}-heading`} tabIndex={-1}>Appearance</h2>
           <section>
-            <div className="setting-heading"><h3>Display mode</h3><p>Use your device setting or choose a consistent mode.</p></div>
-            <div className="mode-picker">
-              {themeModes.map((mode) => (
-                <button className={themeMode === mode ? "active" : ""} key={mode} onClick={() => updateAppearance({ mode })}>
-                  <span className={`mode-preview mode-${mode}`}><i /><b /></span>
-                  {mode[0].toUpperCase() + mode.slice(1)}
-                </button>
-              ))}
-            </div>
-          </section>
-          <section>
-            <div className="setting-heading"><h3>Colourway</h3><p>Each palette has a carefully tuned light and dark expression.</p></div>
-            <div className="colourway-list">
-              {colourways.map((theme) => (
-                <button className={colourway === theme.id ? "active" : ""} key={theme.id} onClick={() => updateAppearance({ colourway: theme.id })}>
-                  <span className="theme-swatches">{theme.swatches.map((swatch) => <i key={swatch} style={{ backgroundColor: swatch }} />)}</span>
-                  <span><strong>{theme.name}</strong><small>{theme.description}</small></span>
-                  <b>{colourway === theme.id ? "✓" : ""}</b>
+            <div className="setting-heading"><h3>Theme</h3><p>Each pack is a complete, self-contained sky — pick the one that matches your household.</p></div>
+            <div className="theme-pack-list">
+              {themePacks.map((pack) => (
+                <button className={theme === pack ? "active" : ""} key={pack} onClick={() => updateAppearance({ theme: pack })}>
+                  <span className="theme-swatches">{themePackInfo[pack].swatches.map((swatch, index) => <i key={`${pack}-${index}`} style={{ backgroundColor: swatch }} />)}</span>
+                  <span><strong>{themePackInfo[pack].name}</strong><small>{themePackInfo[pack].description}</small></span>
+                  <b>{theme === pack ? "✓" : ""}</b>
                 </button>
               ))}
             </div>
@@ -635,18 +617,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
                   <span className={`text-size-preview text-size-${size}`}>Aa</span>
                   <span><strong>{textSizeLabels[size].name}</strong><small>{textSizeLabels[size].detail}</small></span>
                   <b>{textSize === size ? "✓" : ""}</b>
-                </button>
-              ))}
-            </div>
-          </section>
-          <section>
-            <div className="setting-heading"><h3>Due-date heat map</h3><p>Choose traditional urgency colours or a palette tuned to the active theme.</p></div>
-            <div className="preference-card-picker">
-              {urgencyPalettes.map((palette) => (
-                <button className={urgencyPalette === palette ? "active" : ""} key={palette} onClick={() => updateAppearance({ urgencyPalette: palette })}>
-                  <span className={`heat-preview heat-preview-${palette}`}><i /><i /><i /><i /></span>
-                  <span><strong>{urgencyPaletteLabels[palette].name}</strong><small>{urgencyPaletteLabels[palette].detail}</small></span>
-                  <b>{urgencyPalette === palette ? "✓" : ""}</b>
                 </button>
               ))}
             </div>
@@ -751,10 +721,8 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   return (
     <div
       className="app-frame"
-      data-theme={colourway}
-      data-mode={themeMode}
+      data-theme={theme}
       data-text-size={textSize}
-      data-urgency-palette={urgencyPalette}
     >
       <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
