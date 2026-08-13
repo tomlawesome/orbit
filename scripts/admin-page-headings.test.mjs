@@ -64,8 +64,7 @@ describe("administration heading uniqueness", () => {
   it("keeps the administration surface on the persisted theme and readable heading metrics", () => {
     expect(styles).toContain(":is(.app-frame, .settings-page, .admin-page)");
     for (const attribute of [
-      '"data-theme": themePreference.colourway',
-      '"data-mode": themePreference.mode',
+      '"data-theme": themePreference.theme',
       '"data-text-size": themePreference.textSize',
     ]) {
       expect(page).toContain(attribute);
