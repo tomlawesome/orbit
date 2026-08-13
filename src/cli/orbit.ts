@@ -9,17 +9,54 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+import {
+  BackupRestoreCliRefusal,
+  runBackup,
+  runExportRecoveryBundle,
+  runImportRecoveryBundle,
+  runRestore,
+  verifyBackupBundle,
+} from "../lib/backup-restore-cli";
 import { evaluateReadiness, type OidcSecretFileFacts } from "../lib/config-contract";
 import { parseEnvOrbitContent } from "../lib/env-orbit-file";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
-import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, type RestoreDockerAdapter, RestoreRun, deriveRestorePaths, recoverRestore } from "../lib/restore-engine";
-import { createTar, extractTar } from "../lib/recovery-bundle";
+import {
+  type BackupDockerAdapter,
+  RecoveryBundleRefusal,
+  createDockerComposeBackupAdapter,
+  createTar,
+  extractTar,
+  isValidDocumentKekHex,
+  requireMatchingPassphrase,
+  requireValidPassphrase,
+} from "../lib/recovery-bundle";
+import {
+  IMPORT_CONFIRMATION_PHRASE,
+  type MachinePromptDriver,
+  RESTORE_CONFIRMATION_PHRASE,
+  RecoveryPromptAbortedError,
+  collectMachineImportConfirmation,
+  collectMachineRecoveryPassphrase,
+  collectMachineRecoveryPassphraseNoConfirm,
+  collectMachineRestoreConfirmation,
+} from "../lib/recovery-prompts";
+import {
+  CORRESPONDENCE_QUERIES,
+  RestoreEngineRefusal,
+  type CorrespondenceReports,
+  type RestoreDockerAdapter,
+  createDockerComposeRestoreAdapter,
+  deriveRestorePaths,
+  recoverRestore,
+} from "../lib/restore-engine";
 
 // The orbit engine CLI (ADR-0011, issue #294). First flow: `check` — the
 // value-free readiness report, output-identical to `configure.sh --check`
@@ -78,6 +115,325 @@ function commandCheck(deployDir: string): never {
   const report = evaluateReadiness(parsed.record, facts);
   process.stdout.write(report.lines.join("\n") + "\n");
   process.exit(report.ok ? 0 : 1);
+}
+
+// ---------------------------------------------------------------------------
+// orbit backup / orbit restore / orbit export-recovery-bundle /
+// orbit import-recovery-bundle (issue #296 slice 4): real, explicit-
+// invocation-only CLI entry points wired onto src/lib/recovery-bundle.ts
+// (slices 1-2) and src/lib/restore-engine.ts (slice 3) via the orchestration
+// in src/lib/backup-restore-cli.ts. None of these is reachable except by
+// typing the command name — no default/implied execution from `main()`'s
+// dispatch, no bootstrap wiring, and scripts/backup.sh / scripts/restore.sh
+// / scripts/export-recovery-bundle.sh / scripts/import-recovery-bundle.sh
+// remain entirely unmodified and are not invoked by anything here (see
+// docs/adr-notes/296-backup-port-plan.md, Slice 4, "Non-goals").
+// ---------------------------------------------------------------------------
+
+interface BackupRestorePaths {
+  envFile: string;
+  backupDirectory: string;
+  documentKekFile: string;
+}
+
+// The TS CLI's own path convention: everything is derived from `--dir`
+// (matching `check`'s existing convention above), not from the Bash
+// scripts' ORBIT_ENV_FILE/ORBIT_BACKUP_DIR/ORBIT_SECRETS_DIR environment
+// variables — a deliberate, flagged simplification (see docs/adr-notes/
+// 296-backup-port-plan.md, Slice 4 Flags), not a behavioral gap in what's
+// characterized.
+function resolveBackupRestorePaths(deployDir: string): BackupRestorePaths {
+  return {
+    envFile: join(deployDir, ".env-orbit"),
+    backupDirectory: join(deployDir, "backups"),
+    documentKekFile: join(deployDir, ".orbit-secrets", "document-kek"),
+  };
+}
+
+/**
+ * Reads the document KEK straight off the host filesystem (the slice 1
+ * divergence docs/adr-notes/296-backup-port-plan.md's Flags already
+ * flagged: every Bash script reads it the same way for its own format
+ * checks). Single O_NOFOLLOW descriptor, mirroring commandCheck's own
+ * discipline above and recovery-bundle.ts's readRegularFileNoFollow.
+ */
+function readDocumentKekHex(path: string): string {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    fail(`orbit: missing regular document KEK file at ${path}`);
+  }
+  let content: string;
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) fail(`orbit: missing regular document KEK file at ${path}`);
+    content = readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+  const trimmed = content.replace(/[\r\n]+$/, "");
+  if (!isValidDocumentKekHex(trimmed)) fail("orbit: the document KEK must be a 32-byte hexadecimal value");
+  return trimmed;
+}
+
+// --- synchronous line I/O ---------------------------------------------------
+//
+// Everything else in this CLI is synchronous (no Promises anywhere in this
+// file); prompt collection follows the same style rather than introducing
+// async purely for stdin. fs.readSync on fd 0 performs a real blocking read
+// syscall regardless of whether fd 0 is a TTY or a pipe — the same technique
+// widely-used synchronous-stdin CLI libraries use — so this works both for a
+// real terminal and for a spawned test harness's piped stdin.
+
+function readSyncLine(fd: number): string | undefined {
+  const bytes: number[] = [];
+  const buffer = Buffer.alloc(1);
+  for (;;) {
+    const bytesRead = readSync(fd, buffer, 0, 1, null);
+    if (bytesRead === 0) return bytes.length > 0 ? Buffer.from(bytes).toString("utf8") : undefined;
+    const byte = buffer[0];
+    if (byte === 10) return Buffer.from(bytes).toString("utf8");
+    if (byte !== 13) bytes.push(byte);
+  }
+}
+
+/**
+ * A masked (no-echo) synchronous line read directly off fd 0 in raw mode —
+ * the Node equivalent of `read -s`. Requires a real controlling terminal on
+ * both stdin and stdout, matching export-recovery-bundle.sh/import-recovery-
+ * bundle.sh's own `</dev/tty` requirement ("An interactive terminal is
+ * required."), simplified to require stdin itself be that terminal (this
+ * CLI never pipes a secret to a subprocess's stdin the way the Bash scripts
+ * pipe the passphrase into `recovery-crypto.mjs`'s container invocation, so
+ * — unlike Bash — nothing here needs stdin kept free for that; flagged in
+ * docs/adr-notes/296-backup-port-plan.md).
+ */
+function readTtyMaskedLine(promptText: string): string {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    fail("orbit: an interactive terminal is required.");
+  }
+  process.stdout.write(promptText);
+  process.stdin.setRawMode(true);
+  const bytes: number[] = [];
+  const buffer = Buffer.alloc(1);
+  try {
+    for (;;) {
+      const bytesRead = readSync(0, buffer, 0, 1, null);
+      if (bytesRead === 0) break;
+      const byte = buffer[0];
+      if (byte === 3) {
+        // Ctrl-C: restore the terminal before exiting so the shell isn't left echo-less.
+        process.stdin.setRawMode(false);
+        process.stdout.write("\n");
+        process.exit(130);
+      }
+      if (byte === 13 || byte === 10) break;
+      if (byte === 127 || byte === 8) {
+        if (bytes.length > 0) bytes.pop();
+        continue;
+      }
+      bytes.push(byte);
+    }
+  } finally {
+    process.stdin.setRawMode(false);
+  }
+  process.stdout.write("\n");
+  return Buffer.from(bytes).toString("utf8");
+}
+
+function readTtyLine(promptText: string): string {
+  if (!process.stdin.isTTY) fail("orbit: an interactive terminal is required.");
+  process.stdout.write(promptText);
+  const line = readSyncLine(0);
+  if (line === undefined) fail("orbit: an interactive terminal is required.");
+  return line;
+}
+
+function isMachinePromptMode(): boolean {
+  return process.env.ORBIT_RECOVERY_PROMPTS === "machine";
+}
+
+function stdoutMachineDriver(): MachinePromptDriver {
+  return {
+    write(line: string): void {
+      process.stdout.write(`${line}\n`);
+    },
+    readLine(): string | undefined {
+      return readSyncLine(0);
+    },
+  };
+}
+
+/** export-recovery-bundle.sh:37-45 (guarantees #6-7): passphrase, then its confirmation, entered twice with no retry loop in TTY mode (matching the Bash original's single-attempt fail-closed behavior exactly); machine mode gets the bounded-3-attempt retry protocol docs/engine-events.md now documents. */
+function collectRecoveryPassphraseWithConfirmation(): string {
+  if (isMachinePromptMode()) return collectMachineRecoveryPassphrase(stdoutMachineDriver());
+  const passphrase = readTtyMaskedLine("Recovery passphrase: ");
+  requireValidPassphrase(passphrase);
+  const confirmation = readTtyMaskedLine("Confirm recovery passphrase: ");
+  requireMatchingPassphrase(passphrase, confirmation);
+  return passphrase;
+}
+
+/** import-recovery-bundle.sh:73-74: a single passphrase entry, no confirmation (only IMPORT_CONFIRMATION below is a typed phrase). */
+function collectImportPassphrase(): string {
+  if (isMachinePromptMode()) return collectMachineRecoveryPassphraseNoConfirm(stdoutMachineDriver());
+  return readTtyMaskedLine("Recovery passphrase: ");
+}
+
+/** import-recovery-bundle.sh:88-94 (guarantee #19): the literal "IMPORT RECOVERY" phrase, single attempt in TTY mode. */
+function collectImportConfirmation(bundlePath: string): boolean {
+  if (isMachinePromptMode()) {
+    try {
+      collectMachineImportConfirmation(stdoutMachineDriver());
+      return true;
+    } catch (error) {
+      if (error instanceof RecoveryPromptAbortedError) return false;
+      throw error;
+    }
+  }
+  process.stdout.write(`This will replace the local document KEK and restore:\n  ${bundlePath}\n`);
+  const answer = readTtyLine("Type IMPORT RECOVERY to continue: ");
+  return answer === IMPORT_CONFIRMATION_PHRASE;
+}
+
+/** restore.sh guarantee #46: either `--yes` with `ORBIT_NONINTERACTIVE_RESTORE=true` (unattended automation — a single flag alone is never sufficient), or the literal "RESTORE" phrase (interactive/machine). Returns a callback: runRestore() calls it exactly once, at restore.sh's own confirmation point (after preflight/capacity, before the checkpoint), never eagerly. */
+function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
+  if (useYesFlag) {
+    return () => process.env.ORBIT_NONINTERACTIVE_RESTORE === "true";
+  }
+  return () => {
+    if (isMachinePromptMode()) {
+      try {
+        collectMachineRestoreConfirmation(stdoutMachineDriver());
+        return true;
+      } catch (error) {
+        if (error instanceof RecoveryPromptAbortedError) return false;
+        throw error;
+      }
+    }
+    process.stdout.write("This will replace Orbit database contents and encrypted document bytes after a verified recovery checkpoint.\n");
+    const answer = readTtyLine("Type RESTORE to continue: ");
+    return answer === RESTORE_CONFIRMATION_PHRASE;
+  };
+}
+
+function commandBackup(deployDir: string, args: string[]): never {
+  const paths = resolveBackupRestorePaths(deployDir);
+  const documentKekHex = readDocumentKekHex(paths.documentKekFile);
+  const adapter: BackupDockerAdapter = createDockerComposeBackupAdapter({ envFile: paths.envFile, cwd: deployDir });
+
+  if (args[0] === "--verify") {
+    if (args.length !== 2 || !args[1]) fail("orbit: usage: orbit backup --verify <backup.tar>");
+    const target = resolve(args[1]);
+    const workDir = mkdtempSync(join(tmpdir(), "orbit-backup-verify-"));
+    try {
+      verifyBackupBundle(target, documentKekHex, workDir, adapter);
+      process.stdout.write(`Orbit backup is valid: ${args[1]}\n`);
+      process.exit(0);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  }
+
+  if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
+  const result = runBackup({ backupDirectory: paths.backupDirectory, documentKekHex, adapter, now: new Date() });
+  process.stdout.write(`Orbit backup created: ${result.finalTarPath}\n`);
+  process.exit(0);
+}
+
+function commandRestore(deployDir: string, args: string[]): never {
+  const paths = resolveBackupRestorePaths(deployDir);
+  const restorePaths = deriveRestorePaths(paths.backupDirectory, paths.documentKekFile);
+  const adapter = createDockerComposeRestoreAdapter({ envFile: paths.envFile, cwd: deployDir });
+
+  let yesFlag = false;
+  let recoverMode = false;
+  let backupFile: string | undefined;
+  for (const arg of args) {
+    if (arg === "--yes") {
+      yesFlag = true;
+      continue;
+    }
+    if (arg === "--recover") {
+      recoverMode = true;
+      continue;
+    }
+    if (backupFile === undefined) {
+      backupFile = arg;
+      continue;
+    }
+    fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
+  }
+
+  if (recoverMode) {
+    if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
+    const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-recover-"));
+    try {
+      recoverRestore({ adapter, paths: restorePaths, workDir });
+      process.stdout.write("Orbit recovery completed; the prior database, document tree, and key state were restored.\n");
+      process.exit(0);
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  }
+
+  if (backupFile === undefined) fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
+  const documentKekHex = readDocumentKekHex(paths.documentKekFile);
+  const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-"));
+  try {
+    runRestore({
+      backupTarPath: resolve(backupFile),
+      documentKekHex,
+      paths: restorePaths,
+      adapter,
+      workDir,
+      confirm: makeRestoreConfirmer(yesFlag),
+    });
+    process.stdout.write("Orbit restore completed successfully.\n");
+    process.exit(0);
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
+  if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit export-recovery-bundle <backup.tar>");
+  const paths = resolveBackupRestorePaths(deployDir);
+  const documentKekHex = readDocumentKekHex(paths.documentKekFile);
+  const adapter = createDockerComposeBackupAdapter({ envFile: paths.envFile, cwd: deployDir });
+  const passphrase = collectRecoveryPassphraseWithConfirmation();
+  const result = runExportRecoveryBundle({
+    sourceBundlePath: resolve(args[0]),
+    documentKekHex,
+    passphrase,
+    passphraseConfirmation: passphrase,
+    backupDirectory: paths.backupDirectory,
+    adapter,
+    now: new Date(),
+  });
+  process.stdout.write(`Orbit recovery bundle created: ${result.finalPath}\n`);
+  process.exit(0);
+}
+
+function commandImportRecoveryBundle(deployDir: string, args: string[]): never {
+  if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit import-recovery-bundle <recovery.tar>");
+  const recoveryBundlePath = resolve(args[0]);
+  const paths = resolveBackupRestorePaths(deployDir);
+  const adapter = createDockerComposeRestoreAdapter({ envFile: paths.envFile, cwd: deployDir });
+  const passphrase = collectImportPassphrase();
+  const importConfirmed = collectImportConfirmation(recoveryBundlePath);
+  runImportRecoveryBundle({
+    recoveryBundlePath,
+    passphrase,
+    liveDocumentKekFile: paths.documentKekFile,
+    backupDirectory: paths.backupDirectory,
+    adapter,
+    importConfirmed,
+    confirmRestore: makeRestoreConfirmer(false),
+  });
+  process.stdout.write("Orbit recovery import completed successfully.\n");
+  process.exit(0);
 }
 
 // Scenario shape for the hidden __install-transaction-rehearse subcommand
@@ -270,6 +626,59 @@ class RestoreRehearsalFakeAdapter implements RestoreDockerAdapter {
   waitForHealth(): boolean {
     return this.appRunning;
   }
+  measureLiveDatabaseSizeBytes(): number {
+    return 1024;
+  }
+  measureLiveDocumentTreeKib(): number {
+    return 1;
+  }
+  measureDocumentVolumeAvailableKib(): number {
+    return 1_000_000;
+  }
+}
+
+/**
+ * Builds a real, fully-valid backup bundle (five members, HMAC-signed,
+ * encrypted document archive — everything verifyBackupBundle/runRestore
+ * themselves require) from a document tree + fake database JSON blob, using
+ * a throwaway BackupDockerAdapter pointed at that content — not the
+ * scenario's own "live" adapter/state, which must stay untouched until
+ * runRestore's real cutover mutates it. This is what makes the rehearsal
+ * below exercise the true orchestrated flow (issue #296 slice 4): the
+ * "updated" bundle runRestore() consumes is produced exactly the way
+ * `orbit backup` would produce one, via the same createBackupBundle
+ * (slice 2) the real command calls.
+ */
+function buildRehearsalUpdateBundle(spec: RestoreRehearsalDocumentSpec, documentKekHex: string, scratchRoot: string): string {
+  const sourceRoot = join(scratchRoot, "source");
+  const documentsRoot = join(sourceRoot, "documents");
+  mkdirSync(documentsRoot, { recursive: true });
+  buildDocumentTree(documentsRoot, spec);
+  const databaseFile = join(sourceRoot, "database.json");
+  writeFakeDatabaseBlob(databaseFile, spec);
+
+  const sourceAdapter: BackupDockerAdapter = {
+    stopApp(): void {},
+    startApp(): void {},
+    dumpDatabase(outputPath: string): void {
+      copyFileSync(databaseFile, outputPath);
+    },
+    pgRestoreListOk(dumpPath: string): boolean {
+      try {
+        JSON.parse(readFileSync(dumpPath, "utf8"));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    collectDocumentsArchive(outputPath: string): void {
+      createTar(documentsRoot, outputPath, ["."]);
+    },
+  };
+
+  const bundleDirectory = join(scratchRoot, "bundle-source");
+  const result = runBackup({ backupDirectory: bundleDirectory, documentKekHex, adapter: sourceAdapter, now: new Date() });
+  return result.finalTarPath;
 }
 
 function commandRestoreEngineRehearse(scenarioPath: string): never {
@@ -292,30 +701,42 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
   buildDocumentTree(scenario.liveDocumentsRoot, scenario.original);
   writeFakeDatabaseBlob(scenario.liveDatabaseFile, scenario.original);
 
+  const documentKekHex = readFileSync(scenario.documentKekFile, "utf8").replace(/[\r\n]+$/, "");
+  const bundleScratchDir = mkdtempSync(join(scenario.backupDirectory, ".rehearsal-updated-bundle."));
+  const updatedBundlePath = buildRehearsalUpdateBundle(scenario.updated, documentKekHex, bundleScratchDir);
+
+  // Drives the real orchestrated flow (src/lib/backup-restore-cli.ts's
+  // runRestore — the same function `orbit restore` itself calls), not a
+  // hand-assembled sequence of RestoreRun calls: this is what "extends the
+  // SIGKILL rehearsal matrix to cover the orchestrated flow" means in
+  // practice — the staged-bundle preflight and check_capacity (#11-12) now
+  // run for real ahead of the checkpoint, and the SIGKILL points below are
+  // the same testHooks the orchestration itself exposes, not steps
+  // duplicated here.
   const workDir = mkdtempSync(join(scenario.backupDirectory, ".rehearsal-work."));
-  const run = RestoreRun.prepare({ adapter, paths, workDir });
-
   try {
-    run.createCheckpoint();
-    if (scenario.hardKillAfter === "checkpoint") process.kill(process.pid, "SIGKILL");
-
-    const updatedDocumentsRoot = mkdtempSync(join(scenario.backupDirectory, ".rehearsal-updated-docs."));
-    buildDocumentTree(updatedDocumentsRoot, scenario.updated);
-    const updatedDocumentsTar = join(workDir, "updated-documents.tar");
-    createTar(updatedDocumentsRoot, updatedDocumentsTar, ["."]);
-    run.cutoverDocuments(updatedDocumentsTar);
-    if (scenario.hardKillAfter === "documents-replaced") process.kill(process.pid, "SIGKILL");
-
-    const updatedDatabaseDump = join(workDir, "updated-database.dump");
-    writeFakeDatabaseBlob(updatedDatabaseDump, scenario.updated);
-    run.cutoverDatabase(updatedDatabaseDump);
-    if (scenario.hardKillAfter === "database-restored") process.kill(process.pid, "SIGKILL");
-
-    run.finalize();
-    process.stdout.write("outcome=completed\n");
+    const result = runRestore({
+      backupTarPath: updatedBundlePath,
+      documentKekHex,
+      paths,
+      adapter,
+      workDir,
+      confirm: () => true,
+      testHooks: {
+        afterCheckpoint: () => {
+          if (scenario.hardKillAfter === "checkpoint") process.kill(process.pid, "SIGKILL");
+        },
+        afterDocumentsReplaced: () => {
+          if (scenario.hardKillAfter === "documents-replaced") process.kill(process.pid, "SIGKILL");
+        },
+        afterDatabaseRestored: () => {
+          if (scenario.hardKillAfter === "database-restored") process.kill(process.pid, "SIGKILL");
+        },
+      },
+    });
+    process.stdout.write(`outcome=${result.outcome}\n`);
     process.exit(0);
   } catch (error) {
-    run.dispose();
     process.stdout.write(`outcome=failed message=${(error as Error).message}\n`);
     process.exit(1);
   }
@@ -339,21 +760,52 @@ function main(): void {
   }
 
   let deployDir = process.cwd();
+  const commandArgs: string[] = [];
   for (let index = 0; index < rest.length; index += 1) {
     if (rest[index] === "--dir" && rest[index + 1]) {
       deployDir = resolve(rest[index + 1]);
       index += 1;
     } else {
-      fail(`orbit: unknown option ${rest[index]}`);
+      commandArgs.push(rest[index]);
     }
   }
-  switch (command) {
-    case "check":
-      commandCheck(deployDir);
-      break;
-    default:
-      fail("orbit: supported commands: check [--dir <deployment>]");
+
+  try {
+    switch (command) {
+      case "check":
+        if (commandArgs.length > 0) fail(`orbit: unknown option ${commandArgs[0]}`);
+        commandCheck(deployDir);
+        break;
+      case "backup":
+        commandBackup(deployDir, commandArgs);
+        break;
+      case "restore":
+        commandRestore(deployDir, commandArgs);
+        break;
+      case "export-recovery-bundle":
+        commandExportRecoveryBundle(deployDir, commandArgs);
+        break;
+      case "import-recovery-bundle":
+        commandImportRecoveryBundle(deployDir, commandArgs);
+        break;
+      default:
+        failUsage();
+    }
+  } catch (error) {
+    // Every refusal class in the three modules this CLI wires together
+    // throws a stable, category-only message (no secret material, no
+    // attacker-controlled path/member names — asserted by each module's own
+    // no-leak sweep), so surfacing `error.message` directly here is safe;
+    // anything else is a genuine bug and should keep its stack trace.
+    if (error instanceof RecoveryBundleRefusal || error instanceof RestoreEngineRefusal || error instanceof BackupRestoreCliRefusal) {
+      fail(`orbit: ${error.message}`);
+    }
+    throw error;
   }
+}
+
+function failUsage(): never {
+  fail("orbit: supported commands: check, backup, restore, export-recovery-bundle, import-recovery-bundle [--dir <deployment>]");
 }
 
 main();

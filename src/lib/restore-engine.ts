@@ -15,6 +15,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  statfsSync,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -55,14 +56,12 @@ import {
 // Pure filesystem/crypto logic except where RestoreDockerAdapter is
 // injected for the operations that genuinely need a live Docker/Postgres
 // deployment, mirroring recovery-bundle.ts's BackupDockerAdapter shape.
-// check_capacity (restore.sh #11-12) is deliberately out of scope for this
-// slice — see Flags in docs/adr-notes/296-backup-port-plan.md.
 //
-// No shipped entry point reaches this module in this slice: it is wired
-// only to the hidden `orbit __restore-engine-rehearse` subcommand
-// (src/cli/orbit.ts), used solely for the SIGKILL interruption
-// characterization test in restore-engine.interruption.test.ts — the same
-// pattern install-transaction.ts uses for #295 slice 1.
+// Slice 4 (issue #296) adds check_capacity (restore.sh #11-12,
+// checkRestoreCapacity below) — deliberately deferred by slice 3 — and is
+// now wired into the orchestrated forward-restore flow in
+// src/lib/backup-restore-cli.ts, which a real `orbit restore` CLI entry
+// point drives (src/cli/orbit.ts). See docs/adr-notes/296-backup-port-plan.md.
 
 // ---------------------------------------------------------------------------
 // Refusals
@@ -89,7 +88,9 @@ export type RestoreEngineRefusalCode =
   | "preflight-correspondence-failed"
   | "query-report-failed"
   | "recovery-restore-failed"
-  | "recovery-health-failed";
+  | "recovery-health-failed"
+  | "capacity-measurement-invalid"
+  | "capacity-insufficient";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -664,6 +665,12 @@ export interface RestoreDockerAdapter extends Pick<BackupDockerAdapter, "dumpDat
   queryActiveReport(query: string): string;
   /** restore.sh:738-750 — polls the app's health endpoint for up to 45s. */
   waitForHealth(): boolean;
+  /** restore.sh:368-373 (check_capacity, #11-12) — `pg_database_size(current_database())`; throws on failure or non-numeric output. */
+  measureLiveDatabaseSizeBytes(): number;
+  /** restore.sh:375-379 (check_capacity, #11-12) — `du -sk /var/lib/orbit/documents` inside a one-off app container; throws on failure or non-numeric output. */
+  measureLiveDocumentTreeKib(): number;
+  /** restore.sh:390-394 (check_capacity, #11-12) — `df -Pk /var/lib/orbit/documents`'s Avail column inside a one-off app container; throws on failure or non-numeric output. */
+  measureDocumentVolumeAvailableKib(): number;
 }
 
 function fetchCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryReport">, databaseName: string): CorrespondenceReports {
@@ -730,6 +737,141 @@ function applyCheckpointState(adapter: RestoreDockerAdapter, checkpointDirectory
   if (!adapter.replaceDocumentsFromArchive(join(checkpointDirectory, "documents.tar"))) return false;
   if (!installCheckpointKey(checkpointDirectory, documentKekFile)) return false;
   return captureAndCheckActiveCorrespondence(adapter, workDir);
+}
+
+// ---------------------------------------------------------------------------
+// check_capacity (restore.sh:355-397, guarantees #11-12) — deferred by
+// slice 3, in scope for slice 4 (docs/adr-notes/296-backup-port-plan.md):
+// refuses a driven restore unless there is provably enough free space in
+// the private backup directory, the temporary staging filesystem, and the
+// live document volume simultaneously to hold the working set, checkpoint,
+// current data, and staged tree at once, with fixed headroom reserves.
+//
+// `directoryUsageKib`/`filesystemAvailableKib` are host-side
+// reimplementations of `du -sk`/`df -Pk`'s "Avail" column (not
+// `stat -f`/`f_bfree`, which includes root-reserved space `df` itself
+// excludes) — the same "reimplement in Node rather than shell out"
+// discipline `sha256File` already established over `sha256sum`
+// (docs/adr-notes/296-backup-port-plan.md Flags), since neither is a
+// Docker-only operation and the exact byte-for-byte output of the `du`/`df`
+// binaries themselves is not a format this module needs to match (unlike
+// `tar`/`openssl`): the value is an inherently host/filesystem-dependent
+// measurement fed into a `>=` comparison, not a fixed artifact.
+// ---------------------------------------------------------------------------
+
+/**
+ * `du -sk` equivalent (restore.sh:359-362,375-379): recursively sums each
+ * entry's allocated disk usage (`st_blocks`, 512-byte units, matching
+ * POSIX/GNU `du`'s own block-based accounting rather than logical byte
+ * size) under `root`, including `root` itself. Symlinks are not followed —
+ * counted at their own (small) allocation, never descended into — matching
+ * `du`'s default (non-`-L`) behavior.
+ */
+export function directoryUsageKib(root: string): number {
+  let blocks = 0;
+  const walk = (directory: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryPath = join(directory, entry.name);
+      let stat;
+      try {
+        stat = lstatSync(entryPath);
+      } catch {
+        continue;
+      }
+      blocks += stat.blocks ?? 0;
+      if (stat.isDirectory()) walk(entryPath);
+    }
+  };
+  const rootStat = lstatSync(root);
+  blocks += rootStat.blocks ?? 0;
+  if (rootStat.isDirectory()) walk(root);
+  return Math.ceil((blocks * 512) / 1024);
+}
+
+/**
+ * `df -Pk`'s "Avail" column equivalent (restore.sh:381-385,390-394):
+ * space available to an unprivileged caller (`f_bavail`), not raw free
+ * space (`f_bfree`, which includes filesystem-reserved blocks `df` itself
+ * excludes from "Avail").
+ */
+export function filesystemAvailableKib(path: string): number {
+  const stats = statfsSync(path);
+  return Math.floor((stats.bavail * stats.bsize) / 1024);
+}
+
+/** restore.sh:358's `working_headroom_kib`/`checkpoint_headroom_kib` (64 MiB each, used identically twice per :380,387). */
+export const RESTORE_CAPACITY_HEADROOM_KIB = 65_536;
+
+export interface RestoreCapacityFacts {
+  /** `du -sk` of the privately staged document tree (restore.sh:359-362). */
+  stagedDocumentsKib: number;
+  /** `stat -c '%s'` of the backup bundle file (restore.sh:363-367). */
+  backupBytes: number;
+  /** `pg_database_size(current_database())` (restore.sh:368-374). */
+  currentDatabaseBytes: number;
+  /** `du -sk` inside the app container of `/var/lib/orbit/documents` (restore.sh:375-379). */
+  currentDocumentKib: number;
+  /** `df -Pk`'s Avail column for the private backup directory (restore.sh:381-384). */
+  hostAvailableKib: number;
+  /** `df -Pk`'s Avail column for the temporary staging filesystem (restore.sh:385-386). */
+  tempAvailableKib: number;
+  /** `df -Pk`'s Avail column inside the app container for `/var/lib/orbit/documents` (restore.sh:390-394). */
+  volumeAvailableKib: number;
+}
+
+function requireNonNegativeIntegerMeasurement(value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    refuse("capacity-measurement-invalid", "preflight/capacity failed; a capacity measurement was not numeric.");
+  }
+}
+
+/**
+ * check_capacity (restore.sh:355-397): every measurement is validated as a
+ * non-negative integer first (#12, matching restore.sh's own
+ * `[[ "$x" =~ ^[0-9]+$ ]]` guards against a corrupted/hostile
+ * `du`/`df`/`psql` response silently becoming `0` or a shell-injection
+ * vector — moot for injection here since these are TypeScript numbers, not
+ * shell text, but the same fail-closed numeric gate is kept for parity and
+ * defense-in-depth against a malformed adapter implementation), then the
+ * three space requirements (#11) are checked in the same order restore.sh
+ * checks them: the private backup directory (working + checkpoint +
+ * database + document + rollback headroom), the temporary staging
+ * filesystem (checkpoint extraction), and the live document volume (room
+ * for the staged tree once current contents are removed).
+ */
+export function checkRestoreCapacity(facts: RestoreCapacityFacts): void {
+  for (const value of Object.values(facts)) requireNonNegativeIntegerMeasurement(value);
+
+  const backupKib = Math.ceil(facts.backupBytes / 1024);
+  const currentDatabaseKib = Math.ceil(facts.currentDatabaseBytes / 1024);
+  const requiredBackupKib =
+    backupKib +
+    currentDatabaseKib +
+    facts.currentDocumentKib +
+    facts.stagedDocumentsKib * 2 +
+    RESTORE_CAPACITY_HEADROOM_KIB +
+    RESTORE_CAPACITY_HEADROOM_KIB;
+  if (facts.hostAvailableKib < requiredBackupKib) {
+    refuse(
+      "capacity-insufficient",
+      "preflight/capacity failed; reserve working, checkpoint, database, document, and rollback space in the private backup location.",
+    );
+  }
+
+  const tempRequiredKib = facts.stagedDocumentsKib + facts.currentDocumentKib + RESTORE_CAPACITY_HEADROOM_KIB;
+  if (facts.tempAvailableKib < tempRequiredKib) {
+    refuse("capacity-insufficient", "preflight/capacity failed; reserve temporary filesystem space for checkpoint extraction.");
+  }
+
+  if (facts.volumeAvailableKib + facts.currentDocumentKib < facts.stagedDocumentsKib) {
+    refuse("capacity-insufficient", "preflight/capacity failed; reserve document-volume space for the staged tree after current contents are removed.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,6 +1468,49 @@ export function createDockerComposeRestoreAdapter(options: RestoreDockerComposeA
         if (Date.now() >= deadline) return false;
         sleepSync(1000);
       }
+    },
+    measureLiveDatabaseSizeBytes(): number {
+      const result = spawnSync(
+        dockerBinary,
+        composeArgs(
+          "exec",
+          "-T",
+          "orbit-db",
+          "sh",
+          "-c",
+          'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select pg_database_size(current_database());"',
+        ),
+        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+      );
+      const value = (result.stdout ?? "").trim();
+      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
+        refuse("capacity-measurement-invalid", "preflight/capacity failed; current database size could not be measured.");
+      }
+      return Number(value);
+    },
+    measureLiveDocumentTreeKib(): number {
+      const result = spawnSync(
+        dockerBinary,
+        composeArgs("run", "--rm", "--no-deps", "--entrypoint", "sh", "orbit-app", "-c", "du -sk /var/lib/orbit/documents | awk 'NR == 1 { print $1 }'"),
+        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+      );
+      const value = (result.stdout ?? "").trim();
+      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
+        refuse("capacity-measurement-invalid", "preflight/capacity failed; current document usage could not be measured.");
+      }
+      return Number(value);
+    },
+    measureDocumentVolumeAvailableKib(): number {
+      const result = spawnSync(
+        dockerBinary,
+        composeArgs("run", "--rm", "--no-deps", "--entrypoint", "sh", "orbit-app", "-c", "df -Pk /var/lib/orbit/documents | awk 'NR == 2 { print $4 }'"),
+        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+      );
+      const value = (result.stdout ?? "").trim();
+      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
+        refuse("capacity-measurement-invalid", "preflight/capacity failed; document-volume capacity could not be checked.");
+      }
+      return Number(value);
     },
   };
 }
