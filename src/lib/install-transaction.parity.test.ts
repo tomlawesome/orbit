@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,22 +92,29 @@ function snapshotTree(root: string): Snapshot {
   const snapshot: Snapshot = {};
   for (const entry of readdirSync(root).sort()) {
     const absolute = join(root, entry);
-    const stat = lstatSync(absolute);
-    if (stat.isSymbolicLink()) {
-      snapshot[entry] = { mode: stat.mode & 0o777, type: "symlink", linkTarget: readlinkSync(absolute) };
-    } else if (stat.isDirectory()) {
-      snapshot[entry] = { mode: stat.mode & 0o777, type: "directory", entries: snapshotTree(absolute) };
-    } else {
-      // Single-descriptor read: O_NOFOLLOW open, then fstat and read the SAME
-      // descriptor, so the content provably belongs to the statted inode
-      // (CodeQL js/file-system-race).
-      const fd = openSync(absolute, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-      try {
-        const fileStat = fstatSync(fd);
-        snapshot[entry] = { mode: fileStat.mode & 0o777, type: "file", content: readFileSync(fd, "utf8") };
-      } finally {
-        closeSync(fd);
+    // No check-then-use pairs (CodeQL js/file-system-race): readlink IS the
+    // symlink probe, and everything else is fstat+read on one O_NOFOLLOW
+    // descriptor, so every recorded fact comes from the operation itself.
+    let linkTarget: string | undefined;
+    try {
+      linkTarget = readlinkSync(absolute);
+    } catch {
+      linkTarget = undefined;
+    }
+    if (linkTarget !== undefined) {
+      snapshot[entry] = { mode: 0o777, type: "symlink", linkTarget };
+      continue;
+    }
+    const fd = openSync(absolute, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    try {
+      const opened = fstatSync(fd);
+      if (opened.isDirectory()) {
+        snapshot[entry] = { mode: opened.mode & 0o777, type: "directory", entries: snapshotTree(absolute) };
+      } else {
+        snapshot[entry] = { mode: opened.mode & 0o777, type: "file", content: readFileSync(fd, "utf8") };
       }
+    } finally {
+      closeSync(fd);
     }
   }
   return snapshot;
