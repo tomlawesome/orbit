@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
+import { log } from "@/lib/logger";
 import {
   itemActivitySchema,
   workspaceSchema,
@@ -36,6 +37,26 @@ import { isInstanceAdministrator } from "@/server/authorization";
  * Reconstructs the normalized database rows into the UI's versioned workspace
  * contract. The browser therefore stays independent from database structure.
  */
+// Mirrors householdWorkspaceSchema's array caps (src/lib/workspace.ts). No
+// write path enforces these, so a read must clamp to what the outbound
+// contract allows rather than 422 on stored data a write already accepted
+// (#383).
+const MAX_ITEMS_PER_HOUSEHOLD = 500;
+const MAX_NOTIFICATION_IDS_PER_HOUSEHOLD = 2_000;
+
+/** Truncates to the outbound schema cap instead of letting workspaceSchema.parse fail on stored data (#383). */
+function clampedForRead<T>(values: T[], limit: number): T[] {
+  if (values.length <= limit) return values;
+  log.warn({
+    event: "application.error",
+    state: "degraded",
+    reason: "unexpected_failure",
+    action: "inspect_admin_diagnostics",
+    impact: "none",
+  });
+  return values.slice(0, limit);
+}
+
 export async function readWorkspace(userId: string, sessionId: string, preferredHouseholdId?: string | null): Promise<WorkspaceState> {
   const administrator = await isInstanceAdministrator(userId);
   const householdSelection = {
@@ -89,15 +110,23 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),
     getDb().select().from(reminderRules),
-    getDb().select().from(auditLog)
-      .where(inArray(auditLog.householdId, householdIds))
+    // Only recordActivity's inserts (entityType "item", changes: { activity })
+    // feed the item history timeline; every other audit_log write (document
+    // lifecycle, membership, household lifecycle, ...) is filtered out by the
+    // itemActivitySchema.safeParse below. Filtering entityType in SQL keeps
+    // the 5000-row window from being consumed by rows this read discards
+    // anyway (#383).
+    getDb().select({ householdId: auditLog.householdId, changes: auditLog.changes, createdAt: auditLog.createdAt })
+      .from(auditLog)
+      .where(and(inArray(auditLog.householdId, householdIds), eq(auditLog.entityType, "item")))
       .orderBy(desc(auditLog.createdAt))
       .limit(5_000),
     getDb().select({ householdId: memberships.householdId, userId: memberships.userId, role: memberships.role })
       .from(memberships)
       .where(inArray(memberships.householdId, householdIds)),
     getDb().select().from(notificationStates)
-      .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds))),
+      .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
+      .orderBy(desc(notificationStates.updatedAt)),
   ]);
 
   const eventByItem = new Map<string, (typeof eventRows)[number]>();
@@ -175,10 +204,16 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
           accent: section.accent,
           visible: section.visible,
         })),
-        items: householdItems,
+        items: clampedForRead(householdItems, MAX_ITEMS_PER_HOUSEHOLD),
         activities: activitiesByHousehold.get(household.id) ?? [],
-        readNotificationIds: householdStates.filter((state) => state.readAt).map((state) => state.notificationId),
-        dismissedNotificationIds: householdStates.filter((state) => state.dismissedAt).map((state) => state.notificationId),
+        readNotificationIds: clampedForRead(
+          householdStates.filter((state) => state.readAt).map((state) => state.notificationId),
+          MAX_NOTIFICATION_IDS_PER_HOUSEHOLD,
+        ),
+        dismissedNotificationIds: clampedForRead(
+          householdStates.filter((state) => state.dismissedAt).map((state) => state.notificationId),
+          MAX_NOTIFICATION_IDS_PER_HOUSEHOLD,
+        ),
       };
     }),
   });
@@ -426,22 +461,26 @@ export async function applyWorkspaceCommand(
       || command.type === "notification.dismiss"
       || command.type === "notification.read-all"
     ) {
-      const notificationIds = command.type === "notification.read-all"
-        ? command.notificationIds
-        : [command.notificationId];
-      for (const notificationId of notificationIds) {
+      // Deduplicated so the multi-row upsert below never targets the same
+      // conflict key twice in one statement (Postgres rejects that with "ON
+      // CONFLICT DO UPDATE command cannot affect row a second time").
+      const notificationIds = [...new Set(
+        command.type === "notification.read-all" ? command.notificationIds : [command.notificationId],
+      )];
+      if (notificationIds.length) {
         const changes = command.type === "notification.dismiss"
           ? { dismissedAt: new Date(), updatedAt: new Date() }
           : { readAt: new Date(), updatedAt: new Date() };
-        await transaction.insert(notificationStates).values({
-          userId,
-          householdId,
-          notificationId,
-          ...changes,
-        }).onConflictDoUpdate({
-          target: [notificationStates.userId, notificationStates.householdId, notificationStates.notificationId],
-          set: changes,
-        });
+        // One multi-row upsert instead of one round-trip per id: this runs
+        // inside the household advisory lock, so a large notification.read-all
+        // batch (up to 2000 ids) must not serialize a round-trip per id while
+        // blocking every other command against the household (#383).
+        await transaction.insert(notificationStates)
+          .values(notificationIds.map((notificationId) => ({ userId, householdId, notificationId, ...changes })))
+          .onConflictDoUpdate({
+            target: [notificationStates.userId, notificationStates.householdId, notificationStates.notificationId],
+            set: changes,
+          });
       }
       return;
     }

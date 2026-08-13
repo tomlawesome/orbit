@@ -5,7 +5,7 @@ import { GET as getInbox } from "@/app/api/imap-inbox/route";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, items } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { discardImapReviewItem, getImapReview, listImapInbox } from "@/server/imap-inbox";
+import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview, listImapInbox } from "@/server/imap-inbox";
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { requestHouseholdDeletion } from "@/server/household-lifecycle";
@@ -13,6 +13,17 @@ import { requestForSession, requestWithoutSession, createIntegrationFixture } fr
 import { syntheticPdf } from "../support/synthetic-documents";
 
 describe("authenticated mailbox review read boundary", () => {
+  it("bounds a malformed receipt id to 404 instead of a driver-error 500 (#383)", async () => {
+    const fixture = await createIntegrationFixture("imap-review-malformed-id");
+    const malformedId = "not-a-uuid";
+    await expect(getImapReview(fixture.users.member.id, malformedId, fixture.household.id))
+      .rejects.toMatchObject({ code: "inbox_receipt_not_found" });
+    await expect(discardImapReviewItem(fixture.users.member.id, malformedId))
+      .rejects.toMatchObject({ code: "inbox_receipt_not_found" });
+    await expect(assignImapReceiptHousehold(fixture.users.member.id, malformedId, fixture.household.id))
+      .rejects.toMatchObject({ code: "inbox_receipt_not_found" });
+  });
+
   it("does not disclose a receipt to signed-out or cross-user callers", async () => {
     const fixture = await createIntegrationFixture("imap-review-route-auth");
     const member = await fixture.session("member");

@@ -6,6 +6,7 @@ import { documents, households, imapIngestionAttachments, imapIngestionMessages,
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion } from "@/server/document-repository";
 import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
   findReviewedIntakeCandidateReason,
@@ -96,6 +97,9 @@ export async function getImapReview(userId: string, receiptId: string, household
   const user = await privateMailboxUser(userId);
   if (user.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (!(await hasHouseholdMembership(userId, householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  // A malformed id must fail the same bounded way an unknown one does,
+  // rather than reach the uuid column as text and 500 (#383).
+  if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   const [receipt] = await getDb().select({
     id: imapIngestionMessages.id,
     status: imapIngestionMessages.status,
@@ -149,6 +153,9 @@ export async function getImapReview(userId: string, receiptId: string, household
 export async function discardImapReviewItem(userId: string, receiptId: string): Promise<void> {
   const activeUser = await privateMailboxUser(userId);
   if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  // A malformed id must fail the same bounded way an unknown one does,
+  // rather than reach the uuid column as text and 500 (#383).
+  if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   const [receipt] = await getDb().select().from(imapIngestionMessages)
     .where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId))).limit(1);
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
@@ -374,6 +381,9 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
 export async function assignImapReceiptHousehold(userId: string, receiptId: string, householdId: string): Promise<{ receiptId: string }> {
   const activeUser = await privateMailboxUser(userId);
   if (activeUser.isInstanceAdmin) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
+  // A malformed id must fail the same bounded way an unknown one does,
+  // rather than reach the uuid column as text and 500 (#383).
+  if (!validUuid(receiptId)) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   const changed = await getDb().transaction(async (transaction) => {
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);

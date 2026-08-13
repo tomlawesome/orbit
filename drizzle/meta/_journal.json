@@ -169,6 +169,13 @@
       "when": 1785092000000,
       "tag": "0023_outage_scanner_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785093000000,
+      "tag": "0024_audit_activity_read_index",
+      "breakpoints": true
     }
   ]
 }
