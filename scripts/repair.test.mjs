@@ -91,22 +91,30 @@ function dockerShimScript({
   restartFails = false,
   healthMarkerPath = "",
   // --execute --dangerous's rotate-database-credential support:
-  // `alterRoleFails` makes every `ALTER ROLE` exec'd through `psql` fail
-  // (exit 1), simulating the rotate-credential step itself failing after a
-  // successful checkpoint. `recoveryCryptoFails` makes every
-  // `compose run ... recovery-crypto.mjs ...` invocation fail outright
-  // (exit 1) BEFORE dispatching to the real script, simulating a
+  // `alterRoleFails` makes every script-mode `psql -f -` exec'd for the
+  // rotate-credential step fail (exit 1), simulating that step itself
+  // failing after a successful checkpoint. `recoveryCryptoFails` makes
+  // every `compose run ... recovery-crypto.mjs ...` invocation fail
+  // outright (exit 1) BEFORE dispatching to the real script, simulating a
   // Docker/compose-level failure distinct from a crypto-level one (e.g. a
   // bad passphrase, which the real script itself already reports via its
   // own nonzero exit — no separate flag needed for that case).
   alterRoleFails = false,
   recoveryCryptoFails = false,
-  // When set, a successful `ALTER ROLE` touches this marker file, and the
-  // psql-auth branch reports `ok` (regardless of `db.authResult`) once the
-  // marker exists — mirroring `healthMarkerPath` above, this is what lets a
-  // test prove the post-execution re-diagnosis honestly reflects a real
-  // rotation rather than a canned answer.
+  // When set, a successful rotate-credential exec touches this marker
+  // file, and the psql-auth branch reports `ok` (regardless of
+  // `db.authResult`) once the marker exists — mirroring `healthMarkerPath`
+  // above, this is what lets a test prove the post-execution re-diagnosis
+  // honestly reflects a real rotation rather than a canned answer.
   dbAuthMarkerPath = "",
+  // The rotate-credential step delivers its SQL (including the fresh
+  // credential) over `psql -f -`'s STDIN, never argv (see the coordinator
+  // review this fixes: the SQL must never appear in `docker`/`psql` argv,
+  // observable via /proc). When set, the shim's `-f -` branch captures
+  // exactly what it received on its own stdin into this path, so a test can
+  // assert the rotation SQL genuinely arrived via stdin (not argv, and not
+  // simply absent because the call never happened).
+  execStdinLogPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -208,7 +216,15 @@ function dockerShimScript({
     '    if [[ "$joined" == *"pg_isready"* ]]; then',
     `      exit ${dbReadyExit}`,
     "    fi",
-    '    if [[ "$joined" == *"ALTER ROLE"* ]]; then',
+    // The rotate-credential step's script-mode invocation
+    // (`psql -v ON_ERROR_STOP=1 ... -f -`) is fingerprinted by the literal
+    // trailing " -f -" token, never by SQL text (there is none in argv —
+    // that is exactly the property under test). This exec call is the ONLY
+    // one repair.sh ever pipes real stdin content into, so reading it here
+    // is safe: the other exec branches below never touch stdin, and so
+    // never race with repair.sh's own prompt reads on its primary stdin.
+    '    if [[ "$joined" == *" -f -"* ]]; then',
+    execStdinLogPath ? `      cat > '${execStdinLogPath}'` : "      cat > /dev/null",
     alterRoleExit === 0 && dbAuthMarkerPath ? `      : > '${dbAuthMarkerPath}'` : "      true",
     `      exit ${alterRoleExit}`,
     "    fi",
@@ -2073,11 +2089,12 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const targetDir = makeCredentialMismatchFixture();
     const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
     const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
 
     const result = runRepair(
       targetDir,
       ["--execute", "--dangerous"],
-      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, argvLogPath },
+      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, argvLogPath, execStdinLogPath },
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
@@ -2119,11 +2136,20 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     const argvLog = readFileSync(argvLogPath, "utf8");
     expect(argvLog).toMatch(/^restart /m);
 
-    // Ordering proof: ALTER ROLE only ever appears in the log AFTER the
-    // checkpoint bundle already exists on disk (checkpoint precedes
-    // rotation) — reconstructed from the log's own line order.
-    const execLines = argvLog.split("\n").filter((line) => line.includes("exec") && line.includes("ALTER ROLE"));
-    expect(execLines.length).toBeGreaterThan(0);
+    // The rotation SQL — including the fresh credential — was delivered
+    // ONLY over psql's stdin (`-f -`), never as `docker`/`psql` argv:
+    // neither the literal statement text nor any 64-hex-char candidate
+    // (which would be the credential) ever appears in the argv log, even
+    // though the exec call for it did happen (proven by the `-f -` fixture
+    // matching in the log below).
+    expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(argvLog).toMatch(/ -f -(\s|$)/m);
+
+    // ...and it DID genuinely arrive over stdin: the shim's `-f -` branch
+    // captured exactly what repair.sh piped into it.
+    const execStdin = readFileSync(execStdinLogPath, "utf8");
+    expect(execStdin).toContain(`ALTER ROLE "orbit" WITH PASSWORD '${newPassword}'`);
 
     expectStdoutIsEnumOnly(result.stdout);
     expect(result.stdout).not.toContain(targetDir);
@@ -2131,15 +2157,17 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stdout).not.toContain(ORIGINAL_POSTGRES_PASSWORD);
     expect(result.stdout).not.toContain(newPassword);
     expect(result.stderr).not.toContain(ROTATE_PASSPHRASE);
+    expect(result.stderr).not.toContain(newPassword);
     // repair.sh prints the checkpoint directory as the relative path it
     // created it under (never the absolute host path) — see "Privacy"
     // above; assert on that basename rather than the absolute path.
     expect(result.stderr).toContain(basename(checkpointDir));
   });
 
-  it("checkpoint precedes rotation: when the checkpoint itself cannot be created, ALTER ROLE is never attempted and the credential is never touched", () => {
+  it("checkpoint precedes rotation: when the checkpoint itself cannot be created, no rotation SQL is ever sent (argv or stdin) and the credential is never touched", () => {
     const targetDir = makeCredentialMismatchFixture();
     const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
 
     const result = runRepair(
       targetDir,
@@ -2148,6 +2176,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
         db: { present: true, ready: true, authResult: "mismatch" },
         recoveryCryptoFails: true,
         argvLogPath,
+        execStdinLogPath,
       },
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
@@ -2161,7 +2190,12 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(findCheckpointDir(targetDir)).toBeNull(); // the failed attempt's own directory is cleaned up
     const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
     expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/ -f -(\s|$)/m); // the rotate-credential exec never even ran
     expect(argvLog).not.toContain("restart");
+    // No rotation SQL was received over stdin either — the shim's `-f -`
+    // branch (the only thing that would have written this file) was never
+    // reached at all.
+    expect(existsSync(execStdinLogPath)).toBe(false);
   });
 
   it("when the current postgres-password secret is missing/invalid, the checkpoint step is a documented no-op (no passphrase prompt) and rotation still proceeds", () => {
@@ -2191,9 +2225,10 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
 
   // --- rotation-step failure: guidance + checkpoint preserved + stable exit -
 
-  it("rotation-step failure (ALTER ROLE fails after a successful checkpoint): guidance referencing the checkpoint, checkpoint preserved, credential/config untouched, stable exit 4", () => {
+  it("rotation-step failure (the rotate-credential exec fails after a successful checkpoint): guidance referencing the checkpoint, checkpoint preserved, credential/config untouched, stable exit 4", () => {
     const targetDir = makeCredentialMismatchFixture();
     const argvLogPath = join(scratchDir(), "argv.log");
+    const execStdinLogPath = join(scratchDir(), "exec-stdin.log");
 
     const result = runRepair(
       targetDir,
@@ -2202,6 +2237,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
         db: { present: true, ready: true, authResult: "mismatch" },
         alterRoleFails: true,
         argvLogPath,
+        execStdinLogPath,
       },
       { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
@@ -2227,6 +2263,14 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // restart-services never ran (the sequence stopped at rotate-credential).
     const argvLog = readFileSync(argvLogPath, "utf8");
     expect(argvLog).not.toMatch(/^restart /m);
+
+    // The rotate-credential exec DID happen (the checkpoint had already
+    // succeeded), and its SQL — including the staged credential — still
+    // arrived only over stdin, never argv, even on this failing attempt.
+    expect(argvLog).not.toContain("ALTER ROLE");
+    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(existsSync(execStdinLogPath)).toBe(true);
+    expect(readFileSync(execStdinLogPath, "utf8")).toContain('ALTER ROLE "orbit" WITH PASSWORD');
 
     expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
     expect(result.stdout).not.toContain(checkpointDir);
