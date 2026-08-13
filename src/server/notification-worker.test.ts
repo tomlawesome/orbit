@@ -9,6 +9,7 @@ import {
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
   householdReminderTime,
+  isAllowedPushEndpoint,
   notificationRetryDelayMs,
   reminderIsSnoozed,
 } from "./notification-worker";
@@ -119,6 +120,29 @@ describe("notification worker scheduling", () => {
     expect(deliveryFailureState("smtp_unavailable", 1, 5)).toBe("retry");
     expect(deliveryFailureState("push_unavailable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("unknown", 5, 5)).toBe("failed");
+  });
+
+  it("#383 finding 2: only allows push endpoints that are https on the default port and not a private or reserved address", () => {
+    expect(isAllowedPushEndpoint("https://push.services.example.test/sub/abc123")).toBe(true);
+    expect(isAllowedPushEndpoint("https://push.services.example.test:443/sub/abc123")).toBe(true);
+    // Plaintext HTTP is never a real push service, and it strips the VAPID auth header's confidentiality.
+    expect(isAllowedPushEndpoint("http://push.services.example.test/sub")).toBe(false);
+    // A non-default port on an otherwise-plausible host is exactly the shape
+    // the review's concrete probe used against the database container.
+    expect(isAllowedPushEndpoint("https://orbit-db:5432/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://orbit-tika:9998/probe")).toBe(false);
+    // IPv4 and IPv6 loopback, link-local, and private ranges.
+    expect(isAllowedPushEndpoint("https://127.0.0.1/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://10.0.0.5/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://172.20.3.4/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://192.168.1.10/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://169.254.1.1/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://[::1]/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://[fe80::1]/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://[fd00::1]/probe")).toBe(false);
+    expect(isAllowedPushEndpoint("https://localhost/probe")).toBe(false);
+    // Malformed input must fail closed rather than throw.
+    expect(isAllowedPushEndpoint("not a url")).toBe(false);
   });
 
   it("exposes only bounded initial worker health", () => {
