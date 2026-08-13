@@ -34,7 +34,7 @@
 
 /* The banner used to sit under the topbar. With the chrome floating, it
    needs to clear the north star on its own. */
-.main-shell > .sync-error-banner { position: relative; z-index: 30; margin: 70px 22px 0; }
+.main-shell > .sync-error-banner { position: relative; z-index: 14; margin: 70px 22px 0; }
 .main-shell > .sync-error-banner + .content-list { padding-top: 26px; }
 
 /* "Due next" is full-bleed — the sky runs edge to edge under the floating
@@ -68,11 +68,17 @@
 
 /* ---------------------------------------------------------------- orb */
 
+/* Shell chrome occupies the 16-26 band, deliberately BELOW every dialog
+   scrim the workspace itself raises (the lowest is .capture-review-scrim at
+   29, then settings at 40 and the item editor at 50). The orb is fixed and
+   always on screen, so from a higher band it sat on top of an open dialog
+   and swallowed clicks meant for it - the item editor's own close button
+   was unreachable. An open dialog must always win. */
 .orb {
   position: fixed;
   top: 18px;
   right: 20px;
-  z-index: 62;
+  z-index: 26;
   box-sizing: border-box;
   width: 44px;
   height: 44px;
@@ -105,7 +111,7 @@
 .shell-scrim {
   position: fixed;
   inset: 0;
-  z-index: 44;
+  z-index: 18;
   display: block;
   padding: 0;
   border: 0;
@@ -113,7 +119,7 @@
   backdrop-filter: blur(3px);
   cursor: pointer;
 }
-.shell-scrim-account { z-index: 58; }
+.shell-scrim-account { z-index: 22; }
 
 /* ------------------------------------------------------- account panel */
 
@@ -121,7 +127,7 @@
   position: fixed;
   top: 74px;
   right: 20px;
-  z-index: 60;
+  z-index: 24;
   box-sizing: border-box;
   width: min(330px, calc(100vw - 32px));
   max-height: calc(100dvh - 96px);
@@ -300,7 +306,7 @@
   --drawer-size: 300px;
   --handle-top-size: 58px;
   position: fixed;
-  z-index: 40;
+  z-index: 16;
   display: flex;
   pointer-events: none;
 }
@@ -311,7 +317,7 @@
   left: 0;
   right: 0;
   top: 0;
-  z-index: 46;
+  z-index: 20;
   flex-direction: column;
   align-items: center;
   transform: translateY(calc(-100% + var(--handle-top-size)));
