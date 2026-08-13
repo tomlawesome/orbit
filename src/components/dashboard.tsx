@@ -10,6 +10,7 @@ import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run
 import type { HouseholdInput } from "@/components/household-onboarding";
 import type { HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
+import { AuthenticationGate } from "@/components/authentication-gate";
 import { HeroSky, ItemRow, type ItemFilter } from "@/components/hero-sky";
 import { Icon } from "@/components/icons";
 import type { CompletionInput } from "@/components/item-detail";
@@ -131,36 +132,6 @@ export function SectionNameField({ name, onCommit, ariaLabel }: { name: string; 
         (event.target as HTMLInputElement).blur();
       }}
     />
-  );
-}
-
-function AuthenticationGate({
-  loading,
-  loadingMessage,
-  error,
-  onRetry,
-}: {
-  loading: boolean;
-  loadingMessage?: string;
-  error?: string;
-  onRetry?: () => void;
-}) {
-  const message = loading ? loadingMessage : error;
-  return (
-    <main className="authentication-gate">
-      <section>
-        <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
-        <p className="eyebrow">Everything in your orbit, on track</p>
-        <h1>{loading ? loadingMessage ? "Orbit is starting…" : "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
-        <p role={message ? "alert" : undefined}>
-          {message ?? (loading
-            ? "Orbit is confirming your session."
-            : "Your household information is private and is only available after authentication.")}
-        </p>
-        {!loading && error && onRetry && <button className="wizard-primary" type="button" onClick={onRetry}>Try again <Icon name="chevron" /></button>}
-        {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
-      </section>
-    </main>
   );
 }
 
