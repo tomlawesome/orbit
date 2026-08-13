@@ -92,7 +92,10 @@ test("an interrupted sign-in explains itself without echoing the provider", asyn
   await page.goto("/auth/error?code=invalid_state");
 
   await expect(page.getByRole("heading", { name: "We couldn't sign you in." })).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveText("The sign-in request expired or could not be matched to this browser.");
+  // Scoped to the screen's own message: Next.js keeps an empty
+  // role="alert" route announcer in the document, so an unscoped
+  // getByRole("alert") is a strict-mode violation rather than a failure.
+  await expect(page.locator('p.family-message[role="alert"]')).toHaveText("The sign-in request expired or could not be matched to this browser.");
   await expect(page.getByRole("link", { name: "Return home" })).toHaveAttribute("href", "/");
 
   const results = await new AxeBuilder({ page })
