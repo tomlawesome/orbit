@@ -13,6 +13,31 @@ readonly maximum_secret_bytes=65536
 temporary_file=""
 terminal_fd=""
 terminal_echo_disabled=0
+installer_ui_input_loaded=0
+installer_ui_path="$repo_dir/scripts/installer-ui.sh"
+if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
+  # shellcheck source=/dev/null
+  source "$installer_ui_path"
+  if declare -F installer_ui_read_text >/dev/null &&
+    declare -F installer_ui_read_secret >/dev/null; then
+    installer_ui_input_loaded=1
+  fi
+fi
+
+# docs/engine-events.md "Machine prompts (v0)". Opt-in only: byte-identical
+# to today's TTY prompting unless the caller sets this exact value. The
+# duplicated descriptor is opened here, before any command substitution, so
+# that machine_prompt_collect (invoked as `var="$(machine_prompt_collect ...)"`
+# below) can still write protocol lines to the real stdout from inside a
+# subshell whose own stdout is being captured by that substitution.
+machine_prompts=0
+if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" == machine ]]; then
+  machine_prompts=1
+fi
+machine_prompt_fd=""
+if [[ "$machine_prompts" == 1 ]]; then
+  exec {machine_prompt_fd}>&1
+fi
 
 run_configuration_preflight() {
   [[ -f scripts/configuration.sh ]] || return 0
@@ -31,7 +56,7 @@ fail() {
 }
 
 usage() {
-  printf 'Usage: %s [--check|--init|--set-oidc-secret]\n' "$0" >&2
+  printf 'Usage: %s [--check|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]]\n' "$0" >&2
 }
 
 cleanup() {
@@ -42,6 +67,10 @@ cleanup() {
   if [[ -n "$terminal_fd" ]]; then
     exec {terminal_fd}>&-
     terminal_fd=""
+  fi
+  if [[ -n "$machine_prompt_fd" ]]; then
+    exec {machine_prompt_fd}>&-
+    machine_prompt_fd=""
   fi
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
 }
@@ -60,8 +89,12 @@ read_guided_line() {
   local prompt="$1" input
 
   if [[ -n "$terminal_fd" ]]; then
-    printf '%s' "$prompt" >&"$terminal_fd"
-    IFS= read -r -u "$terminal_fd" input || return 1
+    if [[ "$installer_ui_input_loaded" == 1 ]]; then
+      input="$(installer_ui_read_text "$terminal_fd" "$prompt" 2048)" || return $?
+    else
+      printf '%s' "$prompt" >&"$terminal_fd"
+      IFS= read -r -u "$terminal_fd" input || return 1
+    fi
   else
     IFS= read -r -p "$prompt" input || return 1
   fi
@@ -97,6 +130,44 @@ generate_hex_secret() {
   printf '%s\n' "${secret,,}"
 }
 
+example_active_value() {
+  local requested_key="$1" line value="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      value="${line#*=}"
+      found=$((found + 1))
+    fi
+  done < "$environment_example"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
+}
+
+write_minimal_environment() {
+  local heading key value
+  while [[ $# -gt 0 ]]; do
+    heading="$1"
+    shift
+    printf '# --- %s ---\n' "$heading"
+    while [[ $# -gt 0 && "$1" != --section ]]; do
+      key="$1"
+      shift
+      if [[ "$key" == managed:* ]]; then
+        key="${key#managed:}"
+        if [[ "$key" == OIDC_CLIENT_SECRET_FILE ]]; then
+          printf '# %s=%s\n' "$key" "$oidc_secret_file_path"
+        else
+          printf '# %s=\n' "$key"
+        fi
+      else
+        value="$(example_active_value "$key")" || return 1
+        printf '%s=%s\n' "$key" "$value"
+      fi
+    done
+    [[ $# -eq 0 ]] || shift
+    printf '\n'
+  done
+}
+
 ensure_environment_file() {
   [[ -f "$environment_example" ]] ||
     fail "${environment_example} is missing."
@@ -113,7 +184,14 @@ ensure_environment_file() {
     fail "Could not create a temporary Orbit environment file."
   chmod 600 "$temporary_file" ||
     fail "Could not secure the temporary Orbit environment file."
-  cp -- "$environment_example" "$temporary_file"
+  write_minimal_environment \
+    'Core' ORBIT_CONFIG_SCHEMA_VERSION APP_URL ORBIT_IMAGE managed:ORBIT_CONFIG_APPLIED_VERSION managed:ORBIT_CONFIG_APPLIED_DIGEST --section \
+    'Authentication' OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET managed:OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL --section \
+    'Generated secrets and keys' SESSION_SECRET_FILE DOCUMENT_KEK_FILE POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY_FILE --section \
+    'Deployment' managed:COMPOSE_PROJECT_NAME ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER --section \
+    'Optional services' TIKA_URL OLLAMA_MODEL IMAP_ENABLED --section \
+    'Observability' ORBIT_LOG_LEVEL ORBIT_LOG_FORMAT > "$temporary_file" ||
+    fail "Could not create a concise Orbit environment file from the supported defaults."
   mv -- "$temporary_file" "$environment_file"
   temporary_file=""
   printf 'Created %s from %s.\n' "$environment_file" "$environment_example"
@@ -138,7 +216,8 @@ ensure_secrets_directory() {
 # including comments, is copied through byte-for-byte. All pairs are applied
 # in a single atomic rewrite.
 update_managed_keys() {
-  local temp line key found
+  local temp line key found final_newline=1 output_line index last_byte=""
+  local -a input_lines=() output_lines=()
   local -A pending=() written=()
   local -a order=()
 
@@ -155,25 +234,75 @@ update_managed_keys() {
   chmod 600 "$temp" ||
     fail "Could not secure the temporary Orbit environment file."
 
-  {
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      found=0
-      for key in "${order[@]}"; do
-        if [[ "$line" == "${key}="* ]]; then
-          found=1
-          if [[ -z "${written[$key]:-}" ]]; then
-            printf '%s=%s\n' "$key" "${pending[$key]}"
-            written["$key"]=1
-          fi
-          break
-        fi
-      done
-      [[ "$found" == 1 ]] || printf '%s\n' "$line"
-    done < "$environment_file"
+  mapfile -t input_lines < "$environment_file" ||
+    fail "Could not read ${environment_file} for an atomic update."
+  if [[ -s "$environment_file" ]]; then
+    # Command substitution strips trailing newlines, so inspect the final byte
+    # as hex when preserving the source file's exact newline convention.
+    last_byte="$(tail -c 1 -- "$environment_file" | od -An -t x1 | tr -d '[:space:]')"
+    [[ "$last_byte" == 0a ]] || final_newline=0
+  fi
+
+  for line in "${input_lines[@]}"; do
+    found=0
+
+    # Keep the file-backed OIDC selector beside its authentication
+    # documentation. Active managed lines are the only lines eligible for
+    # relocation. The obsolete commented selector itself is replaced so a
+    # valid file-backed secret does not still look disabled. Other comments
+    # and unmanaged operator lines pass through unchanged.
+    if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
+      "$line" == "# OIDC_CLIENT_SECRET_FILE="* ]]; then
+      if [[ -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" ]]; then
+        output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}")
+        written[OIDC_CLIENT_SECRET_FILE]=1
+      fi
+      continue
+    fi
+
     for key in "${order[@]}"; do
-      [[ -n "${written[$key]:-}" ]] || printf '%s=%s\n' "$key" "${pending[$key]}"
+      if [[ "$line" == "${key}="* ]]; then
+        found=1
+        if [[ "$key" == OIDC_CLIENT_SECRET_FILE ]]; then
+          # The canonical location is emitted at the documented selector or
+          # immediately after OIDC_CLIENT_SECRET below. Do not retain an
+          # older active copy in an arbitrary location.
+          break
+        elif [[ -z "${written[$key]:-}" ]]; then
+          output_lines+=("$key=${pending[$key]}")
+          written["$key"]=1
+        fi
+        break
+      fi
     done
-  } > "$temp"
+
+    if [[ "$found" == 0 ]]; then
+      output_lines+=("$line")
+    fi
+    if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
+      -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" &&
+      "$line" == OIDC_CLIENT_SECRET=* ]]; then
+      output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}")
+      written[OIDC_CLIENT_SECRET_FILE]=1
+    fi
+  done
+  for key in "${order[@]}"; do
+    if [[ -z "${written[$key]:-}" ]]; then
+      output_lines+=("$key=${pending[$key]}")
+      # Adding a new assignment requires a line boundary after the value,
+      # even when the source file ended without one.
+      final_newline=1
+    fi
+  done
+
+  for index in "${!output_lines[@]}"; do
+    output_line="${output_lines[index]}"
+    if ((index == ${#output_lines[@]} - 1 && final_newline == 0)); then
+      printf '%s' "$output_line"
+    else
+      printf '%s\n' "$output_line"
+    fi
+  done > "$temp"
 
   mv -- "$temp" "$environment_file" ||
     fail "Could not persist configuration in ${environment_file}."
@@ -187,6 +316,44 @@ persist_orbit_image() {
     fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
   fi
   update_managed_keys ORBIT_IMAGE "$orbit_image"
+}
+
+is_valid_local_model() {
+  local value="$1"
+  [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
+}
+
+set_deployment_profile() {
+  local preset="$1" model="${2:-}" profiles="" tika_url=""
+
+  case "$preset" in
+    standard)
+      [[ -z "$model" ]] || return 2
+      ;;
+    processing)
+      [[ -z "$model" ]] || return 2
+      profiles="processing"
+      tika_url="http://orbit-tika:9998"
+      ;;
+    ai)
+      is_valid_local_model "$model" || return 2
+      profiles="ai"
+      ;;
+    full)
+      is_valid_local_model "$model" || return 2
+      profiles="processing,ai"
+      tika_url="http://orbit-tika:9998"
+      ;;
+    *) return 2 ;;
+  esac
+
+  ensure_environment_file
+  update_managed_keys \
+    COMPOSE_PROFILES "$profiles" \
+    TIKA_URL "$tika_url" \
+    OLLAMA_MODEL "$model"
+  printf 'Orbit deployment profile saved: %s.\n' "$preset"
 }
 
 # --- Guided configuration (--init) validation -------------------------------
@@ -344,6 +511,170 @@ prompt_oidc_client_id() {
   done
 }
 
+# --- Machine prompt mode (ORBIT_CONFIGURE_PROMPTS=machine) -------------------
+#
+# docs/engine-events.md "Machine prompts (v0)" documents the exact line
+# grammar and field/kind/reason vocabulary emitted here. Acceptance is
+# decided solely by the same validators the TTY prompts above call
+# (normalize_public_origin, validate_oidc_issuer, is_valid_client_id, and the
+# OIDC client secret's existing non-empty/size checks below); the
+# classify_*_rejection helpers only pick a reason label for an answer already
+# known to be rejected and never themselves gate acceptance.
+
+machine_prompt_field_kind() {
+  case "$1" in
+    APP_URL) printf 'url' ;;
+    OIDC_ISSUER) printf 'url' ;;
+    OIDC_CALLBACK_URL) printf 'url' ;;
+    OIDC_CLIENT_ID) printf 'text' ;;
+    OIDC_CLIENT_SECRET) printf 'secret' ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- reason vocabulary (docs/engine-events.md "Machine prompts (v0)") -------
+
+# Classifies a rejected URL-kind answer exactly the way normalize_public_origin
+# (allow_path=0, APP_URL) and validate_oidc_issuer (allow_path=1, OIDC_ISSUER)
+# parse one, using the same primitives those validators use.
+classify_url_rejection() {
+  local value="$1" allow_path="$2" host
+  if [[ -z "$value" ]]; then
+    printf 'empty'
+    return
+  fi
+  if contains_forbidden_characters "$value"; then
+    printf 'invalid-characters'
+    return
+  fi
+  case "$value" in
+    https://*) ;;
+    *)
+      printf 'not-https'
+      return
+      ;;
+  esac
+  case "$value" in
+    *@*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  case "$value" in
+    *'?'*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  case "$value" in
+    *'#'*)
+      printf 'not-absolute-url'
+      return
+      ;;
+  esac
+  host="${value#https://}"
+  if [[ "$allow_path" == 1 ]]; then
+    host="${host%%/*}"
+  else
+    host="${host%/}"
+    case "$host" in
+      */*)
+        printf 'not-absolute-url'
+        return
+        ;;
+    esac
+  fi
+  if [[ -z "$host" ]]; then
+    printf 'not-absolute-url'
+    return
+  fi
+  if is_forbidden_host "${host,,}"; then
+    printf 'forbidden-host'
+    return
+  fi
+  printf 'not-absolute-url'
+}
+
+classify_app_url_rejection() {
+  classify_url_rejection "$1" 0
+}
+
+classify_oidc_issuer_rejection() {
+  classify_url_rejection "$1" 1
+}
+
+classify_oidc_client_id_rejection() {
+  if [[ -z "$1" ]]; then
+    printf 'empty'
+  else
+    printf 'invalid-characters'
+  fi
+}
+
+# Mirrors, and never replaces, the non-empty/size checks set_oidc_secret
+# applies below after reading its answer; kept separate rather than shared so
+# machine mode can never change that function's existing default-path
+# behaviour.
+classify_oidc_secret_rejection() {
+  if [[ -z "$1" ]]; then
+    printf 'empty'
+  else
+    printf 'too-large'
+  fi
+}
+
+# --- end reason vocabulary ---------------------------------------------
+
+# validate_oidc_issuer and is_valid_client_id are plain predicates; wrap them
+# so machine_prompt_collect's validator callback can use the same "print the
+# accepted value, or print nothing and fail" contract normalize_public_origin
+# already implements directly.
+machine_validate_oidc_issuer() {
+  validate_oidc_issuer "$1" && printf '%s' "$1"
+}
+
+machine_validate_oidc_client_id() {
+  is_valid_client_id "$1" && printf '%s' "$1"
+}
+
+machine_validate_oidc_secret() {
+  local value="$1" bytes
+  [[ -n "$value" ]] || return 1
+  bytes="$(printf '%s' "$value" | wc -c | tr -d '[:space:]')"
+  [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
+  [[ "$bytes" -le "$maximum_secret_bytes" ]] || return 1
+  printf '%s' "$value"
+}
+
+# Drives one machine-mode field to completion: emits a `prompt` line, reads
+# exactly one answer line from standard input, and emits `prompt-accept` or
+# `prompt-reject` per docs/engine-events.md. Never prints the answer itself.
+# Aborts (emits `prompt-abort` and returns failure, for the caller's existing
+# refusal path) after a third rejected attempt or on end-of-input.
+machine_prompt_collect() {
+  local field="$1" validator="$2" classifier="$3"
+  local kind attempt=1 input value reason
+  kind="$(machine_prompt_field_kind "$field")" || return 2
+  while ((attempt <= 3)); do
+    printf 'prompt field=%s kind=%s required=true attempt=%d\n' \
+      "$field" "$kind" "$attempt" >&"$machine_prompt_fd"
+    if ! IFS= read -r input; then
+      printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
+      return 1
+    fi
+    if value="$("$validator" "$input")"; then
+      printf 'prompt-accept field=%s\n' "$field" >&"$machine_prompt_fd"
+      printf '%s' "$value"
+      return 0
+    fi
+    reason="$("$classifier" "$input")"
+    printf 'prompt-reject field=%s reason=%s\n' "$field" "$reason" >&"$machine_prompt_fd"
+    attempt=$((attempt + 1))
+  done
+  printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
+  return 1
+}
+
 # Guided (--init) collection of the non-secret public URL and OIDC values.
 # Prompts interactively only when stdin/stdout are terminals; otherwise the
 # complete ORBIT_CONFIGURE_APP_URL / ORBIT_CONFIGURE_OIDC_ISSUER /
@@ -364,6 +695,16 @@ guided_init() {
     client_id="$ORBIT_CONFIGURE_OIDC_CLIENT_ID"
   elif [[ "$env_count" -gt 0 ]]; then
     fail "Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set."
+  elif [[ "$machine_prompts" == 1 ]]; then
+    if ! app_url="$(machine_prompt_collect APP_URL normalize_public_origin classify_app_url_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
+    if ! issuer="$(machine_prompt_collect OIDC_ISSUER machine_validate_oidc_issuer classify_oidc_issuer_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
+    if ! client_id="$(machine_prompt_collect OIDC_CLIENT_ID machine_validate_oidc_client_id classify_oidc_client_id_rejection)"; then
+      fail "Guided configuration was cancelled."
+    fi
   elif open_controlling_terminal; then
     if ! app_url="$(prompt_app_url)"; then
       fail "Guided configuration was cancelled."
@@ -481,17 +822,26 @@ ensure_oidc_secret_placeholder() {
 set_oidc_secret() {
   local secret secret_bytes
 
-  if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
+  if [[ "$machine_prompts" == 1 ]]; then
+    if ! secret="$(machine_prompt_collect OIDC_CLIENT_SECRET machine_validate_oidc_secret classify_oidc_secret_rejection)"; then
+      fail "Could not read a complete OIDC client secret from standard input."
+    fi
+  elif [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
     open_controlling_terminal; then
-    disable_terminal_echo
-    printf 'OIDC client secret (input hidden): ' >&"$terminal_fd"
-    if ! IFS= read -r -s -u "$terminal_fd" secret; then
+    if [[ "$installer_ui_input_loaded" == 1 ]]; then
+      secret="$(installer_ui_read_secret "$terminal_fd" 'OIDC client secret (input hidden): ' "$maximum_secret_bytes")" ||
+        fail "Could not read a complete OIDC client secret from the controlling terminal."
+    else
+      disable_terminal_echo
+      printf 'OIDC client secret (input hidden): ' >&"$terminal_fd"
+      if ! IFS= read -r -s -u "$terminal_fd" secret; then
+        restore_terminal_echo
+        printf '\n' >&"$terminal_fd"
+        fail "Could not read a complete OIDC client secret from the controlling terminal."
+      fi
       restore_terminal_echo
       printf '\n' >&"$terminal_fd"
-      fail "Could not read a complete OIDC client secret from the controlling terminal."
     fi
-    restore_terminal_echo
-    printf '\n' >&"$terminal_fd"
   elif [[ -t 0 ]]; then
     if ! IFS= read -r -s -p '' secret; then
       fail "Could not read a complete OIDC client secret from standard input."
@@ -784,6 +1134,17 @@ case "${1:-}" in
       exit 2
     fi
     set_oidc_secret
+    exit 0
+    ;;
+  --set-deployment-profile)
+    if [[ $# -lt 2 || $# -gt 3 ]]; then
+      usage
+      exit 2
+    fi
+    if ! set_deployment_profile "$2" "${3:-}"; then
+      usage
+      exit 2
+    fi
     exit 0
     ;;
   *)

@@ -1,0 +1,271 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — uncharted space</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="family.css">
+<style>
+/* uncharted-space 404: charted sky (left third) runs out of survey data and
+   fades into strange, sparse, unstable sky. centrepiece constellation spells
+   404. issue #307 family set. */
+.teal{--star:#9fe3da} .rose{--star:#eab3c4}
+
+.grain{position:fixed;inset:0;z-index:5;pointer-events:none;mix-blend-mode:screen;
+       animation:grain-flicker 8s ease-in-out infinite}
+@keyframes grain-flicker{0%,100%{opacity:.06}45%{opacity:.09}60%{opacity:.055}}
+
+.far{animation:drift-far 145s linear infinite}
+.near{animation:drift-near 92s linear infinite}
+@keyframes drift-far{from{transform:translate(0,0)}to{transform:translate(-72px,12px)}}
+@keyframes drift-near{from{transform:translate(0,0)}to{transform:translate(58px,-16px)}}
+
+.homeglow{animation:glow-breathe 6.4s ease-in-out infinite}
+@keyframes glow-breathe{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:.88;transform:scale(1.09)}}
+
+.pulse-teal{animation:pulse-teal 5.3s ease-in-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes pulse-teal{
+  0%{opacity:.28;transform:scale(1)}
+  14%{opacity:.95;transform:scale(1.55)}
+  19%{opacity:.4;transform:scale(1.05)}
+  52%{opacity:.65;transform:scale(1.25)}
+  68%{opacity:.22;transform:scale(.92)}
+  100%{opacity:.28;transform:scale(1)}
+}
+.pulse-rose{animation:pulse-rose 7.8s ease-in-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes pulse-rose{
+  0%{opacity:.22;transform:scale(1)}
+  30%{opacity:.85;transform:scale(1.4)}
+  38%{opacity:.32;transform:scale(1.02)}
+  61%{opacity:.58;transform:scale(1.18)}
+  80%{opacity:.16;transform:scale(.9)}
+  100%{opacity:.22;transform:scale(1)}
+}
+
+.courseline{stroke-dasharray:2 15;animation:dashflow 6.5s linear infinite}
+@keyframes dashflow{to{stroke-dashoffset:-170}}
+
+.meteor{animation:meteor-fire 9.3s linear infinite}
+@keyframes meteor-fire{
+  0%,85%{opacity:0;transform:translate(0,0)}
+  86.5%{opacity:1;transform:translate(4px,3px)}
+  92%{opacity:.85;transform:translate(74px,44px)}
+  93.5%,100%{opacity:0;transform:translate(84px,50px)}
+}
+
+.stage{position:relative;z-index:3;height:100%}
+.course-link{position:fixed;left:76.5%;top:84.5%;transform:translate(-2%,0);z-index:4;
+             font:12.5px var(--mono);letter-spacing:.03em;color:var(--accent);
+             text-decoration:none;white-space:nowrap;border-bottom:1px solid var(--line);
+             padding-bottom:4px}
+.course-link:hover{border-color:var(--accent)}
+.foot span.dim{color:var(--ink-faint)}
+</style></head><body>
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<defs>
+  <filter id="halo1" x="-300%" y="-300%" width="700%" height="700%"><feGaussianBlur stdDeviation="2.1"/></filter>
+  <filter id="halo2" x="-300%" y="-300%" width="700%" height="700%"><feGaussianBlur stdDeviation="3.6"/></filter>
+  <filter id="haloSun" x="-300%" y="-300%" width="700%" height="700%"><feGaussianBlur stdDeviation="11"/></filter>
+  <filter id="depthBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1"/></filter>
+  <linearGradient id="chartMaskGrad" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="#fff"/>
+    <stop offset="34%" stop-color="#fff"/>
+    <stop offset="46%" stop-color="#000"/>
+    <stop offset="100%" stop-color="#000"/>
+  </linearGradient>
+  <mask id="chartFade" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="1000">
+    <rect x="0" y="0" width="1600" height="1000" fill="url(#chartMaskGrad)"/>
+  </mask>
+  <radialGradient id="homeGlowGrad" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#fff3d6" stop-opacity=".9"/>
+    <stop offset="30%" stop-color="#f0b429" stop-opacity=".45"/>
+    <stop offset="65%" stop-color="#e2772b" stop-opacity=".12"/>
+    <stop offset="100%" stop-color="#e2772b" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="unchartedDark" x1="460" y1="0" x2="880" y2="0" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000" stop-opacity=".6"/>
+  </linearGradient>
+  <linearGradient id="chartedWash" x1="0" y1="0" x2="620" y2="0" gradientUnits="userSpaceOnUse">
+    <stop offset="0%" stop-color="#2a3866" stop-opacity=".4"/>
+    <stop offset="100%" stop-color="#2a3866" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="meteorGrad" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#e9edf8" stop-opacity="0"/>
+    <stop offset="55%" stop-color="#f4f0ff" stop-opacity=".95"/>
+    <stop offset="100%" stop-color="#e9edf8" stop-opacity="0"/>
+  </linearGradient>
+</defs>
+
+<!-- base wash: charted third faintly lit, uncharted two-thirds noticeably darker -->
+<rect x="0" y="0" width="620" height="1000" fill="url(#chartedWash)"/>
+<rect x="460" y="0" width="1140" height="1000" fill="url(#unchartedDark)"/>
+
+<!-- ambient drifting starfield, two depth layers, whole frame -->
+<g class="far" fill="#e9edf8">
+  <circle cx="120" cy="140" r="0.7" opacity=".18"/><circle cx="340" cy="620" r="0.6" opacity=".16"/>
+  <circle cx="60" cy="820" r="0.8" opacity=".2"/><circle cx="480" cy="220" r="0.55" opacity=".15"/>
+  <circle cx="900" cy="90" r="0.6" opacity=".14"/><circle cx="1080" cy="640" r="0.7" opacity=".16"/>
+  <circle cx="1250" cy="300" r="0.5" opacity=".13"/><circle cx="700" cy="880" r="0.65" opacity=".17"/>
+  <circle cx="1480" cy="760" r="0.6" opacity=".15"/><circle cx="1380" cy="120" r="0.7" opacity=".18"/>
+  <circle cx="820" cy="480" r="0.5" opacity=".12"/><circle cx="230" cy="960" r="0.6" opacity=".16"/>
+  <circle cx="1560" cy="440" r="0.55" opacity=".14"/><circle cx="960" cy="920" r="0.7" opacity=".15"/>
+  <circle cx="40" cy="480" r="0.6" opacity=".17"/><circle cx="1180" cy="860" r="0.5" opacity=".13"/>
+  <circle cx="520" cy="60" r="0.65" opacity=".16"/><circle cx="1520" cy="180" r="0.55" opacity=".15"/>
+</g>
+<g class="near" fill="#f4f0ff">
+  <circle cx="180" cy="380" r="1.1" opacity=".3"/><circle cx="640" cy="140" r="0.9" opacity=".28"/>
+  <circle cx="1020" cy="380" r="1.0" opacity=".26"/><circle cx="1420" cy="600" r="1.15" opacity=".3"/>
+  <circle cx="300" cy="720" r="0.85" opacity=".24"/><circle cx="1180" cy="200" r="1.0" opacity=".27"/>
+  <circle cx="760" cy="640" r="0.95" opacity=".25"/><circle cx="1550" cy="880" r="1.1" opacity=".29"/>
+  <circle cx="70" cy="640" r="0.9" opacity=".26"/><circle cx="920" cy="180" r="1.0" opacity=".28"/>
+  <circle cx="1300" cy="740" r="0.85" opacity=".24"/><circle cx="440" cy="900" r="1.05" opacity=".27"/>
+</g>
+
+<!-- charted space: graticule + tiny constellations, fading right (survey ends) -->
+<g mask="url(#chartFade)" filter="url(#depthBlur)">
+  <g stroke="var(--line)" fill="none" stroke-width=".6" opacity=".16">
+    <path d="M 80 -60 Q -18 520 80 1060"/>
+    <path d="M 220 -60 Q 24 520 220 1060"/>
+    <path d="M 360 -60 Q 66 520 360 1060"/>
+    <path d="M 500 -60 Q 108 520 500 1060"/>
+    <path d="M 640 -60 Q 150 520 640 1060"/>
+    <path d="M -100 80 Q 280 234 660 80"/>
+    <path d="M -100 240 Q 280 338 660 240"/>
+    <path d="M -100 400 Q 280 442 660 400"/>
+    <path d="M -100 560 Q 280 546 660 560"/>
+    <path d="M -100 720 Q 280 650 660 720"/>
+    <path d="M -100 880 Q 280 754 660 880"/>
+  </g>
+
+  <!-- mini charted constellation: the kettle -->
+  <g stroke="var(--ink-faint)" stroke-width="1" fill="var(--ink-mid)" transform="translate(90,0)">
+    <path d="M 90 180 L 130 150 L 170 175 L 150 220 L 90 180" fill="none" opacity=".4"/>
+    <circle cx="90" cy="180" r="1.4"/><circle cx="130" cy="150" r="1.6"/>
+    <circle cx="170" cy="175" r="1.3"/><circle cx="150" cy="220" r="1.5"/>
+  </g>
+  <text x="148" y="128" class="annot" style="fill:var(--ink-faint);opacity:.6">THE KETTLE</text>
+
+  <!-- mini charted constellation: latchkey -->
+  <g stroke="var(--ink-faint)" stroke-width="1" fill="var(--ink-mid)" transform="translate(90,0)">
+    <path d="M 220 480 L 260 440 L 300 470 L 330 430" fill="none" opacity=".4"/>
+    <circle cx="220" cy="480" r="1.3"/><circle cx="260" cy="440" r="1.6"/>
+    <circle cx="300" cy="470" r="1.4"/><circle cx="330" cy="430" r="1.5"/>
+  </g>
+  <text x="282" y="410" class="annot" style="fill:var(--ink-faint);opacity:.6">LATCHKEY</text>
+
+  <!-- mini charted constellation: pendulum -->
+  <g stroke="var(--ink-faint)" stroke-width="1" fill="var(--ink-mid)" transform="translate(90,0)">
+    <path d="M 110 700 L 150 680 L 190 720 L 170 760 L 120 750 L 110 700" fill="none" opacity=".4"/>
+    <circle cx="110" cy="700" r="1.3"/><circle cx="150" cy="680" r="1.5"/><circle cx="190" cy="720" r="1.4"/>
+    <circle cx="170" cy="760" r="1.6"/><circle cx="120" cy="750" r="1.3"/>
+  </g>
+  <text x="166" y="656" class="annot" style="fill:var(--ink-faint);opacity:.6">PENDULUM</text>
+</g>
+
+<!-- survey limit marker: where the map runs out of data -->
+<g opacity=".22">
+  <line x1="612" y1="0" x2="612" y2="1000" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="1 9"/>
+  <text x="600" y="470" class="annot" style="fill:var(--ink-faint)" transform="rotate(-90 600 470)" text-anchor="middle">SURVEY LIMIT · NO DATA BEYOND</text>
+</g>
+
+<!-- home glow, far left horizon -->
+<circle class="homeglow" cx="-40" cy="520" r="230" fill="url(#homeGlowGrad)" filter="url(#haloSun)"/>
+<circle cx="-40" cy="520" r="90" fill="url(#homeGlowGrad)"/>
+
+<!-- uncharted: sparse strange stars, no grid, no lines -->
+<g>
+  <circle cx="700" cy="150" r="0.9" fill="#e9edf8" opacity=".3"/>
+  <circle cx="780" cy="640" r="1.1" fill="#e9edf8" opacity=".26"/>
+  <circle cx="860" cy="300" r="0.7" fill="#dfe6ff" opacity=".22"/>
+  <circle cx="960" cy="820" r="0.8" fill="#e9edf8" opacity=".24"/>
+  <circle cx="1030" cy="200" r="0.6" fill="#e9edf8" opacity=".2"/>
+  <circle cx="1120" cy="700" r="0.9" fill="#dfe6ff" opacity=".24"/>
+  <circle cx="1220" cy="880" r="0.7" fill="#e9edf8" opacity=".22"/>
+  <circle cx="1300" cy="120" r="0.85" fill="#e9edf8" opacity=".26"/>
+  <circle cx="1400" cy="500" r="0.7" fill="#dfe6ff" opacity=".2"/>
+  <circle cx="1470" cy="260" r="0.9" fill="#e9edf8" opacity=".25"/>
+  <circle cx="1540" cy="700" r="0.6" fill="#e9edf8" opacity=".2"/>
+  <circle cx="650" cy="900" r="0.8" fill="#e9edf8" opacity=".22"/>
+  <circle cx="1160" cy="60" r="0.7" fill="#dfe6ff" opacity=".2"/>
+  <circle cx="900" cy="960" r="0.75" fill="#e9edf8" opacity=".23"/>
+  <circle cx="1550" cy="920" r="0.65" fill="#e9edf8" opacity=".2"/>
+  <circle cx="600" cy="330" r="0.65" fill="#e9edf8" opacity=".18"/>
+
+  <!-- the two unstable stars -->
+  <g class="pulse-teal">
+    <circle cx="820" cy="200" r="5.5" fill="#9fe3da" filter="url(#halo2)" opacity=".5"/>
+    <circle cx="820" cy="200" r="1.8" fill="#c9f4ee"/>
+  </g>
+  <g class="pulse-rose">
+    <circle cx="1330" cy="650" r="5" fill="#eab3c4" filter="url(#halo2)" opacity=".5"/>
+    <circle cx="1330" cy="650" r="1.6" fill="#f6d7e0"/>
+  </g>
+</g>
+
+<!-- plotted course home -->
+<path class="courseline" d="M 1300 900 C 980 800 560 660 40 528" fill="none"
+      stroke="var(--accent)" stroke-width="1.4" stroke-linecap="round" opacity=".55"/>
+<circle cx="1300" cy="900" r="3" fill="var(--accent)" opacity=".7"/>
+
+<!-- meteor: fires briefly every ~9s -->
+<line class="meteor" x1="1420" y1="90" x2="1478" y2="132" stroke="url(#meteorGrad)" stroke-width="1.6" stroke-linecap="round"/>
+
+<!-- centrepiece: the 404 constellation, crisp -->
+<g id="c404">
+  <text x="978" y="330" class="annot" style="font-size:13px;letter-spacing:.16em;fill:var(--accent);opacity:.9">404 · UNCHARTED</text>
+  <path d="M 978 338 H 1150 L 1196 380" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".55"/>
+
+  <g fill="none" stroke="var(--accent)" stroke-width="1" stroke-opacity=".35">
+    <!-- digit "4" -->
+    <path d="M 1060 380 L 980 500 L 1092 500"/>
+    <path d="M 1060 380 L 1060 580"/>
+    <!-- digit "0" -->
+    <path d="M 1196 380 L 1240 420 L 1252 480 L 1240 540 L 1196 580 L 1152 540 L 1140 480 L 1152 420 Z"/>
+    <!-- digit "4" -->
+    <path d="M 1372 380 L 1292 500 L 1404 500"/>
+    <path d="M 1372 380 L 1372 580"/>
+  </g>
+
+  <g fill="#f4f0ff">
+    <circle cx="1060" cy="380" r="0" filter="url(#halo1)"/>
+    <!-- 4 -->
+    <circle cx="1060" cy="380" r="6" filter="url(#halo1)" opacity=".55"/><circle cx="1060" cy="380" r="2.6"/>
+    <circle cx="980" cy="500" r="5.5" filter="url(#halo1)" opacity=".5"/><circle cx="980" cy="500" r="2.1"/>
+    <circle cx="1060" cy="500" r="7" filter="url(#halo2)" opacity=".55"/><circle cx="1060" cy="500" r="3.2"/>
+    <circle cx="1092" cy="500" r="5" filter="url(#halo1)" opacity=".5"/><circle cx="1092" cy="500" r="1.8"/>
+    <circle cx="1060" cy="580" r="6.5" filter="url(#halo1)" opacity=".5"/><circle cx="1060" cy="580" r="2.8"/>
+    <!-- 0 -->
+    <circle cx="1196" cy="380" r="6" filter="url(#halo1)" opacity=".5"/><circle cx="1196" cy="380" r="2.4"/>
+    <circle cx="1240" cy="420" r="5.5" filter="url(#halo1)" opacity=".5"/><circle cx="1240" cy="420" r="2"/>
+    <circle cx="1252" cy="480" r="7" filter="url(#halo2)" opacity=".55"/><circle cx="1252" cy="480" r="3"/>
+    <circle cx="1240" cy="540" r="5.5" filter="url(#halo1)" opacity=".5"/><circle cx="1240" cy="540" r="2"/>
+    <circle cx="1196" cy="580" r="6.5" filter="url(#halo1)" opacity=".5"/><circle cx="1196" cy="580" r="2.6"/>
+    <circle cx="1152" cy="540" r="5" filter="url(#halo1)" opacity=".45"/><circle cx="1152" cy="540" r="1.7"/>
+    <circle cx="1140" cy="480" r="6.5" filter="url(#halo2)" opacity=".5"/><circle cx="1140" cy="480" r="2.9"/>
+    <circle cx="1152" cy="420" r="5" filter="url(#halo1)" opacity=".45"/><circle cx="1152" cy="420" r="1.8"/>
+    <!-- 4 -->
+    <circle cx="1372" cy="380" r="6" filter="url(#halo1)" opacity=".55"/><circle cx="1372" cy="380" r="2.6"/>
+    <circle cx="1292" cy="500" r="5.5" filter="url(#halo1)" opacity=".5"/><circle cx="1292" cy="500" r="2.1"/>
+    <circle cx="1372" cy="500" r="7" filter="url(#halo2)" opacity=".55"/><circle cx="1372" cy="500" r="3.2"/>
+    <circle cx="1404" cy="500" r="5" filter="url(#halo1)" opacity=".5"/><circle cx="1404" cy="500" r="1.8"/>
+    <circle cx="1372" cy="580" r="6.5" filter="url(#halo1)" opacity=".5"/><circle cx="1372" cy="580" r="2.8"/>
+  </g>
+</g>
+</svg></div>
+
+<div class="stage">
+  <a class="course-link mono" href="#">plot a course home &rarr;</a>
+</div>
+
+<svg class="grain" width="100%" height="100%" preserveAspectRatio="none">
+  <rect x="0" y="0" width="100%" height="100%" filter="url(#grainf)"/>
+  <defs>
+    <filter id="grainf">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="11" stitchTiles="stitch" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0.85 0.85 0.85 0 -0.15"/>
+    </filter>
+  </defs>
+</svg>
+
+<div class="vignette"></div>
+<div class="foot">uncharted &middot; <span class="dim">the survey ends at the fold</span> &middot; a course is plotted home</div>
+</body></html>

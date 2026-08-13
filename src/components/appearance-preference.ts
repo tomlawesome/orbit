@@ -2,14 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { PREFERENCE_EVENT, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
-import { themePreferenceSchema, type ThemePreference } from "@/lib/preferences";
+import { legacyToThemePack, themePacks, themePreferenceSchema, type ThemePack, type ThemePreference } from "@/lib/preferences";
 import type { WorkspaceSession } from "@/lib/preview-workspace";
 
 const DEFAULT_THEME: ThemePreference = {
-  mode: "system",
-  colourway: "after-dark",
+  theme: "starchart",
   textSize: "comfortable",
-  urgencyPalette: "themed",
   emailNotifications: true,
   pushNotifications: true,
 };
@@ -19,6 +17,10 @@ const THEME_SESSION_HYDRATED_KEY = "orbit:theme-session-user:v1";
 export type AppearanceSessionUser = Pick<WorkspaceSession["user"],
   "id" | "themeMode" | "themeId" | "textSize" | "urgencyPalette" | "emailNotifications" | "pushNotifications"
 >;
+
+function isThemePack(value: string): value is ThemePack {
+  return (themePacks as readonly string[]).includes(value);
+}
 
 function useLocalStorageValue(key: string, fallback: string): string {
   const subscribe = useCallback((onStoreChange: () => void) => {
@@ -40,12 +42,17 @@ function useLocalStorageValue(key: string, fallback: string): string {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
+/** Resolves a raw, DB-shaped (themeId, themeMode) pair to a v19 theme pack:
+ *  a value already stored in the new pack format passes straight through,
+ *  otherwise it is migrated via the documented legacy mapping (#325). */
+function resolveThemePack(themeId: string, themeMode: string): ThemePack {
+  return isThemePack(themeId) ? themeId : legacyToThemePack(themeId, themeMode);
+}
+
 function sessionThemePreference(user: AppearanceSessionUser): ThemePreference {
   const parsed = themePreferenceSchema.safeParse({
-    mode: user.themeMode,
-    colourway: user.themeId,
+    theme: resolveThemePack(user.themeId, user.themeMode),
     textSize: user.textSize,
-    urgencyPalette: user.urgencyPalette,
     emailNotifications: user.emailNotifications,
     pushNotifications: user.pushNotifications,
   });
@@ -54,7 +61,11 @@ function sessionThemePreference(user: AppearanceSessionUser): ThemePreference {
 
 function parseThemePreference(storedTheme: string): ThemePreference {
   try {
-    const parsed = themePreferenceSchema.safeParse(JSON.parse(storedTheme));
+    const raw = JSON.parse(storedTheme) as Record<string, unknown>;
+    const candidate = typeof raw.theme === "string"
+      ? raw
+      : { ...raw, theme: resolveThemePack(String(raw.colourway ?? ""), String(raw.mode ?? "")) };
+    const parsed = themePreferenceSchema.safeParse(candidate);
     return parsed.success ? parsed.data : DEFAULT_THEME;
   } catch {
     return DEFAULT_THEME;

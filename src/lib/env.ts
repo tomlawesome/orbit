@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OIDC_CALLBACK_PATH } from "@/lib/config-contract";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const authEnvironmentSchema = z.object({
@@ -66,7 +67,7 @@ export function getAuthConfig(environment: NodeJS.ProcessEnv = process.env): Aut
     issuer: issuerUrl.href,
     clientId: parsed.OIDC_CLIENT_ID,
     clientSecret: parsed.OIDC_CLIENT_SECRET,
-    callbackUrl: parsed.OIDC_CALLBACK_URL ?? new URL("/api/auth/callback", appUrl).href,
+    callbackUrl: parsed.OIDC_CALLBACK_URL ?? new URL(OIDC_CALLBACK_PATH, appUrl).href,
     scopes: scopes.join(" "),
     claims: {
       email: parsed.OIDC_EMAIL_CLAIM,

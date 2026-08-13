@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import "@/app/theme-tokens.css";
 import "@/app/globals.css";
 import { ServiceWorkerRegistration } from "@/components/service-worker-registration";
 

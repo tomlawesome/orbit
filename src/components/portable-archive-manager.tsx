@@ -76,7 +76,7 @@ export function PortableArchiveManager({ householdId, csrfToken }: { householdId
       <div><p className="portable-archive-kicker">Import</p><h4>Preview an import</h4><p>Orbit checks an archive before making any changes. You review duplicate items before import.</p></div>
       <label className="field"><span>Encrypted export file</span><input name="archive" type="file" accept="application/json,.json" required /></label>
       <label className="field"><span>Export passphrase</span><input type="password" autoComplete="off" minLength={12} maxLength={256} required value={importPassphrase} onChange={(event) => setImportPassphrase(event.target.value)} /></label>
-      <div className="portable-archive-actions"><button className="portable-archive-secondary" type="submit" disabled={busy}>{busy ? "Checking export…" : "Preview import"}</button>{!!importArchive && <button className="wizard-primary" type="button" disabled={busy} onClick={() => void commitImport}>{conflicts.length ? `Import and skip ${conflicts.length} duplicate${conflicts.length === 1 ? "" : "s"}` : "Import reviewed items"}</button>}</div>
+      <div className="portable-archive-actions"><button className="portable-archive-secondary" type="submit" disabled={busy}>{busy ? "Checking export…" : "Preview import"}</button>{!!importArchive && <button className="wizard-primary" type="button" disabled={busy} onClick={() => void commitImport()}>{conflicts.length ? `Import and skip ${conflicts.length} duplicate${conflicts.length === 1 ? "" : "s"}` : "Import reviewed items"}</button>}</div>
       {preview && <p className="portable-archive-message" role="status">{preview}</p>}
     </form>
   </section>;

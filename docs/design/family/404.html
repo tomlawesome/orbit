@@ -1,0 +1,177 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — off the chart</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="family.css">
+<style>
+/* layers: giant numerals(0) < derelict(1) < content(3) — nothing crosses above content */
+.big404{position:fixed;inset:0;display:grid;place-items:center;z-index:0;pointer-events:none}
+.big404 span{font:600 46vh var(--display);letter-spacing:.02em;color:transparent;
+             -webkit-text-stroke:1.5px rgba(77,88,120,.35);line-height:1}
+.derelict{position:fixed;z-index:1;pointer-events:none;
+          animation:drift-x 74s linear infinite}
+.derelict .bob{animation:drift-y 74s ease-in-out infinite}
+@keyframes drift-x{from{transform:translateX(-14vw)}to{transform:translateX(110vw)}}
+@keyframes drift-y{from{transform:translateY(72vh)}50%{transform:translateY(26vh)}to{transform:translateY(64vh)}}
+.derelict svg{overflow:visible}
+.spinner{transform-origin:26px 26px;animation:selfspin 9s linear infinite}
+@keyframes selfspin{to{transform:rotate(360deg)}}
+.trail{stroke-dasharray:3 9;stroke-linecap:round;opacity:.4}
+.stage{position:relative;z-index:3}
+.home{text-align:center}
+.home .minisun{position:relative;width:120px;height:120px;margin:0 auto 20px}
+.home .minisun .glow{position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle,#fff3d6 0%,rgba(240,180,41,.55) 26%,rgba(226,119,43,.1) 62%,transparent 75%);
+  animation:breathe-sun 4s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{transform:scale(1)}to{transform:scale(1.12)}}
+.home .minisun svg{position:absolute;inset:0;overflow:visible}
+.home .minisun .orbiter{transform-origin:60px 60px;animation:orb 7s linear infinite}
+@keyframes orb{to{transform:rotate(360deg)}}
+.home h1{font:600 30px var(--display);letter-spacing:-.01em}
+.home p{font:12px var(--mono);color:var(--ink-mid);margin:10px 0 24px}
+.home a{font:12.5px var(--mono);color:var(--accent);text-decoration:none;
+        border-bottom:1px solid var(--line);padding-bottom:4px}
+.home a:hover{border-color:var(--accent)}
+</style></head><body>
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<g fill="#e9edf8"><circle cx="791.2" cy="556.7" r="1.05" opacity="0.2"/>
+      <circle cx="513.5" cy="693.2" r="0.79" opacity="0.21"/>
+      <circle cx="648.8" cy="329.8" r="0.53" opacity="0.29"/>
+      <circle cx="1430.0" cy="688.8" r="0.91" opacity="0.2"/>
+      <circle cx="693.6" cy="144.2" r="0.98" opacity="0.19"/>
+      <circle cx="466.8" cy="980.8" r="0.67" opacity="0.39"/>
+      <circle cx="988.7" cy="761.2" r="0.9" opacity="0.15"/>
+      <circle cx="1140.6" cy="258.8" r="0.73" opacity="0.14"/>
+      <circle cx="93.5" cy="367.6" r="0.41" opacity="0.22"/>
+      <circle cx="1360.2" cy="998.5" r="0.74" opacity="0.13"/>
+      <circle cx="553.9" cy="63.8" r="0.57" opacity="0.29"/>
+      <circle cx="986.9" cy="31.4" r="0.79" opacity="0.23"/>
+      <circle cx="636.6" cy="135.0" r="0.71" opacity="0.13"/>
+      <circle cx="1097.8" cy="649.4" r="0.9" opacity="0.22"/>
+      <circle cx="1530.9" cy="368.7" r="0.56" opacity="0.21"/>
+      <circle cx="1460.4" cy="157.8" r="1.01" opacity="0.38"/>
+      <circle cx="1363.1" cy="465.6" r="0.76" opacity="0.36"/>
+      <circle cx="1136.5" cy="806.8" r="0.54" opacity="0.28"/>
+      <circle cx="1181.2" cy="238.2" r="0.57" opacity="0.35"/>
+      <circle cx="909.0" cy="409.8" r="0.79" opacity="0.18"/>
+      <circle cx="396.6" cy="106.5" r="0.72" opacity="0.14"/>
+      <circle cx="1434.9" cy="955.9" r="0.87" opacity="0.13"/>
+      <circle cx="957.7" cy="155.5" r="0.7" opacity="0.14"/>
+      <circle cx="795.8" cy="75.2" r="0.62" opacity="0.17"/>
+      <circle cx="745.8" cy="930.5" r="0.86" opacity="0.33"/>
+      <circle cx="1160.5" cy="531.0" r="0.45" opacity="0.12"/>
+      <circle cx="215.2" cy="516.3" r="0.67" opacity="0.38"/>
+      <circle cx="319.3" cy="131.6" r="0.91" opacity="0.28"/>
+      <circle cx="84.9" cy="344.2" r="0.76" opacity="0.35"/>
+      <circle cx="1246.5" cy="873.5" r="0.83" opacity="0.38"/>
+      <circle cx="752.5" cy="289.0" r="0.51" opacity="0.35"/>
+      <circle cx="1040.5" cy="616.6" r="1.18" opacity="0.29"/>
+      <circle cx="496.3" cy="694.9" r="1.14" opacity="0.15"/>
+      <circle cx="1509.8" cy="416.2" r="0.49" opacity="0.25"/>
+      <circle cx="1249.4" cy="491.3" r="0.62" opacity="0.33"/>
+      <circle cx="163.0" cy="671.2" r="0.69" opacity="0.28"/>
+      <circle cx="811.0" cy="280.2" r="0.56" opacity="0.35"/>
+      <circle cx="731.0" cy="283.8" r="0.87" opacity="0.33"/>
+      <circle cx="142.2" cy="458.3" r="0.52" opacity="0.33"/>
+      <circle cx="72.6" cy="832.6" r="0.85" opacity="0.25"/>
+      <circle cx="859.4" cy="278.6" r="0.76" opacity="0.15"/>
+      <circle cx="570.6" cy="595.9" r="0.89" opacity="0.2"/>
+      <circle cx="985.7" cy="784.8" r="1.02" opacity="0.1"/>
+      <circle cx="801.0" cy="170.6" r="1.06" opacity="0.27"/>
+      <circle cx="706.4" cy="609.8" r="0.81" opacity="0.16"/>
+      <circle cx="1462.6" cy="56.4" r="0.43" opacity="0.19"/>
+      <circle cx="227.3" cy="373.5" r="0.89" opacity="0.22"/>
+      <circle cx="1551.6" cy="326.7" r="1.15" opacity="0.39"/>
+      <circle cx="877.2" cy="806.2" r="0.46" opacity="0.38"/>
+      <circle cx="706.7" cy="337.7" r="1.14" opacity="0.22"/>
+      <circle cx="142.2" cy="27.4" r="1.04" opacity="0.15"/>
+      <circle cx="1017.5" cy="86.9" r="1.05" opacity="0.39"/>
+      <circle cx="589.0" cy="795.5" r="1.12" opacity="0.17"/>
+      <circle cx="758.2" cy="998.0" r="1.16" opacity="0.27"/>
+      <circle cx="878.1" cy="20.8" r="1.06" opacity="0.38"/>
+      <circle cx="902.8" cy="231.8" r="0.5" opacity="0.29"/>
+      <circle cx="1111.0" cy="597.8" r="1.07" opacity="0.11"/>
+      <circle cx="10.2" cy="102.5" r="0.65" opacity="0.11"/>
+      <circle cx="386.4" cy="207.4" r="1.05" opacity="0.26"/>
+      <circle cx="319.7" cy="506.8" r="0.52" opacity="0.4"/>
+      <circle cx="145.2" cy="238.6" r="0.86" opacity="0.37"/>
+      <circle cx="1049.0" cy="136.4" r="0.89" opacity="0.32"/>
+      <circle cx="1492.5" cy="637.8" r="0.6" opacity="0.35"/>
+      <circle cx="1118.6" cy="892.0" r="0.56" opacity="0.35"/>
+      <circle cx="768.2" cy="221.4" r="0.6" opacity="0.13"/>
+      <circle cx="1435.3" cy="142.8" r="0.91" opacity="0.18"/>
+      <circle cx="400.0" cy="352.4" r="1.08" opacity="0.12"/>
+      <circle cx="624.4" cy="327.6" r="0.79" opacity="0.29"/>
+      <circle cx="1384.6" cy="635.5" r="1.08" opacity="0.36"/>
+      <circle cx="1301.5" cy="25.4" r="0.45" opacity="0.26"/>
+      <circle cx="314.8" cy="362.6" r="0.82" opacity="0.26"/>
+      <circle cx="1226.4" cy="772.5" r="0.57" opacity="0.27"/>
+      <circle cx="756.3" cy="444.4" r="0.98" opacity="0.31"/>
+      <circle cx="1131.6" cy="383.9" r="0.47" opacity="0.28"/>
+      <circle cx="406.2" cy="310.3" r="0.48" opacity="0.12"/>
+      <circle cx="710.3" cy="961.0" r="0.89" opacity="0.18"/>
+      <circle cx="1521.7" cy="195.7" r="0.94" opacity="0.12"/>
+      <circle cx="1530.8" cy="911.0" r="1.07" opacity="0.21"/>
+      <circle cx="723.7" cy="496.5" r="1.14" opacity="0.27"/>
+      <circle cx="396.5" cy="906.7" r="0.74" opacity="0.32"/>
+      <circle cx="1508.2" cy="773.2" r="0.5" opacity="0.35"/>
+      <circle cx="722.3" cy="997.2" r="0.7" opacity="0.15"/>
+      <circle cx="188.3" cy="997.2" r="0.74" opacity="0.1"/>
+      <circle cx="802.2" cy="959.0" r="0.57" opacity="0.38"/>
+      <circle cx="1594.7" cy="204.3" r="0.57" opacity="0.14"/>
+      <circle cx="159.1" cy="0.6" r="0.57" opacity="0.34"/>
+      <circle cx="694.6" cy="411.7" r="0.9" opacity="0.14"/>
+      <circle cx="1243.2" cy="250.6" r="0.81" opacity="0.17"/>
+      <circle cx="413.9" cy="148.2" r="0.71" opacity="0.23"/>
+      <circle cx="157.2" cy="832.4" r="0.67" opacity="0.3"/>
+      <circle cx="304.1" cy="42.4" r="1.18" opacity="0.17"/>
+      <circle cx="18.8" cy="928.5" r="0.74" opacity="0.1"/>
+      <circle cx="1024.0" cy="338.0" r="1.17" opacity="0.35"/>
+      <circle cx="1058.7" cy="701.5" r="0.66" opacity="0.38"/>
+      <circle cx="1492.3" cy="246.2" r="0.44" opacity="0.12"/>
+      <circle cx="842.2" cy="618.6" r="1.04" opacity="0.37"/>
+      <circle cx="613.3" cy="443.7" r="0.72" opacity="0.37"/>
+      <circle cx="349.1" cy="129.1" r="0.56" opacity="0.38"/>
+      <circle cx="272.2" cy="994.9" r="0.6" opacity="0.21"/>
+      <circle cx="289.2" cy="973.7" r="0.46" opacity="0.15"/>
+      <circle cx="1107.4" cy="485.2" r="0.71" opacity="0.24"/>
+      <circle cx="1429.5" cy="149.5" r="0.84" opacity="0.16"/>
+      <circle cx="795.4" cy="386.2" r="0.73" opacity="0.19"/>
+      <circle cx="20.2" cy="199.7" r="0.99" opacity="0.22"/>
+      <circle cx="198.4" cy="107.1" r="0.98" opacity="0.16"/>
+      <circle cx="1506.2" cy="523.3" r="0.45" opacity="0.2"/>
+      <circle cx="995.0" cy="987.0" r="1.13" opacity="0.17"/>
+      <circle cx="978.0" cy="574.5" r="1.11" opacity="0.15"/>
+      <circle cx="826.3" cy="579.0" r="0.79" opacity="0.24"/>
+      <circle cx="30.0" cy="174.2" r="1.16" opacity="0.19"/></g></svg></div>
+<div class="big404"><span>404</span></div>
+<div class="derelict"><div class="bob">
+  <svg width="260" height="80" viewBox="0 0 260 80">
+    <path class="trail" d="M -180 46 C -90 20 -30 54 16 30" stroke="var(--ink-faint)" fill="none" stroke-width="1.5"/>
+    <g class="spinner">
+      <circle cx="26" cy="26" r="13" fill="#3b4763"/>
+      <path d="M 26 13 A 13 13 0 0 1 26 39 Z" fill="rgba(0,0,0,.4)"/>
+      <circle cx="21" cy="21" r="4" fill="rgba(255,255,255,.25)"/>
+      <ellipse cx="26" cy="26" rx="22" ry="6.5" transform="rotate(-18 26 26)"
+               fill="none" stroke="var(--ink-faint)" stroke-width="1" opacity=".6"/>
+    </g>
+    <text x="58" y="16" class="annot" opacity=".75">OFF THE CHART</text>
+    <path d="M 56 22 H 150 L 134 34" fill="none" stroke="var(--accent)" stroke-width="1" opacity=".45"/>
+  </svg>
+</div></div>
+<div class="stage"><div class="home">
+  <div class="minisun">
+    <div class="glow"></div>
+    <svg viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="34" fill="none" stroke="var(--line)" stroke-width="1"/>
+      <g class="orbiter"><circle cx="94" cy="60" r="3.5" style="fill:var(--accent)"/></g>
+      <circle cx="60" cy="60" r="7" fill="#fff3d6"/>
+    </svg>
+  </div>
+  <h1>This page has drifted off the chart</h1>
+  <p>but your sky is exactly where you left it</p>
+  <a href="#">&#8598; return to your orbit</a>
+</div></div>
+<div class="vignette"></div>
+<div class="foot">adrift &middot; the derelict tumbles behind everything &middot; home burns warm at the centre</div>
+</body></html>

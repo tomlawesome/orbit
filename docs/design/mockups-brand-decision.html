@@ -1,0 +1,158 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — the mark: ratified</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070d1f;--panel:#0b1226;--line:#243259;--ink:#e9edf8;--mid:#8791b3;--faint:#4d5878;
+--accent:#d8b45a;--sun:#ffe9c4;--mono:'JetBrains Mono',ui-monospace,monospace;
+--display:'Space Grotesk',Inter,system-ui,sans-serif}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;
+     max-width:920px;margin:0 auto;padding:60px 24px 80px;line-height:1.6}
+h1{font:600 24px var(--display)}
+p.lead{color:var(--mid);font-size:13.5px;margin:8px 0 10px;max-width:640px}
+.back{font:11px var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--line);
+      border-radius:99px;padding:3px 12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+      padding:38px 40px;margin-top:28px}
+.hero{display:flex;flex-direction:column;align-items:center;gap:20px;padding:46px 0 40px}
+.hero .word{font:600 54px var(--display);letter-spacing:.015em;line-height:1}
+.row{display:flex;gap:26px;align-items:center;justify-content:center;flex-wrap:wrap;
+     padding:26px 0;border-top:1px solid rgba(36,50,89,.5)}
+.cell{display:flex;flex-direction:column;align-items:center;gap:12px}
+.cell small{font:10.5px var(--mono);color:var(--faint);letter-spacing:.1em}
+.hlock{display:flex;align-items:center;gap:16px}
+.hlock .word{font:600 34px var(--display);letter-spacing:.015em}
+.paper{background:#f4f1e8;border-radius:12px;padding:22px 30px;color:#1c2b4a}
+.paper .word{color:#1c2b4a}
+.note{font-size:13px;color:var(--mid);max-width:660px;margin:26px auto 0}
+.note b{color:var(--ink);font-weight:560}
+.foot{font:10.5px var(--mono);color:var(--faint);margin-top:34px;letter-spacing:.08em;text-align:center}
+svg{overflow:visible;display:block}
+.tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
+@keyframes spinback{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.tr{animation:none}}
+</style></head><body>
+<h1>The mark — ratified</h1>
+<p class="lead">Decided (owner, 2026-08-13): the mark is three flat geometric shapes —
+the ring, the planet riding it, and a plain filled circle at the centre: the household.
+No gradients, no glow, no 3D — ever. Pure flat geometry, identical at every size, so the
+identity survives any medium: screens, print, embroidery, a favicon. The word sets
+plain. The only thing that ever moves is the planet, slowly, on live surfaces.</p>
+<a class="back" href="mockups-web-v19.html">← v19 index</a>
+
+<div class="card">
+
+  <!-- HERO: full dress, stacked (the login composition) -->
+  <div class="hero">
+    <svg width="150" height="150" viewBox="0 0 200 200" role="img" aria-label="Orbit mark, full dress">
+      <!-- three flat shapes: ring, planet, centre. nothing else, ever. -->
+      <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7"/>
+      <circle cx="100" cy="100" r="7" fill="var(--sun)"/>
+      <g class="tr">
+        <circle cx="163" cy="63.5" r="16" fill="#d8b45a"/>
+      </g>
+    </svg>
+    <div class="word">orbit</div>
+  </div>
+
+  <!-- DRESS LEVELS -->
+  <div class="row">
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7"/>
+        <circle cx="100" cy="100" r="7" fill="var(--sun)"/>
+        <circle cx="163" cy="63.5" r="16" fill="#d8b45a"/>
+      </svg>
+      <small>STAR-CHART · gold planet</small>
+    </div>
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#7c8699" stroke-width="7"/>
+        <circle cx="100" cy="100" r="7" fill="#dbe9ff"/>
+        <circle cx="163" cy="63.5" r="16" fill="#7dd3fc"/>
+      </svg>
+      <small>AFTER DARK · sky planet</small>
+    </div>
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="8"/>
+        <circle cx="100" cy="100" r="8" fill="#e9edf8"/>
+        <circle cx="163" cy="63.5" r="17" fill="#e9edf8"/>
+      </svg>
+      <small>ONE INK · print, embroidery</small>
+    </div>
+  </div>
+
+  <!-- HORIZONTAL LOCKUP + LIGHT -->
+  <div class="row">
+    <div class="cell">
+      <div class="hlock">
+        <svg width="44" height="44" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="9"/>
+          <circle cx="100" cy="100" r="8" fill="var(--sun)"/>
+          <circle cx="163" cy="63.5" r="19" fill="#d8b45a"/>
+        </svg>
+        <span class="word">orbit</span>
+      </div>
+      <small>HORIZONTAL — app chrome, README</small>
+    </div>
+    <div class="cell">
+      <div class="paper">
+        <div class="hlock">
+          <svg width="44" height="44" viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="72" fill="none" stroke="#5d6a87" stroke-width="9"/>
+            <circle cx="100" cy="100" r="8" fill="#1c2b4a"/>
+            <circle cx="163" cy="63.5" r="19" fill="#b4842c"/>
+          </svg>
+          <span class="word" style="color:#1c2b4a">orbit</span>
+        </div>
+      </div>
+      <small>LIGHT — atlas paper, invoices, email</small>
+    </div>
+  </div>
+
+  <!-- REDUCTIONS -->
+  <div class="row">
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="32" height="32" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="68" fill="none" stroke="#8791b3" stroke-width="16"/>
+        <circle cx="100" cy="100" r="14" fill="#ffe9c4"/>
+        <circle cx="163" cy="63.5" r="26" fill="#d8b45a"/>
+      </svg></div>
+      <small>32PX</small>
+    </div>
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="16" height="16" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="64" fill="none" stroke="#a7b0cc" stroke-width="22"/>
+        <circle cx="100" cy="100" r="20" fill="#ffe9c4"/>
+        <circle cx="163" cy="63.5" r="34" fill="#d8b45a"/>
+      </svg></div>
+      <small>16PX FAVICON</small>
+    </div>
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="92" height="30" viewBox="0 0 200 66">
+        <g transform="translate(0 -67)">
+          <circle cx="33" cy="100" r="24" fill="none" stroke="#8791b3" stroke-width="4"/>
+          <circle cx="33" cy="100" r="3" fill="#ffe9c4"/>
+          <circle cx="54" cy="87.8" r="6.5" fill="#d8b45a"/>
+        </g>
+        <text x="70" y="110" transform="translate(0 -67)" font-family="'Space Grotesk',sans-serif"
+              font-weight="600" font-size="34" fill="#e9edf8">orbit</text>
+      </svg></div>
+      <small>ONE-LINE — footers, CLI banner</small>
+    </div>
+  </div>
+
+  <p class="note"><b>The rule:</b> the mark is exactly three flat geometric shapes — the
+  ring, the planet, and the plain filled centre. No gradients, no glows, no 3D, no
+  decoration of any kind, at any size, in any medium. Colour is the only variable, and it
+  comes from the theme tokens. Motion is permitted in exactly one place: on live surfaces
+  the planet may drift slowly around the ring. Because the shapes are pure flat geometry,
+  the identity survives print, embroidery, favicons and dark/light alike.
+  <br><br><b>What it replaces:</b> the three-arc gesture mark retires; all bespoke
+  wordmark treatments are dropped; the word always sets plain.</p>
+</div>
+
+<div class="foot">orbit · the mark · RATIFIED 2026-08-13 · issue #307 · ring · planet · plain centre — three flat shapes, no more · the planet drifts once per 40s on live surfaces</div>
+</body></html>
