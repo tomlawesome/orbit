@@ -8,6 +8,7 @@ import {
   runConfigurationPreflight,
 } from "./configuration-migration";
 import {
+  DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
   DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
@@ -484,10 +485,15 @@ export async function runInstall(
         transaction.commitMove(SECRETS_DIRECTORY, "directory");
       }
 
-      // Move every fetched asset into place (install.sh:1467-1474).
+      // Move every fetched asset into place (install.sh:1467-1474). Assets
+      // are not secret-bearing (unlike the environment file/secrets tree
+      // above) and install.sh installs them at the ambient umask (typically
+      // 0644, never chmodded) — writeStagedFile's SECURE_FILE_MODE (0600)
+      // default is for secrets only, so pass DEPLOYMENT_ASSET_FILE_MODE
+      // explicitly (issue #383).
       for (const asset of DEPLOYMENT_ASSETS) {
         const content = readFileSync(join(scratchDir, asset));
-        transaction.writeStagedFile(asset, content);
+        transaction.writeStagedFile(asset, content, DEPLOYMENT_ASSET_FILE_MODE);
         transaction.commitMove(asset, "file");
       }
 

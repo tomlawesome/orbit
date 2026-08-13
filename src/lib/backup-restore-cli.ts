@@ -1,4 +1,20 @@
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  copyFileSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -380,6 +396,44 @@ export interface RunImportRecoveryBundleOptions {
 }
 
 /**
+ * `renameSync`, falling back to copy+fsync+unlink on EXDEV. The live
+ * document KEK lives under the deployment directory while `workDir` is
+ * `mkdtempSync(join(tmpdir(), ...))` — on Debian 13, Ubuntu 24.04+ and
+ * Fedora, /tmp is tmpfs by default, a different filesystem from the
+ * deployment directory, so a plain `renameSync` throws EXDEV
+ * (issue #383). Mirrors writeRestoreJournal's (restore-engine.ts)
+ * temp-then-publish durability shape: write the copy at its final secure
+ * mode before any byte lands (writeSecretFile), fsync its data, then remove
+ * the source — never leaving two live copies of key material if a step
+ * after the copy throws.
+ */
+function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: string): void {
+  try {
+    renameSync(sourcePath, destinationPath);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") {
+      throw error;
+    }
+  }
+  const descriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let content: Buffer;
+  try {
+    content = readFileSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+  writeSecretFile(destinationPath, content, SECURE_FILE_MODE);
+  const destinationDescriptor = openSync(destinationPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    fsyncSync(destinationDescriptor);
+  } finally {
+    closeSync(destinationDescriptor);
+  }
+  unlinkSync(sourcePath);
+}
+
+/**
  * Mirrors import-recovery-bundle.sh's own binary outside view: either the
  * whole import completed, or it failed and threw — there is no partial
  * "resolved but not completed" return value, matching the Bash script's own
@@ -421,11 +475,11 @@ export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions)
 
     options.adapter.stopApp();
     const previousKekPath = join(workDir, "previous-document-kek");
-    renameSync(options.liveDocumentKekFile, previousKekPath);
-    writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
-
     const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
     try {
+      renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
+      writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
+
       runRestore({
         backupTarPath: join(extractedDir, "orbit-backup.tar"),
         documentKekHex: recoveredKekHex,
@@ -452,7 +506,7 @@ export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions)
       // evidence (e.g. capacity/correspondence preflight failed) — revert
       // the key swap and restart the app, keeping the prior deployment usable.
       try {
-        renameSync(previousKekPath, options.liveDocumentKekFile);
+        renameSecretFileAcrossDevices(previousKekPath, options.liveDocumentKekFile);
       } catch {
         // Best-effort, matching import-recovery-bundle.sh:26's `mv -f ... || true`.
       }
