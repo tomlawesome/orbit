@@ -114,6 +114,40 @@ describe("receipt identity PostgreSQL boundaries", () => {
     }
   }, 15_000);
 
+  it("skips the new-mail fetch once the checkpoint has caught up to the mailbox's own uidNext (#383)", async () => {
+    const fixture = await createIntegrationFixture("recipient-steady-state-no-refetch");
+    const current = config();
+    const alias = imapRecipientAlias(fixture.users.member.id, current);
+    const ranges: string[] = [];
+    setImapClientFactoryForTests(() => ({
+      // Exactly one message exists, at UID 1, so the mailbox's own uidNext
+      // correctly predicts 2. A fake this simple ignores the requested
+      // range and always yields the same message, so if the range-collapse
+      // guard failed to skip a caught-up poll, the second cycle would
+      // re-fetch and re-record the same UID-1 message a second time.
+      mailbox: { uidValidity: 500n, uidNext: 2 },
+      async connect() {},
+      async logout() {},
+      async getMailboxLock() { return { release() {} }; },
+      async *fetch(range: string) {
+        ranges.push(range);
+        yield { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("steady-state-message") };
+      },
+    } as unknown as import("imapflow").ImapFlow));
+    try {
+      await runImapIngestionCycle(current);
+      expect(ranges).toEqual(["1:*"]);
+      await runImapIngestionCycle(current);
+      expect(ranges).toEqual(["1:*"]);
+      expect(await getDb().select({ uid: imapIngestionMessages.mailboxUid })
+        .from(imapIngestionMessages).where(eq(imapIngestionMessages.mailboxUidValidity, "500")))
+        .toEqual([{ uid: 1 }]);
+    } finally {
+      setImapClientFactoryForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
   it("keeps current G2 receipt ingestion available when its static previous tuple expires", async () => {
     const fixture = await createIntegrationFixture("recipient-expiry-boundary");
     const expiry = new Date(Date.now() - 1_000);
@@ -122,7 +156,10 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const alias = imapRecipientAlias(fixture.users.member.id, rotation);
     const ranges: string[] = [];
     setImapClientFactoryForTests(() => ({
-      mailbox: { uidValidity: 300n },
+      // Comfortably above every UID this fixture's fake mailboxes use, so
+      // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
+      // never skips these tests' fetch calls.
+      mailbox: { uidValidity: 300n, uidNext: 1_000_000 },
       async connect() {},
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
@@ -182,7 +219,10 @@ describe("receipt identity PostgreSQL boundaries", () => {
       { uid: 3, headers: Buffer.from("X-Original-To: one@example.invalid\r\nX-Original-To: two@example.invalid\r\n"), source: Buffer.from("message-three") },
     ];
     const fakeClient = {
-      mailbox: { uidValidity: 42n },
+      // Comfortably above every UID this fixture's fake mailboxes use, so
+      // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
+      // never skips these tests' fetch calls.
+      mailbox: { uidValidity: 42n, uidNext: 1_000_000 },
       async connect() {},
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
@@ -222,7 +262,10 @@ describe("receipt identity PostgreSQL boundaries", () => {
       const uidValidity = poll++ === 0 ? "100" : "101";
       const uid = uidValidity === "100" ? 7 : 1;
       const client = {
-        mailbox: { uidValidity: BigInt(uidValidity) },
+        // Comfortably above every UID this fixture's fake mailboxes use, so
+        // runImapIngestionCycle's "${nextUid}:*" range-collapse guard
+        // (#383) never skips these tests' fetch calls.
+        mailbox: { uidValidity: BigInt(uidValidity), uidNext: 1_000_000 },
         async connect() {},
         async logout() {},
         async getMailboxLock() { return { release() {} }; },
@@ -255,7 +298,10 @@ describe("receipt identity PostgreSQL boundaries", () => {
     setImapClientFactoryForTests(() => {
       const firstPoll = poll++ === 0;
       const client = {
-        mailbox: { uidValidity: 200n },
+        // Comfortably above every UID this fixture's fake mailboxes use, so
+        // runImapIngestionCycle's "${nextUid}:*" range-collapse guard
+        // (#383) never skips these tests' fetch calls.
+        mailbox: { uidValidity: 200n, uidNext: 1_000_000 },
         async connect() {},
         async logout() {},
         async getMailboxLock() { return { release() {} }; },

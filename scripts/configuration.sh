@@ -70,10 +70,24 @@ validate_value() {
   [[ ${#value} -le 4096 ]] || return 1
   is_control_free "$value" || return 1
   [[ "$value" != [[:space:]]* && "$value" != *[[:space:]] ]] || return 1
-  # These forms are ambiguous to Compose or a shell-like dotenv parser.
-  [[ "$value" != *'$'* && "$value" != *'`'* &&
-    "$value" != *'"'* && "$value" != *"'"* && "$value" != *'#'* &&
-    "$value" != *\\* ]] || return 1
+  # $ and ` are ambiguous to Compose's env-file parser in any position: `$`
+  # triggers ${VAR}/$VAR interpolation, and there is no escape (a preceding
+  # backslash does not suppress it — confirmed against `docker compose
+  # config`).
+  [[ "$value" != *'$'* && "$value" != *'`'* ]] || return 1
+  # A value that itself begins with a quote is the real hazard: Compose
+  # treats a leading quote as opening a value that runs on, potentially
+  # consuming following lines verbatim, until a matching quote is found. A
+  # quote anywhere else in the value is passed through literally, as is a
+  # backslash — real deployments' .env-orbit values (e.g. a mail provider's
+  # generated SMTP_PASSWORD) commonly contain either and were previously
+  # rejected unconditionally, blocking --preflight/--migrate on an already-
+  # working deployment (#383).
+  [[ "$value" != \'* && "$value" != \"* ]] || return 1
+  # A `#` is only a comment marker to Compose when preceded by whitespace;
+  # elsewhere in the value it is literal (also confirmed against `docker
+  # compose config`).
+  [[ "$value" != *[[:space:]]'#'* ]] || return 1
 }
 
 is_valid_applied_version() {

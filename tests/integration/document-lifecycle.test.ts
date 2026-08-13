@@ -234,6 +234,31 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(await fixture.auditCount(documentId)).toBe(beforeAudits);
   });
 
+  it("bounds a malformed document or draft id to 404 instead of a driver-error 500 (#383)", async () => {
+    const fixture = await createIntegrationFixture("document-malformed-id");
+    const session = await fixture.session("member");
+    const malformedId = "not-a-uuid";
+    const downloadUrl = `http://127.0.0.1:3000/api/documents/${malformedId}/download`;
+
+    for (const response of [
+      await downloadDocument(requestForSession(session, downloadUrl), documentContext(malformedId)),
+      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(malformedId)),
+      await restoreDocumentRoute(requestForSession(session, `${downloadUrl}/restore`, { method: "POST" }), documentContext(malformedId)),
+      await createDocumentDraftRoute(requestForSession(session, `http://127.0.0.1:3000/api/documents/${malformedId}/draft`, { method: "POST" }), documentContext(malformedId)),
+    ]) {
+      expect(response.status).toBe(404);
+      expect((await response.json()).error).toMatchObject({ code: "document_not_found" });
+    }
+
+    const draftApproval = await approveDocumentDraftRoute(requestForSession(session, "http://127.0.0.1:3000/api/document-drafts/not-a-uuid/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sectionId: fixture.section.id, title: "Test", provider: null, reference: null, mode: "create" }),
+    }), draftContext(malformedId));
+    expect(draftApproval.status).toBe(404);
+    expect((await draftApproval.json()).error).toMatchObject({ code: "draft_not_found" });
+  });
+
   it("finalizes a purge when ciphertext was already removed by an interrupted attempt", async () => {
     const fixture = await createIntegrationFixture("document-interrupted-purge");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
