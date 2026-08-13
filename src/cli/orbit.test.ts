@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -179,5 +179,83 @@ describe("orbit backup --verify: reaches real verification for a present-but-inv
     const result = runCli(["backup", "--verify", notATar, "--dir", sandbox]);
     expect(result.status).not.toBe(0);
     expect(result.stderr).not.toContain("usage");
+  });
+});
+
+// Engine-delivery slice (issue #295, owner decision 2026-08-13: "the engine
+// can never manage the Docker socket. Ever."): ORBIT_ENGINE_CONTEXT=container
+// is the one fact refuseDockerInContainer trusts (baked into the shipped
+// image via a Dockerfile ENV instruction — see docs/engine-events.md,
+// "In-container engine invocation (v0)"). Every command whose adapters would
+// spawn `docker` must refuse before constructing that adapter; `check` must
+// be completely unaffected. Proven here by actually spawning the CLI with a
+// booby-trapped `docker` ahead of the real one on PATH, so a passing test
+// means the code path was never reached, not merely that it failed cleanly.
+describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () => {
+  const DOCKER_NEEDING_COMMANDS = ["install", "update", "backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
+
+  // Placed inside `sandbox` (not a separate mkdtemp) so the shared afterEach
+  // cleanup above removes it along with everything else.
+  function makeBoobyTrappedDockerBinDir(callLogPath: string): string {
+    const binDir = join(sandbox, "fakebin");
+    mkdirSync(binDir, { recursive: true });
+    const script = ["#!/usr/bin/env bash", `printf 'TRAPPED: docker %s\\n' "$*" >> '${callLogPath}'`, "exit 99", ""].join("\n");
+    writeFileSync(join(binDir, "docker"), script, { mode: 0o755 });
+    return binDir;
+  }
+
+  it.each(DOCKER_NEEDING_COMMANDS)("%s refuses with exit 9 and the reason enum, before ever constructing a docker adapter", (command) => {
+    const callLogPath = join(sandbox, "docker-calls.log");
+    writeFileSync(callLogPath, "");
+    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+
+    const result = runCli([command, "--dir", sandbox], {
+      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "container" },
+    });
+
+    expect(result.status).toBe(9);
+    expect(result.stderr).toContain(`orbit: refused command=${command} reason=docker-command-forbidden-in-container`);
+    expect(readFileSync(callLogPath, "utf8")).toBe("");
+  });
+
+  it("check is completely unaffected: it works fully against a bind-mounted-shaped deploy directory in container mode", () => {
+    mkdirSync(join(sandbox, ".orbit-secrets"), { recursive: true, mode: 0o700 });
+    writeFileSync(join(sandbox, ".orbit-secrets", "oidc-client-secret"), "fixture-secret\n", { mode: 0o600 });
+    const record = [
+      "APP_URL=https://orbit.guard-test.invalid",
+      "OIDC_ISSUER=https://oidc.guard-test.invalid/application/o/orbit/",
+      "OIDC_CLIENT_ID=orbit-guard-test",
+      "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.guard-test.invalid/api/auth/callback",
+      `ORBIT_IMAGE=registry.guard-test.invalid/acceptance/orbit@sha256:${"a".repeat(64)}`,
+      "",
+    ].join("\n");
+    writeFileSync(join(sandbox, ".env-orbit"), record, { mode: 0o600 });
+
+    const callLogPath = join(sandbox, "docker-calls.log");
+    writeFileSync(callLogPath, "");
+    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+
+    const result = runCli(["check", "--dir", sandbox], {
+      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "container" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("ready APP_URL");
+    expect(readFileSync(callLogPath, "utf8")).toBe("");
+  });
+
+  it("the guard is inert when ORBIT_ENGINE_CONTEXT is unset: host-mode behavior is unchanged", () => {
+    const result = runCli(["install", "--dir", sandbox]);
+    expect(result.status).not.toBe(9);
+    expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
+  });
+
+  it("the guard is inert when ORBIT_ENGINE_CONTEXT is set to any value other than the literal \"container\"", () => {
+    const result = runCli(["install", "--dir", sandbox], {
+      env: { ...process.env, ORBIT_ENGINE_CONTEXT: "host" },
+    });
+    expect(result.status).not.toBe(9);
+    expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
   });
 });
