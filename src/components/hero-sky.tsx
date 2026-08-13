@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dueCopy as dashboardDueCopy, formatCost, formatLongDate } from "@/components/dashboard-utils";
 import { GravityDial, type DialItem } from "@/components/gravity-dial";
 import { Icon } from "@/components/icons";
@@ -46,7 +46,7 @@ export interface ItemRowProps {
  * one place that decides what an item row says and one accessible
  * "Open {title}" action e2e/acceptance coverage can rely on either way.
  */
-export function ItemRow({ item, index, today, sections, archiveMode, highlighted, showTMinus, onOpen }: ItemRowProps) {
+export const ItemRow = memo(function ItemRow({ item, index, today, sections, archiveMode, highlighted, showTMinus, onOpen }: ItemRowProps) {
   const dueBand = getDueBand(item.dueDate, today);
   const displayState = archiveMode ? item.status : dueBand;
   const itemSection = sections.find((section) => section.id === item.sectionId);
@@ -84,7 +84,7 @@ export function ItemRow({ item, index, today, sections, archiveMode, highlighted
       <button className="more-button" aria-label={`Open ${item.title}`} onClick={() => onOpen(item)}><Icon name="chevron" /></button>
     </article>
   );
-}
+});
 
 interface ManifestGroup {
   key: string;
@@ -197,7 +197,12 @@ export function HeroSky({
   // there is a real DOM to measure right here, and setting both `hovered`
   // and `placement` together avoids an extra render between "who" and
   // "where" that a `useEffect` round-trip would otherwise introduce.
-  function handleBodyHover(item: DialItem | null) {
+  //
+  // useCallback (issue #383): GravityDial is memoized, so a stable handler
+  // identity is required for that memo to actually skip re-rendering every
+  // orbiting body on each hover — a freshly-created closure every render
+  // would defeat React.memo's prop comparison.
+  const handleBodyHover = useCallback((item: DialItem | null) => {
     setHovered(item);
     if (!item) {
       setPlacement(null);
@@ -218,7 +223,7 @@ export function HeroSky({
     const bodyRect = bodyEl.getBoundingClientRect();
     const dialRect = dialEl.getBoundingClientRect();
     setPlacement(calloutPlacementForBody(bodyRect, dialRect, window.innerWidth));
-  }
+  }, []);
 
   useEffect(() => {
     if (!highlightedId) return;
@@ -226,11 +231,11 @@ export function HeroSky({
     return () => window.clearTimeout(timer);
   }, [highlightedId]);
 
-  function handleBodyClick(item: DialItem) {
+  const handleBodyClick = useCallback((item: DialItem) => {
     setHighlightedId(item.id);
     const target = manifestRef.current?.querySelector(`#manifest-item-${item.id}`);
     target?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
-  }
+  }, [reducedMotion]);
 
   const hoveredHomeItem = hovered ? items.find((item) => item.id === hovered.id) : undefined;
   const hoveredTMinus = hovered ? formatTMinus(daysUntil(hovered.dueDate, today)) : null;

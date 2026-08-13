@@ -1,22 +1,18 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccountMenu } from "@/components/account-menu";
 import { usePersistedThemePreference } from "@/components/appearance-preference";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
-import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
-import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
+import type { HouseholdInput } from "@/components/household-onboarding";
+import type { HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
 import { HeroSky, ItemRow, type ItemFilter } from "@/components/hero-sky";
 import { Icon } from "@/components/icons";
-import { ItemDetail, type CompletionInput } from "@/components/item-detail";
-import { ItemEditor } from "@/components/item-editor";
-import { NotificationCenter } from "@/components/notification-center";
-import { MemberManager } from "@/components/member-manager";
-import { PortableArchiveManager } from "@/components/portable-archive-manager";
-import { ImapInbox } from "@/components/imap-inbox";
+import type { CompletionInput } from "@/components/item-detail";
 import { calendarDateInTimeZone, formatLongDate, householdInitials, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
 import {
   daysUntil,
@@ -36,6 +32,27 @@ import {
 } from "@/lib/preferences";
 import { useWorkspace } from "@/lib/preview-workspace";
 import { activeHousehold, cloneSections, createEmptyWorkspace, createHousehold, type ItemActivity } from "@/lib/workspace";
+
+// Code-split (issue #383): these render only inside the settings route
+// (`mode === "settings"`, see renderSettingsContent below) and never in the
+// home route's `mode === "workspace"` tree, so a static import here put
+// ~115KB of settings-only source in the home route's client bundle. Kept as
+// SSR'd dynamic imports (the default) rather than `{ ssr: false }` because
+// `/settings` renders them unconditionally on first paint and must still
+// come back as real SSR'd HTML for that route.
+const HouseholdSettings = dynamic(() => import("@/components/household-settings").then((mod) => mod.HouseholdSettings));
+const PortableArchiveManager = dynamic(() => import("@/components/portable-archive-manager").then((mod) => mod.PortableArchiveManager));
+const ImapInbox = dynamic(() => import("@/components/imap-inbox").then((mod) => mod.ImapInbox));
+const MemberManager = dynamic(() => import("@/components/member-manager").then((mod) => mod.MemberManager));
+
+// Code-split (issue #383): these only ever mount behind boolean modal state
+// that starts `false`, so they are never part of the server-rendered HTML
+// on either route — `{ ssr: false }` matches that and skips rendering them
+// server-side entirely.
+const ItemEditor = dynamic(() => import("@/components/item-editor").then((mod) => mod.ItemEditor), { ssr: false });
+const ItemDetail = dynamic(() => import("@/components/item-detail").then((mod) => mod.ItemDetail), { ssr: false });
+const NotificationCenter = dynamic(() => import("@/components/notification-center").then((mod) => mod.NotificationCenter), { ssr: false });
+const HouseholdOnboarding = dynamic(() => import("@/components/household-onboarding").then((mod) => mod.HouseholdOnboarding), { ssr: false });
 
 const NOTICE_DURATION_MS = 10_000;
 const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
@@ -74,6 +91,48 @@ const textSizeLabels = {
   large: { name: "Large", detail: "Maximum in-app text size" },
   "extra-large": { name: "Extra large", detail: "Maximum readability without browser zoom" },
 } as const;
+
+/**
+ * A section-name editor that types locally and only commits (via `onCommit`)
+ * on blur or Enter, instead of on every keystroke (issue #383). The section
+ * list is the source of truth once committed: if it changes out from under
+ * this field (another tab, a restore) while untouched, the draft resyncs.
+ *
+ * Exported for direct unit coverage (dashboard.test.tsx) — the surrounding
+ * `AuthenticatedDashboard` needs a full session/workspace to render.
+ */
+export function SectionNameField({ name, onCommit, ariaLabel }: { name: string; onCommit: (name: string) => void; ariaLabel: string }) {
+  const [draft, setDraft] = useState(name);
+  // Resync the draft when `name` changes out from under this field (a
+  // committed rename round-trip, another tab, a restore) without an effect —
+  // adjusting state during render, per https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
+  const [prevName, setPrevName] = useState(name);
+  if (name !== prevName) {
+    setPrevName(name);
+    setDraft(name);
+  }
+
+  function commit() {
+    const trimmed = draft || "Untitled section";
+    if (trimmed !== name) onCommit(trimmed);
+    else if (draft !== name) setDraft(name);
+  }
+
+  return (
+    <input
+      aria-label={ariaLabel}
+      maxLength={30}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        (event.target as HTMLInputElement).blur();
+      }}
+    />
+  );
+}
 
 function AuthenticationGate({
   loading,
@@ -127,7 +186,12 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const router = useRouter();
   const { workspace, dispatch, executeCommand, refreshWorkspace, signOut, syncStatus, syncMessage } = workspaceState;
   const hasActiveHousehold = workspace.households.length > 0;
-  const household = activeHousehold(workspace) ?? createEmptyWorkspace().households[0];
+  // Memoized (issue #383): gives `household` (and everything derived from it
+  // below) a stable identity across renders that don't touch `workspace`, so
+  // those derived useMemo/HeroSky memoizations can actually hit instead of
+  // recomputing every time — including on the placeholder-household fallback
+  // branch, which otherwise allocates a fresh object on every render.
+  const household = useMemo(() => activeHousehold(workspace) ?? createEmptyWorkspace().households[0], [workspace]);
   // Legacy placeholder households may already exist from releases that created
   // one during a workspace read. Give recovery choices precedence over that
   // unfinished setup, but never create another household from this view.
@@ -153,24 +217,43 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const textSize = themePreference.textSize;
   const emailNotifications = themePreference.emailNotifications;
   const pushNotifications = themePreference.pushNotifications;
-  const activeItems = household.items.filter((item) => item.status === "active");
-  const inactiveItems = household.items.filter((item) => ["archived", "cancelled"].includes(item.status));
+  // Memoized (issue #383): household.items keeps a stable reference across
+  // renders that don't touch the workspace (menu toggles, notices, etc.), so
+  // these only need to recompute when the underlying data actually changes.
+  const activeItems = useMemo(
+    () => household.items.filter((item) => item.status === "active"),
+    [household.items],
+  );
+  const inactiveItems = useMemo(
+    () => household.items.filter((item) => ["archived", "cancelled"].includes(item.status)),
+    [household.items],
+  );
   const archiveMode = activeSection === "archive";
   const listedItems = archiveMode ? inactiveItems : activeItems;
-  const notifications = householdNotifications(household, today);
+  // Memoized (issue #383): householdNotifications does O(items x id-array)
+  // work; without this it reran on every render, including every keystroke
+  // in the unrelated topbar search input.
+  const notifications = useMemo(() => householdNotifications(household, today), [household, today]);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
   const detailItem = household.items.find((item) => item.id === detailItemId);
 
-  const visibleItems = sortByDueDate(listedItems.filter((item) => {
-    const matchesSection = archiveMode || activeSection === "all" || item.sectionId === activeSection;
-    const haystack = `${item.title} ${item.provider ?? ""} ${item.subtype ?? ""} ${item.reference ?? ""}`.toLowerCase();
-    const matchesSearch = haystack.includes(query.trim().toLowerCase());
-    const dueState = getDueState(item.dueDate, today);
-    const matchesFilter = archiveMode || itemFilter === "all"
-      || (itemFilter === "attention" && ["overdue", "due-soon"].includes(dueState))
-      || (itemFilter === "unscheduled" && dueState === "unscheduled");
-    return matchesSection && matchesSearch && matchesFilter;
-  }), today);
+  // Memoized (issue #383): keeps a stable array identity when none of these
+  // inputs changed, so HeroSky's own `[items, today]` memos (buildDialItems /
+  // buildManifestGroups) actually hit instead of recomputing on every
+  // dashboard-level re-render (menu toggles, notices, hover-adjacent state).
+  const visibleItems = useMemo(
+    () => sortByDueDate(listedItems.filter((item) => {
+      const matchesSection = archiveMode || activeSection === "all" || item.sectionId === activeSection;
+      const haystack = `${item.title} ${item.provider ?? ""} ${item.subtype ?? ""} ${item.reference ?? ""}`.toLowerCase();
+      const matchesSearch = haystack.includes(query.trim().toLowerCase());
+      const dueState = getDueState(item.dueDate, today);
+      const matchesFilter = archiveMode || itemFilter === "all"
+        || (itemFilter === "attention" && ["overdue", "due-soon"].includes(dueState))
+        || (itemFilter === "unscheduled" && dueState === "unscheduled");
+      return matchesSection && matchesSearch && matchesFilter;
+    }), today),
+    [listedItems, archiveMode, activeSection, query, itemFilter, today],
+  );
 
   const sortedItems = sortByDueDate(activeItems, today);
   const urgentItems = sortedItems.filter((item) => ["overdue", "due-soon"].includes(getDueState(item.dueDate, today)));
@@ -688,7 +771,11 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
                       <article key={section.id}>
                         <button className={`section-drag accent-${section.accent}`} aria-label={`Change colour for ${section.name}`} title="Change section colour" onClick={() => cycleSectionAccent(section.id)}><Icon name={section.icon} /></button>
                         <div>
-                          <input aria-label={`Name for ${section.name}`} maxLength={30} value={section.name} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name: event.target.value || "Untitled section" } : entry))} />
+                          <SectionNameField
+                            name={section.name}
+                            ariaLabel={`Name for ${section.name}`}
+                            onCommit={(name) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, name } : entry))}
+                          />
                           <small>{itemCount} {itemCount === 1 ? "item" : "items"}</small>
                         </div>
                         <select aria-label={`Icon for ${section.name}`} value={section.icon} onChange={(event) => updateSections(sections.map((entry) => entry.id === section.id ? { ...entry, icon: event.target.value as SectionIcon } : entry))}>
