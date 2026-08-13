@@ -4,7 +4,7 @@ import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
-import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, items, reviewedIntakeOperations } from "@/db/schema";
+import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
 import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
 import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
 import { POST as restoreDocumentRoute } from "@/app/api/documents/[documentId]/restore/route";
@@ -17,6 +17,7 @@ import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documen
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import {
   createIntegrationFixture,
   requestForSession,
@@ -1001,6 +1002,98 @@ describe("authenticated encrypted document lifecycle", () => {
         .from(reviewedIntakeOperations).where(eq(reviewedIntakeOperations.id, operationId));
       expect(completed).toEqual({ status: "completed", attachmentState: "attached" });
     });
+  });
+
+  it("#383 finding 4: keeps a mailbox approval recoverable, and does not destroy the held attachment copy, while its document is in scanner recovery", async () => {
+    const fixture = await createIntegrationFixture("reviewed-mailbox-scan-recovery");
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({
+      bytes: createSyntheticPdf("mailbox scan recovery"),
+      filename: "mailbox-recovery.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: fixture.users.member.id,
+      receiptId,
+    });
+    const [receipt] = await getDb().insert(imapIngestionMessages).values({
+      id: receiptId,
+      mailbox: "private", mailboxUidValidity: "recovery", mailboxUid: 6, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "recovery", userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    }).returning({ id: imapIngestionMessages.id });
+    await getDb().insert(imapIngestionAttachments).values({
+      id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType,
+      sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+      ciphertextSize: held.ciphertextSize, ...held.envelope, status: "stored",
+    });
+    const input = {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId: receipt.id, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "create_separate" as const,
+      item: { title: "Mailbox recovery value", currency: "GBP", status: "active" },
+      attachmentIds: [held.id],
+    };
+
+    let purgeCalls = 0;
+    setImapHoldingPurgeImplementationForTests(async (storageKey) => {
+      purgeCalls += 1;
+      // Reset to the real implementation before delegating: leaving the
+      // override installed would make this call recurse into itself.
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await purgeHeldImapAttachment(storageKey);
+    });
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    try {
+      await withRequiredScanMode(async () => {
+        const partial = await approveReviewedIntake(fixture.users.member.id, input);
+
+        // clamd is down, so the document this attachment was uploaded to is
+        // still in scanner recovery. The approval must not report the
+        // attachment as attached, or the receipt as approved, while that is
+        // true: the held mailbox ciphertext is still the only durable copy.
+        expect(partial.outcome).toBe("partial_success");
+        expect(partial.attachmentState).toBe("pending");
+        expect(partial.pendingAttachmentIds).toContain(held.id);
+        expect(purgeCalls).toBe(0);
+
+        const [recoverableReceipt] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+          .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id));
+        expect(recoverableReceipt).toMatchObject({ status: "recoverable", failureCode: "scanner_unavailable" });
+
+        const [staged] = await getDb().select({ status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId, purgePending: imapIngestionAttachments.purgePending })
+          .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
+        expect(staged.status).toBe("assigned");
+        expect(staged.purgePending).toBe(true);
+        expect(staged.assignedDocumentId).toBeTruthy();
+        const documentId = staged.assignedDocumentId!;
+        const [stagedDocument] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
+        expect(stagedDocument?.lifecycle).toBe("scanning");
+
+        // Once the scanner recovers and the background worker finishes the
+        // document, only then may the approval retry purge the held copy
+        // and report the receipt completed.
+        await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+          .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+        vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+        await runDocumentMaintenanceCycle();
+        const [recoveredDocument] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
+          .from(documents).where(eq(documents.id, documentId));
+        expect(recoveredDocument).toEqual({ lifecycle: "available", scanStatus: "clean" });
+
+        const completed = await approveReviewedIntake(fixture.users.member.id, input);
+        expect(completed.outcome).toBe("approved");
+        expect(completed.attachmentState).toBe("attached");
+        expect(completed.attachedAttachmentIds).toContain(held.id);
+        expect(purgeCalls).toBe(1);
+
+        const [completedReceipt] = await getDb().select({ status: imapIngestionMessages.status, failureCode: imapIngestionMessages.failureCode })
+          .from(imapIngestionMessages).where(eq(imapIngestionMessages.id, receipt.id));
+        expect(completedReceipt).toMatchObject({ status: "completed", failureCode: null });
+      });
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+    }
   });
 
   it("terminalizes linked reviewed intake while retaining only purge failure recovery", async () => {

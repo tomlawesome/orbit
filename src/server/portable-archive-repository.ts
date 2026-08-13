@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documents, dueEvents, households, items, memberships, portableArchives, reminderRules, sections, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
 import { readDocumentDownload } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
@@ -14,8 +15,15 @@ const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 
 const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100), icon: z.string().trim().min(1).max(50), accent: z.string().trim().min(1).max(50), position: z.number().int().min(0).max(10_000), visible: z.boolean() });
-const importedItemSchema = z.object({ id: z.string().uuid(), sectionId: z.string().uuid(), title: z.string().trim().min(1).max(100), subtype: z.string().nullable().optional(), provider: z.string().nullable().optional(), reference: z.string().nullable().optional(), costMinor: z.number().int().nullable().optional(), currency: z.string().length(3), startDate: z.string().nullable().optional(), expiryDate: z.string().nullable().optional(), renewalDate: z.string().nullable().optional(), serviceDate: z.string().nullable().optional(), recurrenceMonths: z.number().int().nullable().optional(), snoozedUntil: z.string().nullable().optional(), notes: z.string().nullable().optional(), externalDocumentUrl: z.string().nullable().optional(), status: z.enum(["active", "expired", "cancelled", "archived"]) });
-const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(200), items: z.array(importedItemSchema).max(10_000), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(z.unknown()) });
+// Field caps deliberately mirror `workspaceItemSchema` (src/lib/workspace.ts):
+// the read path re-validates every persisted item against that schema, so an
+// imported field this schema accepts but the reader rejects would insert a
+// row that 422s `readWorkspace` forever afterwards, with no in-product
+// recovery (#383 finding 2).
+const importedItemSchema = z.object({ id: z.string().uuid(), sectionId: z.string().uuid(), title: z.string().trim().min(1).max(100), subtype: optionalText(80).nullable(), provider: optionalText(100).nullable(), reference: optionalText(80).nullable(), costMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), currency: z.string().length(3), startDate: z.string().nullable().optional(), expiryDate: z.string().nullable().optional(), renewalDate: z.string().nullable().optional(), serviceDate: z.string().nullable().optional(), recurrenceMonths: z.number().int().min(1).max(120).nullable().optional(), snoozedUntil: z.string().nullable().optional(), notes: optionalText(2_000).nullable(), externalDocumentUrl: z.string().nullable().optional(), status: z.enum(["active", "expired", "cancelled", "archived"]) });
+// `.max(500)` mirrors `householdWorkspaceSchema.items` so an archive that
+// parses cleanly here cannot still brick the household by count alone.
+const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(200), items: z.array(importedItemSchema).max(500), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(z.unknown()) });
 
 function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
@@ -34,6 +42,21 @@ async function requireHouseholdAccess(userId: string, householdId: string) {
 
 function jsonBuffer(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(value));
+}
+
+// Base64url has no padding, so this is the exact maximum encoded length for
+// a ciphertext that could decode to at most MAX_ARCHIVE_BYTES (AES-256-GCM
+// ciphertext is the same length as its plaintext; the auth tag is carried
+// separately). Checking this before any crypto work means an oversized
+// archive is rejected before scryptSync or the cipher ever runs, instead of
+// only after `decryptPortableArchive` has already materialised the full
+// plaintext into memory (#383 finding 3).
+const MAX_ARCHIVE_CIPHERTEXT_CHARACTERS = Math.ceil(MAX_ARCHIVE_BYTES / 3) * 4;
+
+function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
+  if (archive.ciphertext.length > MAX_ARCHIVE_CIPHERTEXT_CHARACTERS) {
+    throw new AppError("archive_too_large", "That export is too large", 413);
+  }
 }
 
 /** Builds a normalized, household-scoped payload. Document bytes are opt-in and bounded. */
@@ -181,6 +204,7 @@ export async function reconcilePortableArchiveStorage(): Promise<void> {
 /** Decrypts and validates an archive in memory only; it never writes household data. */
 export function previewPortableArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
+  rejectOversizedCiphertext(serialized);
   let plaintext: Buffer;
   try { plaintext = decryptPortableArchive(serialized, passphrase); } catch { throw new AppError("archive_passphrase_invalid", "The passphrase or archive is invalid", 422); }
   try {
@@ -193,6 +217,7 @@ export function previewPortableArchive(serialized: unknown, passphrase: string) 
 
 function decodeImportArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
+  rejectOversizedCiphertext(serialized);
   let plaintext: Buffer;
   try { plaintext = decryptPortableArchive(serialized, passphrase); } catch { throw new AppError("archive_passphrase_invalid", "The passphrase or archive is invalid", 422); }
   try {
