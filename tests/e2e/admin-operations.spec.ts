@@ -24,16 +24,17 @@ async function readDurableWorkspace(page: Page): Promise<{ households: Synthetic
 
 async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold | null> {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
-  const desktopSettings = page.getByRole("button", { name: "Open account menu" });
-  const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
+  // v19: the account orb is the shell's one persistent control, so "is the
+  // authenticated shell up?" no longer forks on the breakpoint. The status
+  // drawer's handle is what still carries the sync word.
+  const accountOrb = page.getByRole("button", { name: "Open account menu" });
   await expect(page.locator(".sync-state")).toHaveText("Synced", { timeout: 15_000 });
   await expect.poll(async () => {
-    const [recoveryVisible, desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
+    const [recoveryVisible, orbVisible] = await Promise.all([
       recoveryHeading.isVisible(),
-      desktopSettings.isVisible(),
-      mobileNavigation.isVisible(),
+      accountOrb.isVisible(),
     ]);
-    return recoveryVisible || desktopSettingsVisible || mobileNavigationVisible;
+    return recoveryVisible || orbVisible;
   }, { timeout: 15_000 }).toBe(true);
   if (!await recoveryHeading.isVisible()) return null;
 
@@ -45,13 +46,7 @@ async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold 
   await dialog.getByLabel("Household name").fill(householdName);
   await dialog.getByRole("button", { name: "Create household" }).click();
   await expect(dialog).toBeHidden({ timeout: 15_000 });
-  await expect.poll(async () => {
-    const [desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
-      desktopSettings.isVisible(),
-      mobileNavigation.isVisible(),
-    ]);
-    return desktopSettingsVisible || mobileNavigationVisible;
-  }, { timeout: 15_000 }).toBe(true);
+  await expect(accountOrb).toBeVisible({ timeout: 15_000 });
   const workspace = await readDurableWorkspace(page);
   const household = workspace.households.find((entry) => entry.name === householdName);
   if (!household) throw new Error(`Created household "${householdName}" was not present in the durable workspace`);

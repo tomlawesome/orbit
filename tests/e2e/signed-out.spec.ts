@@ -23,8 +23,11 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
   await expect(page.getByRole("link", { name: /Sign in securely/ })).toHaveAttribute("href", "/api/auth/login");
   await expect(page.getByText("Your household information is private")).toBeVisible();
-  await expect(page.locator("button.topbar-profile")).toHaveCount(0);
-  await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
+  // The v19 shell chrome — orb, account panel, drawers — must not exist at
+  // all when signed out, and neither must the chrome it replaced.
+  await expect(page.locator("button.orb")).toHaveCount(0);
+  await expect(page.locator(".account, #createdrawer, #statusdrawer, #keydrawer")).toHaveCount(0);
+  await expect(page.locator(".sidebar, header.topbar, button.topbar-profile, .item-list, .household-control")).toHaveCount(0);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /icon\.svg/);
 
   // The v19 family surface (design/family/login.html), and only it: one
