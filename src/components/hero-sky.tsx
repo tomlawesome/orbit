@@ -10,8 +10,8 @@ import { daysUntil, getDueBand, type HomeItem, type HouseholdSection } from "@/l
 import { usePrefersReducedMotion } from "@/lib/use-reduced-motion";
 
 /**
- * The v19 hero-sky home (issue #327, spec: docs/design/v19/home.html,
- * docs/design/polish-register.md). Composes the full-viewport gravity
+ * The v19 hero-sky home (issue #327, spec: design/v19/home.html,
+ * design/polish-register.md). Composes the full-viewport gravity
  * dial (#326) over a drifting starfield (POL-11), an "explore your
  * world" search, and — on a single scrolling page, no route change — the
  * grouped, reveal-on-scroll manifest that remains the accessible source
