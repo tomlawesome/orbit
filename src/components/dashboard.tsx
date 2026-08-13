@@ -9,6 +9,7 @@ import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run
 import { HouseholdOnboarding, type HouseholdInput } from "@/components/household-onboarding";
 import { HouseholdSettings, type HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
+import { HeroSky, ItemRow, type ItemFilter } from "@/components/hero-sky";
 import { Icon } from "@/components/icons";
 import { ItemDetail, type CompletionInput } from "@/components/item-detail";
 import { ItemEditor } from "@/components/item-editor";
@@ -16,10 +17,9 @@ import { NotificationCenter } from "@/components/notification-center";
 import { MemberManager } from "@/components/member-manager";
 import { PortableArchiveManager } from "@/components/portable-archive-manager";
 import { ImapInbox } from "@/components/imap-inbox";
-import { calendarDateInTimeZone, dueCopy as dashboardDueCopy, formatCost, formatHeadingDate, formatLongDate, householdInitials, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
+import { calendarDateInTimeZone, formatLongDate, householdInitials, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
 import {
   daysUntil,
-  getDueBand,
   getDueState,
   sortByDueDate,
   type HomeItem,
@@ -41,7 +41,6 @@ const NOTICE_DURATION_MS = 10_000;
 const SETTINGS_RETURN_FOCUS_KEY = "settings-return-focus";
 
 type DashboardMode = "workspace" | "settings";
-type ItemFilter = "all" | "attention" | "unscheduled";
 type Notice = { message: string; undoItem?: HomeItem };
 
 const settingsSectionIds = {
@@ -792,78 +791,86 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
         )}
 
         <section className="content">
-          <div className="overview-grid">
-            <article className="hero-panel">
-              <div className="hero-copy">
-                <p className="eyebrow">{archiveMode ? "Household history" : activeSection === "all" ? formatHeadingDate(today) : "Your things"}</p>
-                <h1>{archiveMode ? <>Past, but<br />not <em>lost.</em></> : activeSection === "all" ? <>Everything in your<br /><em>orbit</em>, on track.</> : currentSection?.name ?? "Section"}</h1>
-                <p>{archiveMode ? "Cancelled and archived records stay safely out of the way until you need them." : activeSection === "all" ? "Maintenance, services, renewals and household schedules—looked after in one clear place." : `${visibleItems.length} ${visibleItems.length === 1 ? "item" : "items"} in this section.`}</p>
-              </div>
-              <div className="hero-orbit" aria-hidden="true"><Image src="/orbit-mark.svg" alt="" width={280} height={280} /></div>
-              <div className="hero-footer"><span><b>{archiveMode ? inactiveItems.length : urgentCount}</b> {archiveMode ? "stored records" : "need attention"}</span><span>All dates in {household.timezone.replace("_", " ")}</span></div>
-            </article>
+          {activeSection === "all" && !archiveMode ? (
+            // Issue #327: "Due next" is the v19 hero-sky experience — the
+            // full-viewport dial and grouped, reveal-on-scroll manifest.
+            // Every other view (a section, or the archive) keeps the
+            // plain hero-panel + flat list below, unchanged.
+            <HeroSky
+              items={visibleItems}
+              listedItemsLength={listedItems.length}
+              sections={sections}
+              today={today}
+              householdName={household.name}
+              query={query}
+              onQueryChange={setQuery}
+              itemFilter={itemFilter}
+              onItemFilterChange={setItemFilter}
+              onOpenItem={openItem}
+              onAddItem={openNewItem}
+            />
+          ) : (
+            <>
+              <div className="overview-grid">
+                <article className="hero-panel">
+                  <div className="hero-copy">
+                    <p className="eyebrow">{archiveMode ? "Household history" : "Your things"}</p>
+                    <h1>{archiveMode ? <>Past, but<br />not <em>lost.</em></> : currentSection?.name ?? "Section"}</h1>
+                    <p>{archiveMode ? "Cancelled and archived records stay safely out of the way until you need them." : `${visibleItems.length} ${visibleItems.length === 1 ? "item" : "items"} in this section.`}</p>
+                  </div>
+                  <div className="hero-orbit" aria-hidden="true"><Image src="/orbit-mark.svg" alt="" width={280} height={280} /></div>
+                  <div className="hero-footer"><span><b>{archiveMode ? inactiveItems.length : urgentCount}</b> {archiveMode ? "stored records" : "need attention"}</span><span>All dates in {household.timezone.replace("_", " ")}</span></div>
+                </article>
 
-            <div className="insight-stack">
-              <article className={`focus-card ${mostUrgent ? "" : "focus-card-empty"}`}>
-                <div><span className="focus-kicker">{urgentCount ? "Most urgent" : "Next on the horizon"}</span><Icon name={urgentSection?.icon ?? "calendar"} /></div>
-                <h2>{mostUrgent?.title ?? "Nothing scheduled"}</h2>
-                <p>{mostUrgent ? `${mostUrgent.provider ?? mostUrgent.subtype ?? "Household item"}${mostUrgent.reference ? ` · ${mostUrgent.reference}` : ""}` : "Add a date and Orbit will keep watch."}</p>
-                <div className="focus-date">
-                  <strong>{focusDays == null ? "—" : Math.abs(focusDays)}</strong>
-                  <span>{focusDays == null ? <>not<br />scheduled</> : focusDays < 0 ? <>days<br />overdue</> : focusDays === 0 ? <>due<br />today</> : <>days<br />to go</>}</span>
-                  <button aria-label={mostUrgent ? `Open ${mostUrgent.title}` : "Add an item"} onClick={() => mostUrgent ? openItem(mostUrgent) : openNewItem()}><Icon name="chevron" /></button>
-                </div>
-              </article>
-              <div className="mini-stats">
-                <article><span className="mini-dot amber" /><div><strong>{dueSoonCount} due soon</strong><small>Within 30 days</small></div></article>
-                <article><span className="mini-dot green">✓</span><div><strong>{onTrackCount} on track</strong><small>Nothing to do</small></div></article>
-              </div>
-            </div>
-          </div>
-
-          <section className="upcoming-section">
-            <div className="list-heading">
-              <div><p className="section-number">02</p><h2>{archiveMode ? "Archive & cancelled" : activeSection === "all" ? "Coming up" : `All ${(currentSection?.name ?? "items").toLowerCase()}`}</h2></div>
-              <div className="list-actions">
-                <span>{visibleItems.length} items</span>
-                {!archiveMode && (
-                  <select aria-label="Filter items" value={itemFilter} onChange={(event) => setItemFilter(event.target.value as ItemFilter)}>
-                    <option value="all">All items</option>
-                    <option value="attention">Needs attention</option>
-                    <option value="unscheduled">Unscheduled</option>
-                  </select>
-                )}
-                {!archiveMode && <button className="mobile-add" aria-label="Add item" onClick={openNewItem}><Icon name="plus" /></button>}
-              </div>
-            </div>
-            <div className="item-list">
-              {visibleItems.map((item, index) => {
-                const dueBand = getDueBand(item.dueDate, today);
-                const displayState = archiveMode ? item.status : dueBand;
-                const itemSection = sections.find((section) => section.id === item.sectionId);
-                return (
-                  <article className={`item-card ${archiveMode ? "" : `due-band-${dueBand}`}`} key={item.id}>
-                    <span className="row-number">{String(index + 1).padStart(2, "0")}</span>
-                    <span className={`category-icon type-icon-${itemSection?.icon ?? "calendar"} accent-${itemSection?.accent ?? "sage"}`}><Icon name={itemSection?.icon ?? "calendar"} /></span>
-                    <button className="item-main" onClick={() => openItem(item)}>
-                      <div className="item-title-row"><h3>{item.title}</h3><span className={`status status-${displayState}`}>{archiveMode ? displayState : dashboardDueCopy(item, today, daysUntil)}</span></div>
-                      <p><b>{item.subtype ?? itemSection?.name ?? "Household item"}</b><span>{item.provider ?? "No provider"}{item.reference ? ` · ${item.reference}` : ""}{item.recurrenceMonths ? ` · every ${item.recurrenceMonths === 12 ? "year" : `${item.recurrenceMonths} months`}` : ""}</span></p>
-                    </button>
-                    <div className="item-meta"><strong>{formatCost(item)}</strong><small>{item.dueDate ? formatLongDate(item.dueDate) : "Add a schedule"}</small></div>
-                    <button className="more-button" aria-label={`Open ${item.title}`} onClick={() => openItem(item)}><Icon name="chevron" /></button>
+                <div className="insight-stack">
+                  <article className={`focus-card ${mostUrgent ? "" : "focus-card-empty"}`}>
+                    <div><span className="focus-kicker">{urgentCount ? "Most urgent" : "Next on the horizon"}</span><Icon name={urgentSection?.icon ?? "calendar"} /></div>
+                    <h2>{mostUrgent?.title ?? "Nothing scheduled"}</h2>
+                    <p>{mostUrgent ? `${mostUrgent.provider ?? mostUrgent.subtype ?? "Household item"}${mostUrgent.reference ? ` · ${mostUrgent.reference}` : ""}` : "Add a date and Orbit will keep watch."}</p>
+                    <div className="focus-date">
+                      <strong>{focusDays == null ? "—" : Math.abs(focusDays)}</strong>
+                      <span>{focusDays == null ? <>not<br />scheduled</> : focusDays < 0 ? <>days<br />overdue</> : focusDays === 0 ? <>due<br />today</> : <>days<br />to go</>}</span>
+                      <button aria-label={mostUrgent ? `Open ${mostUrgent.title}` : "Add an item"} onClick={() => mostUrgent ? openItem(mostUrgent) : openNewItem()}><Icon name="chevron" /></button>
+                    </div>
                   </article>
-                );
-              })}
-              {visibleItems.length === 0 && (
-                <div className="empty-state">
-                  <span><Icon name={listedItems.length ? "search" : archiveMode ? "archive" : "plus"} /></span>
-                  <h3>{listedItems.length ? "No matching items" : archiveMode ? "Your archive is empty" : `Start shaping ${household.name}`}</h3>
-                  <p>{listedItems.length ? "Try another search, section, or filter." : archiveMode ? "Archived and cancelled items will remain available here." : "Add the first renewal, service, contract, or household record."}</p>
-                  {!listedItems.length && !archiveMode && <button onClick={openNewItem}>Add your first item</button>}
+                  <div className="mini-stats">
+                    <article><span className="mini-dot amber" /><div><strong>{dueSoonCount} due soon</strong><small>Within 30 days</small></div></article>
+                    <article><span className="mini-dot green">✓</span><div><strong>{onTrackCount} on track</strong><small>Nothing to do</small></div></article>
+                  </div>
                 </div>
-              )}
-            </div>
-          </section>
+              </div>
+
+              <section className="upcoming-section">
+                <div className="list-heading">
+                  <div><p className="section-number">02</p><h2>{archiveMode ? "Archive & cancelled" : `All ${(currentSection?.name ?? "items").toLowerCase()}`}</h2></div>
+                  <div className="list-actions">
+                    <span>{visibleItems.length} items</span>
+                    {!archiveMode && (
+                      <select aria-label="Filter items" value={itemFilter} onChange={(event) => setItemFilter(event.target.value as ItemFilter)}>
+                        <option value="all">All items</option>
+                        <option value="attention">Needs attention</option>
+                        <option value="unscheduled">Unscheduled</option>
+                      </select>
+                    )}
+                    {!archiveMode && <button className="mobile-add" aria-label="Add item" onClick={openNewItem}><Icon name="plus" /></button>}
+                  </div>
+                </div>
+                <div className="item-list">
+                  {visibleItems.map((item, index) => (
+                    <ItemRow key={item.id} item={item} index={index} today={today} sections={sections} archiveMode={archiveMode} onOpen={openItem} />
+                  ))}
+                  {visibleItems.length === 0 && (
+                    <div className="empty-state">
+                      <span><Icon name={listedItems.length ? "search" : archiveMode ? "archive" : "plus"} /></span>
+                      <h3>{listedItems.length ? "No matching items" : archiveMode ? "Your archive is empty" : `Start shaping ${household.name}`}</h3>
+                      <p>{listedItems.length ? "Try another search, section, or filter." : archiveMode ? "Archived and cancelled items will remain available here." : "Add the first renewal, service, contract, or household record."}</p>
+                      {!listedItems.length && !archiveMode && <button onClick={openNewItem}>Add your first item</button>}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </section>
       </main>
 
