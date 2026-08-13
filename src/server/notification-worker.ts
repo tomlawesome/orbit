@@ -220,16 +220,33 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
   };
 }
 
-/** Builds a TLS-pinned Nodemailer transport without exposing provider details. */
+/**
+ * Builds a TLS-pinned Nodemailer transport without exposing provider details.
+ *
+ * nodemailer's `createTransport(urlString, secondArgument)` only ever reads
+ * `secondArgument` as *mail* defaults (e.g. a default `from`) — never as
+ * connection/transport options — whenever the first argument is a URL
+ * string (see `nodemailer/lib/nodemailer.js` and `Mailer`'s constructor).
+ * Passing `requireTLS`, `tls`, or the timeout bounds there is silently
+ * discarded (#383 finding 1's fix depends on the timeouts actually taking
+ * effect, which surfaced this). nodemailer's own URL parser does read
+ * connection options from the URL's query string
+ * (`shared.parseConnectionUrl`, including a `tls.<key>` nested form), so
+ * that is the supported way to carry them through a URL-shaped transporter.
+ */
 export function createSmtpTransport(config: NotificationWorkerConfig, timeouts = true): ReturnType<typeof nodemailer.createTransport> {
-  let hostname: string | undefined;
-  try { hostname = new URL(config.smtpUrl).hostname; } catch { /* verification returns a safe failure below */ }
-  return nodemailer.createTransport(config.smtpUrl, {
-    secure: config.smtpSecurity === "implicit_tls",
-    requireTLS: config.smtpSecurity === "starttls",
-    tls: { minVersion: "TLSv1.2", rejectUnauthorized: true, ...(hostname ? { servername: hostname } : {}) },
-    ...(timeouts ? { connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 5_000 } : {}),
-  });
+  let url: URL;
+  try { url = new URL(config.smtpUrl); } catch { return nodemailer.createTransport(config.smtpUrl); }
+  url.searchParams.set("requireTLS", String(config.smtpSecurity === "starttls"));
+  url.searchParams.set("tls.minVersion", "TLSv1.2");
+  url.searchParams.set("tls.rejectUnauthorized", "true");
+  if (url.hostname) url.searchParams.set("tls.servername", url.hostname);
+  if (timeouts) {
+    url.searchParams.set("connectionTimeout", "5000");
+    url.searchParams.set("greetingTimeout", "5000");
+    url.searchParams.set("socketTimeout", "5000");
+  }
+  return nodemailer.createTransport(url.toString());
 }
 
 /** Verifies SMTP TLS and authentication only; it never sends a message. */
@@ -400,7 +417,13 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
   return {
     async sendEmail(notification) {
       if (!transporter) {
-        transporter = createSmtpTransport(config, false);
+        // Bounded to the same 5s connect/greeting/socket timeouts as the
+        // verification path (#383 finding 1): this send runs inside the
+        // household lifecycle advisory lock (dispatchUnderHouseholdLifecycleLock),
+        // so an unbounded transporter lets a blackholed SMTP provider hold
+        // that lock — and therefore every ordinary workspace write for the
+        // household — for nodemailer's default minutes instead of seconds.
+        transporter = createSmtpTransport(config);
       }
       await transporter.sendMail({
         from: notification.from,

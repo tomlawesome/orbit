@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { afterAll, describe, expect, it } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -619,6 +620,53 @@ describe("notification worker PostgreSQL contracts", () => {
     expect((await deliveryForEvent(pushUnconfiguredEventId))?.lastError).toBe("push_unconfigured");
     expect(pushUnconfiguredCalls).toBe(0);
   });
+
+  it("#383 finding 1: bounds the real SMTP transporter's timeouts so a blackholed provider cannot hold the household lifecycle lock for minutes", async () => {
+    const fixture = await ownerOnlyFixture("worker-smtp-blackhole");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    // Accepts the TCP connection but never sends the SMTP greeting banner,
+    // modelling an egress firewall blackholing port 587. Nodemailer's
+    // unbounded defaults are a 30s greeting timeout (and up to 2 min
+    // connect / 10 min socket for other blackhole shapes); the fix for
+    // #383 finding 1 gives the default send transporter the same 5s
+    // connection/greeting/socket timeouts as the verification path, so the
+    // household advisory lock this dispatch holds cannot be pinned open by
+    // an unresponsive provider.
+    const server = createServer((socket) => {
+      socket.on("error", () => {});
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Blackhole test server did not bind a port");
+    try {
+      // No `providers` override: this exercises the real default SMTP
+      // provider construction, not the test fake used by every other case
+      // in this file. Push is unused here (pushEnabled: false above), so
+      // VAPID credentials are cleared rather than left as the fixture's
+      // placeholder strings, which are not valid VAPID key material.
+      const config = workerConfig({
+        smtpUrl: `smtp://127.0.0.1:${address.port}`,
+        vapidSubject: "",
+        vapidPublicKey: "",
+        vapidPrivateKey: "",
+      });
+      const startedAt = Date.now();
+      await runNotificationCycle(config, {
+        now: () => cycleTime,
+        nextLeaseToken: () => deterministicLeaseToken(50),
+      });
+      const elapsedMs = Date.now() - startedAt;
+      expect(elapsedMs).toBeLessThan(15_000);
+      const delivery = await deliveryForEvent(eventId);
+      expect(delivery?.status).toBe("retry");
+      expect(delivery?.lastError).toBe("smtp_unavailable");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
 
   it("does not materialize deliveries for disabled users, preferences, rules, completed events, or stale events", async () => {
     const disabledUserFixture = await ownerOnlyFixture("worker-disabled-user");
