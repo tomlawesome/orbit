@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -629,6 +629,22 @@ describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
     const outcome = await scenario.run();
     expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
     if (outcome.status === "failed") expect(outcome.message).toContain("failed a syntax check");
+  });
+
+  it("installs deployment assets at mode 0644, not the secret-file 0600 default (issue #383: Compose-mounted config/tika-config.xml must stay readable by the non-root orbit-tika container)", async () => {
+    const targetDir = newTarget();
+    writePreprovisionedTarget(targetDir);
+    const scenario = buildScenario(targetDir);
+
+    const outcome = await scenario.run();
+
+    expect(outcome.status).toBe("ok");
+    for (const asset of ["docker-compose.yml", "config/tika-config.xml", "scripts/configure.sh", "scripts/backup.sh"]) {
+      const mode = statSync(join(targetDir, asset)).mode & 0o777;
+      expect(mode, `${asset} mode`).toBe(0o644);
+    }
+    // The secret-bearing environment file/secrets tree are unaffected.
+    expect(statSync(join(targetDir, ".env-orbit")).mode & 0o777).toBe(0o600);
   });
 });
 

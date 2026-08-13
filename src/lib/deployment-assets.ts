@@ -49,6 +49,20 @@ export const ENVIRONMENT_FILE = ".env-orbit";
 export const SECRETS_DIRECTORY = ".orbit-secrets";
 
 /**
+ * Mode install.sh installs every DEPLOYMENT_ASSETS entry at: install.sh's
+ * asset fetch/install loop (:1405-1413, :1467-1474) never chmods a fetched
+ * asset and sets no umask anywhere in the script, so each asset lands at
+ * whatever the ambient umask allows a plain `curl --output`-created file
+ * (typically 0644) — never InstallTransaction's SECURE_FILE_MODE (0600),
+ * which is reserved for genuinely secret-bearing writes (the staged
+ * environment file and secrets directory tree). Notably, `config/tika-config.xml`
+ * is bind-mounted into the non-root orbit-tika container (docker-compose.yml's
+ * `user: "35002:35002"`), so installing it at 0600 leaves it unreadable and
+ * breaks Tika startup for the processing/full profiles (issue #383).
+ */
+export const DEPLOYMENT_ASSET_FILE_MODE = 0o644;
+
+/**
  * install.sh:1333-1341's asset_directories derivation: the distinct, non-"."
  * parent directory of each asset, in order of first appearance — never
  * `readdir`-sorted, so directory-creation order matches install.sh's own.
