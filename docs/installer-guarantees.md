@@ -15,9 +15,12 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   application container identity/health diagnosis) was added the same day;
   the #261 third slice (`--plan` — a proposed, classified repair plan
   derived from the same findings, still zero mutation) was added the same
-  day.
-- **Totals:** 337 guarantees — 189 HIGH, 115 MEDIUM, 33 LOW.
-  Install/configuration family: 174 (94 HIGH). Backup/recovery/deploy
+  day; the #261 slice 4 stage one (`--execute --safe-only` — execution of
+  the fixed safe/reversible action set only: fix-permissions,
+  restore-transaction, restart-services; stage two/dangerous actions remain
+  unimplemented) was added 2026-08-13.
+- **Totals:** 349 guarantees — 196 HIGH, 120 MEDIUM, 33 LOW.
+  Install/configuration family: 186 (101 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -33,7 +36,7 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
 
 ## Part 1 — Install/configuration family
 
-Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library); `repair.sh` (issue #261, `--check`/`--plan`) added 2026-08-12 — first slice (filesystem/secrets/Compose/volume/container-ownership diagnosis), then second slice (read-only database and application-container diagnosis), then third slice (`--plan` — a proposed, classified repair plan derived from the same findings, still zero mutation) the same day.
+Scripts covered: `install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh` (plus any sourced helper library); `repair.sh` (issue #261, `--check`/`--plan`/`--execute --safe-only`) added 2026-08-12 — first slice (filesystem/secrets/Compose/volume/container-ownership diagnosis), then second slice (read-only database and application-container diagnosis), then third slice (`--plan` — a proposed, classified repair plan derived from the same findings, still zero mutation) the same day; slice 4 stage one (`--execute --safe-only` — executes only the fixed safe/reversible action set: fix-permissions, restore-transaction, restart-services; every other action class is always reported `skipped`, never executed) added 2026-08-13.
 Test files (`*.test.mjs`) and other scripts were explicitly excluded from the read.
 
 
@@ -235,11 +238,26 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 24. `--plan` stdout is restricted to the same enum-only vocabulary discipline as `--check` (`plan action=<action-class> resolves=<reason-class> mutation=<...> backup=<...>` plus a `plan result=... actions=... manual=...` terminal line), grouped by the same fixed `class_order`, so `--plan` output is byte-identical for byte-identical findings and never interpolates a path, configured value, or secret — every `--check` read-only/no-ANSI/determinism guarantee above holds identically under `--plan`. — repair.sh:512-566 — category: secret-handling — criticality: HIGH
 25. An info-severity finding (`docker-unavailable`, `unrelated-resource-present`) is excluded from `--plan` entirely — before the action-class mapping is even consulted — producing no `plan` line and counting toward neither `actions` nor `manual`; a diagnosis containing only info-severity findings therefore yields `plan result=empty actions=0 manual=0` and exit 0, identical to `--check`'s own `result=healthy` exit 0 for that same on-disk/daemon state, so the two modes never render contradictory verdicts (e.g. `--check` "healthy" against `--plan` "unplannable-failures-present") for one unchanged deployment. — repair.sh:524-531 — category: refusal/fail-closed — criticality: MEDIUM
 
+**Slice 4 stage one — `--execute --safe-only` (issue #261, owner decision 2026-08-13)**
+
+26. `--execute` is refused with a usage error (exit 2) unless `--safe-only` is also present (and vice versa, `--safe-only` is refused without `--execute`); the usage message names stage two explicitly rather than silently running a partial repair, so an operator or automated caller can never end up unattended-executing something narrower than they asked for without being told why. — repair.sh:628-670 — category: refusal/fail-closed — criticality: MEDIUM
+27. The stage-one safe set actually executed is a fixed three-item allowlist (`fix-permissions`, `restore-transaction`, `restart-services`) named directly from the owner's decision, not derived from the plan's own `mutation=reversible` tag — `regenerate-secret` is classified reversible in the plan but is never executed here, since minting new live secret material is a materially different risk than a mode-only chmod or a container restart; every action outside the allowlist is always reported `execute action=<class> resolves=<reason-class> result=skipped`, never attempted. — repair.sh:713-713,1037-1043,1719-1725 — category: secret-handling — criticality: HIGH
+28. `fix-permissions` re-validates the target's exact current type (regular non-symlink file, or real non-symlink directory) immediately before its single `chmod` call, defending against a TOCTOU change between diagnosis and execution; a symlink or wrong-type target is reported `failed` with zero mutation rather than chmod'd through, since a mode-only fix cannot safely repair a structural type mismatch. — repair.sh:1461-1493 — category: permissions/ownership — criticality: HIGH
+29. `restore-transaction` only ever considers a fixed, literal allowlist of paths (mirroring install.sh's own `managed_paths`) — it never enumerates the leftover staging directory's own contents to decide what to touch, so a hostile or tampered `.orbit-install-staging.*` directory can never smuggle in an unexpected path to overwrite. — repair.sh:720-733,1508-1524 — category: refusal/fail-closed — criticality: HIGH
+30. `restore-transaction` refuses to act on any path reached through a symlinked parent directory, exactly like install.sh's own `rollback_transaction`, and refuses a symlinked staging backup entry outright — an unproven symlink is never followed on either side of the restore. — repair.sh:1526-1543 — category: permissions/ownership — criticality: HIGH
+31. Before `restore-transaction` mutates any path, the path's current live state is copied into this run's private, mode-0700 recovery directory; if any later path in the same action fails, every path already touched by that action instance is restored from that backup before the action is reported `failed`, and the leftover staging directory is left in place for a future retry — only on full success is the staging directory removed. — repair.sh:1058-1072,1495-1590 — category: transactional/rollback — criticality: HIGH
+32. `restart-services` re-resolves its target container via the identical Compose project-label/service-label ownership proof diagnosis itself uses, immediately before restarting — never trusting the container identity captured at diagnosis time — and restarts a given service at most once per `--execute` run even when two findings (`stale-container` and `application-unhealthy`) both resolve to it, memoizing the outcome for the second `execute` line rather than restarting twice. — repair.sh:1596-1633 — category: refusal/fail-closed — criticality: MEDIUM
+33. Approval for the safe batch follows a fixed priority (machine-prompt mode, then an interactive controlling terminal, then non-interactive automation — reachable only because `--safe-only` is mandatory this slice) and gates all execution: a decline, EOF, or Ctrl-C at the confirmation step is guaranteed to precede any mutation code, so every planned action — safe or not — is reported `skipped` and the deployment is left provably unmutated. — repair.sh:1634-1663,1710-1716 — category: refusal/fail-closed — criticality: HIGH
+34. Machine-prompt mode (`ORBIT_REPAIR_PROMPTS=machine`) reuses the exact #297 line grammar (`prompt`/`prompt-accept`/`prompt-abort`, `key=value` tokens only) documented for `configure.sh` in docs/engine-events.md, extended with exactly one repair-specific field/kind pair (`field=safe-batch kind=confirm`) so a launcher driving repair.sh programmatically never needs a second protocol; only the literal single-byte answer `y` accepts. — repair.sh:1634-1650 — category: provenance/immutability — criticality: MEDIUM
+35. `--execute` stdout carries the same enum-only discipline as `--check`/`--plan` — `execute action=<action-class> resolves=<reason-class> result=<done|failed|skipped>` lines, a terminal `execution result=<empty|complete|unactionable|declined|failed> done=<n> failed=<n>` line, then the full post-execution re-diagnosis in `--check`'s own line grammar — and never interpolates a path, configured value, or secret, exactly like the read-only modes. — repair.sh:1665-1755 — category: secret-handling — criticality: HIGH
+36. `--execute`'s process exit code always reflects this run's own execution outcome (0 empty/complete/unactionable, 1 declined, 4 failed, 2 usage error, 5 forced not-an-orbit-installation) and never the post-execution re-diagnosis's own severity — analogous to how `--plan`'s exit code reflects planning outcome rather than target health — so a caller that also cares about post-repair health reads the printed re-diagnosis `diagnosis result=...` line instead of inferring it from `$?`. — repair.sh:1676-1758 — category: refusal/fail-closed — criticality: MEDIUM
+37. The private recovery directory's path is never printed under any mode, and it is unconditionally removed at the end of every `--execute` run regardless of outcome — a failed action has already consumed its own backup to self-restore before being reported, so nothing that could still need it survives past the run. — repair.sh:1058-1072,1749 — category: secret-handling — criticality: MEDIUM
+
 ---
 
 ## Summary
 
-Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), and extended again for the #261 third slice (`--plan`, still zero mutation). No `*.test.mjs` or other scripts were read.
+Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), extended again for the #261 third slice (`--plan`, still zero mutation), and extended again for the #261 slice 4 stage one (`--execute --safe-only` — the fixed safe/reversible action set only; stage two remains unimplemented). No `*.test.mjs` or other scripts were read.
 
 **Guarantee count by script**
 
@@ -250,23 +268,23 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 12 |
-| repair.sh | 25 |
+| repair.sh | 37 |
 | installer-simulation.sh | 8 |
-| **Total** | **173** |
+| **Total** | **185** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 18 | 20 | 7 | 45 |
+| refusal/fail-closed | 20 | 23 | 7 | 50 |
 | input-validation | 6 | 20 | 7 | 33 |
-| secret-handling | 23 | 4 | 0 | 27 |
-| provenance/immutability | 16 | 8 | 0 | 24 |
-| transactional/rollback | 15 | 2 | 0 | 17 |
-| permissions/ownership | 15 | 0 | 0 | 15 |
+| secret-handling | 25 | 5 | 0 | 30 |
+| provenance/immutability | 16 | 9 | 0 | 25 |
+| transactional/rollback | 16 | 2 | 0 | 18 |
+| permissions/ownership | 17 | 0 | 0 | 17 |
 | recovery | 1 | 4 | 1 | 6 |
 | idempotency | 0 | 3 | 4 | 7 |
-| **Total** | **94** | **61** | **19** | **174** |
+| **Total** | **101** | **66** | **19** | **186** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
