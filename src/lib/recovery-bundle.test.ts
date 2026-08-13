@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   BACKUP_BUNDLE_FORMAT_VERSION,
   BACKUP_BUNDLE_MEMBERS,
+  DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM,
   MIN_RECOVERY_PASSPHRASE_LENGTH,
   RECOVERY_BUNDLE_FORMAT_VERSION,
   RECOVERY_BUNDLE_MEMBERS,
@@ -18,8 +19,10 @@ import {
   buildRecoveryManifest,
   computeBundleHmac,
   createTar,
+  decryptDocumentArchive,
   decryptDocumentKek,
   documentKekFingerprint,
+  encryptDocumentArchive,
   encryptDocumentKek,
   extractTar,
   isValidBundleHmac,
@@ -187,6 +190,58 @@ describe("ORBKEK envelope crypto (recovery-crypto.mjs #2-9)", () => {
     }
     expect(message).not.toContain(secretPassphrase);
     expect(message).not.toContain(KEK_A);
+  });
+});
+
+describe("AES-256-CBC document-archive crypto (backup.sh #19-20,27-28)", () => {
+  it("round-trips a plaintext document tar through encrypt/decrypt", () => {
+    const plaintext = Buffer.from("fake document tar bytes for round-trip fixture");
+    const envelope = encryptDocumentArchive(plaintext, KEK_A);
+    expect(decryptDocumentArchive(envelope, KEK_A)).toEqual(plaintext);
+  });
+
+  it("prefixes the envelope with OpenSSL's own `Salted__` + 8-byte-salt header (byte-compatible with `openssl enc -salt`)", () => {
+    const envelope = encryptDocumentArchive(Buffer.from("x"), KEK_A);
+    expect(envelope.subarray(0, 8).toString("ascii")).toBe("Salted__");
+    expect(envelope.length).toBeGreaterThan(16);
+  });
+
+  it("produces a different envelope every time (fresh salt never reused, mirrors #3's ORBKEK discipline)", () => {
+    const plaintext = Buffer.from("fixed plaintext");
+    const first = encryptDocumentArchive(plaintext, KEK_A);
+    const second = encryptDocumentArchive(plaintext, KEK_A);
+    expect(first.equals(second)).toBe(false);
+  });
+
+  it("refuses a too-short or bad-magic envelope before any cryptographic operation", () => {
+    let error: unknown;
+    try {
+      decryptDocumentArchive(Buffer.from("short"), KEK_A);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("document-archive-invalid");
+
+    const badMagic = Buffer.concat([Buffer.from("NOTSALT!"), Buffer.alloc(32)]);
+    expect(() => decryptDocumentArchive(badMagic, KEK_A)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("reports a wrong document KEK generically as decryption failure, not a detailed crypto error (#19)", () => {
+    const envelope = encryptDocumentArchive(Buffer.from("fake document tar bytes"), KEK_A);
+    let error: unknown;
+    try {
+      decryptDocumentArchive(envelope, KEK_B);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(RecoveryBundleRefusal);
+    expect((error as RecoveryBundleRefusal).code).toBe("document-archive-invalid");
+    expect((error as Error).message).toBe("Document archive decryption failed.");
+  });
+
+  it("DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM matches the manifest identifier backup.sh records (#27)", () => {
+    expect(DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM).toBe("aes-256-cbc-pbkdf2-sha256-iter-600000");
   });
 });
 

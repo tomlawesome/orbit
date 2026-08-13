@@ -1,6 +1,6 @@
 # #296 slice plan: port backup, restore, and recovery-bundle flows to the orbit CLI
 
-Status: proposed (slice 1 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-2 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #296 so each slice lands as an
 independently reviewable pull request, following the same convention as
 `docs/adr-notes/295-install-port-plan.md`. Update it as slices land or the
@@ -165,6 +165,90 @@ no orchestration function exists yet.
   (that begins in slice 3); every characterization here is achievable
   through the module's pure functions and the two forms of parity above.
 
+## Slice 2 — document-archive payload crypto and full bundle content verification (this PR)
+
+**Scope.** Extends `src/lib/recovery-bundle.ts` with everything slice 1
+deliberately deferred:
+
+- The **AES-256-CBC/PBKDF2-SHA256 document-archive envelope**
+  (`encryptDocumentArchive`/`decryptDocumentArchive`), byte-compatible with
+  `openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -pass
+  file:<document-kek-file>` (backup.sh:128-130,156-157). `-pass file:PATH`
+  reads PATH's first line verbatim as the passphrase, so the
+  already-validated `documentKekHex` string doubles as that passphrase;
+  `-pbkdf2` derives key‖IV (48 bytes) in one PBKDF2-HMAC-SHA256 call over the
+  envelope's own 8-byte salt, matching OpenSSL's own `Salted__` + salt
+  header format exactly (guarantees #19-20, #27-28).
+- **`validateBackupBundleContents`**, completing backup.sh's `validate_bundle`
+  end-to-end on top of slice 1's `validateBackupManifestAndAuth`: the
+  `pg_restore --list` liveness check on the embedded database dump (#18) and
+  decrypting + re-validating the document archive against slice 1's own path
+  allow-list (#19-20).
+- **`BackupDockerAdapter`**, the thin injected interface over the operations
+  that genuinely need a live Docker/Postgres deployment (`pg_restore --list`,
+  `pg_dump`, the document-tar collection, and stopping/starting `orbit-app`),
+  mirroring the plan's "thin injected adapter" framing. `validateBackupBundleContents`
+  and `createBackupBundle` depend only on this interface, never on `docker`
+  directly.
+- **`createDockerComposeBackupAdapter`**, the real adapter: spawns the exact
+  `docker compose ...` argument lists backup.sh uses, over a fixed
+  `spawnSync` argv array (no shell interpolation). Its `env` option is the
+  PATH-shim test seam (`recovery-bundle.docker-adapter.test.ts`), following
+  the same fake-executable-ahead-on-PATH technique as
+  `scripts/configure.test.mjs`'s `fakeDockerScript`/`fakeOpensslScript` — no
+  test in this slice requires a live Docker daemon.
+- **`createBackupBundle`**, porting `create_bundle`'s packaging orchestration
+  end-to-end (#21-34): stop the app for a cross-resource point-in-time
+  backup, dump the database and collect the document archive via the
+  adapter, encrypt the documents and delete the plaintext copy immediately,
+  build and HMAC-sign the manifest+checksums, package and validate the
+  five-member tar, and publish it — always restarting the app on the way out
+  (success or failure) via `finally`, the TypeScript equivalent of
+  backup.sh's `EXIT` trap.
+- **`publishBundleAtomically`**, the `.installing`-temp-name-then-publish
+  step (#32-33) — see Flags below for why this is `link`+`unlink` rather
+  than a literal port of `mv --no-clobber`.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 2): `backup.sh` #18-28, #31-34 (the `pg_restore --list` liveness check,
+the document-archive AES-256-CBC decrypt/re-validation, the app-stop/dump/
+collect/encrypt/publish/app-restart orchestration of `create_bundle`, and the
+completed-bundle/atomic-publish checks).
+
+**Testing and parity strategy.**
+
+- **Unit tests** (`src/lib/recovery-bundle.test.ts`): the CBC envelope's
+  round-trip, header format, non-determinism, and generic-failure-message
+  refusal, extending slice 1's existing describe blocks.
+- **Subprocess parity** (`src/lib/recovery-bundle.parity.test.ts`): the
+  document-archive envelope is not a Bash script but a direct `openssl enc`
+  invocation, so the real, unmodified `openssl` binary is spawned with
+  backup.sh's exact argument lists, both directions — an envelope produced
+  by `encryptDocumentArchive` decrypted by real `openssl`, and one produced
+  by real `openssl` decrypted by `decryptDocumentArchive` — plus a
+  wrong-key case showing both implementations refuse it.
+- **Adapter tests** (`src/lib/recovery-bundle.docker-adapter.test.ts`, new
+  file): three layers —
+  1. `createBackupBundle`/`validateBackupBundleContents`/
+     `publishBundleAtomically` exercised against a trivial in-memory fake
+     `BackupDockerAdapter` — no process spawning, covering every refusal
+     path (empty/invalid dump, collection failure, wrong key,
+     already-exists) and the always-restart-the-app invariant.
+  2. `createDockerComposeBackupAdapter` exercised through a PATH-shim fake
+     `docker` executable that logs its exact argv and lets each test control
+     its exit code/stdout — proving the real adapter sends backup.sh's exact
+     command shape and threads stdout/exit-status correctly, still with no
+     real daemon.
+  3. An end-to-end test running `createBackupBundle` against the real
+     adapter through the same PATH shim, then verifying the result with
+     `validateBackupBundleContents` — the full round trip this slice adds,
+     Docker-free.
+- **Determinism and secrets-hygiene** (`src/lib/recovery-bundle.
+  determinism.test.ts`): the document-archive envelope is asserted
+  non-deterministic on purpose (fresh salt), mirroring slice 1's ORBKEK
+  contrast case; a decryption-failure refusal is swept for the document KEK,
+  the wrong key, and the plaintext document bytes, none of which may appear.
+
 ## Flags (bash characterized, not changed)
 
 - The recovery bundle's own `checksums.sha256` is **not** HMAC-signed or
@@ -212,3 +296,33 @@ no orchestration function exists yet.
 - No behavioral discrepancy was found between `recovery-bundle.ts` and the
   Bash scripts for anything in slice 1's scope during this port; the items
   above are characterization/process notes, not correctness concerns.
+- **(slice 2)** `publishBundleAtomically` implements backup.sh's
+  `.installing`-temp-name + `mv --no-clobber` publish step (#32) as
+  `link`+`unlink` instead of a literal port. `mv --no-clobber`'s own
+  never-overwrite check is not itself race-free (GNU `mv` stats the
+  destination, then renames); `link` refuses atomically with `EEXIST` if the
+  destination already exists, with no window between the check and the
+  action. Same never-clobber *behavior*, a race-free *mechanism* — flagging
+  per the CodeQL js/file-system-race discipline this port was asked to hold
+  to, and because it is a deliberate, explainable improvement over the Bash
+  original rather than a literal port, matching the class of divergence
+  slice 1 already flagged for `document_kek_fingerprint`/`write_hmac`.
+- **(slice 2)** `createDockerComposeBackupAdapter`'s `stopApp`/`startApp`/
+  `dumpDatabase`/`collectDocumentsArchive` inherit the child process's
+  stderr (`stdio: [..., "inherit"]`) rather than the Bash original's mix of
+  fully-suppressed (`create_bundle`'s `compose stop/start orbit-app
+  >/dev/null`, stderr not redirected either) and fully-discarded
+  (`validate_bundle`'s `pg_restore --list ... 2>/dev/null`) — this slice
+  standardizes on "never suppress stderr for an operator-facing Docker
+  failure," which is a superset of what backup.sh already does for
+  `stop`/`start`/`pg_dump`/the tar collection (none of those redirect
+  stderr in the Bash original either); only `pg_restore --list`'s own
+  stderr, which Bash discards, is likewise discarded here
+  (`pgRestoreListOk`'s `stdio` has no `"inherit"` slot). No behavioral
+  regression — RecoveryBundleRefusal messages this module throws remain
+  static strings regardless, per the existing no-secret-leak sweep.
+- **(slice 2)** No behavioral discrepancy was found against `openssl enc
+  -pbkdf2` for anything in this slice's document-archive-crypto scope; the
+  wrong-key/short-envelope refusal parity, and both encrypt/decrypt
+  directions, are proven byte-for-byte in
+  `recovery-bundle.parity.test.ts`.
