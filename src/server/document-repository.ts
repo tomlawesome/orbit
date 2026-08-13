@@ -25,6 +25,7 @@ import {
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
+import { validUuid } from "@/server/workspace-access";
 
 function operationalDocumentReason(value: string): OperationalReason {
   return (operationalReasons as readonly string[]).includes(value)
@@ -140,6 +141,13 @@ async function requireHouseholdAndItemAccess(
 }
 
 async function requireDocumentAccess(userId: string, documentId: string) {
+  // A malformed id must fail the same way an unknown-but-well-formed one
+  // does: postgres.js runs with prepare: false, so an invalid uuid literal
+  // reaches PostgreSQL as text and raises a driver error the route handler
+  // cannot classify, surfacing as a 500 instead of the intended 404 (#383).
+  if (!validUuid(documentId)) {
+    throw new AppError("document_not_found", "That document is not available", 404);
+  }
   const [record] = await getDb()
     .select({
       id: documents.id,
