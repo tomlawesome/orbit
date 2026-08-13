@@ -470,11 +470,16 @@ docker compose --project-name "$project" --env-file "$environment_file" \
   the process runs as the image's own declared `USER` (`root`), same as
   every other `--entrypoint`-overridden one-off already shipped.
 - The deployment directory is bind-mounted at the fixed in-container path
-  `/orbit-deploy`, `:ro` for a read-only command (`check` today) and `:rw`
-  only for a command that legitimately needs to write host files — no
-  command ships with `:rw` yet, since every command that would otherwise
-  need to mutate a live deployment is Docker-backed (see "Fail-closed
-  guard" below) and therefore refuses before touching the mount either way.
+  `/orbit-deploy`, `:ro` for a read-only command (`check`) and `:rw` only for
+  a command that legitimately needs to write host files. `configure` (issue
+  #294 — `scripts/configure.sh`'s write flows: the bare/default flow minus
+  `ensure_vapid_keys`, `--init`, `--set-oidc-secret`, `--set-deployment-
+  profile`) is the first `:rw` command: pure file work against the mounted
+  deployment directory, never Docker (see "Fail-closed guard" below —
+  `configure`, like `check`, never calls `refuseDockerInContainer` and is
+  unaffected by container mode). Every other command that would otherwise
+  need to mutate a live deployment is Docker-backed and therefore refuses
+  before touching the mount either way.
 - `$project`/`$environment_file` resolve exactly as `repair.sh`'s own
   "Compose project name derivation" step does, so the one-off targets the
   same Compose project and `.env-orbit` the rest of the deployment's Docker
@@ -507,11 +512,14 @@ any such attempt.
    `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
    `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
    to stderr and exits `9`, before touching the target directory or any
-   subprocess. `check` (the only pure-logic command wired up today) never
-   calls this guard and is unaffected: it works fully against a bind-mounted
-   deploy directory, in or out of a container, and never spawns `docker`
-   under any invocation — `src/cli/orbit.test.ts` and the bundle's own
-   smoke test assert this with a booby-trapped `docker` on `PATH`.
+   subprocess. `check` and `configure` (the pure-logic commands — `configure`
+   added by issue #294; see "Invocation contract" above for why it is the
+   first `:rw` command despite never touching Docker) never call this guard
+   and are unaffected: they work fully against a bind-mounted deploy
+   directory, in or out of a container, and never spawn `docker` under any
+   invocation — `src/cli/orbit.test.ts`, `src/cli/orbit.configure.test.ts`,
+   and the bundle's own smoke test assert this with a booby-trapped `docker`
+   on `PATH`.
 
 This is a permanent architectural boundary, not a placeholder pending a
 future slice: any command that genuinely needs to touch Docker stays a
@@ -519,11 +527,33 @@ host-side operation for good, per the owner's decision above — the engine
 computes, validates, and directs; the host's own bash scripts are the only
 layer that ever runs `docker`.
 
-### First delegation point
+### Delegation points
 
-`scripts/engine-check.sh` is the first (and, as of this slice, only) host
-script wired onto this contract: by default it is a behavior-preserving
-proxy onto the existing `bash scripts/configure.sh --check`, and only when
-`ORBIT_ENGINE_CHECK=container` is set in its environment does it instead
-compose the one-off `check` invocation documented above. No existing script
-(`install.sh`, `configure.sh`, `repair.sh`, ...) is modified by this slice.
+`scripts/engine-check.sh` was the first host script wired onto this
+contract: by default it is a behavior-preserving proxy onto the existing
+`bash scripts/configure.sh --check`, and only when `ORBIT_ENGINE_CHECK=
+container` is set in its environment does it instead compose the one-off
+`check` invocation documented above.
+
+`scripts/configure.sh` itself (issue #294) extends the same opt-in pattern
+to its own write flows, with its own sibling variable,
+`ORBIT_CONFIGURE_ENGINE=container`: unset (the default), every dispatch
+path is byte-identical to before this section existed. When set, each of
+the bare/default flow, `--init`, `--set-oidc-secret`, and
+`--set-deployment-profile` delegates to the one-off `configure` invocation
+above whenever every precondition holds (docker present, a valid and
+already locally-present `ORBIT_IMAGE`, an already-existing `.env-orbit` —
+the very first creation of `.env-orbit` on a fresh checkout always stays
+bash, since `docker compose --env-file` requires the file to already
+exist), falling back to the original bash logic otherwise. `--init` and
+`--set-oidc-secret` are additionally scoped to the two shapes with no real
+controlling-terminal interaction — the fully-scripted `ORBIT_CONFIGURE_*`
+environment triad or the `ORBIT_CONFIGURE_PROMPTS=machine` grammar above (the
+container speaks it itself over `configure.sh`'s own inherited stdio) — a
+genuine human TTY session is never delegated. `ensure_vapid_keys` (the one
+sub-step that genuinely needs `docker` to run or build an image) always
+stays in `scripts/configure.sh`, delegated or not — the containerized engine
+can never touch Docker itself (see "Fail-closed guard" above). See
+`docs/adr-notes/294-configure-write-port-plan.md` for the full design and
+its flags. No existing script's *default* observable behavior changes;
+`install.sh` and `repair.sh` are unmodified by this slice.

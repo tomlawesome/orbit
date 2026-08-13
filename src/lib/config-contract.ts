@@ -131,12 +131,18 @@ export const OIDC_CALLBACK_PATH = "/api/auth/callback";
 const HOSTNAME_PATTERN =
   /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 
-function containsForbiddenCharacters(value: string): boolean {
+// Exported for src/lib/configure-engine.ts's machine-prompt rejection
+// classifiers (classifyUrlRejection etc.), which need the same underlying
+// predicates configure.sh's own classify_*_rejection helpers use — a
+// diagnostic-only second pass over an answer already known to be rejected,
+// never itself deciding acceptance (docs/engine-events.md, "Machine prompts
+// (v0)" §Validation).
+export function containsForbiddenCharacters(value: string): boolean {
   // Bash [[:cntrl:][:space:]]: any whitespace or control character.
   return /[\s\u0000-\u001f\u007f]/.test(value);
 }
 
-function isForbiddenHost(host: string): boolean {
+export function isForbiddenHost(host: string): boolean {
   const bare = host.replace(/:.*$/, "");
   if (["127.0.0.1", "localhost", "0.0.0.0", "::1"].includes(bare)) return true;
   if (bare.startsWith("127.")) return true;
