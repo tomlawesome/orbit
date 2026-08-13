@@ -267,6 +267,21 @@ export interface StageGuidedInstallConfigurationContext {
   environmentFile: string;
   /** Absolute path to $secrets_directory at the same staging-area basis. */
   secretsDirectory: string;
+  /**
+   * Absolute path to the *target's* `.env-orbit`, used only for guarantee
+   * #30's precondition guard (install.sh:1034-1035: `[[ ! -e
+   * "$environment_file" ... ]]`) — install.sh's `$environment_file` is the
+   * plain relative path `.env-orbit`, evaluated against the target
+   * directory it has already `cd`'d into, never the staging copy `-init`
+   * writes into. `environmentFile` above is deliberately kept separate:
+   * it's the staging-area basis every later step in this function stages
+   * *into*, which is always empty at call time and so could never itself
+   * carry the pre-existing-deployment signal this guard exists to catch
+   * (issue #383).
+   */
+  targetEnvironmentFile: string;
+  /** Absolute path to the *target's* `.orbit-secrets`, the guard-only counterpart to `targetEnvironmentFile` above. */
+  targetSecretsDirectory: string;
   /** Path to configure.sh as install.sh invokes it here (install.sh:1041,1043,1045,1050,1054,1059: "$staging_dir/scripts/configure.sh"). */
   configureScript: string;
   orbitImage: string;
@@ -301,7 +316,11 @@ export async function stageGuidedInstallConfiguration(
   answers: MachinePromptAnswerProvider,
 ): Promise<StageGuidedInstallConfigurationOutcome> {
   if (context.installerAction !== "install" || context.plainMode) return { status: "skipped" };
-  if (pathExists(context.environmentFile) || pathExists(context.secretsDirectory)) return { status: "skipped" };
+  // Guarantee #30 (issue #383): tested against the *target's* .env-orbit/
+  // .orbit-secrets, matching install.sh's own `$environment_file`/
+  // `$secrets_directory` globals — never the empty staging-area paths this
+  // function stages into, which would never let this guard fire at all.
+  if (pathExists(context.targetEnvironmentFile) || pathExists(context.targetSecretsDirectory)) return { status: "skipped" };
   if (!context.hasControllingTerminal) return { status: "skipped" };
 
   const init = await adapter.runInit(context.configureScript, context.orbitImage, answers);
