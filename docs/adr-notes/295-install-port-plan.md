@@ -1,6 +1,6 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
-Status: proposed (slice 1 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-2 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan
 changes; it is not meant to be a permanent record like `docs/adr/`.
@@ -116,7 +116,97 @@ characterized, not silently changed, contract — see Flags below.
   managed path not yet committed and that the staging directory is left at
   mode 0700 — the same two assertions the Phase 1 harness makes.
 
+## Slice 2 — target and identity validation (this PR)
+
+**Scope.** Two modules, split along the same "pure filesystem logic" vs.
+"pure logic over sequential, injected `docker` facts" line the slice plan
+drew:
+
+- `src/lib/target-identity.ts`: `isPreprovisionedInput`, `validateTarget`,
+  `readEnvironmentValue`, and `deriveComposeProjectName`, mirroring
+  `is_preprovisioned_input` (install.sh:282-304), `validate_target`
+  (install.sh:410-429), `read_environment_value` (install.sh:605-615), and
+  `derive_compose_project_name` (install.sh:431-462). Direct `node:fs` calls
+  against a caller-supplied target directory, exactly like slice 1's
+  `install-transaction.ts` — no Docker, no network.
+- `src/lib/database-volume-safety.ts`: `evaluateVolumeOwnership` and
+  `verifyDatabaseVolumeSafety`, mirroring `volume_belongs_to_deployment`
+  (install.sh:464-520) and `verify_database_volume_safety`
+  (install.sh:522-586). These two bash functions decide from a *sequence*
+  of `docker` command outputs, several conditional on what an earlier call
+  returned (which container's image gets inspected depends on which
+  container an earlier `docker ps` call turned up as the sole match) — closer
+  to config-contract.ts's injected-facts shape than to slice 1's direct-fs
+  shape, but a single flat facts bundle isn't enough to express the
+  sequencing without duplicating install.sh's own branching a second time to
+  decide which facts are even needed. Instead each individual `docker`
+  invocation is one method on a caller-supplied adapter interface
+  (`VolumeOwnershipAdapter` / `DatabaseVolumeSafetyAdapter`) — the "thin
+  adapter at the edge" the slice plan calls for — while all sequencing,
+  bounds-checking and decision logic is pure, synchronous TypeScript. No
+  adapter implementation that actually shells out to `docker` ships in this
+  slice; that belongs to the slice-5 orchestration work. A reference
+  implementation exists only inside the parity test (see below), clearly
+  commented as not shipped.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 1 / install.sh): 6 (`is_preprovisioned_input`'s strict unattended
+pre-provisioning contract), 7 (`validate_target`'s refusal of an
+unrecognizable non-empty target), 12 (`derive_compose_project_name`'s
+project-name format and configured/requested-mismatch refusals), 13-14
+(`volume_belongs_to_deployment`'s multi-check ownership proof and
+docker-output bounds-checking), 15-16 (refuse an existing volume against an
+empty target; refuse if more than one candidate volume exists), 17 (the
+`database_volume_checked` TOCTOU re-verification of a single already-seen
+volume), 18 (attaching to a proven volume requires the preserved
+`postgres-password` secret at exactly mode 600).
+
+**Non-goals for slice 2**: `verify_database_password_preserved`
+(install.sh:588-595, guarantee #19) is intentionally out of scope — it
+compares the live `postgres-password` secret against the *slice-1
+transaction's own backup* (`InstallTransaction.originalDir`), so porting it
+now would mean either reaching into slice 1's transaction from an
+identity-validation module (wrong layering) or duplicating its backup
+bookkeeping here. It belongs with the orchestration slice that actually
+drives `InstallTransaction` and this slice's checks together. OIDC
+discovery, `configure.sh` invocation, and asset fetching remain out of
+scope, as before (slices 3-4).
+
+**Testing and parity strategy.**
+
+- **Unit tests** (`src/lib/target-identity.test.ts`,
+  `src/lib/database-volume-safety.test.ts`): exhaustive branch coverage over
+  fake adapters/fixtures, test names citing the guarantee numbers above.
+- **Filesystem parity** (`src/lib/target-identity.parity.test.ts`): the same
+  awk-by-function-name extraction and bash-driver pattern slice 1's
+  `install-transaction.parity.test.ts` established, for
+  `is_preprovisioned_input`, `validate_target`, and
+  `derive_compose_project_name` plus their small dependencies
+  (`is_regular_non_symlink_file`, `is_real_non_symlink_directory`,
+  `target_is_empty`, `has_mode`, `read_environment_value`).
+- **Docker-decision parity** (`src/lib/database-volume-safety.parity.test.ts`):
+  since these two functions' decisions come from `docker` output rather than
+  the filesystem, byte-for-byte state diffing doesn't apply the way it does
+  for slice 1. Instead the test puts a single stub `docker` executable (a
+  small Node script reading a JSON "docker world" scenario file) first on
+  `PATH`, then drives *both* implementations against the identical stub: the
+  real `volume_belongs_to_deployment` / `verify_database_volume_safety`
+  bodies, extracted via the same awk pattern and run as bash; and this
+  module's production decision logic, driven through a reference adapter
+  (local to the test file, not shipped) whose methods issue the exact same
+  `docker` argv install.sh itself uses. Both must reach the identical
+  decision from the identical raw docker responses. This test caught a real
+  bug during development: an early draft of `verifyDatabaseVolumeSafety` set
+  `composeProjectNameExplicit=true` after discovering a pre-existing
+  volume's Compose project label, but the real `install.sh:573` only
+  assigns `compose_project_name` there and deliberately never touches
+  `compose_project_name_explicit` — the parity test's comparison of bash's
+  post-run globals against the TS module's returned state caught the
+  discrepancy immediately.
+
 ## Flags (bash characterized, not changed)
+
+### Slice 1
 
 - `install.sh`'s transaction phase (`preflight_final_paths` /
   `prepare_rollback_area` / `rollback_transaction`) has no standalone
@@ -139,3 +229,31 @@ characterized, not silently changed, contract — see Flags below.
 - No behavioral discrepancy in the transaction logic itself was found
   during this read; the two items above are process/tooling notes, not
   correctness concerns.
+
+### Slice 2
+
+- `derive_compose_project_name` reads and writes `compose_project_name` /
+  `compose_project_name_explicit` as bash globals that, in principle, could
+  persist across multiple calls within one script run (an `elif
+  "$compose_project_name_explicit" == 1: return` early-exit exists for
+  exactly that case). `install.sh` has exactly one call site for this
+  function (inside `verify_database_volume_safety`), so that branch is dead
+  code today. `deriveComposeProjectName` therefore models a single,
+  self-contained call and does not accept or return prior-call state. If a
+  future slice ever calls it a second time within one run, this
+  simplification needs revisiting.
+- No shipped `docker` adapter exists yet for `database-volume-safety.ts` —
+  by design, per the scope note above. The parity test's reference adapter
+  (shelling out via `execFileSync`, matching bash's own blocking
+  `$(docker ...)` calls) is a reasonable template for the slice-5
+  orchestration work but is deliberately not exported from the module.
+- One real discrepancy was found and fixed during this port (not merely a
+  process/tooling note, unlike slice 1's two items above):
+  `verifyDatabaseVolumeSafety`'s first draft set
+  `composeProjectNameExplicit=true` after a successful ownership proof;
+  `install.sh:573` does not do this. Fixed before landing; see the code
+  comment at the fix site and the parity-test note above.
+- `verify_database_password_preserved` (guarantee #19) remains unported —
+  see Non-goals above. Flagging again here since it is the one guarantee in
+  install.sh's target/identity/volume-safety neighborhood (#6-19) that this
+  slice does not characterize at all.
