@@ -297,6 +297,34 @@ async function stubDocumentReview(page: Page, fixture: AccessibilityFixture) {
   });
 }
 
+/**
+ * Mirrors src/lib/preferences.ts `legacyToThemePack` (#325): the DOM no
+ * longer exposes the pre-#325 (mode, colourway, urgencyPalette) triple
+ * directly — `data-theme` carries the resolved v19 pack id, and mode/
+ * urgency-palette have no DOM representation at all, because the four
+ * theme packs each already bake in a fixed light/dark scheme and a flat,
+ * non-switchable status-colour set. Duplicated here (rather than imported)
+ * because Playwright's test bundle does not resolve the app's `@/*` path
+ * alias; kept in lockstep with the production mapping's documented table.
+ */
+function resolveThemePack(colourway: string, mode: string): "starchart" | "afterdark" | "atlas" | "dawn" {
+  const dark = mode === "dark";
+  switch (colourway) {
+    case "after-dark":
+      return "afterdark";
+    case "coast":
+      return dark ? "afterdark" : "dawn";
+    case "verdant":
+      return dark ? "starchart" : "atlas";
+    case "ember":
+      return dark ? "starchart" : "atlas";
+    case "berry":
+      return dark ? "afterdark" : "dawn";
+    default:
+      return "starchart";
+  }
+}
+
 async function setThemePreference(page: Page, preference: ThemePreference) {
   await page.evaluate((value) => {
     localStorage.setItem("orbit:theme:v1", JSON.stringify(value));
@@ -305,17 +333,13 @@ async function setThemePreference(page: Page, preference: ThemePreference) {
   await expect(page.locator(".app-frame"))
     .toHaveAttribute("data-text-size", preference.textSize);
   await expect(page.locator(".app-frame"))
-    .toHaveAttribute("data-mode", preference.mode);
-  await expect(page.locator(".app-frame"))
-    .toHaveAttribute("data-theme", preference.colourway);
+    .toHaveAttribute("data-theme", resolveThemePack(preference.colourway, preference.mode));
 }
 
 async function expectAdminTheme(page: Page, preference: ThemePreference) {
   const admin = page.locator(".admin-page");
   await expect(admin).toHaveAttribute("data-text-size", preference.textSize);
-  await expect(admin).toHaveAttribute("data-mode", preference.mode);
-  await expect(admin).toHaveAttribute("data-theme", preference.colourway);
-  await expect(admin).toHaveAttribute("data-urgency-palette", preference.urgencyPalette);
+  await expect(admin).toHaveAttribute("data-theme", resolveThemePack(preference.colourway, preference.mode));
 }
 
 async function expectNoHorizontalOverflow(page: Page, context: string) {
@@ -710,14 +734,17 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
             `${viewport.name}/${preference.mode}/${preference.colourway}`,
           );
           if (viewport.name === "desktop") {
+            // --canvas was the pre-#325 page-background token; the v19 theme
+            // packs (src/app/theme-tokens.css) expose it as --bg instead.
             const workspaceThemeTokens = await page.locator(".app-frame").evaluate((element) => {
               const style = window.getComputedStyle(element);
-              return ["--canvas", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
+              return ["--bg", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
             });
+            expect(workspaceThemeTokens.every((value) => value.length > 0)).toBe(true);
             const settings = await openSettings(page);
             const settingsThemeTokens = await settings.evaluate((element) => {
               const style = window.getComputedStyle(element);
-              return ["--canvas", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
+              return ["--bg", "--ink", "--text-bump"].map((name) => style.getPropertyValue(name).trim());
             });
             expect(settingsThemeTokens).toEqual(workspaceThemeTokens);
             await page.keyboard.press("Escape");
