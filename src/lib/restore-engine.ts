@@ -940,6 +940,8 @@ export class RestoreRun {
   private completed = false;
   private manualRecoveryRequired = false;
   private disposed = false;
+  /** True only for a run reconstructed via resume() — restore.sh's `recover_mode` global, guarding dispose()'s final checkpoint-removal cleanup (restore.sh:855). */
+  private recoverMode = false;
   private stageDatabase: string | undefined;
   private checkpointDigests: RestoreCheckpointDigests | undefined;
 
@@ -975,10 +977,22 @@ export class RestoreRun {
     );
   }
 
-  /** Reconstructs a RestoreRun over an already-loaded, already-integrity-verified checkpoint (recoverRestore's `--recover` path). */
+  /**
+   * Reconstructs a RestoreRun over an already-loaded, already-integrity-
+   * verified checkpoint (recoverRestore's `--recover` path). Deliberately
+   * leaves `checkpointVerified` false: digest integrity alone (already
+   * checked by the caller before calling resume()) is not the same as this
+   * process's own re-verification against a stage database, and
+   * checkpointVerified is what governs dispose()'s rollback-vs-preserve
+   * branching (#35/issue #383) — only reverifyCheckpointForRecovery()
+   * succeeding earns that trust, via markCheckpointVerified(). `recoverMode`
+   * is set instead, so dispose() preserves (never deletes) this durable
+   * checkpoint even while unverified, mirroring restore.sh:855's
+   * `recover_mode != true` cleanup guard.
+   */
   static resume(options: Omit<RestoreRunOptions, "rollbackDocumentKekFile">, checkpointDirectory: string, restoreId: string, digests: RestoreCheckpointDigests): RestoreRun {
     const run = new RestoreRun(options.adapter, options.paths, options.workDir, undefined, options.hooks ?? {}, checkpointDirectory, restoreId);
-    run.checkpointVerified = true;
+    run.recoverMode = true;
     run.checkpointDigests = digests;
     return run;
   }
@@ -993,6 +1007,18 @@ export class RestoreRun {
 
   markManualRecoveryRequired(): void {
     this.manualRecoveryRequired = true;
+  }
+
+  /**
+   * recover_restore's own `checkpoint_verified=true` (restore.sh:817), set
+   * only once this process's own reverifyCheckpointForRecovery() has
+   * actually passed — never eagerly on resume() (issue #383). Trusting the
+   * checkpoint's durable digests alone is not sufficient here: the whole
+   * point of re-verification is to catch a checkpoint that passed integrity
+   * but no longer restores cleanly (e.g. a stage-database name collision).
+   */
+  markCheckpointVerified(): void {
+    this.checkpointVerified = true;
   }
 
   /**
@@ -1216,7 +1242,13 @@ export class RestoreRun {
       this.adapter.dropStageDatabase(this.stageDatabase);
       this.stageDatabase = undefined;
     }
-    if (!this.checkpointVerified) {
+    // Matches restore.sh:855's `checkpoint_verified != true && recover_mode
+    // != true` guard: an unverified checkpoint from a *fresh* run (this
+    // run's own self-verification never passed) is scratch and safe to
+    // discard, but a resumed run's checkpoint is durable recovery evidence
+    // from a *previous* run and must survive this process's re-verification
+    // failing, so a later --recover can still find it (issue #383).
+    if (!this.checkpointVerified && !this.recoverMode) {
       rmSync(this.checkpointDirectory, { recursive: true, force: true });
     }
     rmSync(this.workDir, { recursive: true, force: true });
@@ -1250,11 +1282,17 @@ export interface RecoverRestoreOptions {
  * (which already re-checks checkpoint-artifact presence), re-verifies
  * checkpoint digest integrity and key validity from scratch (never trusting
  * the journal's claims alone, #34), re-runs the full checkpoint self-
- * verification (#35), and only then reapplies it. `manualRecoveryRequired`
- * is set before the apply attempt (mirroring restore.sh:821's ordering), so
- * a failure here routes RestoreRun.dispose() into the "preserve evidence,
- * try `--recover` again" branch rather than a fresh automatic rollback
- * attempt — recovery is safely retriable from any partial failure (#36).
+ * verification (#35), and only then reapplies it. `checkpointVerified` and
+ * `manualRecoveryRequired` are both set only once reverifyCheckpointForRecovery()
+ * has actually returned successfully (mirroring restore.sh:817-818's
+ * ordering) — a re-verification failure therefore reaches
+ * RestoreRun.dispose() with checkpointVerified still false, so dispose()
+ * neither reapplies the unverified checkpoint nor deletes it as recovery
+ * evidence (issue #383); it is `recoverMode`, not `checkpointVerified`, that
+ * keeps that evidence on disk in that case. Once re-verification passes,
+ * a failure applying it routes dispose() into the "preserve evidence, try
+ * `--recover` again" branch rather than a fresh automatic rollback attempt —
+ * recovery is safely retriable from any partial failure (#36).
  */
 export function recoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
   const { fields, checkpointDirectory } = loadRestoreJournal(options.paths.journalPath, options.paths.restoreRoot);
@@ -1280,6 +1318,11 @@ export function recoverRestore(options: RecoverRestoreOptions): RestoreDisposeRe
   let succeeded = false;
   try {
     run.reverifyCheckpointForRecovery();
+    // Only reached once re-verification itself has passed — mirrors
+    // restore.sh:817-818's `checkpoint_verified=true; manual_recovery_required=true`
+    // ordering, so a re-verification failure never reaches dispose() with
+    // checkpointVerified true (issue #383).
+    run.markCheckpointVerified();
     run.markManualRecoveryRequired();
     run.recoverFromCheckpoint();
     succeeded = true;

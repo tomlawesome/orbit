@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -411,6 +411,33 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(readFileSync(join(extractedDir, "orbit-backup.tar"))).toEqual(readFileSync(sourceBundlePath));
   });
 
+  it("publishes the recovery bundle at mode 0600 regardless of the ambient umask (issue #383 finding 5: export-recovery-bundle.sh's `umask 077` was never ported)", () => {
+    const documentsRoot = join(sandbox, "docs-mode");
+    const sourceBackupDirectory = join(sandbox, "source-backups-mode");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, sourceBackupDirectory);
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const recoveryDirectory = join(sandbox, "recovery-backups-mode");
+    const passphrase = "correct horse battery staple";
+
+    const previousUmask = process.umask(0o022);
+    let result: { finalPath: string };
+    try {
+      result = runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+      });
+    } finally {
+      process.umask(previousUmask);
+    }
+
+    expect(lstatSync(result.finalPath).mode & 0o777).toBe(0o600);
+  });
+
   it("refuses (guarantee #4) when the source bundle itself doesn't verify", () => {
     const documentsRoot = join(sandbox, "docs");
     const sourceBackupDirectory = join(sandbox, "source-backups-2");
@@ -511,6 +538,97 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
     const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
     expect(existsSync(paths.journalPath)).toBe(false);
   });
+
+  // `workDir` (mkdtempSync(join(tmpdir(), ...))) and the live deployment
+  // directory are the same filesystem in every other test in this file,
+  // since both `sandbox` and the OS tmpdir live under `/tmp`. These two
+  // tests instead put the live deployment directory under `/var/tmp`,
+  // which is a distinct filesystem from `/tmp` (tmpfs) on Debian/Ubuntu/
+  // Fedora hosts (issue #383 finding 1) — skipping only if this particular
+  // host doesn't actually expose two filesystems here, in which case the
+  // original EXDEV bug is unreproducible and there is nothing to assert.
+  const crossDeviceRoot = "/var/tmp";
+  const crossDeviceAvailable = existsSync(crossDeviceRoot) && statSync(crossDeviceRoot).dev !== statSync(tmpdir()).dev;
+
+  it.skipIf(!crossDeviceAvailable)(
+    "swaps the live KEK across filesystems without crashing (issue #383 finding 1: renameSync throws EXDEV when the live deployment directory and the process's tmpdir are different filesystems)",
+    () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      const crossSandbox = mkdtempSync(join(crossDeviceRoot, "orbit-backup-restore-cli-xdev-"));
+      try {
+        const liveDocumentsRoot = join(crossSandbox, "live-docs-import-xdev");
+        buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+        const liveDocumentKekFile = join(crossSandbox, "live-document-kek-xdev");
+        writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+        const backupDirectory = join(crossSandbox, "import-target-backups-xdev");
+        mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+        const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+
+        const result = runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        });
+
+        expect(result.outcome).toBe("completed");
+        expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(UPDATED_KEY);
+        // The cross-device fallback preserves the secret-file mode.
+        expect(lstatSync(liveDocumentKekFile).mode & 0o777).toBe(0o600);
+      } finally {
+        rmSync(crossSandbox, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(!crossDeviceAvailable)(
+    "reverts the live KEK and restarts the app across filesystems too, when the inner restore fails before leaving journal evidence",
+    () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      const crossSandbox = mkdtempSync(join(crossDeviceRoot, "orbit-backup-restore-cli-xdev2-"));
+      try {
+        const liveDocumentsRoot = join(crossSandbox, "live-docs-import-xdev2");
+        buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+        const liveDocumentKekFile = join(crossSandbox, "live-document-kek-xdev2");
+        writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+        const backupDirectory = join(crossSandbox, "import-target-backups-xdev2");
+        const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+
+        // Before the fix: the key swap (renameSync at the old line 424) ran
+        // outside the try/catch that restarts the app, so an EXDEV here
+        // crashed with a raw, un-refused Node error and left the app
+        // stopped and the live KEK untouched but orbit-app down.
+        expect(() =>
+          runImportRecoveryBundle({
+            recoveryBundlePath,
+            passphrase,
+            liveDocumentKekFile,
+            backupDirectory,
+            adapter,
+            importConfirmed: true,
+            // The inner restore.sh-equivalent confirmation is declined: no
+            // checkpoint is ever taken, so no journal evidence is left
+            // behind, and the key swap must be reverted.
+            confirmRestore: () => false,
+          }),
+        ).toThrow();
+
+        expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+        expect(adapter.appRunning).toBe(true);
+        const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+        expect(existsSync(paths.journalPath)).toBe(false);
+      } finally {
+        rmSync(crossSandbox, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("refuses (import-not-confirmed) and never touches the live KEK when the operator doesn't confirm", () => {
     const passphrase = "correct horse battery staple";

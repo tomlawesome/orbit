@@ -385,6 +385,52 @@ describe("recoverRestore (`--recover` equivalent, restore.sh:798-831, guarantees
     expect(readFileSync(paths.journalPath, "utf8")).toContain("state=checkpointed\n");
   });
 
+  it("preserves the checkpoint and journal, and never touches live state or the app, when this process's own re-verification fails after resuming (issue #383 finding 3)", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    // Simulate a hard interruption right after the checkpoint is durably
+    // journaled: no dispose() call at all, journal + checkpoint simply left
+    // on disk, exactly as a SIGKILL would leave them (matches the sibling
+    // "is idempotent" test below).
+
+    const journalBefore = readFileSync(paths.journalPath, "utf8");
+    const stopCallsBefore = adapter.stopCalls;
+    const startCallsBefore = adapter.startCalls;
+
+    // A second process's --recover: the durable checkpoint's digests still
+    // match (validateCheckpointIntegrity passes, so RestoreRun.resume()
+    // proceeds), but this process's OWN re-verification of the checkpoint
+    // against a fresh stage database now fails (e.g. a leftover stage
+    // database from a prior aborted --recover collided with
+    // createStageDatabase's deterministic name — the real-adapter
+    // reproduction cited by issue #383's finding 3).
+    adapter.restoreDumpToDatabaseOk = false;
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+
+    // Before the fix: RestoreRun.resume() set checkpointVerified=true
+    // eagerly, so dispose() took the "reapply the checkpoint, then delete
+    // the evidence on success" branch here even though re-verification had
+    // just failed. The evidence and live state must instead be untouched.
+    expect(readFileSync(paths.journalPath, "utf8")).toBe(journalBefore);
+    expect(readFileSync(join(run.checkpointDirectory, "database.dump"))).toBeTruthy();
+    expect(adapter.stopCalls).toBe(stopCallsBefore);
+    expect(adapter.startCalls).toBe(startCallsBefore);
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+
+    // Once re-verification can succeed again, a subsequent --recover still
+    // finds the same preserved evidence and completes normally — recovery
+    // remains safely retriable.
+    adapter.restoreDumpToDatabaseOk = true;
+    const recoverWorkDir2 = mkdtempSync(join(sandbox, "recover-work-2-"));
+    expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir2 }).outcome).toBe("completed");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+  });
+
   it("is idempotent: recovering twice in a row (simulating a repeated manual --recover) succeeds both times", () => {
     const liveDocumentsRoot = join(sandbox, "live-documents");
     buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
