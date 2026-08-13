@@ -1,6 +1,6 @@
 # #296 slice plan: port backup, restore, and recovery-bundle flows to the orbit CLI
 
-Status: proposed (slices 1-2 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-3 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #296 so each slice lands as an
 independently reviewable pull request, following the same convention as
 `docs/adr-notes/295-install-port-plan.md`. Update it as slices land or the
@@ -249,6 +249,172 @@ completed-bundle/atomic-publish checks).
   contrast case; a decryption-failure refusal is swept for the document KEK,
   the wrong key, and the plaintext document bytes, none of which may appear.
 
+## Slice 3 — transactional restore engine (this PR)
+
+**Scope.** `src/lib/restore-engine.ts`: `restore.sh`'s checkpoint/journal/
+rollback state machine and its database-row-to-document-blob referential
+integrity checks — the single highest-blast-radius piece of issue #296 (the
+only flow that mutates the live database and document volume), and the
+direct analogue of #295 slice 1's `InstallTransaction`, but with a durable,
+crash-recoverable journal on top:
+
+- **`writeRestoreJournal`/`loadRestoreJournal`** (`write_journal`/
+  `load_recovery_journal`, restore.sh:467-506,772-796): the pid-suffixed-
+  temp-file-then-fsync-then-atomic-rename-then-fsync-directory write, with
+  the previous journal backed up first and restored on a late (post-rename)
+  sync failure; read-back re-validates format version, `restore_id`/`state`
+  enum, all three checkpoint digests, and that the referenced checkpoint
+  directory and its three artifacts still exist as regular, non-symlink
+  files — never trusting the journal's own claims. `RestoreDurabilityHooks`
+  is the fault-injection seam for both, called immediately before each real
+  fsync attempt and may throw to simulate that sync failing — the DI
+  analogue of `restore.sh`'s `ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE` env
+  var, with no env var and no Bash change needed.
+- **`computeCheckpointDigests`/`validateCheckpointIntegrity`/
+  `syncCheckpointArtifacts`** (`checkpoint_sha256`/
+  `validate_checkpoint_integrity`/`sync_checkpoint_artifacts`,
+  restore.sh:399-428,454-465): SHA-256 digests of the three checkpoint
+  artifacts, computed, durably synced (artifacts then directory), and
+  re-verified on demand.
+- **`checkCorrespondence`** (`validate_correspondence`/
+  `validate_correspondence_reports`, restore.sh:205-332,658-736):
+  consolidates restore.sh's own two near-duplicate copies of the same
+  database-row-to-on-disk-blob cross-check into one canonical function (see
+  Flags) — every document/attachment/staging-object row is checked against
+  the actual blob (existence, non-symlink, exact byte size, no duplicate
+  storage-key reuse, no orphaned on-disk object), and any in-flight
+  ("transient") document lifecycle row refuses the whole check, since a
+  point-in-time backup/checkpoint cannot safely represent one.
+  `CORRESPONDENCE_QUERIES` are the six `psql` report queries, transcribed
+  and proven byte-for-byte (`restore-engine.parity.test.ts`).
+- **`RestoreDockerAdapter`**, extending `BackupDockerAdapter`'s three
+  reused operations (`dumpDatabase`, `pgRestoreListOk`,
+  `collectDocumentsArchive` — restore.sh's checkpoint capture uses the
+  identical command shapes `backup.sh`'s `create_bundle` does) with the
+  restore-specific Docker/Postgres edge: private stage database create/
+  drop/restore, live database/document replacement, scan-lease reset, and
+  the two report-query shapes. `createDockerComposeRestoreAdapter` is the
+  real implementation, spawning restore.sh's exact `docker compose ...`
+  argument lists over a fixed `spawnSync` argv array.
+- **`RestoreRun`**: the state machine itself —
+  `createCheckpoint` (`create_checkpoint`, restore.sh:516-566: stop app,
+  capture+validate the DB dump and document archive, checkpoint the current
+  document key, self-verify the whole checkpoint against a private stage
+  database, durably sync and journal it — `checkpointVerified` is set true
+  only once every one of those has succeeded, establishing the same strict
+  "point of no return" ordering restore.sh itself has);
+  `cutoverDocuments`/`cutoverDatabase` (restore.sh:919-926: each live
+  mutation is immediately followed by its own durable journal write);
+  `finalize` (restore.sh:927-932: re-validates active correspondence, waits
+  for health, and only then marks the restore complete and purges the
+  journal/checkpoint); `rollback` (`rollback_checkpoint`,
+  restore.sh:764-770); and **`dispose`** — the `cleanup` `EXIT`-trap
+  equivalent (restore.sh:833-860): if a checkpoint was verified but the
+  restore never completed, it either preserves recovery evidence
+  (mid-`--recover`) or attempts an automatic rollback, durably recording
+  `rollback-failed` and leaving Orbit stopped if that itself fails rather
+  than guessing further — idempotent, exactly like
+  `InstallTransaction.dispose()`.
+- **`recoverRestore`** (`recover_restore`, restore.sh:798-831): the
+  `bash scripts/restore.sh --recover` entry point equivalent — loads and
+  re-validates the journal, re-verifies checkpoint digest integrity and key
+  validity from scratch (never trusting the journal's claims alone),
+  re-runs the full checkpoint self-verification, and only then reapplies
+  it. Recovery is unconditional on the journal's recorded state (matching
+  restore.sh's own behavior — `recover_restore` never branches on
+  `checkpointed` vs. `documents-replaced` vs. `database-restored`; it always
+  fully reapplies the checkpoint), so it is safely retriable from any
+  partial failure, including a failure inside `recoverRestore` itself.
+- **`preflightValidateBundle`** (`prepare_staged_bundle`'s correspondence
+  check, restore.sh:334-353, guarantees #7-10): validates a newly staged
+  bundle's database dump and document tree correspond inside a throwaway
+  private database, entirely before a checkpoint is ever created — reuses
+  `checkCorrespondence` and the same private-stage-database pattern
+  `createCheckpoint`'s self-verification does.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 2 / restore.sh): #2-10 (document-KEK/bundle preflight chain reused from
+slice 1-2, plus the private-staging correspondence check), #13-30
+(checkpoint capture, durability, self-verification, cutover, rollback),
+#31-41,43,45-48 (`--recover` mode and the global `EXIT`-trap/top-level
+guards). `check_capacity` (#11-12) is explicitly **out of scope** for this
+slice — see Flags.
+
+**No shipped entry point.** Nothing in this slice is reachable from any
+real `orbit` command; `RestoreRun`/`recoverRestore` are wired only to the
+hidden `orbit __restore-engine-rehearse` subcommand
+(`src/cli/orbit.ts`), used exclusively by
+`restore-engine.interruption.test.ts` to drive a real, self-delivered
+SIGKILL. No Bash script is modified.
+
+**Testing and parity strategy.**
+
+- **Unit tests** (`restore-engine.test.ts`, 30 tests): journal write/read
+  round-trips and every refusal class (symlinked journal path, invalid
+  digests, mode/format/enum violations, missing/incomplete checkpoint),
+  checkpoint digest compute/validate/sync, and `checkCorrespondence`'s full
+  refusal matrix (transient rows, missing/mismatched/duplicate/orphaned/
+  misplaced objects, crypto-incomplete visible documents, the
+  pending-staging-ledger present/absent distinction, `document_staging_objects`
+  rows against `staging/`, not `objects/`).
+- **State-machine / interruption-matrix tests**
+  (`restore-engine.docker-adapter.test.ts`, 11 tests): a trivial in-memory
+  `FakeRestoreAdapter` (no process spawning) proves the full
+  checkpoint→cutover→finalize lifecycle, and — the core evidence for "every
+  mutating step has a journal entry before it and a rollback path" — a
+  dedicated matrix interrupts (via a thrown error) immediately after each of
+  create_checkpoint, cutoverDocuments, cutoverDatabase, and a failed
+  finalize, asserting `dispose()` always leaves either a fully rolled-back,
+  healthy app with no journal/checkpoint, or (when rollback itself cannot
+  succeed) a durable `rollback-failed` journal plus an intact checkpoint
+  that a subsequent `recoverRestore()` call completes successfully.
+  `recoverRestore` and `preflightValidateBundle` are covered directly too
+  (tamper detection, idempotent re-recovery, preflight never touching live
+  state).
+- **Real-process interruption test** (`restore-engine.interruption.test.ts`,
+  4 tests): drives the hidden CLI rehearsal subcommand as a genuine child
+  process and has it deliver `SIGKILL` to *itself* immediately after each of
+  the three journaled states (`checkpointed`, `documents-replaced`,
+  `database-restored`) — mirroring restore.sh's own
+  `ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE`/`kill -KILL "$$"` test harness
+  exactly, rather than install-transaction.interruption.test.ts's
+  pause-then-external-kill pattern (unnecessary here since restore.sh's own
+  harness already establishes the "kill itself at a coded point" idiom).
+  Asserts the journal and self-verified checkpoint survive the kill with
+  the expected state, and that a second, fresh rehearsal process in
+  `--recover` mode always restores the *original* checkpointed state
+  afterward, regardless of which live mutation had or hadn't completed.
+- **Parity** (`restore-engine.parity.test.ts`, 11 tests): the six
+  `CORRESPONDENCE_QUERIES` and `SCAN_RECOVERY_LEASES_SQL` are `awk`-extracted
+  from the real, unmodified `restore.sh` (locating the literal line by
+  plain-substring anchor, then undoing Bash's `'\''`-embedded-quote escaping
+  — the same transform `sh -c '...'` itself performs at parse time) and
+  compared byte-for-byte against this module's constants, including a check
+  that each query appears at both its `query_report` and
+  `query_active_report` call sites in the real script;
+  `checkpoint_sha256` — genuinely Docker-free on its own — is extracted via
+  `awk` (the same function-extraction technique
+  `install-transaction.parity.test.ts` established) and *executed as a real
+  Bash subprocess* against a real file, compared to `sha256File`'s output;
+  `load_recovery_journal`'s `restore_id`/`state`-enum regex text and its
+  mode-600 check are asserted present verbatim in the extracted function
+  body. Full live-Docker whole-script parity (`restore.sh` end-to-end
+  against a real deployment) is out of reach in this slice's sandbox, same
+  as it was for slice 2's Docker-adapter argv shape — the SQL/regex text
+  and the pure state-machine logic are what's characterized here; the
+  argv shapes `createDockerComposeRestoreAdapter` sends are visible by
+  direct code inspection against restore.sh's own `compose(...)` calls,
+  following the same convention slice 2's `createDockerComposeBackupAdapter`
+  already established.
+
+**Non-goals for slice 3**: real `orbit backup`/`orbit restore` CLI entry
+points, `export-recovery-bundle.sh`/`import-recovery-bundle.sh`'s
+interactive passphrase/confirmation flows and the live document-KEK swap
+(`ORBIT_RESTORE_ROLLBACK_KEK_FILE`'s *caller*, i.e. `import-recovery-bundle.sh`'s
+own orchestration — `RestoreRun`'s `rollbackDocumentKekFile` option is the
+callee-side seam that future slice already needs, ported now since it's
+free), and `check_capacity`'s disk-space preflight arithmetic — all slice 4.
+
 ## Flags (bash characterized, not changed)
 
 - The recovery bundle's own `checksums.sha256` is **not** HMAC-signed or
@@ -326,3 +492,54 @@ completed-bundle/atomic-publish checks).
   wrong-key/short-envelope refusal parity, and both encrypt/decrypt
   directions, are proven byte-for-byte in
   `recovery-bundle.parity.test.ts`.
+- **(slice 3)** `checkCorrespondence` consolidates `restore.sh`'s own two
+  independently-maintained near-duplicate copies of the same
+  database-row-to-on-disk-blob logic (`validate_correspondence`, run
+  against a private stage database in three call sites — preflight,
+  checkpoint self-verify, and `--recover` re-verify — and
+  `validate_correspondence_reports`, run against the live database via
+  `query_active_report`) into one canonical function. Both Bash functions'
+  *observable behavior* is identical (same field order, same regex checks,
+  same object-enumeration logic — confirmed by direct comparison of
+  restore.sh:205-332 against :658-736), so this is the same category of
+  simplification slice 1 already flagged for `backup.sh`'s/`restore.sh`'s
+  duplicated bundle validators, not a behavior change.
+- **(slice 3)** `check_capacity` (restore.sh:355-397, guarantees #11-12 —
+  the `df`/`du`/live-database-size arithmetic proving enough free space
+  exists in the backup directory, temp filesystem, and document volume
+  simultaneously before a restore proceeds) is out of scope for this slice.
+  It sits structurally between `prepare_staged_bundle` and
+  `create_checkpoint` in restore.sh's control flow but does not itself
+  touch the checkpoint/journal/rollback state machine or correspondence
+  checking this slice was scoped to (see Slice 3's own scope note above);
+  flagging for the owner in case it's wanted as an explicit follow-up
+  characterization before slice 4 wires a real `orbit restore` entry point
+  on top of this engine — a shipped restore command must not skip it.
+- **(slice 3)** `loadRestoreJournal`'s regular-file/mode-600 check
+  (restore.sh:773-776) is a single `O_NOFOLLOW` `open`+`fstat` (one
+  descriptor, no window between the safety check and the content read)
+  rather than restore.sh's own separate `[[ -f && ! -L ]]` + `stat -c '%a'`
+  + `cat` sequence — the same CodeQL js/file-system-race discipline slice
+  1's `readRegularFileNoFollow` and slice 2's `link`+`unlink` publish
+  already established, applied here to the journal read path; likewise
+  `checkCorrespondence`'s on-disk blob checks (`regularFileSizeNoFollow`)
+  replace restore.sh's own separate `[[ -f && ! -L ]]` + `stat -c '%s'`
+  pair with one `open(O_NOFOLLOW)`+`fstat` call. Same behavior, a
+  race-free mechanism.
+- **(slice 3)** The real-process interruption test
+  (`restore-engine.interruption.test.ts`) has the rehearsal subprocess
+  deliver `SIGKILL` to itself once a target step completes, rather than
+  pausing for an external kill the way
+  `install-transaction.interruption.test.ts` does — this mirrors
+  restore.sh's *own* test harness convention
+  (`ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE` + `kill -KILL "$$"`) exactly,
+  and sidesteps any race between "the step genuinely completed" and "the
+  kill lands," which the pause-based approach needs external synchronization
+  for. Under this sandbox's process supervision, a self-delivered SIGKILL is
+  sometimes reported as the POSIX wait-status exit code 137 (128+SIGKILL)
+  rather than Node's usual `signal="SIGKILL"`/`code=null` shape; the test
+  accepts either, since both represent the identical kill.
+- No behavioral discrepancy was found between `restore-engine.ts` and
+  `restore.sh` for anything in this slice's scope during this port; the
+  items above are characterization/process notes and one explicitly
+  deferred non-goal (`check_capacity`), not correctness concerns.
