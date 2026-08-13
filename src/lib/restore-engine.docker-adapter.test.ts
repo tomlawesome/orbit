@@ -137,6 +137,15 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
   waitForHealth(): boolean {
     return this.healthOk && this.appRunning;
   }
+  measureLiveDatabaseSizeBytes(): number {
+    return 1024;
+  }
+  measureLiveDocumentTreeKib(): number {
+    return 1;
+  }
+  measureDocumentVolumeAvailableKib(): number {
+    return 1_000_000;
+  }
 }
 
 let sandbox: string;
