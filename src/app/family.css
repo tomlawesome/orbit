@@ -1,0 +1,6 @@
+/*
+ * The screens either side of the workspace (design/family/*.html): sign-in,
+ * sign-out, not-found and maintenance. They share the star-chart surface but
+ * none of the authenticated shell, so their styles live apart from both
+ * globals.css and shell.css.
+ */
