@@ -17,10 +17,8 @@ export default function AdminPage() {
   const { session, syncStatus, syncMessage } = useWorkspace();
   const themePreference = usePersistedThemePreference(session?.user);
   const appearanceAttributes = {
-    "data-theme": themePreference.colourway,
-    "data-mode": themePreference.mode,
+    "data-theme": themePreference.theme,
     "data-text-size": themePreference.textSize,
-    "data-urgency-palette": themePreference.urgencyPalette,
   };
 
   if (!session) {

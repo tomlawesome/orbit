@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — web UI v3: the ring as organizing principle (proposal, issue #307)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* v3: the orbit stops being decoration. The ring is the page's organizing
+     principle; the list is its manifest. Mission vocabulary (T-minus) and a
+     display face carry identity. Display font is fetched from Google Fonts
+     in this MOCKUP ONLY — production self-hosts. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:#0b0f1a; --panel-raised:#0f1524;
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --glow:1; --celestial:none;
+  }
+  [data-theme=starchart]{
+    --bg:#070d1f; --panel:#0b1226; --panel-raised:#101a35;
+    --line:#1d2a4d; --line-soft:#141e3a;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --glow:0; --celestial:block;
+  }
+  [data-theme=atlas]{
+    --bg:#efe9db; --panel:#f7f3ea; --panel-raised:#fbf8f1;
+    --line:#d8cfba; --line-soft:#e4dcc9;
+    --ink:#1c2b4a; --ink-mid:#5d6a87; --ink-faint:#98a0b4;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --glow:0; --celestial:block;
+  }
+  [data-theme=dawn]{
+    --bg:#eef1f6; --panel:#ffffff; --panel-raised:#ffffff;
+    --line:#dde3ee; --line-soft:#e8edf5;
+    --ink:#1a2233; --ink-mid:#5d6b85; --ink-faint:#9aa5ba;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --glow:0; --celestial:none;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;padding:36px 16px 90px;transition:background .35s,color .35s}
+  .frame-label{max-width:1100px;margin:0 auto;padding:0 6px 10px;
+               font:12px var(--mono);color:var(--ink-faint);
+               display:flex;align-items:center;gap:16px}
+  .themes{margin-left:auto;display:flex;gap:6px}
+  .themes button{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                 border:1px solid var(--line);border-radius:99px;padding:4px 12px;cursor:pointer}
+  .themes button[aria-pressed=true]{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+  .frame{max-width:1100px;margin:0 auto;border:1px solid var(--line);
+         border-radius:18px;overflow:hidden;background:var(--bg)}
+
+  .topbar{display:flex;align-items:center;gap:22px;padding:14px 30px;
+          border-bottom:1px solid var(--line-soft)}
+  .mark{display:flex;align-items:center;gap:10px;font-family:var(--display);
+        font-weight:600;font-size:16px;letter-spacing:.02em}
+  .household{font-size:13px;color:var(--ink-mid)}
+  .household b{color:var(--ink);font-weight:500}
+  .search{flex:1;max-width:300px;margin-left:auto}
+  .search input{width:100%;background:var(--panel);border:1px solid var(--line);
+                border-radius:9px;color:var(--ink-mid);font-size:13px;padding:7px 13px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--line);
+          display:grid;place-items:center;font-size:12px;color:var(--ink-mid)}
+
+  /* ---- hero: the ring organizes the page ---- */
+  .hero{position:relative;display:grid;place-items:center;padding:34px 0 6px}
+  .hero svg{display:block}
+  .hero-center{position:absolute;text-align:center;pointer-events:none;width:250px}
+  .hero-center .count{font-family:var(--display);font-weight:600;font-size:58px;
+                      line-height:1;letter-spacing:-.02em}
+  .hero-center .count b{color:var(--warm);font-weight:600}
+  .hero-center .lede{font-size:13.5px;color:var(--ink-mid);margin-top:6px}
+  .hero-center .next{font:12px var(--mono);color:var(--ink-faint);margin-top:12px}
+  .hero-center .next b{color:var(--accent);font-weight:500}
+  .legend{display:flex;gap:18px;justify-content:center;margin:2px 0 8px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px;
+               font:11px var(--mono);color:var(--ink-mid)}
+  .legend i{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .celestial{display:var(--celestial)}
+  .glowlayer{opacity:var(--glow)}
+
+  /* ---- manifest ---- */
+  .manifest{max-width:780px;margin:26px auto 0;padding:0 26px 48px}
+  .group{margin-bottom:28px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:2px}
+  .item{display:flex;align-items:center;gap:15px;border-radius:13px;
+        padding:13px 16px;margin-bottom:4px;border:1px solid transparent}
+  .item:hover{background:var(--panel-raised);border-color:var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .item .body{flex:1;min-width:0}
+  .item .body b{display:block;font-size:14.5px;font-weight:520}
+  .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+  .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
+  .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
+  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  .suggest{border:1px dashed var(--line)}
+  .suggest .body span{color:var(--accent)}
+  .suggest .actions{display:flex;gap:8px}
+  .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+
+  svg text{font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<p class="frame-label">Due Next · v3 — the ring organizes the page; the list is its manifest
+  <span class="themes" role="group" aria-label="Theme">
+    <button onclick="setTheme('afterdark',this)" aria-pressed="true">after dark</button>
+    <button onclick="setTheme('starchart',this)" aria-pressed="false">star-chart</button>
+    <button onclick="setTheme('atlas',this)" aria-pressed="false">atlas</button>
+    <button onclick="setTheme('dawn',this)" aria-pressed="false">dawn</button>
+  </span>
+</p>
+
+<div class="frame">
+  <div class="topbar">
+    <div class="mark">
+      <svg width="24" height="24" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg>
+      orbit
+    </div>
+    <div class="household">Household · <b>Lawson Home</b></div>
+    <div class="search"><input placeholder="Search items, documents…" readonly></div>
+    <div class="avatar">TL</div>
+  </div>
+
+  <div class="hero">
+    <svg width="520" height="520" viewBox="0 0 380 380" role="img"
+         aria-label="Year ring: household items placed by due date around the next twelve months; details in the manifest below">
+      <defs>
+        <radialGradient id="glow3" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".10"/>
+          <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="beam3" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity=".55"/>
+        </linearGradient>
+      </defs>
+      <circle class="glowlayer" cx="190" cy="190" r="172" fill="url(#glow3)"/>
+
+      <!-- celestial cartography layer: graticule + constellation lines -->
+      <g class="celestial">
+        <circle cx="190" cy="190" r="158" fill="none" stroke="var(--line-soft)" stroke-width=".75"/>
+        <circle cx="190" cy="190" r="176" fill="none" stroke="var(--line-soft)" stroke-width=".5"/>
+        <g stroke="var(--line-soft)" stroke-width=".5">
+          <line x1="190" y1="14" x2="190" y2="30"/><line x1="314.5" y1="65.5" x2="303" y2="77"/>
+          <line x1="366" y1="190" x2="350" y2="190"/><line x1="314.5" y1="314.5" x2="303" y2="303"/>
+          <line x1="190" y1="366" x2="190" y2="350"/><line x1="65.5" y1="314.5" x2="77" y2="303"/>
+          <line x1="14" y1="190" x2="30" y2="190"/><line x1="65.5" y1="65.5" x2="77" y2="77"/>
+        </g>
+        <!-- constellation: the Home items, joined -->
+        <polyline points="166,52 241,61 290,97.5" fill="none"
+                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
+                  stroke-dasharray="1 5" stroke-linecap="round"/>
+      </g>
+
+      <circle cx="190" cy="190" r="140" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+      <circle cx="190" cy="190" r="136" fill="none" stroke="var(--line-soft)" stroke-width="1"/>
+
+      <g stroke="var(--line)" stroke-width="1.5">
+        <line x1="190" y1="46" x2="190" y2="56"/><line x1="262" y1="65.3" x2="257" y2="73.9"/>
+        <line x1="314.7" y1="118" x2="306.1" y2="123"/><line x1="334" y1="190" x2="324" y2="190"/>
+        <line x1="314.7" y1="262" x2="306.1" y2="257"/><line x1="262" y1="314.7" x2="257" y2="306.1"/>
+        <line x1="190" y1="334" x2="190" y2="324"/><line x1="118" y1="314.7" x2="123" y2="306.1"/>
+        <line x1="65.3" y1="262" x2="73.9" y2="257"/><line x1="46" y1="190" x2="56" y2="190"/>
+        <line x1="65.3" y1="118" x2="73.9" y2="123"/><line x1="118" y1="65.3" x2="123" y2="73.9"/>
+      </g>
+      <g font-size="9" fill="var(--ink-faint)" text-anchor="middle">
+        <text x="190" y="38">AUG</text><text x="267" y="59">SEP</text>
+        <text x="323" y="114">OCT</text><text x="343" y="194">NOV</text>
+        <text x="323" y="270">DEC</text><text x="267" y="327">JAN</text>
+        <text x="190" y="349">FEB</text><text x="113" y="327">MAR</text>
+        <text x="57" y="270">APR</text><text x="37" y="194">MAY</text>
+        <text x="57" y="114">JUN</text><text x="113" y="59">JUL</text>
+      </g>
+
+      <rect x="189.4" y="60" width="1.2" height="66" fill="url(#beam3)"/>
+      <path d="M190 44 l5.5 9 h-11 Z" style="fill:var(--accent)"/>
+
+      <g fill="none" stroke-linecap="round">
+        <path d="M 148 61 A 140 140 0 0 1 162 53" stroke="var(--overdue)" stroke-opacity=".45" stroke-width="2"/>
+        <path d="M 204 50.7 A 140 140 0 0 1 218 53.8" stroke="var(--warm)" stroke-opacity=".45" stroke-width="2"/>
+        <path d="M 224 55.2 A 140 140 0 0 1 238 59.4" stroke="var(--warm)" stroke-opacity=".45" stroke-width="2"/>
+        <path d="M 276 84.5 A 140 140 0 0 1 287 94" stroke="var(--upcoming)" stroke-opacity=".4" stroke-width="2"/>
+      </g>
+
+      <circle cx="166" cy="52" r="7" style="fill:var(--overdue)"/>
+      <circle cx="221" cy="54" r="6.5" style="fill:var(--warm)"/>
+      <circle cx="241" cy="61" r="6" style="fill:var(--warm)"/>
+      <circle cx="290" cy="97.5" r="5.5" style="fill:var(--upcoming)"/>
+      <circle cx="306" cy="123" r="5" style="fill:none;stroke:var(--upcoming);stroke-width:1.8"/>
+      <g style="fill:var(--ok)">
+        <circle cx="322" cy="220" r="4.5"/><circle cx="295" cy="276" r="4.5"/>
+        <circle cx="244" cy="315" r="4.5"/><circle cx="170" cy="327" r="4.5"/>
+        <circle cx="106" cy="297" r="4.5"/><circle cx="64" cy="239" r="4.5"/>
+        <circle cx="55" cy="165" r="4.5"/><circle cx="82" cy="104" r="4.5"/>
+        <circle cx="134" cy="64" r="4.5"/>
+      </g>
+    </svg>
+    <div class="hero-center">
+      <div class="count"><b>3</b></div>
+      <div class="lede">need you before September.<br>Fourteen more, quietly on track.</div>
+      <div class="next">next · <b>Car MOT · T−16d</b></div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--overdue)"></i>overdue</span>
+    <span><i style="background:var(--warm)"></i>due soon</span>
+    <span><i style="background:var(--upcoming)"></i>upcoming</span>
+    <span><i style="background:var(--ok)"></i>on track</span>
+  </div>
+
+  <div class="manifest">
+    <div class="group">
+      <h3>Needs attention</h3>
+      <div class="item">
+        <span class="dot" style="background:var(--overdue)"></span>
+        <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year</span></div>
+        <div class="t over">T+16d<small>28 Jul</small></div>
+      </div>
+      <div class="item">
+        <span class="dot" style="background:var(--warm)"></span>
+        <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year</span></div>
+        <div class="t soon">T−16d<small>29 Aug</small></div>
+      </div>
+      <div class="item">
+        <span class="dot" style="background:var(--warm)"></span>
+        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas</span></div>
+        <div class="t soon">T−22d<small>04 Sep</small></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Suggested from your documents</h3>
+      <div class="item suggest">
+        <span class="dot" style="background:var(--accent)"></span>
+        <div class="body"><b>Home insurance renewal</b><span>Found in policy-schedule.pdf · renews 02 Oct</span></div>
+        <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Later this year</h3>
+      <div class="item">
+        <span class="dot" style="background:var(--upcoming)"></span>
+        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year</span></div>
+        <div class="t up">T−61d<small>12 Oct</small></div>
+      </div>
+      <div class="item">
+        <span class="dot" style="background:var(--ok)"></span>
+        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · done 12 Jun</span></div>
+        <div class="t ok">T−122d<small>12 Dec</small></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="frame-label" style="margin-top:14px">orbit · v3 proposal · issue #307 · star-chart rebuilt as celestial cartography (constellation lines join a section's items) · atlas keeps the paper</p>
+
+<script>
+function setTheme(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+</script>
+</body>
+</html>
