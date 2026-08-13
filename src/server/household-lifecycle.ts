@@ -4,6 +4,7 @@ import {
   auditLog,
   documentCrypto,
   documents,
+  documentStagingObjects,
   households,
   memberships,
   notificationDeliveries,
@@ -23,6 +24,13 @@ const RECOVERY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 interface HouseholdStorageKeys {
   documents: string[];
   archives: string[];
+  // A document still `scanning` has no document_crypto row yet; its
+  // encrypted bytes live in document_staging_objects under staging/ until
+  // the scan completes. Without collecting these, deleting the household
+  // cascades the metadata away, deleteHouseholdStorage never sees the key,
+  // and the tombstone records "complete" while the ciphertext is still on
+  // disk (#383).
+  stagingDocuments: string[];
 }
 
 type HouseholdDeletionAction = "household_hard_deleted" | "household_purged";
@@ -41,6 +49,7 @@ async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<boole
   const results = await Promise.allSettled([
     ...keys.documents.map((storageKey) => documentStorage.deleteCiphertext(storageKey)),
     ...keys.archives.map((storageKey) => archiveStorage.delete(storageKey)),
+    ...keys.stagingDocuments.map((storageKey) => documentStorage.deleteStagingCiphertext(storageKey)),
   ]);
   return results.every((result) => result.status === "fulfilled");
 }
@@ -238,6 +247,10 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
       .from(documents)
       .innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
       .where(eq(documents.householdId, validHouseholdId));
+    const stagingDocumentRows = await transaction.select({ storageKey: documentStagingObjects.storageKey })
+      .from(documents)
+      .innerJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id))
+      .where(eq(documents.householdId, validHouseholdId));
     const archiveRows = await transaction.select({ storageKey: portableArchives.storageKey })
       .from(portableArchives).where(eq(portableArchives.householdId, validHouseholdId));
 
@@ -258,6 +271,7 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
     return {
       documents: documentRows.map((row) => row.storageKey),
       archives: archiveRows.map((row) => row.storageKey),
+      stagingDocuments: stagingDocumentRows.map((row) => row.storageKey),
     };
   });
 
@@ -290,6 +304,8 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
 
       const documentRows = await transaction.select({ storageKey: documentCrypto.storageKey }).from(documents)
         .innerJoin(documentCrypto, eq(documentCrypto.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
+      const stagingDocumentRows = await transaction.select({ storageKey: documentStagingObjects.storageKey }).from(documents)
+        .innerJoin(documentStagingObjects, eq(documentStagingObjects.documentId, documents.id)).where(eq(documents.householdId, candidate.id));
       const archiveRows = await transaction.select({ storageKey: portableArchives.storageKey })
         .from(portableArchives).where(eq(portableArchives.householdId, candidate.id));
       await transaction.insert(auditLog).values({
@@ -301,7 +317,11 @@ export async function purgeExpiredHouseholds(limit = 10): Promise<void> {
         changes: { reason: "retention_expired", storageCleanup: "pending" },
       });
       await transaction.delete(households).where(eq(households.id, candidate.id));
-      return { documents: documentRows.map((row) => row.storageKey), archives: archiveRows.map((row) => row.storageKey) };
+      return {
+        documents: documentRows.map((row) => row.storageKey),
+        archives: archiveRows.map((row) => row.storageKey),
+        stagingDocuments: stagingDocumentRows.map((row) => row.storageKey),
+      };
     });
     if (storageKeys) {
       const storageCleanupComplete = await deleteHouseholdStorage(storageKeys);

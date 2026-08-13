@@ -332,7 +332,12 @@ export const auditLog = pgTable("audit_log", {
   action: text("action").notNull(),
   changes: jsonb("changes").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId)]);
+}, (table) => [
+  index("audit_household_entity_idx").on(table.householdId, table.entityType, table.entityId),
+  // Supports readWorkspace's item-activity feed query (entityType filter +
+  // createdAt-descending scan), the only remaining unbounded audit_log read.
+  index("audit_household_activity_idx").on(table.householdId, table.entityType, table.createdAt),
+]);
 
 /** A private, passphrase-encrypted household portability export. */
 export const portableArchives = pgTable("portable_archives", {

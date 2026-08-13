@@ -828,6 +828,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
     try {
       if (!client.mailbox) throw new Error("IMAP mailbox could not be opened");
       const uidValidity = client.mailbox.uidValidity.toString();
+      const mailboxUidNext = client.mailbox.uidNext;
       const retryRows = await getDb().select({
         uid: imapIngestionMessages.mailboxUid,
       }).from(imapIngestionMessages).where(and(
@@ -889,10 +890,18 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
       // unseen tail; the next poll resumes at the next UID.
       const nextUid = (checkpoint?.lastUid ?? 0) + 1;
       let newMessages = 0;
-      for await (const message of client.fetch(`${nextUid}:*`, fetchOptions, { uid: true })) {
-        await processMessage(message);
-        newMessages += 1;
-        if (newMessages >= 25) break;
+      // A "${nextUid}:*" UID range always includes at least the mailbox's
+      // highest UID (RFC 3501 §6.4.8), even once nextUid exceeds every
+      // assigned UID. Unguarded, steady-state polling (no new mail) would
+      // re-fetch and re-process the newest message in full on every poll
+      // forever. Skip the fetch once the checkpoint has caught up to the
+      // mailbox's own next-UID prediction instead (#383).
+      if (nextUid < mailboxUidNext) {
+        for await (const message of client.fetch(`${nextUid}:*`, fetchOptions, { uid: true })) {
+          await processMessage(message);
+          newMessages += 1;
+          if (newMessages >= 25) break;
+        }
       }
     } finally { lock.release(); }
   } finally {
