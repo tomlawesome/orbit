@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
@@ -199,6 +199,11 @@ function stageContext(overrides: Partial<StageGuidedInstallConfigurationContext>
     hasControllingTerminal: true,
     environmentFile: join(dir, ".env-orbit"),
     secretsDirectory: join(dir, ".orbit-secrets"),
+    // Distinct target-side paths (issue #383 addon finding 5): the
+    // precondition guard reads these, never the staging basis above, which
+    // stays empty by construction until this function itself writes to it.
+    targetEnvironmentFile: join(dir, "target", ".env-orbit"),
+    targetSecretsDirectory: join(dir, "target", ".orbit-secrets"),
     configureScript: join(dir, "staging", "scripts", "configure.sh"),
     orbitImage: "ghcr.io/tomlawesome/orbit@sha256:" + "a".repeat(64),
     profileChange: false,
@@ -221,32 +226,47 @@ describe("stageGuidedInstallConfiguration (install.sh:1031-1077)", () => {
     expect(outcome).toEqual({ status: "skipped" });
   });
 
-  it("guarantee #30: skips when .env-orbit already exists, even though empty target/no secrets dir", async () => {
+  it("guarantee #30: skips when the target's .env-orbit already exists, even though empty target/no secrets dir", async () => {
     const context = stageContext();
-    writeFileSync(context.environmentFile, "APP_URL=https://example.invalid\n", { mode: 0o600 });
+    mkdirSync(dirname(context.targetEnvironmentFile), { recursive: true });
+    writeFileSync(context.targetEnvironmentFile, "APP_URL=https://example.invalid\n", { mode: 0o600 });
     const { adapter, calls } = fakeAdapter();
     const outcome = await stageGuidedInstallConfiguration(context, adapter, noopAnswers);
     expect(outcome).toEqual({ status: "skipped" });
     expect(calls.init).toHaveLength(0);
   });
 
-  it("guarantee #30: skips when .env-orbit exists only as a symlink (install.sh:1034-1035)", async () => {
+  it("guarantee #30: skips when the target's .env-orbit exists only as a symlink (install.sh:1034-1035)", async () => {
     const dir = makeSandbox();
     const real = join(dir, "real-env");
     writeFileSync(real, "APP_URL=https://example.invalid\n");
     const context = stageContext();
-    symlinkSync(real, context.environmentFile);
+    mkdirSync(dirname(context.targetEnvironmentFile), { recursive: true });
+    symlinkSync(real, context.targetEnvironmentFile);
     const { adapter } = fakeAdapter();
     const outcome = await stageGuidedInstallConfiguration(context, adapter, noopAnswers);
     expect(outcome).toEqual({ status: "skipped" });
   });
 
-  it("guarantee #30: skips when .orbit-secrets already exists as a directory", async () => {
+  it("guarantee #30: skips when the target's .orbit-secrets already exists as a directory", async () => {
     const context = stageContext();
-    mkdirSync(context.secretsDirectory, { mode: 0o700 });
+    mkdirSync(context.targetSecretsDirectory, { recursive: true, mode: 0o700 });
     const { adapter } = fakeAdapter();
     const outcome = await stageGuidedInstallConfiguration(context, adapter, noopAnswers);
     expect(outcome).toEqual({ status: "skipped" });
+  });
+
+  it("guarantee #30 (issue #383 addon finding 5): does NOT skip merely because the empty staging basis's own paths happen to exist — only the target's files gate this guard", async () => {
+    const context = stageContext();
+    // Before the fix, the guard read context.environmentFile/secretsDirectory
+    // (the staging basis) instead of the target's own files, so it could
+    // never actually observe a pre-existing target deployment at all.
+    // Writing to the staging basis here must have no effect on the guard.
+    writeFileSync(context.environmentFile, "APP_URL=https://example.invalid\n", { mode: 0o600 });
+    const { adapter, calls } = fakeAdapter();
+    const outcome = await stageGuidedInstallConfiguration(context, adapter, noopAnswers);
+    expect(outcome.status).not.toBe("skipped");
+    expect(calls.init).toHaveLength(1);
   });
 
   it("skips without a controlling terminal (install.sh:1036)", async () => {

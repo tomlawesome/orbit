@@ -293,8 +293,37 @@ export function isValidDocumentKekFingerprint(value: string): boolean {
   return DOCUMENT_KEK_FINGERPRINT_PATTERN.test(value);
 }
 
+/**
+ * Read/hash chunk size for sha256File and encryptDocumentArchiveToFile
+ * (#383): the same bounded-memory incremental shape `sha256sum`/`openssl
+ * enc` use, so digesting or encrypting an artifact of any size never holds
+ * more than this much of it in memory at once.
+ */
+const STREAM_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * sha256sum-equivalent, but bounded-memory (#383): `readFileSync` enforces a
+ * hard 2 GiB ceiling (`ERR_FS_FILE_TOO_LARGE`) independent of available
+ * memory, and even under that ceiling it materialises the whole file at
+ * once. This instead opens once with O_NOFOLLOW (no separate lstat-then-open
+ * race window, matching readRegularFileNoFollow's discipline) and feeds the
+ * digest fixed-size chunks via readSync, so peak memory is O(1) regardless
+ * of file size.
+ */
 export function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(STREAM_CHUNK_BYTES);
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead));
+    }
+    return hash.digest("hex");
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export function sha256Buffer(buffer: Buffer): string {
@@ -343,18 +372,34 @@ export function listTarMembers(tarPath: string): string[] {
   return stdout.split("\n").filter((line) => line.length > 0);
 }
 
-/** `tar -tvf <path>` parsed into (type-char, name) pairs — the verbose listing used for link/special-file rejection. */
+/**
+ * `tar -tvf <path>` parsed into (type-char, name) pairs. Member names are
+ * taken from listTarMembers's exact `tar -tf` listing (one name per line,
+ * unambiguous even when a name contains spaces) rather than parsed out of
+ * the verbose `-tvf` line, which prefixes the name with permission/owner/
+ * size/date columns of varying width — taking "everything after the last
+ * space" truncates any member name that itself contains a space down to its
+ * final path segment, silently validating the wrong name (issue #383,
+ * reproduced against GNU tar 1.35). The verbose listing is used only for
+ * its first field (the permission string, whose leading character is the
+ * type char); a length mismatch between the two listings means the two
+ * `tar` invocations disagree about the archive's contents, so this refuses
+ * rather than pairing a name with the wrong type char. Mirrors backup.sh's
+ * own split: validate_document_archive reads names from a `tar -tf` listing
+ * and checks type chars separately via `tar -tvf | awk '{print substr($1,1,1)}'`.
+ */
 export function listTarEntriesVerbose(tarPath: string): TarEntry[] {
+  const names = listTarMembers(tarPath);
   const { status, stdout } = runTar(["-tvf", tarPath]);
   if (status !== 0) refuse("archive-invalid", "Bundle archive is invalid.");
-  const entries: TarEntry[] = [];
-  for (const line of stdout.split("\n")) {
-    if (line.length === 0) continue;
-    const firstField = line.trimStart().split(/\s+/, 1)[0];
-    const nameField = line.slice(line.lastIndexOf(" ") + 1);
-    entries.push({ typeChar: firstField.charAt(0), name: nameField });
+  const typeChars = stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.trimStart().charAt(0));
+  if (typeChars.length !== names.length) {
+    refuse("archive-invalid", "Bundle archive listing is inconsistent.");
   }
-  return entries;
+  return names.map((name, index) => ({ name, typeChar: typeChars[index] }));
 }
 
 export function extractTar(tarPath: string, destinationDir: string): void {
@@ -362,8 +407,24 @@ export function extractTar(tarPath: string, destinationDir: string): void {
   if (status !== 0) refuse("archive-invalid", "Bundle archive could not be extracted.");
 }
 
-/** `tar -C workDir -cf outputPath <members...>`, in the exact member order given — matches the Bash scripts' own fixed argument order. */
+/**
+ * `tar -C workDir -cf outputPath <members...>`, in the exact member order
+ * given — matches the Bash scripts' own fixed argument order. Pre-creates
+ * `outputPath` at SECURE_FILE_MODE before invoking tar: backup.sh:138 and
+ * export-recovery-bundle.sh:50 both `umask 077` before packaging a bundle,
+ * so every file `tar -cf` creates — including the final `orbit-*.tar` /
+ * `orbit-recovery-*.tar` deliverable, since publishBundleAtomically's `link`
+ * preserves whatever mode this temp file was created at — lands at 0600;
+ * this port set no umask anywhere, so a plain `tar -cf` honoured the
+ * inherited ambient umask (typically 0644) instead (issue #383). GNU tar
+ * opens an already-existing output path for writing without changing its
+ * mode, so pre-creating it here (with the same O_NOFOLLOW discipline as
+ * every other secret write in this module) closes the "briefly
+ * world-readable at the ambient umask" window entirely, rather than
+ * chmod-ing after the fact.
+ */
 export function createTar(workDir: string, outputPath: string, members: readonly string[]): void {
+  closeSync(openWriteSecretDescriptor(outputPath));
   const result = spawnSync("tar", ["-C", workDir, "-cf", outputPath, ...members], { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`tar failed to package the bundle: ${result.stderr ?? ""}`);
@@ -453,6 +514,44 @@ export function encryptDocumentArchive(plaintext: Buffer, documentKekHex: string
     const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
     return Buffer.concat([DOCUMENT_ARCHIVE_MAGIC, salt, ciphertext]);
   } finally {
+    key.fill(0);
+    iv.fill(0);
+  }
+}
+
+/**
+ * encryptDocumentArchive's bounded-memory sibling (#383): produces the exact
+ * same `Salted__`+salt+ciphertext byte format (see encryptDocumentArchive's
+ * doc comment / recovery-bundle.parity.test.ts's real-`openssl` parity
+ * suite), but reads `plaintextPath` and writes `outputPath` in fixed-size
+ * chunks through the cipher instead of holding the whole plaintext,
+ * ciphertext, and a concatenated copy of both in memory at once. Both file
+ * descriptors are opened O_NOFOLLOW (readRegularFileNoFollow's discipline
+ * for the source; openWriteSecretDescriptor's for the 0600 destination).
+ */
+export function encryptDocumentArchiveToFile(plaintextPath: string, documentKekHex: string, outputPath: string): void {
+  const salt = randomBytes(DOCUMENT_ARCHIVE_SALT_BYTES);
+  const { key, iv } = deriveDocumentArchiveKeyIv(documentKekHex, salt);
+  const inputDescriptor = openSync(plaintextPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const outputDescriptor = openWriteSecretDescriptor(outputPath);
+    try {
+      const cipher = createCipheriv("aes-256-cbc", key, iv);
+      writeSync(outputDescriptor, Buffer.concat([DOCUMENT_ARCHIVE_MAGIC, salt]));
+      const readBuffer = Buffer.allocUnsafe(STREAM_CHUNK_BYTES);
+      for (;;) {
+        const bytesRead = readSync(inputDescriptor, readBuffer, 0, readBuffer.length, null);
+        if (bytesRead === 0) break;
+        const chunk = cipher.update(bytesRead === readBuffer.length ? readBuffer : readBuffer.subarray(0, bytesRead));
+        if (chunk.length > 0) writeSync(outputDescriptor, chunk);
+      }
+      const final = cipher.final();
+      if (final.length > 0) writeSync(outputDescriptor, final);
+    } finally {
+      closeSync(outputDescriptor);
+    }
+  } finally {
+    closeSync(inputDescriptor);
     key.fill(0);
     iv.fill(0);
   }
@@ -596,6 +695,22 @@ export function validateBackupManifestAndAuth(extractedDir: string, documentKekH
 }
 
 /**
+ * Every legitimate checksums.sha256 member name is a single plain filename
+ * (backup.sh's `database.dump`/`documents.tar.enc`/etc., or
+ * export-recovery-bundle.sh's `orbit-backup.tar`/`document-kek.enc`) — never
+ * a path with a directory component. Rejecting anything else before it ever
+ * reaches sha256File closes a path-traversal hole (#383): for the outer
+ * recovery bundle, checksums.sha256 is deliberately *not* HMAC-authenticated
+ * (see the module comment above verifyRecoveryBundleChecksums) and is read
+ * before the passphrase/document-KEK are ever verified, so an attacker-
+ * crafted `orbit-recovery-*.tar` handed to an operator could otherwise name
+ * `../../../etc/passwd`-style entries and turn `orbit import-recovery-bundle`
+ * into an existence/content-guessing oracle (or a hang against a device like
+ * `/dev/zero`) for paths entirely outside the extraction directory.
+ */
+const SAFE_CHECKSUM_MEMBER_NAME_PATTERN = /^[^/\\]+$/;
+
+/**
  * `sha256sum --check --status`-equivalent: every `<digest>  <name>` line in
  * checksumsPath must match the actual file's digest under extractedDir, or
  * the bundle is refused (backup.sh #17 / restore.sh preflight/checksum).
@@ -608,6 +723,9 @@ export function verifyChecksumsFile(extractedDir: string, checksumsPath: string)
     const match = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
     if (!match) refuse("checksum-mismatch", "A bundle member is corrupt.");
     const [, expectedDigest, memberName] = match;
+    if (!SAFE_CHECKSUM_MEMBER_NAME_PATTERN.test(memberName) || memberName === "." || memberName === "..") {
+      refuse("checksum-mismatch", "A bundle member is corrupt.");
+    }
     let actualDigest: string;
     try {
       actualDigest = sha256File(`${extractedDir}/${memberName}`);
@@ -876,9 +994,14 @@ export function createBackupBundle(
     adapter.collectDocumentsArchive(documentsTarPath);
     validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
 
-    const plaintext = readRegularFileNoFollow(documentsTarPath);
-    const encrypted = encryptDocumentArchive(plaintext, documentKekHex);
-    writeSecretFile(encryptedDocumentsPath, encrypted);
+    // #383: streamed rather than readRegularFileNoFollow + encryptDocumentArchive
+    // + writeSecretFile — that shape held the plaintext documents.tar, its
+    // ciphertext, and a concatenated header+ciphertext copy in memory
+    // simultaneously (~4x the plaintext size), which OOMs real household
+    // document trees well before any single member hits sha256File's old
+    // 2 GiB ceiling. encryptDocumentArchiveToFile produces byte-identical
+    // output one bounded chunk at a time.
+    encryptDocumentArchiveToFile(documentsTarPath, documentKekHex, encryptedDocumentsPath);
     unlinkSync(documentsTarPath);
 
     const fingerprint = documentKekFingerprint(documentKekHex);

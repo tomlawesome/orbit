@@ -30,6 +30,60 @@ describe("household notifications", () => {
     expect(householdNotifications(activeHousehold(dismissed), "2026-07-25").some((entry) => entry.id === notification.id)).toBe(false);
   });
 
+  // Regression coverage for the #383 deep-review finding at notifications.ts:34/49:
+  // dismissed/read lookups moved from `Array.prototype.includes` (an O(n) scan
+  // per item, repeated per item) to a `Set` built once per call. This pins the
+  // read/dismissed semantics at the schema's array-size cap (workspace.ts:
+  // 2000 entries) so a future change can't silently swap back to a lookup
+  // that only happens to work for small fixtures.
+  it("keeps read/dismissed semantics correct against large id lists", () => {
+    const initial = createTestWorkspace();
+    const household = activeHousehold(initial);
+    const [firstNotification, secondNotification] = householdNotifications(household, "2026-07-25");
+    expect(firstNotification).toBeDefined();
+    expect(secondNotification).toBeDefined();
+
+    const padding = Array.from({ length: 2000 }, (_, index) => `padding-${index}`);
+    const padded = {
+      ...initial,
+      households: initial.households.map((entry) => entry.id === household.id
+        ? {
+          ...entry,
+          // The target notification's id sits at the very end of a
+          // schema-capped read list and is absent from an equally large
+          // dismissed list — a linear scan and a Set-based lookup only agree
+          // here if the whole list is actually checked correctly.
+          readNotificationIds: [...padding, firstNotification.id],
+          dismissedNotificationIds: padding,
+        }
+        : entry),
+    };
+
+    const results = householdNotifications(activeHousehold(padded), "2026-07-25");
+    expect(results.map((entry) => entry.itemId)).toEqual([firstNotification.itemId, secondNotification.itemId]);
+    expect(results.find((entry) => entry.id === firstNotification.id)?.read).toBe(true);
+    expect(results.find((entry) => entry.id === secondNotification.id)?.read).toBe(false);
+  });
+
+  it("drops a notification whose id is anywhere in a large dismissed list, not just at the edges", () => {
+    const initial = createTestWorkspace();
+    const household = activeHousehold(initial);
+    const [firstNotification] = householdNotifications(household, "2026-07-25");
+    expect(firstNotification).toBeDefined();
+
+    const padding = Array.from({ length: 2000 }, (_, index) => `padding-${index}`);
+    const dismissedInTheMiddle = [...padding.slice(0, 1000), firstNotification.id, ...padding.slice(1000)];
+    const padded = {
+      ...initial,
+      households: initial.households.map((entry) => entry.id === household.id
+        ? { ...entry, dismissedNotificationIds: dismissedInTheMiddle }
+        : entry),
+    };
+
+    const results = householdNotifications(activeHousehold(padded), "2026-07-25");
+    expect(results.some((entry) => entry.id === firstNotification.id)).toBe(false);
+  });
+
   it("suppresses notifications until a snooze date is reached", () => {
     const initial = createTestWorkspace();
     const activity = {
