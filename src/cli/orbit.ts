@@ -79,6 +79,51 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// In-container fail-closed guard (engine-delivery slice, owner decision
+// 2026-08-13 recorded on issue #295: "the engine can never manage the Docker
+// socket. Ever." / "host scripts remain the only Docker-touching layer").
+//
+// This exact bundle (dist/cli/orbit.js, built by scripts/bundle-orbit-cli.mjs)
+// ships inside the app image at /opt/orbit/cli/orbit.js and is invoked by
+// host scripts as a disposable `docker compose run --rm --no-deps` one-off
+// (docs/engine-events.md, "In-container engine invocation") — never handed
+// the Docker socket, never running with Node on a bare host. `ORBIT_ENGINE_
+// CONTEXT=container` is baked into the image with a Dockerfile `ENV`
+// instruction, which — unlike CMD/ENTRYPOINT — is part of the image's own
+// config and is therefore present in every container started from it
+// regardless of `--entrypoint`/`--user` overrides; a container run any other
+// way (a plain host checkout driven by `pnpm run orbit`/`tsx`) never has it
+// set. This is the single fact this guard trusts.
+//
+// Every command whose adapters spawn `docker` (install/update via
+// install-docker-adapter.ts; backup/restore/export-recovery-bundle/
+// import-recovery-bundle via recovery-bundle.ts's/restore-engine.ts's
+// createDockerCompose*Adapter) calls refuseDockerInContainer as the FIRST
+// statement in its command function below — before any adapter is
+// constructed, so the code path that would spawn `docker` is never reached,
+// not merely made to fail once reached. `check` (and any other pure-logic
+// command) never calls this guard and is unaffected.
+const ENGINE_CONTAINER_ENV_VAR = "ORBIT_ENGINE_CONTEXT";
+const ENGINE_CONTAINER_CONTEXT_VALUE = "container";
+
+/** Reason enum for the refusal below — stable, machine-parseable, no free text. */
+type DockerForbiddenReason = "docker-command-forbidden-in-container";
+const DOCKER_FORBIDDEN_REASON: DockerForbiddenReason = "docker-command-forbidden-in-container";
+
+/** Exit code reserved for this refusal class; distinct from the generic `fail()` exit(1) and the Ctrl-C exit(130) already in use elsewhere in this file. */
+const DOCKER_FORBIDDEN_EXIT_CODE = 9;
+
+function isRunningAsEngineContainer(): boolean {
+  return process.env[ENGINE_CONTAINER_ENV_VAR] === ENGINE_CONTAINER_CONTEXT_VALUE;
+}
+
+function refuseDockerInContainer(command: string): void {
+  if (!isRunningAsEngineContainer()) return;
+  process.stderr.write(`orbit: refused command=${command} reason=${DOCKER_FORBIDDEN_REASON}\n`);
+  process.exit(DOCKER_FORBIDDEN_EXIT_CODE);
+}
+
 function gatherOidcSecretFacts(deployDir: string): OidcSecretFileFacts {
   const secretsDirectory = join(deployDir, ".orbit-secrets");
   const secretFile = join(secretsDirectory, "oidc-client-secret");
@@ -330,6 +375,7 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
 }
 
 function commandBackup(deployDir: string, args: string[]): never {
+  refuseDockerInContainer("backup");
   const paths = resolveBackupRestorePaths(deployDir);
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
   const adapter: BackupDockerAdapter = createDockerComposeBackupAdapter({ envFile: paths.envFile, cwd: deployDir });
@@ -354,6 +400,7 @@ function commandBackup(deployDir: string, args: string[]): never {
 }
 
 function commandRestore(deployDir: string, args: string[]): never {
+  refuseDockerInContainer("restore");
   const paths = resolveBackupRestorePaths(deployDir);
   const restorePaths = deriveRestorePaths(paths.backupDirectory, paths.documentKekFile);
   const adapter = createDockerComposeRestoreAdapter({ envFile: paths.envFile, cwd: deployDir });
@@ -409,6 +456,7 @@ function commandRestore(deployDir: string, args: string[]): never {
 }
 
 function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
+  refuseDockerInContainer("export-recovery-bundle");
   if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit export-recovery-bundle <backup.tar>");
   const paths = resolveBackupRestorePaths(deployDir);
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
@@ -428,6 +476,7 @@ function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
 }
 
 function commandImportRecoveryBundle(deployDir: string, args: string[]): never {
+  refuseDockerInContainer("import-recovery-bundle");
   if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit import-recovery-bundle <recovery.tar>");
   const recoveryBundlePath = resolve(args[0]);
   const paths = resolveBackupRestorePaths(deployDir);
@@ -852,6 +901,7 @@ const UNREACHABLE_ANSWERS: MachinePromptAnswerProvider = {
 };
 
 function commandInstallOrUpdate(action: "install" | "update", deployDirArg: string | undefined): void {
+  refuseDockerInContainer(action);
   if (!deployDirArg) {
     fail(`orbit: ${action} requires --dir <deployment>`);
   }
