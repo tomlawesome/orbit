@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,7 +91,7 @@ describe("CORRESPONDENCE_QUERIES parity against restore.sh's literal psql --comm
     // both (see restore-engine.ts's module comment on consolidating the
     // duplication), so every query text must appear at least twice in the
     // real script.
-    const script = spawnSync("cat", [restoreScriptPath], { encoding: "utf8" }).stdout;
+    const script = readFileSync(restoreScriptPath, "utf8");
     for (const query of Object.values(CORRESPONDENCE_QUERIES)) {
       // Re-escape the query the same way restore.sh embeds it, to count occurrences robustly.
       const escaped = query.replace(/'/g, "'\\''");
