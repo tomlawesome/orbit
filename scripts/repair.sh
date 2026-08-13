@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Orbit repair mode — safe diagnostic + planning + STAGE-ONE executor
-# (issue #261, slice 4).
+# Orbit repair mode — safe diagnostic + planning + STAGE-ONE/STAGE-TWO
+# executor (issue #261, slice 4/5).
 #
-# Supported invocations through this slice:
+# Supported invocations:
 #   bash scripts/repair.sh --check [--plain]              (slices 1+2: read-only
 #                                                           diagnosis)
 #   bash scripts/repair.sh --plan  [--plain]               (slice 3: read-only
@@ -18,14 +18,26 @@ set -Eeuo pipefail
 #                                                           ONLY the safe/
 #                                                           reversible action
 #                                                           set)
-# `--plain` is tolerated anywhere in the argument list; output is
-# unconditionally plain regardless of it. Exactly one of `--check`/`--plan`/
-# `--execute` is required. `--safe-only` is accepted only alongside
-# `--execute`, and — in this slice — is REQUIRED alongside it: stage two
-# (dangerous, credential-rotation actions, approved separately per the
-# 2026-08-13 owner decision on issue #261) is not implemented yet, so
-# `--execute` without `--safe-only` is refused with a usage error rather than
-# silently running only part of a repair. Any other combination, flag, or
+#   bash scripts/repair.sh --execute --dangerous [--plain] (slice 5 stage two:
+#                                                           diagnosis + planning,
+#                                                           then — subject to
+#                                                           interactive/
+#                                                           machine-prompt
+#                                                           approval only, see
+#                                                           "EXECUTE MODE
+#                                                           (--execute
+#                                                           --dangerous)" below
+#                                                           — execution of the
+#                                                           rotate-database-
+#                                                           credential action)
+# `--safe-only` and `--dangerous` may be combined in one `--execute`
+# invocation (each batch keeps its own independent approval and outcome); at
+# least one of the two is REQUIRED alongside `--execute`, so a bare
+# `--execute` is refused with a usage error rather than silently running only
+# part of a repair. `--plain` is tolerated anywhere in the argument list;
+# output is unconditionally plain regardless of it. Exactly one of
+# `--check`/`--plan`/`--execute` is required. `--safe-only`/`--dangerous` are
+# accepted only alongside `--execute`. Any other combination, flag, or
 # positional argument is a usage error.
 #
 # This script is deliberately standalone and source-less: it never sources
@@ -293,14 +305,17 @@ set -Eeuo pipefail
 #                                   postgres-password AND a retained volume
 #                                   is present.
 #     mutation=credential-rotation backup=required. This is the #261
-#     motivating recovery path: preserve/restore the original password
-#     file when available, or rotate the database role to the current
-#     generated secret through a verified local connection. A database
-#     password is NEVER reset merely because authentication failed. This is
-#     issue #261's stage-two action class (per the owner's 2026-08-13
-#     decision): its checkpoint-and-typed-word approval model is a separate,
-#     later slice — `--execute --safe-only` always reports it as `skipped`,
-#     never executes it. See "EXECUTE MODE" below.
+#     motivating recovery path: preserve the original password (in a
+#     checkpoint) and then rotate the database role to a freshly generated
+#     credential through a verified local connection. A database password is
+#     NEVER reset merely because authentication failed WITHOUT first
+#     checkpointing whatever credential is currently live. This is issue
+#     #261's stage-two action class (per the owner's 2026-08-13 decisions):
+#     its checkpoint-and-typed-word approval model is implemented in this
+#     slice (5) and only ever runs under `--execute --dangerous`, subject to
+#     interactive/machine-prompt approval — see "EXECUTE MODE (--execute
+#     --dangerous)" below. `--execute --safe-only` alone (without
+#     `--dangerous`) still always reports it as `skipped`, never executes it.
 #
 #   restart-services             <- application-unhealthy, stale-container
 #     mutation=service-restart backup=not-required. Revalidating and
@@ -349,6 +364,26 @@ set -Eeuo pipefail
 # remain reserved for a later executor slice that can safely pair them with
 # repair actions.
 #
+# Stage-two dangerous-step iterator (recorded owner intention, 2026-08-13
+# comment on issue #261) — RESERVED SHAPE
+# --------------------------------------------------------------------------
+# Stage two has exactly one dangerous action class today
+# (rotate-database-credential, see the action-class table above and
+# "EXECUTE MODE (--execute --dangerous)" below), decomposed into an ordered
+# sequence of independently callable steps (`rotate_database_credential_steps`
+# / `run_dangerous_step`): checkpoint, rotate-credential, update-config,
+# restart-services. This is deliberately a STEP ITERATOR, not one monolithic
+# function, so that if stage two ever grows a second dangerous action class,
+# the operator can be offered either of two execution cadences without this
+# shape being restructured: run the approved sequence straight through (the
+# only cadence actually wired up in this slice, via
+# `run_rotate_database_credential_steps`), or cycle one step at a time with
+# an operator pause between each (a future slice would call
+# `run_dangerous_step` directly per element with a pause in between, instead
+# of the current unconditional loop — no UI for that cadence exists yet, and
+# none is built in this slice). Nothing here bakes in the single-action,
+# straight-through assumption as the only possible shape.
+#
 # EXECUTE MODE (--execute --safe-only) — issue #261 SLICE 4, STAGE ONE
 # --------------------------------------------------------------------------
 # `--execute --safe-only` runs the identical diagnosis and planning above
@@ -358,13 +393,14 @@ set -Eeuo pipefail
 #   fix-permissions       restore-transaction       restart-services
 #
 # Every other action class the plan can produce (`regenerate-secret`,
-# `rotate-database-credential`, `rerun-configuration`, `manual`) is always
-# reported and never executed — see "Safe set is a fixed allowlist" below.
-# Stage two (`rotate-database-credential`, gated on a passphrase-encrypted
-# ORBKEK01 checkpoint and a typed-word confirmation) is a separate,
-# not-yet-implemented slice; `--execute` without `--safe-only` is refused
-# with a usage error explaining this rather than silently running a partial
-# repair.
+# `rerun-configuration`, `manual`) is always reported and never executed —
+# see "Safe set is a fixed allowlist" below. `rotate-database-credential`
+# (stage two, gated on a passphrase-encrypted ORBKEK01 checkpoint and a
+# typed-word confirmation) is likewise never executed by `--safe-only` alone
+# — see "EXECUTE MODE (--execute --dangerous)" below, which is the ONLY way
+# it is ever executed. `--execute` with neither `--safe-only` nor
+# `--dangerous` is refused with a usage error rather than silently running
+# no repair at all.
 #
 # Safe set is a fixed allowlist, not derived from the plan's own
 # mutation=reversible tag
@@ -491,8 +527,15 @@ set -Eeuo pipefail
 #
 # Confirmation model — hybrid approval (owner decision, 2026-08-13)
 # --------------------------------------------------------------------------
-# When at least one safe-set action is planned, this script decides how to
-# gain approval in this fixed priority order:
+# This section covers the SAFE-BATCH confirmation only (`--safe-only`,
+# stage one). The dangerous batch (`--dangerous`, stage two) has its own,
+# stricter, never-automatable approval model — see "EXECUTE MODE (--execute
+# --dangerous)" below; the two batches are independent (each is offered and
+# confirmed on its own, regardless of the other's outcome, when both flags
+# are given together).
+#
+# When at least one safe-set action is planned AND `--safe-only` was given,
+# this script decides how to gain approval in this fixed priority order:
 #
 #   1. ORBIT_REPAIR_PROMPTS=machine — regardless of TTY-ness. Emits the
 #      #297 machine-prompt line grammar (docs/engine-events.md "Machine
@@ -512,23 +555,31 @@ set -Eeuo pipefail
 #      other text, Ctrl-C (bash's default SIGINT handling terminates the
 #      process before any mutation code runs, since confirmation always
 #      precedes it), or EOF (Ctrl-D) — declines. A decline leaves the
-#      deployment completely unmutated: every planned action, safe or not,
-#      is reported `skipped`.
+#      deployment completely unmutated: every planned SAFE-BATCH action is
+#      reported `skipped` (a dangerous-class entry present in the same plan
+#      is never reported by this safe-batch logic at all — see below).
 #   3. Neither of the above, i.e. genuinely non-interactive: this is the
-#      automation contract, and in this slice `--safe-only` is mandatory
-#      alongside `--execute`, so this path is always the `--safe-only`
-#      path. No confirmation is shown or required; execution proceeds
-#      straight to the `execute` lines below. (A future slice that allows
-#      `--execute` without `--safe-only` would need to gate this bypass on
-#      the flag explicitly, since a broader action set would no longer be
-#      uniformly safe to run unattended — that gate does not exist yet
-#      because there is nothing beyond the safe set to gate.)
+#      automation contract for the safe batch specifically. `--safe-only`
+#      being set is what opts into this unattended path; no confirmation is
+#      shown or required, and execution proceeds straight to the `execute`
+#      lines below. This bypass applies ONLY to the safe batch — it never
+#      applies to the dangerous batch (see "EXECUTE MODE (--execute
+#      --dangerous)" below), which is refused outright when genuinely
+#      non-interactive, regardless of `--dangerous` being set.
 #
 # `ORBIT_REPAIR_TTY_INPUT=1` is a test-only escape hatch, mirroring
 # install.sh/configure.sh's own `ORBIT_CONFIGURE_TTY_INPUT` precedent: it
 # forces the interactive confirmation path even though the test harness's
 # stdin is a pipe rather than a real terminal, so the decline/EOF/accept
-# behavior of the human-facing prompt can be exercised without a pty.
+# behavior of the human-facing prompt can be exercised without a pty. It
+# applies identically to the dangerous batch's own interactive prompts below.
+#
+# A plan entry whose action class is `rotate-database-credential` is NEVER
+# handled by the safe-batch logic in this section: when `--dangerous` is
+# set, it is deferred entirely to the dangerous batch below (never printed
+# as `skipped` here, even on an empty plan/safe_count or a decline); when
+# `--dangerous` is NOT set, it is printed `skipped` by the safe-batch logic
+# exactly as before this slice (unchanged, existing behavior).
 #
 # Machine prompts (repair --execute)
 # --------------------------------------------------------------------------
@@ -621,19 +672,321 @@ set -Eeuo pipefail
 # Privacy
 # --------------------------------------------------------------------------
 # The private recovery directory's path, the staging directory's path, and
-# every path this script touches during execution are never printed, in
-# any line, under any mode — the enum-only stdout discipline that governs
-# `--check`/`--plan` holds identically under `--execute`.
+# every path this script touches during execution are never printed, on
+# STDOUT, in any line, under any mode — the enum-only stdout discipline that
+# governs `--check`/`--plan` holds identically under `--execute`. The one
+# deliberate exception is the dangerous batch's own checkpoint bundle path,
+# which is printed as human guidance on STDERR — see "EXECUTE MODE
+# (--execute --dangerous)" below.
+
+# ============================================================================
+# EXECUTE MODE (--execute --dangerous) — issue #261 SLICE 5, STAGE TWO
+# ============================================================================
+#
+# `--execute --dangerous` runs the identical diagnosis and planning
+# `--execute --safe-only` does, and additionally makes the single stage-two
+# action class — `rotate-database-credential` — executable, subject to the
+# approval model below. It may be combined with `--safe-only` in the same
+# invocation (each batch is independently planned, approved and executed;
+# see "Confirmation model" above for how the two batches coexist) or used on
+# its own. `rotate-database-credential` resolves database-credential-mismatch,
+# volume-retained-without-credentials, and (per the exception in the
+# action-class table above) a postgres-password secret-missing finding paired
+# with a retained volume — see that table for the full rationale. Every plan
+# entry resolving to `rotate-database-credential` is coalesced into ONE
+# execution instance (mirroring `restart-services`'s own once-per-run
+# `service_restart_result` dedup above): the credential is rotated at most
+# once per `--execute` run, and every matching plan entry reports the same
+# shared outcome.
+#
+# Never automatable — this is the entire point of stage two
+# --------------------------------------------------------------------------
+# There is NO flag, environment variable, or flag combination that lets the
+# dangerous batch run unattended. Approval requires either a real
+# interactive controlling terminal (or the test-only
+# `ORBIT_REPAIR_TTY_INPUT=1` escape hatch) or `ORBIT_REPAIR_PROMPTS=machine`
+# (a programmatic caller that answers prompts one line at a time — still an
+# explicit, synchronous approval exchange, not a bypass). Under any other
+# invocation — no controlling terminal, `ORBIT_REPAIR_PROMPTS` unset/not
+# `machine`, including under `--safe-only`'s own non-interactive automation
+# bypass described above — the dangerous batch is refused outright with
+# `dangerous result=refused ... reason=non-interactive` and exit code 6,
+# before any prompt is shown, before the checkpoint step, before anything is
+# touched. This is a structural refusal, not a declined confirmation: no
+# prompt is ever printed in this path (there is nothing to answer).
+#
+# Approval model — typed action word (owner decision, 2026-08-13)
+# --------------------------------------------------------------------------
+# Unlike the safe batch's `y`/`Y` confirmation, the dangerous batch requires
+# the operator to TYPE THE LITERAL ACTION WORD `rotate` — a non-standard
+# input specifically so muscle-memory Enter, a blank line, or any other text
+# can never fire it. The plan preview for the dangerous batch (the same
+# `plan action=... resolves=... mutation=credential-rotation backup=required`
+# line grammar --plan uses, on stdout, enum-only) is printed first. Then:
+#
+#   - Interactively: `Orbit repair: type 'rotate' to proceed (anything else
+#     cancels): ` is printed to stderr (not an enum) and one answer line is
+#     read from stdin. An exact `rotate` proceeds; a blank Enter, any other
+#     text, or EOF re-prompts, up to 3 attempts total; the 3rd rejected
+#     attempt (or an EOF at any attempt) refuses with
+#     `dangerous result=refused ... reason=refused-by-operator` and exit 6.
+#   - Under `ORBIT_REPAIR_PROMPTS=machine`: the repair-specific
+#     `field=action-word kind=typed-word` prompt (see "Machine prompts"
+#     below) is emitted instead, with the same exact-`rotate` acceptance
+#     rule and the same 3-attempt bound.
+#
+# Passphrase — the checkpoint, in the existing ORBKEK01 format (owner
+# decision, 2026-08-13; no new formats)
+# --------------------------------------------------------------------------
+# Once the typed action word is accepted, and BEFORE any database-touching
+# step, this script checkpoints the current `postgres-password` secret (if
+# one currently exists as a regular, mode-600 file whose content is a valid
+# 64-hex-character secret — the exact format `openssl rand -hex 32`
+# generates and `configure.sh`'s own `ensure_secret_file` enforces, matching
+# the `document-kek` format the existing ORBKEK01 machinery already targets;
+# when no such secret currently exists there is nothing to preserve, and the
+# checkpoint step is a documented no-op — see `do_checkpoint_step` — that
+# does not itself prompt for a passphrase). The checkpoint is a
+# passphrase-encrypted ORBKEK01 envelope (scrypt + AES-256-GCM,
+# `scripts/recovery-crypto.mjs`/`src/lib/recovery-bundle.ts`'s `encrypt`,
+# issue #296 slice 1) — the exact same format and code path
+# `export-recovery-bundle.sh` already uses for the document KEK, reused
+# HERE unmodified rather than reimplemented in shell: this script (bash) has
+# no crypto primitives of its own and never adds any. Because
+# `--entrypoint` overrides the container's normal entrypoint (which would
+# otherwise copy secrets into `/run/orbit-secrets`), the source is read from
+# the raw Compose secret mount `/run/secrets/orbit-postgres-password` —
+# exactly the path `export-recovery-bundle.sh` reads `orbit-document-kek`
+# from — via:
+#
+#   printf '%s' "$checkpoint_passphrase" |
+#     docker compose --project-name "$project" --env-file "$environment_file" \
+#       run --rm --no-deps -T --entrypoint node orbit-app \
+#       /opt/orbit/scripts/recovery-crypto.mjs encrypt \
+#       /run/secrets/orbit-postgres-password > "$bundle_path"
+#
+# The passphrase travels ONLY over that child process's stdin — never its
+# argv, never its environment — so it is not observable via `ps` or
+# `/proc/<pid>/cmdline`/`/proc/<pid>/environ` for that process or this
+# script's own. The passphrase is read into a `local`/script-scoped shell
+# variable, is never `export`ed, is erased (reassigned to an empty string)
+# immediately after the encrypt-and-verify exchange, and is never written to
+# any file, printed, or logged. It is subject to the existing ≥12-character
+# rule (`MIN_RECOVERY_PASSPHRASE_LENGTH` in recovery-bundle.ts /
+# recovery-crypto.mjs) and is prompted for TWICE (entry + confirmation, both
+# with input hidden via bash's `read -s`), matching
+# `export-recovery-bundle.sh`'s own passphrase collection exactly.
+#
+# Checkpoint verification (BEFORE rotation touches anything)
+# --------------------------------------------------------------------------
+# Immediately after the encrypted bundle is written, this script decrypts it
+# straight back (mirroring `import-recovery-bundle.sh`'s own
+# bind-mount-and-decrypt pattern: `--volume
+# "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" --entrypoint
+# node orbit-app .../recovery-crypto.mjs decrypt
+# /recovery/postgres-password.enc`) using the same passphrase, and compares
+# the recovered value byte-for-byte against the original secret content
+# (never printed either side of the comparison). Only if that round-trip
+# succeeds is the checkpoint considered established. If the bundle cannot be
+# created, or verification fails for any reason (wrong passphrase captured
+# by a transcription slip, a `docker`/`node` failure, a truncated write),
+# the WHOLE dangerous batch is refused — `dangerous result=failed ...
+# reason=checkpoint-failed`, exit 4 — and the database is never touched: no
+# `ALTER ROLE`, no secret-file write, no restart. This is what "checkpoint
+# created and verified BEFORE rotation touches anything" means concretely:
+# the ordering is enforced by the step iterator below, where `checkpoint` is
+# always the FIRST step and every later step is skipped entirely on its
+# failure.
+#
+# Checkpoint storage — local-only, owner-only, kept until manually deleted
+# --------------------------------------------------------------------------
+# The bundle is written into a freshly created, mode-0700 directory
+# (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
+# existing `.orbit-repair-recovery.XXXXXX`/`.orbit-install-staging.XXXXXX`
+# prefixes, distinct so it is never mistaken for either by a later
+# diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
+# directory (`cleanup_recovery_dir`, always removed at the end of every
+# `--execute` run), the checkpoint directory is NEVER removed by this
+# script — it is local-only, kept until the operator manually deletes it,
+# per the owner's explicit "no ad-hoc download hosting from a broken box"
+# decision (the recovered app's normal export/download flow is the intended
+# way to get a copy off the machine, not this checkpoint). Its path is never
+# printed on stdout (the enum-only contract holds); it IS printed as human
+# guidance on stderr, both right after a successful checkpoint and again (if
+# applicable) inside any later step-failure guidance — see "Any step
+# failure" below.
+#
+# Step iterator: checkpoint -> rotate-credential -> update-config ->
+# restart-services -> full re-diagnosis
+# --------------------------------------------------------------------------
+# See the "Stage-two dangerous-step iterator" note near RESERVED CLASSES
+# above for why this is a table of independently callable steps rather than
+# one function. The four steps, run straight through in this slice
+# (`run_rotate_database_credential_steps`):
+#
+#   1. checkpoint         See above. The ONLY step that may legitimately be
+#                          a no-op (no prior secret to preserve).
+#   2. rotate-credential   Generates a fresh 64-hex-character credential
+#                          (the same `openssl rand -hex 32` primitive
+#                          `configure.sh`'s `generate_hex_secret` uses),
+#                          stages it to a FIXED, predictable path
+#                          (`$secrets_directory/.repair-staged-postgres-
+#                          password`, mode 600) BEFORE touching the
+#                          database — so if a later step fails, the new
+#                          value is durably recoverable from a known path
+#                          rather than lost with a discarded shell
+#                          variable — then re-resolves this deployment's
+#                          orbit-db container (the same Compose
+#                          project/service-label ownership proof Step 10/11
+#                          use, never trusting diagnosis-time state) and
+#                          issues `ALTER ROLE "<user>" WITH PASSWORD
+#                          '<new>'` over a LOCAL-SOCKET connection (no `-h`,
+#                          exactly the trust-auth precondition the
+#                          "Database credential handling" note above already
+#                          documents) — so this step needs no prior
+#                          knowledge of whichever password the database
+#                          currently expects, which is exactly why it can
+#                          repair a credential-mismatch OR a missing-secret
+#                          deployment identically. The SQL text — including
+#                          the fresh credential — is piped to `psql -f -`
+#                          over stdin (`docker exec -i`, never `-c`/argv), so
+#                          it is never observable via `ps` or
+#                          `/proc/<pid>/cmdline` for either the `docker` or
+#                          `psql` process, exactly like the checkpoint
+#                          passphrase above; `-v ON_ERROR_STOP=1` is required
+#                          alongside `-f` (unlike `-c`, script-mode psql does
+#                          not fail its own exit code on a SQL error unless
+#                          this is set). Neither the new value nor the ALTER
+#                          ROLE statement is ever printed. Both interpolated
+#                          values are restricted-charset by prior validation
+#                          — `$rotate_pg_user` matches `^[A-Za-z0-9_]+$`
+#                          (resolve_rotate_db_identity) and the credential is
+#                          hex-only (charset `[0-9a-f]`, generate_hex_secret)
+#                          — so building this literal SQL text is
+#                          injection-safe regardless of the stdin delivery.
+#   3. update-config       Re-verifies the secrets directory is still a
+#                          real, non-symlink, mode-700 directory (the same
+#                          TOCTOU re-check `fix-permissions` performs), then
+#                          `mv`s the staged file from step 2 onto
+#                          `$secrets_directory/postgres-password` — a
+#                          same-directory rename, essentially always
+#                          reliable once step 2 has already succeeded.
+#   4. restart-services    Reuses the existing `do_restart_services` action
+#                          implementation verbatim (restarts this
+#                          deployment's orbit-app container so it picks up
+#                          the rotated credential on its next connection).
+#   5. full re-diagnosis   Not a "step" in the failure-stops-here sense
+#                          above — this is the standard post-execution
+#                          `--check`-format re-diagnosis (see "Output
+#                          contract" below), which always runs at the very
+#                          end of the `--execute` invocation regardless of
+#                          how either batch concluded.
+#
+# Any step failure: stop, guidance, stable non-zero exit
+# --------------------------------------------------------------------------
+# If ANY of steps 1-4 fails, the remaining steps in the sequence are never
+# attempted — the iterator stops at the first failure. `dangerous_failure_
+# reason` is set to `checkpoint-failed` (step 1) or `step-failed` (steps
+# 2-4), and recovery guidance is printed to stderr: for a post-checkpoint
+# failure, the checkpoint bundle's path (decrypt with
+# `docker compose ... run --rm --no-deps -T --entrypoint node orbit-app
+# /opt/orbit/scripts/recovery-crypto.mjs decrypt <path-inside-container>`
+# after bind-mounting it, exactly as this script itself does to verify it)
+# is named so the pre-rotation credential can be recovered by hand; if the
+# failure is at or after step 3 (i.e. step 2 already staged a new
+# credential), the staged file's fixed path is ALSO named, since the
+# database may already be expecting that value. Every planned entry
+# resolving to `rotate-database-credential` is then reported
+# `execute action=rotate-database-credential resolves=<class> result=failed`
+# and the run's exit code is 4 — the identical exit code stage one's own
+# `failed` terminal result uses, deliberately: `execution`'s exit-code
+# vocabulary already means "at least one attempted mutation failed" and
+# stage two does not need a second failure exit code, only its own `reason`
+# enum (see "Output contract" below) to distinguish which kind of failure it
+# was.
+#
+# Machine prompts (repair --execute --dangerous)
+# --------------------------------------------------------------------------
+# `ORBIT_REPAIR_PROMPTS=machine` extends the same #297 line grammar
+# (docs/engine-events.md "Machine prompts (v0)") the safe batch already uses,
+# adding three more repair-specific field/kind pairs, used only here:
+#
+#   prompt field=action-word kind=typed-word required=true attempt=<1..3>
+#   prompt field=checkpoint-passphrase kind=secret required=true attempt=<1..3>
+#   prompt field=checkpoint-passphrase-confirm kind=secret required=true attempt=<1..3>
+#
+# `action-word` accepts only the exact single-line answer `rotate`;
+# `reason=mismatch` on any other non-empty answer, `reason=empty` on a blank
+# line. `checkpoint-passphrase` accepts any answer of at least
+# `MIN_RECOVERY_PASSPHRASE_LENGTH` (12) characters; `reason=empty` for a
+# blank line, `reason=too-short` otherwise. `checkpoint-passphrase-confirm`
+# accepts only an answer identical to the just-accepted
+# `checkpoint-passphrase` answer; `reason=mismatch` otherwise. Every field is
+# bounded at 3 attempts, exactly like the existing `machine_prompt_collect`
+# convention in `configure.sh`: a 3rd rejected answer (or EOF at any
+# attempt) emits `prompt-abort field=<field>` instead of a 4th `prompt`, and
+# refuses the dangerous batch (`reason=refused-by-operator`, exit 6) rather
+# than a 4th prompt. No prompt line for any of these three fields ever
+# carries the answer itself — only the fixed `field`/`kind`/`reason`/
+# `attempt` vocabulary, exactly like the existing `safe-batch` field.
+#
+# Output contract (--execute --dangerous)
+# --------------------------------------------------------------------------
+# The dangerous batch adds exactly one new terminal line, printed once,
+# after every `execute action=rotate-database-credential ...` line the
+# dangerous batch itself produced (if any), and always after the safe
+# batch's own `execution result=...` line when both batches ran:
+#
+#   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
+#
+# `result=empty` (reason=none) — `--dangerous` was given but the plan
+# contained no `rotate-database-credential` entry; no prompt is shown.
+# `result=complete` (reason=none) — the credential was rotated and every
+# step succeeded. `result=refused` — the approval gate itself was never
+# passed (`reason=non-interactive` or `reason=refused-by-operator`); zero
+# mutation occurred. `result=failed` — approval was granted but a step
+# failed (`reason=checkpoint-failed` or `reason=step-failed`); see "Any step
+# failure" above. Like every other line in this script, no path, configured
+# value, or secret ever appears in this line or in any `execute action=
+# rotate-database-credential ...` line — enums only, exactly like
+# `--check`/`--plan`/`--execute --safe-only`.
+#
+# EXIT CODES (--execute --dangerous)
+# --------------------------------------------------------------------------
+#   0  dangerous result is `empty` or `complete` (and, when `--safe-only` was
+#      also given, the safe batch's own result is `empty`/`complete`/
+#      `unactionable` too — see the existing EXIT CODES (--execute) table
+#      above for that batch's own semantics).
+#   1  the safe batch (only) was declined — identical meaning to the
+#      existing `--safe-only` exit 1, unchanged; only reachable when
+#      `--dangerous`'s own result is not itself `failed`.
+#   4  a FAILURE occurred in either batch: the safe batch's own `failed`
+#      result, OR the dangerous batch's `result=failed` (`reason=
+#      checkpoint-failed`/`step-failed`) — a real failure always wins over a
+#      mere refusal or decline in the exit code.
+#   5  not-an-orbit-installation — identical trigger/meaning to every other
+#      mode; forced before either batch is even attempted.
+#   6  NEW — the dangerous batch's `result=refused`
+#      (`reason=non-interactive`/`refused-by-operator`): the approval gate
+#      was never passed, so nothing was mutated, but this is distinct from
+#      exit 1 (an explicit, single y/N decline) because the dangerous
+#      approval model has no single-shot decline — every refusal here is
+#      either a structural non-interactive refusal or an exhausted bounded
+#      retry.
 
 usage() {
-  printf 'Usage: %s (--check|--plan|--execute --safe-only) [--plain]\n' "$0" >&2
-  printf 'Orbit repair: --execute requires --safe-only in this slice.\n' >&2
-  printf 'Orbit repair: stage two (dangerous, credential-rotation) actions are not yet implemented,\n' >&2
-  printf 'Orbit repair: so --execute alone is refused rather than silently running a partial repair.\n' >&2
+  printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)) [--plain]\n' "$0" >&2
+  printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
+  printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
+  printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
+  printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential action,\n' >&2
+  printf 'Orbit repair: which always requires interactive or machine-prompt approval —\n' >&2
+  printf 'Orbit repair: there is no flag that runs it unattended.\n' >&2
 }
 
 plain_mode=0
 safe_only=0
+dangerous=0
 mode=""
 for arg in "$@"; do
   case "$arg" in
@@ -649,6 +1002,7 @@ for arg in "$@"; do
       ;;
     --plain) plain_mode=1 ;;
     --safe-only) safe_only=1 ;;
+    --dangerous) dangerous=1 ;;
     *)
       usage
       exit 2
@@ -660,12 +1014,12 @@ done
   exit 2
 }
 if [[ "$mode" == execute ]]; then
-  [[ "$safe_only" == 1 ]] || {
+  [[ "$safe_only" == 1 || "$dangerous" == 1 ]] || {
     usage
     exit 2
   }
-elif [[ "$safe_only" == 1 ]]; then
-  # --safe-only is only meaningful alongside --execute.
+elif [[ "$safe_only" == 1 || "$dangerous" == 1 ]]; then
+  # --safe-only/--dangerous are only meaningful alongside --execute.
   usage
   exit 2
 fi
@@ -706,11 +1060,33 @@ readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orb
 readonly total_checks=15
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
+readonly docker_rotate_timeout=30s
+readonly docker_checkpoint_timeout=30s
+readonly min_recovery_passphrase_length=12
+# Fixed path a newly rotated postgres-password is staged to BEFORE the
+# database is touched, and rename()d onto the live secret from — see
+# "Step iterator" in the header's "EXECUTE MODE (--execute --dangerous)"
+# section for why a fixed, predictable path (rather than a random mktemp
+# name) is deliberate: it is nameable in step-failure recovery guidance.
+readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgres-password"
 
 # Stage-one safe set (issue #261, owner decision 2026-08-13). See "Safe set
 # is a fixed allowlist" above for why this is not derived from the plan's
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services)
+
+# Stage-two dangerous set (issue #261, owner decision 2026-08-13) — only
+# ever executed under `--execute --dangerous`, subject to the typed-word/
+# checkpoint approval model. See "EXECUTE MODE (--execute --dangerous)"
+# above.
+readonly -a dangerous_action_classes=(rotate-database-credential)
+
+# The step ITERATOR for rotate-database-credential — see the "Stage-two
+# dangerous-step iterator" note near RESERVED CLASSES above and "Step
+# iterator" in "EXECUTE MODE (--execute --dangerous)" for the full
+# rationale. Each name is dispatched through dangerous_step_fn below by
+# run_dangerous_step, which is independently callable per step.
+readonly -a rotate_database_credential_steps=(checkpoint rotate-credential update-config restart-services)
 
 # Fixed allowlist of paths restore-transaction may ever touch, mirroring
 # install.sh's own `managed_paths` (its `deployment_assets` plus
@@ -826,6 +1202,16 @@ plan_actions_count=0
 plan_manual_count=0
 recovery_dir=""
 declare -A service_restart_result=()
+
+# dangerous-batch state (--execute --dangerous only; unused otherwise).
+safe_batch_exit_code=0
+dangerous_exit_code=0
+dangerous_failure_reason=none
+checkpoint_bundle_path=""
+checkpoint_passphrase=""
+rotate_pg_user=""
+rotate_pg_db=""
+rotate_db_id=""
 
 add_finding() {
   findings+=("$1|$2|$3")
@@ -1042,6 +1428,22 @@ is_safe_action() {
   return 1
 }
 
+is_dangerous_action() {
+  local candidate="$1" known
+  for known in "${dangerous_action_classes[@]}"; do
+    [[ "$known" == "$candidate" ]] && return 0
+  done
+  return 1
+}
+
+# True only when this plan entry's action is dangerous-class AND
+# `--dangerous` was requested — i.e. the safe-batch logic must defer it
+# entirely to the dangerous batch rather than reporting it `skipped` itself.
+# See "Confirmation model" above for the full rationale.
+is_dangerous_deferred() {
+  [[ "$dangerous" == 1 ]] && is_dangerous_action "$1"
+}
+
 # The confirmation preview: the same `plan ...` line grammar --plan itself
 # prints, derived from the already-computed $plan_entries. Enum-only,
 # printed to stdout ahead of the confirmation exchange.
@@ -1049,6 +1451,19 @@ print_plan_preview() {
   local entry action fclass ftarget
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
+    IFS='|' read -r action fclass ftarget <<< "$entry"
+    printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
+      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+  done
+}
+
+# Same line grammar as print_plan_preview above, but over an explicit list
+# of "action|resolves|target" entries rather than the whole of
+# $plan_entries — used by the dangerous batch to preview only its own
+# (deferred) entries, never the safe batch's.
+print_entries_preview() {
+  local entry action fclass ftarget
+  for entry in "$@"; do
     IFS='|' read -r action fclass ftarget <<< "$entry"
     printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
       "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
@@ -1660,70 +2075,570 @@ confirm_safe_batch() {
   return 0
 }
 
-# --- execute mode driver -----------------------------------------------------
+# --- stage two: rotate-database-credential (--execute --dangerous) ---------
+#
+# See "EXECUTE MODE (--execute --dangerous)" in the header for the full
+# design rationale this section implements.
 
-execute_repair() {
-  local entry action fclass ftarget status result
-  local safe_count=0 done_count=0 failed_count=0 terminal_result=""
+# Mirrors configure.sh's own generate_hex_secret exactly (same primitive,
+# same fallback, same format check) — repair.sh is deliberately
+# standalone/source-less (see the top-of-file header note) so this is a
+# same-shape reimplementation, not a shared function.
+generate_hex_secret() {
+  local secret=""
 
-  recovery_dir=""
-  service_restart_result=()
-
-  run_diagnosis
-
-  if [[ "$diagnosis_early" == 1 ]]; then
-    compute_plan_entries
-    for entry in "${plan_entries[@]:-}"; do
-      [[ -n "$entry" ]] || continue
-      IFS='|' read -r action fclass ftarget <<< "$entry"
-      printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
-    done
-    printf 'execution result=empty done=0 failed=0\n'
-    run_diagnosis
-    print_check_lines
-    exit 5
+  if command -v openssl >/dev/null 2>&1; then
+    secret="$(openssl rand -hex 32)" || secret=""
+  elif [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+    secret="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')" || secret=""
   fi
 
-  compute_plan_entries
+  [[ "$secret" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  printf '%s' "${secret,,}"
+}
+
+# Re-resolves this deployment's orbit-db container id and its configured
+# POSTGRES_USER/POSTGRES_DB, exactly like check_database_reachability above
+# (deliberately re-implemented rather than shared — see that function's own
+# "never trusting diagnosis-time state" precedent for restart-services).
+# Sets globals $rotate_pg_user/$rotate_pg_db/$rotate_db_id ($rotate_db_id is
+# empty when no single unambiguous container was found).
+resolve_rotate_db_identity() {
+  local candidate db_ids
+  rotate_pg_user=orbit
+  rotate_pg_db=orbit
+  rotate_db_id=""
+
+  if [[ "$env_status" == ok ]]; then
+    candidate="$(read_environment_value POSTGRES_USER 2>/dev/null || true)"
+    [[ "$candidate" =~ ^[A-Za-z0-9_]+$ ]] && rotate_pg_user="$candidate"
+    candidate="$(read_environment_value POSTGRES_DB 2>/dev/null || true)"
+    [[ "$candidate" =~ ^[A-Za-z0-9_]+$ ]] && rotate_pg_db="$candidate"
+  fi
+
+  db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=orbit-db" \
+    --format '{{.ID}}' 2>/dev/null || true)"
+  if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
+    rotate_db_id="$db_ids"
+  fi
+}
+
+# Invokes the ORBKEK01 CLI (issue #296 slice 1's scripts/recovery-crypto.mjs,
+# reused unmodified) inside a one-off orbit-app container, exactly like
+# export-recovery-bundle.sh does for the document KEK — see "Passphrase —
+# the checkpoint" above for the full rationale, including why the passphrase
+# only ever travels over this child's stdin.
+checkpoint_encrypt_postgres_password() {
+  local out_path="$1"
+  printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
+    docker compose --project-name "$project" --env-file "$environment_file" \
+    run --rm --no-deps -T --entrypoint node orbit-app \
+    /opt/orbit/scripts/recovery-crypto.mjs encrypt /run/secrets/orbit-postgres-password \
+    > "$out_path" 2>/dev/null
+}
+
+# Mirrors import-recovery-bundle.sh's own bind-mount-and-decrypt pattern.
+# Prints the recovered 64-hex-character value on stdout (the caller alone is
+# responsible for never printing it onward) or nothing on failure.
+checkpoint_decrypt_verify() {
+  local bundle_path="$1"
+  printf '%s' "$checkpoint_passphrase" | timeout "$docker_checkpoint_timeout" \
+    docker compose --project-name "$project" --env-file "$environment_file" \
+    run --rm --no-deps -T \
+    --volume "$repo_dir/$bundle_path:/recovery/postgres-password.enc:ro" \
+    --entrypoint node orbit-app \
+    /opt/orbit/scripts/recovery-crypto.mjs decrypt /recovery/postgres-password.enc 2>/dev/null
+}
+
+validate_checkpoint_passphrase() {
+  [[ "${#1}" -ge "$min_recovery_passphrase_length" ]] && printf '%s' "$1"
+}
+
+classify_checkpoint_passphrase_rejection() {
+  if [[ -z "$1" ]]; then printf 'empty'; else printf 'too-short'; fi
+}
+
+# Collects and confirms the checkpoint passphrase (bounded at 3 attempts per
+# field, matching configure.sh's own machine_prompt_collect convention).
+# Sets the global $checkpoint_passphrase on success (0); leaves it empty and
+# returns 1 on refusal/EOF. Never prints the passphrase itself, in either
+# mode.
+prompt_checkpoint_passphrase() {
+  checkpoint_passphrase=""
+  local attempt input value=""
+
+  if [[ "$machine_prompts" == 1 ]]; then
+    attempt=1
+    while ((attempt <= 3)); do
+      printf 'prompt field=checkpoint-passphrase kind=secret required=true attempt=%d\n' "$attempt"
+      if ! IFS= read -r input; then
+        printf 'prompt-abort field=checkpoint-passphrase\n'
+        return 1
+      fi
+      if value="$(validate_checkpoint_passphrase "$input")"; then
+        printf 'prompt-accept field=checkpoint-passphrase\n'
+        input=""
+        break
+      fi
+      printf 'prompt-reject field=checkpoint-passphrase reason=%s\n' "$(classify_checkpoint_passphrase_rejection "$input")"
+      input=""
+      attempt=$((attempt + 1))
+      if ((attempt > 3)); then
+        printf 'prompt-abort field=checkpoint-passphrase\n'
+        return 1
+      fi
+    done
+
+    attempt=1
+    while ((attempt <= 3)); do
+      printf 'prompt field=checkpoint-passphrase-confirm kind=secret required=true attempt=%d\n' "$attempt"
+      if ! IFS= read -r input; then
+        printf 'prompt-abort field=checkpoint-passphrase-confirm\n'
+        value=""
+        return 1
+      fi
+      if [[ "$input" == "$value" ]]; then
+        printf 'prompt-accept field=checkpoint-passphrase-confirm\n'
+        checkpoint_passphrase="$value"
+        input=""
+        value=""
+        return 0
+      fi
+      printf 'prompt-reject field=checkpoint-passphrase-confirm reason=mismatch\n'
+      input=""
+      attempt=$((attempt + 1))
+      if ((attempt > 3)); then
+        printf 'prompt-abort field=checkpoint-passphrase-confirm\n'
+        value=""
+        return 1
+      fi
+    done
+  fi
+
+  if [[ "$interactive" == 1 ]]; then
+    attempt=1
+    while ((attempt <= 3)); do
+      printf 'Orbit repair: checkpoint passphrase (at least %d characters, input hidden): ' \
+        "$min_recovery_passphrase_length" >&2
+      if ! IFS= read -r -s input; then
+        printf '\n' >&2
+        printf 'Orbit repair: no passphrase received; refusing to rotate the database credential.\n' >&2
+        return 1
+      fi
+      printf '\n' >&2
+      if value="$(validate_checkpoint_passphrase "$input")"; then
+        input=""
+        break
+      fi
+      input=""
+      attempt=$((attempt + 1))
+      if ((attempt > 3)); then
+        printf 'Orbit repair: no valid passphrase received; refusing to rotate the database credential.\n' >&2
+        return 1
+      fi
+      printf 'Orbit repair: passphrase must be at least %d characters; %d attempt(s) remaining.\n' \
+        "$min_recovery_passphrase_length" "$((3 - attempt + 1))" >&2
+    done
+
+    attempt=1
+    while ((attempt <= 3)); do
+      printf 'Orbit repair: confirm checkpoint passphrase (input hidden): ' >&2
+      if ! IFS= read -r -s input; then
+        printf '\n' >&2
+        printf 'Orbit repair: no confirmation received; refusing to rotate the database credential.\n' >&2
+        value=""
+        return 1
+      fi
+      printf '\n' >&2
+      if [[ "$input" == "$value" ]]; then
+        checkpoint_passphrase="$input"
+        input=""
+        value=""
+        return 0
+      fi
+      input=""
+      attempt=$((attempt + 1))
+      if ((attempt > 3)); then
+        printf 'Orbit repair: passphrases did not match; refusing to rotate the database credential.\n' >&2
+        value=""
+        return 1
+      fi
+      printf 'Orbit repair: passphrases did not match; %d attempt(s) remaining.\n' "$((3 - attempt + 1))" >&2
+    done
+  fi
+
+  return 1
+}
+
+# Step 1 of the rotate-database-credential iterator. Returns 0 (checkpoint
+# step satisfied — either verified-created, or legitimately nothing to
+# preserve) or 1 (failed — the caller must stop before any database
+# mutation). Sets $checkpoint_bundle_path (relative to $repo_dir) only when
+# a bundle was actually created. See "Passphrase — the checkpoint" and
+# "Checkpoint verification" above for the full rationale.
+do_checkpoint_step() {
+  checkpoint_bundle_path=""
+  local secret_path="$secrets_directory/postgres-password"
+  local original_hex="" recovered_hex="" checkpoint_dir="" bundle_path=""
+  local verify_status=0
+
+  if ! is_regular_non_symlink_file "$secret_path" || ! has_mode "$secret_path" 600; then
+    printf 'Orbit repair: no existing postgres-password secret to preserve; proceeding without a content checkpoint.\n' >&2
+    return 0
+  fi
+  original_hex="$(tr -d '\r\n' < "$secret_path" 2>/dev/null || true)"
+  if [[ ! "$original_hex" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    printf 'Orbit repair: the current postgres-password secret is not in the expected format; proceeding without a content checkpoint.\n' >&2
+    original_hex=""
+    return 0
+  fi
+
+  if ! prompt_checkpoint_passphrase; then
+    original_hex=""
+    return 1
+  fi
+
+  checkpoint_dir="$(mktemp -d "./.orbit-repair-checkpoint.XXXXXX")" || {
+    checkpoint_passphrase=""
+    original_hex=""
+    return 1
+  }
+  chmod 700 -- "$checkpoint_dir" || {
+    checkpoint_passphrase=""
+    original_hex=""
+    rm -rf -- "$checkpoint_dir"
+    return 1
+  }
+
+  bundle_path="$checkpoint_dir/postgres-password.orbkek"
+  if ! checkpoint_encrypt_postgres_password "$bundle_path" || [[ ! -s "$bundle_path" ]]; then
+    printf 'Orbit repair: could not create the pre-rotation checkpoint; refusing to rotate the database credential.\n' >&2
+    checkpoint_passphrase=""
+    original_hex=""
+    rm -rf -- "$checkpoint_dir"
+    return 1
+  fi
+  chmod 600 -- "$bundle_path" 2>/dev/null || true
+
+  recovered_hex="$(checkpoint_decrypt_verify "$bundle_path")" || verify_status=$?
+  if [[ "$verify_status" != 0 || "$recovered_hex" != "$original_hex" ]]; then
+    printf 'Orbit repair: the pre-rotation checkpoint failed verification; refusing to rotate the database credential.\n' >&2
+    checkpoint_passphrase=""
+    original_hex=""
+    recovered_hex=""
+    rm -rf -- "$checkpoint_dir"
+    return 1
+  fi
+
+  checkpoint_passphrase=""
+  original_hex=""
+  recovered_hex=""
+  checkpoint_bundle_path="$bundle_path"
+  printf 'Orbit repair: pre-rotation checkpoint created and verified at %s\n' "$checkpoint_dir" >&2
+  printf 'Orbit repair: (passphrase-encrypted, ORBKEK01 format; keep the passphrase and this file — Orbit never stores the passphrase — until you have confirmed the rotation succeeded.)\n' >&2
+  return 0
+}
+
+# Step 2. Generates a fresh credential, stages it to the FIXED
+# $staged_postgres_password_path BEFORE touching the database (see "Step
+# iterator" above for why), then rotates the database role over a
+# local-socket (trust-auth) connection so no prior knowledge of the
+# database's current password is ever required.
+do_rotate_credential_step() {
+  resolve_rotate_db_identity
+  [[ -n "$rotate_db_id" ]] || return 1
+  is_real_non_symlink_directory "$secrets_directory" || return 1
+  has_mode "$secrets_directory" 700 || return 1
+
+  local new_password="" status=0
+  new_password="$(generate_hex_secret)" || return 1
+
+  printf '%s\n' "$new_password" > "$staged_postgres_password_path" || {
+    new_password=""
+    return 1
+  }
+  chmod 600 -- "$staged_postgres_password_path" || {
+    new_password=""
+    rm -f -- "$staged_postgres_password_path"
+    return 1
+  }
+
+  # Delivered over psql's stdin (`-f -`), never as a `-c`/argv value — see
+  # "Step iterator" above for the full rationale, including why both
+  # interpolated values are injection-safe by prior validation regardless.
+  printf 'ALTER ROLE "%s" WITH PASSWORD '"'"'%s'"'"';\n' "$rotate_pg_user" "$new_password" |
+    timeout "$docker_rotate_timeout" docker exec -i "$rotate_db_id" \
+      psql -v ON_ERROR_STOP=1 -U "$rotate_pg_user" -d "$rotate_pg_db" -f - \
+      >/dev/null 2>&1 || status=$?
+  new_password=""
+  [[ "$status" == 0 ]]
+}
+
+# Step 3. Same-directory rename of the staged credential onto the live
+# secret — re-verifies the secrets directory immediately before acting,
+# exactly like fix-permissions's own TOCTOU re-check.
+do_update_config_step() {
+  [[ -f "$staged_postgres_password_path" && ! -L "$staged_postgres_password_path" ]] || return 1
+  is_real_non_symlink_directory "$secrets_directory" || return 1
+  has_mode "$secrets_directory" 700 || return 1
+  mv -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
+}
+
+# Step 4 reuses do_restart_services verbatim (it already ignores its own
+# unused positional argument, and its target is unconditionally orbit-app —
+# see that function above).
+
+declare -A dangerous_step_fn=(
+  [checkpoint]=do_checkpoint_step
+  [rotate-credential]=do_rotate_credential_step
+  [update-config]=do_update_config_step
+  [restart-services]=do_restart_services
+)
+
+# Independently callable per step — see the "Stage-two dangerous-step
+# iterator" note near RESERVED CLASSES above for why this indirection
+# (rather than one monolithic function) is deliberate.
+run_dangerous_step() {
+  local step="$1" fn
+  fn="${dangerous_step_fn[$step]:-}"
+  [[ -n "$fn" ]] || return 1
+  "$fn"
+}
+
+# The straight-through cadence over $rotate_database_credential_steps — see
+# "Step iterator" above. Stops at the first failing step; sets
+# $dangerous_failure_reason to checkpoint-failed (step 1) or step-failed
+# (steps 2-4) and prints stderr recovery guidance referencing the checkpoint
+# (and, once step 2 has run, the staged new-credential path) before
+# returning 1.
+run_rotate_database_credential_steps() {
+  local step
+  dangerous_failure_reason=none
+  for step in "${rotate_database_credential_steps[@]}"; do
+    if ! run_dangerous_step "$step"; then
+      if [[ "$step" == checkpoint ]]; then
+        dangerous_failure_reason="checkpoint-failed"
+      else
+        dangerous_failure_reason="step-failed"
+        printf "Orbit repair: stage two step '%s' failed.\n" "$step" >&2
+        if [[ -n "$checkpoint_bundle_path" ]]; then
+          printf 'Orbit repair: the pre-rotation credential remains recoverable from the checkpoint at %s\n' \
+            "$checkpoint_bundle_path" >&2
+          printf 'Orbit repair: (decrypt it with your checkpoint passphrase — see "EXECUTE MODE (--execute --dangerous)" in scripts/repair.sh for the exact command).\n' >&2
+        fi
+        if [[ "$step" != rotate-credential && -e "$staged_postgres_password_path" ]]; then
+          printf 'Orbit repair: a newly rotated credential is already staged at %s;\n' \
+            "$staged_postgres_password_path" >&2
+          printf 'Orbit repair: move it into place as %s/postgres-password if the database still accepts it.\n' \
+            "$secrets_directory" >&2
+        fi
+      fi
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Approval gate for stage two: the operator must type the literal action
+# word "rotate" — see "Approval model" above. Bounded at 3 attempts.
+# Returns 0 (typed correctly) or 1 (refused: wrong word on the final
+# attempt, empty input, or EOF). The non-interactive/non-machine case is
+# never routed here at all — see execute_dangerous_batch below.
+confirm_dangerous_action() {
+  local count="$1" attempt answer remaining
+
+  if [[ "$machine_prompts" == 1 ]]; then
+    attempt=1
+    while ((attempt <= 3)); do
+      printf 'prompt field=action-word kind=typed-word required=true attempt=%d\n' "$attempt"
+      if ! IFS= read -r answer; then
+        printf 'prompt-abort field=action-word\n'
+        return 1
+      fi
+      if [[ "$answer" == rotate ]]; then
+        printf 'prompt-accept field=action-word\n'
+        return 0
+      fi
+      if [[ -z "$answer" ]]; then
+        printf 'prompt-reject field=action-word reason=empty\n'
+      else
+        printf 'prompt-reject field=action-word reason=mismatch\n'
+      fi
+      attempt=$((attempt + 1))
+    done
+    printf 'prompt-abort field=action-word\n'
+    return 1
+  fi
+
+  if [[ "$interactive" == 1 ]]; then
+    printf 'Orbit repair: stage two — %d dangerous action(s) proposed above (mutation=credential-rotation).\n' \
+      "$count" >&2
+    attempt=1
+    while ((attempt <= 3)); do
+      printf "Orbit repair: type 'rotate' to proceed (anything else cancels): " >&2
+      if ! IFS= read -r answer; then
+        printf 'Orbit repair: no confirmation received; refusing the dangerous action.\n' >&2
+        return 1
+      fi
+      if [[ "$answer" == rotate ]]; then
+        return 0
+      fi
+      remaining=$((3 - attempt))
+      if [[ "$remaining" -gt 0 ]]; then
+        printf 'Orbit repair: confirmation did not match; %d attempt(s) remaining.\n' "$remaining" >&2
+      fi
+      attempt=$((attempt + 1))
+    done
+    printf 'Orbit repair: stage two confirmation not received; refusing the dangerous action.\n' >&2
+    return 1
+  fi
+
+  return 1
+}
+
+# Phase 2 of --execute --dangerous. Called unconditionally after the safe
+# batch (phase 1) has already run, regardless of that phase's own outcome —
+# see "Confirmation model" above. Prints one `execute action=... result=...`
+# line per deferred dangerous-class plan entry, then one terminal `dangerous
+# result=... done=<n> failed=<n> reason=...` line. Sets $dangerous_exit_code
+# for execute_repair to fold into the run's final exit code.
+execute_dangerous_batch() {
+  local entry action fclass ftarget
+  local -a dangerous_entries=()
+  dangerous_exit_code=0
+
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r action fclass ftarget <<< "$entry"
-    is_safe_action "$action" && safe_count=$((safe_count + 1))
+    is_dangerous_action "$action" && dangerous_entries+=("$entry")
   done
 
-  if [[ "$safe_count" -eq 0 ]]; then
-    for entry in "${plan_entries[@]:-}"; do
-      [[ -n "$entry" ]] || continue
+  if [[ "${#dangerous_entries[@]}" -eq 0 ]]; then
+    printf 'dangerous result=empty done=0 failed=0 reason=none\n'
+    return 0
+  fi
+
+  # Never automatable: refused outright, no prompt shown, whenever neither a
+  # real approval channel is available — see "Never automatable" above.
+  if [[ "$machine_prompts" != 1 && "$interactive" != 1 ]]; then
+    for entry in "${dangerous_entries[@]}"; do
       IFS='|' read -r action fclass ftarget <<< "$entry"
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
     done
-    if [[ "${#plan_entries[@]}" -eq 0 ]]; then
+    printf 'dangerous result=refused done=0 failed=0 reason=non-interactive\n'
+    dangerous_exit_code=6
+    return 0
+  fi
+
+  print_entries_preview "${dangerous_entries[@]}"
+
+  if ! confirm_dangerous_action "${#dangerous_entries[@]}"; then
+    for entry in "${dangerous_entries[@]}"; do
+      IFS='|' read -r action fclass ftarget <<< "$entry"
+      printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+    done
+    printf 'dangerous result=refused done=0 failed=0 reason=refused-by-operator\n'
+    dangerous_exit_code=6
+    return 0
+  fi
+
+  # Approved: rotate-database-credential is currently the only dangerous
+  # action class, so every deferred entry shares one execution instance and
+  # outcome (mirrors do_restart_services's own once-per-run dedup above).
+  local step_status=0
+  run_rotate_database_credential_steps || step_status=$?
+
+  local line_result done_count=0 failed_count=0
+  if [[ "$step_status" == 0 ]]; then
+    line_result="done"
+    done_count="${#dangerous_entries[@]}"
+  else
+    line_result="failed"
+    failed_count="${#dangerous_entries[@]}"
+  fi
+  for entry in "${dangerous_entries[@]}"; do
+    IFS='|' read -r action fclass ftarget <<< "$entry"
+    printf 'execute action=%s resolves=%s result=%s\n' "$action" "$fclass" "$line_result"
+  done
+
+  if [[ "$line_result" == "done" ]]; then
+    printf 'dangerous result=complete done=%d failed=0 reason=none\n' "$done_count"
+    dangerous_exit_code=0
+  else
+    printf 'dangerous result=failed done=0 failed=%d reason=%s\n' "$failed_count" "$dangerous_failure_reason"
+    dangerous_exit_code=4
+  fi
+}
+
+# --- execute mode driver -----------------------------------------------------
+
+# Phase 1 (--safe-only): identical output/behavior to the original slice-4
+# stage-one implementation when $dangerous==0 (verified byte-for-byte by the
+# existing --execute --safe-only test suite, which never sets --dangerous).
+# When $dangerous==1, every dangerous-class plan entry is deferred (see
+# is_dangerous_deferred above) instead of being printed `skipped` here — it
+# is reported by execute_dangerous_batch (phase 2) instead. Sets
+# $safe_batch_exit_code (0/1/4, the same values the old inline `exit`
+# statements used) rather than exiting directly, so execute_repair can run
+# phase 2 and the final re-diagnosis afterward.
+run_safe_batch() {
+  local entry action fclass ftarget status result
+  local safe_count=0 done_count=0 failed_count=0 terminal_result=""
+
+  if [[ "$safe_only" == 1 ]]; then
+    for entry in "${plan_entries[@]:-}"; do
+      [[ -n "$entry" ]] || continue
+      IFS='|' read -r action fclass ftarget <<< "$entry"
+      is_safe_action "$action" && safe_count=$((safe_count + 1))
+    done
+  fi
+
+  if [[ "$safe_count" -eq 0 ]]; then
+    # $reported_count excludes entries deferred to the dangerous batch (see
+    # is_dangerous_deferred above): a plan containing ONLY a deferred
+    # rotate-database-credential entry must not be mislabeled `unactionable`
+    # by the safe batch — phase 2 (execute_dangerous_batch) is about to
+    # handle it. This is purely a label/exit-code nuance: $safe_batch_exit_code
+    # is 0 either way, and when $dangerous==0 nothing is ever deferred, so
+    # $reported_count always equals ${#plan_entries[@]} and this is
+    # byte-identical to the original stage-one behavior.
+    local reported_count=0
+    for entry in "${plan_entries[@]:-}"; do
+      [[ -n "$entry" ]] || continue
+      IFS='|' read -r action fclass ftarget <<< "$entry"
+      is_dangerous_deferred "$action" && continue
+      printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+      reported_count=$((reported_count + 1))
+    done
+    if [[ "$reported_count" -eq 0 ]]; then
       terminal_result=empty
     else
       terminal_result=unactionable
     fi
     printf 'execution result=%s done=0 failed=0\n' "$terminal_result"
-    run_diagnosis
-    print_check_lines
-    exit 0
+    safe_batch_exit_code=0
+    return 0
   fi
 
   if ! confirm_safe_batch "$safe_count"; then
     for entry in "${plan_entries[@]:-}"; do
       [[ -n "$entry" ]] || continue
       IFS='|' read -r action fclass ftarget <<< "$entry"
+      is_dangerous_deferred "$action" && continue
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
     done
     printf 'execution result=declined done=0 failed=0\n'
-    run_diagnosis
-    print_check_lines
-    exit 1
+    safe_batch_exit_code=1
+    return 0
   fi
 
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r action fclass ftarget <<< "$entry"
     if ! is_safe_action "$action"; then
+      is_dangerous_deferred "$action" && continue
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
       continue
     fi
@@ -1745,22 +2660,75 @@ execute_repair() {
     printf 'execute action=%s resolves=%s result=%s\n' "$action" "$fclass" "$result"
   done
 
-  cleanup_recovery_dir
-
   if [[ "$failed_count" -gt 0 ]]; then
     terminal_result=failed
   else
     terminal_result=complete
   fi
   printf 'execution result=%s done=%s failed=%s\n' "$terminal_result" "$done_count" "$failed_count"
+  if [[ "$terminal_result" == failed ]]; then
+    safe_batch_exit_code=4
+  else
+    safe_batch_exit_code=0
+  fi
+}
 
+execute_repair() {
+  local entry action fclass ftarget
+
+  recovery_dir=""
+  service_restart_result=()
+  checkpoint_bundle_path=""
+  safe_batch_exit_code=0
+  dangerous_exit_code=0
+
+  run_diagnosis
+
+  if [[ "$diagnosis_early" == 1 ]]; then
+    compute_plan_entries
+    for entry in "${plan_entries[@]:-}"; do
+      [[ -n "$entry" ]] || continue
+      IFS='|' read -r action fclass ftarget <<< "$entry"
+      is_dangerous_deferred "$action" && continue
+      printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
+    done
+    printf 'execution result=empty done=0 failed=0\n'
+    if [[ "$dangerous" == 1 ]]; then
+      printf 'dangerous result=empty done=0 failed=0 reason=none\n'
+    fi
+    run_diagnosis
+    print_check_lines
+    exit 5
+  fi
+
+  compute_plan_entries
+  run_safe_batch
+
+  if [[ "$dangerous" == 1 ]]; then
+    execute_dangerous_batch
+  fi
+
+  cleanup_recovery_dir
   run_diagnosis
   print_check_lines
 
-  case "$terminal_result" in
-    complete) exit 0 ;;
-    failed) exit 4 ;;
-  esac
+  # Final exit code — see "EXIT CODES (--execute --dangerous)" above for the
+  # full precedence table this implements. A real failure (4) in either
+  # batch always wins; a dangerous refusal (6) is reported next; a safe-batch
+  # decline (1) is preserved when nothing else overrides it; otherwise 0.
+  # When $dangerous==0, $dangerous_exit_code stays 0 and this reduces to
+  # exactly the original stage-one exit code (0/1/4) — see run_safe_batch's
+  # own comment for why its output is unchanged in that case too.
+  if [[ "$safe_batch_exit_code" == 4 || "$dangerous_exit_code" == 4 ]]; then
+    exit 4
+  fi
+  if [[ "$dangerous_exit_code" == 6 ]]; then
+    exit 6
+  fi
+  if [[ "$safe_batch_exit_code" == 1 ]]; then
+    exit 1
+  fi
+  exit 0
 }
 
 case "$mode" in
