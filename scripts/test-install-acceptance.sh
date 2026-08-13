@@ -288,7 +288,19 @@ positive_scenario() {
         > "$workdir/install.log" 2>&1 &
     local install_bg=$! waited=0
     set +m
-    until grep -q '^phase=assets' "$workdir/install.log" 2>/dev/null; do
+    # Wait for the staging directory itself rather than a '^phase=assets' log
+    # line: install.sh's UI events are queued (installer_ui_event) until
+    # load_installer_ui sources the just-fetched installer-ui.sh, which does
+    # not happen until *after* every asset has been fetched and bash -n
+    # checked (install.sh:1395-1421). So the "starting" event for the assets
+    # phase is only ever written to the log already-batched with "completed"
+    # right as the phase ends — grepping for it can never catch install.sh
+    # mid-fetch, only after the whole phase (and everything gated on the log
+    # line) has already finished. staging_dir is mkdir'd as the very first
+    # step of the phase (install.sh:1398), before any asset is fetched, so
+    # its appearance on disk is a real-time signal of "assets phase begun."
+    until find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d 2>/dev/null |
+      grep -q .; do
       sleep 0.2; waited=$((waited + 1))
       [[ "$waited" -lt 300 ]] || fail "interruption: assets phase never observed"
       kill -0 "$install_bg" 2>/dev/null || fail "interruption: installer exited before the assets phase"
