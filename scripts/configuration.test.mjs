@@ -188,9 +188,9 @@ describe("configuration.sh", () => {
       "APP_URL=$HOST\n",
       "APP_URL=$(hostname)\n",
       "APP_URL=\"https://a.example.invalid\"\n",
+      "APP_URL='https://a.example.invalid\n",
       "APP_URL=`hostname`\n",
-      "APP_URL=a\\b\n",
-      "APP_URL=https://a.example.invalid#comment\n",
+      "APP_URL=https://a.example.invalid #comment\n",
       "APP_URL= leading\n",
       "APP_URL=trailing \n",
       " APP_URL=https://a.example.invalid\n",
@@ -205,6 +205,32 @@ describe("configuration.sh", () => {
     chmodSync(result.file, 0o640);
     const unsafe = spawnSync("bash", [script, "--check", "--file", result.file], { encoding: "utf8" });
     expect(unsafe.status).not.toBe(0);
+  });
+
+  // #383: a value containing a non-leading quote, a backslash anywhere, or a
+  // `#` not preceded by whitespace was previously rejected unconditionally,
+  // even though Compose's env-file parser (verified with `docker compose
+  // config`) passes every one of these through to the container literally.
+  // That blocked --preflight/--migrate for an already-working deployment
+  // whose .env-orbit legitimately holds a direct secret containing one of
+  // these characters (SMTP_PASSWORD etc. — see the "accepted for upgrades"
+  // comment on lines 31-34 above), with no way to recover except rotating
+  // the credential at the provider. Only a leading quote (Compose can run
+  // it on across lines) and a whitespace-preceded `#` (Compose's real
+  // comment marker) remain rejected, per the "rejects" case above.
+  it("accepts a non-leading quote, a backslash, or a `#` not preceded by whitespace (#383)", () => {
+    for (const value of [
+      "Xk7#pq2rLm",
+      String.raw`a\b`,
+      'abc"def',
+      "abc'def",
+      "https://a.example.invalid#fragment",
+      String.raw`C:\Users\orbit`,
+    ]) {
+      const migrated = run(`APP_URL=https://a.example.invalid\nSMTP_PASSWORD=${value}\n`, migrationArgs());
+      expect(migrated.status).toBe(0);
+      expect(readFileSync(migrated.file, "utf8")).toContain(`SMTP_PASSWORD=${value}\n`);
+    }
   });
 
   it("rejects invalid or mismatched managed Compose project identity", () => {
