@@ -1,47 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="orbit-mark-title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-labelledby="orbit-mark-title">
   <title id="orbit-mark-title">Orbit — everything in your orbit, on track</title>
 
-  <!-- Three independent, tapered arcs represent services moving around the home. -->
-  <path
-    fill="#715cff"
-    d="M103 58c29-39 80-48 105-17 21 27 13 72-18 119 18-43 23-82 8-105-17-25-57-22-95 3Z"
-  />
-  <circle cx="202" cy="70" r="10" fill="#715cff" />
+  <!-- The ratified mark: exactly three flat shapes — the year ring, the planet
+       riding it, and the plain filled centre (the household). Nothing else, at
+       any size: no gradient, no glow, no 3D, no shadow, no glyph inside the ring.
 
-  <path
-    fill="#22e7d3"
-    d="M119 61c-53-8-94 14-99 55-5 36 27 67 98 83-54-24-81-51-80-82 1-31 29-51 81-56Z"
-  />
-  <circle cx="31" cy="139" r="11" fill="#22e7d3" />
+       Colour is baked in rather than tokenised because every caller renders this
+       through next/image, i.e. as an <img>: page CSS cannot reach into an image
+       document, currentColor would resolve to its own black, and the active
+       theme pack is chosen in-app, so prefers-color-scheme is not a proxy for
+       it. These three values are therefore picked to clear 3:1 against every
+       pack's page and panel surface at once — star-chart #060b1c and after dark
+       #05070d as readily as atlas #efe9db and dawn #eef1f6. They sit midway
+       between the ratified dark-surface trio (#8791b3 / #ffe9c4 / #d8b45a) and
+       the light-surface one (#5d6a87 / #1c2b4a / #b4842c). Per-pack colour needs
+       this geometry inlined into the components instead of loaded as an image. -->
 
-  <path
-    fill="#ff4fa3"
-    d="M191 112c27 35 19 79-19 101-33 20-76 18-103-10 29 19 66 18 96 0 30-19 41-53 26-91Z"
-  />
-  <circle cx="143" cy="216" r="11" fill="#ff4fa3" />
-
-  <!-- The enlarged home remains high-contrast in both light and dark interfaces. -->
-  <g transform="translate(-16.64 -18.2) scale(1.13)">
-    <path
-      fill="#f7f4ff"
-      stroke="#15162b"
-      stroke-linejoin="round"
-      stroke-width="10"
-      d="M78 126 128 82l50 44v56c0 9-7 16-16 16H94c-9 0-16-7-16-16v-56Z"
-    />
-    <path
-      fill="none"
-      stroke="#15162b"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      stroke-width="12"
-      d="m69 129 59-52 59 52"
-    />
-    <path
-      fill="#ff4fa3"
-      stroke="#15162b"
-      stroke-width="7"
-      d="M113 198v-33c0-9 7-16 15-16s15 7 15 16v33"
-    />
-  </g>
+  <circle cx="100" cy="100" r="72" fill="none" stroke="#7b86a6" stroke-width="7" />
+  <circle cx="100" cy="100" r="7" fill="#7b86a6" />
+  <!-- 163,63.5 is 72.8 from the centre: the planet rides the ring, not beside it. -->
+  <circle cx="163" cy="63.5" r="16" fill="#ac8129" />
 </svg>
