@@ -1,6 +1,6 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
-Status: proposed (slices 1-3 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-4 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan
 changes; it is not meant to be a permanent record like `docs/adr/`.
@@ -336,6 +336,124 @@ unchanged from the top-level plan.
   mismatch (migration fails closed) — each asserted against this module's
   exact output, not just exit-code parity.
 
+## Slice 4 — guided configuration driving (this PR)
+
+**Scope.** `src/lib/guided-configuration.ts`: `stageGuidedInstallConfiguration`
+and `prepareConfiguration`, mirroring `stage_guided_install_configuration`
+(install.sh:1031-1077) and `prepare_configuration` (install.sh:947-1008),
+plus the small decision helpers they call directly —
+`missingRequiredFields`, `missingGuidedFields`, `missingConfigurationFields`
+(install.sh:843-877) and `noninteractiveConfigurationGuidance`
+(install.sh:879-885).
+
+install.sh itself always hands the real controlling terminal to
+`scripts/configure.sh` for these flows (`bash scripts/configure.sh --init`,
+with `ORBIT_CONFIGURE_PROMPTS` never set — docs/engine-events.md's own
+"Machine prompts (v0)" section says so explicitly: "install.sh never sets
+this variable"). The CLI port has no `/dev/tty` to hand a child process, so
+per the top-level plan this slice always drives configure.sh's guided
+fields (`APP_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`)
+through the #297 `ORBIT_CONFIGURE_PROMPTS=machine` line grammar instead of
+TTY prompting — the same grammar
+`scripts/engine-prompt-renderer.fixture.mjs` already demonstrates driving
+generically as the schema-blind reference consumer. `parseMachinePromptLine`
+reimplements that grammar (the same four line shapes and field/kind/reason
+vocabulary, not a new variant of it) as a pure, typed parser with no adapter
+of its own.
+
+Every `configure.sh` invocation the two ported functions make — `--init`,
+the bare default invocation, `--set-oidc-secret`, `--set-deployment-profile`,
+and `--check` — is one method on a caller-supplied
+`GuidedConfigurationAdapter`, the same "thin adapter at the edge, nothing
+shipped yet" shape slice 2's `database-volume-safety.ts` and slice 3's
+`configuration-migration.ts`/`oidc-discovery.ts` established; no production
+implementation ships in this slice. Unlike every adapter shipped so far
+(each models one blocking `$(cmd ...)` call as a synchronous method), the
+two machine-prompt methods (`runInit`, `runSetOidcSecret`) model a live,
+multi-round stdin/stdout exchange with a real child process and are
+declared `async` — see Flags. Deciding the actual answer values that feed
+a `MachinePromptAnswerProvider` (from CLI flags, environment, or a future
+interactive UI) and the final apply/cancel review decision
+(`GuidedConfigurationAdapter.confirmApply`) are both out of scope for this
+slice — collecting those is explicitly deferred to slice 5's
+orchestration/wiring work, per the plan's own slice boundary.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 1 / install.sh): 24 (`prepare_configuration`'s non-interactive refusal
+with install.sh's exact remediation guidance when required fields are
+missing and no controlling terminal is available), 28 (re-verifying
+`.env-orbit`/`.orbit-secrets` are still a regular non-symlink file and a
+real non-symlink directory after every configure.sh invocation that mutates
+configuration), 30 (`stage_guided_install_configuration` only activates for
+a fresh, wizard-mode install with no pre-existing `.env-orbit`/
+`.orbit-secrets`, not even as a symlink), 31 (every step of guided-install
+configuration runs against the staged copy, and the returned outcome
+carries install.sh's own "the target remains unchanged" framing on every
+failure path), 32 (a final "apply" decision is required before the caller
+may treat the result as staged/committable).
+
+**Non-goals for slice 4**: no production `GuidedConfigurationAdapter`
+implementation that actually spawns `bash scripts/configure.sh` ships in
+this slice — by design, the same non-goal slices 2-3 established for
+`docker`/`curl`/`configuration.sh`. Deciding *where* `configureScript`
+points (the staging directory for `stage_guided_install_configuration`, the
+target's own tree for `prepare_configuration` — both accepted as a plain
+path parameter, exactly like `configuration-migration.ts`'s
+`configurationScript` argument), sourcing real answer values for a
+`MachinePromptAnswerProvider`, implementing `confirmApply` as an actual
+CLI prompt, and wiring both functions onto slice 1's `InstallTransaction`
+staging area are all explicitly deferred to slice 5's full orchestration
+work, per the top-level plan. `resolve_installer_action` and
+`choose_deployment_profile` (install.sh:684-841 — the profile-selection
+wizard that decides `profileChange`/`selectedProfile`/`selectedModel`
+*before* either ported function runs) are out of scope: this slice accepts
+their outputs as caller-supplied context fields, the same "accept the
+already-decided fact" stance `configuration-migration.ts` takes toward
+`target-identity.ts`'s `deriveComposeProjectName`. `has_controlling_terminal`
+(install.sh:597-603) is likewise accepted as an injected boolean fact rather
+than independently probed — this module has no `/dev/tty` of its own to
+open, the same injected-facts convention `target-identity.ts` and
+`database-volume-safety.ts` already established for filesystem/docker
+facts.
+
+**Testing and parity strategy.**
+
+- **Unit tests** (`src/lib/guided-configuration.test.ts`): exhaustive branch
+  coverage over a fake `GuidedConfigurationAdapter` and real temporary
+  directories for the filesystem re-verification checks, test names citing
+  the guarantee numbers above — every skip condition, every failure
+  message, the ai/full-only model argument, and every branch of
+  `prepareConfiguration`'s two-stage readiness/guided-fallback/final-refusal
+  structure.
+- **Source-extraction parity** (`missing_required_fields`,
+  `missing_guided_fields`, `missing_configuration_fields`,
+  `print_noninteractive_configuration_guidance`): the same awk-by-function-
+  name extraction and bash-driver pattern slice 1's
+  `install-transaction.parity.test.ts` and slice 2's
+  `target-identity.parity.test.ts` established, since install.sh has no
+  standalone entry point for these helpers either. Compared byte-for-byte
+  against this module's pure functions across readiness fixtures covering
+  every field category (required, guided-only, optional-service, and
+  empty).
+- **Real machine-prompt-exchange parity**: unlike install.sh's transaction
+  phase, `scripts/configure.sh` already has real, independently-invocable
+  `--init` and `--set-oidc-secret` entry points, so — the same strategy
+  slice 3's `configuration-migration.parity.test.ts` uses for
+  `configuration.sh --preflight`/`--migrate` — this test spawns the real,
+  unmodified script directly with `ORBIT_CONFIGURE_PROMPTS=machine`, driven
+  through a reference adapter local to the test file (not shipped) built
+  only from this module's exported `parseMachinePromptLine`. This proves
+  the exported grammar parser actually drives the live script to a
+  completed guided configuration, not just a hand-rolled stub: a successful
+  three-field `--init` run (asserting the resulting `.env-orbit` content
+  and that no prompt line or captured stdout ever contains an answer
+  value), a reject-then-accept retry (`not-https` reason, `attempt=2`), a
+  third-rejection abort (`empty` reason, exactly three prompts then
+  `prompt-abort`, no `.env-orbit` written — guarantee configure.sh #14),
+  and `--set-oidc-secret` success/`empty`/`too-large` scenarios (asserting
+  the persisted secret file's content while asserting the secret value
+  itself never appears in the child process's stdout or stderr).
+
 ## Flags (bash characterized, not changed)
 
 ### Slice 1
@@ -428,3 +546,62 @@ unchanged from the top-level plan.
   was found during this port; the items above are process/tooling notes and
   one deliberate strengthening (the file-descriptor TOCTOU closure), not
   correctness concerns.
+
+### Slice 4
+
+- **Deliberate protocol substitution, not a characterization of unchanged
+  behavior**: install.sh's own `stage_guided_install_configuration` and
+  `prepare_configuration` hand the real controlling terminal to
+  `scripts/configure.sh` (`--init`/`--set-oidc-secret` with no
+  `ORBIT_CONFIGURE_PROMPTS` set) — install.sh never uses machine-prompt mode
+  itself. This port always drives those two calls with
+  `ORBIT_CONFIGURE_PROMPTS=machine` instead, per the top-level plan's own
+  wording ("driving `scripts/configure.sh` ... from the CLI instead of a
+  human terminal"). The underlying validators configure.sh calls are
+  identical either way (docs/engine-events.md "Machine prompts (v0)"
+  §Validation: "exactly the same validator functions the TTY prompts call
+  today"), so this is a substitution of the *transport*, not a change to
+  what is accepted — but it is a real, intentional divergence from
+  install.sh's own literal call shape at these two sites, flagged here for
+  owner visibility rather than buried in the Scope section.
+- **`confirmApply` collapses two distinct bash outcomes into one**:
+  install.sh's final review menu (install.sh:1064-1071) distinguishes a
+  clean "cancel" choice (fixed exit 130) from a non-zero `$status` returned
+  by `installer_ui_select` itself (e.g. a read error on `/dev/tty`) and
+  propagates that status verbatim. Since `confirmApply` is an injected,
+  unshipped adapter method with no real interactive implementation in this
+  slice, `stageGuidedInstallConfiguration` collapses both into a single
+  `{status: "cancelled"}` outcome. A future slice-5 implementation of
+  `confirmApply` may want to distinguish "operator declined" from "input
+  channel failed" again; revisit then.
+- **Async adapter methods, a first for this port**: `runInit` and
+  `runSetOidcSecret` are declared `Promise`-returning, unlike every adapter
+  method shipped in slices 2-3 (each modeled as a synchronous method
+  mirroring bash's own blocking `$(cmd ...)` substitution). A live,
+  multi-round machine-prompt exchange has no synchronous Node equivalent of
+  a single blocking subprocess call, so this slice breaks with the prior
+  convention rather than force an artificial synchronous shape onto a
+  fundamentally interactive protocol. The other four adapter methods
+  (`runDefault`, `runSetDeploymentProfile`, `runCheck`, and `confirmApply`)
+  keep the established synchronous-or-simple-async shape consistent with
+  their bash originals.
+- **`has_controlling_terminal` and the profile-selection wizard are
+  injected facts, not ported logic**: `has_controlling_terminal`
+  (install.sh:597-603) is accepted as a caller-supplied boolean, and
+  `profileChange`/`selectedProfile`/`selectedModel` are accepted as
+  already-decided context fields rather than this slice porting
+  `resolve_installer_action`/`choose_deployment_profile`
+  (install.sh:684-841) itself — see Non-goals above. Both are consistent
+  with this port's own established injected-facts convention, not new
+  simplifications invented for this slice.
+- No production `GuidedConfigurationAdapter` implementation ships in this
+  slice — by design, the same non-goal slices 2-3 established for
+  `docker`/`curl`/`configuration.sh`. The parity test's reference adapter
+  (spawning the real script and driving it via this module's own
+  `parseMachinePromptLine`) is a reasonable template for the slice-5
+  orchestration work but is deliberately not exported from the module.
+- No behavioral discrepancy was found in `missing_required_fields`,
+  `missing_guided_fields`, `missing_configuration_fields`, or
+  `print_noninteractive_configuration_guidance`'s ported logic during this
+  port; all four are confirmed byte-for-byte against the extracted,
+  unmodified install.sh source.
