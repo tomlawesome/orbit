@@ -847,11 +847,23 @@ set -Eeuo pipefail
 #                          knowledge of whichever password the database
 #                          currently expects, which is exactly why it can
 #                          repair a credential-mismatch OR a missing-secret
-#                          deployment identically. Neither the new value nor
-#                          the ALTER ROLE statement is ever printed; the
-#                          value is hex-only (charset `[0-9a-f]`), so no SQL
-#                          quoting hazard exists when it is interpolated
-#                          into the statement's single-quoted literal.
+#                          deployment identically. The SQL text — including
+#                          the fresh credential — is piped to `psql -f -`
+#                          over stdin (`docker exec -i`, never `-c`/argv), so
+#                          it is never observable via `ps` or
+#                          `/proc/<pid>/cmdline` for either the `docker` or
+#                          `psql` process, exactly like the checkpoint
+#                          passphrase above; `-v ON_ERROR_STOP=1` is required
+#                          alongside `-f` (unlike `-c`, script-mode psql does
+#                          not fail its own exit code on a SQL error unless
+#                          this is set). Neither the new value nor the ALTER
+#                          ROLE statement is ever printed. Both interpolated
+#                          values are restricted-charset by prior validation
+#                          — `$rotate_pg_user` matches `^[A-Za-z0-9_]+$`
+#                          (resolve_rotate_db_identity) and the credential is
+#                          hex-only (charset `[0-9a-f]`, generate_hex_secret)
+#                          — so building this literal SQL text is
+#                          injection-safe regardless of the stdin delivery.
 #   3. update-config       Re-verifies the secrets directory is still a
 #                          real, non-symlink, mode-700 directory (the same
 #                          TOCTOU re-check `fix-permissions` performs), then
@@ -2353,10 +2365,13 @@ do_rotate_credential_step() {
     return 1
   }
 
-  timeout "$docker_rotate_timeout" docker exec -T "$rotate_db_id" \
-    psql -U "$rotate_pg_user" -d "$rotate_pg_db" \
-    -c "ALTER ROLE \"$rotate_pg_user\" WITH PASSWORD '$new_password'" \
-    >/dev/null 2>&1 || status=$?
+  # Delivered over psql's stdin (`-f -`), never as a `-c`/argv value — see
+  # "Step iterator" above for the full rationale, including why both
+  # interpolated values are injection-safe by prior validation regardless.
+  printf 'ALTER ROLE "%s" WITH PASSWORD '"'"'%s'"'"';\n' "$rotate_pg_user" "$new_password" |
+    timeout "$docker_rotate_timeout" docker exec -i "$rotate_db_id" \
+      psql -v ON_ERROR_STOP=1 -U "$rotate_pg_user" -d "$rotate_pg_db" -f - \
+      >/dev/null 2>&1 || status=$?
   new_password=""
   [[ "$status" == 0 ]]
 }
