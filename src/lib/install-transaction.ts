@@ -12,6 +12,7 @@ import {
   renameSync,
   rmSync,
   rmdirSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -346,9 +347,18 @@ export class InstallTransaction {
     this.createdDirectories.push(relativePath);
   }
 
-  /** Marks the transaction committed: dispose() will no longer roll back (#56). */
+  /**
+   * Marks the transaction committed: dispose() will no longer roll back
+   * (#56). Also records the commit in the staging directory itself
+   * (install.sh:1569-1582, issue #383 finding 2): if the host dies during
+   * the post-commit image-pull/health-wait phase, the surviving staging
+   * directory would otherwise be indistinguishable from an interrupted
+   * transaction, and repair.sh's restore-transaction would silently revert
+   * a successful install. repair.sh refuses when this marker is present.
+   */
   commit(): void {
     this.requireActive();
+    writeFileSync(join(this.stagingDir, "committed"), "");
     this.committed = true;
   }
 
