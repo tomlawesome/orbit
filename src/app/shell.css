@@ -1,0 +1,7 @@
+/*
+ * Application shell — the v19 chrome (design/v19/home.html): the account
+ * orb, its slide-out panel, and the status/key/create drawers. Kept out of
+ * globals.css so the shell can be worked on without touching the workspace
+ * styles it wraps. Loaded after globals.css, so declarations here win on
+ * equal specificity.
+ */
