@@ -11,6 +11,7 @@ import {
   RestoreEngineRefusal,
   checkCorrespondence,
   computeCheckpointDigests,
+  deriveHealthProbeUrl,
   deriveRestorePaths,
   loadRestoreJournal,
   syncCheckpointArtifacts,
@@ -362,5 +363,37 @@ describe("CORRESPONDENCE_QUERIES", () => {
     expect(Object.keys(CORRESPONDENCE_QUERIES).sort()).toEqual(
       ["attachments", "crypto", "documentStaging", "staging", "transientCount", "visible"].sort(),
     );
+  });
+});
+
+// #383: waitForHealth previously always probed the hardcoded
+// `http://127.0.0.1:3000/api/health`, so a deployment configured with a
+// non-default ORBIT_BIND_ADDRESS/ORBIT_PORT in .env-orbit could never pass
+// the post-cutover/post-rollback health wait — restore.sh's own
+// wait_for_health has the identical hardcoded-URL bug being fixed in
+// parallel (issue #383), so this mirrors the same ORBIT_BIND_ADDRESS/
+// ORBIT_PORT-aware derivation docker-compose.yml's own
+// `${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000` port mapping
+// uses, as an in-repo TypeScript unit (no sibling bash test file exists yet
+// in this worktree to byte-for-byte parity-test against).
+describe("deriveHealthProbeUrl (docker-compose.yml's own ORBIT_BIND_ADDRESS/ORBIT_PORT defaulting, #383)", () => {
+  function envFileWith(contents: string): string {
+    const path = join(sandbox, `.env-orbit-${Math.random().toString(36).slice(2)}`);
+    writeFileSync(path, contents);
+    return path;
+  }
+
+  it.each([
+    ["no .env-orbit at all (file missing)", undefined, "http://127.0.0.1:3000/api/health"],
+    ["empty .env-orbit", "", "http://127.0.0.1:3000/api/health"],
+    ["explicit default bind address (Compose's own default)", "ORBIT_BIND_ADDRESS=0.0.0.0\nORBIT_PORT=3000\n", "http://127.0.0.1:3000/api/health"],
+    ["neither key set, other keys present", "COMPOSE_PROJECT_NAME=orbit\n", "http://127.0.0.1:3000/api/health"],
+    ["custom bind address, default port", "ORBIT_BIND_ADDRESS=192.168.1.50\n", "http://192.168.1.50:3000/api/health"],
+    ["default bind address, custom port", "ORBIT_PORT=8443\n", "http://127.0.0.1:8443/api/health"],
+    ["custom bind address and custom port", "ORBIT_BIND_ADDRESS=10.0.0.5\nORBIT_PORT=8080\n", "http://10.0.0.5:8080/api/health"],
+    ["values interspersed with unrelated/blank/comment-shaped lines", "\nCOMPOSE_PROFILES=mail\nORBIT_PORT=4000\n\nORBIT_BIND_ADDRESS=172.17.0.1\n", "http://172.17.0.1:4000/api/health"],
+  ])("%s", (_label, contents, expected) => {
+    const envFile = contents === undefined ? join(sandbox, "does-not-exist") : envFileWith(contents);
+    expect(deriveHealthProbeUrl(envFile)).toBe(expected);
   });
 });

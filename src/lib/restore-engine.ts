@@ -892,8 +892,12 @@ export interface PreflightValidateBundleOptions {
 
 export function preflightValidateBundle(options: PreflightValidateBundleOptions): void {
   const stage = `orbit_restore_stage_${options.stagingId}`;
-  options.adapter.createStageDatabase(stage);
+  // #383: createStageDatabase moved inside the try (it previously ran
+  // before it, so a refusal/throw from the create call itself skipped the
+  // finally below entirely) so the drop always runs, matching
+  // verifyCheckpointArtifactsCorrespond's equivalent fix.
   try {
+    options.adapter.createStageDatabase(stage);
     if (!options.adapter.restoreDumpToDatabase(stage, options.databaseDumpPath)) {
       refuse("checkpoint-verification-failed", "preflight/database-stage failed; the PostgreSQL archive could not be restored transactionally.");
     }
@@ -1061,8 +1065,15 @@ export class RestoreRun {
     const databaseDumpPath = join(this.checkpointDirectory, "database.dump");
     const documentsTarPath = join(this.checkpointDirectory, "documents.tar");
     try {
-      this.adapter.createStageDatabase(stage);
+      // #383: recorded before createStageDatabase is called (not after it
+      // returns), matching restore.sh:545-546/811-812's own
+      // `stage_database=... ; create_stage_database` ordering — so a
+      // createStageDatabase that refuses or partially succeeds server-side
+      // still leaves this.stageDatabase set, and the finally below (and
+      // dispose()'s cleanup) always attempts the (idempotent, DROP-IF-
+      // EXISTS) drop instead of leaking the stage database forever.
       this.stageDatabase = stage;
+      this.adapter.createStageDatabase(stage);
       if (!this.adapter.restoreDumpToDatabase(stage, databaseDumpPath)) {
         refuse("checkpoint-verification-failed", "checkpoint/verification failed; the durable database checkpoint is invalid.");
       }
@@ -1296,6 +1307,54 @@ function sleepSync(milliseconds: number): void {
   Atomics.wait(signal, 0, 0, milliseconds);
 }
 
+/**
+ * Derives the local health-probe URL from ORBIT_BIND_ADDRESS/ORBIT_PORT in
+ * the deployment's .env-orbit, mirroring exactly how docker-compose.yml
+ * defaults the orbit-app port mapping (`${ORBIT_BIND_ADDRESS:-0.0.0.0}:
+ * ${ORBIT_PORT:-3000}:3000`, docker-compose.yml:53) — not a hardcoded
+ * `http://127.0.0.1:3000/api/health` (#383), which can never pass on a
+ * deployment configured with a non-default ORBIT_BIND_ADDRESS or ORBIT_PORT.
+ *
+ * A bind address of "0.0.0.0" (Compose's own default, "listen on every
+ * interface") is not itself a valid address to connect *to*; the same
+ * convention operators already rely on when reaching their own deployment
+ * applies here too: probe via the loopback address instead. Any other bind
+ * address is probed directly, exactly as configured. A missing, unreadable,
+ * or empty-valued line falls back to Compose's own defaults, the same as an
+ * unset `${VAR:-default}` substitution would.
+ */
+export function deriveHealthProbeUrl(envFile: string): string {
+  let bindAddress = "";
+  let port = "";
+  let content: string;
+  try {
+    content = readFileSync(envFile, "utf8");
+  } catch {
+    content = "";
+  }
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
+    if (!match) continue;
+    if (match[1] === "ORBIT_BIND_ADDRESS") bindAddress = match[2];
+    else if (match[1] === "ORBIT_PORT") port = match[2];
+  }
+  const probeHost = bindAddress === "" || bindAddress === "0.0.0.0" ? "127.0.0.1" : bindAddress;
+  const probePort = port === "" ? "3000" : port;
+  return `http://${probeHost}:${probePort}/api/health`;
+}
+
+/**
+ * queryReport/queryActiveReport's psql maxBuffer (#383): a correspondence
+ * report is one `<uuid>|<64-hex>|<size>|<lifecycle>`-shaped line per row
+ * (~120 bytes), so Node's 1 MiB spawnSync default caps a restore at roughly
+ * 8,700 documents before psql is SIGTERMed and refused as a query failure.
+ * 1 GiB matches recovery-bundle.ts's runTar's own maxBuffer for the same
+ * class of "external process, unbounded but not attacker-controlled output"
+ * call.
+ */
+const PSQL_REPORT_MAX_BUFFER = 1024 * 1024 * 1024;
+
 export function createDockerComposeRestoreAdapter(options: RestoreDockerComposeAdapterOptions): RestoreDockerAdapter {
   const dockerBinary = options.dockerBinary ?? "docker";
   const cwd = options.cwd;
@@ -1435,7 +1494,13 @@ export function createDockerComposeRestoreAdapter(options: RestoreDockerComposeA
           name,
           query,
         ),
-        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+        // #383: explicit generous maxBuffer, matching runTar's own
+        // (recovery-bundle.ts) — without it, Node's 1 MiB default silently
+        // SIGTERMs psql once a correspondence report exceeds ~8,700 rows
+        // (result.status becomes null, not a clean nonzero exit), which
+        // query-report-failed then misreports as a query failure rather
+        // than an output-size ceiling.
+        { cwd, env, encoding: "utf8", maxBuffer: PSQL_REPORT_MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"] },
       );
       if (result.status !== 0) refuse("query-report-failed", "The staged database could not be queried for correspondence checking.");
       return result.stdout ?? "";
@@ -1453,13 +1518,13 @@ export function createDockerComposeRestoreAdapter(options: RestoreDockerComposeA
           "sh",
           query,
         ),
-        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+        { cwd, env, encoding: "utf8", maxBuffer: PSQL_REPORT_MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"] },
       );
       if (result.status !== 0) refuse("query-report-failed", "The active database could not be queried for correspondence checking.");
       return result.stdout ?? "";
     },
     waitForHealth(): boolean {
-      const url = options.healthUrl ?? "http://127.0.0.1:3000/api/health";
+      const url = options.healthUrl ?? deriveHealthProbeUrl(options.envFile);
       const curlBinary = options.curlBinary ?? "curl";
       const deadline = Date.now() + 45_000;
       for (;;) {
