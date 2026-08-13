@@ -1,0 +1,185 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — the mark: decision card</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070d1f;--panel:#0b1226;--line:#243259;--ink:#e9edf8;--mid:#8791b3;--faint:#4d5878;
+--accent:#d8b45a;--sun:#ffe9c4;--mono:'JetBrains Mono',ui-monospace,monospace;
+--display:'Space Grotesk',Inter,system-ui,sans-serif}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;
+     max-width:920px;margin:0 auto;padding:60px 24px 80px;line-height:1.6}
+h1{font:600 24px var(--display)}
+p.lead{color:var(--mid);font-size:13.5px;margin:8px 0 10px;max-width:640px}
+.back{font:11px var(--mono);color:var(--accent);text-decoration:none;border:1px solid var(--line);
+      border-radius:99px;padding:3px 12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+      padding:38px 40px;margin-top:28px}
+.hero{display:flex;flex-direction:column;align-items:center;gap:20px;padding:46px 0 40px}
+.hero .word{font:600 54px var(--display);letter-spacing:.015em;line-height:1}
+.row{display:flex;gap:26px;align-items:center;justify-content:center;flex-wrap:wrap;
+     padding:26px 0;border-top:1px solid rgba(36,50,89,.5)}
+.cell{display:flex;flex-direction:column;align-items:center;gap:12px}
+.cell small{font:10.5px var(--mono);color:var(--faint);letter-spacing:.1em}
+.hlock{display:flex;align-items:center;gap:16px}
+.hlock .word{font:600 34px var(--display);letter-spacing:.015em}
+.paper{background:#f4f1e8;border-radius:12px;padding:22px 30px;color:#1c2b4a}
+.paper .word{color:#1c2b4a}
+.note{font-size:13px;color:var(--mid);max-width:660px;margin:26px auto 0}
+.note b{color:var(--ink);font-weight:560}
+.foot{font:10.5px var(--mono);color:var(--faint);margin-top:34px;letter-spacing:.08em;text-align:center}
+svg{overflow:visible;display:block}
+.tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
+@keyframes spinback{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.tr{animation:none}}
+</style></head><body>
+<h1>The mark — decision card</h1>
+<p class="lead">Not a new concept: the proposal is that Orbit's mark is the one it already
+uses — the gravity-well dial, miniaturised. The year is the ring, the planet is the thing
+approaching, the household burns at the centre. The word sets plain because the mark
+carries everything. Below: how much dress the same drawing can wear, from hero to favicon.</p>
+<a class="back" href="mockups-web-v19.html">← v19 index</a>
+
+<div class="card">
+
+  <!-- HERO: full dress, stacked (the login composition) -->
+  <div class="hero">
+    <svg width="150" height="150" viewBox="0 0 200 200" role="img" aria-label="Orbit mark, full dress">
+      <defs>
+        <radialGradient id="plglow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#d8b45a" stop-opacity=".7"/>
+          <stop offset="45%" stop-color="#d8b45a" stop-opacity=".22"/>
+          <stop offset="100%" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="sunglow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffe9c4" stop-opacity=".9"/>
+          <stop offset="55%" stop-color="#ffe9c4" stop-opacity=".25"/>
+          <stop offset="100%" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="pbody" cx="34%" cy="30%" r="75%">
+          <stop offset="0%" stop-color="#f2dCA2"/>
+          <stop offset="45%" stop-color="#d8b45a"/>
+          <stop offset="100%" stop-color="#8a6420"/>
+        </radialGradient>
+        <linearGradient id="trail" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#d8b45a" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#d8b45a" stop-opacity=".55"/>
+        </linearGradient>
+      </defs>
+      <!-- the year ring -->
+      <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".85"/>
+      <!-- the well: a faint inner threshold, the household at centre -->
+      <circle cx="100" cy="100" r="34" fill="none" stroke="#d8b45a" stroke-opacity=".28"
+              stroke-width="1.6" stroke-dasharray="2.5 5"/>
+      <circle cx="100" cy="100" r="17" fill="url(#sunglow)"/>
+      <circle cx="100" cy="100" r="6" fill="var(--sun)"/>
+      <!-- the approach: motion held in a still (trail rides the ring behind the planet) -->
+      <g class="tr">
+        <path d="M 118.6 30.5 A 72 72 0 0 1 162.4 64" fill="none" stroke="url(#trail)"
+              stroke-width="7" stroke-linecap="round" opacity=".8"/>
+        <circle cx="163" cy="63.5" r="30" fill="url(#plglow)"/>
+        <circle cx="163" cy="63.5" r="15" fill="url(#pbody)"/>
+        <circle cx="158" cy="58" r="4.5" fill="rgba(255,255,255,.5)"/>
+      </g>
+    </svg>
+    <div class="word">orbit</div>
+  </div>
+
+  <!-- DRESS LEVELS -->
+  <div class="row">
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="7" opacity=".85"/>
+        <circle cx="100" cy="100" r="34" fill="none" stroke="#d8b45a" stroke-opacity=".28" stroke-width="1.6" stroke-dasharray="2.5 5"/>
+        <circle cx="100" cy="100" r="17" fill="url(#sunglow)"/><circle cx="100" cy="100" r="6" fill="var(--sun)"/>
+        <path d="M 118.6 30.5 A 72 72 0 0 1 162.4 64" fill="none" stroke="url(#trail)" stroke-width="7" stroke-linecap="round" opacity=".8"/>
+        <circle cx="163" cy="63.5" r="30" fill="url(#plglow)"/><circle cx="163" cy="63.5" r="15" fill="url(#pbody)"/>
+        <circle cx="158" cy="58" r="4.5" fill="rgba(255,255,255,.5)"/>
+      </svg>
+      <small>FULL DRESS · hero, splash</small>
+    </div>
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="8"/>
+        <circle cx="100" cy="100" r="6.5" fill="var(--sun)" opacity=".9"/>
+        <circle cx="163" cy="63.5" r="17" fill="#d8b45a"/>
+      </svg>
+      <small>STANDARD · chrome (today's login)</small>
+    </div>
+    <div class="cell">
+      <svg width="92" height="92" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="9"/>
+        <circle cx="163" cy="63.5" r="18" fill="#e9edf8"/>
+      </svg>
+      <small>BARE · one ink</small>
+    </div>
+  </div>
+
+  <!-- HORIZONTAL LOCKUP + LIGHT -->
+  <div class="row">
+    <div class="cell">
+      <div class="hlock">
+        <svg width="44" height="44" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="9"/>
+          <circle cx="100" cy="100" r="7" fill="var(--sun)" opacity=".9"/>
+          <circle cx="163" cy="63.5" r="19" fill="#d8b45a"/>
+        </svg>
+        <span class="word">orbit</span>
+      </div>
+      <small>HORIZONTAL — app chrome, README</small>
+    </div>
+    <div class="cell">
+      <div class="paper">
+        <div class="hlock">
+          <svg width="44" height="44" viewBox="0 0 200 200">
+            <circle cx="100" cy="100" r="72" fill="none" stroke="#5d6a87" stroke-width="9"/>
+            <circle cx="100" cy="100" r="7" fill="#1c2b4a"/>
+            <circle cx="163" cy="63.5" r="19" fill="#b4842c"/>
+          </svg>
+          <span class="word" style="color:#1c2b4a">orbit</span>
+        </div>
+      </div>
+      <small>LIGHT — atlas paper, invoices, email</small>
+    </div>
+  </div>
+
+  <!-- REDUCTIONS -->
+  <div class="row">
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="32" height="32" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="68" fill="none" stroke="#8791b3" stroke-width="16"/>
+        <circle cx="163" cy="63.5" r="26" fill="#d8b45a"/>
+      </svg></div>
+      <small>32PX</small>
+    </div>
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="16" height="16" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="64" fill="none" stroke="#a7b0cc" stroke-width="22"/>
+        <circle cx="163" cy="63.5" r="34" fill="#d8b45a"/>
+      </svg></div>
+      <small>16PX FAVICON</small>
+    </div>
+    <div class="cell">
+      <div style="height:34px;display:flex;align-items:center"><svg width="92" height="30" viewBox="0 0 200 66">
+        <g transform="translate(0 -67)">
+          <circle cx="33" cy="100" r="24" fill="none" stroke="#8791b3" stroke-width="4"/>
+          <circle cx="54" cy="87.8" r="6.5" fill="#d8b45a"/>
+        </g>
+        <text x="70" y="110" transform="translate(0 -67)" font-family="'Space Grotesk',sans-serif"
+              font-weight="600" font-size="34" fill="#e9edf8">orbit</text>
+      </svg></div>
+      <small>ONE-LINE — footers, CLI banner</small>
+    </div>
+  </div>
+
+  <p class="note"><b>Why this is the mark:</b> it's the product miniaturised, not a logo
+  invented beside it. The full-dress version carries the whole identity — the year ring,
+  the threshold, the household sun, a planet mid-approach with its trail (and on the real
+  splash it slowly orbits) — while every reduction sheds detail in the same order the
+  product itself does. The word never performs; it just names the drawing.
+  <br><br><b>What it replaces:</b> the three-arc gesture mark (pre-star-chart era) retires;
+  all bespoke wordmark treatments are dropped.</p>
+</div>
+
+<div class="foot">orbit · the mark · decision card · issue #307 · the hero planet drifts once per 40s — motion is part of the mark</div>
+</body></html>
