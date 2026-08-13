@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { and, eq, sql } from "drizzle-orm";
@@ -17,6 +17,7 @@ import {
 import {
   dueEvents,
   households,
+  items,
   memberships,
   notificationDeliveries,
   pushSubscriptions,
@@ -698,5 +699,153 @@ describe("notification worker PostgreSQL contracts", () => {
       providers: fakeProviders(),
     });
     expect(await deliveryForEvent(staleEventId)).toBeUndefined();
+  });
+
+  it("#383 finding 1: does not pay the per-row Intl.DateTimeFormat cost for due events far outside the reminder catch-up window", async () => {
+    const fixture = await ownerOnlyFixture("worker-date-window");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+
+    // Due events far outside any plausible catch-up window for `cycleTime`
+    // (2026-03-29): without the SQL date predicate from #383 finding 1,
+    // every one of these would join into the candidate set and pay a fresh
+    // Intl.DateTimeFormat construction in materializeDueDeliveries. Bulk
+    // inserted (rather than one item/event/rule per round trip) to keep the
+    // test fast at a row count large enough to make an unbounded scan obvious.
+    const farRowCount = 60;
+    const farItems = await getDb().insert(items).values(
+      Array.from({ length: farRowCount }, (_, index) => ({
+        householdId: fixture.household.id,
+        sectionId: fixture.section.id,
+        title: `Far future item ${index}`,
+        currency: "GBP",
+      })),
+    ).returning({ id: items.id });
+    await getDb().insert(dueEvents).values(
+      farItems.map((item) => ({
+        householdId: fixture.household.id,
+        itemId: item.id,
+        kind: "renewal" as const,
+        dueDate: "2031-06-15",
+      })),
+    );
+    await getDb().insert(reminderRules).values(
+      farItems.map((item) => ({ itemId: item.id, daysBefore: 0 })),
+    );
+
+    // Spying on the prototype method (rather than replacing the
+    // Intl.DateTimeFormat constructor itself) keeps every constructed
+    // formatter a genuine native instance, so this cannot corrupt
+    // Intl.DateTimeFormat for the rest of the test run.
+    const formatSpy = vi.spyOn(Intl.DateTimeFormat.prototype, "formatToParts");
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(),
+      nextLeaseToken: () => deterministicLeaseToken(44),
+    });
+    const formatCalls = formatSpy.mock.calls.length;
+    formatSpy.mockRestore();
+
+    expect((await deliveryForEvent(eventId))?.status).toBe("sent");
+    // Without the predicate this would be at least farRowCount (one call
+    // per far-future candidate); the shared test database can carry a
+    // handful of unrelated leftover rows from earlier tests in this file
+    // that also land near `cycleTime`, so the bound is well below
+    // farRowCount rather than an exact count.
+    expect(formatCalls).toBeLessThan(farRowCount / 2);
+  });
+
+  it("#383 finding 2: never calls the push provider for a subscription endpoint outside the https/public-address boundary", async () => {
+    const fixture = await ownerOnlyFixture("worker-push-unsafe-endpoint");
+    const eventId = await seedEvent(fixture, { emailEnabled: false });
+    // Same shape as the review's concrete probe: a plausible-looking
+    // internal hostname on a non-default port (the database container).
+    const unsafeEndpoint = "https://orbit-db.invalid:5432/probe";
+    await getDb().insert(pushSubscriptions).values({
+      userId: fixture.users.owner.id,
+      endpoint: unsafeEndpoint,
+      p256dh: "p256dh",
+      auth: "auth",
+    });
+    let pushCalls = 0;
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(async () => {}, () => { pushCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(40),
+    });
+    expect(pushCalls).toBe(0);
+    expect((await deliveryForEvent(eventId))?.status).toBe("sent");
+    const [revoked] = await getDb().select({ revokedAt: pushSubscriptions.revokedAt })
+      .from(pushSubscriptions).where(eq(pushSubscriptions.endpoint, unsafeEndpoint));
+    expect(revoked?.revokedAt).not.toBeNull();
+  });
+
+  it("#383 finding 3: does not resend to a subscription that already received the reminder when a sibling subscription fails transiently", async () => {
+    const fixture = await ownerOnlyFixture("worker-push-partial-failure");
+    const eventId = await seedEvent(fixture, { emailEnabled: false });
+    const phone = `https://push.invalid.example/phone-${fixture.users.owner.id}`;
+    const laptop = `https://push.invalid.example/laptop-${fixture.users.owner.id}`;
+    await getDb().insert(pushSubscriptions).values([
+      { userId: fixture.users.owner.id, endpoint: phone, p256dh: "p256dh", auth: "auth" },
+      { userId: fixture.users.owner.id, endpoint: laptop, p256dh: "p256dh", auth: "auth" },
+    ]);
+    const callsByEndpoint: Record<string, number> = { [phone]: 0, [laptop]: 0 };
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(async () => {}, (notification) => {
+        callsByEndpoint[notification.target.endpoint] = (callsByEndpoint[notification.target.endpoint] ?? 0) + 1;
+        if (notification.target.endpoint === laptop) throw { statusCode: 503, message: "private push detail" };
+      }),
+      nextLeaseToken: () => deterministicLeaseToken(41),
+    });
+    expect(callsByEndpoint[phone]).toBe(1);
+    expect(callsByEndpoint[laptop]).toBe(1);
+    const delivered = await deliveryForEvent(eventId);
+    // At least one device (phone) genuinely received the reminder, so the
+    // delivery completes rather than retrying — retrying would necessarily
+    // resend to every still-active subscription, including the phone.
+    expect(delivered?.status).toBe("sent");
+    expect(delivered?.lastError).toBe("push_unavailable");
+
+    // A second cycle must not be able to reach this delivery again: it is
+    // terminal, so the phone cannot receive a duplicate.
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(async () => {}, (notification) => {
+        callsByEndpoint[notification.target.endpoint] = (callsByEndpoint[notification.target.endpoint] ?? 0) + 1;
+      }),
+      nextLeaseToken: () => deterministicLeaseToken(42),
+    });
+    expect(callsByEndpoint[phone]).toBe(1);
+  });
+
+  it("#383 finding 4: cancels an already-queued delivery for a member who was removed from the household before it was claimed", async () => {
+    const fixture = await createIntegrationFixture("worker-member-removed");
+    const eventId = await seedEvent(fixture, { pushEnabled: false });
+    await getDb().insert(notificationDeliveries).values({
+      householdId: fixture.household.id,
+      eventId,
+      userId: fixture.users.member.id,
+      channel: "email",
+      scheduledFor: cycleTime,
+    });
+    await getDb().delete(memberships).where(and(
+      eq(memberships.householdId, fixture.household.id),
+      eq(memberships.userId, fixture.users.member.id),
+    ));
+    const recipients: string[] = [];
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+      nextLeaseToken: () => deterministicLeaseToken(43),
+    });
+    expect(recipients).not.toContain(fixture.users.member.email);
+    const [memberDelivery] = await getDb().select().from(notificationDeliveries).where(and(
+      eq(notificationDeliveries.eventId, eventId),
+      eq(notificationDeliveries.userId, fixture.users.member.id),
+    ));
+    expect(memberDelivery).toMatchObject({
+      status: "cancelled",
+      lastError: "membership_removed",
+    });
   });
 });
