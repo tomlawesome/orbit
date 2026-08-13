@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
 import {
   computeBodyGeometry,
   describeDaysRemaining,
@@ -233,7 +233,11 @@ function Body({
   );
 }
 
-export function GravityDial({
+// Memoized (issue #383): each hover event re-rendered every orbiting body via
+// this component even though its own props (the item list, today, callbacks)
+// hadn't changed — React.memo skips that as long as callers pass stable
+// props (see hero-sky.tsx's useCallback-wrapped hover/click handlers).
+export const GravityDial = memo(function GravityDial({
   items,
   today,
   householdName,
@@ -417,4 +421,4 @@ export function GravityDial({
       </svg>
     </div>
   );
-}
+});
