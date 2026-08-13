@@ -53,12 +53,37 @@ const args = [
   `--outfile=${outfile}`,
 ];
 
-const result = spawnSync(esbuildBinary, args, { cwd: projectRoot, stdio: "inherit" });
+// stdio is explicitly closed/piped, never "inherit": this script is spawned
+// itself from inside test suites (scripts/bundle-orbit-cli.test.mjs) that
+// run under vitest's forked worker pool, where "inherit" ties the esbuild
+// child's fds directly to that fork's own stdout/stderr pipes back to the
+// vitest main process — if anything about that chain doesn't tear down
+// cleanly, the fork's own output stream never reaches EOF and the whole
+// test file hangs instead of failing (this is what stalled CI). stdin is
+// "ignore" outright (esbuild's CLI never reads it for a one-shot --bundle
+// invocation, and there is nothing for this script to write); stdout/stderr
+// are captured and only re-emitted through this process's own streams
+// after the child has fully exited. `timeout`/`killSignal` bound the call
+// so a wedged esbuild process fails this script loudly instead of hanging
+// the caller (and, transitively, any CI job) indefinitely.
+const result = spawnSync(esbuildBinary, args, {
+  cwd: projectRoot,
+  stdio: ["ignore", "pipe", "pipe"],
+  encoding: "utf8",
+  timeout: 60_000,
+  killSignal: "SIGKILL",
+});
 
 if (result.error) {
   process.stderr.write(`bundle-orbit-cli: failed to run esbuild: ${result.error.message}\n`);
   process.exit(1);
 }
+if (result.signal) {
+  process.stderr.write(`bundle-orbit-cli: esbuild was killed by signal ${result.signal} (likely the ${60_000}ms timeout)\n`);
+  process.exit(1);
+}
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
 if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }

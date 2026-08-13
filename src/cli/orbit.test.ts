@@ -26,11 +26,19 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
+// A hard bound on every spawned CLI invocation in this file: a wedged child
+// fails the test loudly within seconds instead of consuming the outer CI
+// job's own timeout. SIGKILL, not the default SIGTERM — none of these
+// children install their own signal handlers.
+const CLI_SPAWN_TIMEOUT_MS = 30_000;
+
 function runCli(args: string[], options: { input?: string; env?: NodeJS.ProcessEnv } = {}): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("node", [tsx, cli, ...args], {
     encoding: "utf8",
     input: options.input,
     env: options.env ?? process.env,
+    timeout: CLI_SPAWN_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   });
   return { status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
@@ -245,17 +253,58 @@ describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () =
     expect(readFileSync(callLogPath, "utf8")).toBe("");
   });
 
+  // Both "inert" tests below deliberately still put a fake `docker` on PATH
+  // (never the real binary): the point of these two tests is only that
+  // refuseDockerInContainer itself doesn't fire outside container mode, not
+  // that the full real install flow against a real Docker daemon succeeds
+  // or fails a particular way. An earlier version of this test used the
+  // sandbox's own real PATH/docker — under CI's coverage-instrumented,
+  // resource-constrained run, that let a real, un-mocked `docker compose
+  // version` subprocess call (install-docker-adapter.ts's
+  // checkDockerAvailable, which has no spawnSync-level timeout of its own)
+  // run loose from inside a test for the first time in this suite, which is
+  // exactly the kind of call that can turn into an indefinite hang under
+  // load rather than a clean pass/fail — this fake is fast and
+  // deterministic regardless of host conditions.
   it("the guard is inert when ORBIT_ENGINE_CONTEXT is unset: host-mode behavior is unchanged", () => {
-    const result = runCli(["install", "--dir", sandbox]);
+    // The install target must stay empty (a fresh subdirectory of `sandbox`,
+    // not `sandbox` itself): once the guard doesn't fire, install's own
+    // pre-existing target-content validation runs for real, and it refuses
+    // a non-empty target before ever reaching the docker check — that would
+    // fail this test for an unrelated reason (an empty callLog, but from a
+    // different early refusal, not from the guard).
+    const targetDir = join(sandbox, "target");
+    mkdirSync(targetDir);
+    const callLogPath = join(sandbox, "docker-calls.log");
+    writeFileSync(callLogPath, "");
+    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+
+    const result = runCli(["install", "--dir", targetDir], {
+      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}` },
+    });
+
+    // No ORBIT_ENGINE_CONTEXT set: the guard never fires, so install
+    // proceeds to its own (pre-existing) docker-availability check, which
+    // does reach the fake docker — proving the guard adds a refusal only in
+    // container mode, without altering host-mode behavior.
     expect(result.status).not.toBe(9);
     expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
+    expect(readFileSync(callLogPath, "utf8")).not.toBe("");
   });
 
   it("the guard is inert when ORBIT_ENGINE_CONTEXT is set to any value other than the literal \"container\"", () => {
-    const result = runCli(["install", "--dir", sandbox], {
-      env: { ...process.env, ORBIT_ENGINE_CONTEXT: "host" },
+    const targetDir = join(sandbox, "target");
+    mkdirSync(targetDir);
+    const callLogPath = join(sandbox, "docker-calls.log");
+    writeFileSync(callLogPath, "");
+    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+
+    const result = runCli(["install", "--dir", targetDir], {
+      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "host" },
     });
+
     expect(result.status).not.toBe(9);
     expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
+    expect(readFileSync(callLogPath, "utf8")).not.toBe("");
   });
 });
