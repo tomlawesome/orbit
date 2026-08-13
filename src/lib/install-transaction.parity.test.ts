@@ -1,16 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,7 +98,16 @@ function snapshotTree(root: string): Snapshot {
     } else if (stat.isDirectory()) {
       snapshot[entry] = { mode: stat.mode & 0o777, type: "directory", entries: snapshotTree(absolute) };
     } else {
-      snapshot[entry] = { mode: stat.mode & 0o777, type: "file", content: readFileSync(absolute, "utf8") };
+      // Single-descriptor read: O_NOFOLLOW open, then fstat and read the SAME
+      // descriptor, so the content provably belongs to the statted inode
+      // (CodeQL js/file-system-race).
+      const fd = openSync(absolute, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      try {
+        const fileStat = fstatSync(fd);
+        snapshot[entry] = { mode: fileStat.mode & 0o777, type: "file", content: readFileSync(fd, "utf8") };
+      } finally {
+        closeSync(fd);
+      }
     }
   }
   return snapshot;
