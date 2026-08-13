@@ -382,7 +382,10 @@ test.describe("authenticated document lifecycle", () => {
       await dropZone.dispatchEvent("dragover", { dataTransfer: textTransfer });
       await expect(dropZone).not.toHaveClass(/dragging/);
       await dropZone.dispatchEvent("drop", { dataTransfer: textTransfer });
-      await expect(page.getByRole("listitem")).toHaveCount(0);
+      // Scoped to the document lists: the v19 shell keeps the chart-key
+      // drawer's rows in the document at all times (shut, and inert), so a
+      // page-wide listitem count no longer means "nothing was attached".
+      await expect(page.locator("ul.document-list li")).toHaveCount(0);
 
       const droppedName = "dropped-document.pdf";
       const fileTransfer = await page.evaluateHandle(({ name, bytes }) => {
