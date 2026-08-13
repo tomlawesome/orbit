@@ -1,6 +1,6 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
-Status: proposed (slices 1-2 implemented). This is a working note, not an ADR —
+Status: proposed (slices 1-3 implemented). This is a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan
 changes; it is not meant to be a permanent record like `docs/adr/`.
@@ -204,6 +204,138 @@ scope, as before (slices 3-4).
   post-run globals against the TS module's returned state caught the
   discrepancy immediately.
 
+## Slice 3 — OIDC discovery and configuration migration (this PR)
+
+**Scope.** Two modules, split along the network/subprocess boundary each
+crosses:
+
+- `src/lib/oidc-discovery.ts`: `buildDiscoveryUrl`, `validateDiscoveryDocument`,
+  `classifyOidcFetchResult`, and the `verifyOidcDiscovery` orchestrator,
+  mirroring `verify_oidc_discovery` (install.sh:887-945). Unlike every module
+  ported so far, this is not filesystem-only: fetching the discovery
+  document is a network call (`curl`), and — deliberately, per guarantee
+  #27 — the document's own untrusted JSON is *never* parsed by install.sh's
+  own host process at all; it is parsed only inside a throwaway,
+  network-isolated, capability-dropped Docker container. Both the curl call
+  and the sandboxed-container call are injected adapters
+  (`OidcDiscoveryFetchAdapter`, `OidcDiscoverySandboxAdapter`) with no
+  production implementation shipped in this slice — the same "thin adapter
+  at the edge, nothing shipped yet" shape slice 2's `database-volume-safety.ts`
+  established for `docker`. `validateDiscoveryDocument` is a faithful port
+  of the JS install.sh runs *inside* that sandboxed container
+  (`oidc_discovery_parser`, install.sh:23-47) — it exists to prove semantic
+  parity against the live script and to give the real adapter slice 5
+  eventually ships something to call, but `verifyOidcDiscovery` itself never
+  calls it directly against live network content; it only ever trusts the
+  injected sandbox adapter's decision, exactly as install.sh only trusts the
+  container's exit code.
+- `src/lib/configuration-migration.ts`: `buildPreflightArgv`,
+  `buildMigrateArgv`, `runConfigurationPreflight`, and
+  `runConfigurationMigration`, mirroring `run_configuration_migration`
+  (install.sh:1010-1029) and its `--preflight` companion call
+  (install.sh:1441-1448). `scripts/configuration.sh` already has its own
+  standalone, independently-tested `--preflight`/`--migrate --transaction`
+  entry points (unlike install.sh's own transaction phase in slice 1), so
+  this module deliberately does *not* reimplement `migrate_file`'s
+  atomic-write/rollback-backup/provenance logic in TypeScript — that would
+  duplicate a contract configuration.sh already proves, for no safety
+  benefit and real drift risk. It ports only install.sh's own decision
+  logic *around* the handoff: exactly which arguments to pass, and which of
+  configuration.sh's two known-good stdout strings are accepted as success
+  (guarantee #29) — anything else, including a plausible-looking but
+  different string, is treated as failure. The subprocess call itself is a
+  caller-supplied `ConfigurationScriptAdapter` with no shipped production
+  implementation — a "handoff", not a port.
+
+Both modules "wire onto slice 1's transaction and slice 2's validated
+identity" as building blocks rather than deep imports:
+`verifyOidcDiscovery` reuses `target-identity.ts`'s `readEnvironmentValue`
+directly to read `OIDC_ISSUER`, and accepts a caller-supplied
+`discoveryFilePath` so a future orchestrator can place it under an active
+`InstallTransaction`'s own `stagingPathFor` staging area;
+`ConfigurationMigrationTarget.composeProjectName` is documented as coming
+from `target-identity.ts`'s `deriveComposeProjectName`, and both
+configuration-migration calls are documented as needing to run inside an
+active `InstallTransaction` so a preflight or migration failure rolls back
+cleanly (part of guarantee #50). Neither module imports the other slices'
+code directly — same deliberate decoupling slice 2's
+`database-volume-safety.ts` chose over `install-transaction.ts`.
+
+**Guarantees characterized** (catalogue numbers, `docs/installer-guarantees.md`
+Part 1 / install.sh unless noted): 25 (OIDC discovery HTTP request pinned to
+HTTPS-only, timeouts, and a size cap), 26 (discovery document only trusted
+after independently re-confirming it landed as a regular non-symlink file,
+forcing 600, and re-checking size — defense in depth beyond curl's own
+limit), 27 (the discovery JSON itself is validated only inside the
+sandboxed, network-isolated container, never by install.sh's own host
+process), 29 (`run_configuration_migration` invokes migration only with
+already-verified arguments and accepts only the two known-good output
+strings). Also configuration.sh's own list (`docs/installer-guarantees.md`,
+configuration.sh #18, #24): #18 (migration's idempotent "already current"
+message, one of the two strings this slice's classifier accepts), #24
+(`--transaction` is only accepted together with `--migrate`, which is why
+`buildMigrateArgv` always emits both flags together). Part of guarantee #50
+(preflight and migrate both run before any asset is installed, still
+covered by the outer file-transaction rollback) is characterized by
+`runConfigurationPreflight`/`runConfigurationMigration` existing as
+composable calls meant to run inside an active `InstallTransaction`; the
+"before any asset is installed" sequencing itself is orchestration that
+belongs to slice 5, per the Non-goals below.
+
+**Non-goals for slice 3**: no production adapter that actually shells
+`curl` or `docker`, or that actually invokes `bash scripts/configuration.sh`,
+ships in this slice — all three remain interfaces only, exercised in tests
+via PATH-shimmed stub binaries or (for configuration.sh, which already has
+real entry points) direct `spawnSync` of the unmodified script. Wiring real
+adapters together with slice 1's transaction and slice 2's identity/volume
+checks into the actual sequencing install.sh performs (when to fetch
+discovery vs. run migration, staging-dir placement, and the
+`configuration_migration_completed`-guarded double-call-site logic at
+install.sh:1443-1448/1484-1487) is explicitly deferred to slice 5's full
+orchestration work. `stage_guided_install_configuration` and
+`prepare_configuration` (driving `scripts/configure.sh` itself, including
+the `ORBIT_CONFIGURE_PROMPTS=machine` protocol from #297) remain slice 4,
+unchanged from the top-level plan.
+
+**Testing and parity strategy.**
+
+- **Unit tests** (`src/lib/oidc-discovery.test.ts`,
+  `src/lib/configuration-migration.test.ts`): exhaustive branch coverage
+  over fake adapters/fixtures (including real temporary files and a real
+  symlink for the discovery-file safety checks), test names citing the
+  guarantee numbers above.
+- **OIDC discovery parity** (`src/lib/oidc-discovery.parity.test.ts`), two
+  parts: (1) `oidc_discovery_parser`'s exact JS is awk-extracted verbatim
+  from the live install.sh and executed for real via
+  `node --input-type=commonjs -e`, compared against
+  `validateDiscoveryDocument` for identical raw stdin across ~10 fixtures
+  (issuer mismatch, malformed JSON, non-object/array/null document, missing
+  or non-string endpoint fields, non-https/credentialed/fragment-bearing
+  endpoints, oversized input); (2) `verify_oidc_discovery` itself is
+  awk-extracted along with its `is_regular_non_symlink_file`/
+  `read_environment_value` dependencies and run as bash, with a single stub
+  `curl`/`docker` pair (Node scripts reading a JSON scenario file) put
+  first on `PATH` — the same PATH-shim seam slice 2's stub `docker`
+  established — so both the real script and `verifyOidcDiscovery`'s
+  production orchestration observe identical fetch/sandbox responses across
+  8 scenarios (success; missing `OIDC_ISSUER`; curl exit 63 and 7;
+  HTTP 500; a symlinked destination; an oversized on-disk file; sandbox
+  rejection) and are asserted to reach the identical `{reason, action,
+  message}`, not just the identical pass/fail.
+- **Configuration migration parity** (`src/lib/configuration-migration.
+  parity.test.ts`): unlike install.sh's transaction phase, configuration.sh
+  already has real `--preflight`/`--migrate --transaction` entry points, so
+  this test spawns the real, unmodified script directly (stronger than
+  function extraction — the same technique `config-contract.parity.test.ts`
+  uses for `configure.sh --check`) through a reference adapter local to the
+  test file (not shipped), driven entirely through this module's own
+  `buildPreflightArgv`/`buildMigrateArgv`. Four scenarios: an
+  already-current file (idempotent message), a legacy unversioned file
+  (migration message with `schema v0`/`legacy/unknown` provenance text), a
+  structurally invalid file (preflight fails closed), and a Compose project
+  mismatch (migration fails closed) — each asserted against this module's
+  exact output, not just exit-code parity.
+
 ## Flags (bash characterized, not changed)
 
 ### Slice 1
@@ -257,3 +389,42 @@ scope, as before (slices 3-4).
   see Non-goals above. Flagging again here since it is the one guarantee in
   install.sh's target/identity/volume-safety neighborhood (#6-19) that this
   slice does not characterize at all.
+
+### Slice 3
+
+- No production adapter that shells `curl`, `docker`, or
+  `bash scripts/configuration.sh` ships in this slice — by design, the same
+  "handoff/adapter, not a shipped call" non-goal slice 2 established for
+  `docker`. The parity tests' reference/stub implementations are reasonable
+  templates for the slice-5 orchestration work but are deliberately not
+  exported from either module.
+- `verifyOidcDiscovery`'s on-disk file-safety check (guarantee #26) is
+  ported through a single file descriptor (open with `O_NOFOLLOW`, then
+  `fstat`/`fchmod`/`fstat` on that descriptor) rather than install.sh's own
+  three separate path-based operations (`is_regular_non_symlink_file`,
+  `chmod`, `stat`) — a strict tightening (no stat-then-use window) rather
+  than a behavioral difference for any fixture where nothing races the
+  installer between checks; install.sh itself has this TOCTOU window and
+  this port deliberately closes it rather than reproducing it, per this
+  slice's CodeQL "no stat-then-use pattern" requirement. The final
+  "sandbox adapter reads `documentPath` fresh" step still mirrors
+  install.sh's own two-open sequence exactly (a second, separate open of the
+  same path) since that boundary is documented as belonging to a real
+  adapter's implementation, which does not exist yet in this slice.
+- `run_configuration_migration`'s output classification
+  (`runConfigurationMigration`) explicitly strips trailing newlines from the
+  adapter's raw stdout before matching, mirroring bash's own
+  `migration_output="$(...)"` command-substitution semantics (which strips
+  *all* trailing newlines, not just one) — a caller-supplied adapter that
+  returns raw, un-stripped subprocess stdout still classifies correctly.
+- `configuration-migration.ts` intentionally does not encode install.sh's
+  own sequencing of *when* preflight/migration run relative to asset
+  staging and the guided-configuration path (the
+  `configuration_migration_completed`-guarded two-call-site logic at
+  install.sh:1443-1448/1484-1487) — see Non-goals above. A future slice-5
+  orchestrator owns that state machine; this slice only proves the two
+  calls it does make are individually correct.
+- No behavioral discrepancy in either ported function's own decision logic
+  was found during this port; the items above are process/tooling notes and
+  one deliberate strengthening (the file-descriptor TOCTOU closure), not
+  correctness concerns.
