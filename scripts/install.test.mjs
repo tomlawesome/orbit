@@ -660,7 +660,10 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     cwd: targetDir,
     encoding: "utf8",
     input,
-    timeout: 10000,
+    // 30s, not 10s: under parallel CI load with coverage instrumentation the
+    // PTY session can exceed 10s, and the SIGKILL surfaces as status null
+    // instead of the asserted exit code (observed on PRs #368 and #372).
+    timeout: 30000,
     killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
