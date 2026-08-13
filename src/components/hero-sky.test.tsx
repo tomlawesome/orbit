@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+import * as dashboardUtils from "@/components/dashboard-utils";
+import * as dialGeometry from "@/lib/dial-geometry";
 import { HeroSky } from "./hero-sky";
 import type { HomeItem, HouseholdSection } from "@/lib/domain";
 
@@ -195,5 +197,57 @@ describe("HeroSky", () => {
     const groups = [...container.querySelectorAll(".group")];
     expect(groups.length).toBeGreaterThan(0);
     for (const group of groups) expect(group.classList.contains("seen")).toBe(true);
+  });
+
+  // Regression coverage for the #383 deep-review finding at hero-sky.tsx:191:
+  // hovering a dial body used to re-render every orbiting body (GravityDial's
+  // Body children recompute computeBodyGeometry) and every manifest row
+  // (ItemRow recomputes formatCost/formatLongDate/dueCopy) for a callout that
+  // only needs to move one absolutely-positioned div. GravityDial and ItemRow
+  // are now React.memo'd and hero-sky.tsx's hover handlers are useCallback'd,
+  // so with a stable `items` prop (also now memoized in dashboard.tsx) a
+  // hover event should do none of that per-item work again.
+  describe("hover memoization (issue #383)", () => {
+    it("does not recompute orbital geometry for any body on hover", async () => {
+      await renderHeroSky();
+      const geometrySpy = vi.spyOn(dialGeometry, "computeBodyGeometry");
+      geometrySpy.mockClear();
+
+      const body = container.querySelector('[data-body="mot"] [role="button"]')!;
+      await act(async () => {
+        body.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+      await act(async () => {
+        body.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      });
+
+      // The hover callout genuinely changed (see the "shows hover callout
+      // content" test above) — this asserts specifically that no Body
+      // recomputed its geometry to produce that, i.e. GravityDial bailed out
+      // via React.memo rather than re-rendering its full item set.
+      expect(geometrySpy).not.toHaveBeenCalled();
+      geometrySpy.mockRestore();
+    });
+
+    it("does not re-render manifest rows on hover", async () => {
+      await renderHeroSky();
+      // `dueCopy` is only ever called from inside ItemRow (the hover
+      // callout separately calls `formatCost` on the hovered item itself,
+      // which is legitimately expected to run on every hover), so it is an
+      // ItemRow-exclusive render signal.
+      const dueCopySpy = vi.spyOn(dashboardUtils, "dueCopy");
+      dueCopySpy.mockClear();
+
+      const body = container.querySelector('[data-body="mot"] [role="button"]')!;
+      await act(async () => {
+        body.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+
+      // Zero calls means every ItemRow bailed out via React.memo instead of
+      // re-rendering for a state change (hovered/placement) that none of
+      // their props reflect.
+      expect(dueCopySpy).not.toHaveBeenCalled();
+      dueCopySpy.mockRestore();
+    });
   });
 });
