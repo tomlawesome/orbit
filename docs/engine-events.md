@@ -429,3 +429,101 @@ Additions to this section's `recovery field`, `recovery kind` or
 `recovery reason-class` are allowed within v0 and must update this document
 in the same pull request. Renaming or removing a value is a breaking change
 requiring a version bump and coordination with consumers.
+
+## In-container engine invocation (v0)
+
+Engine-delivery architecture (owner decision, 2026-08-13, recorded across
+comments on issue #295): host bash scripts remain the only thing that ever
+runs `docker` commands — a handful of explicit invocations, at operator
+request, never continuous or backgrounded. The TypeScript engine (this
+repository's `src/cli/orbit.ts`) ships INSIDE the app image, bundled to a
+single dependency-free file at `/opt/orbit/cli/orbit.js`
+(`scripts/bundle-orbit-cli.mjs`, wired into the Dockerfile's `cli-builder`
+stage), and is invoked by host scripts as a disposable
+`docker compose run --rm --no-deps` one-off — the exact pattern
+`scripts/repair.sh` already uses to call `scripts/recovery-crypto.mjs`
+(see that script's "Passphrase — the checkpoint" section), generalized to
+the engine CLI. The engine container is never handed the Docker socket,
+never starts/stops/inspects other containers, and no host in this
+architecture is ever required to have Node installed outside the image.
+
+### Invocation contract
+
+```
+docker compose --project-name "$project" --env-file "$environment_file" \
+  run --rm --no-deps -T --entrypoint node \
+  --volume "<host-deployment-dir>:/orbit-deploy:<ro|rw>" \
+  orbit-app /opt/orbit/cli/orbit.js <command> --dir /orbit-deploy
+```
+
+- `--rm --no-deps` — a throwaway container, and only the named service's own
+  image is used; no dependent service (`orbit-db`, etc.) is started for a
+  one-off that does not need one, mirroring `recovery-crypto.mjs`'s own call
+  sites in `scripts/repair.sh`.
+- `-T` — disables pseudo-TTY allocation, the same choice `repair.sh`'s own
+  `recovery-crypto.mjs` invocations make, so stdio behaves predictably for a
+  scripted caller (machine prompts, if any, flow over stdio exactly as the
+  "Machine prompts (v0)" grammar above already defines — no new protocol).
+- `--entrypoint node` — bypasses `container-entrypoint.sh` (the secret
+  bootstrap/privilege-drop entrypoint the normal `orbit-app` service uses)
+  entirely, the same substitution `recovery-crypto.mjs`'s call sites make;
+  the process runs as the image's own declared `USER` (`root`), same as
+  every other `--entrypoint`-overridden one-off already shipped.
+- The deployment directory is bind-mounted at the fixed in-container path
+  `/orbit-deploy`, `:ro` for a read-only command (`check` today) and `:rw`
+  only for a command that legitimately needs to write host files — no
+  command ships with `:rw` yet, since every command that would otherwise
+  need to mutate a live deployment is Docker-backed (see "Fail-closed
+  guard" below) and therefore refuses before touching the mount either way.
+- `$project`/`$environment_file` resolve exactly as `repair.sh`'s own
+  "Compose project name derivation" step does, so the one-off targets the
+  same Compose project and `.env-orbit` the rest of the deployment's Docker
+  operations already use.
+
+### Fail-closed guard: no Docker access from inside the engine container
+
+Owner's hard constraint (issue #295, 2026-08-13): "the engine can never
+manage the Docker socket. Ever." No code path inside the bundled CLI may
+even ATTEMPT to spawn `docker` while running as this in-image engine — not
+"attempts and fails for lack of a socket," but structurally refuses before
+any such attempt.
+
+`src/cli/orbit.ts` bakes this in two parts:
+
+1. The Dockerfile's `runner` stage sets `ENV ORBIT_ENGINE_CONTEXT=container`.
+   `ENV` (unlike `CMD`/`ENTRYPOINT`) is part of the image's own config and is
+   present in every container started from it regardless of
+   `--entrypoint`/`--user` overrides — the one fact the guard trusts. A
+   container started any other way (a host checkout run directly via
+   `pnpm run orbit`/`tsx`, with no image involved) never has it set.
+2. Every command whose adapters would ever spawn `docker`
+   (`install`/`update` via `src/lib/install-docker-adapter.ts`;
+   `backup`/`restore`/`export-recovery-bundle`/`import-recovery-bundle` via
+   `src/lib/recovery-bundle.ts`'s/`src/lib/restore-engine.ts`'s
+   `createDockerCompose*Adapter`) calls `refuseDockerInContainer` as the
+   FIRST statement in its command function — before any adapter is
+   constructed, so the code path that would spawn `docker` is never
+   reached, not merely made to fail once reached. When
+   `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
+   `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
+   to stderr and exits `9`, before touching the target directory or any
+   subprocess. `check` (the only pure-logic command wired up today) never
+   calls this guard and is unaffected: it works fully against a bind-mounted
+   deploy directory, in or out of a container, and never spawns `docker`
+   under any invocation — `src/cli/orbit.test.ts` and the bundle's own
+   smoke test assert this with a booby-trapped `docker` on `PATH`.
+
+This is a permanent architectural boundary, not a placeholder pending a
+future slice: any command that genuinely needs to touch Docker stays a
+host-side operation for good, per the owner's decision above — the engine
+computes, validates, and directs; the host's own bash scripts are the only
+layer that ever runs `docker`.
+
+### First delegation point
+
+`scripts/engine-check.sh` is the first (and, as of this slice, only) host
+script wired onto this contract: by default it is a behavior-preserving
+proxy onto the existing `bash scripts/configure.sh --check`, and only when
+`ORBIT_ENGINE_CHECK=container` is set in its environment does it instead
+compose the one-off `check` invocation documented above. No existing script
+(`install.sh`, `configure.sh`, `repair.sh`, ...) is modified by this slice.
