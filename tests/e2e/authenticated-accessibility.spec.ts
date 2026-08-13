@@ -441,9 +441,12 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       for (const action of [/^Due next(?:\s|$)/, /^Notifications(?:\s|$)/, /^Archive(?:\s|$)/]) {
         await expect(panel.getByRole("button", { name: action })).toHaveCount(1);
       }
-      // The section rail, with its counts, lives under "Your things".
+      // The section rail, with its counts, lives under "Your things". This
+      // household's only section is "Accessibility": the default
+      // Home/Vehicles/Devices/Services set comes from the first-run wizard,
+      // not from a household created straight through the API.
       await expect(panel.getByRole("navigation", { name: "Your things" })
-        .getByRole("button", { name: /^Home(?:\s|$)/ })).toHaveCount(1);
+        .getByRole("button", { name: /^Accessibility(?:\s|$)/ })).toHaveCount(1);
 
       await page.keyboard.press("Escape");
       await expect(panel).toHaveCount(0);
