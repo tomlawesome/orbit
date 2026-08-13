@@ -17,6 +17,16 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const bundlePath = join(repoDir, "dist", "cli", "orbit.js");
 
+// Every spawnSync call in this file gets an explicit, closed/piped stdio
+// config (never "inherit") and a hard timeout+killSignal: a wedged child (or
+// one whose piped stdio never sees EOF) fails this test loudly within
+// seconds instead of hanging the whole CI job until its own outer timeout.
+// SIGKILL (not the default SIGTERM) since none of these children install
+// their own signal handlers and this is a test, not a production shutdown
+// path.
+const SPAWN_TIMEOUT_MS = 30_000;
+const SPAWN_OPTS = { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: SPAWN_TIMEOUT_MS, killSignal: "SIGKILL" };
+
 const scratchDirs = [];
 afterAll(() => {
   while (scratchDirs.length > 0) {
@@ -56,7 +66,9 @@ function makeReadyFixture() {
 // A `docker` that, if ever executed, fails the test outright — proving a
 // code path never even attempts the spawn, not merely that the spawn fails
 // gracefully. Bash, not Node — see scripts/engine-check.test.mjs's own
-// makeFakeDockerBin comment for why.
+// makeFakeDockerBin comment for why. Never reads stdin (so it is inert
+// regardless of how its own stdin is wired by a caller), and exits
+// immediately — no risk of it becoming the thing that hangs.
 function makeBoobyTrappedDockerBinDir(callLogPath) {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-bundle-smoke-trap-"));
   scratchDirs.push(binDir);
@@ -66,6 +78,10 @@ function makeBoobyTrappedDockerBinDir(callLogPath) {
   return binDir;
 }
 
+function resolveTool(tool) {
+  return spawnSync("which", [tool], SPAWN_OPTS).stdout.trim();
+}
+
 // PATH with no docker at all (see scripts/engine-check.test.mjs's own
 // makeDockerlessBinDir comment for why a real system directory can't be
 // used directly: docker shares /usr/bin with bash/coreutils here).
@@ -73,7 +89,7 @@ function makeDockerlessBinDir() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-bundle-smoke-nodocker-"));
   scratchDirs.push(binDir);
   for (const tool of ["node", "bash"]) {
-    const realPath = spawnSync("which", [tool], { encoding: "utf8" }).stdout.trim();
+    const realPath = resolveTool(tool);
     if (realPath) symlinkSync(realPath, join(binDir, tool));
   }
   return binDir;
@@ -81,7 +97,7 @@ function makeDockerlessBinDir() {
 
 describe("scripts/bundle-orbit-cli.mjs", () => {
   it("runs the real bundling step and produces a single, working dist/cli/orbit.js", () => {
-    const result = spawnSync("node", [join(scriptsDir, "bundle-orbit-cli.mjs")], { cwd: repoDir, encoding: "utf8" });
+    const result = spawnSync("node", [join(scriptsDir, "bundle-orbit-cli.mjs")], { cwd: repoDir, ...SPAWN_OPTS });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("wrote");
     const bundleSource = readFileSync(bundlePath, "utf8");
@@ -91,7 +107,7 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
   });
 
   it("`node <bundle>` with no arguments refuses with a usage message (nonzero exit)", () => {
-    const result = spawnSync("node", [bundlePath], { encoding: "utf8" });
+    const result = spawnSync("node", [bundlePath], SPAWN_OPTS);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("orbit:");
     expect(result.stderr).toContain("supported commands");
@@ -101,7 +117,7 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const fixture = makeReadyFixture();
     const dockerlessBinDir = makeDockerlessBinDir();
     const result = spawnSync("node", [bundlePath, "check", "--dir", fixture], {
-      encoding: "utf8",
+      ...SPAWN_OPTS,
       env: { PATH: dockerlessBinDir },
     });
     expect(result.status).toBe(0);
@@ -114,10 +130,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const callLogPath = join(scratchDir(), "docker-calls.log");
     writeFileSync(callLogPath, "");
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-    const nodeDir = dirname(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
+    const nodeDir = dirname(resolveTool("node"));
 
     const result = spawnSync("node", [bundlePath, "check", "--dir", fixture], {
-      encoding: "utf8",
+      ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}` },
     });
 
@@ -130,10 +146,10 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const callLogPath = join(scratchDir(), "docker-calls.log");
     writeFileSync(callLogPath, "");
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-    const nodeDir = dirname(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
+    const nodeDir = dirname(resolveTool("node"));
 
     const result = spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
-      encoding: "utf8",
+      ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}`, ORBIT_ENGINE_CONTEXT: "container" },
     });
 
@@ -150,7 +166,7 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
 
     for (const command of dockerNeedingCommands) {
       const result = spawnSync("node", [bundlePath, command, "--dir", targetDir], {
-        encoding: "utf8",
+        ...SPAWN_OPTS,
         env: { PATH: dockerlessBinDir, ORBIT_ENGINE_CONTEXT: "container" },
       });
       expect(result.status, `command=${command}`).toBe(9);
@@ -164,13 +180,13 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     const callLogPath = join(scratchDir(), "docker-calls.log");
     writeFileSync(callLogPath, "");
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-    const nodeDir = dirname(spawnSync("which", ["node"], { encoding: "utf8" }).stdout.trim());
+    const nodeDir = dirname(resolveTool("node"));
     // The trap script's own `#!/usr/bin/env bash` shebang needs bash
     // resolvable too, on top of `docker` itself.
-    const bashDir = dirname(spawnSync("which", ["bash"], { encoding: "utf8" }).stdout.trim());
+    const bashDir = dirname(resolveTool("bash"));
 
     const result = spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
-      encoding: "utf8",
+      ...SPAWN_OPTS,
       env: { PATH: `${trapBinDir}:${nodeDir}:${bashDir}` },
     });
 
