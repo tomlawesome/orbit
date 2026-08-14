@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { themePacks } from "@/lib/preferences";
 
-// The token names v19 defines for every pack (docs/design/v19/home.html,
-// docs/design/family/family.css — issue #325). This list is the contract:
+// The token names v19 defines for every pack (design/v19/home.html,
+// design/family/family.css — issue #325). This list is the contract:
 // each of the four packs must define exactly this set, no more, no less,
 // so no pack silently falls back to an unstyled surface.
 const EXPECTED_TOKENS = [
