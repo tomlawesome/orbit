@@ -1,0 +1,73 @@
+
+body{background:#060a18}
+.sky-drift-far{animation:driftf 380s linear infinite}
+.sky-drift-near{animation:driftn 185s linear infinite}
+@keyframes driftf{to{transform:translateX(-1600px)}}
+@keyframes driftn{to{transform:translateX(-1600px)}}
+.tw{animation:twinkle 5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.2}to{opacity:.85}}
+
+/* corona layers — every group breathes on its own period, nothing in sync */
+.corona-wide{animation:cbreathe 8s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes cbreathe{from{opacity:.66}to{opacity:1}}
+.streamers-a{transform-origin:800px 440px;animation:sway-a 26s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-a{from{transform:rotate(-3.4deg) scale(1)}to{transform:rotate(3.8deg) scale(1.035)}}
+.streamers-b{transform-origin:800px 440px;animation:sway-b 39s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-b{from{transform:rotate(3deg) scale(1.03)}to{transform:rotate(-2.8deg) scale(1)}}
+.streamers-b{animation-delay:-13s}
+.filaments{transform-origin:800px 440px;animation:sway-c 31s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes sway-c{from{transform:rotate(2deg);opacity:.6}to{transform:rotate(-2.6deg);opacity:1}}
+.prom{animation:flicker 7s ease-in-out infinite alternate}
+.prom.p2{animation-duration:9.5s;animation-delay:-3s}
+.prom.p3{animation-duration:6.2s;animation-delay:-1.4s}
+@keyframes flicker{from{opacity:.55}to{opacity:.95}}
+.ring-inner{animation:shimmer 8s ease-in-out infinite alternate}
+@keyframes shimmer{from{opacity:.75}to{opacity:1}}
+.horizon{animation:horiz 17s ease-in-out infinite alternate}
+@keyframes horiz{from{opacity:.75}to{opacity:1}}
+
+/* transit as the progress bar — the arc creeps, honestly slow */
+.progress{animation:transit 90s linear forwards}
+@keyframes transit{from{stroke-dasharray:52 48}to{stroke-dasharray:74 26}}
+
+/* the diamond ring — service returning; demo loops every 36s */
+.flare{opacity:0;animation:ringflash 36s linear infinite}
+@keyframes ringflash{
+  0%,60%{opacity:0;transform:scale(.2)}
+  63%{opacity:.6;transform:scale(.6)}
+  66%{opacity:1;transform:scale(1)}
+  72%{opacity:.5;transform:scale(1.15)}
+  77%,100%{opacity:0;transform:scale(.2)}
+}
+.flare{transform-origin:948px 348px;transform-box:view-box}
+/* the shockwave ring racing out from third contact */
+.flarewave{opacity:0;transform-origin:948px 348px;transform-box:view-box;
+           animation:flarewave 36s linear infinite}
+@keyframes flarewave{
+  0%,62%{opacity:0;transform:scale(.3)}
+  64%{opacity:.8;transform:scale(1)}
+  74%{opacity:0;transform:scale(9)}
+  75%,100%{opacity:0;transform:scale(.3)}
+}
+.wash{opacity:0;animation:washflash 36s linear infinite;pointer-events:none}
+@keyframes washflash{
+  0%,61%{opacity:0}
+  66%{opacity:.96}
+  73%{opacity:.3}
+  78%,100%{opacity:0}
+}
+.ringflare{opacity:0;animation:ringlit 36s linear infinite}
+@keyframes ringlit{
+  0%,60%{opacity:0}
+  64%{opacity:1}
+  74%{opacity:.3}
+  79%,100%{opacity:0}
+}
+.msg{position:fixed;left:0;right:0;bottom:20vh;text-align:center;z-index:3;
+     font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
+     text-transform:uppercase}
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
+@media (prefers-reduced-motion: reduce){
+  .flare,.wash,.ringflare,.flarewave{opacity:0!important}
+  .progress{stroke-dasharray:64 36}
+}

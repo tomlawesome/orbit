@@ -1,0 +1,123 @@
+<script>
+  import "./admin.css";
+  import { operationsFixture } from "./operations.fixture.js";
+
+  /**
+   * The observatory (CON-9: "admin = observatory"). Administration is the one
+   * place in Orbit that is unapologetically instrumented — a graticule over
+   * the same sky, telemetry pulsing on it, and rows of state read as
+   * measurements rather than prose.
+   *
+   * Only the Operations pane is drawn. Users, Households, Deliveries, Document
+   * jobs and Mailboxes are named in the nav and have no design behind them
+   * yet; they are listed in #410 and their links stay inert rather than
+   * leading somewhere invented.
+   *
+   * Built from design/family/admin.html and owned here from that point on. The
+   * rows are a seam — see operations.fixture.js.
+   */
+  const operations = operationsFixture;
+</script>
+
+<svelte:head>
+  <link rel="stylesheet" href="/screens/family.css" />
+  <title>Orbit — observatory</title>
+</svelte:head>
+
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<g fill="#e9edf8"><circle cx="19.6" cy="112.4" r="0.6" opacity="0.2"/>
+      <circle cx="221.9" cy="112.4" r="0.52" opacity="0.21"/>
+      <circle cx="235.8" cy="740.7" r="0.73" opacity="0.1"/>
+      <circle cx="857.1" cy="447.8" r="0.61" opacity="0.25"/>
+      <circle cx="149.0" cy="20.4" r="0.87" opacity="0.15"/>
+      <circle cx="317.6" cy="330.3" r="0.58" opacity="0.24"/>
+      <circle cx="336.5" cy="216.9" r="0.69" opacity="0.17"/>
+      <circle cx="1526.0" cy="838.7" r="0.58" opacity="0.11"/>
+      <circle cx="1338.3" cy="989.0" r="0.42" opacity="0.2"/>
+      <circle cx="1389.4" cy="651.2" r="0.51" opacity="0.22"/>
+      <circle cx="1167.7" cy="193.8" r="0.72" opacity="0.12"/>
+      <circle cx="66.3" cy="336.0" r="0.57" opacity="0.15"/>
+      <circle cx="1034.8" cy="836.2" r="0.88" opacity="0.25"/>
+      <circle cx="1589.6" cy="789.8" r="0.55" opacity="0.11"/>
+      <circle cx="998.0" cy="545.8" r="0.74" opacity="0.1"/>
+      <circle cx="308.5" cy="921.0" r="0.7" opacity="0.2"/>
+      <circle cx="153.0" cy="399.2" r="0.86" opacity="0.19"/>
+      <circle cx="1586.6" cy="196.9" r="0.63" opacity="0.22"/>
+      <circle cx="711.5" cy="788.9" r="0.68" opacity="0.1"/>
+      <circle cx="158.2" cy="983.0" r="0.46" opacity="0.11"/>
+      <circle cx="536.3" cy="713.5" r="0.83" opacity="0.16"/>
+      <circle cx="797.0" cy="788.4" r="0.54" opacity="0.14"/>
+      <circle cx="980.4" cy="636.2" r="0.42" opacity="0.1"/>
+      <circle cx="220.7" cy="725.1" r="0.75" opacity="0.25"/>
+      <circle cx="1228.1" cy="254.8" r="0.78" opacity="0.25"/>
+      <circle cx="557.9" cy="11.2" r="0.59" opacity="0.13"/>
+      <circle cx="281.8" cy="45.1" r="0.46" opacity="0.23"/>
+      <circle cx="80.0" cy="614.0" r="0.5" opacity="0.11"/>
+      <circle cx="1313.2" cy="298.7" r="0.49" opacity="0.16"/>
+      <circle cx="1111.9" cy="524.4" r="0.83" opacity="0.15"/>
+      <circle cx="838.5" cy="717.1" r="0.63" opacity="0.2"/>
+      <circle cx="747.0" cy="133.6" r="0.46" opacity="0.21"/>
+      <circle cx="1191.8" cy="942.8" r="0.75" opacity="0.18"/>
+      <circle cx="265.9" cy="853.1" r="0.46" opacity="0.15"/>
+      <circle cx="225.0" cy="380.7" r="0.55" opacity="0.15"/>
+      <circle cx="1137.7" cy="541.6" r="0.52" opacity="0.21"/>
+      <circle cx="1176.2" cy="827.2" r="0.42" opacity="0.18"/>
+      <circle cx="1432.6" cy="258.8" r="0.5" opacity="0.22"/>
+      <circle cx="582.2" cy="401.3" r="0.81" opacity="0.15"/>
+      <circle cx="317.5" cy="214.4" r="0.57" opacity="0.2"/>
+      <circle cx="589.2" cy="771.1" r="0.43" opacity="0.12"/>
+      <circle cx="999.9" cy="479.5" r="0.65" opacity="0.24"/>
+      <circle cx="443.8" cy="181.6" r="0.42" opacity="0.16"/>
+      <circle cx="475.4" cy="473.8" r="0.4" opacity="0.08"/>
+      <circle cx="607.5" cy="757.6" r="0.55" opacity="0.24"/>
+      <circle cx="927.0" cy="403.4" r="0.79" opacity="0.12"/>
+      <circle cx="968.3" cy="846.5" r="0.67" opacity="0.13"/>
+      <circle cx="153.6" cy="574.1" r="0.49" opacity="0.14"/>
+      <circle cx="867.9" cy="941.1" r="0.74" opacity="0.17"/>
+      <circle cx="1373.4" cy="308.6" r="0.59" opacity="0.2"/>
+      <circle cx="886.8" cy="221.6" r="0.61" opacity="0.22"/>
+      <circle cx="387.7" cy="705.8" r="0.42" opacity="0.24"/>
+      <circle cx="1094.5" cy="323.7" r="0.89" opacity="0.22"/>
+      <circle cx="98.7" cy="248.3" r="0.65" opacity="0.25"/>
+      <circle cx="225.1" cy="47.7" r="0.56" opacity="0.09"/>
+      <circle cx="654.3" cy="538.5" r="0.62" opacity="0.1"/>
+      <circle cx="37.1" cy="802.9" r="0.62" opacity="0.16"/>
+      <circle cx="764.9" cy="685.7" r="0.85" opacity="0.22"/>
+      <circle cx="1163.5" cy="338.9" r="0.48" opacity="0.1"/>
+      <circle cx="1374.5" cy="56.9" r="0.68" opacity="0.23"/>
+      <circle cx="515.6" cy="389.1" r="0.61" opacity="0.24"/>
+      <circle cx="1094.7" cy="838.8" r="0.42" opacity="0.2"/>
+      <circle cx="721.5" cy="401.5" r="0.81" opacity="0.21"/>
+      <circle cx="1456.7" cy="738.5" r="0.86" opacity="0.15"/>
+      <circle cx="889.8" cy="784.8" r="0.63" opacity="0.1"/>
+      <circle cx="936.7" cy="871.2" r="0.84" opacity="0.1"/>
+      <circle cx="609.7" cy="228.6" r="0.57" opacity="0.24"/>
+      <circle cx="673.7" cy="313.2" r="0.54" opacity="0.15"/>
+      <circle cx="1071.5" cy="342.6" r="0.49" opacity="0.12"/>
+      <circle cx="415.9" cy="906.2" r="0.48" opacity="0.21"/></g>
+<g class="grid" stroke="#17203f" fill="none">
+  <circle cx="800" cy="500" r="330"/><circle cx="800" cy="500" r="470"/><circle cx="800" cy="500" r="610"/>
+  <line x1="800" y1="30" x2="800" y2="970"/><line x1="330" y1="500" x2="1270" y2="500"/>
+  <line x1="468" y1="168" x2="1132" y2="832"/><line x1="1132" y1="168" x2="468" y2="832"/>
+</g>
+<g fill="#d8b45a"><circle class="pulse" cx="1130" cy="500" r="2.4"/>
+<circle class="pulse p2" cx="800" cy="170" r="2.4"/><circle class="pulse p3" cx="567" cy="733" r="2.4"/></g>
+</svg></div>
+<div class="obs">
+  <div class="obs-head"><div class="mark-row"><svg width="26" height="26" viewBox="0 0 200 200" aria-hidden="true"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div><span class="badge">OBSERVATORY</span></div>
+  <nav class="glass">
+    <a class="on" href="#">Operations</a><a href="#">Users</a><a href="#">Households</a>
+    <a href="#">Deliveries</a><a href="#">Document jobs</a><a href="#">Mailboxes</a>
+  </nav>
+  <main class="pane glass">
+    <h3>Operational state</h3>
+    {#each operations.state as line}
+      <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
+    {/each}
+    <h3 style="margin-top:22px">Recent deliveries</h3>
+    {#each operations.deliveries as line}
+      <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
+    {/each}
+  </main>
+</div>
+<div class="vignette"></div>

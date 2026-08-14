@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  data-theme is what activates the token packs in home.css — including
+  --stars, which drives the starfield's opacity. Without it the packs never
+  match, --stars is undefined, and the sky renders invisible. Set here rather
+  than on mount so it is correct in the server-rendered HTML, exactly as
+  design/v19/home.html sets it on its own <html>.
+-->
+<html lang="en" data-theme="starchart">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    %sveltekit.head%
+  </head>
+  <!--
+    display:contents keeps this wrapper out of the layout entirely, so the
+    mockup's children behave as direct children of <body> — which is what its
+    position:fixed and height:100% rules were authored against.
+  -->
+  <body><div style="display: contents">%sveltekit.body%</div></body>
+</html>

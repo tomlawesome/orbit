@@ -1,0 +1,30 @@
+
+body{background:#04070f}
+.sky-far{animation:driftf 370s linear infinite}
+.sky-near{animation:driftn 180s linear infinite}
+@keyframes driftf{to{transform:translateX(-1600px)}}
+@keyframes driftn{to{transform:translateX(-1600px)}}
+.tw{animation:twinkle 5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.2}to{opacity:.8}}
+
+/* the well never sits still */
+.disc-precess{transform-origin:800px 450px;animation:precess 56s ease-in-out infinite alternate}
+@keyframes precess{from{transform:rotate(-1.4deg)}to{transform:rotate(1.6deg)}}
+.disc-glow{animation:dbreathe 9s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes dbreathe{from{opacity:.65}to{opacity:1}}
+.photon{animation:pflick 6.5s ease-in-out infinite alternate}
+@keyframes pflick{from{opacity:.8}to{opacity:1}}
+.photon-hot{animation:pflick2 4.2s ease-in-out infinite alternate}
+@keyframes pflick2{from{opacity:.7}to{opacity:1}}
+.lensed{animation:lens 12s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes lens{from{opacity:.7}to{opacity:.95}}
+.smear{animation:smear 8s ease-in-out infinite alternate}
+@keyframes smear{from{opacity:.55}to{opacity:.85}}
+
+.line-a{position:fixed;left:0;right:0;bottom:17vh;text-align:center;z-index:3;
+        font:500 14px var(--display);letter-spacing:.14em;color:var(--ink-mid)}
+.line-b{position:fixed;left:0;right:0;bottom:12.5vh;text-align:center;z-index:3;
+        font:11px var(--mono);letter-spacing:.14em}
+.line-b a{color:var(--accent);text-decoration:none}
+.line-b a:hover{text-decoration:underline}
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}

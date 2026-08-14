@@ -1,0 +1,51 @@
+/*
+ * The mobile dialect — lifted from design/family/mobile-home.html and owned
+ * here from that point on.
+ *
+ * CON-10 states a dialect rather than a second design: the dial owns the
+ * width, callouts and drawers become bottom sheets, and the other households
+ * collapse from a sky you fly through into a strip you scroll. One identity,
+ * one chart, a different grammar for a thumb.
+ *
+ * Global rather than component-scoped, alongside family.css.
+ */
+
+body{overflow-y:auto;overflow-x:hidden}
+.sky g{animation:drift 180s linear infinite}
+@keyframes drift{to{transform:translateX(-40px)}}
+.mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
+.mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
+.morb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+      background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+      font:11px var(--mono);color:var(--ink-mid)}
+.mdial{width:100%;aspect-ratio:1;position:relative}
+.mdial svg{width:100%;height:100%}
+.skies{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
+.skies .msys{flex:none;display:flex;align-items:center;gap:8px;font:10.5px var(--mono);
+             color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;
+             padding:6px 13px;background:var(--panel)}
+.skies svg{flex:none}
+.msearch{margin:8px 0 18px;text-align:center}
+.msearch input{width:88%;background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+      text-align:center;font:12.5px var(--mono);color:var(--ink);padding:7px}
+.mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-faint);margin:14px 4px 8px}
+.mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
+       padding:11px 13px;margin-bottom:6px}
+.mitem b{display:block;font-size:13.5px;font-weight:520}
+.mitem span{font-size:11px;color:var(--ink-mid)}
+.mitem .flex{flex:1;min-width:0}
+.mt{font:500 12px var(--mono);text-align:right}
+.mt small{display:block;font-size:9.5px;color:var(--ink-faint)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+       padding:18px 22px 26px;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
+.sheet.open{transform:none}
+.sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.sheet b{font-size:15px;font-weight:600}
+.sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
+.sheet .acts{display:flex;gap:9px}
+.sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
+      background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.sheet .acts .pri{color:var(--accent);border-color:var(--accent)}

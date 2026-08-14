@@ -1,0 +1,37 @@
+/*
+ * The design family's core: shared tokens and surface for the family screens
+ * (sign-in, sign-out, 404, maintenance). Built from design/family/family.css
+ * and owned here from that point on.
+ *
+ * Deliberately NOT global. design/v19/home.html never linked it and defines
+ * its own token packs; applying it to home imposed body{overflow:hidden},
+ * which killed scrolling back up from the manifest to the hero.
+ */
+/* orbit design family core — one identity, many skies (issue #307, v13) */
+:root{
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --display:'Space Grotesk',var(--ui);
+  --bg:#070d1f; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.78);
+  --line:#243259; --line-soft:#17203f;
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+  --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+  --sun:#ffe9c4;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--ui);overflow:hidden}
+.sky{position:fixed;inset:-5%;pointer-events:none}
+.sky svg{position:absolute;inset:0;width:100%;height:100%}
+.vignette{position:fixed;inset:0;pointer-events:none;
+          background:radial-gradient(ellipse at 50% 40%,transparent 55%,rgba(0,0,0,.3) 100%)}
+.stage{position:relative;height:100%;display:grid;place-items:center;z-index:2}
+.glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+       border:1px solid var(--line);border-radius:18px}
+.mark-row{display:flex;align-items:center;gap:10px;font-family:var(--display);
+          font-weight:600;font-size:17px;letter-spacing:.02em}
+.mono{font-family:var(--mono)}
+.annot{font:10.5px var(--mono);letter-spacing:.12em;fill:var(--accent)}
+.foot{position:fixed;bottom:16px;left:0;right:0;text-align:center;z-index:2;
+      font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.1em}
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
