@@ -10,21 +10,9 @@ async function signIn(page: Page, identity: string) {
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
 }
 
-// v19 has no sidebar and no topbar (design/v19/home.html): the account orb
-// is the one persistent control at every breakpoint, and its panel is where
-// navigation, the household switcher, the section list and sign-out live.
-async function openAccountPanel(page: Page) {
-  const orb = page.getByRole("button", { name: "Open account menu" });
-  await expect(orb, "Expected the account orb").toBeVisible({ timeout: 15_000 });
-  await orb.click();
-  const panel = page.getByRole("dialog", { name: "Account and menu" });
-  await expect(panel).toBeVisible({ timeout: 15_000 });
-  return panel;
-}
-
-async function openSettingsFromPanel(page: Page) {
-  const panel = await openAccountPanel(page);
-  await panel.getByRole("button", { name: "Settings", exact: true }).click();
+async function openDesktopSettings(page: Page) {
+  await page.getByRole("button", { name: "Open account menu" }).click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 }
 
 async function clickWithConfirmation(page: Page, click: () => Promise<void>) {
@@ -130,16 +118,31 @@ async function waitForActiveHousehold(page: Page, name: string): Promise<Durable
   );
 }
 
+async function openMobileNavigationIfNeeded(page: Page) {
+  const householdPicker = page.locator("button.household-picker");
+  const openNavigation = page.getByRole("button", { name: "Open navigation" });
+  await expect.poll(
+    async () => (await householdPicker.isVisible()) || (await openNavigation.isVisible()),
+    { timeout: 15_000 },
+  ).toBe(true);
+  if (await openNavigation.isVisible()) await openNavigation.click();
+  await expect(householdPicker).toBeVisible({ timeout: 15_000 });
+}
+
 async function selectHouseholdByName(page: Page, name: string): Promise<DurableWorkspace> {
   const workspace = await waitForDurableWorkspace(page);
   const target = workspace.households.find((household) => household.name === name);
   if (!target) throw new Error(`Expected household "${name}" to be available for selection`);
 
-  // The switcher only exists in the dashboard shell, never on /settings.
   if (new URL(page.url()).pathname === "/settings") await page.goto("/");
-  const panel = await openAccountPanel(page);
-  const targetItem = panel.locator("button.account-household").filter({ hasText: name });
-  await expect(targetItem, `Expected exactly one household entry for "${name}"`).toHaveCount(1, { timeout: 15_000 });
+  await openMobileNavigationIfNeeded(page);
+  const householdPicker = page.locator("button.household-picker");
+  await expect(householdPicker, `Expected the household picker before selecting "${name}"`).toBeVisible({ timeout: 15_000 });
+  await householdPicker.click();
+  const householdMenu = page.getByRole("menu");
+  await expect(householdMenu).toBeVisible({ timeout: 15_000 });
+  const targetItem = householdMenu.getByRole("menuitem").filter({ hasText: name });
+  await expect(targetItem, `Expected exactly one household menu item for "${name}"`).toHaveCount(1, { timeout: 15_000 });
   await targetItem.click();
   return waitForActiveHousehold(page, name);
 }
@@ -165,10 +168,9 @@ async function openItemRow(page: Page, title: string) {
 async function reopenItemFromList(page: Page, title: string, list: "home" | "archive") {
   await page.reload();
   await waitForActiveHouseholdItem(page, title);
-  const panel = await openAccountPanel(page);
   const listButton = list === "archive"
-    ? panel.getByRole("button", { name: /^Archive(?:\s|$)/ })
-    : panel.getByRole("button", { name: /^Home(?:\s|$)/ });
+    ? page.getByRole("button", { name: /^Archive(?:\s|$)/ })
+    : page.getByRole("button", { name: /^Home(?:\s|$)/ });
   await expect(listButton, `Expected the ${list} item list to be available`).toBeVisible({ timeout: 15_000 });
   await listButton.click();
   await openItemRow(page, title);
@@ -177,12 +179,19 @@ async function reopenItemFromList(page: Page, title: string, list: "home" | "arc
   return detail;
 }
 
-async function createManualHousehold(page: Page, name: string) {
+async function createManualHousehold(page: Page, isMobile: boolean, name: string) {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
+  const householdPicker = page.locator("button.household-picker");
   const workspace = await waitForDurableWorkspace(page);
   if (workspace.activeHouseholdId && workspace.households.length > 0) {
-    const panel = await openAccountPanel(page);
-    const addHousehold = panel.getByRole("button", { name: "Add a household" });
+    if (isMobile) {
+      const navigation = page.getByRole("button", { name: "Open navigation" });
+      await expect(navigation).toBeVisible({ timeout: 15_000 });
+      await navigation.click();
+    }
+    await expect(householdPicker).toBeVisible({ timeout: 15_000 });
+    await householdPicker.click();
+    const addHousehold = page.getByRole("button", { name: "Add a household" });
     await expect(addHousehold).toBeVisible({ timeout: 15_000 });
     await addHousehold.click();
   } else {
@@ -198,9 +207,7 @@ async function createManualHousehold(page: Page, name: string) {
   await waitForActiveHousehold(page, name);
   await page.reload();
   await waitForActiveHousehold(page, name);
-  // The topbar search that used to prove the shell rebound is gone; the
-  // hero's own document-outline heading is the equivalent signal.
-  await expect(page.getByRole("heading", { name: `${name} — due next` })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByPlaceholder(`Search ${name.toLowerCase()}…`)).toBeVisible();
 }
 
 async function waitForSynced(page: Page) {
@@ -246,7 +253,7 @@ test.describe("authenticated household lifecycle", () => {
       await signIn(memberPage, member);
       await expect(memberPage.getByRole("heading", { name: "Where would you like to begin?" })).toBeVisible();
 
-      await openSettingsFromPanel(page);
+      await openDesktopSettings(page);
       await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("link", { name: "Members", exact: true }).click();
       await expect(page.getByLabel("Registered user").locator("option", { hasText: member })).toHaveCount(1);
@@ -256,12 +263,12 @@ test.describe("authenticated household lifecycle", () => {
 
       await memberPage.reload();
       await expect(memberPage.getByText("Acceptance household", { exact: true }).first()).toBeVisible();
-      const memberPanel = await openAccountPanel(memberPage);
-      await expect(memberPanel.getByRole("button", { name: "Settings", exact: true })).toHaveCount(1);
-      await expect(memberPanel.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(1);
+      await memberPage.getByRole("button", { name: "Open account menu" }).click();
+      await expect(memberPage.getByRole("menuitem", { name: "Settings", exact: true })).toHaveCount(1);
+      await expect(memberPage.getByRole("menuitem", { name: "Sign out", exact: true })).toHaveCount(1);
       await expect(memberPage.getByRole("link", { name: "Administration" })).toHaveCount(0);
-      await expect(memberPanel.getByRole("button", { name: "Administration", exact: true })).toHaveCount(0);
-      await memberPanel.getByRole("button", { name: "Settings", exact: true }).click();
+      await expect(memberPage.getByRole("menuitem", { name: "Administration", exact: true })).toHaveCount(0);
+      await memberPage.getByRole("menuitem", { name: "Settings", exact: true }).click();
       await expect(memberPage.getByRole("link", { name: "Household", exact: true })).toHaveCount(0);
       await expect(memberPage.getByRole("region", { name: "Household", exact: true })).toHaveCount(0);
       await expect(memberPage.getByRole("link", { name: "Sections", exact: true })).toHaveCount(0);
@@ -302,7 +309,7 @@ test.describe("authenticated household lifecycle", () => {
       // Administration is now a route, so the journey must return to the
       // workspace and reopen settings before using a settings section again.
       await page.goto("/");
-      await openSettingsFromPanel(page);
+      await openDesktopSettings(page);
       await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("link", { name: "Household", exact: true }).click();
       await page.getByLabel(/Type “Acceptance household” to remove this household/).fill("Acceptance household");
@@ -349,7 +356,7 @@ test.describe("authenticated household lifecycle", () => {
 
     await signIn(page, administrator);
     const suffix = Date.now();
-    await createManualHousehold(page, `Issue 40 desktop ${suffix}`);
+    await createManualHousehold(page, false, `Issue 40 desktop ${suffix}`);
     const title = `Manual item ${suffix}`;
     const updatedTitle = `${title} updated`;
     const inspectionRequests: string[] = [];
@@ -357,8 +364,7 @@ test.describe("authenticated household lifecycle", () => {
       if (request.url().includes("/item-document-inspection")) inspectionRequests.push(request.url());
     });
 
-    await page.getByRole("button", { name: "Add to your orbit" }).click();
-    await page.getByRole("button", { name: "Open the full form" }).click();
+    await page.getByRole("button", { name: "Add item", exact: true }).first().click();
     let editor = page.getByRole("dialog", { name: "Add an item" });
     await editor.getByLabel("What do you want to keep track of?").fill(title);
     await editor.getByLabel("Type").fill("Insurance");
@@ -441,11 +447,11 @@ test.describe("authenticated household lifecycle", () => {
     expect(finalItem).toMatchObject({ status: "archived", version: 8, dueDate: "2031-11-20", snoozedUntil: "2031-11-25" });
     expect(inspectionRequests).toEqual([]);
     await page.reload();
-    await (await openAccountPanel(page)).getByRole("button", { name: /^Archive/ }).click();
+    await page.getByRole("button", { name: /^Archive/ }).click();
     await expect(page.locator("article.item-card").filter({ has: page.getByRole("heading", { name: updatedTitle, exact: true }) })).toHaveCount(1, { timeout: 15_000 });
   });
 
-  test("proves member leave, owner/admin removal and ownership transfer journeys", async ({ page, browser }, testInfo) => {
+  test("proves member leave, owner/admin removal and ownership transfer journeys", async ({ page, browser, isMobile }, testInfo) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page, administrator);
@@ -453,7 +459,7 @@ test.describe("authenticated household lifecycle", () => {
     // database, so give each project a distinct durable household scenario.
     const projectPartition = testInfo.project.name.replace(/[^a-z0-9]+/giu, "-").replace(/^-|-$/gu, "").toLowerCase();
     const householdName = `Issue 94 membership ${projectPartition} ${Date.now()}`;
-    await createManualHousehold(page, householdName);
+    await createManualHousehold(page, isMobile, householdName);
     const createdWorkspace = await waitForActiveHousehold(page, householdName);
     const householdId = createdWorkspace.activeHouseholdId;
     if (!householdId) throw new Error(`Expected household "${householdName}" to have a durable id`);
@@ -466,7 +472,13 @@ test.describe("authenticated household lifecycle", () => {
       const openMembers = async (targetPage: Page) => {
         const settingsPage = targetPage.locator(".settings-page");
         if (!(await settingsPage.isVisible())) {
-          await openSettingsFromPanel(targetPage);
+          const openNavigation = targetPage.getByRole("button", { name: "Open navigation" });
+          if (await openNavigation.isVisible()) {
+            await openMobileNavigationIfNeeded(targetPage);
+            await targetPage.getByRole("button", { name: "Personalise", exact: true }).click();
+          } else {
+            await openDesktopSettings(targetPage);
+          }
         }
         await expect(targetPage).toHaveURL(/\/settings(?:#settings-members)?$/);
         await expect(settingsPage).toBeVisible({ timeout: 15_000 });
@@ -580,7 +592,7 @@ test.describe("authenticated household lifecycle", () => {
 
     await signIn(page, administrator);
     const suffix = Date.now();
-    await createManualHousehold(page, `Issue 40 mobile ${suffix}`);
+    await createManualHousehold(page, true, `Issue 40 mobile ${suffix}`);
     const title = `Mobile item ${suffix}`;
     const updatedTitle = `${title} edited`;
     const inspectionRequests: string[] = [];

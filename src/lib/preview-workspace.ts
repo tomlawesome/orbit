@@ -9,7 +9,6 @@ import {
   type WorkspaceState,
 } from "@/lib/workspace";
 import { purgeLegacyWorkspaceCache } from "@/lib/private-browser-storage";
-import { markSignedOut } from "@/lib/signed-out-notice";
 
 export type WorkspaceSyncStatus = "loading" | "signed-out" | "synced" | "saving" | "error";
 
@@ -408,11 +407,6 @@ export function useWorkspace() {
       setWorkspace(emptyWorkspace);
       setSyncStatus("signed-out");
       setSyncMessage("");
-      // Hands the goodbye screen to whichever document lands after this
-      // navigation — which may be a round trip through the provider's
-      // end-session endpoint. Content-free and one-shot; see
-      // lib/signed-out-notice.ts.
-      markSignedOut();
       window.location.assign(payload.redirectTo || "/");
     } catch {
       sessionRef.current = activeSession;
