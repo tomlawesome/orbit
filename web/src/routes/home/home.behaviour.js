@@ -72,6 +72,39 @@ export function mountHome({ galaxy }) {
       ox *= f; oy *= f;
       placed.push({ key, hh, ox, oy, dist });
     }
+    /*
+     * The chart owns the middle of the sky (#427). Bearings are clamped into
+     * the visible area, and that clamp is tighter vertically than the dial is
+     * tall — h/2-155 is 245px in an 800px viewport against a 320px dial radius
+     * — so a household on a near-vertical bearing was placed *inside* the
+     * chart rather than behind it.
+     *
+     * Push anything inside the keep-out out to its edge, along its own bearing
+     * so the direction stays true. If that lands it outside the visible band,
+     * slide it around the circle instead of off the top or bottom: hold y at
+     * the limit and solve for x, which keeps both the keep-out distance and
+     * the side of the sky it belongs on.
+     */
+    /* .dialwrap's offsetWidth, not the dial's bounding rect: the rect includes
+       transforms, and the chart is mid-fanfare (POL-1) on first render, so
+       measuring it there yields a keep-out sized for a chart that is still
+       growing. offsetWidth is the settled layout box. */
+    const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 46;
+    const maxY = Math.max(120, h / 2 - 155);
+    const clearDial = (point) => {
+      const d = Math.hypot(point.ox, point.oy);
+      if (d >= keepOut) return;
+      const scale = keepOut / (d || 1);
+      point.ox *= scale;
+      point.oy *= scale;
+      if (Math.abs(point.oy) > maxY) {
+        const side = point.ox >= 0 ? 1 : -1;
+        point.oy = Math.sign(point.oy || 1) * maxY;
+        point.ox = side * Math.sqrt(Math.max(keepOut * keepOut - point.oy * point.oy, 0));
+      }
+    };
+    for (const point of placed) clearDial(point);
+
     // narrow viewports can fold two bearings onto the same patch of sky —
     // relax overlaps apart so every constellation stays individually clickable
     for (let round = 0; round < 4; round++) {
@@ -87,6 +120,10 @@ export function mountHome({ galaxy }) {
         }
       }
     }
+    /* The relax pass can push a constellation back over the chart, so the
+       keep-out is re-applied after it: clearing the dial wins over spacing. */
+    for (const point of placed) clearDial(point);
+
     for (const { key, hh, ox, oy, dist } of placed) {
       const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
       const div = document.createElement("div");
@@ -100,7 +137,9 @@ export function mountHome({ galaxy }) {
       div.style.top = (h / 2 + oy - 95) + "px";
       div.style.setProperty("--tox", ox + "px");
       div.style.setProperty("--toy", oy + "px");
-      div.style.opacity = dim;
+      /* A custom property rather than a flat opacity, so a pack can lift the
+         floor without losing the distance gradient. See home.css. */
+      div.style.setProperty("--dim", dim);
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       // the arrow extends underneath the text, then veers toward the ring
@@ -115,6 +154,20 @@ export function mountHome({ galaxy }) {
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
+      /*
+       * The leader rule runs under the label and then veers to the ring, so
+       * its length has to match the label. `tw` above estimates that from the
+       * character count at the mockup's own font size; once the text is in the
+       * document its real width is knowable, so measure it and correct the
+       * path. That makes the label size themeable — the engraved packs set a
+       * larger one — without the rule ending short of the word.
+       */
+      const text = div.querySelector("text");
+      const measured = Math.min(150, text.getComputedTextLength());
+      if (measured) {
+        div.querySelector("path")
+          .setAttribute("d", `M 4 21 H ${measured + 10} L ${measured + 26} 40`);
+      }
     }
   }
 
@@ -288,6 +341,9 @@ export function mountHome({ galaxy }) {
     /* Survive a refresh. See the note in app.html: the server holds the real
        preference once the shell is wired; this is the pre-paint cache. */
     try { localStorage.setItem("orbit-theme", name); } catch (e) {}
+    /* The constellation leaders are measured from the rendered label, and
+       the engraved packs size that label differently, so re-measure. */
+    if (!flying) renderGalaxy(false);
   }
 
   /* The markup ships with star-chart pressed, because that is what the mockup

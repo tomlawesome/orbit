@@ -75,14 +75,32 @@
    * dusk over a city rather than deep space.
    */
   [data-theme=retrograde]{
-    --bg:#0f0a1e; --panel:rgba(26,16,48,.6); --panel-raised:rgba(34,20,62,.82);
-    --line:#3a2a63; --line-soft:#241a42;
-    --ink:#f2e9ff; --ink-mid:#a08fc7; --ink-faint:#6b5b91;
-    --accent:#ff5fd2; --ok:#2ff2c4; --warm:#ffb43d; --overdue:#ff4d6d; --upcoming:#5ce1ff;
-    --degraded:#ff8a3d;
-    --sun:#ff5fd2; --sun-core:#fff0fb; --stars:1; --celestial:block;
-    --star-far:#c8b8ff; --star-near:#f2e9ff;
-    --chart-line:#3a2a63; --chart-line-soft:#241a42; --chart-ink:#6b5b91;
+    --bg:#120a26; --panel:rgba(30,18,56,.62); --panel-raised:rgba(40,24,74,.84);
+    --line:#402c6b; --line-soft:#2a1c4a;
+    --ink:#f6ecff; --ink-mid:#b39ddb; --ink-faint:#7a68a6;
+    /* First pass read as synthwave — violet, magenta, cyan — and the owner
+       found it short of "the typical bright 80s colours" (2026-08-14). The
+       missing notes were acid yellow, hot coral and a true neon green, so the
+       status tokens now carry them. Discipline is unchanged and is what keeps
+       this the right side of tacky: a deep ground so the neons sit ON
+       something, one job per colour, and everything structural still a tint of
+       the violet. */
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#c9b6ff; --star-near:#ffffff;
+    --chart-line:#4a3480; --chart-line-soft:#2a1c4a; --chart-ink:#7a68a6;
+    /* The bodies are the largest coloured things on the screen, and their
+       gradients were hardcoded, so no pack could reach them - which is why the
+       first retrograde still read as a violet version of star-chart. The stops
+       now take variables whose fallbacks are the original values, so every
+       other pack is untouched and this one can put the eighties into the
+       planets themselves: neon green, acid yellow, hot coral, electric
+       turquoise. The gloss stays; these are chrome and neon, not ink. */
+    --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+    --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+    --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+    --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
   }
 
   /*
@@ -126,6 +144,45 @@
   /* Printed stars do not twinkle. Drift is untouched. */
   [data-theme=atlas] body.quiet .sky .near circle,
   [data-theme=dawn] body.quiet .sky .near circle{animation:none}
+  /*
+   * Engraving is weight, not just contrast (owner, 2026-08-14). Darkening the
+   * ink alone left the chart looking like a faint night sky printed badly; on
+   * paper the structural rules have to carry actual thickness. Each family is
+   * matched on the weight the design gave it and scaled about 1.4x, so their
+   * relationship to one another - hairline graticule, light inner ring, heavy
+   * month ring - is preserved rather than flattened.
+   *
+   * Matched by attribute so the shared SVG stays untouched; CSS stroke-width
+   * beats the presentation attribute. The starfield is unaffected: its stroke
+   * comes from CSS above, not from an attribute.
+   */
+  [data-theme=atlas] .dial [stroke-width=".5"],
+  [data-theme=dawn] .dial [stroke-width=".5"]{stroke-width:.8}
+  [data-theme=atlas] .dial [stroke-width=".75"],
+  [data-theme=dawn] .dial [stroke-width=".75"]{stroke-width:1.1}
+  [data-theme=atlas] .dial [stroke-width="1"],
+  [data-theme=dawn] .dial [stroke-width="1"]{stroke-width:1.4}
+  [data-theme=atlas] .dial [stroke-width="1.3"],
+  [data-theme=dawn] .dial [stroke-width="1.3"]{stroke-width:1.8}
+  [data-theme=atlas] .dial [stroke-width="1.5"],
+  [data-theme=dawn] .dial [stroke-width="1.5"]{stroke-width:2.1}
+  /* The constellations are the same engraving at another scale. */
+  [data-theme=atlas] .minisys [stroke-width="1"],
+  [data-theme=dawn] .minisys [stroke-width="1"]{stroke-width:1.4}
+  /*
+   * The household names sit furthest back and were the hardest thing to read
+   * on paper (owner, 2026-08-14). Two causes, both of them a night sky's
+   * assumptions: 9.5px of tracked-out mono is legible as glowing type on dark
+   * and marginal as ink on light, and the distance dimming bottoms out at .45,
+   * which a bright ground washes away entirely. So the engraved packs set a
+   * larger label and lift the dimming floor, keeping the gradient above it so
+   * distance still reads. The leader rule follows, because renderGalaxy
+   * measures the rendered text rather than estimating it.
+   */
+  [data-theme=atlas] .minisys,
+  [data-theme=dawn] .minisys{opacity:clamp(.72, calc(var(--dim, 1) + .22), 1)}
+  [data-theme=atlas] .minisys text,
+  [data-theme=dawn] .minisys text{font-size:11.5px;opacity:1}
 
   *{box-sizing:border-box;margin:0}
   html{scroll-behavior:smooth}
@@ -481,6 +538,11 @@
      and grows as we approach. Nothing ever swaps. */
   .minisys{position:absolute;cursor:pointer;z-index:3;
            transform-origin:118px 95px; /* the ring centre — flights pivot on it */
+           /* --dim is written per constellation by renderGalaxy: nearer
+              households sit brighter. Read here rather than applied inline so
+              a pack can lift the floor without losing the gradient. The
+              .flying and .dissolve rules below still override it. */
+           opacity:var(--dim, 1);
            transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s}
   .minisys:hover .msring{stroke-opacity:.9}
   .msring{transition:stroke-opacity .3s}
