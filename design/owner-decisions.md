@@ -151,9 +151,18 @@ geometry-alone.
 
 **Drawer rules:** the edge word **rides its drawer**, staying attached as it
 slides; clicking pulls it out and pushes it home. **All drawers animate back to
-their closed positions on scroll down** (POL-12). Escape and click-outside
-retract the create drawer. Layout must **pad for the scrollbar**, which was
-overlaying the `key` label.
+their closed positions on scroll down** (POL-12). Layout must **pad for the
+scrollbar**, which was overlaying the `key` label.
+
+**Light dismiss (owner, 2026-08-14, amending the create-drawer-only rule
+above; issue #416).** One rule for every transient surface on home — the three
+drawers, the document card and the account panel. Clicking anywhere outside an
+open surface closes it, Escape closes it, and opening one closes the others,
+so **only ever one sits over the hero**. The scrim remains create-only, exactly
+as CON-18 ratified: nothing else dims the sky. Previously click-outside
+belonged to the create drawer alone, which left all three drawers able to sit
+open together and left the document card — opened from a callout that then
+vanishes — with no exit but its own close button.
 
 **Status drawer contents** — bounded states only, never values: per-container
 rows with status, last health-check result and how long ago, a reason from the

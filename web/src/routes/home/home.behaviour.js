@@ -28,6 +28,21 @@ export function mountHome({ galaxy }) {
       signal: controller.signal,
     });
 
+  /*
+   * A mockup is one document per screen, so leaving it destroys everything the
+   * page wrote. Here <body> and the stylesheets outlive the screen, so
+   * anything home writes outside its own subtree has to be handed back on the
+   * way out or it follows the reader to the next screen - which is how a
+   * blurred scrim survived a trip to /create. Timers are tracked for the same
+   * reason: a flight that lands after unmount writes to nodes that are gone.
+   */
+  const timers = new Set();
+  const later = (fn, ms) => {
+    const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
+    timers.add(id);
+    return id;
+  };
+
 
   /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
   const GALAXY = galaxy;
@@ -117,7 +132,7 @@ export function mountHome({ galaxy }) {
     // one continuous motion in two beats that overlap by a breath: the flight
     // lands the ring centre EXACTLY concentric with the dial's sun, and only
     // then does the chart grow out of that shared centre — slow and deliberate
-    setTimeout(() => {
+    later(() => {
       document.getElementById("dial-name").textContent = GALAXY[key].name;
       document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
         (key === "lawson" ? "owner" : "member");
@@ -127,7 +142,7 @@ export function mountHome({ galaxy }) {
       dial.style.animation = "none"; void dial.offsetWidth;
       dial.style.animation = "bloom 2.4s cubic-bezier(.22,.61,.21,1) 1";
     }, 1120);
-    setTimeout(() => {
+    later(() => {
       const wrap = hero.querySelector(".dialwrap");
       wrap.style.transition = "none";
       hero.classList.remove("flying");
@@ -262,11 +277,27 @@ export function mountHome({ galaxy }) {
     const open = card.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
   }
+  /* title -> pack name, the mapping the swatch buttons encode:
+     "star-chart" is starchart, "after dark" is afterdark. */
+  const packOf = (button) => button.title.replace(/[\s-]/g, "");
+
   function setSwatch(name, button){
     document.documentElement.dataset.theme = name;
     for (const other of button.parentElement.querySelectorAll("button"))
       other.setAttribute("aria-pressed", String(other === button));
+    /* Survive a refresh. See the note in app.html: the server holds the real
+       preference once the shell is wired; this is the pre-paint cache. */
+    try { localStorage.setItem("orbit-theme", name); } catch (e) {}
   }
+
+  /* The markup ships with star-chart pressed, because that is what the mockup
+     draws. If the reader restored a different pack before paint, the pressed
+     swatch and the live theme disagree until they click - so reconcile once. */
+  (function syncSwatches(){
+    const active = document.documentElement.dataset.theme;
+    for (const button of document.querySelectorAll(".swatches button"))
+      button.setAttribute("aria-pressed", String(packOf(button) === active));
+  })();
   function toggleCreate(button){
     const drawer = document.getElementById("createdrawer");
     const open = drawer.classList.toggle("open");
@@ -274,9 +305,60 @@ export function mountHome({ galaxy }) {
     document.body.classList.toggle("create-open", open);
     button.querySelector("span").textContent = open ? "close" : "create";
   }
-  addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && document.body.classList.contains("create-open"))
+  /*
+   * One light-dismiss rule for the whole screen (owner, 2026-08-14), amending
+   * CON-18 and the "Drawer rules" in design/owner-decisions.md, which gave
+   * click-outside to the create drawer alone.
+   *
+   * Click anywhere outside an open overlay and it closes; Escape closes;
+   * opening or clicking into one closes the others, so only ever one sits over
+   * the hero. This invents no UI and moves nothing at rest - the scrim stays
+   * create-only exactly as ratified. It reuses the state the design already
+   * has: the `open` class, toggleCreate() for the create drawer (never bare
+   * class removal, or body.create-open strands and the screen stays blurred),
+   * and the same [aria-expanded] bookkeeping the scroll retract does.
+   */
+  const OVERLAY_HIT = [
+    ["#createdrawer", "create"],
+    ["#statusdrawer", "statusdrawer"],
+    ["#keydrawer", "keydrawer"],
+    ["#docview", "docview"],
+    ["#account", "account"],
+    ["button.orb", "account"],
+  ];
+
+  function closeOverlays(keep){
+    if (keep !== "create" && document.body.classList.contains("create-open"))
       toggleCreate(document.getElementById("nstar"));
+    for (const id of ["statusdrawer", "keydrawer"]) {
+      if (id === keep) continue;
+      const drawer = document.getElementById(id);
+      if (drawer?.classList.contains("open")) {
+        drawer.classList.remove("open");
+        drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+      }
+    }
+    if (keep !== "docview") document.getElementById("docview")?.classList.remove("open");
+    if (keep !== "account") {
+      const account = document.getElementById("account");
+      if (account?.classList.contains("open")) {
+        account.classList.remove("open");
+        document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+      }
+    }
+  }
+
+  addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return closeOverlays(null);
+    const hit = OVERLAY_HIT.find(([selector]) => target.closest(selector));
+    /* Runs after the element's own handler, so a handle has already toggled
+       its drawer by now and this only clears the others. */
+    closeOverlays(hit ? hit[1] : null);
+  });
+
+  addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeOverlays(null);
   });
   /* v17: every drawer animates home when you scroll down */
   let lastY = scrollY;
@@ -313,7 +395,7 @@ export function mountHome({ galaxy }) {
   /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
   for (const swatch of document.querySelectorAll(".swatches button")) {
     on(swatch, "click", (event) =>
-      setSwatch(event.currentTarget.title.replace(/[\s-]/g, ""), event.currentTarget));
+      setSwatch(packOf(event.currentTarget), event.currentTarget));
   }
 
   const explore = document.getElementById("explore");
@@ -331,5 +413,21 @@ export function mountHome({ galaxy }) {
   on(document.querySelector("#docview .close"), "click", () =>
     document.getElementById("docview").classList.remove("open"));
 
-  return () => controller.abort();
+  /*
+   * Hand the document back exactly as home found it. Everything below lives
+   * outside home's own subtree, so Svelte does not remove it and it would
+   * otherwise follow the reader to the next screen: the body classes home
+   * writes, the callout node it appends to <body> (which accumulated one copy
+   * per visit), the flight timers, and the group observer.
+   */
+  return () => {
+    controller.abort();
+    for (const id of timers) clearTimeout(id);
+    timers.clear();
+    observer.disconnect();
+    callout.remove();
+    document.body.classList.remove(
+      "create-open", "constellation-lit", "health-degraded", "health-offline",
+    );
+  };
 }
