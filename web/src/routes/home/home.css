@@ -75,9 +75,17 @@
    * dusk over a city rather than deep space.
    */
   [data-theme=retrograde]{
-    --bg:#120a26; --panel:rgba(30,18,56,.62); --panel-raised:rgba(40,24,74,.84);
-    --line:#402c6b; --line-soft:#2a1c4a;
-    --ink:#f6ecff; --ink-mid:#b39ddb; --ink-faint:#7a68a6;
+    /* Second revision (owner, 2026-08-15): "heavy use of purple - the
+       backdrop, the cards, the dial - different shades but very similar
+       palette". True: the ground, the panels, the rules and the muted ink were
+       all violet tints, so the neons had nothing to sit against and the pack
+       read as monochrome with a few coloured dots. The eighties this is
+       reaching for are grid-on-black, not a purple wash - so the ground drops
+       to near-black, the structure goes cyan, and magenta is left to do the
+       accenting on its own. */
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
     /* First pass read as synthwave — violet, magenta, cyan — and the owner
        found it short of "the typical bright 80s colours" (2026-08-14). The
        missing notes were acid yellow, hot coral and a true neon green, so the
@@ -88,8 +96,9 @@
     --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
     --degraded:#ff9f1c;
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
-    --star-far:#c9b6ff; --star-near:#ffffff;
-    --chart-line:#4a3480; --chart-line-soft:#2a1c4a; --chart-ink:#7a68a6;
+    /* The chart is the grid: cyan rules on black, the way the era drew it. */
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
     /* The bodies are the largest coloured things on the screen, and their
        gradients were hardcoded, so no pack could reach them - which is why the
        first retrograde still read as a violet version of star-chart. The stops

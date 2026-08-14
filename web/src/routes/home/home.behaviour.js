@@ -65,66 +65,65 @@ export function mountHome({ galaxy }) {
     const placed = [];
     for (const [key, hh] of Object.entries(GALAXY)) {
       if (key === camera) continue;   // you never see your own constellation — you're inside it
-      let ox = hh.pos[0] - cx, oy = hh.pos[1] - cy;
-      const dist = Math.hypot(ox, oy);
-      // clamp to the visible sky along the true bearing; dim with distance
-      const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - 155)));
-      ox *= f; oy *= f;
-      placed.push({ key, hh, ox, oy, dist });
+      const dx = hh.pos[0] - cx, dy = hh.pos[1] - cy;
+      const dist = Math.hypot(dx, dy);
+      /*
+       * CON-13, honoured properly (#428). A household is a fixed point of
+       * navigation, so its BEARING is the part of its position that carries
+       * meaning and nothing below is allowed to change it. Distance is
+       * expressed as radius, which every later pass may negotiate freely.
+       *
+       * Previously the offset was clamped as a vector and then shoved about by
+       * the overlap pass and the keep-out, both of which moved constellations
+       * off their true bearing — so after a flight the survivors landed
+       * wherever the arithmetic left them, and the sky read as reshuffled
+       * rather than rotated.
+       */
+      placed.push({ key, hh, dist, angle: Math.atan2(dy, dx), radius: 0 });
     }
-    /*
-     * The chart owns the middle of the sky (#427). Bearings are clamped into
-     * the visible area, and that clamp is tighter vertically than the dial is
-     * tall — h/2-155 is 245px in an 800px viewport against a 320px dial radius
-     * — so a household on a near-vertical bearing was placed *inside* the
-     * chart rather than behind it.
-     *
-     * Push anything inside the keep-out out to its edge, along its own bearing
-     * so the direction stays true. If that lands it outside the visible band,
-     * slide it around the circle instead of off the top or bottom: hold y at
-     * the limit and solve for x, which keeps both the keep-out distance and
-     * the side of the sky it belongs on.
-     */
+
+    /* How far the visible sky extends on a given bearing: the ellipse the
+       clamp used to apply, expressed as a radius so it can bound one instead
+       of redirecting it. */
+    const reachOn = (angle) => {
+      const rx = w / 2 + 40, ry = Math.max(120, h / 2 - 155);
+      const c = Math.cos(angle), sn = Math.sin(angle);
+      return 1 / Math.hypot(c / rx, sn / ry);
+    };
     /* .dialwrap's offsetWidth, not the dial's bounding rect: the rect includes
        transforms, and the chart is mid-fanfare (POL-1) on first render, so
        measuring it there yields a keep-out sized for a chart that is still
        growing. offsetWidth is the settled layout box. */
     const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 46;
-    const maxY = Math.max(120, h / 2 - 155);
-    const clearDial = (point) => {
-      const d = Math.hypot(point.ox, point.oy);
-      if (d >= keepOut) return;
-      const scale = keepOut / (d || 1);
-      point.ox *= scale;
-      point.oy *= scale;
-      if (Math.abs(point.oy) > maxY) {
-        const side = point.ox >= 0 ? 1 : -1;
-        point.oy = Math.sign(point.oy || 1) * maxY;
-        point.ox = side * Math.sqrt(Math.max(keepOut * keepOut - point.oy * point.oy, 0));
-      }
-    };
-    for (const point of placed) clearDial(point);
 
-    // narrow viewports can fold two bearings onto the same patch of sky —
-    // relax overlaps apart so every constellation stays individually clickable
-    for (let round = 0; round < 4; round++) {
+    for (const point of placed) {
+      /* Nearer households sit closer in, but never inside the chart. Where a
+         bearing cannot clear the chart within the visible band — near-vertical
+         on a short viewport — the keep-out wins and the constellation sits
+         partly outside the band. The bearing is never the thing that gives. */
+      point.radius = Math.max(keepOut, Math.min(point.dist, reachOn(point.angle)));
+    }
+
+    /* Two bearings can fold onto the same patch of sky. Separate them by
+       pushing one further out and drawing the other closer in — radius only,
+       so both keep their true direction. */
+    for (let round = 0; round < 6; round++) {
       for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
         const a = placed[i], z = placed[j];
-        let dx = z.ox - a.ox, dy = z.oy - a.oy;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < 230) {
-          const push = (230 - d) / 2;
-          dx /= d; dy /= d;
-          a.ox -= dx * push; a.oy -= dy * push;
-          z.ox += dx * push; z.oy += dy * push;
-        }
+        const ax = Math.cos(a.angle) * a.radius, ay = Math.sin(a.angle) * a.radius;
+        const zx = Math.cos(z.angle) * z.radius, zy = Math.sin(z.angle) * z.radius;
+        const gap = Math.hypot(zx - ax, zy - ay);
+        if (gap >= 230) continue;
+        const push = (230 - gap) / 2;
+        const inner = a.radius <= z.radius ? a : z;
+        const outer = inner === a ? z : a;
+        inner.radius = Math.max(keepOut, inner.radius - push);
+        outer.radius = outer.radius + push;
       }
     }
-    /* The relax pass can push a constellation back over the chart, so the
-       keep-out is re-applied after it: clearing the dial wins over spacing. */
-    for (const point of placed) clearDial(point);
 
-    for (const { key, hh, ox, oy, dist } of placed) {
+    for (const { key, hh, dist, angle, radius } of placed) {
+      const ox = Math.cos(angle) * radius, oy = Math.sin(angle) * radius;
       const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
       const div = document.createElement("div");
       div.className = "minisys" + (settle ? " settle" : "");
