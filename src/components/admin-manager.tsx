@@ -15,20 +15,6 @@ interface AdminManagerProps {
   session: WorkspaceSession;
 }
 
-/**
- * The ids of the four headings this component renders, so the administration
- * page's section rail (src/app/admin/page.tsx) can point at them without
- * duplicating the strings. Each heading carries tabIndex={-1} and each section
- * is labelled by it, which makes the sections named regions and lets a plain
- * `#fragment` link move keyboard focus the way the settings rail does.
- */
-export const adminSectionHeadingIds = {
-  operations: "admin-operations-heading",
-  audit: "admin-audit-heading",
-  documents: "admin-documents-heading",
-  administrators: "admin-administrators-heading",
-} as const;
-
 interface DocumentHealth {
   overall: "healthy" | "degraded";
   encryption: { status: "ready" | "unavailable" };
@@ -279,8 +265,8 @@ export function AdminManager({ session }: AdminManagerProps) {
   }
 
   return <div className="settings-content">
-    <section aria-labelledby={adminSectionHeadingIds.operations}>
-      <div className="setting-heading admin-heading"><div><h3 id={adminSectionHeadingIds.operations} tabIndex={-1}>Operations</h3><p>Safe status for delivery, jobs and configured providers.</p></div><button type="button" className="admin-refresh" onClick={() => void loadOperations()} disabled={operationsLoading}>{operationsLoading ? "Refreshing…" : "Refresh"}</button></div>
+    <section>
+      <div className="setting-heading admin-heading"><div><h3>Operations</h3><p>Safe status for delivery, jobs and configured providers.</p></div><button type="button" className="admin-refresh" onClick={() => void loadOperations()} disabled={operationsLoading}>{operationsLoading ? "Refreshing…" : "Refresh"}</button></div>
       {operationsError && <p className="admin-health-warning" role="alert">{operationsError}</p>}
       {operations ? <>
         <div className="admin-health-grid admin-operations-grid">
@@ -308,18 +294,18 @@ export function AdminManager({ session }: AdminManagerProps) {
       </> : !operationsError && <p className="member-message" role="status">Loading operations…</p>}
     </section>
 
-    <section aria-labelledby={adminSectionHeadingIds.audit}>
-      <div className="setting-heading"><h3 id={adminSectionHeadingIds.audit} tabIndex={-1}>Recent audit history</h3><p>Security and data actions only. Content and credentials are never shown.</p></div>
+    <section>
+      <div className="setting-heading"><h3>Recent audit history</h3><p>Security and data actions only. Content and credentials are never shown.</p></div>
       {operations?.audit.length ? <><ol className="admin-audit-list">{operations.audit.map((entry) => <li key={entry.id}><strong>{entry.actionLabel}</strong><span>{entry.actorName} · {entry.householdName}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ol>{operations.nextCursor && <button type="button" className="admin-refresh" onClick={() => void loadOlderAudit()} disabled={auditLoading}>{auditLoading ? "Loading older history…" : "Load older history"}</button>}</> : <p className="member-message">No recent audit events.</p>}
     </section>
 
-    <section aria-labelledby={adminSectionHeadingIds.documents}>
-      <div className="setting-heading"><h3 id={adminSectionHeadingIds.documents} tabIndex={-1}>Document protection</h3><p>Encryption, storage, malware scanning and retention-worker status.</p></div>
+    <section>
+      <div className="setting-heading"><h3>Document protection</h3><p>Encryption, storage, malware scanning and retention-worker status.</p></div>
       {documentHealth ? <><>{documentHealth.scanner.status === "disabled" && <p className="admin-health-warning" role="alert">Malware scanning is disabled. New files are accepted without a virus scan.</p>}{documentHealth.overall === "degraded" && documentHealth.scanner.status !== "disabled" && <p className="admin-health-warning" role="alert">Document protection needs attention. Uploads fail closed while required protection is unavailable.</p>}</><div className="admin-health-grid"><article><span>Encryption key</span><strong data-status={documentHealth.encryption.status}>{documentHealth.encryption.status}</strong></article><article><span>Encrypted storage</span><strong data-status={documentHealth.storage.status}>{documentHealth.storage.status}</strong></article><article><span>Malware scanner</span><strong data-status={documentHealth.scanner.status}>{documentHealth.scanner.status}</strong></article><article><span>Retention worker</span><strong data-status={documentHealth.worker.started ? "ready" : "unavailable"}>{documentHealth.worker.started ? "ready" : "unavailable"}</strong></article><article><span>Storage quota</span><strong>{formatBytes(documentHealth.quota.usedBytes)} / {formatBytes(documentHealth.quota.limitBytes)}</strong></article><article><span>Reconciliation</span><strong data-status={documentHealth.worker.lastReconciliationAt ? "ready" : "unavailable"}>{documentHealth.worker.lastReconciliationAt ? "complete" : "waiting"}</strong></article><article><span>Scanner recovery</span><strong data-status={documentHealth.scanRecovery.failed || documentHealth.scanRecovery.purgePending ? "unavailable" : "ready"}>{documentHealth.scanRecovery.retrying} retrying · {documentHealth.scanRecovery.failed} failed</strong></article><article><span>Recovery purge</span><strong>{documentHealth.scanRecovery.purgePending} pending</strong></article></div></> : <p className="member-message" role={healthError ? "alert" : "status"}>{healthError || "Checking document protection…"}</p>}
     </section>
 
-    <section aria-labelledby={adminSectionHeadingIds.administrators}>
-      <div className="setting-heading"><h3 id={adminSectionHeadingIds.administrators} tabIndex={-1}>Instance administrators</h3><p>Administrators can manage every user, household, section, and item in this Orbit instance.</p></div>
+    <section>
+      <div className="setting-heading"><h3>Instance administrators</h3><p>Administrators can manage every user, household, section, and item in this Orbit instance.</p></div>
       <div className="admin-list">{users.map((user) => <article key={user.id}><span className="member-avatar">{initials(user.displayName)}</span><span><strong>{user.displayName}</strong><small>{user.email}{user.id === session.user.id ? " · You" : ""}{user.disabledAt ? " · Account disabled" : ""}</small></span><b>{user.disabledAt ? "Disabled" : user.isInstanceAdmin ? "Administrator" : "User"}</b><span className="admin-user-actions"><button type="button" disabled={busyUserId !== null || Boolean(user.disabledAt) || (user.id === session.user.id && user.isInstanceAdmin)} title={user.disabledAt ? "Enable this account before changing administrator access" : user.id === session.user.id && user.isInstanceAdmin ? "Another administrator must remove your access" : undefined} onClick={() => void updateAdministrator(user)}>{busyUserId === user.id ? "Saving…" : user.id === session.user.id && user.isInstanceAdmin ? "Current admin" : user.isInstanceAdmin ? "Remove admin" : "Make admin"}</button><button type="button" disabled={busyUserId !== null || (user.id === session.user.id && !user.disabledAt)} title={user.id === session.user.id && !user.disabledAt ? "Another administrator must disable your account" : undefined} onClick={() => void updateAccountStatus(user)}>{busyUserId === user.id ? "Saving…" : user.disabledAt ? "Enable account" : "Disable account"}</button></span></article>)}</div>
       {message && <p className="member-message" role="status" aria-live="polite">{message}</p>}
     </section>
