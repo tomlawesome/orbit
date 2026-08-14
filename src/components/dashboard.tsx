@@ -4,12 +4,16 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AccountMenu } from "@/components/account-menu";
+import { AccountPanel } from "@/components/account-panel";
 import { usePersistedThemePreference } from "@/components/appearance-preference";
+import { ChartKeyDrawer } from "@/components/chart-key-drawer";
+import { CreateDrawer } from "@/components/create-drawer";
+import { StatusDrawer } from "@/components/status-drawer";
 import { FirstRunWizard, type HouseholdSetupInput } from "@/components/first-run-wizard";
 import type { HouseholdInput } from "@/components/household-onboarding";
 import type { HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
+import { AuthenticationGate } from "@/components/authentication-gate";
 import { HeroSky, ItemRow, type ItemFilter } from "@/components/hero-sky";
 import { Icon } from "@/components/icons";
 import type { CompletionInput } from "@/components/item-detail";
@@ -70,9 +74,13 @@ const settingsSectionIds = {
   members: "settings-members",
 } as const;
 
-function visibleSettingsTrigger(): "desktop-profile" | "mobile-menu" {
-  return window.matchMedia("(min-width: 821px)").matches ? "desktop-profile" : "mobile-menu";
-}
+/**
+ * The v19 shell has one persistent control at every breakpoint — the
+ * account orb — so returning from /settings always lands there. The
+ * marker itself is retained because the return has to survive a real
+ * route change, and sessionStorage is the only thing that does.
+ */
+const SETTINGS_RETURN_FOCUS_TRIGGER = "orb";
 
 function focusSettingsSection(sectionId: string) {
   window.setTimeout(() => {
@@ -134,36 +142,6 @@ export function SectionNameField({ name, onCommit, ariaLabel }: { name: string; 
   );
 }
 
-function AuthenticationGate({
-  loading,
-  loadingMessage,
-  error,
-  onRetry,
-}: {
-  loading: boolean;
-  loadingMessage?: string;
-  error?: string;
-  onRetry?: () => void;
-}) {
-  const message = loading ? loadingMessage : error;
-  return (
-    <main className="authentication-gate">
-      <section>
-        <Image src="/orbit-mark.svg" alt="" width={112} height={112} priority />
-        <p className="eyebrow">Everything in your orbit, on track</p>
-        <h1>{loading ? loadingMessage ? "Orbit is starting…" : "Checking access…" : error ? "Orbit could not open safely." : "Sign in to Orbit."}</h1>
-        <p role={message ? "alert" : undefined}>
-          {message ?? (loading
-            ? "Orbit is confirming your session."
-            : "Your household information is private and is only available after authentication.")}
-        </p>
-        {!loading && error && onRetry && <button className="wizard-primary" type="button" onClick={onRetry}>Try again <Icon name="chevron" /></button>}
-        {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
-      </section>
-    </main>
-  );
-}
-
 type AuthenticatedWorkspace = Omit<ReturnType<typeof useWorkspace>, "session">;
 
 /** Keeps signed-out/loading state outside the authenticated dashboard tree. */
@@ -203,8 +181,9 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const settingsHeadingRef = useRef<HTMLHeadingElement>(null);
   const [query, setQuery] = useState("");
   const [itemFilter, setItemFilter] = useState<ItemFilter>("all");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [householdMenuOpen, setHouseholdMenuOpen] = useState(false);
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
+  const [statusDrawerOpen, setStatusDrawerOpen] = useState(false);
+  const [keyDrawerOpen, setKeyDrawerOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [itemEditorOpen, setItemEditorOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<HomeItem | undefined>();
@@ -229,6 +208,9 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     [household.items],
   );
   const archiveMode = activeSection === "archive";
+  // "Due next" is the only view with a chart, so it is the only view that
+  // goes full-bleed under the floating chrome and offers the chart key.
+  const heroView = activeSection === "all" && !archiveMode;
   const listedItems = archiveMode ? inactiveItems : activeItems;
   // Memoized (issue #383): householdNotifications does O(items x id-array)
   // work; without this it reran on every render, including every keystroke
@@ -267,7 +249,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
 
   const navigateHomeWithFocus = useCallback(() => {
     if (!sessionStorage.getItem(SETTINGS_RETURN_FOCUS_KEY)) {
-      sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, visibleSettingsTrigger());
+      sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, SETTINGS_RETURN_FOCUS_TRIGGER);
     }
     router.push("/");
   }, [router]);
@@ -312,13 +294,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     sessionStorage.removeItem(SETTINGS_RETURN_FOCUS_KEY);
 
     const timer = window.setTimeout(() => {
-      if (focusMarker === "desktop-profile") {
-        const profileButton = document.querySelector("button.topbar-profile") as HTMLButtonElement | null;
-        profileButton?.focus();
-      } else if (focusMarker === "mobile-menu") {
-        const menuButton = document.querySelector("button.mobile-menu") as HTMLButtonElement | null;
-        menuButton?.focus();
-      }
+      document.querySelector<HTMLButtonElement>("button[data-settings-return-focus]")?.focus();
     }, 50);
 
     return () => window.clearTimeout(timer);
@@ -401,9 +377,22 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     updateSections(restored);
   }
 
+  /**
+   * Switches the visible list. Edge drawers are shut on the way: the chart
+   * key only exists on "Due next", so leaving that view would otherwise
+   * unmount it mid-open and have it re-open — stealing focus — on return.
+   */
+  function showList(section: string) {
+    setActiveSection(section);
+    setKeyDrawerOpen(false);
+    setStatusDrawerOpen(false);
+    if (section === "archive") setItemFilter("all");
+  }
+
   function openNewItem() {
     setEditingItem(undefined);
     setDetailItemId(null);
+    setCreateDrawerOpen(false);
     setItemEditorOpen(true);
   }
 
@@ -577,8 +566,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     setItemFilter("all");
     setDetailItemId(null);
     setNotificationsOpen(false);
-    setHouseholdMenuOpen(false);
-    setMenuOpen(false);
   }
 
   async function addHousehold(input: HouseholdInput) {
@@ -588,7 +575,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     });
     setActiveSection("all");
     setOnboardingOpen(false);
-    setHouseholdMenuOpen(false);
     setNotice({ message: `${input.name} is ready` });
   }
 
@@ -622,8 +608,18 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   }
 
   function navigateToSettings() {
-    sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, visibleSettingsTrigger());
+    sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, SETTINGS_RETURN_FOCUS_TRIGGER);
     router.push("/settings");
+  }
+
+  /**
+   * The mailbox review queue lives inside settings. The old shell only
+   * reached it by landing on /settings and finding the section; the v19
+   * account panel links straight to it so "Inbox" stays a destination.
+   */
+  function navigateToInbox() {
+    sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, SETTINGS_RETURN_FOCUS_TRIGGER);
+    router.push("/settings?open=inbox");
   }
 
   if (mode === "settings") {
@@ -810,75 +806,64 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
       data-theme={theme}
       data-text-size={textSize}
     >
-      <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
-        <div className="brand">
-          <span className="brand-mark"><Image src="/orbit-mark.svg" alt="" width={56} height={56} priority /></span>
-          <span>Orbit</span>
-        </div>
-        <div className="household-control">
-          <button className="household-picker" type="button" aria-expanded={householdMenuOpen} onClick={() => setHouseholdMenuOpen(!householdMenuOpen)}>
-            <span className="household-avatar">{householdInitials(household.name)}</span>
-            <span><strong>{household.name}</strong><small>{household.memberCount} {household.memberCount === 1 ? "member" : "members"}</small></span>
-            <Icon name="chevron" />
-          </button>
-          {householdMenuOpen && (
-            <div className="household-menu" role="menu">
-              <p>Your households</p>
-              {workspace.households.map((entry) => (
-                <button type="button" role="menuitem" className={entry.id === household.id ? "active" : ""} key={entry.id} onClick={() => selectHousehold(entry.id)}>
-                  <span>{householdInitials(entry.name)}</span>
-                  <span><strong>{entry.name}</strong><small>{entry.items.filter((item) => item.status !== "archived").length} items</small></span>
-                  <b>{entry.id === household.id ? "✓" : ""}</b>
-                </button>
-              ))}
-              <button type="button" className="add-household" onClick={() => setOnboardingOpen(true)}><Icon name="plus" /> Add a household</button>
-            </div>
-          )}
-        </div>
-        <nav aria-label="Main navigation">
-          <p className="nav-label">Overview</p>
-          <button className={activeSection === "all" ? "nav-item active" : "nav-item"} onClick={() => { setActiveSection("all"); setMenuOpen(false); }}>
-            <Icon name="calendar" /><span>Due next</span><b>{urgentCount}</b>
-          </button>
-          <p className="nav-label">Your things</p>
-          {sections.filter((section) => section.visible).map((section) => (
-            <button className={activeSection === section.id ? "nav-item active" : "nav-item"} key={section.id} onClick={() => { setActiveSection(section.id); setMenuOpen(false); }}>
-              <Icon name={section.icon} /><span>{section.name}</span><b>{activeItems.filter((item) => item.sectionId === section.id).length}</b>
-            </button>
-          ))}
-          <p className="nav-label nav-spaced">Manage</p>
-          <button className="nav-item" onClick={() => { setNotificationsOpen(true); setMenuOpen(false); }}><Icon name="bell" /><span>Notifications</span>{unreadNotificationCount > 0 && <b>{unreadNotificationCount}</b>}</button>
-          <button className={archiveMode ? "nav-item active" : "nav-item"} onClick={() => { setActiveSection("archive"); setItemFilter("all"); setMenuOpen(false); }}><Icon name="archive" /><span>Archive</span><b>{inactiveItems.length}</b></button>
-          <button className="nav-item" onClick={() => { navigateToSettings(); setMenuOpen(false); }}><Icon name="settings" /><span>Personalise</span></button>
-        </nav>
-      </aside>
+      <AccountPanel
+        displayName={session.user.displayName}
+        initials={householdInitials(session.user.displayName)}
+        isInstanceAdmin={session.user.isInstanceAdmin}
+        households={workspace.households.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          itemCount: entry.items.filter((item) => item.status !== "archived").length,
+        }))}
+        activeHouseholdId={household.id}
+        householdName={household.name}
+        householdRole={household.canManage ? "owner" : "member"}
+        sections={sections.filter((section) => section.visible).map((section) => ({
+          id: section.id,
+          name: section.name,
+          icon: section.icon,
+          itemCount: activeItems.filter((item) => item.sectionId === section.id).length,
+        }))}
+        activeSection={activeSection}
+        dueNextCount={urgentCount}
+        archiveCount={inactiveItems.length}
+        unreadNotificationCount={unreadNotificationCount}
+        theme={theme}
+        signOutBusy={logoutBusy}
+        onSelectHousehold={selectHousehold}
+        onAddHousehold={() => setOnboardingOpen(true)}
+        onSelectSection={showList}
+        onSelectDueNext={() => showList("all")}
+        onSelectArchive={() => showList("archive")}
+        onNotifications={() => setNotificationsOpen(true)}
+        onInbox={navigateToInbox}
+        onSettings={navigateToSettings}
+        onAdministration={() => router.push("/admin")}
+        onThemeChange={(pack) => updateAppearance({ theme: pack })}
+        onSignOut={() => { void handleSignOut(); }}
+      />
+
+      <CreateDrawer open={createDrawerOpen} onOpenChange={setCreateDrawerOpen} onOpenFullForm={openNewItem} />
+
+      <StatusDrawer
+        open={statusDrawerOpen}
+        onOpenChange={setStatusDrawerOpen}
+        syncStatus={syncStatus}
+        syncMessage={syncMessage}
+        householdName={household.name}
+        memberCount={household.memberCount}
+        timezone={household.timezone}
+      />
+
+      {heroView && <ChartKeyDrawer open={keyDrawerOpen} onOpenChange={setKeyDrawerOpen} />}
 
       <main className="main-shell">
-        <header className="topbar">
-          <button className="mobile-menu" data-settings-return-focus aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><span /><span /><span /></button>
-          <label className="search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${household.name.toLowerCase()}…`} /></label>
-          <span className={`sync-state sync-${syncStatus}`} title={syncMessage || undefined}>
-            <i />{syncStatus === "saving" ? "Saving" : syncStatus === "loading" ? "Loading" : syncStatus === "error" ? "Review" : "Synced"}
-          </span>
-          <button className="icon-button" aria-label={`Notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`} onClick={() => setNotificationsOpen(true)}><Icon name="bell" />{unreadNotificationCount > 0 && <i />}</button>
-          <AccountMenu
-            displayName={session.user.displayName}
-            initials={householdInitials(session.user.displayName)}
-            isInstanceAdmin={session.user.isInstanceAdmin}
-            onSettings={navigateToSettings}
-            onAdministration={() => router.push("/admin")}
-            onSignOut={() => { void handleSignOut(); }}
-            logoutBusy={logoutBusy}
-          />
-          <button className="add-button" onClick={openNewItem}><Icon name="plus" /> Add item</button>
-        </header>
-
         {syncStatus === "error" && syncMessage && (
           <div className="sync-error-banner" role="alert">{syncMessage}</div>
         )}
 
-        <section className="content">
-          {activeSection === "all" && !archiveMode ? (
+        <section className={`content ${heroView ? "content-hero" : "content-list"}`}>
+          {heroView ? (
             // Issue #327: "Due next" is the v19 hero-sky experience — the
             // full-viewport dial and grouped, reveal-on-scroll manifest.
             // Every other view (a section, or the archive) keeps the
@@ -901,7 +886,10 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
               <div className="overview-grid">
                 <article className="hero-panel">
                   <div className="hero-copy">
-                    <p className="eyebrow">{archiveMode ? "Household history" : "Your things"}</p>
+                    {/* With the sidebar gone, this eyebrow is where the
+                        section and archive views say which household you
+                        are looking at. */}
+                    <p className="eyebrow">{household.name}</p>
                     <h1>{archiveMode ? <>Past, but<br />not <em>lost.</em></> : currentSection?.name ?? "Section"}</h1>
                     <p>{archiveMode ? "Cancelled and archived records stay safely out of the way until you need them." : `${visibleItems.length} ${visibleItems.length === 1 ? "item" : "items"} in this section.`}</p>
                   </div>
@@ -932,6 +920,18 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
                   <div><p className="section-number">02</p><h2>{archiveMode ? "Archive & cancelled" : `All ${(currentSection?.name ?? "items").toLowerCase()}`}</h2></div>
                   <div className="list-actions">
                     <span>{visibleItems.length} items</span>
+                    {/* The topbar used to own search for every view. The
+                        hero keeps its own "explore your world" field, so
+                        the section and archive lists carry theirs here. */}
+                    <label className="list-search">
+                      <Icon name="search" />
+                      <input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={`Search ${household.name.toLowerCase()}…`}
+                        aria-label="Search items and documents"
+                      />
+                    </label>
                     {!archiveMode && (
                       <select aria-label="Filter items" value={itemFilter} onChange={(event) => setItemFilter(event.target.value as ItemFilter)}>
                         <option value="all">All items</option>
@@ -960,8 +960,6 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
           )}
         </section>
       </main>
-
-      {menuOpen && <button className="scrim" aria-label="Close navigation" onClick={() => setMenuOpen(false)} />}
 
       {itemEditorOpen && (
         <ItemEditor
