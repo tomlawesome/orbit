@@ -33,8 +33,6 @@ async function ensureHousehold(page: Page) {
 }
 
 async function openAddItem(page: Page, isMobile: boolean) {
-  // The manifest keeps its compact add button for thumbs; on desktop the
-  // v19 shell's north-star create drawer is the affordance (CON-12).
   if (isMobile) {
     const add = page.locator("button.mobile-add");
     await expect(add).toBeVisible();
@@ -42,8 +40,7 @@ async function openAddItem(page: Page, isMobile: boolean) {
     await page.keyboard.press("Enter");
     return;
   }
-  await page.getByRole("button", { name: "Add to your orbit" }).click();
-  await page.getByRole("button", { name: "Open the full form" }).click();
+  await page.getByRole("button", { name: "Add item", exact: true }).first().click();
 }
 
 async function submitAddItem(page: Page, editor: Locator, isMobile: boolean) {
