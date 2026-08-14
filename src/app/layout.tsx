@@ -3,6 +3,7 @@ import "@/app/theme-tokens.css";
 import "@/app/globals.css";
 import "@/app/shell.css";
 import "@/app/family.css";
+import "@/app/screens.css";
 import { ServiceWorkerRegistration } from "@/components/service-worker-registration";
 
 export const metadata: Metadata = {
