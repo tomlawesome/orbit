@@ -1,0 +1,94 @@
+/*
+ * The pocket dialect's stylesheet (CON-10, #430) — lifted from
+ * design/family/mobile-home.html and owned here from that point on.
+ *
+ * Every selector is scoped under .pocket for one blunt reason: this dialect
+ * shares a document with the desk chart now, and both were authored as
+ * whole-page stylesheets. `.sky`, `.dot` and `.open` exist in both, and the
+ * mockup pulled in family.css, whose `body{overflow:hidden}` is recorded in
+ * that file's own header as having killed home's scroll once already. So
+ * nothing here is allowed to reach outside the dialect.
+ *
+ * The three rules the dialect actually needed from family.css are inlined at
+ * the foot, scoped the same way, rather than linking the whole sheet.
+ */
+
+/* ---- the dialect switch ------------------------------------------------
+ * Both dialects are server-rendered and CSS chooses, so there is no flash of
+ * the wrong one and no-JS still gets a page. display:contents keeps the
+ * wrapper out of layout entirely, so each dialect's children behave as the
+ * direct children of <body> their rules were written against; display:none on
+ * the same element hides the whole subtree.
+ *
+ * 900px: the pocket is drawn at max-width 400 and the chart is authored for a
+ * 1600-wide desk. Between those, a centred 400 column is the better of two
+ * imperfect answers, so the boundary sits well above the phone rather than
+ * just past it.
+ */
+.pocket{display:contents}
+.desk{display:contents}
+@media (min-width:901px){ .pocket{display:none} }
+@media (max-width:900px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
+
+/*
+ * The mobile dialect — lifted from design/family/mobile-home.html and owned
+ * here from that point on.
+ *
+ * CON-10 states a dialect rather than a second design: the dial owns the
+ * width, callouts and drawers become bottom sheets, and the other households
+ * collapse from a sky you fly through into a strip you scroll. One identity,
+ * one chart, a different grammar for a thumb.
+ *
+ * Global rather than component-scoped, alongside family.css.
+ */
+
+
+.pocket .sky g{animation:drift 180s linear infinite}
+@keyframes drift{to{transform:translateX(-40px)}}
+.pocket .mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
+.pocket .mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
+.pocket .morb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+      background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+      font:11px var(--mono);color:var(--ink-mid)}
+.pocket .mdial{width:100%;aspect-ratio:1;position:relative}
+.pocket .mdial svg{width:100%;height:100%}
+.pocket .skies{display:flex;gap:10px;overflow-x:auto;padding:6px 2px 10px}
+.pocket .skies .msys{flex:none;display:flex;align-items:center;gap:8px;font:10.5px var(--mono);
+             color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;
+             padding:6px 13px;background:var(--panel)}
+.pocket .skies svg{flex:none}
+.pocket .msearch{margin:8px 0 18px;text-align:center}
+.pocket .msearch input{width:88%;background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+      text-align:center;font:12.5px var(--mono);color:var(--ink);padding:7px}
+.pocket .mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-faint);margin:14px 4px 8px}
+.pocket .mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
+       padding:11px 13px;margin-bottom:6px}
+.pocket .mitem b{display:block;font-size:13.5px;font-weight:520}
+.pocket .mitem span{font-size:11px;color:var(--ink-mid)}
+.pocket .mitem .flex{flex:1;min-width:0}
+.pocket .mt{font:500 12px var(--mono);text-align:right}
+.pocket .mt small{display:block;font-size:9.5px;color:var(--ink-faint)}
+.pocket .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.pocket .sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+       padding:18px 22px 26px;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
+.pocket .sheet.open{transform:none}
+.pocket .sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.pocket .sheet b{font-size:15px;font-weight:600}
+.pocket .sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 14px}
+.pocket .sheet .acts{display:flex;gap:9px}
+.pocket .sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
+      background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.pocket .sheet .acts .pri{color:var(--accent);border-color:var(--accent)}
+
+/* ---- the three rules the dialect used from family.css, scoped -----------
+ * Copied rather than linked: family.css is global and its body rules would
+ * reach the desk chart. The other family screens keep owning that file.
+ */
+.pocket{line-height:normal}
+.pocket .sky{position:fixed;inset:-5%;pointer-events:none}
+.pocket .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.pocket .mark-row{display:flex;align-items:center;gap:10px;font-family:var(--display);
+                  font-weight:600;font-size:17px;letter-spacing:.02em}
+@media (prefers-reduced-motion:reduce){ .pocket .sky g{animation:none} }

@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { mountHome } from "./home.behaviour.js";
   import { GALAXY_FIXTURE } from "./galaxy.fixture.js";
+  import Pocket from "./pocket.svelte";
+  import { mountPocket } from "./pocket.behaviour.js";
   import "./home.css";
 
   /**
@@ -11,14 +13,40 @@
    * Svelte renders the markup and then stands back: mountHome() takes the
    * document and runs the chart, the galaxy and the drawers as the imperative
    * DOM code they were written as. See home.behaviour.js for why.
+   *
+   * Two dialects share this route (CON-10, #430): the desk chart below and the
+   * pocket in pocket.svelte. Both are server-rendered and CSS chooses between
+   * them, so there is no flash of the wrong one and no-JS still gets a page.
+   * Only the visible dialect is mounted, because each binds window-level
+   * listeners and the hidden one would be handling events against elements
+   * with no layout.
    */
-  onMount(() => mountHome({ galaxy: GALAXY_FIXTURE }));
+  const DESK = "(min-width: 901px)";
+
+  onMount(() => {
+    const query = window.matchMedia(DESK);
+    let teardown = null;
+    const sync = () => {
+      teardown?.();
+      /* Tear the old dialect down before standing the new one up. */
+      teardown = query.matches ? mountHome({ galaxy: GALAXY_FIXTURE }) : mountPocket();
+    };
+    sync();
+    query.addEventListener("change", sync);
+    return () => {
+      query.removeEventListener("change", sync);
+      teardown?.();
+    };
+  });
 </script>
 
 <svelte:head>
   <title>Orbit</title>
 </svelte:head>
 
+<Pocket />
+
+<div class="desk">
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
@@ -289,4 +317,5 @@
   <div class="sub">2 documents · encrypted · scanned clean</div>
   <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
   <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
+</div>
 </div>

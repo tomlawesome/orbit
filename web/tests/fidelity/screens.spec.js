@@ -77,7 +77,10 @@ const SCREENS = [
   },
   {
     name: "mobile",
-    path: "/mobile",
+    /* Same path as home: the pocket is a dialect of it, not a second screen
+       (#430). What selects between them is the viewport below, which is why
+       the gate having per-screen frames is what makes one URL possible. */
+    path: "/home",
     stage: "porting",
     mockup: "/design/family/mobile-home.html",
     /* The dialect's own frame: `.mpage` is drawn at max-width 400 and the sky
@@ -144,6 +147,19 @@ const LOCAL_FONT_CSS = [500, 600]
       `font-weight:${weight};font-display:block;` +
       `src:url(${MOCKUPS}/fonts/space-grotesk-latin-${weight}-normal.woff2) format('woff2')}`,
   )
+  .concat([
+    /*
+     * Inter and JetBrains Mono, declared under the plain names the mockups ask
+     * for. The app bundles them as variable faces (#418); the mockups never
+     * fetched them at all and fell back to whatever the host had, which on a
+     * bare Linux box is not a face anyone chose. Serving both sides the same
+     * files is what keeps this a comparison of design.
+     */
+    `@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;` +
+      `font-display:block;src:url(${MOCKUPS}/inter/inter-latin-wght-normal.woff2) format('woff2')}`,
+    `@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 800;` +
+      `font-display:block;src:url(${MOCKUPS}/mono/jetbrains-mono-latin-wght-normal.woff2) format('woff2')}`,
+  ])
   .join("\n");
 
 /** Blanks the given rectangles in an image, in place. */
