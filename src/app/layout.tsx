@@ -1,9 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "@/app/theme-tokens.css";
 import "@/app/globals.css";
-import "@/app/shell.css";
-import "@/app/family.css";
-import "@/app/screens.css";
 import { ServiceWorkerRegistration } from "@/components/service-worker-registration";
 
 export const metadata: Metadata = {
@@ -32,8 +29,7 @@ export const metadata: Metadata = {
   },
 };
 
-// Star-chart's page depth, matching manifest.ts; #15162b was the retired identity.
-export const viewport: Viewport = { themeColor: "#060b1c", colorScheme: "light dark" };
+export const viewport: Viewport = { themeColor: "#15162b", colorScheme: "light dark" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
