@@ -325,7 +325,12 @@
   .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
             color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
   .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
-  .item{display:flex;align-items:center;gap:15px;border-radius:14px;
+  /* The manifest rows are links to the item view now (#424). CON-5 is
+     unchanged - a click on a dial body still anchors to its row; the row is
+     what carries you onward. As anchors they need the row's own ink and no
+     underline, or the browser draws a manifest of blue links. */
+  .item{color:inherit;text-decoration:none;
+        display:flex;align-items:center;gap:15px;border-radius:14px;
         padding:14px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
         background:var(--panel);backdrop-filter:blur(8px)}
   .item:hover{background:var(--panel-raised);border-color:var(--line)}
