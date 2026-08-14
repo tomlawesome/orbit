@@ -85,6 +85,48 @@
     --chart-line:#3a2a63; --chart-line-soft:#241a42; --chart-ink:#6b5b91;
   }
 
+  /*
+   * The engraved atlas (#426, owner 2026-08-14).
+   *
+   * The star chart is a luminous metaphor — a glowing sun, glossy bodies,
+   * points of light on dark. Inverted onto a bright ground it fights itself,
+   * which is why the light packs needed three rounds of remedial work and
+   * still were not right. So they stop imitating a night sky and become the
+   * other thing their name already points at: a printed star atlas. Printed
+   * charts do not glow; they are engraved. Weight instead of luminosity, flat
+   * ink instead of gloss, line work instead of glow.
+   *
+   * Expressed entirely in rules scoped to the two light packs, so one SVG
+   * still serves all five and the dark packs are untouched. Drift stays — it
+   * is POL-11's owner rule and a moving sky is not a luminous device.
+   */
+  [data-theme=atlas] .dial circle[filter="url(#sun)"],
+  [data-theme=dawn] .dial circle[filter="url(#sun)"]{
+    filter:none}
+  /* Paper has no specular. */
+  [data-theme=atlas] .dial [fill^="rgba(255,255,255"],
+  [data-theme=dawn] .dial [fill^="rgba(255,255,255"]{
+    fill:transparent}
+  /* Bodies become flat ink discs. Status survives as colour, not as gloss:
+     each maps to the token the pack already defines for that meaning. CSS
+     fill beats the presentation attribute, so the shared markup is untouched
+     and POL-10's storm selectors still match. */
+  [data-theme=atlas] .dial [fill="url(#p-jade)"],
+  [data-theme=dawn] .dial [fill="url(#p-jade)"]{fill:var(--ok)}
+  [data-theme=atlas] .dial [fill="url(#p-amber)"],
+  [data-theme=dawn] .dial [fill="url(#p-amber)"]{fill:var(--warm)}
+  [data-theme=atlas] .dial [fill="url(#p-ruby)"],
+  [data-theme=dawn] .dial [fill="url(#p-ruby)"]{fill:var(--overdue)}
+  [data-theme=atlas] .dial [fill="url(#p-sky)"],
+  [data-theme=dawn] .dial [fill="url(#p-sky)"]{fill:var(--upcoming)}
+  /* Engraving is line work, so the chart's rules carry more weight than they
+     do behind a glow. */
+  [data-theme=atlas]{--chart-line:rgba(28,43,74,.78); --chart-line-soft:rgba(28,43,74,.42)}
+  [data-theme=dawn]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
+  /* Printed stars do not twinkle. Drift is untouched. */
+  [data-theme=atlas] body.quiet .sky .near circle,
+  [data-theme=dawn] body.quiet .sky .near circle{animation:none}
+
   *{box-sizing:border-box;margin:0}
   html{scroll-behavior:smooth}
   html,body{min-height:100%}
