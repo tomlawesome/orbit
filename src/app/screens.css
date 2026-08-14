@@ -1,0 +1,492 @@
+/*
+ * Settings and administration — the two full-page screens inside the
+ * authenticated app (design/family/settings-mail.html, design/family/admin.html,
+ * surface language from design/v19/home.html).
+ *
+ * v19 deleted the sidebar and the topbar, which is what these two screens had
+ * been leaning on for a sense of place: without them the settings nav card sat
+ * alone against a bare page and administration read as a slab floating in an
+ * empty field. Both screens now sit on the same star-chart surface the rest of
+ * v19 uses — sky, vignette, glass panels, mono eyebrows — with the content in
+ * panels rather than loose on the background. Administration adds the chart
+ * grid from design/family/admin.html: "the same sky, instrumented".
+ *
+ * Conventions are taken from src/app/shell.css and src/app/family.css rather
+ * than invented here:
+ *
+ *  - every colour comes from the theme-pack token contract
+ *    (src/app/theme-tokens.css); no screen-local hex values, so all four packs
+ *    work light and dark. The one permitted literal is the #000 the vignette
+ *    mixes toward.
+ *  - `--ink-faint` never carries text (2.2-2.8:1 on every pack) and `--accent`
+ *    never carries small text (3.15:1 on atlas). Where the ratified mockups use
+ *    them for words, the value is lifted toward `--ink` by a fixed mix — the
+ *    same pattern family.css uses for `--family-quiet` / `--family-link`.
+ *    src/app/screens.contrast.test.ts recomputes each lift against every pack
+ *    and fails below 4.5:1.
+ *  - `--ink-mid` on `--bg` is 4.47:1 on atlas, so page-level muted text uses
+ *    `--screen-quiet`; inside panels either is safe.
+ *  - globals.css paints a white focus ring, which vanishes on the light packs.
+ *    These screens take the ring from the pack's own ink, haloed by the page
+ *    background, exactly as shell.css and family.css do.
+ */
+
+.settings-page,
+.admin-page {
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Muted body/label text that still clears AA on the raw page background. */
+  --screen-quiet: color-mix(in srgb, var(--ink-mid) 85%, var(--ink) 15%);
+  /* Accent-coloured *words*. Half the pack's accent, half its ink: enough
+     hue left to still read as the accent, enough ink to clear AA on the
+     tinted chips these words sit in as well as on the flat pane. The
+     fill/border `--accent` itself is untouched. */
+  --screen-accent-text: color-mix(in srgb, var(--accent) 50%, var(--ink) 50%);
+  /* The dust in the sky, keyed to the pack's own star switch. */
+  --screen-star: color-mix(in srgb, var(--ink) 55%, transparent);
+
+  position: relative;
+  isolation: isolate;
+  min-height: 100dvh;
+  padding: clamp(26px, 4.5vh, 52px) 22px clamp(44px, 8vh, 96px);
+  color: var(--ink);
+  background: var(--bg);
+  font-family: var(--font-body), sans-serif;
+}
+
+/* ---- the sky -------------------------------------------------------- */
+
+/* `--stars` is the pack's own switch (0 on atlas and dawn), so neither the
+   dust nor the vignette branches on the theme itself. Fixed, not absolute:
+   the field stays put while a long settings page scrolls past it. */
+.settings-page::before,
+.admin-page::before {
+  content: "";
+  position: fixed;
+  z-index: -3;
+  inset: 0;
+  opacity: var(--stars, 1);
+  pointer-events: none;
+  background-repeat: repeat;
+  background-size: 420px 340px;
+  background-image:
+    radial-gradient(circle 1.1px at 34px 58px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.8px at 118px 21px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1px at 203px 96px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.7px at 291px 44px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1.2px at 377px 133px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.9px at 61px 168px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.7px at 149px 214px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1.1px at 246px 187px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.8px at 332px 246px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1px at 402px 291px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.7px at 22px 279px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1.2px at 96px 318px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.9px at 188px 302px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.8px at 273px 328px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 1px at 356px 12px, var(--screen-star) 0 60%, transparent 100%),
+    radial-gradient(circle 0.7px at 413px 205px, var(--screen-star) 0 60%, transparent 100%);
+}
+
+.settings-page::after,
+.admin-page::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  opacity: var(--stars, 1);
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 34%,
+    transparent 55%,
+    color-mix(in srgb, #000 28%, transparent) 100%
+  );
+}
+
+/* The observatory grid (design/family/admin.html) — the same sky, but
+   instrumented. `--chart-line-soft` is defined by every pack, including the
+   two with no stars, so administration reads as a chart on parchment as
+   surely as it reads as a chart on indigo. */
+.admin-chart {
+  position: fixed;
+  z-index: -2;
+  inset: 0;
+  pointer-events: none;
+}
+.admin-chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.admin-chart-grid {
+  fill: none;
+  stroke: var(--chart-line-soft);
+  stroke-width: 1.5;
+  transform-box: view-box;
+  transform-origin: 800px 500px;
+}
+/* Precession, not decoration: one turn every five and a half minutes. The
+   JS switch (src/lib/use-reduced-motion.ts) stills it as soon as the page
+   mounts; the media query covers the frames before that and the no-JS case. */
+.admin-chart-grid[data-motion="full"] { animation: admin-precess 330s linear infinite; }
+@keyframes admin-precess { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .admin-chart-grid { animation: none; }
+}
+
+/* ---- shared furniture ----------------------------------------------- */
+
+/* One measure for both screens, so the header, the rail and the pane all
+   line up against the same column instead of drifting on the page. */
+.settings-page > *,
+.admin-page-inner {
+  width: min(100%, 1160px);
+  margin-inline: auto;
+}
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-page-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* The chip stacks above the title rather than sitting opposite it, so the
+   header reads as one lockup instead of two things pushed apart. `stretch`
+   is deliberate: the heading takes the full measure and wraps against it,
+   while the chip and the badge shrink to their own words. */
+.settings-page-header,
+.admin-page-header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.settings-page .page-heading,
+.admin-page .page-heading {
+  color: var(--ink);
+}
+
+/* The mono chip: the return link, the administration link, the badge. Same
+   shape and surface as the shell's orb and handles, so leaving a screen looks
+   like leaving a screen wherever you are. `--panel-raised`, not `--panel`,
+   because the hover border is `--accent`: that token is 2.97:1 on `--panel`
+   for atlas and 3.15:1 on `--panel-raised`, and 3:1 is the non-text bar. */
+.settings-return-button,
+.settings-admin-link a,
+.admin-page-back,
+.admin-page-header p {
+  box-sizing: border-box;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  color: var(--ink);
+  background: var(--panel-raised);
+  backdrop-filter: blur(10px);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: calc(9px + var(--text-bump));
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-decoration: none;
+}
+
+.settings-return-button,
+.admin-page-back,
+.admin-page-header p,
+.settings-admin-link a { align-self: flex-start; }
+.settings-return-button,
+.admin-page-back { cursor: pointer; }
+.settings-return-button { padding-left: 9px; }
+.settings-return-button svg { width: 14px; height: 14px; transform: rotate(180deg); }
+
+.settings-return-button:hover,
+.settings-admin-link a:hover,
+.admin-page-back:hover { border-color: var(--accent); }
+
+/* The badge above the administration heading (design/family/admin.html's
+   "OBSERVATORY" pill). It is a label, not a control, so it stays quiet. */
+.admin-page-header p {
+  color: var(--screen-quiet);
+  letter-spacing: .18em;
+  font-size: calc(8px + var(--text-bump));
+  text-transform: uppercase;
+}
+
+.settings-admin-link { margin: 0; }
+
+/* ---- the section rails ---------------------------------------------- */
+
+.settings-layout,
+.admin-layout {
+  display: grid;
+  grid-template-columns: minmax(164px, 204px) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.settings-section-nav-column,
+.admin-section-nav-column {
+  position: sticky;
+  top: 22px;
+}
+
+.settings-section-nav,
+.admin-section-nav {
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  display: grid;
+  gap: 2px;
+}
+
+.settings-section-nav a,
+.admin-section-nav a {
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: var(--screen-quiet);
+  font-family: var(--mono);
+  font-size: calc(10px + var(--text-bump));
+  letter-spacing: .04em;
+  text-decoration: none;
+  overflow-wrap: break-word;
+}
+
+.settings-section-nav a:hover,
+.admin-section-nav a:hover {
+  color: var(--ink);
+  background: var(--panel-raised);
+}
+
+/* ---- the panes ------------------------------------------------------ */
+
+/* Only the pane that is a direct child of a layout gets the panel: the
+   settings sections, HouseholdSettings, MemberManager and AdminManager all
+   reuse `.settings-content` internally and must stay flat inside it.
+   `--panel-raised` is deliberate — AdminManager's colours were calibrated
+   against that surface and tinting behind it drops them below AA. */
+.settings-layout > .settings-content,
+.admin-layout > .settings-content,
+.admin-page-inner > :is(.admin-page-refusal, .admin-page-status) {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-raised);
+  backdrop-filter: blur(14px);
+}
+
+.settings-layout > .settings-content,
+.admin-layout > .settings-content { padding: 2px 26px; }
+
+.admin-page-inner > :is(.admin-page-refusal, .admin-page-status) {
+  max-width: 60ch;
+  padding: 20px 24px;
+  font-size: calc(10px + var(--text-bump));
+  line-height: 1.6;
+}
+
+/* Inside a pane the dividers are hairlines, and the last one never draws a
+   rule against the pane's own edge. */
+:is(.settings-page, .admin-page) .settings-content > section {
+  border-bottom-color: var(--line-soft);
+}
+:is(.settings-page, .admin-page) .settings-content > section:last-child {
+  border-bottom: 0;
+}
+
+.settings-layout > .settings-content > .settings-section-region {
+  padding: 26px 0;
+  border-bottom: 1px solid var(--line-soft);
+  scroll-margin-top: 22px;
+}
+.settings-layout > .settings-content > .settings-section-region:last-child {
+  border-bottom: 0;
+}
+
+.settings-section-region > h2 {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: calc(21px + var(--text-bump));
+  letter-spacing: -.4px;
+  scroll-margin-top: 22px;
+}
+
+.settings-section-region > section {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.settings-section-region > section:last-of-type { border-bottom: 0; }
+
+.settings-section-region > .settings-content { margin-top: 8px; }
+
+/* AdminManager's section headings are the rail's targets, so they need the
+   same scroll clearance the settings headings have. */
+.admin-layout > .settings-content > section { scroll-margin-top: 22px; }
+.admin-layout > .settings-content > section > .setting-heading h3 { scroll-margin-top: 22px; }
+
+/* ---- end of session -------------------------------------------------- */
+
+.settings-session-actions {
+  margin: 0;
+  padding: 17px 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.settings-session-actions div { display: grid; gap: 4px; }
+.settings-session-actions strong { font-size: calc(11px + var(--text-bump)); }
+.settings-session-actions span {
+  color: var(--screen-quiet);
+  font-size: calc(9px + var(--text-bump));
+  line-height: 1.45;
+}
+.settings-session-actions button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--overdue-ink);
+  border-radius: 10px;
+  color: var(--overdue-text);
+  background: transparent;
+  font: inherit;
+  font-size: calc(9px + var(--text-bump));
+  font-weight: 800;
+  cursor: pointer;
+}
+.settings-session-actions button:disabled { opacity: .55; cursor: wait; }
+
+/* ---- accent words ---------------------------------------------------- */
+
+/*
+ * Every place these two screens paint *text* in the raw `--accent`. On atlas
+ * that token measures 3.15:1 on `--panel-raised` — fine for a border, a ring
+ * or a fill, a WCAG AA failure for a word. Each of these is lifted toward the
+ * pack's ink instead; borders, rings and fills below are untouched.
+ */
+:is(.settings-page, .admin-page) :is(
+  .portable-archive-intro .eyebrow,
+  .portable-archive-kicker,
+  .portable-archive-secondary,
+  .portable-archive-message,
+  .theme-pack-list > button > b,
+  .preference-card-picker > button > b,
+  .text-size-preview,
+  .member-actions button:first-child,
+  .admin-list b,
+  .admin-list button,
+  .admin-refresh,
+  .admin-user-actions button,
+  .admin-operation-actions button,
+  .admin-operation-actions span,
+  .admin-job-actions button,
+  .imap-review .eyebrow,
+  .imap-review-heading > button,
+  .recovery-options article button,
+  .recovery-actions button,
+  .recovery-confirmation p
+) {
+  color: var(--screen-accent-text);
+}
+
+/* The file picker's own button is a shadow-DOM part, so it needs its own rule. */
+:is(.settings-page, .admin-page) .portable-archive .field input[type="file"]::file-selector-button {
+  color: var(--screen-accent-text);
+}
+
+/* Danger actions keep the danger colour, which clears AA on every pack. */
+:is(.settings-page, .admin-page) :is(
+  .admin-user-actions button:last-child,
+  .admin-job-actions button:last-child,
+  .member-list button,
+  .recovery-actions .danger,
+  .recovery-confirmation .danger
+) {
+  color: var(--overdue-text);
+}
+
+/* ---- focus ----------------------------------------------------------- */
+
+/* globals.css paints a white ring haloed in near-black, which disappears on
+   the atlas and dawn packs. Take both from the active pack instead. */
+:is(.settings-page, .admin-page)
+  :is(a[href], button, input, select, textarea, [contenteditable="true"], [tabindex]):focus-visible,
+.settings-section-region > h2:focus,
+:is(.settings-page, .admin-page) [tabindex="-1"]:focus {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--bg);
+}
+
+/* ---- narrow ---------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .settings-layout,
+  .admin-layout {
+    display: block;
+  }
+
+  .settings-section-nav-column,
+  .admin-section-nav-column {
+    position: static;
+    margin-bottom: 14px;
+  }
+
+  .settings-section-nav,
+  .admin-section-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .settings-page,
+  .admin-page {
+    padding-inline: 14px;
+  }
+
+  .settings-page .page-heading,
+  .admin-page .page-heading {
+    font-size: calc(28px + var(--text-bump));
+  }
+
+  .settings-layout > .settings-content,
+  .admin-layout > .settings-content {
+    padding-inline: 16px;
+  }
+
+  .settings-layout > .settings-content > .settings-section-region,
+  .settings-section-region > h2,
+  .admin-layout > .settings-content > section,
+  .admin-layout > .settings-content > section > .setting-heading h3 {
+    scroll-margin-top: 14px;
+  }
+
+  .settings-session-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 15px 16px;
+  }
+}
+
+/* Below this the two-up rail cannot hold "Administrators" at the largest
+   text size without pushing the document sideways, so it goes back to one
+   column rather than overflowing. */
+@media (max-width: 420px) {
+  .settings-section-nav,
+  .admin-section-nav {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
