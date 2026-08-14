@@ -36,6 +36,7 @@ The supported topology and deferred alternatives are recorded in
 | Boundary | Responsibility | Current implementation |
 | --- | --- | --- |
 | Next.js routes | HTTP parsing, session/CSRF enforcement, cache policy, response mapping | `src/app/api` |
+| Web front end | Every signed-in and signed-out screen | **In transition.** Next.js and React (`src/app`, `src/components`) still serve the product. Its replacement is built from the ratified mockups on SvelteKit in `web/`, and is referenced by no Dockerfile, compose file or workflow until the cut. See [ADR-0012](adr/0012-front-end-leaves-react.md) |
 | Authentication | OIDC discovery/callback, claim validation, provisioning, sessions | `src/lib/auth` |
 | Domain and workspace | Item, schedule, section, notification and household command contracts | `src/lib`, `src/server/workspace-*` |
 | Authorization | Instance, household, owner and document access decisions | `src/server/authorization.ts`, `workspace-access.ts`, document authorization |
