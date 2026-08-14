@@ -5,12 +5,24 @@
    * family.css, so importing it globally imposed rules home was never written
    * against. Each family screen imports it for itself.
    *
-   * The mockups pull Space Grotesk from fonts.googleapis.com. Self-hosted
-   * here instead: identical typeface, no third-party request from a
-   * self-hosted product. Weights 500 and 600 are the two the designs use.
+   * All three of the design's typefaces are self-hosted: no request leaves the
+   * machine, which a self-hosted product requires. All are OFL-1.1.
+   *
+   * Space Grotesk is --display. The mockups fetched it from
+   * fonts.googleapis.com; identical typeface, served from the bundle instead.
+   * Weights 500 and 600 are the two the designs use.
+   *
+   * Inter (--ui) and JetBrains Mono (--mono) are named first in the font
+   * stacks but were never fetched by the mockups, so until now they fell back
+   * to whatever face the viewer's machine happened to offer - a different
+   * design on every device, and on a bare Linux host not a Latin face anyone
+   * chose. Variable rather than static cuts: the design asks for weights 400,
+   * 500, 520, 560 and 600, and 520 and 560 exist only on a variable axis.
    */
   import "@fontsource/space-grotesk/500.css";
   import "@fontsource/space-grotesk/600.css";
+  import "@fontsource-variable/inter";
+  import "@fontsource-variable/jetbrains-mono";
 
   let { children } = $props();
 </script>
