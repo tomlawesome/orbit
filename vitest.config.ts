@@ -14,6 +14,10 @@ export default defineConfig({
       ".agents/worktrees/**",
       "tests/e2e/**",
       "tests/integration/**",
+      // web/ is a separate project with its own runners: its fidelity and
+      // behaviour suites are Playwright, so collecting them here calls
+      // Playwright's test() outside a Playwright runner and fails to load (#425).
+      "web/**",
     ],
     coverage: {
       provider: "v8",
