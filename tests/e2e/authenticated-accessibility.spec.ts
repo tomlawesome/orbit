@@ -558,6 +558,21 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
         await expect(settings.getByRole("region", { name: sectionName, exact: true })).toBeVisible();
       }
       await expect(settings.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
+      // v19 (#399): the defect this screen was rebuilt for. With the sidebar
+      // gone the rail sat alone against a bare page with a trench beside it
+      // and the sections loose on the background. Rail and pane are now one
+      // instrument on the star-chart surface: a real panel, set beside — not
+      // marooned from — the content it indexes.
+      const settingsPane = settings.locator(".settings-layout > .settings-content");
+      await expect(settingsPane).toHaveCSS("border-style", "solid");
+      const railBox = await settings.locator(".settings-section-nav").boundingBox();
+      const paneBox = await settingsPane.boundingBox();
+      expect(railBox, "the settings rail should be laid out").not.toBeNull();
+      expect(paneBox, "the settings pane should be laid out").not.toBeNull();
+      if (railBox && paneBox) {
+        // Negative when the rail stacks above the pane on a narrow viewport.
+        expect(paneBox.x - (railBox.x + railBox.width)).toBeLessThanOrEqual(32);
+      }
       await settings.getByRole("link", { name: "Inbox", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
       await expectNoAxeViolations(page, ".settings-page");
@@ -566,6 +581,16 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expectNoAxeViolations(page, ".imap-review");
       await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
+      // v19 (#399): administration is the observatory — the same landmark
+      // shape as settings, a labelled section rail over named regions, and
+      // no tabs anywhere.
+      const administration = page.locator(".admin-page");
+      await expect(administration.getByRole("navigation", { name: "Administration sections" })).toBeVisible();
+      await expect(administration.getByRole("tablist")).toHaveCount(0);
+      await expect(administration.getByRole("tab")).toHaveCount(0);
+      for (const sectionName of ["Operations", "Recent audit history", "Document protection", "Instance administrators"]) {
+        await expect(administration.getByRole("region", { name: sectionName, exact: true })).toBeVisible();
+      }
       await expectNoAxeViolations(page, ".admin-page");
     });
   });

@@ -192,6 +192,21 @@ test.describe("administrator operations evidence", () => {
       await administration.getByRole("button", { name: "Load older history" }).click();
       await expect(administration.getByText("Account disabled", { exact: true })).toBeVisible();
       await expect(administration.getByRole("button", { name: "Load older history" })).toHaveCount(0);
+
+      // v19 (#399): the observatory rail. Administration is a place with
+      // named sections now, not one long slab, and each rail link lands
+      // keyboard focus on the heading it points at — the same contract the
+      // settings rail keeps.
+      const rail = administration.getByRole("navigation", { name: "Administration sections" });
+      await expect(rail).toBeVisible();
+      await rail.getByRole("link", { name: "Audit history", exact: true }).click();
+      await expect(page).toHaveURL(/\/admin#admin-audit-heading$/);
+      await expect(
+        administration.getByRole("heading", { name: "Recent audit history", exact: true, level: 3 }),
+      ).toBeFocused();
+      await expect(
+        administration.getByRole("region", { name: "Recent audit history", exact: true }),
+      ).toBeVisible();
     } catch (error) {
       journeyFailed = true;
       throw error;
