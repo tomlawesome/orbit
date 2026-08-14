@@ -153,30 +153,23 @@ async function expectNoAxeViolations(page: Page, include: string) {
   expect(results.violations, `Expected no WCAG A/AA violations in ${include}`).toEqual([]);
 }
 
-// v19 replaced the sidebar and the topbar with a single floating account
-// orb (design/v19/home.html), so there is no longer a desktop/mobile fork
-// in how navigation is reached: the orb is the control at every breakpoint.
-async function openAccountPanel(page: Page) {
-  await page.getByRole("button", { name: "Open account menu" }).click();
-  const panel = page.getByRole("dialog", { name: "Account and menu" });
-  await expect(panel).toBeVisible();
-  return panel;
-}
-
 async function openSettings(page: Page) {
-  const panel = await openAccountPanel(page);
-  await panel.getByRole("button", { name: "Settings", exact: true }).click();
+  const desktopTrigger = page.locator("button.topbar-profile:visible");
+  if (await desktopTrigger.count()) {
+    await desktopTrigger.click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  } else {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("button", { name: "Personalise", exact: true }).click();
+  }
   await expect(page).toHaveURL(/\/settings$/);
   const settingsPage = page.locator(".settings-page");
   await expect(settingsPage).toBeVisible();
   return settingsPage;
 }
 
-// CON-12: the north star is the shell's "Add item" affordance now, and the
-// full form is one deliberate step behind it.
 async function openItemEditor(page: Page) {
-  await page.getByRole("button", { name: "Add to your orbit" }).click();
-  await page.getByRole("button", { name: "Open the full form" }).click();
+  await page.locator("button.add-button:visible, button.mobile-add:visible").first().click();
   const dialog = page.getByRole("dialog", { name: "Add an item" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByLabel("What do you want to keep track of?")).toBeFocused();
@@ -194,12 +187,10 @@ async function openItemDetail(page: Page, fixture: AccessibilityFixture) {
   return { dialog, trigger: row.locator("button.more-button") };
 }
 
-// Notifications moved off the topbar and into the account panel, so the
-// orb is both the way in and the control focus returns to on close.
 async function openNotifications(page: Page) {
-  const trigger = page.getByRole("button", { name: "Open account menu" });
-  const panel = await openAccountPanel(page);
-  await panel.getByRole("button", { name: /^Notifications(?:\s|$)/ }).click();
+  const trigger = page.locator("header.topbar")
+    .getByRole("button", { name: /^Notifications(?:,|$)/ });
+  await trigger.click();
   const dialog = page.getByRole("dialog", { name: "Notifications" });
   await expect(dialog).toBeVisible();
   return { dialog, trigger };
@@ -385,9 +376,12 @@ async function expectCoreSurfacesFit(
   await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/$/);
   await expect(settings).not.toBeVisible();
-  // One control at every breakpoint: there is no hamburger to fall back to.
-  await expect(page.getByRole("button", { name: "Open account menu" })).toBeFocused();
-  await expect(page.locator(".sidebar, header.topbar, button.mobile-menu")).toHaveCount(0);
+  if ((page.viewportSize()?.width ?? 0) <= 820) {
+    await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
+    await expect(page.locator(".sidebar")).toHaveCSS("visibility", "hidden");
+  } else {
+    await expect(page.getByRole("button", { name: "Open account menu" })).toBeFocused();
+  }
 
   const editor = await openItemEditor(page);
   await expectNoHorizontalOverflow(page, `${context}/item-editor`);
@@ -410,9 +404,9 @@ async function expectCoreSurfacesFit(
 }
 
 test.describe("authenticated accessibility and responsive acceptance", () => {
-  test("provides an accessible account panel carrying everything the old chrome did", async ({ page, isMobile }) => {
+  test("provides an accessible desktop account menu with explicit sign-out", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
-    test.skip(isMobile, "The panel is identical on a phone; the scrim leg needs the desktop layering to be clickable.");
+    test.skip(isMobile, "The account control is desktop-only; mobile navigation remains unchanged.");
 
     const fixture = newFixture();
     let cleanupRequired = false;
@@ -421,110 +415,68 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       cleanupRequired = true;
       await createFixture(page, fixture);
       const trigger = page.getByRole("button", { name: "Open account menu" });
-      const panel = page.getByRole("dialog", { name: "Account and menu" });
-      await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+      const menu = page.getByRole("menu", { name: "Account menu" });
+      await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
       await expect(trigger).toHaveAttribute("aria-expanded", "false");
-      await expect(panel).toHaveCount(0);
-      // The chrome the panel replaced is gone, not merely restyled.
-      await expect(page.locator(".sidebar, header.topbar, button.topbar-profile, button.household-picker")).toHaveCount(0);
+      await expect(menu).toHaveCount(0);
 
       await trigger.click();
       await expect(trigger).toHaveAttribute("aria-expanded", "true");
-      await expect(panel).toBeVisible();
-      await expectNoAxeViolations(page, ".account");
+      await expect(menu).toBeVisible();
+      await expect(menu.getByRole("menuitem")).toHaveCount(3);
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await expectNoAxeViolations(page, ".account-menu-popup");
 
-      // Capability inventory: nothing the sidebar or topbar offered may be
-      // unreachable now that both are deleted.
-      for (const action of ["Settings", "Inbox", "Administration", "Add a household", "Sign out"]) {
-        await expect(panel.getByRole("button", { name: action, exact: true }), `${action} is unreachable`).toHaveCount(1);
-      }
-      for (const action of [/^Due next(?:\s|$)/, /^Notifications(?:\s|$)/, /^Archive(?:\s|$)/]) {
-        await expect(panel.getByRole("button", { name: action })).toHaveCount(1);
-      }
-      // The section rail, with its counts, lives under "Your things". This
-      // household's only section is "Accessibility": the default
-      // Home/Vehicles/Devices/Services set comes from the first-run wizard,
-      // not from a household created straight through the API.
-      await expect(panel.getByRole("navigation", { name: "Your things" })
-        .getByRole("button", { name: /^Accessibility(?:\s|$)/ })).toHaveCount(1);
-
+      await page.keyboard.press("ArrowDown");
+      await expect(menu.getByRole("menuitem", { name: "Administration", exact: true })).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await page.keyboard.press("ArrowUp");
+      await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
+      await page.keyboard.press("Home");
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await page.keyboard.press("End");
+      await expect(menu.getByRole("menuitem", { name: "Sign out", exact: true })).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(panel).toHaveCount(0);
+      await expect(menu).toBeHidden();
       await expect(trigger).toBeFocused();
 
       await trigger.click();
-      await page.locator(".shell-scrim-account").click();
-      await expect(panel).toHaveCount(0);
+      await page.locator("header.topbar .search").click();
+      await expect(menu).toBeHidden();
       await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
 
-      // The panel is modal: Tab never escapes it while it is open.
       await trigger.click();
-      await expect(panel).toBeVisible();
-      for (let step = 0; step < 14; step += 1) {
-        await page.keyboard.press("Tab");
-        expect(
-          await panel.evaluate((element) => element.contains(document.activeElement)),
-          `Tab step ${step} left the account panel`,
-        ).toBe(true);
-      }
-      await page.keyboard.press("Escape");
-      await expect(trigger).toBeFocused();
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(menu).toBeHidden();
+      await expect(trigger).toHaveAttribute("aria-expanded", "false");
+      await expect(page.getByRole("button", { name: "Add item", exact: true })).toBeFocused();
 
       await trigger.click();
-      await panel.getByRole("button", { name: "Administration", exact: true }).click();
+      await menu.getByRole("menuitem", { name: "Administration", exact: true }).click();
       await expect(page).toHaveURL(/\/admin$/);
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
 
       await page.goto("/");
       await expect(trigger).toBeVisible();
+      await trigger.click();
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toHaveCount(0);
+      await trigger.click();
+      await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
       await cleanupFixture(page, fixture);
       cleanupRequired = false;
-      await trigger.click();
-      await panel.getByRole("button", { name: "Sign out", exact: true }).click();
+      await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
     } finally {
       if (cleanupRequired) {
         await cleanupFixture(page, fixture);
       }
     }
-  });
-
-  test("keeps the status and chart-key drawers reachable, labelled and dismissible", async ({ page }) => {
-    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
-    await withFixture(page, async () => {
-      // CON-7: the word on the screen edge is the handle for its drawer.
-      const statusHandle = page.locator("button.handle.sync-state");
-      await expect(statusHandle).toHaveText("Synced");
-      await expect(statusHandle).toHaveAttribute("aria-expanded", "false");
-      await expect(page.locator("#statusdrawer")).toHaveAttribute("inert");
-
-      await statusHandle.click();
-      await expect(statusHandle).toHaveAttribute("aria-expanded", "true");
-      const status = page.getByRole("region", { name: "System status" });
-      await expect(status).toBeVisible();
-      await expectNoAxeViolations(page, "#statusdrawer");
-      await page.keyboard.press("Escape");
-      await expect(statusHandle).toHaveAttribute("aria-expanded", "false");
-      await expect(statusHandle).toBeFocused();
-
-      const keyHandle = page.getByRole("button", { name: "Chart key" });
-      await keyHandle.click();
-      await expect(page.getByRole("region", { name: "Chart key" })).toBeVisible();
-      await expectNoAxeViolations(page, "#keydrawer");
-      await page.keyboard.press("Escape");
-      await expect(keyHandle).toBeFocused();
-
-      // CON-12: the create drawer is modal, so it scrims and traps.
-      const northStar = page.getByRole("button", { name: "Add to your orbit" });
-      await northStar.click();
-      const create = page.getByRole("dialog", { name: "Add to your orbit" });
-      await expect(create).toBeVisible();
-      await expectNoAxeViolations(page, "#createdrawer");
-      await expect(page.locator(".shell-scrim")).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(northStar).toHaveAttribute("aria-expanded", "false");
-      await expect(northStar).toBeFocused();
-    });
   });
 
   test("has no automated WCAG A or AA violations across core authenticated surfaces", async ({ page }) => {
@@ -558,21 +510,6 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
         await expect(settings.getByRole("region", { name: sectionName, exact: true })).toBeVisible();
       }
       await expect(settings.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
-      // v19 (#399): the defect this screen was rebuilt for. With the sidebar
-      // gone the rail sat alone against a bare page with a trench beside it
-      // and the sections loose on the background. Rail and pane are now one
-      // instrument on the star-chart surface: a real panel, set beside — not
-      // marooned from — the content it indexes.
-      const settingsPane = settings.locator(".settings-layout > .settings-content");
-      await expect(settingsPane).toHaveCSS("border-style", "solid");
-      const railBox = await settings.locator(".settings-section-nav").boundingBox();
-      const paneBox = await settingsPane.boundingBox();
-      expect(railBox, "the settings rail should be laid out").not.toBeNull();
-      expect(paneBox, "the settings pane should be laid out").not.toBeNull();
-      if (railBox && paneBox) {
-        // Negative when the rail stacks above the pane on a narrow viewport.
-        expect(paneBox.x - (railBox.x + railBox.width)).toBeLessThanOrEqual(32);
-      }
       await settings.getByRole("link", { name: "Inbox", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Incoming documents" })).toBeVisible();
       await expectNoAxeViolations(page, ".settings-page");
@@ -581,16 +518,6 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expectNoAxeViolations(page, ".imap-review");
       await page.goto("/admin");
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
-      // v19 (#399): administration is the observatory — the same landmark
-      // shape as settings, a labelled section rail over named regions, and
-      // no tabs anywhere.
-      const administration = page.locator(".admin-page");
-      await expect(administration.getByRole("navigation", { name: "Administration sections" })).toBeVisible();
-      await expect(administration.getByRole("tablist")).toHaveCount(0);
-      await expect(administration.getByRole("tab")).toHaveCount(0);
-      for (const sectionName of ["Operations", "Recent audit history", "Document protection", "Instance administrators"]) {
-        await expect(administration.getByRole("region", { name: sectionName, exact: true })).toBeVisible();
-      }
       await expectNoAxeViolations(page, ".admin-page");
     });
   });
@@ -682,8 +609,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       const settingsTrigger = page.getByRole("button", { name: "Open account menu" });
       await settingsTrigger.focus();
       await settingsTrigger.click();
-      await page.getByRole("dialog", { name: "Account and menu" })
-        .getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
       await expect(page).toHaveURL(/\/settings$/);
       const settingsHeading = page.getByRole("heading", { name: "Settings" });
       await expect(settingsHeading).toBeFocused();
@@ -705,13 +631,9 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expect(page).toHaveURL(/\/$/);
       await expect(settingsTrigger).toBeFocused();
 
-      // The north star handle is the shell's add affordance. Opening the
-      // full form shuts the drawer behind the editor, so the handle — not
-      // the button inside the drawer — is where focus must land again.
-      const addTrigger = page.getByRole("button", { name: "Add to your orbit" });
+      const addTrigger = page.locator("button.add-button:visible");
       await addTrigger.focus();
       await addTrigger.click();
-      await page.getByRole("button", { name: "Open the full form" }).click();
       const editor = page.getByRole("dialog", { name: "Add an item" });
       await expect(editor.getByLabel("What do you want to keep track of?")).toBeFocused();
       await editor.getByRole("button", { name: "Close item editor" }).focus();
