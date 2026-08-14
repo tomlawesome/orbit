@@ -3,8 +3,8 @@
      place; "centre" is only where the camera is parked. Flying moves the
      starfield, never the destination. Display font fetched in mockup only. */
   :root{
-    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
     --display:'Space Grotesk',var(--ui);
   }
   [data-theme=starchart]{
@@ -14,6 +14,10 @@
     --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
     --degraded:#fb8b24;
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    /* Far stars are the pack's ink, near stars one step further from the
+       background - the relationship the design already used when both fills
+       were literals (#e9edf8 is exactly --ink here). */
+    --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
   }
   [data-theme=afterdark]{
@@ -23,25 +27,62 @@
     --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
     --degraded:#fb8b24;
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
   }
+  /* Dialled back from the ratified #efe9db (owner, 2026-08-14): a sky this
+     bright fights the whole conceit, so atlas is now aged paper at dusk rather
+     than fresh paper at noon. Only the ground and its surfaces moved - ink,
+     accent and status tokens are untouched, so every relationship the design
+     set still holds, against a quieter field. */
   [data-theme=atlas]{
-    --bg:#efe9db; --panel:rgba(247,243,234,.8); --panel-raised:#fbf8f1;
-    --line:#d8cfba; --line-soft:#e4dcc9;
-    --ink:#1c2b4a; --ink-mid:#5d6a87; --ink-faint:#98a0b4;
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
     --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
     --degraded:#c2570e;
-    --sun:#f3dfae; --sun-core:#1c2b4a; --stars:0; --celestial:block;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    /* A daylit sky still drifts (owner, 2026-08-14). The design switched the
+       starfield off on the light packs; instead it inverts - ink on paper,
+       taken from the pack's own ink family rather than a new tone. Lower
+       opacity than the dark packs because dark-on-light reads heavier. */
+    --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
   }
+  /* Dialled back from the ratified #eef1f6 (owner, 2026-08-14) for the same
+     reason as atlas: dawn is now first light rather than full morning. */
   [data-theme=dawn]{
-    --bg:#eef1f6; --panel:rgba(255,255,255,.85); --panel-raised:#ffffff;
-    --line:#dde3ee; --line-soft:#e8edf5;
-    --ink:#1a2233; --ink-mid:#5d6b85; --ink-faint:#9aa5ba;
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
     --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
     --degraded:#c2570e;
-    --sun:#cfe4f7; --sun-core:#1a2233; --stars:0; --celestial:none;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  /*
+   * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
+   * a real astronomical term and an eighties one, which is the whole brief:
+   * neon and vivid, but classy rather than tacky.
+   *
+   * What keeps it the right side of that line is restraint, not saturation.
+   * The ground is deep indigo-violet, never black, so the neons sit ON
+   * something. Exactly two signature neons carry the screen - magenta for the
+   * accent and cyan for what is coming - with mint reserved for "on track" and
+   * amber for warmth. No rainbow: every remaining token is a tint of the
+   * violet ground. The stars go lilac rather than white so the sky reads as
+   * dusk over a city rather than deep space.
+   */
+  [data-theme=retrograde]{
+    --bg:#0f0a1e; --panel:rgba(26,16,48,.6); --panel-raised:rgba(34,20,62,.82);
+    --line:#3a2a63; --line-soft:#241a42;
+    --ink:#f2e9ff; --ink-mid:#a08fc7; --ink-faint:#6b5b91;
+    --accent:#ff5fd2; --ok:#2ff2c4; --warm:#ffb43d; --overdue:#ff4d6d; --upcoming:#5ce1ff;
+    --degraded:#ff8a3d;
+    --sun:#ff5fd2; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#c8b8ff; --star-near:#f2e9ff;
+    --chart-line:#3a2a63; --chart-line-soft:#241a42; --chart-ink:#6b5b91;
   }
 
   *{box-sizing:border-box;margin:0}
@@ -62,6 +103,22 @@
   .sky .near{animation:driftn 195s linear infinite}
   @keyframes driftf{to{transform:translateX(-1600px)}}
   @keyframes driftn{to{transform:translateX(-1600px)}}
+  /* POL-11 on a daylit sky. The generator's per-star alphas (far .12–.35,
+     near .30–.70) were tuned for bright points on a night ground, where the
+     eye is most sensitive. Inverted — small dark specks on a bright ground —
+     the same alphas all but disappear, so the light packs lift both layers to
+     a flat, readable value. Depth still reads: the two layers keep their
+     generated radii (far .4–.9px, near .8–1.5px).
+
+     Size is lifted with a stroke rather than by setting r, because a stroke
+     adds the same width to every star and so preserves that radius variation,
+     where a flat r would erase it. Owner call, 2026-08-14. */
+  [data-theme=atlas] .sky .far circle,
+  [data-theme=dawn] .sky .far circle{opacity:.5;
+       stroke:var(--star-far);stroke-width:.7}
+  [data-theme=atlas] .sky .near circle,
+  [data-theme=dawn] .sky .near circle{opacity:.8;
+       stroke:var(--star-near);stroke-width:.7}
   .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
@@ -77,6 +134,17 @@
              font:12.5px var(--mono);color:var(--ink);padding:6px 4px;
              transition:border-color .25s}
   .splash-search input::placeholder{color:var(--ink-faint)}
+  /* The field is a hairline under centred type, which reads as a caption
+     rather than an input. At rest the line was --line, measuring 1.14-1.56
+     against the sky across the four packs - a rumour rather than a line - and
+     the only real cue arrived on focus, by which point you have committed.
+     Now it escalates: present at rest, firmer on approach, accent once you are
+     in it. Ordered rest, hover, focus so the accent still wins when both
+     apply. No box, no icon, no label: owner-decisions.md records that the
+     splash is "just the star chart" and that added chrome was rejected three
+     times. Owner call, 2026-08-14. */
+  .splash-search input{border-bottom-color:var(--ink-faint)}
+  .splash-search input:hover{border-color:var(--ink-mid)}
   .splash-search input:focus{border-color:var(--accent)}
 
   /* CON-7: the word IS the handle — attached to the drawer edge, riding the
@@ -173,8 +241,12 @@
   .suggest button.yes{border-color:var(--accent);color:var(--accent)}
   svg text{font-family:var(--mono)}
 
+  /* overscroll-behavior goes with the light-dismiss rule (owner, 2026-08-14):
+     the card is capped at 76vh and scrolls internally, so without this,
+     reaching the end of a long document list chains the scroll to the page and
+     the card dismisses itself out from under whoever is reading it. */
   .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
-           max-height:76vh;overflow:auto;
+           max-height:76vh;overflow:auto;overscroll-behavior:contain;
            width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
            border:1px solid var(--line);border-radius:16px;padding:20px 22px;
            opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
@@ -321,10 +393,19 @@
     50%{transform:translate(-32px,-2px)}75%{transform:translate(-46px,1px)}100%{transform:translate(-60px,0)}}
   .dial{transition:transform 2s cubic-bezier(.3,.6,.2,1)}
   body.storm .dial{transform:scale(1.26)}
-  .dial g[fill="url(#p-jade)"],.dial circle[fill="url(#p-jade)"],
+  /* The `circle[fill="url(#p-jade)"]` term that used to sit in both lists is
+     deliberately gone (owner, 2026-08-14). POL-4 gives every dial body
+     transform-box:fill-box so a hover grows it in place; this rule's
+     transform-origin:190px 190px outranked that on the two jade circles inside
+     a .body-link, and with fill-box in force the origin was measured inside
+     the planet's own 7px box - throwing the disc 154px out of its ring at 45
+     degrees on hover. The term was redundant anyway: those circles' <a
+     data-body> parents are already matched by the terms that remain, so POL-10
+     still reaches them through the wrapper. */
+  .dial g[fill="url(#p-jade)"],
   .dial [data-body="i-smoke"],.dial [data-body="i-svc"]{
     transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
-  body.storm .dial g[fill="url(#p-jade)"],body.storm .dial circle[fill="url(#p-jade)"],
+  body.storm .dial g[fill="url(#p-jade)"],
   body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"]{
     transform:scale(1.17)}
   .dial .belt{transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}

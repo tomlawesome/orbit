@@ -21,8 +21,8 @@
 
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g id="cam-far" class="cam"><g class="far" fill="#e9edf8"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
-    <g id="cam-near" class="cam"><g class="near" fill="#f4f0ff"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
+    <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
+    <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
 </div>
 <div class="vignette" aria-hidden="true"></div>
@@ -44,8 +44,10 @@
     <span>THEME</span>
     <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <button style="background:#efe9db" title="atlas" aria-pressed="false"></button>
-    <button style="background:#eef1f6" title="dawn" aria-pressed="false"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false"></button>
+    <button style="background:#0f0a1e;box-shadow:inset 0 0 0 1px #ff5fd2" title="retrograde"
+            aria-pressed="false"></button>
   </div>
   <button class="signout">sign out →</button>
 </div>
