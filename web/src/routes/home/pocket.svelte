@@ -1,29 +1,25 @@
 <script>
-  import { onMount } from "svelte";
-  import "./mobile.css";
-  import { mountMobile } from "./mobile.behaviour.js";
+  import "./pocket.css";
 
   /**
-   * Home, in the mobile dialect (CON-10). The dial owns the width, the other
-   * households collapse from a sky you fly through into a strip you scroll,
-   * and what is a hover callout on a desk becomes a bottom sheet under a
-   * thumb.
+   * Home in the mobile dialect (CON-10, #430) — the dial owns the width, the
+   * other households collapse from a sky you fly through into a strip you
+   * scroll, and what is a hover callout on a desk becomes a bottom sheet under
+   * a thumb.
    *
-   * Served at its own path for now. Whether this is a route or a breakpoint of
-   * /home is an open question — see #410 — and deciding it by accident is how
-   * an m-dot site happens.
+   * It shares home's URL. Both dialects are server-rendered and the viewport
+   * chooses between them in CSS, because selecting in JS would flash the wrong
+   * one and would break the non-JS fallback. See pocket.css for the switch.
    *
-   * Built from design/family/mobile-home.html and owned here from that point
+   * Lifted from design/family/mobile-home.html and owned here from that point
    * on. Its rows and bodies are still the mockup's own data.
+   *
+   * Markup only: +page.svelte mounts whichever dialect the viewport selected,
+   * so the hidden one never binds listeners.
    */
-  onMount(mountMobile);
 </script>
 
-<svelte:head>
-  <link rel="stylesheet" href="/screens/family.css" />
-  <title>Orbit</title>
-</svelte:head>
-
+<div class="pocket">
 <div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
 <g fill="#e9edf8"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
       <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
@@ -127,4 +123,5 @@
   <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
   <div class="acts"><button class="pri">open</button><button>documents</button><button
     data-sheet-close>close</button></div>
+</div>
 </div>

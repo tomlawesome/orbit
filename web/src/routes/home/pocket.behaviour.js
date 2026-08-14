@@ -13,7 +13,7 @@
  * `innerHTML` — the attribute is already entity-decoded by the parser, so the
  * result is identical and nothing here can inject markup.
  */
-export function mountMobile() {
+export function mountPocket() {
   const controller = new AbortController();
   const on = (target, type, handler) =>
     target?.addEventListener(type, handler, { signal: controller.signal });

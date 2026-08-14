@@ -22,6 +22,12 @@ const repo = resolve(here, "../../..");
 const ROOTS = {
   "/design/": resolve(repo, "design"),
   "/fonts/": resolve(repo, "web/node_modules/@fontsource/space-grotesk/files"),
+  /* The app self-hosts all three faces (#418). The mockups fetch only Space
+     Grotesk and let Inter and JetBrains Mono fall back to whatever the host
+     offers, so without these the gate would measure font delivery rather
+     than design — the very thing the interception exists to prevent. */
+  "/inter/": resolve(repo, "web/node_modules/@fontsource-variable/inter/files"),
+  "/mono/": resolve(repo, "web/node_modules/@fontsource-variable/jetbrains-mono/files"),
 };
 
 const TYPES = {
