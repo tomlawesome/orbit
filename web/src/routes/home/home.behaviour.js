@@ -1,0 +1,335 @@
+/**
+ * The home screen's behaviour, carried across from design/v19/home.html with
+ * its logic intact.
+ *
+ * This code is imperative DOM by design — it creates elements, writes
+ * transforms directly, relaxes overlapping constellations apart and flies a
+ * camera. Rewriting it as reactive markup is the same translation step that
+ * lost the design in #408, arriving by another door. So no framework owns this
+ * subtree: it is mounted once, handed the document, and left alone.
+ *
+ * Two deliberate departures from the mockup, neither of which can move a pixel:
+ *
+ *   1. The galaxy is a parameter rather than a constant — see galaxy.fixture.js.
+ *   2. The mockup's inline on* attributes are wired here as listeners instead.
+ *      Inline handlers need their functions to be globals; a module has none.
+ */
+export function mountHome({ galaxy }) {
+  /*
+   * Shadows the global so every bare addEventListener() below — the mockup's
+   * own keydown, scroll and resize handlers — is registered against this
+   * controller and torn down with the screen. The mockup's code is unchanged;
+   * it simply resolves a different binding.
+   */
+  const controller = new AbortController();
+  const addEventListener = (type, handler, options) =>
+    window.addEventListener(type, handler, {
+      ...(typeof options === "object" ? options : null),
+      signal: controller.signal,
+    });
+
+
+  /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
+  const GALAXY = galaxy;
+  let camera = "lawson";
+  let flying = false;
+  const hero = document.getElementById("hero");
+
+  /* the starfield offset is a pure function of the camera position, so a
+     flight animates between two truths and there is nothing to snap back */
+  function pointSky(){
+    const [cx, cy] = GALAXY[camera].pos;
+    document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
+    document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
+  }
+
+  function renderGalaxy(settle){
+    for (const old of hero.querySelectorAll(".minisys")) old.remove();
+    const w = hero.clientWidth, h = hero.clientHeight;
+    const [cx, cy] = GALAXY[camera].pos;
+    const placed = [];
+    for (const [key, hh] of Object.entries(GALAXY)) {
+      if (key === camera) continue;   // you never see your own constellation — you're inside it
+      let ox = hh.pos[0] - cx, oy = hh.pos[1] - cy;
+      const dist = Math.hypot(ox, oy);
+      // clamp to the visible sky along the true bearing; dim with distance
+      const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - 155)));
+      ox *= f; oy *= f;
+      placed.push({ key, hh, ox, oy, dist });
+    }
+    // narrow viewports can fold two bearings onto the same patch of sky —
+    // relax overlaps apart so every constellation stays individually clickable
+    for (let round = 0; round < 4; round++) {
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i], z = placed[j];
+        let dx = z.ox - a.ox, dy = z.oy - a.oy;
+        const d = Math.hypot(dx, dy) || 1;
+        if (d < 230) {
+          const push = (230 - d) / 2;
+          dx /= d; dy /= d;
+          a.ox -= dx * push; a.oy -= dy * push;
+          z.ox += dx * push; z.oy += dy * push;
+        }
+      }
+    }
+    for (const { key, hh, ox, oy, dist } of placed) {
+      const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
+      const div = document.createElement("div");
+      div.className = "minisys" + (settle ? " settle" : "");
+      div.setAttribute("role", "button");
+      div.setAttribute("aria-label", "Fly to " + hh.name);
+      // anchored so the RING CENTRE (118,95 in the svg) sits at the bearing
+      // point — a flight translating by -delta therefore lands the ring centre
+      // EXACTLY on the hero centre, concentric with the dial's sun
+      div.style.left = (w / 2 + ox - 118) + "px";
+      div.style.top = (h / 2 + oy - 95) + "px";
+      div.style.setProperty("--tox", ox + "px");
+      div.style.setProperty("--toy", oy + "px");
+      div.style.opacity = dim;
+      const label = hh.name.toUpperCase();
+      const tw = Math.min(150, label.length * 6.6);
+      // the arrow extends underneath the text, then veers toward the ring
+      const veer = `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+      div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
+        <text x="6" y="14" font-size="9.5" letter-spacing=".14em" style="fill:var(--accent)" opacity=".85">${label}</text>
+        <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+        <circle class="msring" cx="118" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+        <circle cx="118" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+        ${hh.planets.map(([px, py, pr, tok]) =>
+          `<circle cx="${118 + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+      </svg>`;
+      div.addEventListener("click", () => flyTo(key, div));
+      hero.appendChild(div);
+    }
+  }
+
+  function flyTo(key, mini){
+    if (flying) return;
+    flying = true;
+    const [cx, cy] = GALAXY[camera].pos;
+    const dx = GALAXY[key].pos[0] - cx, dy = GALAXY[key].pos[1] - cy;
+    hero.style.setProperty("--flyx", dx + "px");
+    hero.style.setProperty("--flyy", dy + "px");
+    hero.classList.add("flying");
+    mini.classList.add("target");
+    camera = key;
+    pointSky();               // the starfield streams to the new truth
+    // one continuous motion in two beats that overlap by a breath: the flight
+    // lands the ring centre EXACTLY concentric with the dial's sun, and only
+    // then does the chart grow out of that shared centre — slow and deliberate
+    setTimeout(() => {
+      document.getElementById("dial-name").textContent = GALAXY[key].name;
+      document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
+        (key === "lawson" ? "owner" : "member");
+      hero.classList.add("arriving");   // dial pinned at centre, under the ring
+      mini.classList.add("dissolve");   // the ring hands the centre to the chart
+      const dial = document.querySelector(".dial");
+      dial.style.animation = "none"; void dial.offsetWidth;
+      dial.style.animation = "bloom 2.4s cubic-bezier(.22,.61,.21,1) 1";
+    }, 1120);
+    setTimeout(() => {
+      const wrap = hero.querySelector(".dialwrap");
+      wrap.style.transition = "none";
+      hero.classList.remove("flying");
+      hero.classList.remove("arriving");
+      void wrap.offsetWidth;
+      wrap.style.transition = "";
+      renderGalaxy(true);     // home appears on the reverse bearing of the flight
+      flying = false;
+    }, 1600);
+  }
+
+  /* ---- starfield: generated, two depth layers ---- */
+  const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+  (function stars(){
+    const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+    const NS = "http://www.w3.org/2000/svg";
+    for (let i = 0; i < 95; i++) {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+      c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+      c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+      far.appendChild(c);
+    }
+    for (let i = 0; i < 46; i++) {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+      c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+      c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+      near.appendChild(c);
+    }
+  })();
+
+  function setTheme(name, button){
+    document.documentElement.dataset.theme = name;
+    for (const other of button.parentElement.querySelectorAll("button"))
+      other.setAttribute("aria-pressed", String(other === button));
+  }
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries)
+      if (entry.isIntersecting) entry.target.classList.add("seen");
+  }, { threshold: 0.15 });
+  for (const group of document.querySelectorAll(".group")) observer.observe(group);
+  /* POL-6 + POL-4: callout tooltip and bidirectional highlight */
+  const callout = document.createElement("div");
+  callout.className = "callout";
+  callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+  document.body.appendChild(callout);
+  for (const link of document.querySelectorAll(".body-link")) {
+    link.addEventListener("mouseenter", () => {
+      const rect = link.getBoundingClientRect();
+      const dial = document.querySelector(".dial").getBoundingClientRect();
+      const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
+      callout.querySelector("b").textContent = link.dataset.title;
+      callout.querySelector("small").textContent = link.dataset.t + " · " + link.dataset.cost;
+      callout.classList.toggle("side-right", rightSide);
+      callout.classList.toggle("side-left", !rightSide);
+      callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
+      callout.style.right = rightSide ? "" : (innerWidth - rect.left + 34) + "px";
+      callout.style.top = (rect.top - 14) + "px";
+      const docs = link.dataset.docs;
+      callout.classList.toggle("has-docs", Boolean(docs));
+      if (docs) {
+        const chip = callout.querySelector(".chip");
+        chip.textContent = "◆ " + docs + " documents";
+        chip.onclick = () => openDocsByTitle(link.dataset.title);
+      }
+      callout.classList.add("show");
+      document.getElementById(link.dataset.body)?.classList.add("lit");
+      document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+    });
+    link.addEventListener("mouseleave", () => {
+      setTimeout(() => { if (!callout.matches(":hover")) {
+        callout.classList.remove("show");
+        document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+      }}, 160);
+    });
+  }
+  for (const item of document.querySelectorAll(".item[id]")) {
+    item.addEventListener("mouseenter", () => {
+      document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+    });
+    item.addEventListener("mouseleave", () => {
+      document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+    });
+  }
+  /* POL-5: constellations on section-header hover */
+  const homeHeader = [...document.querySelectorAll(".group h3")]
+    .find((h) => h.textContent.includes("Needs attention"));
+  if (homeHeader) {
+    homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
+    homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
+  }
+  function replayArrival(){
+    const dial = document.querySelector(".dial");
+    dial.style.animation = "none"; void dial.offsetWidth;
+    dial.style.animation = "";
+  }
+  function restoreOrbit(){
+    document.getElementById("b-mot").classList.add("restored");
+    const comet = document.getElementById("comet");
+    comet.classList.remove("fly"); void comet.getBBox; comet.classList.add("fly");
+  }
+  /* POL-9 */
+  function openPalette(open){
+    document.getElementById("palette").classList.toggle("open", open);
+  }
+  addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+      event.preventDefault(); document.getElementById("explore").focus();
+    }
+  });
+  function openDocsByTitle(title){
+    callout.classList.remove("show");
+    document.getElementById("docview-title").textContent = title;
+    document.getElementById("docview").classList.add("open");
+  }
+  callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
+  const healthStates = ["healthy","degraded","offline"];
+  let healthIndex = 1;
+  function applyHealth(){
+    document.body.classList.toggle("health-degraded", healthStates[healthIndex]==="degraded");
+    document.body.classList.toggle("health-offline", healthStates[healthIndex]==="offline");
+    const word = healthStates[healthIndex]==="healthy" ? "status" :
+      healthStates[healthIndex]==="offline" ? "offline" : "degraded";
+    document.querySelector("#edge-health span").textContent = word;
+    if (healthStates[healthIndex]==="healthy") document.getElementById("statusdrawer").classList.remove("open");
+  }
+  function cycleHealth(){ healthIndex = (healthIndex+1)%3; applyHealth(); }
+  applyHealth();
+  function toggleAccount(button){
+    const card = document.getElementById("account");
+    const open = card.classList.toggle("open");
+    button.setAttribute("aria-expanded", String(open));
+  }
+  function setSwatch(name, button){
+    document.documentElement.dataset.theme = name;
+    for (const other of button.parentElement.querySelectorAll("button"))
+      other.setAttribute("aria-pressed", String(other === button));
+  }
+  function toggleCreate(button){
+    const drawer = document.getElementById("createdrawer");
+    const open = drawer.classList.toggle("open");
+    button.setAttribute("aria-expanded", String(open));
+    document.body.classList.toggle("create-open", open);
+    button.querySelector("span").textContent = open ? "close" : "create";
+  }
+  addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("create-open"))
+      toggleCreate(document.getElementById("nstar"));
+  });
+  /* v17: every drawer animates home when you scroll down */
+  let lastY = scrollY;
+  addEventListener("scroll", () => {
+    if (scrollY > lastY + 4) {
+      for (const id of ["statusdrawer", "keydrawer"]) {
+        const drawer = document.getElementById(id);
+        if (drawer.classList.contains("open")) {
+          drawer.classList.remove("open");
+          drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+        }
+      }
+      if (document.body.classList.contains("create-open"))
+        toggleCreate(document.getElementById("nstar"));
+    }
+    lastY = scrollY;
+  }, { passive: true });
+
+  pointSky();
+  renderGalaxy(false);
+  addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
+
+  /* ---- wiring that replaces the mockup's inline on* attributes ---- */
+  const on = (target, type, handler) =>
+    target?.addEventListener(type, handler, { signal: controller.signal });
+
+  const star = document.getElementById("nstar");
+
+  on(document.querySelector("button.orb"), "click", (event) =>
+    toggleAccount(event.currentTarget));
+  on(star, "click", (event) => toggleCreate(event.currentTarget));
+  on(document.querySelector(".scrim"), "click", () => toggleCreate(star));
+
+  /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
+  for (const swatch of document.querySelectorAll(".swatches button")) {
+    on(swatch, "click", (event) =>
+      setSwatch(event.currentTarget.title.replace(/[\s-]/g, ""), event.currentTarget));
+  }
+
+  const explore = document.getElementById("explore");
+  on(explore, "focus", () => openPalette(true));
+  on(explore, "blur", () => setTimeout(() => openPalette(false), 150));
+
+  /* both drawer handles ride their own drawer, which is their parent */
+  for (const handle of document.querySelectorAll(".drawer > button.handle")) {
+    on(handle, "click", (event) => {
+      const open = event.currentTarget.parentElement.classList.toggle("open");
+      event.currentTarget.setAttribute("aria-expanded", String(open));
+    });
+  }
+
+  on(document.querySelector("#docview .close"), "click", () =>
+    document.getElementById("docview").classList.remove("open"));
+
+  return () => controller.abort();
+}
