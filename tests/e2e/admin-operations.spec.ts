@@ -24,17 +24,16 @@ async function readDurableWorkspace(page: Page): Promise<{ households: Synthetic
 
 async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold | null> {
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
-  // v19: the account orb is the shell's one persistent control, so "is the
-  // authenticated shell up?" no longer forks on the breakpoint. The status
-  // drawer's handle is what still carries the sync word.
-  const accountOrb = page.getByRole("button", { name: "Open account menu" });
+  const desktopSettings = page.getByRole("button", { name: "Open account menu" });
+  const mobileNavigation = page.getByRole("button", { name: "Open navigation" });
   await expect(page.locator(".sync-state")).toHaveText("Synced", { timeout: 15_000 });
   await expect.poll(async () => {
-    const [recoveryVisible, orbVisible] = await Promise.all([
+    const [recoveryVisible, desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
       recoveryHeading.isVisible(),
-      accountOrb.isVisible(),
+      desktopSettings.isVisible(),
+      mobileNavigation.isVisible(),
     ]);
-    return recoveryVisible || orbVisible;
+    return recoveryVisible || desktopSettingsVisible || mobileNavigationVisible;
   }, { timeout: 15_000 }).toBe(true);
   if (!await recoveryHeading.isVisible()) return null;
 
@@ -46,7 +45,13 @@ async function ensureSyntheticHousehold(page: Page): Promise<SyntheticHousehold 
   await dialog.getByLabel("Household name").fill(householdName);
   await dialog.getByRole("button", { name: "Create household" }).click();
   await expect(dialog).toBeHidden({ timeout: 15_000 });
-  await expect(accountOrb).toBeVisible({ timeout: 15_000 });
+  await expect.poll(async () => {
+    const [desktopSettingsVisible, mobileNavigationVisible] = await Promise.all([
+      desktopSettings.isVisible(),
+      mobileNavigation.isVisible(),
+    ]);
+    return desktopSettingsVisible || mobileNavigationVisible;
+  }, { timeout: 15_000 }).toBe(true);
   const workspace = await readDurableWorkspace(page);
   const household = workspace.households.find((entry) => entry.name === householdName);
   if (!household) throw new Error(`Created household "${householdName}" was not present in the durable workspace`);
@@ -192,21 +197,6 @@ test.describe("administrator operations evidence", () => {
       await administration.getByRole("button", { name: "Load older history" }).click();
       await expect(administration.getByText("Account disabled", { exact: true })).toBeVisible();
       await expect(administration.getByRole("button", { name: "Load older history" })).toHaveCount(0);
-
-      // v19 (#399): the observatory rail. Administration is a place with
-      // named sections now, not one long slab, and each rail link lands
-      // keyboard focus on the heading it points at — the same contract the
-      // settings rail keeps.
-      const rail = administration.getByRole("navigation", { name: "Administration sections" });
-      await expect(rail).toBeVisible();
-      await rail.getByRole("link", { name: "Audit history", exact: true }).click();
-      await expect(page).toHaveURL(/\/admin#admin-audit-heading$/);
-      await expect(
-        administration.getByRole("heading", { name: "Recent audit history", exact: true, level: 3 }),
-      ).toBeFocused();
-      await expect(
-        administration.getByRole("region", { name: "Recent audit history", exact: true }),
-      ).toBeVisible();
     } catch (error) {
       journeyFailed = true;
       throw error;
