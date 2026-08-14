@@ -237,21 +237,21 @@
     <div class="manifest" id="manifest-top">
     <div class="group">
       <h3>Needs attention <span class="closest">· closest approach — Car MOT · T−16d</span></h3>
-      <div class="item" id="i-gutter">
+      <a class="item" id="i-gutter" href="/item/i-gutter">
         <span class="dot" style="background:var(--overdue)"></span>
         <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150</span></div>
         <div class="t over">T+16d<small>28 Jul</small></div>
-      </div>
-      <div class="item" id="i-mot">
+      </a>
+      <a class="item" id="i-mot" href="/item/i-mot">
         <span class="dot ter" style="color:var(--warm)"></span>
         <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
         <div class="t soon">T−16d<small>29 Aug</small></div>
-      </div>
-      <div class="item" id="i-boiler">
+      </a>
+      <a class="item" id="i-boiler" href="/item/i-boiler">
         <span class="dot" style="background:var(--warm)"></span>
         <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120</span></div>
         <div class="t soon">T−22d<small>04 Sep</small></div>
-      </div>
+      </a>
     </div>
     <div class="group">
       <h3>Suggested from your documents</h3>
@@ -263,16 +263,16 @@
     </div>
     <div class="group">
       <h3>Later this year</h3>
-      <div class="item" id="i-chimney">
+      <a class="item" id="i-chimney" href="/item/i-chimney">
         <span class="dot" style="background:var(--upcoming)"></span>
         <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90</span></div>
         <div class="t up">T−61d<small>12 Oct</small></div>
-      </div>
-      <div class="item" id="i-smoke">
+      </a>
+      <a class="item" id="i-smoke" href="/item/i-smoke">
         <span class="dot" style="background:var(--ok)"></span>
         <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12</span></div>
         <div class="t ok">T−122d<small>12 Dec</small></div>
-      </div>
+      </a>
     </div>
   </div>
 </div>
