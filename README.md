@@ -42,8 +42,10 @@ centre with Install, Update, Repair, and Exit choices. Install guides the
 operator through a supported Standard, Document processing, Full local stack,
 or Custom profile, then collects the public HTTPS Orbit origin, complete OIDC
 issuer, client ID, and hidden OIDC client secret in private staging. The target
-is not changed until the final review is accepted. Repair is a non-mutating
-dispatch point until the bounded repair engine in issue #261 is delivered.
+is not changed until the final review is accepted. Repair diagnoses a deployment
+read-only by default, and will only change it when explicitly asked: its guarded
+actions require `--execute`, and the credential rotation additionally requires
+`--dangerous` and a typed confirmation.
 Git is not required and the repository is not cloned: a deployment needs
 compose assets and a published image, not source or tests.
 
