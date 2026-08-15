@@ -90,7 +90,7 @@ export const WORKSPACE_FIXTURE = {
   /* Not an API field: pins chart arithmetic to the mockups' own date so the
      fidelity gate is deterministic. The seam ignores it on live data. */
   fixtureToday: "2026-08-13",
-  /* Not an API field either: no route serves document suggestions yet (#452
+  /* Not an API field either: no route serves document suggestions yet (#454
      will) — the design's "Suggested from your documents" group renders from
      this until it exists, and renders empty on live data. */
   suggestions: [
