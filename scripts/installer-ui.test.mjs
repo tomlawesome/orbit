@@ -18,8 +18,34 @@ const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 // the widget installs its own trap). Bit 0x4000 is signal 15 (TERM). Falls
 // back to firing after ~2s so a genuine regression still surfaces as a test
 // failure instead of a hang.
+/*
+ * Send SIGTERM only once the shell has actually installed its handler.
+ *
+ * These two tests assert that an interrupted prompt restores the terminal, and
+ * they were flaky on GitHub Actions for a reason that had nothing to do with
+ * the behaviour under test (#284): the kill was a fixed wall-clock guess
+ * against process setup - fork, source, open /dev/tty, stty raw, install the
+ * trap - which is scheduler-latency bound, not work bound. Losing that race
+ * delivers SIGTERM at its default disposition and the process dies with 143
+ * before the code being tested has run at all.
+ *
+ * So this polls SigCgt in /proc until the SIGTERM bit (signal 15, bit 14,
+ * 0x4000) is set, which is the kernel's own record that a handler exists.
+ *
+ * On exhaustion it prints a distinguishable marker BEFORE killing, and the
+ * tests assert the marker is absent. Two failure modes were both unacceptable:
+ * killing blind after a budget is the original race with extra steps (and it
+ * was reachable - 400 iterations at 5ms is a two-second budget on a runner
+ * that can pause a process for longer, surfacing as an unexplained 143), while
+ * not killing at all leaves the prompt blocked forever and hangs the job,
+ * which is worse. Marking and then killing gives a run that finishes and a
+ * failure that says which of the two things went wrong.
+ *
+ * The budget is generous because it costs nothing in the normal case: the loop
+ * exits as soon as the bit is set, which is microseconds after the trap runs.
+ */
 const waitForTermTrapThenKill =
-  'target="$BASHPID"; (for i in $(seq 1 400); do line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then break; fi; sleep 0.005; done; kill -TERM "$target") &';
+  'target="$BASHPID"; (for i in $(seq 1 2000); do line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then kill -TERM "$target"; exit 0; fi; sleep 0.005; done; printf "TRAP_NEVER_INSTALLED\n") &';
 
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
@@ -366,6 +392,9 @@ describe("installer semantic UI", () => {
     );
 
     expect(result.status).toBe(0);
+    // If this fires, the signal was sent before the handler existed, so a
+    // failure below is about the harness rather than the code under test.
+    expect(result.stdout).not.toContain("TRAP_NEVER_INSTALLED");
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
@@ -387,13 +416,16 @@ describe("installer semantic UI", () => {
   // "GitLab cross-validation mirror" note in HANDOVER-260-ci.md before
   // touching this test or its sibling below. Re-enable once GH Actions
   // runner contention is confirmed back to normal.
-  it.skip("restores terminal state when text entry is interrupted by a signal", () => {
+  it("restores terminal state when text entry is interrupted by a signal", () => {
     const result = runPty(
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
     );
 
     expect(result.status).toBe(0);
+    // If this fires, the signal was sent before the handler existed, so a
+    // failure below is about the harness rather than the code under test.
+    expect(result.stdout).not.toContain("TRAP_NEVER_INSTALLED");
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
@@ -409,13 +441,16 @@ describe("installer semantic UI", () => {
 
   // Quarantined: see the comment on the sibling "text entry is interrupted
   // by a signal" test above — same investigation, same issue (#284).
-  it.skip("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
+  it("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
     const result = runPty(
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
       "",
     );
 
     expect(result.status).toBe(0);
+    // If this fires, the signal was sent before the handler existed, so a
+    // failure below is about the harness rather than the code under test.
+    expect(result.stdout).not.toContain("TRAP_NEVER_INSTALLED");
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
