@@ -1,4 +1,5 @@
 <script>
+  import Grain from "$lib/Grain.svelte";
   import { onMount } from "svelte";
   import "./login.css";
 
@@ -50,7 +51,7 @@
 </svelte:head>
 
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-<g class="far" fill="#e9edf8"><g id="lg-fartile"><circle class="tw" style="animation-delay:3.9s" cx="1265.7" cy="832.5" r="0.84" opacity="0.14"/>
+<g class="far" fill="var(--star-far, #e9edf8)"><g id="lg-fartile"><circle class="tw" style="animation-delay:3.9s" cx="1265.7" cy="832.5" r="0.84" opacity="0.14"/>
       <circle cx="1141.9" cy="658.3" r="0.75" opacity="0.31"/>
       <circle cx="903.2" cy="721.6" r="0.42" opacity="0.27"/>
       <circle cx="1019.8" cy="902.8" r="0.66" opacity="0.17"/>
@@ -150,7 +151,7 @@
       <circle cx="733.8" cy="520.4" r="0.72" opacity="0.23"/>
       <circle cx="1299.9" cy="224.0" r="0.55" opacity="0.22"/>
       <circle cx="1308.9" cy="946.7" r="0.57" opacity="0.29"/></g><use href="#lg-fartile" x="1600"/></g>
-<g class="near" fill="#f4f0ff"><g id="lg-neartile"><circle cx="584.1" cy="212.4" r="1.5" opacity="0.63"/>
+<g class="near" fill="var(--star-near, #f4f0ff)"><g id="lg-neartile"><circle cx="584.1" cy="212.4" r="1.5" opacity="0.63"/>
       <circle cx="781.6" cy="127.5" r="1.14" opacity="0.35"/>
       <circle cx="693.5" cy="882.3" r="0.84" opacity="0.66"/>
       <circle cx="560.9" cy="836.7" r="1.01" opacity="0.47"/>
@@ -316,10 +317,5 @@
   <!-- the ask lives inside the ring, directly beneath the name -->
   <div class="gate-wrap"><button class="gate">Sign in</button></div>
 </div></div>
-<svg class="grain" width="100%" height="100%"><filter id="gr">
-  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
-  <feColorMatrix type="saturate" values="0"/>
-  <feComponentTransfer><feFuncA type="linear" slope="0.08"/></feComponentTransfer>
-  <feComposite operator="in" in2="SourceGraphic"/>
-</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+<Grain slope={0.08} />
 <div class="vignette"></div>

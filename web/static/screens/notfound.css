@@ -2,8 +2,6 @@
 body{background:#04070f}
 .sky-far{animation:driftf 370s linear infinite}
 .sky-near{animation:driftn 180s linear infinite}
-@keyframes driftf{to{transform:translateX(-1600px)}}
-@keyframes driftn{to{transform:translateX(-1600px)}}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.8}}
 
@@ -27,4 +25,3 @@ body{background:#04070f}
         font:11px var(--mono);letter-spacing:.14em}
 .line-b a{color:var(--accent);text-decoration:none}
 .line-b a:hover{text-decoration:underline}
-.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}

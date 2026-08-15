@@ -35,7 +35,6 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
 @keyframes breathe-band{from{opacity:.8}to{opacity:1}}
 .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
-.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 /* the mark is the hero, at scale, and the name sits INSIDE the ring — one
    object, not a badge with a caption. The sun rises toward the planet riding
    the ring (owner, 2026-08-14).

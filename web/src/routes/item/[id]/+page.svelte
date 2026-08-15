@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { mountItemSky } from "./sky.js";
+  import { DESIGN_TODAY, day, every, longDate, money, tminus } from "$lib/format.js";
   import "./item.css";
 
   /**
@@ -22,27 +23,7 @@
   let { data } = $props();
   const item = $derived(data.item);
 
-  const money = (minor, currency, estimate) => {
-    if (minor === null || minor === undefined) return "—";
-    const amount = new Intl.NumberFormat("en-GB", { style: "currency", currency })
-      .format(minor / 100);
-    return estimate ? `~${amount}` : amount;
-  };
 
-  /* The manifest's own vocabulary: a date, and how far away it is in days.
-     Pinned to the design's today so the view agrees with the chart that sent
-     you here rather than with the wall clock. */
-  const TODAY = "2026-08-13";
-  const day = (iso) => Math.round(Date.parse(iso + "T00:00:00Z") / 86400000);
-  const tminus = (due) => {
-    const days = day(due) - day(TODAY);
-    return days < 0 ? `T+${-days}d` : `T−${days}d`;
-  };
-  const longDate = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
-    day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
-  });
-  const every = (months) =>
-    months === 12 ? "every year" : months === 1 ? "every month" : `every ${months} months`;
 
   /* POL-11: every page's sky drifts. Decorative and aria-hidden, so a reader
      without JavaScript loses only the stars, never the item. */
@@ -64,7 +45,7 @@
 
     <div class="kv">
       <span>due</span>
-      <b class:over={day(item.dueDate) < day(TODAY)}>
+      <b class:over={day(item.dueDate) < day(DESIGN_TODAY)}>
         {tminus(item.dueDate)} · {longDate(item.dueDate)}
       </b>
     </div>

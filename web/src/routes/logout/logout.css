@@ -1,9 +1,7 @@
 
 /* seamless starfield drift — near layer reads clearly within a few seconds */
-.drift.far{animation:driftfar 640s linear infinite}
-.drift.near{animation:driftnear 205s linear infinite}
-@keyframes driftfar{to{transform:translateX(-1600px)}}
-@keyframes driftnear{to{transform:translateX(-1600px)}}
+.drift.far{animation:driftf 640s linear infinite}
+.drift.near{animation:driftn 205s linear infinite}
 .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 .world{position:fixed;inset:0;z-index:1}
@@ -68,7 +66,6 @@ body.set .rim-ember{opacity:1}
 body.set .shimmer-ember{opacity:.7}
 @keyframes sweep{to{stroke-dashoffset:-100}}
 
-.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 /* The same hero lockup as the sign-in: the ring large, the name set plain
    inside it, the ask beneath. Both ends of a session wear the same face
    (CON-19, amended 2026-08-14 for the sign-in hero and applied here too).
