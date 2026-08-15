@@ -166,6 +166,19 @@ describe("manifestGroupsOf", () => {
   });
 });
 
+// A brand-new user has no household at all (#453's journey; until it lands
+// the transform must degrade, never throw).
+describe("the empty workspace", () => {
+  it("renders nothing rather than crashing", () => {
+    expect(dialBodiesOf(null, { today: TODAY })).toEqual([]);
+    const groups = manifestGroupsOf(null, { today: TODAY });
+    expect(groups.attention).toEqual([]);
+    expect(groups.later).toEqual([]);
+    expect(groups.closest).toBe(null);
+    expect(galaxyOf({ households: [] }, TODAY)).toEqual({});
+  });
+});
+
 describe("daysUntil", () => {
   it("counts calendar days independent of clock time", () => {
     expect(daysUntil("2026-08-29", TODAY)).toBe(16);

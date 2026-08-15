@@ -49,6 +49,50 @@
 
 .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:18px;line-height:1.8}
 
+/* The action pills: create.html's .types button grammar verbatim — the
+   design's established "choose one of these" control (#455). */
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+.acts button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);
+  border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer}
+.acts button:hover{color:var(--ink)}
+.acts button[aria-pressed=true]{color:var(--accent);border-color:var(--accent);
+  background:rgba(216,180,90,.08)}
+.acts button:disabled{opacity:.5;cursor:default}
+
+/* The panels reuse create.html's field grammar (create.css .field/.row2/
+   .save-row/.btn-primary/.cancel-link); only their placement inside this card
+   is local. */
+.panel{margin-top:16px;padding-top:4px}
+.panel .field{margin-bottom:13px}
+.panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
+  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+.panel .field input,.panel .field textarea{width:100%;background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
+  padding:9px 12px;font-family:var(--ui)}
+.panel .field input:focus,.panel .field textarea:focus{outline:none;border-color:var(--accent)}
+.panel .field textarea{resize:vertical;line-height:1.5}
+.panel .field.mono input{font-family:var(--mono)}
+.panel .row2{display:flex;gap:14px}
+.panel .row2>.field{flex:1;min-width:0}
+.save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
+.btn-primary{flex:0 0 auto;padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
+  font:600 13px var(--display);color:var(--bg);background:var(--accent)}
+.btn-primary:hover{filter:brightness(1.05)}
+.btn-primary:disabled{opacity:.5;cursor:default}
+/* create.html's cancel link as a button — same type, no chrome. */
+.cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+  cursor:pointer;padding:0}
+.cancel-link:hover{color:var(--ink-mid)}
+/* A quieter sibling for the secondary destructive choice: the pill grammar
+   at the save-row's size. */
+.btn-quiet{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);
+  border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer}
+.btn-quiet:hover{color:var(--ink)}
+
+/* Failure carries a line of type in the server's own words — create.css's
+   save-note treatment, toned with the urgency ink the design already uses. */
+.problem{font:10.5px var(--mono);color:var(--overdue);margin-top:14px;line-height:1.6}
+
 /* create.html's cancel link, which is its established way back. */
 .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
       color:var(--ink-mid);text-decoration:none}
