@@ -23,7 +23,11 @@ body{overflow-y:auto;overflow-x:hidden}
 .field textarea{resize:vertical;line-height:1.5}
 .field.mono input{font-family:var(--mono)}
 
-.name-field input{font:500 17px var(--display);padding:13px 14px}
+/* The heading IS the name (owner, 2026-08-15): you edit the title of the
+   card itself, so there is no separate name box. Styled as the card's h2. */
+.name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
 
 .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
 .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
@@ -164,13 +168,8 @@ body{overflow-y:auto;overflow-x:hidden}
       <circle cx="880.6" cy="672.9" r="0.76" opacity="0.14"/></g></svg></div>
 <div class="stage">
   <form class="glass card" id="card" onsubmit="return false">
-    <h2>New entry</h2>
+    <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
-
-    <div class="field name-field">
-      <label>name</label>
-      <input id="f-name" placeholder="what is it? — e.g. car insurance, boiler service" autocomplete="off">
-    </div>
 
     <div class="field">
       <label>type</label>

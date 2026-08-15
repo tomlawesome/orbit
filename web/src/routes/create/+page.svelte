@@ -116,13 +116,8 @@
       <circle cx="880.6" cy="672.9" r="0.76" opacity="0.14"/></g></svg></div>
 <div class="stage">
   <form class="glass card" id="card">
-    <h2>New entry</h2>
+    <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
-
-    <div class="field name-field">
-      <label>name</label>
-      <input id="f-name" placeholder="what is it? — e.g. car insurance, boiler service" autocomplete="off">
-    </div>
 
     <div class="field">
       <label>type</label>
