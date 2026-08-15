@@ -1,0 +1,124 @@
+/*
+ * The theme packs, and the font stacks they share (#433).
+ *
+ * These lived in home.css, which meant they applied to home and nowhere else:
+ * picking atlas and walking to /create put you back in a fixed dark palette,
+ * because family.css hardcoded one. Measured before this move — atlas on
+ * /home gave body rgb(162,155,139); every other screen gave rgb(7,13,31).
+ *
+ * Imported by the root layout so every screen sees them. family.css keeps what
+ * is genuinely family-specific — the stage, the glass surface, the sky — and
+ * stops owning the palette, so there is one definition rather than two that
+ * drift.
+ */
+
+:root{
+  --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --display:'Space Grotesk',var(--ui);
+}
+[data-theme=starchart]{
+  --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+  --line:#243259; --line-soft:#17203f;
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+  --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+  --degraded:#fb8b24;
+  --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+  /* Far stars are the pack's ink, near stars one step further from the
+     background - the relationship the design already used when both fills
+     were literals (#e9edf8 is exactly --ink here). */
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+}
+[data-theme=afterdark]{
+  --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+  --line:#1c2434; --line-soft:#151b28;
+  --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+  --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+  --degraded:#fb8b24;
+  --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+  --star-far:#e9edf8; --star-near:#f4f0ff;
+  --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+}
+/* Dialled back from the ratified #efe9db (owner, 2026-08-14): a sky this
+   bright fights the whole conceit, so atlas is now aged paper at dusk rather
+   than fresh paper at noon. Only the ground and its surfaces moved - ink,
+   accent and status tokens are untouched, so every relationship the design
+   set still holds, against a quieter field. */
+[data-theme=atlas]{
+  --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+  --line:#a89c80; --line-soft:#b8ae95;
+  --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+  --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+  --degraded:#c2570e;
+  --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+  /* A daylit sky still drifts (owner, 2026-08-14). The design switched the
+     starfield off on the light packs; instead it inverts - ink on paper,
+     taken from the pack's own ink family rather than a new tone. Lower
+     opacity than the dark packs because dark-on-light reads heavier. */
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+}
+/* Dialled back from the ratified #eef1f6 (owner, 2026-08-14) for the same
+   reason as atlas: dawn is now first light rather than full morning. */
+[data-theme=dawn]{
+  --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+  --line:#9daabf; --line-soft:#b2bccd;
+  --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+}
+/*
+ * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
+ * a real astronomical term and an eighties one, which is the whole brief:
+ * neon and vivid, but classy rather than tacky.
+ *
+ * What keeps it the right side of that line is restraint, not saturation.
+ * The ground is deep indigo-violet, never black, so the neons sit ON
+ * something. Exactly two signature neons carry the screen - magenta for the
+ * accent and cyan for what is coming - with mint reserved for "on track" and
+ * amber for warmth. No rainbow: every remaining token is a tint of the
+ * violet ground. The stars go lilac rather than white so the sky reads as
+ * dusk over a city rather than deep space.
+ */
+[data-theme=retrograde]{
+  /* Second revision (owner, 2026-08-15): "heavy use of purple - the
+     backdrop, the cards, the dial - different shades but very similar
+     palette". True: the ground, the panels, the rules and the muted ink were
+     all violet tints, so the neons had nothing to sit against and the pack
+     read as monochrome with a few coloured dots. The eighties this is
+     reaching for are grid-on-black, not a purple wash - so the ground drops
+     to near-black, the structure goes cyan, and magenta is left to do the
+     accenting on its own. */
+  --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+  --line:#1d4a5a; --line-soft:#12303c;
+  --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+  /* First pass read as synthwave — violet, magenta, cyan — and the owner
+     found it short of "the typical bright 80s colours" (2026-08-14). The
+     missing notes were acid yellow, hot coral and a true neon green, so the
+     status tokens now carry them. Discipline is unchanged and is what keeps
+     this the right side of tacky: a deep ground so the neons sit ON
+     something, one job per colour, and everything structural still a tint of
+     the violet. */
+  --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+  --degraded:#ff9f1c;
+  --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+  /* The chart is the grid: cyan rules on black, the way the era drew it. */
+  --star-far:#9fd6e6; --star-near:#ffffff;
+  --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  /* The bodies are the largest coloured things on the screen, and their
+     gradients were hardcoded, so no pack could reach them - which is why the
+     first retrograde still read as a violet version of star-chart. The stops
+     now take variables whose fallbacks are the original values, so every
+     other pack is untouched and this one can put the eighties into the
+     planets themselves: neon green, acid yellow, hot coral, electric
+     turquoise. The gloss stays; these are chrome and neon, not ink. */
+  --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+  --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+  --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+  --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+}
+
