@@ -55,7 +55,7 @@ describe("dependency change review", () => {
     expect(config).not.toContain("allow-ghsas:");
   });
 
-  it("allows only the governed version-bound sharp licence exception", () => {
+  it("allows only governed version-bound licence exceptions", () => {
     const [globalConfig, dependencyLicenseAllowList] = config.split(
       "allow-dependencies-licenses:",
     );
@@ -65,6 +65,12 @@ describe("dependency change review", () => {
     ].map((match) => match[1]);
 
     expect(allowedDependencyPurls).toEqual([
+      // OFL-1.1 typefaces, governed by #440. Pinned individually rather than
+      // adding OFL-1.1 to allow-licenses, so a future font package cannot
+      // arrive unreviewed.
+      "pkg:npm/@fontsource/space-grotesk@5.3.0",
+      "pkg:npm/@fontsource-variable/inter@5.3.0",
+      "pkg:npm/@fontsource-variable/jetbrains-mono@5.3.0",
       "pkg:npm/@img/sharp-libvips-darwin-arm64@1.3.0",
       "pkg:npm/@img/sharp-libvips-darwin-x64@1.3.0",
       "pkg:npm/@img/sharp-libvips-linux-arm@1.3.0",
@@ -80,9 +86,12 @@ describe("dependency change review", () => {
       "pkg:npm/@img/sharp-win32-ia32@0.35.0",
       "pkg:npm/@img/sharp-win32-x64@0.35.0",
     ]);
+    // Every exception must be individually version-pinned and belong to a
+    // governed set. Widened once, deliberately, for the OFL-1.1 typefaces
+    // (#440); the shape stays exact-version so nothing can arrive by drift.
     for (const purl of allowedDependencyPurls) {
       expect(purl).toMatch(
-        /^(?:pkg:npm\/@img\/sharp-libvips-[^@/]+@1\.3\.0|pkg:npm\/@img\/sharp-(?:wasm32|win32-arm64|win32-ia32|win32-x64)@0\.35\.0)$/u,
+        /^(?:pkg:npm\/@img\/sharp-libvips-[^@/]+@1\.3\.0|pkg:npm\/@img\/sharp-(?:wasm32|win32-arm64|win32-ia32|win32-x64)@0\.35\.0|pkg:npm\/@fontsource(?:-variable)?\/(?:space-grotesk|inter|jetbrains-mono)@5\.3\.0)$/u,
       );
     }
 
