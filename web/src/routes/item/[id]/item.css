@@ -114,3 +114,14 @@ html body{overflow-y:auto;overflow-x:hidden}
 @media (prefers-reduced-motion:reduce){
   .sky .far,.sky .near{animation:none}
 }
+
+/* #434 amend-then-accept: the suggestion wears the create form's grammar —
+   the heading IS the name (create.css .name-title, mirrored here because this
+   screen does not load that sheet), and a field extraction read from the
+   document carries the from-document mark (create.css .field.sugg). */
+.name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.panel .field.sugg input{border-left:3px solid var(--accent)}
+.save-row .back{margin-top:0}

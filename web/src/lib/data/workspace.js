@@ -267,6 +267,24 @@ export async function readItem(id) {
       })),
     };
   }
+  /* #434: the id may be a mail-in receipt — a suggestion opens in the same
+     view, amendable, with accept-into-orbit instead of the item actions. */
+  try {
+    const inbox = await readInbox();
+    const suggestion = receiptSuggestionsOf(inbox.receipts).find((one) => one.receiptId === id);
+    if (suggestion) {
+      const receipt = inbox.receipts.find((one) => one.id === id);
+      return {
+        ...suggestion,
+        suggestion: true,
+        proposal: receipt?.proposal ?? {},
+        attachmentCount: receipt?.attachmentCount ?? 0,
+        today: new Date().toISOString().slice(0, 10),
+      };
+    }
+  } catch {
+    /* the inbox being unreachable must read as "no such item", not a crash */
+  }
   return null;
 }
 
