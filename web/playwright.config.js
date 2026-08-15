@@ -27,7 +27,10 @@ export default defineConfig({
        * so a stale build can never pass for a current one.
        */
       command: "pnpm build && node build/index.js",
-      env: { PORT: "4173" },
+      /* ORBIT_FIXTURES turns on the fixture /api routes (#451) so the seam's
+         real fetch path renders known data. Production never sets it, and the
+         composite entry keeps /api on the engine regardless. */
+      env: { PORT: "4173", ORBIT_FIXTURES: "1" },
       url: "http://127.0.0.1:4173/login",
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,

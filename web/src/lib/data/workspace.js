@@ -25,6 +25,14 @@ export class WorkspaceError extends Error {
 async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
+    /* Signed out is not an error state the screens handle — it is a journey:
+       into the login flow and back to this exact page (#451). The throw below
+       still happens so pending callers settle while the navigation takes over. */
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.location.assign(
+        `/api/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`,
+      );
+    }
     /* The server explains itself in its own words when it can. When it can't —
        an HTML error page, a proxy, a process that isn't there — say that
        plainly rather than surfacing a bare "Not Found" the reader cannot act
@@ -115,24 +123,65 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
-import { GALAXY_FIXTURE } from "./fixtures/galaxy.js";
-import { ITEMS_FIXTURE } from "./fixtures/items.js";
 import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
-
-/** The households the chart draws. Live source: GET /api/workspace. */
-export async function readGalaxy() {
-  return GALAXY_FIXTURE;
-}
+import { galaxyOf } from "./chart.js";
 
 /**
- * One item, or null. A membership test against data the front end already
- * holds — never a request built from the URL — so an unknown id is a 404, not
- * a fetch. When this flips to the live workspace, the id may only ever select
- * from what the session already sees, never widen it.
+ * "Today" for chart arithmetic. The workspace fixture pins it to the date the
+ * designs were drawn against so the fidelity gate is deterministic; the real
+ * API carries no such field, so live data uses the real clock.
+ */
+function todayOf(workspace) {
+  return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
+}
+
+/** The fixed sky (#451): the live workspace through the chart transform. */
+export async function readGalaxy() {
+  const workspace = await readWorkspace();
+  return {
+    galaxy: galaxyOf(workspace, todayOf(workspace)),
+    primary: workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null,
+  };
+}
+
+const shortDate = (iso) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+const sizeLabel = (bytes) =>
+  bytes >= 1024 * 1024
+    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
+    : `${Math.round(bytes / 1024)} KB`;
+
+/**
+ * One item, or null. A membership test against data the session already sees
+ * — never a request built from the URL — so an unknown id is a 404, not a
+ * probe: there deliberately is no item-by-id route to widen (#451). The
+ * documents join uses the household id the membership test just proved.
+ * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  */
 export async function readItem(id) {
-  return Object.hasOwn(ITEMS_FIXTURE, id) ? ITEMS_FIXTURE[id] : null;
+  const workspace = await readWorkspace();
+  for (const household of workspace.households) {
+    const item = (household.items ?? []).find((one) => one.id === id);
+    if (!item) continue;
+    const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
+    const body = await json(
+      await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+        credentials: "same-origin",
+      }),
+    );
+    return {
+      ...item,
+      householdId: household.id,
+      section: sections.get(item.sectionId) ?? null,
+      documents: (body.documents ?? []).map((doc) => ({
+        name: doc.displayName,
+        meta: `added ${shortDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
+      })),
+    };
+  }
+  return null;
 }
 
 /** Operational state and recent deliveries. Live source: GET /api/admin/operations. */

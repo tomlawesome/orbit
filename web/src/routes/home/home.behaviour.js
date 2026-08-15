@@ -16,7 +16,7 @@
  */
 import { fillStarTiles } from "$lib/sky.js";
 
-export function mountHome({ galaxy }) {
+export function mountHome({ galaxy, primary }) {
   /*
    * Shadows the global so every bare addEventListener() below — the mockup's
    * own keydown, scroll and resize handlers — is registered against this
@@ -48,7 +48,7 @@ export function mountHome({ galaxy }) {
 
   /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
   const GALAXY = galaxy;
-  let camera = "lawson";
+  let camera = primary ?? Object.keys(galaxy)[0];
   let flying = false;
   const hero = document.getElementById("hero");
 
@@ -189,7 +189,7 @@ export function mountHome({ galaxy }) {
     later(() => {
       document.getElementById("dial-name").textContent = GALAXY[key].name;
       document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
-        (key === "lawson" ? "owner" : "member");
+        (GALAXY[key].role ?? "member");
       hero.classList.add("arriving");   // dial pinned at centre, under the ring
       mini.classList.add("dissolve");   // the ring hands the centre to the chart
       const dial = document.querySelector(".dial");

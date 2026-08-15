@@ -99,8 +99,12 @@ export function constellationPlanetsOf(items, today) {
     .map((item) => ({ item, days: daysUntil(item.dueDate, today) }))
     .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity))
     .slice(0, 3);
-  return scheduled.map(({ item, days }) => {
-    const angle = (hashId(item.id) / 0xffffffff) * Math.PI * 2;
+  return scheduled.map(({ item, days }, index) => {
+    /* One 120° sector per planet, placed within it by identity: scattered
+       like the design's, never piled onto one bearing by hash luck. These
+       dots are decorative weather, not navigation — only the constellation's
+       own bearing is sacred. */
+    const angle = ((hashId(item.id) % 120) + index * 120) * (Math.PI / 180);
     const distance = 18 + (hashId(`${item.id}/orbit`) % 13);
     const radius = 2 + ((hashId(`${item.id}/size`) % 9) / 10);
     return [
@@ -112,13 +116,22 @@ export function constellationPlanetsOf(items, today) {
   });
 }
 
-/** The whole fixed sky for a workspace, in the shape the home renderer eats. */
+/**
+ * The whole fixed sky for a workspace, in the shape the home renderer eats.
+ * The primary household is the map origin by construction — the viewer
+ * stands at the centre of their own sky, exactly as the ratified design
+ * scattered its sample — and every other household sits at its own
+ * identity-derived bearing, which therefore never moves for anyone.
+ */
 export function galaxyOf(workspace, today) {
+  const households = (workspace?.households ?? []).slice(0, 5);
+  const primary = workspace?.activeHouseholdId ?? households[0]?.id;
   const galaxy = {};
-  for (const household of (workspace?.households ?? []).slice(0, 5)) {
+  for (const household of households) {
     galaxy[household.id] = {
       name: household.name,
-      pos: constellationPosOf(household.id),
+      role: household.canManage ? "owner" : "member",
+      pos: household.id === primary ? [0, 0] : constellationPosOf(household.id),
       planets: constellationPlanetsOf(household.items ?? [], today),
     };
   }
