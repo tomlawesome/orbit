@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "node scripts/collect-font-licences.mjs && vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "scaffold": "node scripts/scaffold-screen.mjs",
     "fidelity": "playwright test",
     "preview:build": "vite build && rm -rf .preview && cp -r build .preview",
-    "preview:serve": "PORT=4180 node .preview/index.js"
+    "preview:serve": "PORT=4180 node .preview/index.js",
+    "licences": "node scripts/collect-font-licences.mjs"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "5.3.0",
