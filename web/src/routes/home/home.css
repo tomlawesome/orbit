@@ -99,8 +99,6 @@
      snaps or reverses */
   .sky .far{animation:driftf 400s linear infinite}
   .sky .near{animation:driftn 195s linear infinite}
-  @keyframes driftf{to{transform:translateX(-1600px)}}
-  @keyframes driftn{to{transform:translateX(-1600px)}}
   /* POL-11 on a daylit sky. The generator's per-star alphas (far .12–.35,
      near .30–.70) were tuned for bright points on a night ground, where the
      eye is most sensitive. Inverted — small dark specks on a bright ground —

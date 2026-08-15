@@ -21,7 +21,7 @@
 
 <div class="pocket">
 <div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
-<g fill="#e9edf8"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
+<g fill="var(--star-far, #e9edf8)"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
       <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
       <circle cx="292.6" cy="490.0" r="0.95" opacity="0.3"/>
       <circle cx="335.7" cy="373.5" r="0.51" opacity="0.14"/>

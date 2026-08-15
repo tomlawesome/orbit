@@ -14,6 +14,8 @@
  *   2. The mockup's inline on* attributes are wired here as listeners instead.
  *      Inline handlers need their functions to be globals; a module has none.
  */
+import { fillStarTiles } from "$lib/sky.js";
+
 export function mountHome({ galaxy }) {
   /*
    * Shadows the global so every bare addEventListener() below — the mockup's
@@ -206,26 +208,8 @@ export function mountHome({ galaxy }) {
     }, 1600);
   }
 
-  /* ---- starfield: generated, two depth layers ---- */
-  const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
-  (function stars(){
-    const far = document.getElementById("fartile"), near = document.getElementById("neartile");
-    const NS = "http://www.w3.org/2000/svg";
-    for (let i = 0; i < 95; i++) {
-      const c = document.createElementNS(NS, "circle");
-      c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
-      c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
-      c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
-      far.appendChild(c);
-    }
-    for (let i = 0; i < 46; i++) {
-      const c = document.createElementNS(NS, "circle");
-      c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
-      c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
-      c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
-      near.appendChild(c);
-    }
-  })();
+  /* ---- starfield: the shared two-layer tiled field ($lib/sky.js, #445) ---- */
+  fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
 
   function setTheme(name, button){
     document.documentElement.dataset.theme = name;

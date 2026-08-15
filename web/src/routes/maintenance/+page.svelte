@@ -1,4 +1,5 @@
 <script>
+  import Grain from "$lib/Grain.svelte";
   import { onMount } from "svelte";
   import "./maintenance.css";
   import { mountTotalitySky } from "./sky.js";
@@ -217,11 +218,6 @@
 
 <div class="msg">maintenance — back soon</div>
 
-<svg class="grain" width="100%" height="100%"><filter id="gr">
-  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
-  <feColorMatrix type="saturate" values="0"/>
-  <feComponentTransfer><feFuncA type="linear" slope="0.09"/></feComponentTransfer>
-  <feComposite operator="in" in2="SourceGraphic"/>
-</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+<Grain slope={0.09} />
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 44%,transparent 46%,rgba(0,0,0,.42) 100%)"></div>

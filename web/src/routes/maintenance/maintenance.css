@@ -66,7 +66,6 @@ body{background:#060a18}
 .msg{position:fixed;left:0;right:0;bottom:20vh;text-align:center;z-index:3;
      font:500 13px var(--mono);letter-spacing:.34em;color:var(--ink-mid);
      text-transform:uppercase}
-.grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
 @media (prefers-reduced-motion: reduce){
   .flare,.wash,.ringflare,.flarewave{opacity:0!important}
   .progress{stroke-dasharray:64 36}
