@@ -118,21 +118,27 @@
 <div class="stage">
   <article class="glass item-card">
     <h2>{item.title}</h2>
-    <div class="sub">{item.section} · {item.subtype}</div>
+    <div class="sub">{[item.section, item.subtype].filter(Boolean).join(" · ")}</div>
 
-    <div class="kv">
-      <span>due</span>
-      <b class:over={day(item.dueDate) < day(item.today ?? DESIGN_TODAY)}>
-        {tminus(item.dueDate, item.today ?? DESIGN_TODAY)} · {longDate(item.dueDate)}
-      </b>
-    </div>
+    {#if item.dueDate}
+      <div class="kv">
+        <span>due</span>
+        <b class:over={day(item.dueDate) < day(item.today ?? DESIGN_TODAY)}>
+          {tminus(item.dueDate, item.today ?? DESIGN_TODAY)} · {longDate(item.dueDate)}
+        </b>
+      </div>
+    {:else}
+      <div class="kv"><span>due</span><b>unscheduled</b></div>
+    {/if}
     {#if item.snoozedUntil}
       <div class="kv"><span>snoozed until</span><b>{longDate(item.snoozedUntil)}</b></div>
     {/if}
     {#if item.status !== "active"}
       <div class="kv"><span>status</span><b>{item.status}</b></div>
     {/if}
-    <div class="kv"><span>orbital period</span><b>{every(item.recurrenceMonths)}</b></div>
+    {#if item.recurrenceMonths}
+      <div class="kv"><span>orbital period</span><b>{every(item.recurrenceMonths)}</b></div>
+    {/if}
     <div class="kv">
       <span>typical cost</span>
       <b>{money(item.costMinor, item.currency, item.costIsEstimate)}</b>
@@ -143,10 +149,12 @@
     {#if item.reference}
       <div class="kv"><span>reference</span><b>{item.reference}</b></div>
     {/if}
-    <div class="kv">
-      <span>reminders</span>
-      <b>{item.reminderDays.map((d) => `${d}d before`).join(" · ")}</b>
-    </div>
+    {#if item.reminderDays?.length}
+      <div class="kv">
+        <span>reminders</span>
+        <b>{item.reminderDays.map((d) => `${d}d before`).join(" · ")}</b>
+      </div>
+    {/if}
 
     {#if item.documents.length}
       <h4>documents</h4>
