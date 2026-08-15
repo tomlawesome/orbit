@@ -101,3 +101,46 @@ export async function activeHousehold() {
   }
   return household;
 }
+
+/* ---------------------------------------------------------------------------
+ * Fixture-backed reads (#446).
+ *
+ * Every screen reads through these, never through a per-route fixture import,
+ * so when the API becomes reachable the switch happens HERE — one module —
+ * instead of rewiring nine screens. That is this file's founding promise
+ * ("this module is the only place the front end knows those URLs"), which the
+ * per-route fixtures had quietly broken.
+ *
+ * Async on purpose, though the fixtures resolve instantly: the live versions
+ * are fetches, and making callers async NOW means flipping a body from
+ * fixture to fetch changes no caller's shape later.
+ */
+import { GALAXY_FIXTURE } from "./fixtures/galaxy.js";
+import { ITEMS_FIXTURE } from "./fixtures/items.js";
+import { operationsFixture } from "./fixtures/operations.js";
+import { relayFixture } from "./fixtures/relay.js";
+
+/** The households the chart draws. Live source: GET /api/workspace. */
+export async function readGalaxy() {
+  return GALAXY_FIXTURE;
+}
+
+/**
+ * One item, or null. A membership test against data the front end already
+ * holds — never a request built from the URL — so an unknown id is a 404, not
+ * a fetch. When this flips to the live workspace, the id may only ever select
+ * from what the session already sees, never widen it.
+ */
+export async function readItem(id) {
+  return Object.hasOwn(ITEMS_FIXTURE, id) ? ITEMS_FIXTURE[id] : null;
+}
+
+/** Operational state and recent deliveries. Live source: GET /api/admin/operations. */
+export async function readOperations() {
+  return operationsFixture;
+}
+
+/** The signed-in user's mail-in relay. Live source: the #432 endpoint. */
+export async function readRelay() {
+  return relayFixture;
+}
