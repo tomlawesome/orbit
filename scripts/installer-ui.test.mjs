@@ -454,21 +454,25 @@ describe("installer semantic UI", () => {
   // Quarantined: see the comment on the sibling "text entry is interrupted
   // by a signal" test above — same investigation, same issue (#284).
   /*
-   * Still skipped, and now for a documented reason rather than a shrug (#284).
+   * This one FAILS, and it is telling the truth (#441).
    *
-   * The sibling text-entry test above is fixed and stable: it waits for the
-   * prompt, which installer_ui_read_value writes only after installing its
-   * trap, so the signal cannot arrive first.
+   * It is not a timing problem. With TERM=xterm, so the raw single-key branch
+   * is genuinely taken, and a 1.5-second delay before the signal - twenty
+   * times longer than any plausible setup - installer_ui_select still exits
+   * 143, the default SIGTERM disposition. It installs a trap at
+   * installer-ui.sh:385 and then does not honour it, so an interrupted menu
+   * leaves the caller's terminal in noncanonical mode with echo off.
    *
-   * The same technique does not work here yet. installer_ui_select prints its
-   * header at installer-ui.sh:371, installs the trap at :385 and renders the
-   * menu at :387, so "1) Install" should postdate the handler - but killing on
-   * it still yields 143, meaning the signal is still landing at the default
-   * disposition. Something between the trap and the read is not what it looks
-   * like, and I would rather leave this off with the evidence written down
-   * than ship a test that is green here and red on a loaded runner.
+   * The sibling text-entry test passes, so installer_ui_read_value's identical
+   * -looking trap does work. Whatever differs is in the menu path.
+   *
+   * Marked it.fails rather than skipped. The distinction matters: skipping
+   * stops looking, which is how this stayed invisible for months, whereas
+   * it.fails keeps the assertion running and turns the suite RED the moment
+   * #441 is fixed - so the fix cannot land without someone deleting this
+   * marker and reading the test.
    */
-  it.skip("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
+  it.fails("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
     const transcript = join(mkdtempSync(join(tmpdir(), "orbit-pty-")), "typescript");
     const result = runPty(
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForPromptThenKill("1) Install", transcript)} if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
