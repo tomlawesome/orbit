@@ -107,7 +107,10 @@ export function mountHome({ galaxy, primary }) {
        transforms, and the chart is mid-fanfare (POL-1) on first render, so
        measuring it there yields a keep-out sized for a chart that is still
        growing. offsetWidth is the settled layout box. */
-    const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 46;
+    /* +88, not +46: the keep-out must clear the constellation's own ring
+       (r 40 around the anchor), not just its centre point — the centre kept
+       clear while the ring sat on the dial (owner, 2026-08-16). */
+    const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
 
     for (const point of placed) {
       /* Nearer households sit closer in, but never inside the chart. Where a
@@ -164,10 +167,20 @@ export function mountHome({ galaxy, primary }) {
       div.className = "minisys" + (settle ? " settle" : "");
       div.setAttribute("role", "button");
       div.setAttribute("aria-label", "Fly to " + hh.name);
-      // anchored so the RING CENTRE (118,95 in the svg) sits at the bearing
-      // point — a flight translating by -delta therefore lands the ring centre
-      // EXACTLY on the hero centre, concentric with the dial's sun
-      div.style.left = (w / 2 + ox - 118) + "px";
+      /*
+       * The label and its leader always extend AWAY from the dial (owner,
+       * 2026-08-16): a constellation left of centre reads leftward (the
+       * original layout, ring at svg x 118), one right of centre is the
+       * horizontal mirror (ring at x 92, text end-anchored). mirror() maps
+       * any drawn x through the 210-wide viewBox.
+       */
+      const away = ox > 0;
+      const mx = (x) => (away ? 210 - x : x);
+      const ringX = mx(118);
+      // anchored so the RING CENTRE sits at the bearing point — a flight
+      // translating by -delta therefore lands the ring centre EXACTLY on the
+      // hero centre, concentric with the dial's sun
+      div.style.left = (w / 2 + ox - ringX) + "px";
       div.style.top = (h / 2 + oy - 95) + "px";
       div.style.setProperty("--tox", ox + "px");
       div.style.setProperty("--toy", oy + "px");
@@ -177,14 +190,16 @@ export function mountHome({ galaxy, primary }) {
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       // the arrow extends underneath the text, then veers toward the ring
-      const veer = `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+      const veerFor = (width) => (away
+        ? `M 206 21 H ${200 - width} L ${184 - width} 40`
+        : `M 4 21 H ${width + 10} L ${width + 26} 40`);
       div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="6" y="14" font-size="9.5" letter-spacing=".14em" style="fill:var(--accent)" opacity=".85">${label}</text>
-        <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
-        <circle class="msring" cx="118" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
-        <circle cx="118" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+        <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent)" opacity=".85">${label}</text>
+        <path d="${veerFor(tw)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+        <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+        <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
         ${hh.planets.map(([px, py, pr, tok]) =>
-          `<circle cx="${118 + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+          `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
@@ -199,8 +214,7 @@ export function mountHome({ galaxy, primary }) {
       const text = div.querySelector("text");
       const measured = Math.min(150, text.getComputedTextLength());
       if (measured) {
-        div.querySelector("path")
-          .setAttribute("d", `M 4 21 H ${measured + 10} L ${measured + 26} 40`);
+        div.querySelector("path").setAttribute("d", veerFor(measured));
       }
     }
   }
