@@ -55,6 +55,11 @@ export function mountHome({ galaxy, primary }) {
   /* the starfield offset is a pure function of the camera position, so a
      flight animates between two truths and there is nothing to snap back */
   function pointSky(){
+    /* A workspace with no household yet has no camera position: the sky
+       stays at origin and the galaxy renders nothing. The real journey for
+       that user — label-only constellations and "Request to join" — is #453;
+       until it lands the screen must degrade, not throw. */
+    if (!GALAXY[camera]) return;
     const [cx, cy] = GALAXY[camera].pos;
     document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
     document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
@@ -62,6 +67,7 @@ export function mountHome({ galaxy, primary }) {
 
   function renderGalaxy(settle){
     for (const old of hero.querySelectorAll(".minisys")) old.remove();
+    if (!GALAXY[camera]) return; // no household yet — see pointSky (#453)
     const w = hero.clientWidth, h = hero.clientHeight;
     const [cx, cy] = GALAXY[camera].pos;
     const placed = [];

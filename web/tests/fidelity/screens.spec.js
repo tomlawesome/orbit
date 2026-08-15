@@ -119,6 +119,15 @@ const SCREENS = [
     mockupOnly: [".foot"],
   },
   {
+    /* No mockup draws the item view (#424): it is composed from ratified
+       vocabulary and guarded by its owned baseline alone. Discovered missing
+       from this list during #455 — a shipped screen the gate never watched. */
+    name: "item",
+    path: "/item/i-mot",
+    stage: "owned",
+    settle: () => Boolean(document.querySelector(".item-card .acts button")),
+  },
+  {
     name: "home",
     path: "/home",
     stage: "porting",
