@@ -1,8 +1,12 @@
 .git
 .github
 .next
-node_modules
+**/node_modules
 .pnpm-store
+web/build
+web/.svelte-kit
+web/.preview
+web/test-results
 tmp
 .env
 .env.*
