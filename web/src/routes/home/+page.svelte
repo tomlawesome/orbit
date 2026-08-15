@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import { mountHome } from "./home.behaviour.js";
   import { readHome } from "$lib/data/workspace.js";
   import { dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -26,6 +27,24 @@
   const DESK = "(min-width: 901px)";
 
   let view = $state(null);
+
+  /*
+   * Coming BACK to home is not arriving at it (owner, 2026-08-15: leaving an
+   * item must return you to exactly where you were). The POL-1 fanfare plays
+   * only on a forward arrival — the CSS keys off .arrive — and a history
+   * return restores the scroll position once the data has given the page its
+   * height (SvelteKit's own restoration fires before the fetch resolves, so
+   * it lands at the top without this).
+   */
+  let arrive = $state(true);
+  let restoreScroll = null;
+  afterNavigate((navigation) => {
+    arrive = navigation.type !== "popstate";
+  });
+  export const snapshot = {
+    capture: () => window.scrollY,
+    restore: (y) => { restoreScroll = y; },
+  };
 
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
@@ -120,6 +139,11 @@
       if (disposed) return;
       sync();
       query.addEventListener("change", sync);
+      if (restoreScroll !== null) {
+        const y = restoreScroll;
+        restoreScroll = null;
+        requestAnimationFrame(() => window.scrollTo(0, y));
+      }
     });
     return () => {
       disposed = true;
@@ -135,7 +159,7 @@
 
 <Pocket {view} />
 
-<div class="desk">
+<div class="desk" class:arrive>
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
