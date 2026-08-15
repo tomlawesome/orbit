@@ -330,3 +330,21 @@ These post-date the mockups and supersede them where they conflict:
   glyph.
 - **A planet-orbit loading animation on sign-in was built and then dropped** for
   now.
+
+## 11. Membership and the empty sky (owner, 2026-08-15)
+
+The design family gains the journeys the ratified eight never covered:
+
+- **The remaining screens get mockups** — due next, documents, inbox, settings,
+  administration — built in the established star-chart identity. The owner
+  expects these to converge in few iterations now the identity is strong.
+- **Core membership model.** Any user can create a household and becomes its
+  owner. Instance admins see everything by default. Ordinary users can see what
+  households (sub-systems) exist.
+- **The empty sky.** A signed-in user with no household still sees the
+  starfield and the sub-systems — but each constellation shows only its basic
+  household label, none of its contents. Clicking one asks
+  **“Request to join X system?”**; the request goes to that household's owners
+  to approve.
+- **Adding members.** Owners can add any user to their household; instance
+  admins can add any user to any household.
