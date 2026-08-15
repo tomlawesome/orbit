@@ -774,10 +774,13 @@ function renderGalaxy(settle){
     div.className = "minisys" + (settle ? " settle" : "");
     div.setAttribute("role", "button");
     div.setAttribute("aria-label", "Fly to " + hh.name);
-    // anchored so the RING CENTRE (118,95 in the svg) sits at the bearing
-    // point — a flight translating by -delta therefore lands the ring centre
-    // EXACTLY on the hero centre, concentric with the dial's sun
-    div.style.left = (w / 2 + ox - 118) + "px";
+    // The label and its leader always extend AWAY from the dial (owner,
+    // 2026-08-16): left of centre reads leftward, right of centre is the
+    // horizontal mirror. Verbatim from the app (home.behaviour.js).
+    const away = ox > 0;
+    const mx = (x) => (away ? 210 - x : x);
+    const ringX = mx(118);
+    div.style.left = (w / 2 + ox - ringX) + "px";
     div.style.top = (h / 2 + oy - 95) + "px";
     div.style.setProperty("--tox", ox + "px");
     div.style.setProperty("--toy", oy + "px");
@@ -785,14 +788,14 @@ function renderGalaxy(settle){
     const label = hh.name.toUpperCase();
     const tw = Math.min(150, label.length * 6.6);
     // the arrow extends underneath the text, then veers toward the ring
-    const veer = `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+    const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
     div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-      <text x="6" y="14" font-size="9.5" letter-spacing=".14em" style="fill:var(--accent)" opacity=".85">${label}</text>
+      <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent)" opacity=".85">${label}</text>
       <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
-      <circle class="msring" cx="118" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
-      <circle cx="118" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+      <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+      <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
       ${hh.planets.map(([px, py, pr, tok]) =>
-        `<circle cx="${118 + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+        `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
     </svg>`;
     div.addEventListener("click", () => flyTo(key, div));
     hero.appendChild(div);
