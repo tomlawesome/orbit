@@ -136,6 +136,7 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
       id: item.id,
       title: item.title,
       days,
+      dueDate: item.dueDate,
       placement: dialPlacement(days),
       size: bodySize(item.costMinor),
       paint: PAINTS[bandOf(days)],

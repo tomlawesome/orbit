@@ -133,7 +133,7 @@
   <title>Orbit</title>
 </svelte:head>
 
-<Pocket />
+<Pocket {view} />
 
 <div class="desk">
 <div class="sky" aria-hidden="true">
