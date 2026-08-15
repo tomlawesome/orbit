@@ -1,6 +1,6 @@
 <script>
   import "./relay.css";
-  import { relayFixture } from "./relay.fixture.js";
+
 
   /**
    * Your relay — the per-user mail-in address (CON-9: "settings-mail =
@@ -13,7 +13,8 @@
    * Built from design/family/settings-mail.html and owned here from that point
    * on. The four values are a seam — see relay.fixture.js.
    */
-  const relay = relayFixture;
+  let { data } = $props();
+  const relay = $derived(data.relay);
 </script>
 
 <svelte:head>

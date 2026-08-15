@@ -10,7 +10,7 @@
  *
  * Two deliberate departures from the mockup, neither of which can move a pixel:
  *
- *   1. The galaxy is a parameter rather than a constant — see galaxy.fixture.js.
+ *   1. The galaxy is a parameter rather than a constant — see $lib/data/workspace.js (#446).
  *   2. The mockup's inline on* attributes are wired here as listeners instead.
  *      Inline handlers need their functions to be globals; a module has none.
  */

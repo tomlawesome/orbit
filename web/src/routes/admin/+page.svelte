@@ -1,6 +1,6 @@
 <script>
   import "./admin.css";
-  import { operationsFixture } from "./operations.fixture.js";
+
 
   /**
    * The observatory (CON-9: "admin = observatory"). Administration is the one
@@ -16,7 +16,8 @@
    * Built from design/family/admin.html and owned here from that point on. The
    * rows are a seam — see operations.fixture.js.
    */
-  const operations = operationsFixture;
+  let { data } = $props();
+  const operations = $derived(data.operations);
 </script>
 
 <svelte:head>
