@@ -184,6 +184,7 @@ export async function readItem(id) {
     return {
       ...item,
       householdId: household.id,
+      today: todayOf(workspace),
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map((doc) => ({
         name: doc.displayName,

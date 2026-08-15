@@ -128,7 +128,7 @@ const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jad
  */
 export function dialBodiesOf(household, { suggestions = [], today }) {
   const bodies = [];
-  for (const item of household.items ?? []) {
+  for (const item of household?.items ?? []) {
     if (item.status !== "active") continue;
     const days = daysUntil(item.dueDate, today);
     if (days === null) continue;
@@ -182,8 +182,8 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
  * called out on the attention heading.
  */
 export function manifestGroupsOf(household, { suggestions = [], today }) {
-  const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
-  const rows = (household.items ?? [])
+  const sections = new Map((household?.sections ?? []).map((s) => [s.id, s.name]));
+  const rows = (household?.items ?? [])
     .filter((item) => item.status === "active")
     .map((item) => ({
       id: item.id,
