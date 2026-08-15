@@ -9,9 +9,12 @@
  */
 
 
-body{overflow-y:auto;overflow-x:hidden}
+/* html body, not body: family.css loads via <link> AFTER this bundled sheet,
+   so at equal specificity its body{overflow:hidden} wins and a card taller
+   than the viewport cannot scroll (owner hit this adding a document). */
+html body{overflow-y:auto;overflow-x:hidden}
 .sky svg{opacity:.55}
-.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;justify-content:center;
+.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;justify-content:center;
        padding:64px 20px 96px}
 .card{width:100%;max-width:600px;padding:34px 38px}
 .card h2{font:600 22px var(--display)}
