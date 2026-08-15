@@ -138,21 +138,28 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
 
+  // The full serial suite shares this member with other specs, so the created
+  // item is found by diffing the workspace around the approval, never by
+  // position.
+  const itemsOf = async () => {
+    const workspace = (await (await page.request.get("/api/workspace")).json()) as {
+      workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> };
+    };
+    return workspace.workspace.households.flatMap((household) =>
+      household.items.map((item) => ({ ...item, householdId: household.id })));
+  };
+  const before = new Set((await itemsOf()).map((item) => item.id));
+
   // Two taps approve it for real: item created, document transferred.
   await row.getByRole("button", { name: "Add to orbit" }).click();
   await row.getByRole("button", { name: "tap again to approve" }).click();
   await expect(page.locator(".item.suggest")).toHaveCount(0, { timeout: 30_000 });
 
   // The item is real workspace truth now, with its document attached.
-  const workspace = (await (await page.request.get("/api/workspace")).json()) as {
-    workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> };
-  };
-  const items = workspace.workspace.households.flatMap((household) =>
-    household.items.map((item) => ({ ...item, householdId: household.id })));
-  expect(items.length).toBeGreaterThanOrEqual(1);
-  const created = items[items.length - 1];
+  const created = (await itemsOf()).filter((item) => !before.has(item.id));
+  expect(created.length).toBe(1);
   const documents = (await (
-    await page.request.get(`/api/households/${created.householdId}/items/${created.id}/documents`)
+    await page.request.get(`/api/households/${created[0].householdId}/items/${created[0].id}/documents`)
   ).json()) as { documents: Array<{ displayName: string }> };
   expect(documents.documents.length).toBeGreaterThanOrEqual(1);
 });
