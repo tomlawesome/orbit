@@ -116,6 +116,10 @@ RUN printf '{"type":"module"}\n' > ./web/package.json \
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
+# The composite entry (#450): both applications in one process on one origin.
+# Root-owned data files like the entrypoint; invoked as `node scripts/...`.
+COPY --from=builder --chown=root:root /opt/orbit/scripts/container-server.mjs ./scripts/container-server.mjs
+COPY --from=builder --chown=root:root /opt/orbit/scripts/v19-dispatch.mjs ./scripts/v19-dispatch.mjs
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,
 # like container-entrypoint.sh above and VERSION/REVISION/CHANNEL below;
@@ -138,4 +142,4 @@ USER root
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD su-exec orbit:orbit node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"
 ENTRYPOINT ["/opt/orbit/scripts/container-entrypoint.sh"]
-CMD ["node", "server.js"]
+CMD ["node", "scripts/container-server.mjs"]
