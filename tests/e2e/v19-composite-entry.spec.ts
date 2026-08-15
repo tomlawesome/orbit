@@ -9,8 +9,10 @@ test.describe("composite entry", () => {
     await page.goto("/api/auth/login?returnTo=/home");
     await page.getByRole("link", { name: "Orbit Administrator" }).click();
     await expect(page).toHaveURL(/\/home$/);
-    // The gravity-well dial only exists in the v19 markup.
-    await expect(page.locator(".dialwrap")).toBeVisible();
+    // Both v19 home dialects are server-rendered and CSS chooses (CON-10):
+    // the gravity-well dial on desktop, the pocket dial on mobile. Exactly
+    // one hero may be visible — and neither exists in the Next markup.
+    await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
     const session = await page.evaluate(async () => {
       const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
       return (await response.json()) as { authenticated?: boolean };
@@ -26,7 +28,7 @@ test.describe("composite entry", () => {
     });
     const response = await page.goto("/home");
     expect(response?.status()).toBe(200);
-    await expect(page.locator(".dialwrap")).toBeVisible();
+    await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
     expect(scriptResponses.length).toBeGreaterThan(0);
     expect(scriptResponses.every((status) => status === 200)).toBe(true);
   });
