@@ -192,21 +192,21 @@
     <h4>actions</h4>
     <div class="acts" role="group" aria-label="Item actions">
       {#if item.status === "active"}
-        <button aria-pressed={panel === "complete"} onclick={() => open("complete")}>complete</button>
-        <button aria-pressed={panel === "reschedule"} onclick={() => open("reschedule")}>reschedule</button>
-        <button aria-pressed={panel === "snooze"} onclick={() => open("snooze")}>snooze</button>
-        <button aria-pressed={panel === "edit"} onclick={() => open("edit")}>edit</button>
-        <button aria-pressed={panel === "retire"} onclick={() => open("retire")}>retire</button>
+        <button style="--act:var(--ok)" aria-pressed={panel === "complete"} onclick={() => open("complete")}>complete</button>
+        <button style="--act:var(--upcoming)" aria-pressed={panel === "reschedule"} onclick={() => open("reschedule")}>reschedule</button>
+        <button style="--act:var(--warm)" aria-pressed={panel === "snooze"} onclick={() => open("snooze")}>snooze</button>
+        <button style="--act:var(--accent)" aria-pressed={panel === "edit"} onclick={() => open("edit")}>edit</button>
+        <button style="--act:var(--overdue)" aria-pressed={panel === "retire"} onclick={() => open("retire")}>retire</button>
       {:else}
-        <button disabled={busy} onclick={() => run(() => statusCommand(item, "active"))}>restore</button>
+        <button style="--act:var(--ok)" disabled={busy} onclick={() => run(() => statusCommand(item, "active"))}>restore</button>
         {#if item.status !== "archived"}
-          <button aria-pressed={panel === "retire"} onclick={() => open("retire")}>retire</button>
+          <button style="--act:var(--overdue)" aria-pressed={panel === "retire"} onclick={() => open("retire")}>retire</button>
         {/if}
       {/if}
     </div>
 
     {#if panel === "complete"}
-      <div class="panel">
+      <div class="panel" style="--act:var(--ok)">
         <div class="row2">
           <div class="field"><label for="a-done">completed on</label>
             <input id="a-done" type="date" bind:value={form.completedDate}></div>
@@ -235,7 +235,7 @@
     {/if}
 
     {#if panel === "reschedule"}
-      <div class="panel">
+      <div class="panel" style="--act:var(--upcoming)">
         <div class="field"><label for="a-due">new due date</label>
           <input id="a-due" type="date" bind:value={form.dueDate}></div>
         <div class="save-row">
@@ -247,7 +247,7 @@
     {/if}
 
     {#if panel === "snooze"}
-      <div class="panel">
+      <div class="panel" style="--act:var(--warm)">
         <div class="field"><label for="a-until">snooze until</label>
           <input id="a-until" type="date" bind:value={form.until}></div>
         <div class="save-row">
@@ -259,7 +259,7 @@
     {/if}
 
     {#if panel === "edit"}
-      <div class="panel">
+      <div class="panel" style="--act:var(--accent)">
         <div class="field"><label for="e-title">title</label>
           <input id="e-title" bind:value={form.title}></div>
         <div class="row2">
@@ -287,7 +287,7 @@
     {/if}
 
     {#if panel === "retire"}
-      <div class="panel">
+      <div class="panel" style="--act:var(--overdue)">
         <div class="note">
           retiring takes this item off the chart — archive keeps its history;
           cancel marks it stood down and it can be restored later
