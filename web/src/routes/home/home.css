@@ -237,6 +237,10 @@
   .suggest{border-style:dashed}
   .suggest .body span{color:var(--accent)}
   .suggest .actions{display:flex;gap:8px}
+  /* #434: a refused approval speaks in the server's own words, in the
+     urgency ink the design already uses (the item view's .problem twin). */
+  .mail-problem{flex-basis:100%;font:10.5px var(--mono);color:var(--overdue);
+    margin-top:8px;line-height:1.6}
   .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
                   border:1px solid var(--line);background:none;color:var(--ink-mid)}
   .suggest button.yes{border-color:var(--accent);color:var(--accent)}

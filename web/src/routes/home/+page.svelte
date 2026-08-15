@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { afterNavigate } from "$app/navigation";
   import { mountHome } from "./home.behaviour.js";
-  import { readHome } from "$lib/data/workspace.js";
+  import { approveReceipt, dismissReceipt, readHome } from "$lib/data/workspace.js";
   import { dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
@@ -45,6 +45,38 @@
     capture: () => window.scrollY,
     restore: (y) => { restoreScroll = y; },
   };
+
+  /* Mail-in review on the row (#434): first tap arms, second fires. One
+     operation id per receipt across every retry — approval is idempotent by
+     construction, so a double-tap can never create two items. */
+  let armed = $state({ id: null, act: null });
+  let busyReceipt = $state(null);
+  let mailProblem = $state(null);
+  const operationIds = new Map();
+  async function tapReceipt(suggestion, act) {
+    mailProblem = null;
+    if (!suggestion.receiptId) return; // a #454 fixture suggestion has no mail behind it yet
+    if (armed.id !== suggestion.id || armed.act !== act) {
+      armed = { id: suggestion.id, act };
+      return;
+    }
+    busyReceipt = suggestion.id;
+    try {
+      if (act === "approve") {
+        if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
+        await approveReceipt(suggestion, view.primary, operationIds.get(suggestion.receiptId));
+        operationIds.delete(suggestion.receiptId);
+      } else {
+        await dismissReceipt(suggestion.receiptId);
+      }
+      armed = { id: null, act: null };
+      view = await readHome();
+    } catch (error) {
+      mailProblem = error?.message ?? String(error);
+    } finally {
+      busyReceipt = null;
+    }
+  }
 
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
@@ -423,8 +455,28 @@
           {#each groups.suggestions as s (s.id)}
             <div class="item suggest" id={s.id}>
               <span class="dot sug" style="color:var(--accent)"></span>
-              <div class="body"><b>{s.title}</b><span>Found in {s.sourceDocument} · renews {short(s.renewsOn)} · {money(s.costMinor, s.currency, true)}</span></div>
-              <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+              <div class="body"><b>{s.title}</b><span>{[
+                `Found in ${s.sourceDocument}`,
+                s.renewsOn ? `renews ${short(s.renewsOn)}` : null,
+                s.costMinor ? money(s.costMinor, s.currency, true) : null,
+              ].filter(Boolean).join(" · ")}</span></div>
+              <!-- #434: approval is the boundary between untrusted mail and
+                   the household, so it takes two deliberate taps — the first
+                   arms, the second fires. One operation id per receipt makes
+                   the write idempotent under any retry. -->
+              <div class="actions">
+                <button class="yes" disabled={busyReceipt === s.id}
+                  onclick={() => tapReceipt(s, "approve")}>
+                  {armed.id === s.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
+                </button>
+                <button disabled={busyReceipt === s.id}
+                  onclick={() => tapReceipt(s, "dismiss")}>
+                  {armed.id === s.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
+                </button>
+              </div>
+              {#if mailProblem && armed.id === s.id}
+                <div class="mail-problem">{mailProblem}</div>
+              {/if}
             </div>
           {/each}
         </div>
