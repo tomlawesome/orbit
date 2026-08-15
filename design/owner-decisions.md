@@ -348,3 +348,12 @@ The design family gains the journeys the ratified eight never covered:
   to approve.
 - **Adding members.** Owners can add any user to their household; instance
   admins can add any user to any household.
+
+## 12. Nothing on the dial is decoration (owner, 2026-08-16)
+
+**"Nothing on the dial is there for decoration, it's all real information.
+Planet colour, location, size, style, rings etc etc."** The dial is totally
+empty at zero entries; green planets exist only when entries are months away
+from needing attention. The mockups' hand-drawn "asteroid field" (and the
+pocket dial's decorative dots) are removed from the designs and the product
+alike — every body drawn is a real item placed by the law.

@@ -28,7 +28,15 @@ services:
       IMAP_ALIAS_CURRENT_GENERATION: "1"
       IMAP_POLL_SECONDS: "30"
       SMTP_HOST: orbit-greenmail
-      SMTP_PORT: "3025"
+      SMTP_PORT: "3465"
+      SMTP_USER: orbit-notify@in.orbit.test
+      SMTP_SECURITY: implicit_tls
+      # Orbit verifies provider certificates unconditionally (by design);
+      # the sidecar's generated cert is trusted explicitly instead of
+      # weakening that. scripts/dev-greenmail-cert.sh writes it.
+      NODE_EXTRA_CA_CERTS: /etc/orbit/greenmail-ca.pem
+    volumes:
+      - ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/greenmail-ca.pem:/etc/orbit/greenmail-ca.pem:ro
   orbit-oidc:
     build:
       context: ./tests/oidc
@@ -45,8 +53,13 @@ services:
     image: greenmail/standalone:2.1.5@sha256:8a2024725c7b1ce8f720644bccb6f237781992a8cbf283023446eb7d29326ad0
     environment:
       GREENMAIL_OPTS: >-
-        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imaps
+        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.smtps
+        -Dgreenmail.setup.test.imaps
         -Dgreenmail.auth.disabled -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.tls.keystore.file=/certs/greenmail.p12
+        -Dgreenmail.tls.keystore.password=orbit-proving-ground
+    volumes:
+      - ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/greenmail.p12:/certs/greenmail.p12:ro
     ports:
       # SMTP for the seeding spec, loopback only.
       - "127.0.0.1:3025:3025"

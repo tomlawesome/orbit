@@ -164,8 +164,6 @@
                    fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
         {/if}
       {/each}
-      <g style="fill:var(--ok)"><circle cx="322" cy="220" r="5"/><circle cx="106" cy="297" r="5"/>
-      <circle cx="55" cy="165" r="5"/><circle cx="134" cy="64" r="5"/></g>
     </svg>
   </div>
   <div class="skies">
