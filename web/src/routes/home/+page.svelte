@@ -154,6 +154,7 @@
   const crescent = (b) =>
     `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
 
+
   onMount(() => {
     const query = window.matchMedia(DESK);
     let teardown = null;
@@ -396,14 +397,6 @@
           </g></a>
         {/if}
       {/each}
-      <!-- the asteroid field: distant, decorative, the design's own weather -->
-      <g fill="url(#p-jade)">
-        <circle cx="239.4" cy="275.5" r="4"/>
-        <circle cx="152.0" cy="294.3" r="4"/><circle cx="102.6" cy="268.7" r="5"/><circle cx="103.7" cy="267.7" r="1.7" fill="rgba(255,255,255,.35)"/>
-        <circle cx="70.0" cy="222.2" r="3.5"/><circle cx="62.2" cy="160.5" r="6"/><circle cx="62.2" cy="160.5" r="3.4" style="fill:var(--bg)"/><circle cx="62.2" cy="160.5" r="1.7"/>
-        <circle cx="84.5" cy="101.5" r="4.5"/><circle cx="120.7" cy="65.1" r="5.5"/><path d="M 120.7 59.6 A 5.5 5.5 0 0 1 120.7 70.6 Z" fill="rgba(0,0,0,.42)"/>
-        <circle cx="157.0" cy="47.2" r="3.5"/>
-      </g>
       {#each bodies.filter((b) => b.documentCount > 0 && b.paint === "jade") as b (b.id)}
         <g class="belt" aria-hidden="true">
           <ellipse cx={b.placement.x} cy={b.placement.y} rx="13.5" ry="4.6"
