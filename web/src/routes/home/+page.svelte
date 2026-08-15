@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { mountHome } from "./home.behaviour.js";
-  import { GALAXY_FIXTURE } from "./galaxy.fixture.js";
+  import { readGalaxy } from "$lib/data/workspace.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import "./home.css";
@@ -26,14 +26,25 @@
   onMount(() => {
     const query = window.matchMedia(DESK);
     let teardown = null;
+    let disposed = false;
+    let galaxy = null;
     const sync = () => {
       teardown?.();
       /* Tear the old dialect down before standing the new one up. */
-      teardown = query.matches ? mountHome({ galaxy: GALAXY_FIXTURE }) : mountPocket();
+      teardown = query.matches ? mountHome({ galaxy }) : mountPocket();
     };
-    sync();
-    query.addEventListener("change", sync);
+    /* The galaxy comes through the seam (#446). onMount must stay synchronous
+       — an async callback's return value is discarded, which would leak every
+       listener the teardown exists to remove — so the read resolves into a
+       closure and mounting follows it. */
+    readGalaxy().then((data) => {
+      if (disposed) return;
+      galaxy = data;
+      sync();
+      query.addEventListener("change", sync);
+    });
     return () => {
+      disposed = true;
       query.removeEventListener("change", sync);
       teardown?.();
     };

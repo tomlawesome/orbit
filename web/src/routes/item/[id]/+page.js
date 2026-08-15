@@ -1,17 +1,13 @@
 import { error } from "@sveltejs/kit";
-import { ITEMS_FIXTURE } from "./items.fixture.js";
+import { readItem } from "$lib/data/workspace.js";
 
 /**
- * One item, at its own URL (#424).
- *
- * The lookup is a membership test against a set this front end already holds,
- * never a fetch built from the URL — so an id that is not in the set is a 404
- * rather than a request. When the workspace API is wired the set becomes the
- * signed-in user's own items and that property has to survive: the id may only
- * ever select from what the session may already see, never widen it.
+ * One item, at its own URL (#424), read through the seam (#446) so the
+ * fixture-to-live switch happens in one module. The 404 stays here: the seam
+ * answers null for an unknown id and the route decides what that means.
  */
-export function load({ params }) {
-  const item = Object.hasOwn(ITEMS_FIXTURE, params.id) ? ITEMS_FIXTURE[params.id] : null;
+export async function load({ params }) {
+  const item = await readItem(params.id);
   if (!item) error(404, "No such item");
   return { item };
 }
