@@ -8,8 +8,10 @@ import {
   bodySize,
   constellationPosOf,
   daysUntil,
+  dialBodiesOf,
   dialPlacement,
   galaxyOf,
+  manifestGroupsOf,
 } from "../../web/src/lib/data/chart.js";
 
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
@@ -115,6 +117,52 @@ describe("the fixed galaxy (CON-13/#428)", () => {
     const [, , r, tone] = first.planets[0];
     expect(r).toBeGreaterThan(1.5);
     expect(tone).toBe("--warm"); // due in 7 days = needs attention
+  });
+});
+
+const HOUSEHOLD = {
+  id: "hh-test",
+  sections: [
+    { id: "s-home", name: "Home" },
+    { id: "s-vehicles", name: "Vehicles" },
+  ],
+  items: [
+    { id: "i-a", title: "Overdue thing", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2026-07-28", costMinor: 15000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-b", title: "Inspection", sectionId: "s-vehicles", status: "active", subtype: "inspection", scheduleKind: "service", dueDate: "2026-08-29", costMinor: 5485, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-c", title: "Far out", sectionId: "s-home", status: "active", subtype: "service", scheduleKind: "service", dueDate: "2027-01-21", costMinor: 30000, costIsEstimate: true, currency: "GBP", recurrenceMonths: 12 },
+    { id: "i-d", title: "Archived", sectionId: "s-home", status: "archived", subtype: "service", scheduleKind: "service", dueDate: "2026-08-20", costMinor: 1000, currency: "GBP", recurrenceMonths: 12 },
+  ],
+};
+const SUGGESTION = { id: "sug-1", title: "Insurance", renewsOn: "2026-10-03", costMinor: 40000, currency: "GBP" };
+
+describe("dialBodiesOf", () => {
+  it("places active items and suggestions by the law, sorted by lead time", () => {
+    const bodies = dialBodiesOf(HOUSEHOLD, { suggestions: [SUGGESTION], today: TODAY });
+    expect(bodies.map((b) => b.id)).toEqual(["i-a", "i-b", "sug-1", "i-c"]);
+    expect(bodies.find((b) => b.id === "i-d")).toBeUndefined();
+    const inspection = bodies.find((b) => b.id === "i-b");
+    expect(inspection.kind).toBe("inspection");
+    expect(inspection.paint).toBe("amber");
+    expect(inspection.trail).toBe(true);
+    expect(inspection.closest).toBe(true); // first future non-suggestion = the comet's anchor
+    const suggestion = bodies.find((b) => b.suggestion);
+    expect(suggestion.paint).toBe("accent");
+    const far = bodies.find((b) => b.id === "i-c");
+    expect(far.paint).toBe("jade");
+    expect(far.trail).toBe(false);
+    expect(bodies[0].overdue).toBe(true);
+  });
+});
+
+describe("manifestGroupsOf", () => {
+  it("groups by urgency with sections joined and the closest approach named", () => {
+    const groups = manifestGroupsOf(HOUSEHOLD, { suggestions: [SUGGESTION], today: TODAY });
+    expect(groups.attention.map((r) => r.id)).toEqual(["i-a", "i-b"]);
+    expect(groups.later.map((r) => r.id)).toEqual(["i-c"]);
+    expect(groups.attention[1].section).toBe("Vehicles");
+    expect(groups.closest.id).toBe("i-b");
+    expect(groups.suggestions[0].id).toBe("sug-1");
+    expect(groups.attention[0].costIsEstimate).toBe(true);
   });
 });
 

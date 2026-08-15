@@ -116,6 +116,95 @@ export function constellationPlanetsOf(items, today) {
   });
 }
 
+const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jade", unscheduled: "jade" };
+
+/**
+ * The dial's bodies (#414/#451): the household's active items placed by the
+ * law, plus any document suggestions as un-accepted accent bodies. Sorted by
+ * lead time. Decorations follow the chart key: kind marks the body's face
+ * (crescent = inspection, cored = renewal, plain = service), a belt means
+ * documents, a trail rides with anything within 60 days of the sun, the ping
+ * sits on overdue, and the comet flies from the closest approach.
+ */
+export function dialBodiesOf(household, { suggestions = [], today }) {
+  const bodies = [];
+  for (const item of household.items ?? []) {
+    if (item.status !== "active") continue;
+    const days = daysUntil(item.dueDate, today);
+    if (days === null) continue;
+    bodies.push({
+      id: item.id,
+      title: item.title,
+      days,
+      placement: dialPlacement(days),
+      size: bodySize(item.costMinor),
+      paint: PAINTS[bandOf(days)],
+      kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+      suggestion: false,
+      costMinor: item.costMinor ?? null,
+      costIsEstimate: Boolean(item.costIsEstimate),
+      currency: item.currency ?? "GBP",
+      documentCount: item.documentCount ?? 0,
+      trail: Math.abs(days) <= 60,
+      overdue: days < 0,
+    });
+  }
+  for (const suggestion of suggestions) {
+    const days = daysUntil(suggestion.renewsOn, today);
+    if (days === null) continue;
+    bodies.push({
+      id: suggestion.id,
+      title: suggestion.title,
+      days,
+      placement: dialPlacement(days),
+      size: bodySize(suggestion.costMinor),
+      paint: "accent",
+      kind: "suggestion",
+      suggestion: true,
+      costMinor: suggestion.costMinor ?? null,
+      costIsEstimate: true,
+      currency: suggestion.currency ?? "GBP",
+      documentCount: 0,
+      trail: Math.abs(days) <= 60,
+      overdue: false,
+    });
+  }
+  bodies.sort((a, b) => a.days - b.days);
+  const closest = bodies.find((body) => !body.suggestion && body.days >= 0);
+  if (closest) closest.closest = true;
+  return bodies;
+}
+
+/**
+ * The manifest's groups: needs attention (inside 31 days, overdue first),
+ * document suggestions, then later this year — with the closest approach
+ * called out on the attention heading.
+ */
+export function manifestGroupsOf(household, { suggestions = [], today }) {
+  const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
+  const rows = (household.items ?? [])
+    .filter((item) => item.status === "active")
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      section: sections.get(item.sectionId) ?? null,
+      days: daysUntil(item.dueDate, today),
+      dueDate: item.dueDate ?? null,
+      band: bandOf(daysUntil(item.dueDate, today)),
+      provider: item.provider ?? null,
+      recurrenceMonths: item.recurrenceMonths ?? null,
+      costMinor: item.costMinor ?? null,
+      costIsEstimate: Boolean(item.costIsEstimate),
+      currency: item.currency ?? "GBP",
+      kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+    }))
+    .sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
+  const attention = rows.filter((row) => row.days !== null && row.days <= 30);
+  const later = rows.filter((row) => row.days === null || row.days > 30);
+  const closest = rows.find((row) => row.days !== null && row.days >= 0) ?? null;
+  return { attention, suggestions, later, closest };
+}
+
 /**
  * The whole fixed sky for a workspace, in the shape the home renderer eats.
  * The primary household is the map origin by construction — the viewer
