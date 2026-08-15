@@ -163,7 +163,7 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   const householdId = suggestion.householdId ?? fallbackHouseholdId;
   if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
   if (!suggestion.householdId) {
-    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { body: { householdId } }));
+    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
   }
   const review = await json(
     await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),

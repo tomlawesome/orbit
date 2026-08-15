@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -36,6 +36,19 @@ async function signInAsMember(page: Page) {
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Member" }).click();
   await expect(page).toHaveURL(/\/home$/);
+}
+
+// A fresh instance promotes its first sign-in to instance admin, and admins
+// have an empty relay inbox by design. Claim that promotion for the
+// administrator in a throwaway context so the member below is an ordinary
+// user with a real inbox.
+async function establishInstanceAdmin(browser: Browser) {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await expect(page).toHaveURL(/\/home$/);
+  await context.close();
 }
 
 
@@ -100,10 +113,11 @@ async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000) {
 
 test.describe.configure({ mode: "serial" });
 
-test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", async ({ page }) => {
+test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket has no suggestion rows yet (#434 follow-up)");
   test.setTimeout(240_000);
 
+  await establishInstanceAdmin(browser);
   await signInAsMember(page);
   await seedHousehold(page);
   const userId = await sessionUserId(page);
