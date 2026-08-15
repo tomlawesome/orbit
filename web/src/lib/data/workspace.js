@@ -136,12 +136,22 @@ function todayOf(workspace) {
   return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
 }
 
-/** The fixed sky (#451): the live workspace through the chart transform. */
-export async function readGalaxy() {
-  const workspace = await readWorkspace();
+/**
+ * Everything the home screen renders (#451): the fixed sky, the primary
+ * household (dial and manifest), any document suggestions (none from the live
+ * API yet — #452), the signed-in user, and the date the chart reckons from.
+ */
+export async function readHome() {
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  const today = todayOf(workspace);
   return {
-    galaxy: galaxyOf(workspace, todayOf(workspace)),
-    primary: workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null,
+    galaxy: galaxyOf(workspace, today),
+    primary,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    suggestions: workspace.suggestions ?? [],
+    user: session?.user ?? null,
+    today,
   };
 }
 
