@@ -758,7 +758,17 @@ function renderGalaxy(settle){
       }
     }
   }
-  for (const { key, hh, ox, oy, dist } of placed) {
+  for (let { key, hh, ox, oy, dist } of placed) {
+    // The one case the bearing yields (mirrors the app, owner 2026-08-15):
+    // no position on a steep bearing is both clear of the dial and inside the
+    // sky, so it slides around its circle to the band edge on its own side.
+    const lim = oy < 0 ? h / 2 - 215 : h / 2 - 155;
+    if (Math.abs(oy) > lim) {
+      const r = Math.hypot(ox, oy);
+      const side = Math.sign(ox) || 1;
+      oy = Math.sign(oy) * Math.max(lim, 0);
+      ox = side * Math.sqrt(Math.max(r * r - oy * oy, 0));
+    }
     const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
     const div = document.createElement("div");
     div.className = "minisys" + (settle ? " settle" : "");
