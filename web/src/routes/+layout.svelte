@@ -19,6 +19,11 @@
    * chose. Variable rather than static cuts: the design asks for weights 400,
    * 500, 520, 560 and 600, and 520 and 560 exist only on a variable axis.
    */
+  /* The theme packs, for every screen rather than only home (#433). Imported
+     before the faces so a pack's tokens are defined by the time anything
+     reads them. */
+  import "$lib/packs.css";
+
   import "@fontsource/space-grotesk/500.css";
   import "@fontsource/space-grotesk/600.css";
   import "@fontsource-variable/inter";
