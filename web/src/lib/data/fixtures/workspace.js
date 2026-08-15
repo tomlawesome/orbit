@@ -41,7 +41,7 @@ const LAWSON_ITEMS = [
   {
     id: "i-mot", title: "Car MOT — Volvo V60", sectionId: "s-vehicles", status: "active",
     subtype: "inspection", scheduleKind: "service", provider: null, reference: null,
-    costMinor: 5485, currency: "GBP", dueDate: "2026-08-29",
+    costMinor: 5485, currency: "GBP", dueDate: "2026-08-29", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21, 7], notes: null,
     snoozedUntil: null, version: 5, updatedAt: "2026-06-12T10:30:00.000Z",
   },
@@ -69,7 +69,7 @@ const LAWSON_ITEMS = [
   {
     id: "i-svc", title: "Car full service", sectionId: "s-vehicles", status: "active",
     subtype: "service", scheduleKind: "service", provider: null, reference: null,
-    costMinor: 30000, currency: "GBP", dueDate: "2027-01-21",
+    costMinor: 30000, currency: "GBP", dueDate: "2027-01-21", documentCount: 2,
     recurrenceMonths: 12, reminderDays: [21], notes: null,
     snoozedUntil: null, version: 2, updatedAt: "2026-06-12T10:35:00.000Z",
   },
