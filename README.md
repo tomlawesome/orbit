@@ -721,6 +721,14 @@ the protected branch, test, manual-validation, and digest-promotion workflow.
 
 ---
 
+## Licence
+
+Orbit is free software, licensed under the [GNU Affero General Public
+License v3.0 or later](LICENSE). If you run a modified Orbit for others
+over a network, the AGPL's remote-interaction clause applies. The three
+bundled typefaces are separately licensed under the SIL OFL&nbsp;1.1
+(issue&nbsp;#440); their licence text ships with the application.
+
 <p align="center">
   <img src="public/orbit-mark.svg" alt="" width="52" />
   <br />
