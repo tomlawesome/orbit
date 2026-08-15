@@ -77,7 +77,9 @@ async function sendMail(alias: string, subject: string, attachment: { filename: 
     to: alias,
     subject,
     text: "A forwarded document for the proving ground.",
-    headers: { "X-Orbit-Delivered-To": alias },
+    // prepared: nodemailer folds lines over 78 chars and Orbit (rightly)
+    // quarantines a folded trusted-recipient header; real MTAs write it unfolded.
+    headers: { "X-Orbit-Delivered-To": { prepared: true, value: alias } },
     attachments: attachment ? [attachment] : [],
   });
   transport.close();
