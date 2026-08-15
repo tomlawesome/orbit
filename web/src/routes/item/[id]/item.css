@@ -18,8 +18,11 @@
  */
 
 /* create.html's override: the family stage centres a fixed card, and a detail
-   view has to be able to grow past the fold. */
-.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;
+   view has to be able to grow past the fold. Doubled selectors because
+   family.css loads via <link> after this bundled sheet and would win a tie
+   (the create form's unscrollable-card bug, owner-found 2026-08-15). */
+html body{overflow-y:auto;overflow-x:hidden}
+.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;
        justify-content:center;padding:56px 20px}
 
 /* Each screen names its own card and sizes it. The relay is 430px, the create

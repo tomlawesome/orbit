@@ -102,11 +102,27 @@
     notes: form.notes.trim() || undefined,
   });
 
+  /* Owner, 2026-08-15: clicking the space around the card returns you to
+     exactly where you were — browser history, not a forced trip through the
+     dial's arrival. Escape agrees (closing an open panel first, CON-20's
+     precedence). Deep links with no history still land on home. */
+  function dismiss() {
+    if (window.history.length > 1) window.history.back();
+    else goto(`/home#${item.id}`);
+  }
+  function onKeydown(event) {
+    if (event.key !== "Escape") return;
+    if (panel) panel = null;
+    else dismiss();
+  }
+
   /* POL-11: every page's sky drifts. Decorative and aria-hidden, so a reader
      without JavaScript loses only the stars, never the item. */
   let sky;
   onMount(() => mountItemSky(sky));
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <svelte:head>
   <link rel="stylesheet" href="/screens/family.css" />
@@ -115,7 +131,12 @@
 
 <div class="sky" aria-hidden="true" bind:this={sky}></div>
 
-<div class="stage">
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+<!-- The stage is the card's backdrop: clicking it is dismissal (CON-20's
+     light-dismiss grammar), with Escape as the keyboard equivalent above.
+     Only the empty space acts — anything inside the card never bubbles here
+     as currentTarget. -->
+<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
   <article class="glass item-card">
     <h2>{item.title}</h2>
     <div class="sub">{[item.section, item.subtype].filter(Boolean).join(" · ")}</div>
@@ -140,7 +161,7 @@
       <div class="kv"><span>orbital period</span><b>{every(item.recurrenceMonths)}</b></div>
     {/if}
     <div class="kv">
-      <span>typical cost</span>
+      <span>cost</span>
       <b>{money(item.costMinor, item.currency, item.costIsEstimate)}</b>
     </div>
     {#if item.provider}
@@ -248,7 +269,7 @@
             <input id="e-reference" bind:value={form.reference} placeholder="optional"></div>
         </div>
         <div class="row2">
-          <div class="field mono"><label for="e-cost">typical cost</label>
+          <div class="field mono"><label for="e-cost">cost</label>
             <input id="e-cost" inputmode="decimal" bind:value={form.cost} placeholder="optional"></div>
           <div class="field"><label for="e-due">due date</label>
             <input id="e-due" type="date" bind:value={form.dueDate}></div>
