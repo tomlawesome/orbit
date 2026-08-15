@@ -3,7 +3,7 @@
   import { goto, invalidateAll } from "$app/navigation";
   import { mountItemSky } from "./sky.js";
   import { DESIGN_TODAY, day, every, longDate, money, tminus } from "$lib/format.js";
-  import { applyCommand } from "$lib/data/workspace.js";
+  import { applyCommand, approveReceipt, dismissReceipt, readWorkspace } from "$lib/data/workspace.js";
   import {
     archiveCommand,
     completeCommand,
@@ -102,6 +102,80 @@
     notes: form.notes.trim() || undefined,
   });
 
+  /*
+   * Amend-then-accept (#434): a mail-in suggestion opens in this same view,
+   * every proposed field editable (fields extraction read from the document
+   * carry the from-document mark), and acceptance goes through the
+   * reviewed-intake protocol with one operation id kept across retries.
+   */
+  let sform = $state(null);
+  let acceptArmedDismiss = $state(false);
+  let acceptOpId = null;
+  $effect(() => {
+    if (item?.suggestion && !sform) {
+      sform = {
+        title: item.proposal.title ?? "Forwarded email",
+        provider: item.proposal.provider ?? "",
+        reference: item.proposal.reference ?? "",
+        cost: pounds(item.proposal.costMinor),
+        dueDate: item.proposal.dueDate ?? "",
+        recurrenceMonths: item.proposal.recurrenceMonths ?? "",
+      };
+    }
+  });
+  const marked = (field) => Boolean(item?.fieldEvidence?.[field]);
+  async function accept() {
+    busy = true;
+    problem = null;
+    try {
+      acceptOpId ??= crypto.randomUUID();
+      const amended = { title: sform.title.trim() || "Forwarded email", currency: item.currency };
+      if (item.proposal.subtype) amended.subtype = item.proposal.subtype;
+      if (sform.provider.trim()) amended.provider = sform.provider.trim();
+      if (sform.reference.trim()) amended.reference = sform.reference.trim();
+      const cost = minorOf(sform.cost);
+      if (cost !== undefined) amended.costMinor = cost;
+      if (sform.dueDate) {
+        amended.dueDate = sform.dueDate;
+        if (item.proposal.scheduleKind) {
+          amended.scheduleKind = item.proposal.scheduleKind;
+          const months = Number(sform.recurrenceMonths);
+          if (months) amended.recurrenceMonths = months;
+        }
+      }
+      const workspace = await readWorkspace();
+      const fallback = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+      const result = await approveReceipt(item, fallback, acceptOpId, amended);
+      if (result.outcome === "partial_success") {
+        problem = "The item is recorded, but its documents need another try — accept again to finish.";
+        return;
+      }
+      acceptOpId = null;
+      await goto(result.itemId ? `/item/${result.itemId}` : "/home");
+    } catch (error) {
+      problem = error?.message ?? String(error);
+    } finally {
+      busy = false;
+    }
+  }
+  async function dismissSuggestion() {
+    if (!acceptArmedDismiss) {
+      acceptArmedDismiss = true;
+      return;
+    }
+    busy = true;
+    problem = null;
+    try {
+      await dismissReceipt(item.receiptId);
+      await goto("/home");
+    } catch (error) {
+      problem = error?.message ?? String(error);
+      acceptArmedDismiss = false;
+    } finally {
+      busy = false;
+    }
+  }
+
   /* Owner, 2026-08-15: clicking the space around the card returns you to
      exactly where you were — browser history, not a forced trip through the
      dial's arrival. Escape agrees (closing an open panel first, CON-20's
@@ -137,6 +211,55 @@
      Only the empty space acts — anything inside the card never bubbles here
      as currentTarget. -->
 <div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+  {#if item.suggestion && sform}
+    <!-- #434 amend-then-accept: the suggestion in the item view's own card,
+         every field editable, from-document fields marked, acceptance the
+         only path into the household. -->
+    <article class="glass item-card" style="--act:var(--ok)">
+      <input class="name-title" bind:value={sform.title} aria-label="name"
+             class:sugg={marked("title")}>
+      <div class="sub">suggested from your documents · {item.sourceDocument}</div>
+
+      <div class="panel">
+        <div class="row2">
+          <div class="field" class:sugg={marked("dueDate")}>
+            <label for="s-due">renews / due</label>
+            <input id="s-due" type="date" bind:value={sform.dueDate}></div>
+          <div class="field" class:sugg={marked("recurrenceMonths")}>
+            <label for="s-recur">orbital period (months)</label>
+            <input id="s-recur" inputmode="numeric" bind:value={sform.recurrenceMonths}></div>
+        </div>
+        <div class="row2">
+          <div class="field" class:sugg={marked("provider")}>
+            <label for="s-provider">provider</label>
+            <input id="s-provider" bind:value={sform.provider} placeholder="optional"></div>
+          <div class="field" class:sugg={marked("reference")}>
+            <label for="s-reference">reference</label>
+            <input id="s-reference" bind:value={sform.reference} placeholder="optional"></div>
+        </div>
+        <div class="field mono" class:sugg={marked("costMinor")}>
+          <label for="s-cost">cost</label>
+          <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional"></div>
+        {#if item.attachmentCount > 0}
+          <div class="note">◆ {item.sourceDocument} will be attached on acceptance</div>
+        {/if}
+        <div class="save-row">
+          <button class="btn-primary" disabled={busy || !sform.title.trim()} onclick={accept}>
+            accept into orbit
+          </button>
+          <button class="btn-quiet" style="--act:var(--overdue)" disabled={busy} onclick={dismissSuggestion}>
+            {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
+          </button>
+          <a class="back" style="margin-top:0" href="/home">← back to your orbit</a>
+        </div>
+        {#if problem}
+          <div class="problem" role="alert">{problem}</div>
+        {/if}
+        <div class="note">nothing is created without your acceptance — an
+          unaccepted suggestion simply expires and is purged</div>
+      </div>
+    </article>
+  {:else}
   <article class="glass item-card">
     <h2>{item.title}</h2>
     <div class="sub">{[item.section, item.subtype].filter(Boolean).join(" · ")}</div>
@@ -310,5 +433,6 @@
 
     <a class="back" href="/home#{item.id}">← back to your orbit</a>
   </article>
+  {/if}
 </div>
 <div class="vignette" aria-hidden="true"></div>
