@@ -126,6 +126,72 @@ export async function activeHousehold() {
 import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
 import { galaxyOf } from "./chart.js";
+import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
+
+/** A mutating fetch with the session's CSRF token, like applyCommand's. */
+async function csrfFetch(path, { method = "POST", body } = {}) {
+  const { csrfToken } = await readSession();
+  return fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      "x-csrf-token": csrfToken,
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+/**
+ * The signed-in user's private mail-in inbox (#434). Instance admins have no
+ * private mailbox (the route answers empty for them), and a broken inbox must
+ * never take home down with it — the caller treats this as additive.
+ */
+export async function readInbox() {
+  const body = await json(await fetch("/api/imap-inbox", { credentials: "same-origin" }));
+  return { receipts: body.receipts ?? [], households: body.households ?? [] };
+}
+
+/**
+ * Approve a mail-in suggestion as proposed (#434): assign a household if the
+ * receipt has none, read the review (fresh draftVersion, first section, the
+ * staged attachments), then approve through the reviewed-intake protocol.
+ * The operationId makes retries idempotent — a double-tap cannot create two
+ * items — so callers keep ONE id per receipt across attempts.
+ */
+export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null) {
+  const householdId = suggestion.householdId ?? fallbackHouseholdId;
+  if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
+  if (!suggestion.householdId) {
+    await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { body: { householdId } }));
+  }
+  const review = await json(
+    await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
+  );
+  const section = review.sections?.[0];
+  if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
+  const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
+    body: {
+      operationId,
+      source: {
+        kind: "mailbox_draft",
+        receiptId: suggestion.receiptId,
+        draftVersion: review.receipt?.draftVersion ?? suggestion.draftVersion,
+      },
+      householdId,
+      sectionId: section.id,
+      action: "create_separate",
+      item: amendedItem ?? approvalItemOf(review.receipt?.proposal ?? {}, suggestion.currency),
+      attachmentIds: (review.attachments ?? []).map((attachment) => attachment.id),
+    },
+  }));
+  return body; // { outcome: "approved" | "partial_success", itemId }
+}
+
+/** Discard a mail-in receipt; its staged files are purged server-side. */
+export async function dismissReceipt(receiptId) {
+  await json(await csrfFetch(`/api/imap-inbox/${receiptId}`, { method: "DELETE" }));
+}
 
 /**
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
@@ -142,14 +208,23 @@ function todayOf(workspace) {
  * API yet — #454), the signed-in user, and the date the chart reckons from.
  */
 export async function readHome() {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session, inbox] = await Promise.all([
+    readWorkspace(),
+    readSession(),
+    /* Additive: mail-in suggestions enrich home, they must never sink it. */
+    readInbox().catch(() => ({ receipts: [] })),
+  ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const today = todayOf(workspace);
   return {
     galaxy: galaxyOf(workspace, today),
     primary,
     household: workspace.households.find((one) => one.id === primary) ?? null,
-    suggestions: workspace.suggestions ?? [],
+    suggestions: [
+      ...(workspace.suggestions ?? []),
+      ...receiptSuggestionsOf(inbox.receipts),
+    ],
+    mailFailures: receiptFailuresOf(inbox.receipts),
     user: session?.user ?? null,
     today,
   };
