@@ -28,18 +28,19 @@
     let teardown = null;
     let disposed = false;
     let galaxy = null;
+    let primary = null;
     const sync = () => {
       teardown?.();
       /* Tear the old dialect down before standing the new one up. */
-      teardown = query.matches ? mountHome({ galaxy }) : mountPocket();
+      teardown = query.matches ? mountHome({ galaxy, primary }) : mountPocket();
     };
-    /* The galaxy comes through the seam (#446). onMount must stay synchronous
-       — an async callback's return value is discarded, which would leak every
-       listener the teardown exists to remove — so the read resolves into a
-       closure and mounting follows it. */
+    /* The galaxy comes through the seam (#446), live since #451. onMount must
+       stay synchronous — an async callback's return value is discarded, which
+       would leak every listener the teardown exists to remove — so the read
+       resolves into a closure and mounting follows it. */
     readGalaxy().then((data) => {
       if (disposed) return;
-      galaxy = data;
+      ({ galaxy, primary } = data);
       sync();
       query.addEventListener("change", sync);
     });
