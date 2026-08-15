@@ -36,6 +36,14 @@ FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac3044
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
 ARG ORBIT_CHANNEL
+
+# Release metadata is validated here, immediately after the ARGs, rather than
+# beside the files it writes 50 steps later (#435). Nothing between depends on
+# these values, so validating late meant a malformed version failed only after
+# the whole application build had been done and thrown away.
+RUN printf '%s\n' "${ORBIT_VERSION}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq '^[0-9a-f]{40}$' \
+  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq '^(ci|preview|dev)$'
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
