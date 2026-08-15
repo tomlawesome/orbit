@@ -27,3 +27,11 @@
 .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
 .btns button.pri{color:var(--accent);border-color:var(--accent)}
+
+/* #434: mail that arrived but could not become a suggestion — the relay is
+   where the user looks for "did my forward make it", so its failures live
+   here, in the card's own kv grammar, toned as small print not alarm. */
+.failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+.failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-faint);margin:0 0 8px}
+.failures .kv span:last-child{color:var(--overdue);text-align:right}
