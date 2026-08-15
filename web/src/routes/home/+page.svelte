@@ -64,7 +64,13 @@
     try {
       if (act === "approve") {
         if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-        await approveReceipt(suggestion, view.primary, operationIds.get(suggestion.receiptId));
+        const result = await approveReceipt(suggestion, view.primary, operationIds.get(suggestion.receiptId));
+        if (result.outcome === "partial_success") {
+          /* The item exists but its documents didn't make it: the SAME
+             operation id retries the SAME body — never a second item. */
+          mailProblem = "The item is recorded, but its documents need another try — tap again to finish.";
+          return;
+        }
         operationIds.delete(suggestion.receiptId);
       } else {
         await dismissReceipt(suggestion.receiptId);
