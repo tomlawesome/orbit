@@ -324,8 +324,11 @@
          backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
   body.create-open .scrim{opacity:1;pointer-events:auto}
 
-  /* POL-1: arrival — the mark expands into the dial once per load */
-  .dial{transform-origin:50% 50%;animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
+  /* POL-1: arrival — the mark expands into the dial once per ARRIVAL.
+     Coming back through history is not arriving (owner, 2026-08-15), so the
+     fanfare keys off .arrive, which a popstate return never sets. */
+  .dial{transform-origin:50% 50%}
+  .desk.arrive .dial{animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
   @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
   @media (prefers-reduced-motion: reduce){.dial{animation:none}}
   /* /POL-1 */

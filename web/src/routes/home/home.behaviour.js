@@ -138,8 +138,27 @@ export function mountHome({ galaxy, primary }) {
       }
     }
 
+    /* The sky's usable vertical half-extents: the top is busier (the
+       north-star create handle, the account row), so it ends sooner. */
+    const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
+
     for (const { key, hh, dist, angle, radius } of placed) {
-      const ox = Math.cos(angle) * radius, oy = Math.sin(angle) * radius;
+      let ox = Math.cos(angle) * radius, oy = Math.sin(angle) * radius;
+      /*
+       * The one case where the bearing yields (#428 amendment, owner-found
+       * twice: a constellation trapped behind the create handle). On a short
+       * hero the keep-out radius exceeds the sky's vertical extent, so a
+       * steep bearing has NO position that is both outside the dial and
+       * inside the sky. Sitting behind a control is worse than bending: the
+       * constellation keeps its radius (the keep-out holds) and slides
+       * around the circle to the band edge on its own side — minimally, and
+       * deterministically, so the sky is still fixed for a given viewport.
+       */
+      const limit = oy < 0 ? safeTop : safeBottom;
+      if (Math.abs(oy) > limit) {
+        oy = Math.sign(oy) * Math.max(limit, 0);
+        ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(radius * radius - oy * oy, 0));
+      }
       const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
       const div = document.createElement("div");
       div.className = "minisys" + (settle ? " settle" : "");
