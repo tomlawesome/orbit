@@ -107,6 +107,12 @@ COPY --from=builder --chown=orbit:orbit /opt/orbit/drizzle ./drizzle
 # bare-import scan), so no web node_modules is copied. Inert until #411's
 # composite entry dispatches to it.
 COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
+# The output is ESM but sits under the Next standalone's package.json, which
+# has no "type" field — without this marker Node reparses every file with a
+# MODULE_TYPELESS_PACKAGE_JSON warning. Root-owned data file, like VERSION.
+RUN printf '{"type":"module"}\n' > ./web/package.json \
+  && chown root:root ./web/package.json \
+  && chmod 0444 ./web/package.json
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
