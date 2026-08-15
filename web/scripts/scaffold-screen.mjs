@@ -71,7 +71,9 @@ function bodyMarkupOf(html, source) {
   const body = html.match(/<body>([\s\S]*)<\/body>/);
   if (!body) throw new Error(`${source}: no <body> found`);
 
-  const markup = body[1].replace(/<script>[\s\S]*?<\/script>/g, "").trim();
+  // Case-insensitive and attribute-tolerant (js/bad-tag-filter): the mockups
+  // are our own lowercase files, but a filter that misses <SCRIPT> is wrong.
+  const markup = body[1].replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "").trim();
 
   // Svelte reads { and } as template expressions. No mockup markup uses them
   // today; if one ever does it must be escaped deliberately, not discovered as
@@ -88,7 +90,7 @@ function bodyMarkupOf(html, source) {
 
 /** The mockup's own <script> contents, concatenated in document order. */
 function scriptOf(html, source) {
-  const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const blocks = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)];
   if (!blocks.length) throw new Error(`${source}: no <script> block found`);
   return blocks.map((block) => block[1]).join("\n");
 }
