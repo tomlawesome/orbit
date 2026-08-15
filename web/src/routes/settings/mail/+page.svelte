@@ -15,6 +15,9 @@
    */
   let { data } = $props();
   const relay = $derived(data.relay);
+  const failures = $derived(data.failures ?? []);
+  const shortDate = (value) =>
+    new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 </script>
 
 <svelte:head>
@@ -122,6 +125,15 @@
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
   <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+  {#if failures.length}
+    <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
+    <div class="failures">
+      <h4>arrived, but could not be read</h4>
+      {#each failures as failure (failure.id)}
+        <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{failure.message}</span></div>
+      {/each}
+    </div>
+  {/if}
   <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
   outbound reminder email remains configured by your administrator</div>
 </div></div>
