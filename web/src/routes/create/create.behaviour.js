@@ -52,6 +52,9 @@ export function mountCreate() {
   on(nameInput, "input", () => {
     if (nameInput.value.trim().length >= 3) reveal();
   });
+  /* The heading arrives pre-filled ("New Entry", owner 2026-08-15): first
+     focus selects it whole, so typing replaces rather than appends. */
+  on(nameInput, "focus", () => nameInput.select());
 
   /* ---- the drop target ---- */
 
