@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
  * through the same command API the product uses, then completed through the
  * v19 view, with the new orbit visible back on home.
  */
-async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string }> {
+async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
   return await page.evaluate(async () => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
@@ -51,7 +51,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string }> {
       },
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
-    return { itemId };
+    return { itemId, householdId };
   });
 }
 
@@ -92,17 +92,17 @@ test("a stale version is refused and the view says so", async ({ page }) => {
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
   await expect(page).toHaveURL(/\/home$/);
 
-  const { itemId } = await seedHouseholdWithItem(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
   await page.goto(`/item/${itemId}`);
   await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
 
   // Someone else reschedules while our view is open (same command API,
   // fresh version) — our copy is now stale.
-  await page.evaluate(async () => {
+  await page.evaluate(async ({ seededHouseholdId, seededItemId }) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
     const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin" })).json()).workspace;
-    const household = workspace.households.find((one: { name: string }) => one.name === "Actions Proving Ground");
-    const item = household.items[0];
+    const household = workspace.households.find((one: { id: string }) => one.id === seededHouseholdId);
+    const item = household.items.find((one: { id: string }) => one.id === seededItemId);
     const response = await fetch("/api/workspace/commands", {
       method: "POST",
       credentials: "same-origin",
@@ -117,7 +117,7 @@ test("a stale version is refused and the view says so", async ({ page }) => {
       }),
     });
     if (!response.ok) throw new Error(`rival reschedule failed: ${response.status}`);
-  });
+  }, { seededHouseholdId: householdId, seededItemId: itemId });
 
   await page.locator(".acts button", { hasText: /^reschedule$/ }).click();
   await page.locator("#a-due").fill("2026-12-01");
