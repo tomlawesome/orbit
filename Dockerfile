@@ -10,6 +10,9 @@ ENTRYPOINT ["node", "/opt/orbit/scripts/generate-vapid.mjs"]
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
+# web/ is a workspace member (#419): one root lockfile covers both packages,
+# so the frozen install below materialises web/node_modules too.
+COPY web/package.json ./web/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
@@ -27,6 +30,20 @@ RUN pnpm build
 # already gates this file in CI. See scripts/bundle-orbit-cli.mjs for the
 # deterministic flag set and docs/engine-events.md, "In-container engine
 # invocation", for the resulting artifact's invocation contract.
+# Builds the v19 front end (web/, SvelteKit + adapter-node) into its
+# self-contained server output (#449). Its own stage off `deps`, like
+# cli-builder: it needs neither the Next.js build nor its output. The
+# adapter externalises whatever web/package.json lists under `dependencies`,
+# which is why web/ keeps everything in devDependencies — the output below
+# must import only node: builtins, because the runner copies it WITHOUT any
+# node_modules. Nothing serves this output until the composite entry lands
+# (#411 step 2); in this image it is carried, inert.
+FROM base AS web-builder
+COPY --from=deps /opt/orbit/node_modules ./node_modules
+COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
+COPY . .
+RUN pnpm --filter orbit-web build
+
 FROM base AS cli-builder
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY . .
@@ -85,6 +102,11 @@ COPY --from=builder --chown=orbit:orbit /opt/orbit/public ./public
 COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/standalone ./
 COPY --from=builder --chown=orbit:orbit /opt/orbit/.next/static ./.next/static
 COPY --from=builder --chown=orbit:orbit /opt/orbit/drizzle ./drizzle
+# The v19 front end's server output (#449): index.js + handler.js + client/.
+# Self-contained (node: builtins only — asserted by the closure evidence's
+# bare-import scan), so no web node_modules is copied. Inert until #411's
+# composite entry dispatches to it.
+COPY --from=web-builder --chown=orbit:orbit /opt/orbit/web/build ./web
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
 COPY --from=builder --chown=orbit:orbit /opt/orbit/scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --from=builder --chown=root:root /opt/orbit/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
