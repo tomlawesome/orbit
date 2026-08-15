@@ -94,7 +94,12 @@ export function mountHome({ galaxy, primary }) {
        clamp used to apply, expressed as a radius so it can bound one instead
        of redirecting it. */
     const reachOn = (angle) => {
-      const rx = w / 2 + 40, ry = Math.max(120, h / 2 - 155);
+      /* The top of the sky is busier than the bottom — the north-star create
+         handle and the account row live there — so upward bearings get 60px
+         more clearance (owner-found: a constellation squashed behind the
+         handle, 2026-08-15). */
+      const rx = w / 2 + 40;
+      const ry = Math.max(80, h / 2 - (Math.sin(angle) < 0 ? 215 : 155));
       const c = Math.cos(angle), sn = Math.sin(angle);
       return 1 / Math.hypot(c / rx, sn / ry);
     };
@@ -126,7 +131,10 @@ export function mountHome({ galaxy, primary }) {
         const inner = a.radius <= z.radius ? a : z;
         const outer = inner === a ? z : a;
         inner.radius = Math.max(keepOut, inner.radius - push);
-        outer.radius = outer.radius + push;
+        /* Capped: an uncapped push could shove the outer constellation past
+           the visible band — the other half of the trapped-behind-the-handle
+           bug. */
+        outer.radius = Math.min(outer.radius + push, reachOn(outer.angle) + 40);
       }
     }
 
