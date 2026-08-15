@@ -358,9 +358,9 @@
   .callout.has-docs .chip{display:inline-block}
   .callout .chip:hover{border-color:var(--accent)}
   /* POL-7: restored orbit */
-  #b-mot.restored{transition:transform 1.6s cubic-bezier(.3,.6,.2,1);
+  #b-closest.restored{transition:transform 1.6s cubic-bezier(.3,.6,.2,1);
                   transform:translate(28.2px,-99.7px);animation:none}
-  #b-mot.restored circle{fill:var(--ok)!important;transition:fill 1.6s}
+  #b-closest.restored circle{fill:var(--ok)!important;transition:fill 1.6s}
   .comet{stroke:var(--ok);stroke-width:2;stroke-linecap:round;opacity:0}
   .comet.fly{animation:comet 1.6s ease-out 1}
   @keyframes comet{0%{opacity:.7;stroke-dashoffset:110}100%{opacity:0;stroke-dashoffset:0}}

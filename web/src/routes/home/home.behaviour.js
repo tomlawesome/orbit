@@ -277,7 +277,7 @@ export function mountHome({ galaxy, primary }) {
     dial.style.animation = "";
   }
   function restoreOrbit(){
-    document.getElementById("b-mot").classList.add("restored");
+    document.getElementById("b-closest").classList.add("restored");
     const comet = document.getElementById("comet");
     comet.classList.remove("fly"); void comet.getBBox; comet.classList.add("fly");
   }

@@ -1,7 +1,9 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { mountHome } from "./home.behaviour.js";
-  import { readGalaxy } from "$lib/data/workspace.js";
+  import { readHome } from "$lib/data/workspace.js";
+  import { dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
+  import { money } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import "./home.css";
@@ -23,24 +25,99 @@
    */
   const DESK = "(min-width: 901px)";
 
+  let view = $state(null);
+
+  /* Everything below the chrome is the view-model (#451): the same transform
+     the unit tests pin renders the dial, the manifest and the palette. */
+  const bodies = $derived(
+    view ? dialBodiesOf(view.household, { suggestions: view.suggestions, today: view.today }) : [],
+  );
+  const groups = $derived(
+    view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
+  );
+  const initials = $derived(
+    (view?.user?.displayName ?? "")
+      .split(/\s+/)
+      .map((word) => word[0] ?? "")
+      .join("")
+      .slice(0, 2)
+      .toUpperCase(),
+  );
+
+  /* The month ring: positions are the design's own (hand-nudged a few px off
+     the pure circle, kept verbatim); the TEXT walks with the real date, the
+     current month at 12 o'clock (POL-3). */
+  const MONTH_POS = [
+    [190, 31], [271, 53], [330, 112], [352, 194], [330, 274], [271, 333],
+    [190, 355], [109, 333], [50, 274], [28, 194], [50, 112], [109, 53],
+  ];
+  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const monthLabels = $derived(
+    MONTH_POS.map(([x, y], k) => ({
+      x, y,
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12],
+    })),
+  );
+
+  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  const short = (iso) =>
+    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  const period = (months) => (months === 12 ? "1 year" : months === 6 ? "6 months" : `${months} months`);
+  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
+  const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok" };
+
+  const point = (deg, radius) => [
+    Math.round((190 + Math.cos((deg * Math.PI) / 180) * radius) * 10) / 10,
+    Math.round((190 + Math.sin((deg * Math.PI) / 180) * radius) * 10) / 10,
+  ];
+  /* A trail rides just behind the body on its own orbit (suggestions: just
+     ahead) — the arc the design drew for everything close to the sun. */
+  const trailPath = (b) => {
+    const angle = b.days - 90;
+    const [from, to] = b.suggestion ? [angle + 3, angle + 7] : [angle - 7, angle - 3];
+    const [x1, y1] = point(from, b.placement.radius);
+    const [x2, y2] = point(to, b.placement.radius);
+    return `M ${x1} ${y1} A ${b.placement.radius} ${b.placement.radius} 0 0 1 ${x2} ${y2}`;
+  };
+  const trailStroke = (b) =>
+    b.suggestion ? "var(--upcoming)" : b.overdue ? "var(--overdue)" : "var(--warm)";
+  const trailed = $derived(
+    bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
+  );
+  /* The dotted accent line strings the next three routine services together. */
+  const constellationPoints = $derived(
+    bodies
+      .filter((b) => !b.suggestion && b.kind === "service")
+      .slice(0, 3)
+      .map((b) => `${b.placement.x},${b.placement.y}`)
+      .join(" "),
+  );
+  const closest = $derived(bodies.find((b) => b.closest) ?? null);
+  const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
+  const crescent = (b) =>
+    `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
+
   onMount(() => {
     const query = window.matchMedia(DESK);
     let teardown = null;
     let disposed = false;
-    let galaxy = null;
-    let primary = null;
     const sync = () => {
       teardown?.();
       /* Tear the old dialect down before standing the new one up. */
-      teardown = query.matches ? mountHome({ galaxy, primary }) : mountPocket();
+      teardown = query.matches
+        ? mountHome({ galaxy: view.galaxy, primary: view.primary })
+        : mountPocket();
     };
-    /* The galaxy comes through the seam (#446), live since #451. onMount must
-       stay synchronous — an async callback's return value is discarded, which
+    /* The home view comes through the seam, live (#451). onMount must stay
+       synchronous — an async callback's return value is discarded, which
        would leak every listener the teardown exists to remove — so the read
-       resolves into a closure and mounting follows it. */
-    readGalaxy().then((data) => {
+       resolves into a closure and mounting follows it, after tick() has put
+       the data-driven markup in the document for the behaviour to bind. */
+    readHome().then(async (data) => {
       if (disposed) return;
-      ({ galaxy, primary } = data);
+      view = data;
+      await tick();
+      if (disposed) return;
       sync();
       query.addEventListener("change", sync);
     });
@@ -70,9 +147,10 @@
 <div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
 
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">TL</button>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>Tom Lawson</b><span id="who-role">Lawson Home · owner</span></div>
+  <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
+    >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
   <nav>
     <a href="#">Due next</a>
     <a href="#">Documents</a>
@@ -168,7 +246,7 @@
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
       </g>
       <g class="celestial">
-        <polyline points="175.8,140 214.9,127.5 256.6,151.9" fill="none"
+        <polyline points={constellationPoints} fill="none"
                   stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
                   stroke-dasharray="1 5" stroke-linecap="round"/>
       </g>
@@ -188,58 +266,99 @@
         <line x1="60.1" y1="115" x2="66.2" y2="118.5"/><line x1="115" y1="60.1" x2="118.5" y2="66.2"/>
       </g>
       <g font-size="9" fill="var(--chart-ink)" text-anchor="middle">
-        <text x="190" y="31" class="now-month" data-polish="POL-3">AUG</text><text x="271" y="53">SEP</text>
-        <text x="330" y="112">OCT</text><text x="352" y="194">NOV</text>
-        <text x="330" y="274">DEC</text><text x="271" y="333">JAN</text>
-        <text x="190" y="355">FEB</text><text x="109" y="333">MAR</text>
-        <text x="50" y="274">APR</text><text x="28" y="194">MAY</text>
-        <text x="50" y="112">JUN</text><text x="109" y="53">JUL</text>
+        {#each monthLabels as m, k (k)}
+          {#if k === 0}<text x={m.x} y={m.y} class="now-month" data-polish="POL-3">{m.label}</text>
+          {:else}<text x={m.x} y={m.y}>{m.label}</text>{/if}
+        {/each}
       </g>
 
       <path d="M190 38 l5.5 9 h-11 Z" style="fill:var(--accent)"/>
 
       <g fill="none" stroke-linecap="round">
-        <path d="M 170.5 141.8 A 52 52 0 0 1 173.2 140.9" stroke="var(--overdue)" stroke-opacity=".5" stroke-width="2"/>
-        <path d="M 200.3 125.0 A 66 66 0 0 1 204.5 125.7" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
-        <path d="M 207.4 125.0 A 67 67 0 0 1 211.5 126.0" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
-        <path d="M 251.3 143.8 A 77 77 0 0 1 253.5 146.5" stroke="var(--upcoming)" stroke-opacity=".45" stroke-width="2"/>
+        {#each trailed as b (b.id)}
+          <path d={trailPath(b)} stroke={trailStroke(b)}
+                stroke-opacity={b.suggestion ? ".45" : ".5"} stroke-width="2"/>
+        {/each}
       </g>
 
-      <line data-polish="POL-7" id="comet" class="comet" x1="207.9" y1="126.7" x2="236.1" y2="27"
-            stroke-dasharray="110" stroke-dashoffset="110"/>
+      {#if closest}
+        <line data-polish="POL-7" id="comet" class="comet"
+              x1={closest.placement.x} y1={closest.placement.y}
+              x2={closest.placement.x + 28.2} y2={closest.placement.y - 99.7}
+              stroke-dasharray="110" stroke-dashoffset="110"/>
+      {/if}
       </g><!-- /chrome -->
       <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
       <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
-      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
 
-      <circle data-polish="POL-2" class="ping" cx="175.8" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
-      <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><circle id="b-overdue" cx="175.8" cy="140" r="6.5" class="breathe" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/></a>
-      <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="207.9" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><path d="M 207.9 121.5 A 5.2 5.2 0 0 1 207.9 131.9 Z" fill="rgba(0,0,0,.42)"/><circle cx="206.5" cy="128.2" r="1.7" fill="rgba(255,255,255,.4)"/></g></a>
-      <a class="body-link" data-body="i-boiler" data-title="Boiler service" data-t="T−22d" data-cost="~£120" href="#i-boiler"><g class="breathe"><circle cx="214.9" cy="127.5" r="6" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="214.2" cy="129.2" r="2" fill="rgba(255,255,255,.38)"/></g></a>
-      <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="246.1" cy="141.7" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="246.1" cy="141.7" r="6" style="fill:var(--accent)" opacity=".12"/></g></a>
-      <a class="body-link" data-body="i-chimney" data-title="Chimney sweep" data-t="T−61d" data-cost="~£90" href="#i-chimney"><g><circle cx="256.6" cy="151.9" r="5.5" style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/><circle cx="255.2" cy="152.7" r="1.9" fill="rgba(255,255,255,.38)"/></g></a>
-      <a class="body-link" data-body="i-smoke" data-title="Smoke alarm batteries" data-t="T−122d" data-cost="~£12" href="#i-smoke"><circle cx="268.9" cy="236.2" r="3.5" fill="url(#p-jade)"/></a>
+      {#if firstOverdue}
+        <circle data-polish="POL-2" class="ping" cx={firstOverdue.placement.x} cy={firstOverdue.placement.y}
+                r="8" fill="none" style="stroke:var(--overdue)"/>
+      {/if}
+      {#each bodies as b (b.id)}
+        {#if b.suggestion}
+          <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
+             data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"><g
+            ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
+                     style="fill:none;stroke:var(--accent);stroke-width:1.8"
+            /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
+                     style="fill:var(--accent)" opacity=".12"/></g></a>
+        {:else}
+          <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
+             data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
+             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"><g
+             id={b.closest ? "b-closest" : undefined}
+             class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
+            {#if b.paint === "ruby" || b.paint === "amber"}
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
+                      style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
+            {:else if b.paint === "sky"}
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
+                      style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
+            {:else if b.documentCount > 0}
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
+                      style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
+            {:else}
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="url(#p-jade)"/>
+            {/if}
+            {#if b.kind === "inspection"}<path d={crescent(b)} fill="rgba(0,0,0,.42)"/>{/if}
+            {#if b.kind === "renewal"}
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.57} style="fill:var(--bg)"/>
+              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.28} fill="url(#p-{b.paint})"/>
+            {/if}
+            {#if b.size >= 4}
+              <circle cx={b.placement.x - 0.2 * b.size} cy={b.placement.y + 0.25 * b.size}
+                      r={0.33 * b.size} fill="rgba(255,255,255,.38)"/>
+            {/if}
+          </g></a>
+        {/if}
+      {/each}
+      <!-- the asteroid field: distant, decorative, the design's own weather -->
       <g fill="url(#p-jade)">
-        <circle cx="239.4" cy="275.5" r="4"/></g><a class="body-link" data-body="i-svc" data-title="Car full service" data-t="T&#8722;161d" data-cost="~&pound;300" data-docs="2" href="#manifest-top"><circle cx="199.1" cy="294.3" r="6.5" style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/><circle cx="198.9" cy="292.4" r="2.2" fill="rgba(255,255,255,.4)"/></a><g style="fill:var(--ok)"></g>
-      <g fill="url(#p-jade)">
+        <circle cx="239.4" cy="275.5" r="4"/>
         <circle cx="152.0" cy="294.3" r="4"/><circle cx="102.6" cy="268.7" r="5"/><circle cx="103.7" cy="267.7" r="1.7" fill="rgba(255,255,255,.35)"/>
         <circle cx="70.0" cy="222.2" r="3.5"/><circle cx="62.2" cy="160.5" r="6"/><circle cx="62.2" cy="160.5" r="3.4" style="fill:var(--bg)"/><circle cx="62.2" cy="160.5" r="1.7"/>
         <circle cx="84.5" cy="101.5" r="4.5"/><circle cx="120.7" cy="65.1" r="5.5"/><path d="M 120.7 59.6 A 5.5 5.5 0 0 1 120.7 70.6 Z" fill="rgba(0,0,0,.42)"/>
         <circle cx="157.0" cy="47.2" r="3.5"/>
       </g>
-      <g class="belt" aria-hidden="true">
-        <ellipse cx="199.1" cy="294.3" rx="13.5" ry="4.6" transform="rotate(-24 199.1 294.3)"
-                 fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
-      </g>
+      {#each bodies.filter((b) => b.documentCount > 0 && b.paint === "jade") as b (b.id)}
+        <g class="belt" aria-hidden="true">
+          <ellipse cx={b.placement.x} cy={b.placement.y} rx="13.5" ry="4.6"
+                   transform="rotate(-24 {b.placement.x} {b.placement.y})"
+                   fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
+        </g>
+      {/each}
     </svg>
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
         <input id="explore" placeholder="explore your world" aria-label="Search items and documents">
         <div class="palette" data-polish="POL-9" id="palette">
-          <div><b>Car MOT — Volvo V60</b> <small>· T−16d</small></div>
-          <div><b>Boiler service</b> <small>· T−22d</small></div>
-          <div class="act">→ complete "Boiler service"</div>
+          {#each (groups?.attention ?? []).filter((r) => r.days >= 0).slice(0, 2) as row (row.id)}
+            <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
+          {/each}
+          {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
           <div class="act">→ add an item</div>
         </div>
       </div>
@@ -247,45 +366,52 @@
   </div>
 
     <div class="manifest" id="manifest-top">
-    <div class="group">
-      <h3>Needs attention <span class="closest">· closest approach — Car MOT · T−16d</span></h3>
-      <a class="item" id="i-gutter" href="/item/i-gutter">
-        <span class="dot" style="background:var(--overdue)"></span>
-        <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150</span></div>
-        <div class="t over">T+16d<small>28 Jul</small></div>
-      </a>
-      <a class="item" id="i-mot" href="/item/i-mot">
-        <span class="dot ter" style="color:var(--warm)"></span>
-        <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
-        <div class="t soon">T−16d<small>29 Aug</small></div>
-      </a>
-      <a class="item" id="i-boiler" href="/item/i-boiler">
-        <span class="dot" style="background:var(--warm)"></span>
-        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120</span></div>
-        <div class="t soon">T−22d<small>04 Sep</small></div>
-      </a>
-    </div>
-    <div class="group">
-      <h3>Suggested from your documents</h3>
-      <div class="item suggest" id="i-insurance">
-        <span class="dot sug" style="color:var(--accent)"></span>
-        <div class="body"><b>Home insurance renewal</b><span>Found in policy-schedule.pdf · renews 02 Oct · ~£400</span></div>
-        <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
-      </div>
-    </div>
-    <div class="group">
-      <h3>Later this year</h3>
-      <a class="item" id="i-chimney" href="/item/i-chimney">
-        <span class="dot" style="background:var(--upcoming)"></span>
-        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90</span></div>
-        <div class="t up">T−61d<small>12 Oct</small></div>
-      </a>
-      <a class="item" id="i-smoke" href="/item/i-smoke">
-        <span class="dot" style="background:var(--ok)"></span>
-        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12</span></div>
-        <div class="t ok">T−122d<small>12 Dec</small></div>
-      </a>
-    </div>
+    {#if groups}
+      {#snippet manifestRow(row)}
+        <a class="item" id={row.id} href="/item/{row.id}">
+          {#if row.kind === "inspection"}
+            <span class="dot ter" style="color:var({BAND_VAR[row.band]})"></span>
+          {:else}
+            <span class="dot" style="background:var({BAND_VAR[row.band]})"></span>
+          {/if}
+          <div class="body"><b>{row.title}</b><span>{[
+            row.section,
+            row.recurrenceMonths ? `orbital period ${period(row.recurrenceMonths)}` : null,
+            row.provider,
+            row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
+          ].filter(Boolean).join(" · ")}</span></div>
+          {#if row.dueDate}
+            <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
+          {:else}
+            <div class="t ok">—</div>
+          {/if}
+        </a>
+      {/snippet}
+      {#if groups.attention.length}
+        <div class="group">
+          <h3>Needs attention {#if groups.closest}<span class="closest">· closest approach — {groups.closest.title} · {tlabel(groups.closest)}</span>{/if}</h3>
+          {#each groups.attention as row (row.id)}{@render manifestRow(row)}{/each}
+        </div>
+      {/if}
+      {#if groups.suggestions.length}
+        <div class="group">
+          <h3>Suggested from your documents</h3>
+          {#each groups.suggestions as s (s.id)}
+            <div class="item suggest" id={s.id}>
+              <span class="dot sug" style="color:var(--accent)"></span>
+              <div class="body"><b>{s.title}</b><span>Found in {s.sourceDocument} · renews {short(s.renewsOn)} · {money(s.costMinor, s.currency, true)}</span></div>
+              <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      {#if groups.later.length}
+        <div class="group">
+          <h3>Later this year</h3>
+          {#each groups.later as row (row.id)}{@render manifestRow(row)}{/each}
+        </div>
+      {/if}
+    {/if}
   </div>
 </div>
 
