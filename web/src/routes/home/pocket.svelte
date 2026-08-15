@@ -1,5 +1,7 @@
 <script>
   import "./pocket.css";
+  import { dialBodiesOf, hashId, manifestGroupsOf } from "$lib/data/chart.js";
+  import { money } from "$lib/format.js";
 
   /**
    * Home in the mobile dialect (CON-10, #430) — the dial owns the width, the
@@ -11,12 +13,70 @@
    * chooses between them in CSS, because selecting in JS would flash the wrong
    * one and would break the non-JS fallback. See pocket.css for the switch.
    *
-   * Lifted from design/family/mobile-home.html and owned here from that point
-   * on. Its rows and bodies are still the mockup's own data.
+   * Lifted from design/family/mobile-home.html; live since #451 — the same
+   * view-model the desk dialect renders, through the same laws. A thumb gets
+   * fewer, bigger bodies: the overdue one, the closest approach, and anything
+   * carrying documents on a wide orbit; the rest live in the rows.
    *
    * Markup only: +page.svelte mounts whichever dialect the viewport selected,
    * so the hidden one never binds listeners.
    */
+  let { view = null } = $props();
+
+  const bodies = $derived(
+    view ? dialBodiesOf(view.household, { suggestions: view.suggestions, today: view.today }) : [],
+  );
+  const pocketBodies = $derived(
+    bodies.filter((b) => b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
+  );
+  const groups = $derived(
+    view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
+  );
+  const others = $derived(
+    view
+      ? Object.entries(view.galaxy)
+          .filter(([id]) => id !== view.primary)
+          .map(([id, hh]) => {
+            const angle = (hashId(id) / 0xffffffff) * Math.PI * 2;
+            return {
+              id,
+              name: hh.name,
+              tone: hh.planets[0]?.[3] ?? "--ok",
+              dx: Math.round((10 + Math.cos(angle) * 5.5) * 10) / 10,
+              dy: Math.round((10 + Math.sin(angle) * 5.5) * 10) / 10,
+            };
+          })
+      : [],
+  );
+  const initials = $derived(
+    (view?.user?.displayName ?? "")
+      .split(/\s+/)
+      .map((word) => word[0] ?? "")
+      .join("")
+      .slice(0, 2)
+      .toUpperCase(),
+  );
+  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const QUARTER_POS = [[190, 26], [356, 196], [190, 364], [24, 196]];
+  const quarters = $derived(
+    QUARTER_POS.map(([x, y], k) => ({
+      x, y,
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
+    })),
+  );
+  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
+  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  const short = (iso) =>
+    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
+  const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  const sheetMeta = (b) =>
+    [
+      tlabel(b),
+      b.dueDate ? short(b.dueDate) : null,
+      b.costMinor ? money(b.costMinor, b.currency, b.costIsEstimate) : null,
+      b.documentCount > 0 ? `◆ ${b.documentCount} documents` : null,
+    ].filter(Boolean).join(" · ");
 </script>
 
 <div class="pocket">
@@ -84,7 +144,7 @@
 <div class="mpage">
   <div class="mtop">
     <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
-    <div class="morb">TL</div>
+    <div class="morb">{initials}</div>
   </div>
   <div class="mdial">
     <svg viewBox="0 0 380 380">
@@ -92,32 +152,37 @@
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
       <g font-size="11" fill="var(--ink-faint)" text-anchor="middle" font-family="JetBrains Mono,monospace">
-        <text x="190" y="26">AUG</text><text x="356" y="196">NOV</text>
-        <text x="190" y="364">FEB</text><text x="24" y="196">MAY</text></g>
+        {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
-      <circle cx="175.8" cy="140" r="8" style="fill:var(--overdue)" data-sheet-title="Gutter clearing" data-sheet-meta="T+16d &middot; 28 Jul &middot; ~£150"/>
-      <circle cx="212" cy="126" r="7" style="fill:var(--warm)" data-sheet-title="Car MOT — Volvo V60" data-sheet-meta="T&#8722;16d &middot; 29 Aug &middot; £54.85 &middot; ◆ 2 documents"/>
-      <circle cx="199.1" cy="294.3" r="7.5" style="fill:var(--ok)" data-sheet-title="Car full service" data-sheet-meta="T&#8722;161d &middot; ~£300 &middot; ◆ 2 documents"/>
-      <ellipse cx="199.1" cy="294.3" rx="14" ry="5" transform="rotate(-24 199.1 294.3)"
-               fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+      {#each pocketBodies as b (b.id)}
+        <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
+                data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}/>
+        {#if b.documentCount > 0 && b.paint === "jade"}
+          <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
+                   transform="rotate(-24 {b.placement.x} {b.placement.y})"
+                   fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+        {/if}
+      {/each}
       <g style="fill:var(--ok)"><circle cx="322" cy="220" r="5"/><circle cx="106" cy="297" r="5"/>
       <circle cx="55" cy="165" r="5"/><circle cx="134" cy="64" r="5"/></g>
     </svg>
   </div>
   <div class="skies">
-    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)" /><circle cx="15" cy="6" r="2" style="fill:var(--warm)" opacity=".6"/></svg>Seaside Cottage</div>
-    <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx="6" cy="14" r="2" style="fill:var(--ok)" opacity=".6"/></svg>Mum &amp; Dad&rsquo;s</div>
+    {#each others as hh (hh.id)}
+      <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
+    {/each}
   </div>
   <div class="msearch"><input placeholder="explore your world" readonly></div>
+  {#if groups?.attention.length}
   <div class="mgroup"><h3>NEEDS ATTENTION</h3>
-    <div class="mitem"><span class="dot" style="background:var(--overdue)"></span>
-      <div class="flex"><b>Gutter clearing</b><span>Home &middot; ~£150</span></div>
-      <div class="mt" style="color:var(--overdue)">T+16d<small>28 Jul</small></div></div>
-    <div class="mitem"><span class="dot" style="background:var(--warm)"></span>
-      <div class="flex"><b>Car MOT — Volvo V60</b><span>Vehicles &middot; £54.85</span></div>
-      <div class="mt" style="color:var(--warm)">T&#8722;16d<small>29 Aug</small></div></div>
+    {#each groups.attention as row (row.id)}
+      <div class="mitem"><span class="dot" style="background:var({BAND_VAR[row.band]})"></span>
+        <div class="flex"><b>{row.title}</b><span>{[row.section, row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null].filter(Boolean).join(" · ")}</span></div>
+        <div class="mt" style="color:var({BAND_VAR[row.band]})">{tlabel(row)}<small>{row.dueDate ? short(row.dueDate) : ""}</small></div></div>
+    {/each}
   </div>
+  {/if}
 </div>
 <div class="sheet" id="sheet">
   <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
