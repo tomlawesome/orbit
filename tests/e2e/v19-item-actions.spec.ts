@@ -30,7 +30,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string }> {
         memberCount: 1,
         canManage: true,
         onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home" }],
+        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
         items: [],
       },
     });
