@@ -24,7 +24,7 @@
 </svelte:head>
 
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-<g fill="#e9edf8"><circle cx="173.1" cy="785.9" r="0.56" opacity="0.26"/>
+<g fill="var(--star-far, #e9edf8)"><circle cx="173.1" cy="785.9" r="0.56" opacity="0.26"/>
       <circle cx="691.4" cy="78.2" r="0.46" opacity="0.26"/>
       <circle cx="867.1" cy="486.0" r="0.61" opacity="0.24"/>
       <circle cx="771.7" cy="62.0" r="0.76" opacity="0.16"/>

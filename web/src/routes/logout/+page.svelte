@@ -1,4 +1,5 @@
 <script>
+  import Grain from "$lib/Grain.svelte";
   import { onMount } from "svelte";
   import "./logout.css";
   import { mountSunsetSky } from "./sky.js";
@@ -181,10 +182,5 @@
   <!-- the ask lives inside the ring, directly beneath the name -->
   <div class="gate-wrap"><a class="gate" href="/login">Sign in</a></div>
 </div></div>
-<svg class="grain" width="100%" height="100%"><filter id="gr">
-  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
-  <feColorMatrix type="saturate" values="0"/>
-  <feComponentTransfer><feFuncA type="linear" slope="0.08"/></feComponentTransfer>
-  <feComposite operator="in" in2="SourceGraphic"/>
-</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+<Grain slope={0.08} />
 <div class="vignette"></div>

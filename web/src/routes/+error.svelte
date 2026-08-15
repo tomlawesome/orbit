@@ -1,4 +1,5 @@
 <script>
+  import Grain from "$lib/Grain.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { mountGravityWell } from "./gravity-well.js";
@@ -176,12 +177,7 @@
 <div class="line-a">This page fell into a gravity well.</div>
 <div class="line-b"><a href="/">plot a course home &rarr;</a></div>
 
-<svg class="grain" width="100%" height="100%"><filter id="gr">
-  <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
-  <feColorMatrix type="saturate" values="0"/>
-  <feComponentTransfer><feFuncA type="linear" slope="0.09"/></feComponentTransfer>
-  <feComposite operator="in" in2="SourceGraphic"/>
-</filter><rect width="100%" height="100%" filter="url(#gr)"/></svg>
+<Grain slope={0.09} />
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 45%,transparent 42%,rgba(0,0,0,.5) 100%)"></div>
 {:else}
