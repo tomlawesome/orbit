@@ -454,23 +454,26 @@ describe("installer semantic UI", () => {
   // Quarantined: see the comment on the sibling "text entry is interrupted
   // by a signal" test above — same investigation, same issue (#284).
   /*
-   * This one FAILS, and it is telling the truth (#441).
+   * This one FAILS, and what it is telling us is narrower than it first looked
+   * (#441).
    *
-   * It is not a timing problem. With TERM=xterm, so the raw single-key branch
-   * is genuinely taken, and a 1.5-second delay before the signal - twenty
-   * times longer than any plausible setup - installer_ui_select still exits
-   * 143, the default SIGTERM disposition. It installs a trap at
-   * installer-ui.sh:385 and then does not honour it, so an interrupted menu
-   * leaves the caller's terminal in noncanonical mode with echo off.
+   * It is not a timing race: with TERM=xterm, so the raw single-key branch is
+   * genuinely taken, a 1.5-second delay before the signal still produces 143.
    *
-   * The sibling text-entry test passes, so installer_ui_read_value's identical
-   * -looking trap does work. Whatever differs is in the menu path.
+   * But it is also not, as I first concluded, installer_ui_select ignoring its
+   * own trap. Instrumenting the function shows the trap installed in the right
+   * process, and in a plainer invocation it returns rather than dying. The 143
+   * reproduces only in THIS shape - the `if ...; then ...; else ...; fi; wait`
+   * wrapper below - so the harness is implicated, not just the widget.
    *
-   * Marked it.fails rather than skipped. The distinction matters: skipping
-   * stops looking, which is how this stayed invisible for months, whereas
-   * it.fails keeps the assertion running and turns the suite RED the moment
-   * #441 is fixed - so the fix cannot land without someone deleting this
-   * marker and reading the test.
+   * What does look like a real inconsistency: in the plain shape the function
+   * returns 1, where installer_ui_read_value returns 130 for the same
+   * interruption. That is what #441 now tracks.
+   *
+   * Marked it.fails rather than skipped. Skipping stops looking, which is how
+   * this sat unexamined for months; it.fails keeps the assertion running and
+   * turns the suite red the moment the behaviour changes, so nobody can alter
+   * it silently.
    */
   it.fails("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
     const transcript = join(mkdtempSync(join(tmpdir(), "orbit-pty-")), "typescript");
