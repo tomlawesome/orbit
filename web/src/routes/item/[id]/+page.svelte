@@ -108,21 +108,23 @@
    * carry the from-document mark), and acceptance goes through the
    * reviewed-intake protocol with one operation id kept across retries.
    */
-  let sform = $state(null);
+  /* Initialised synchronously: the first render must already know which
+     branch it is — an effect lands after render, and the item branch reads
+     fields a suggestion does not have. */
+  let sform = $state(
+    data.item?.suggestion
+      ? {
+          title: data.item.proposal.title ?? "Forwarded email",
+          provider: data.item.proposal.provider ?? "",
+          reference: data.item.proposal.reference ?? "",
+          cost: data.item.proposal.costMinor != null ? (data.item.proposal.costMinor / 100).toFixed(2) : "",
+          dueDate: data.item.proposal.dueDate ?? "",
+          recurrenceMonths: data.item.proposal.recurrenceMonths ?? "",
+        }
+      : null,
+  );
   let acceptArmedDismiss = $state(false);
   let acceptOpId = null;
-  $effect(() => {
-    if (item?.suggestion && !sform) {
-      sform = {
-        title: item.proposal.title ?? "Forwarded email",
-        provider: item.proposal.provider ?? "",
-        reference: item.proposal.reference ?? "",
-        cost: pounds(item.proposal.costMinor),
-        dueDate: item.proposal.dueDate ?? "",
-        recurrenceMonths: item.proposal.recurrenceMonths ?? "",
-      };
-    }
-  });
   const marked = (field) => Boolean(item?.fieldEvidence?.[field]);
   async function accept() {
     busy = true;
@@ -259,7 +261,7 @@
           unaccepted suggestion simply expires and is purged</div>
       </div>
     </article>
-  {:else}
+  {:else if !item.suggestion}
   <article class="glass item-card">
     <h2>{item.title}</h2>
     <div class="sub">{[item.section, item.subtype].filter(Boolean).join(" · ")}</div>
