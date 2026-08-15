@@ -12,6 +12,23 @@ services:
       # The disposable provider generates a new self-signed certificate every
       # start. This override exists only in the acceptance overlay.
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      # The mail proving ground (#459): real IMAP collection from the
+      # disposable GreenMail sidecar below. The password and alias-secret
+      # files ride the mail overlay; GreenMail accepts any login (auth
+      # disabled), so the password value is irrelevant here. Outbound SMTP
+      # goes to the same sidecar — ingestion requires it configured.
+      IMAP_ENABLED: "true"
+      IMAP_HOST: orbit-greenmail
+      IMAP_PORT: "3993"
+      IMAP_USER: orbit-intake@in.orbit.test
+      IMAP_MAILBOX: INBOX
+      IMAP_TLS_SERVER_NAME: orbit-greenmail
+      IMAP_RECIPIENT_DOMAIN: in.orbit.test
+      IMAP_TRUSTED_RECIPIENT_HEADER: X-Orbit-Delivered-To
+      IMAP_ALIAS_CURRENT_GENERATION: "1"
+      IMAP_POLL_SECONDS: "30"
+      SMTP_HOST: orbit-greenmail
+      SMTP_PORT: "3025"
   orbit-oidc:
     build:
       context: ./tests/oidc
@@ -19,3 +36,17 @@ services:
       TEST_OIDC_ISSUER: https://orbit-oidc:4443/
     ports:
       - "127.0.0.1:4443:4443"
+
+  # The mail proving ground (#459): SMTP + IMAPS in one disposable container,
+  # so real messages with real attachments travel the real collection pipe.
+  # Test-only, like the OIDC provider above; auth disabled because every
+  # credential in this overlay is throwaway.
+  orbit-greenmail:
+    image: greenmail/standalone:2.1.5@sha256:8a2024725c7b1ce8f720644bccb6f237781992a8cbf283023446eb7d29326ad0
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.smtp -Dgreenmail.setup.test.imaps
+        -Dgreenmail.auth.disabled -Dgreenmail.hostname=0.0.0.0
+    ports:
+      # SMTP for the seeding spec, loopback only.
+      - "127.0.0.1:3025:3025"
