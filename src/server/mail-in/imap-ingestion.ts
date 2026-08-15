@@ -38,6 +38,13 @@ export type { ImapIngestionConfig };
 
 export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "retrying" | "exhausted" | "retention_backlog";
 
+/**
+ * How long a mail-in receipt (and its held suggestion) waits for review
+ * before expiring. Owner decision, 2026-08-15 (#434): 45 days, up from 30 —
+ * a forwarded document should survive a long holiday.
+ */
+export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
+
 export interface ImapProviderPreflightState {
   status: ImapPreflightStatus;
   smtp: "not_configured" | "available" | "provider_unavailable" | "unsafe_input";
@@ -859,7 +866,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
-          expiresAt: new Date(Date.now() + 30 * 86_400_000),
+          expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
           status: oversized ? "failed" : userId ? "processing" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : recipient.failureCode ?? "recipient_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
