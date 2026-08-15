@@ -67,13 +67,28 @@ function styleBlockOf(html, source) {
  * component so it can reach real data and real routes, while the markup it
  * drives stays untouched.
  */
+const SCRIPT_BLOCK = /<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi;
+
 function bodyMarkupOf(html, source) {
   const body = html.match(/<body>([\s\S]*)<\/body>/);
   if (!body) throw new Error(`${source}: no <body> found`);
 
-  // Case-insensitive and attribute-tolerant (js/bad-tag-filter): the mockups
-  // are our own lowercase files, but a filter that misses <SCRIPT> is wrong.
-  const markup = body[1].replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "").trim();
+  // Case-insensitive, attribute-tolerant on BOTH tags (end tags may carry
+  // whitespace and junk before ">"), and stripped to a fixed point so nested
+  // fragments cannot reassemble a tag one pass leaves behind. The inputs are
+  // our own mockups, but a tag filter that only works on polite input is
+  // wrong regardless of who writes the input (CodeQL js/bad-tag-filter,
+  // js/incomplete-multi-character-sanitization).
+  let markup = body[1];
+  let previous;
+  do {
+    previous = markup;
+    markup = markup.replace(SCRIPT_BLOCK, "");
+  } while (markup !== previous);
+  markup = markup.trim();
+  if (/<script\b/i.test(markup)) {
+    throw new Error(`${source}: a <script> tag survived stripping — refusing to emit it`);
+  }
 
   // Svelte reads { and } as template expressions. No mockup markup uses them
   // today; if one ever does it must be escaped deliberately, not discovered as
@@ -90,7 +105,7 @@ function bodyMarkupOf(html, source) {
 
 /** The mockup's own <script> contents, concatenated in document order. */
 function scriptOf(html, source) {
-  const blocks = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)];
+  const blocks = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)];
   if (!blocks.length) throw new Error(`${source}: no <script> block found`);
   return blocks.map((block) => block[1]).join("\n");
 }
