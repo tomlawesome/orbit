@@ -139,7 +139,7 @@ function todayOf(workspace) {
 /**
  * Everything the home screen renders (#451): the fixed sky, the primary
  * household (dial and manifest), any document suggestions (none from the live
- * API yet — #452), the signed-in user, and the date the chart reckons from.
+ * API yet — #454), the signed-in user, and the date the chart reckons from.
  */
 export async function readHome() {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
