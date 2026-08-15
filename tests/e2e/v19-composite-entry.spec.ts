@@ -20,14 +20,17 @@ test.describe("composite entry", () => {
     expect(session.authenticated).toBe(true);
   });
 
-  test("the v19 client assets come from the one origin", async ({ page }) => {
+  // #451: signed out, a v19 screen is a journey into login and back to the
+  // exact page — and once back, the client assets all arrive from this origin.
+  test("a signed-out visit lands in login and returns to the page it wanted", async ({ page }) => {
     const scriptResponses: number[] = [];
     page.on("response", (response) => {
       const url = new URL(response.url());
       if (url.pathname.startsWith("/_app/")) scriptResponses.push(response.status());
     });
-    const response = await page.goto("/home");
-    expect(response?.status()).toBe(200);
+    await page.goto("/home");
+    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    await expect(page).toHaveURL(/\/home$/);
     await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
     expect(scriptResponses.length).toBeGreaterThan(0);
     expect(scriptResponses.every((status) => status === 200)).toBe(true);
