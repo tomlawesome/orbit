@@ -573,6 +573,12 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Miami is ruled: day drops, dusk keeps on file** (owner): Miami day
+  is dropped outright. Miami dusk stays on file as a record — "it's a
+  no for now" — not in the release, not built, revisitable. Neither
+  enters the roster; #438 closes on this ruling. With atlas, hanami
+  and porcelain retired and Miami day dropped, the release ships
+  without a true light pack unless solarium is later admitted.
 - **Atlas and hanami are officially retired; solarium is reserved**
   (owner): both retire from the RELEASE — their code and files stay, but
   neither ships as a selectable pack in v1.3. Solarium's judgement is
