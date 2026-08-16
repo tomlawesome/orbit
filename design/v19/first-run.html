@@ -26,23 +26,59 @@
       logout plays the reverse — dawn to log in, dusk to log out. Ascend into
       your sky on arrival; descend into dusk on leaving."
 
-   SO THIS SHEET HOLDS FOUR SURFACES AND ONE ENGINE:
+   SECOND PASS (owner, §15 "the launch, second pass": "a great first pass!
+   I love it"), four rulings, all implemented here:
+     1. LOGOUT IS THE DIRECT REVERSAL OF LOGIN. The bespoke gentler descent is
+        gone. DOWN is now literally UP played backwards — one mirror function
+        drives speed, atmosphere, props and bloom off the ascent's own curves,
+        so the sun contracts, the limb rises back beneath you, the streaks
+        decelerate in reverse and the colours return from the dark to the
+        dawn. It reads a touch faster than the climb (4.1s against 4.8s), and
+        the returning dawn cools into DUSK over the last third — the family
+        rule still colours the destination surface, but the FLIGHT is the
+        ascent reversed, not a second animation.
+     2. THE REVEAL SLOWS. The end-of-flight bloom was a 0.6s flash; it is now
+        a 1.4s deliberate one — the sky takes the colour long before the core
+        does, the core grows on a slow curve, the shockwaves are halved, and
+        the canvas dissolves over 1.5s instead of 0.45s so the planets
+        CONDENSE OUT OF THE LIGHT (a 1.3s blur-and-contract) rather than
+        cutting in under it. Total time extended, as the owner allowed.
+     3. THE DWELL COMES BEFORE THE INSTRUMENT. The arrival now settles on the
+        BARE SKY: the planet symbols, the centre sun, the household's name,
+        and nothing else — no rings, no ticks, no months, no inbox orb, no
+        menu orb, no search, no north star, no scroll cue. Three seconds
+        there. THEN the instrument arrives in the family's own arrive style
+        (home.html's `arrive`: scale .16 → 1), the chrome fades up behind it,
+        and only then does the tour placeholder pop.
+     4. THE NEWCOMER'S ARRIVAL. A non-admin who is not the first user flies
+        the same launch and lands on the dial screen with NO DIAL: the #453
+        labelled sky (web/src/routes/home/+page.svelte's emptySky branch,
+        design/v19/home.html's renderGalaxy), every household a sub-system
+        with its label and leader, under the question "where do you belong?".
+
+   SO THIS SHEET HOLDS FIVE SURFACES AND ONE ENGINE:
      1. the LOGIN screen, reproduced (design/family/login.html) — the base
         layer, its own dawn, its own lockup, its own gate;
      2. the FIRST-RUN CARD floating over it, the login receded behind;
-     3. the FLIGHT — one canvas engine, run UP (3.6s, dawn → dark → home) or
-        DOWN (2.6s, dark → dusk → goodbye);
-     4. the landings — a painted home frame (ascent) and a dusk goodbye
-        surface (descent).
+     3. the FLIGHT — one canvas engine, run UP (4.8s, dawn → dark → home) or
+        DOWN (4.1s, the same flight mirrored, dark → dawn → dusk);
+     4. the landings — a painted home frame (ascent), staged bare-then-
+        instrument, and a dusk goodbye surface (descent);
+     5. the NEWCOMER's labelled sky, where the same climb sets down when you
+        belong to nothing yet.
 
-   WHAT IS CARRIED FORWARD from the first draft: name-your-first-system with
-   the CON-19 mark whose centre fills as you type; timezone and currency;
-   the section chips; the adrift road (§11 / #453). The housing changed —
-   per the ruling they now live on the login — and the section seed grew:
-   §15, same day, "we should see some sections, or the onboarding is a
-   horrible experience. Four might not even be enough." So Home, Vehicles,
-   Devices and Services arrive already ON, six more sit under them for a
-   tap, and "+ your own" still runs to the twelve ceiling.
+   WHAT THE FORM ASKS, after §15's "first-run asks three things only": a NAME,
+   a TIME ZONE and a CURRENCY. Nothing else. The section chips that stood here
+   through two drafts are gone — Home, Vehicles, Devices and Services are
+   applied from the defaults behind the scenes, said once in a quiet line, and
+   changed on the household screen after the tour. The CON-19 mark whose
+   centre fills as you type is carried forward unchanged.
+
+   AND WHAT IS ALREADY OUT THERE (§11 / #453, restyled in the same breath):
+   the adrift banner becomes a see-through card OFF TO THE LEFT led by the
+   count itself — "5 systems discovered in this universe already.." — and it
+   only exists once the first admin has been created. A fresh instance has
+   nothing to count and shows no card.
 
    COLOUR: the flight colour-matches the DEFAULT pack (star-chart) whatever
    pack the form is wearing — the owner's words say default theme, and the
@@ -53,10 +89,13 @@
    ROUTES (#410): the install leaves a household shell with
    `onboardingComplete: false`, and this screen completes it —
      POST /api/workspace/commands  { type:"household.setup",
-       householdId, name, timezone, currency, sections:[...] }
-   A second system from an empty sky uses `household.create` down the same
-   road; asking to join instead is
-     POST /api/households/{id}/join-requests   (§11, #453).
+       householdId, name, timezone, currency }
+   — sections are no longer in the payload the form composes; the command
+   applies the default set itself, so there is one place that decides what a
+   new household starts with. A second system from an empty sky uses
+   `household.create` down the same road; asking to join instead is
+     POST /api/households/{id}/join-requests   (§11, #453) — which is what
+   every row of the newcomer's card, and every constellation behind it, does.
 
    NOT YET RATIFIED, FLAGGED: there is no logout/goodbye screen anywhere in
    design/v19 or design/family. The dusk surface at the end of the descent is
@@ -281,34 +320,16 @@
                   transform:translateY(-50%) rotate(45deg);pointer-events:none}
   .pair{margin-bottom:13px}
 
-  /* the sections, as chips — create's vocabulary, one already seeded */
-  .chips{display:flex;flex-wrap:wrap;gap:8px}
-  .chips button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);
-                border:1px solid var(--line);border-radius:99px;padding:7px 14px;
-                cursor:pointer;letter-spacing:.02em}
-  .chips button:hover{color:var(--ink)}
-  .chips button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
-  .chips button.own{border-style:dashed}
-  .chips .add{border-style:dashed;color:var(--ink-faint)}
-  .chips .add:hover{color:var(--accent);border-color:var(--accent)}
-  #ownname{display:none;margin-top:10px;width:100%;background:var(--panel);
-           border:1px solid var(--accent);border-radius:9px;color:var(--ink);
-           font:12.5px var(--mono);padding:8px 12px}
-  #ownname.open{display:block}
-  #ownname:focus{outline:none}
-  /* the second row: sections offered, not chosen. Quieter pen than the
-     chosen row so the difference is visible at a glance, and a chip that is
-     taken simply crosses the line into the row above. */
-  .suggrow{display:flex;align-items:baseline;gap:10px;margin-top:9px}
-  .suggcap{flex:none;font:10px var(--mono);letter-spacing:.13em;color:var(--ink-faint);
-           text-transform:uppercase}
-  .suggs{display:flex;flex-wrap:wrap;gap:7px}
-  .suggs button{font:11px var(--mono);color:var(--ink-faint);background:none;
-                border:1px dashed var(--line);border-radius:99px;padding:5px 12px;
-                cursor:pointer;letter-spacing:.02em}
-  .suggs button:hover{color:var(--accent);border-color:var(--accent)}
-  .suggs.spent::after{content:"all taken";font:10.5px var(--mono);color:var(--ink-faint)}
-  .full .suggs button{opacity:.35;cursor:not-allowed}
+  /* §15 (owner, "first-run asks three things only"): the section chips are
+     GONE. The first-ever user answers a name, a time zone and a currency, and
+     nothing else. The sections arrive from the defaults behind the scenes;
+     the only trace of them in the form is the quiet line below, which says so
+     and says where to change them. */
+  .quiet{display:flex;gap:9px;align-items:flex-start;margin-top:2px;
+         border-top:1px solid var(--line-soft);padding-top:12px}
+  .quiet .tick{flex:none;margin-top:2px}
+  .quiet p{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85;letter-spacing:.02em}
+  .quiet p b{color:var(--ink-mid);font-weight:400}
 
   /* ── the server's bounded words. Nothing invented in the browser: the
        command name, the rule it broke, and what it did NOT do. ───────────── */
@@ -331,22 +352,48 @@
   .btn:disabled{opacity:.34;cursor:not-allowed;filter:none}
   .go .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.75}
 
-  /* the other road, when this is not a virgin instance (§11 / #453) */
-  .joinroad{display:none;width:100%;max-width:566px;text-align:center;
-            font:11.5px var(--mono);color:var(--ink-mid);line-height:1.9;
-            background:var(--panel);backdrop-filter:blur(12px);
-            border:1px solid var(--line-soft);border-radius:14px;padding:11px 20px;
-            transition:opacity .4s}
-  body.adrift .joinroad{display:block}
-  body.igniting .joinroad{opacity:0}
-  .joinroad b{color:var(--ink);font-weight:400}
-  .joinroad a{color:var(--accent);text-decoration:none}
-  .joinroad a:hover{text-decoration:underline}
+  /* ── WHAT IS ALREADY OUT THERE (§11 / #453, restyled by the owner) ───────
+     Was a banner under the card. It is now a SEE-THROUGH CARD OFF TO THE LEFT
+     led by a BIG NUMBER — the real household count. And it only exists once
+     the first admin has been created: a virgin instance has nothing to count,
+     so on a fresh install this card is not in the layout at all. */
+  .discovered{display:none;position:fixed;left:clamp(18px,5vw,74px);top:50%;
+      z-index:5;width:min(238px,26vw);transform:translateY(-50%);
+      background:color-mix(in srgb,var(--panel) 55%,transparent);
+      backdrop-filter:blur(11px);
+      border:1px solid var(--line-soft);border-radius:16px;padding:19px 20px 17px;
+      transition:opacity .5s ease,transform .6s cubic-bezier(.3,.7,.3,1)}
+  body.adrift.showform .discovered{display:block}
+  body.igniting .discovered{opacity:0;transform:translateY(-50%) translateX(-16px)}
+  .discovered .big{font:600 56px var(--display);line-height:.9;letter-spacing:-.025em;
+                   color:var(--accent)}
+  .discovered .said{font:11px var(--mono);color:var(--ink-mid);line-height:1.85;
+                    margin-top:11px;letter-spacing:.03em}
+  .discovered .said b{color:var(--ink);font-weight:400}
+  .discovered a{display:inline-block;margin-top:12px;font:10.5px var(--mono);
+                color:var(--accent);text-decoration:none;letter-spacing:.06em}
+  .discovered a:hover{text-decoration:underline}
+  /* narrower than this the left margin cannot hold a card without crowding
+     the form, so the count folds to a single compact line above it */
+  @media (max-width:1180px){
+    .discovered{position:relative;left:auto;top:auto;transform:none;order:-1;
+                width:100%;max-width:566px;padding:12px 18px;
+                display:flex;align-items:baseline;gap:14px}
+    body.adrift.showform .discovered{display:flex}
+    body.igniting .discovered{transform:translateX(-16px)}
+    .discovered .big{font-size:34px;line-height:1}
+    .discovered .said{margin-top:0;flex:1}
+    .discovered a{margin-top:0;white-space:nowrap}
+  }
 
   /* ══ 3 · THE FLIGHT ══════════════════════════════════════════════════════ */
   #warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
-        transition:opacity .5s ease .15s}
+        transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
   body.showwarp #warp{opacity:1;transition:opacity .45s ease}
+  /* §15 second pass, ruling 2: the canvas does NOT cut out under the bloom.
+     It dissolves over 1.7 near-linear seconds — `ease` spent two-thirds of
+     the fade in its first third and killed the light too early — so the glow
+     it is holding is still on the screen while the planets condense out. */
   /* the mark leaves the card, rides to the centre of the screen, and puts
      itself out — and 2s later the dial blooms from exactly that point, its
      sun where the mark's centre was. CON-19 becoming the instrument. */
@@ -374,16 +421,58 @@
   .hf{position:fixed;inset:0;z-index:3;opacity:0;pointer-events:none;
       background:var(--bg);transition:opacity .75s ease}
   body.showhome .hf{opacity:1}
-  body.descending .hf{opacity:0;transform:scale(1.05);
-      transition:opacity .5s ease,transform 1.1s cubic-bezier(.4,0,.9,.5)}
+  /* leaving reverses the arrival exactly: the instrument goes first (it came
+     last), then the bodies disperse back into the light the sun is becoming */
+  body.withdrawing .hf .instrument{animation:withdraw .6s cubic-bezier(.55,0,.9,.4) both}
+  body.withdrawing .hf .orb,
+  body.withdrawing .hf .nstar,
+  body.withdrawing .hf .hero-foot{animation:chromeout .45s ease both}
+  @keyframes withdraw{from{transform:scale(1);opacity:1}45%{opacity:.6}to{transform:scale(.16);opacity:0}}
+  @keyframes chromeout{from{opacity:1}to{opacity:0}}
+  body.descending .hf{opacity:0;transition:opacity .7s ease .15s}
+  body.descending .hf .dial{animation:disperse .8s cubic-bezier(.5,0,.9,.45) both}
+  @keyframes disperse{
+    from{transform:scale(1);opacity:1;filter:blur(0)}
+    to{transform:scale(1.68);opacity:0;filter:blur(10px)}}
   .hf .sky{position:absolute;inset:0;opacity:var(--stars)}
   .hf .sky svg{position:absolute;inset:0;width:100%;height:100%}
   .hf .vignette{position:absolute;inset:0;
        background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   .hf .hero{position:absolute;inset:0;display:grid;place-items:center}
   .hf .dial{transform-origin:50% 50%;width:min(620px,86vw,72vh);height:min(620px,86vw,72vh)}
-  body.showhome .hf .dial{animation:arrive 1.15s cubic-bezier(.2,.7,.2,1) 1}
-  @keyframes arrive{from{transform:scale(.12);opacity:0}55%{opacity:1}to{transform:scale(1)}}
+
+  /* ── THE LANDING IS STAGED (§15 second pass, ruling 3) ───────────────────
+     The arrival sets down on the CELESTIAL BODIES ALONE — the planet symbols,
+     the centre sun, the household's name. `bare` takes away everything else:
+     the rings, the ticks, the month letters, the now-marker, the trails, the
+     constellation leg, the inbox orb, the account orb, the north star, the
+     search line, the scroll cue. Three seconds pass there. Then `bare` comes
+     off and `instrument` goes on, and the chart arrives in the family's own
+     arrive style — home.html's `arrive`, verbatim, scale .16 → 1. */
+  body.bare .hf .instrument,
+  body.bare .hf .orb,
+  body.bare .hf .nstar,
+  body.bare .hf .hero-foot{opacity:0;pointer-events:none}
+  .hf .instrument{transform-box:view-box;transform-origin:50% 50%}
+  body.instrument .hf .instrument{animation:arrive 1.3s cubic-bezier(.2,.7,.2,1) both}
+  body.instrument .hf .orb,
+  body.instrument .hf .nstar,
+  body.instrument .hf .hero-foot{animation:chromein .95s ease .34s both}
+  @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1);opacity:1}}
+  @keyframes chromein{from{opacity:0}to{opacity:1}}
+  /* the bodies CONDENSE OUT OF THE LIGHT (ruling 2): they do not pop in at
+     the end of a flash, they come out of the bloom already lit, oversized and
+     unfocused, and draw themselves together while the canvas behind them is
+     still dissolving. Timed to overlap that dissolve, not to follow it. */
+  body.showhome.bare .hf .dial{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
+  /* the final frame deliberately does NOT pin opacity: the newcomer's
+     constellations carry their own distance dimming inline, and the animation
+     must hand them back to it rather than flatten every household to full. */
+  @keyframes condense{
+    from{transform:scale(1.72);opacity:0;filter:blur(11px)}
+    40%{opacity:.8}
+    68%{filter:blur(2.5px)}
+    to{transform:scale(1);filter:blur(0)}}
   .hf .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
   @keyframes rotor{to{transform:rotate(360deg)}}
   .hf .breathe{animation:hbreathe 4.2s ease-in-out infinite}
@@ -410,6 +499,66 @@
   .hf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
   @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
   .hf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
+
+  /* ══ 4c · THE NEWCOMER'S LANDING (§15 second pass, ruling 4) ═════════════
+     A non-admin who is not the first user flies exactly the same launch and
+     sets down HERE instead: the dial screen with no dial. Every household in
+     the instance hangs as a sub-system — the #453 labelled sky, drawn the way
+     web/src/routes/home/+page.svelte's emptySky branch and home.html's
+     renderGalaxy draw it (label, leader rule, ring, centre, planets, and the
+     waiting note on one already asked) — and the question sits where the
+     chart would have been. */
+  .nf{position:fixed;inset:0;z-index:3;opacity:0;pointer-events:none;
+      background:var(--bg);transition:opacity .75s ease}
+  body.shownew .nf{opacity:1;pointer-events:auto}
+  .nf .sky{position:absolute;inset:0;opacity:var(--stars)}
+  .nf .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .nf .vignette{position:absolute;inset:0;
+       background:radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.30) 100%)}
+  .nf .hero{position:absolute;inset:0}
+  .nf .nstar{position:absolute;top:0;left:50%;transform:translateX(-50%);
+             display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 16px}
+  .nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
+  .nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
+  .nf .minisys{position:absolute;transform-origin:118px 95px}
+  .nf .minisys svg{display:block}
+  .nf .minisys text{font-family:var(--mono)}
+  /* the constellations condense out of the same light the planets do */
+  body.shownew.bare .nf .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
+  body.shownew.bare .nf .nstar{opacity:0}
+  body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
+  /* THE NEWCOMER'S CARD sits in the MIDDLE (owner, §15 "first-run asks three
+     things only"): the question, the households they can ask to join, and the
+     one other road — name their own system. Kept as thin as the admin's three
+     fields; everything else is a settings question later. */
+  .nf .belong{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+              width:min(430px,84vw);z-index:5;opacity:0;
+              background:var(--panel);backdrop-filter:blur(16px);
+              border:1px solid var(--line);border-radius:20px;overflow:hidden;
+              box-shadow:0 34px 90px -30px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.03) inset;
+              transition:opacity 1.1s ease}
+  body.belong .nf .belong{opacity:1}
+  .nf .belong .top{padding:20px 24px 15px;border-bottom:1px solid var(--line-soft);
+                   background:var(--panel-raised);text-align:center}
+  .nf .belong h2{font:600 24px var(--display);letter-spacing:.01em;color:var(--ink)}
+  .nf .belong .top p{font:10.5px var(--mono);color:var(--ink-mid);margin-top:8px;
+                     line-height:1.9;letter-spacing:.06em}
+  .nf .belong ul{list-style:none;padding:8px 12px 6px;margin:0;max-height:38vh;overflow:auto}
+  .nf .belong li button{width:100%;display:flex;align-items:center;gap:11px;
+       background:none;border:0;border-radius:10px;padding:9px 12px;cursor:pointer;text-align:left}
+  .nf .belong li button:hover{background:var(--panel-raised)}
+  .nf .belong li .dot{flex:none;width:9px;height:9px;border-radius:50%;
+       border:1px solid var(--accent);opacity:.8}
+  .nf .belong li .nm{flex:1;min-width:0;font:12.5px var(--ui);color:var(--ink);
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
+       color:var(--ink-faint);text-transform:uppercase}
+  .nf .belong li button:hover .act{color:var(--accent)}
+  .nf .belong li.waiting .act{color:var(--warm)}
+  .nf .belong .own{border-top:1px solid var(--line-soft);padding:13px 24px 16px;text-align:center}
+  .nf .belong .own a{font:11.5px var(--mono);color:var(--accent);text-decoration:none;letter-spacing:.04em}
+  .nf .belong .own a:hover{text-decoration:underline}
+  .nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:7px}
 
   /* the welcome tour's placeholder — #477 takes this over in the product */
   #tour{position:fixed;z-index:9;left:50%;top:74%;transform:translate(-50%,-50%) translateY(14px);
@@ -468,13 +617,20 @@
      plain crossfade — form/login out, home in (and home out, dusk in on the
      way down) — over ~0.7s, and the 3s dwell and the tour pop still happen,
      so the sequence tells the same story without any motion. Everything else
-     that drifts, breathes, pulses or rotates is stopped too. */
+     that drifts, breathes, pulses or rotates is stopped too.
+
+     The staging survives it intact, because the staging is class-driven and
+     not motion-driven: the bare sky still lands bare, the three seconds still
+     pass, the instrument and the chrome still appear after them, the newcomer
+     still gets the labelled sky and then the question. Only the movement goes.
+  */
   @media (prefers-reduced-motion: reduce){
     *{animation:none!important}
     #flightmark,#launchname{display:none!important}
-    .card,#formlayer,.hf,#dawn,#dusk,#recede,.loginchrome,.lockup,.gate-wrap{
+    .card,#formlayer,.hf,.nf,#dawn,#dusk,#recede,.loginchrome,.lockup,.gate-wrap{
       transition-duration:.7s!important;transition-timing-function:ease!important}
     .hf,body.descending .hf{transform:none!important}
+    .nf .belong{transform:translate(-50%,-50%)!important}
   }
 </style>
 </head>
@@ -705,6 +861,11 @@
           <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
           <stop offset="85%" stop-color="#f87171" stop-opacity="0"/></radialGradient>
       </defs>
+      <!-- §15 second pass, ruling 3: THE INSTRUMENT. Everything in this group
+           is withheld from the landing — the rings, the ticks, the months, the
+           now-marker, the trails, the constellation leg. It arrives 3 seconds
+           after the bodies have, in the family's arrive style. -->
+      <g class="instrument">
       <g class="rotor">
         <g stroke="var(--chart-line-soft)" stroke-width=".5">
           <line x1="190" y1="14" x2="190" y2="34"/><line x1="314.5" y1="65.5" x2="300" y2="80"/>
@@ -744,6 +905,12 @@
         <path d="M 207.4 125 A 67.324 67.324 0 0 1 211.9 126.3" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
         <path d="M 250.1 146.3 A 74.342 74.342 0 0 1 253 150.6" stroke="var(--upcoming)" stroke-opacity=".45" stroke-width="2"/>
       </g>
+      </g><!-- /instrument -->
+
+      <!-- THE BODIES. This is the whole of the arrival: the centre sun, the
+           household's name under it, and the planet symbols. Nothing else is
+           on the screen for three seconds. -->
+      <g class="bodies">
       <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#hf-sun)" opacity=".8"/>
       <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
       <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle"
@@ -765,11 +932,43 @@
         <circle cx="221.5" cy="287.25" r="2.31" fill="rgba(255,255,255,.38)"/></g>
       <ellipse cx="222.9" cy="285.5" rx="13.5" ry="4.6" transform="rotate(-24 222.9 285.5)"
                fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
+      </g><!-- /bodies -->
     </svg>
   </div>
   <div class="hero-foot">
     <input placeholder="explore your world" readonly tabindex="-1" aria-hidden="true">
     <div class="scrollcue" id="hf-cue">7 IN ORBIT &middot; THE MANIFEST WAITS BELOW</div>
+  </div>
+</div>
+
+<!-- ══════════ THE NEWCOMER'S LANDING: the labelled sky (#453) ══════════ -->
+<div class="nf pack-starchart" id="newframe" aria-hidden="true">
+  <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="nf-far"></g><use href="#nf-far" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="nf-near"></g><use href="#nf-near" x="1600"/></g>
+  </svg></div>
+  <div class="vignette"></div>
+  <div class="nstar">
+    <svg width="30" height="30" viewBox="-15 -15 30 30">
+      <g class="glint">
+        <circle r="9" fill="var(--ink)" opacity=".12"/>
+        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
+              fill="var(--ink)" opacity=".9"/>
+        <circle r="2" fill="var(--ink)"/>
+      </g>
+    </svg><span>create</span>
+  </div>
+  <div class="hero" id="newsky"></div>
+  <div class="belong" role="group" aria-label="Where do you belong?">
+    <div class="top">
+      <h2>where do you belong?</h2>
+      <p>the systems around you are labels until someone lets you in</p>
+    </div>
+    <ul id="belonglist"></ul>
+    <div class="own">
+      <a href="#" onclick="return false">or name your own system →</a>
+      <span>a name, a time zone, a currency — same three questions</span>
+    </div>
   </div>
 </div>
 
@@ -834,36 +1033,19 @@
           afterwards, and dates and costs read by them</span>
       </div>
 
-      <!-- §15 (owner, 2026-08-16): "we should see some sections, or the
-           onboarding is a horrible experience. Four might not even be
-           enough." So four arrive already switched ON — the common shape of
-           a household — and a second row offers six more for a tap. Twelve
-           is still the ceiling, and the ceiling is now reachable, which is
-           why the counter says how much room is left. -->
-      <div class="field" style="margin-bottom:0">
-        <label>its first sections</label>
-        <div class="chips" id="chips" role="group" aria-label="Sections">
-          <button type="button" aria-pressed="true" onclick="chip(this)">Home</button>
-          <button type="button" aria-pressed="true" onclick="chip(this)">Vehicles</button>
-          <button type="button" aria-pressed="true" onclick="chip(this)">Devices</button>
-          <button type="button" aria-pressed="true" onclick="chip(this)">Services</button>
-          <button type="button" class="add" onclick="openOwn()">+ your own</button>
-        </div>
-        <input id="ownname" placeholder="name it, then press enter" maxlength="30"
-               autocomplete="off" aria-label="Your own section name" onkeydown="ownKey(event)">
-        <div class="suggrow">
-          <span class="suggcap">or add</span>
-          <div class="suggs" id="suggs" role="group" aria-label="Suggested sections">
-            <button type="button" onclick="adopt(this)">Insurance</button>
-            <button type="button" onclick="adopt(this)">Subscriptions</button>
-            <button type="button" onclick="adopt(this)">Garden</button>
-            <button type="button" onclick="adopt(this)">Pets</button>
-            <button type="button" onclick="adopt(this)">Health</button>
-            <button type="button" onclick="adopt(this)">Warranties</button>
-          </div>
-        </div>
-        <span class="hint" id="sechint">every entry wears one, printed beside it in the manifest &middot;
-          rename or hide them later</span>
+      <!-- §15 (owner, "first-run asks three things only"): the chips are gone.
+           A name, a time zone, a currency — and the sections come from the
+           defaults on their own. The one line that survives is this one: it
+           admits what was done on your behalf, and says where to undo it. -->
+      <div class="quiet">
+        <svg class="tick" width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="5.6" fill="none" stroke="currentColor" stroke-width="1"
+                  style="stroke:var(--line)"/>
+          <path d="M 4 6.7 L 5.9 8.6 L 9.2 4.6" fill="none" stroke-width="1.3"
+                stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--accent)"/>
+        </svg>
+        <p><b>Home, Vehicles, Devices and Services</b> are set up for you —
+           change, rename or add sections on the household screen whenever you like.</p>
       </div>
 
       <div class="go">
@@ -873,12 +1055,14 @@
     </div>
   </form>
 
-  <!-- §11 / #453: when this is not a virgin instance, there is a second road -->
-  <div class="joinroad">
-    or you are not the first here — <b>five systems</b> already hang in this sky.
-    they are labels until someone lets you in.<br>
-    <a href="home.html">look at your sky and ask to join one →</a>
-  </div>
+  <!-- §11 / #453, restyled: what is already out there. Off to the left, led
+       by the count itself. Present only when there is something to count. -->
+  <aside class="discovered" id="discovered">
+    <div class="big" id="disc-n">5</div>
+    <div class="said"><b id="disc-word">systems</b> discovered in this
+      universe already..</div>
+    <a href="home.html">ask to join one →</a>
+  </aside>
 </div>
 
 <canvas id="warp" aria-hidden="true"></canvas>
@@ -894,8 +1078,8 @@
 <div id="tour" role="note">
   <i aria-hidden="true"></i>
   <b>TOUR POPS HERE</b>
-  <span>the welcome tour (#477) takes over from this point<br>
-        3s after landing, so the demo data is seen first</span>
+  <span>the welcome tour (#477) takes over from this point —<br>
+        after the bare sky, its 3 seconds, and the instrument drawing in</span>
 </div>
 
 <svg class="grain" width="100%" height="100%" aria-hidden="true"><filter id="gr">
@@ -912,7 +1096,8 @@
   <button class="hot" onclick="attempt(true)">LAUNCH</button>
   <button onclick="loginLaunch()">login launch</button>
   <button onclick="logoutDescent()">logout descent</button>
-  <button id="d-adrift" aria-pressed="false" onclick="setInstance('toggle')">adrift state</button>
+  <button onclick="newcomerArrival()">newcomer arrival</button>
+  <button id="d-adrift" aria-pressed="false" onclick="setInstance('toggle')">systems discovered</button>
   <button onclick="replay()">replay</button>
   <span style="margin-left:4px">THEME</span>
   <button class="sw" data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
@@ -924,17 +1109,23 @@
 
 <div class="sheet">
   orbit · first light · PROPOSAL for the #410 cutover family · §15: first-run is a launch, not a form<br>
-  the form sits on the login · the climb belongs to every successful sign-in · logout descends into dusk
+  second pass · three questions only · logout is the login reversed · the reveal slows ·
+  the dwell comes before the instrument · the newcomer lands in the labelled sky
 </div>
 
 <script>
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════════
    THE ENGINE
-   One canvas, run in two directions. UP is 3.6s and accelerates; DOWN is
-   2.6s and only ever decelerates — arrival is a launch, leaving is a
-   setting-down. Everything below is drawn in the DEFAULT pack (star-chart),
-   whatever pack the form is wearing: see PACK.
+   One canvas, run in two directions — and, since the second pass, DOWN is
+   not a second animation at all. It is UP played backwards: a single mirror
+   function maps descent time onto ascent time, and the speed curve, the
+   atmosphere curve, the prop schedule and the bloom are all READ OFF THE
+   ASCENT through it. So the sun contracts, the streaks decelerate in reverse,
+   the limb rises back beneath you and the colours return from the dark to the
+   dawn, because that is what the climb looks like run the other way.
+   Everything below is drawn in the DEFAULT pack (star-chart), whatever pack
+   the form is wearing: see PACK.
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* star-chart, verbatim — the launch colour-matches the default theme (§15).
@@ -1012,8 +1203,12 @@ function seedStars(){
                  z: .28 + rnd() * .72, c: starColour() });
   }
 }
-function respawn(s){
-  s.r = 40 + rnd() * 200; s.a = A0 + rnd() * (A1 - A0);
+/* Running the flight backwards, stars shrink toward the vanishing point
+   instead of streaming away from it — so a spent star has to be reborn at the
+   OUTER edge, not at the centre, or the field empties out on the way down. */
+function respawn(s, rev){
+  s.r = rev ? RMAX * (.80 + rnd() * .20) : 40 + rnd() * 200;
+  s.a = A0 + rnd() * (A1 - A0);
   s.z = .28 + rnd() * .72; s.c = starColour();
 }
 
@@ -1179,43 +1374,107 @@ const PROPS_UP = [
   { kind:"con",   t0:2020, dur:1250, ang: 42, z:.58, shape:1, spin:-0.14 },
   { kind:"sys",   t0:2120, dur:1350, ang:108, z:.62, k:5, spin:-0.16 }
 ];
-const PROPS_DOWN = [
-  { kind:"grat",  t0: 120, dur:2400, ang:-94,  z:.44, spin: 0.10 },
-  { kind:"con",   t0: 240, dur:2100, ang:-56,  z:.60, shape:2, spin:-0.14 },
-  { kind:"sys",   t0: 420, dur:2300, ang:-128, z:.54, k:2, spin: 0.16 },
-  { kind:"con",   t0: 780, dur:2000, ang:-104, z:.56, shape:0, spin: 0.12 },
-  { kind:"grat",  t0:1050, dur:2200, ang:-74,  z:.38, spin:-0.09 }
-];
-
 /* ── the two profiles ─────────────────────────────────────────────────────
-   UP · 3600ms.  0–300 ignition (the ship is barely moving; the mark flares
+   UP · 4800ms.  0–300 ignition (the ship is barely moving; the mark flares
    and the card dissolves) · 300–1350 hard acceleration out of the dawn ·
-   1350–2500 cruise through the dark, where all the chart-pen traffic is ·
-   2500–3250 deceleration onto the household's own coordinates · 3250–3600
-   the sun blooms and the dial grows out of it.
-   DOWN · 2600ms.  Already coasting at 0.7 and never once speeds up: a long
-   1-over-x decay onto the dusk, the last half-second almost still.          */
+   1350–2600 cruise through the dark, where all the chart-pen traffic is ·
+   2600–3500 deceleration onto the household's own coordinates · 3400–4800
+   THE REVEAL: 1.4 slow seconds of the sun blooming, where the first pass
+   spent 0.6 (§15 second pass, ruling 2 — "extend the time as needed").
+
+   DOWN · 4100ms, and NOT ITS OWN CURVE. `mirror(t)` maps descent time onto
+   ascent time, and speed / atmosphere / bloom / props all come back through
+   it. Negative speed is the whole trick: the star engine multiplies each
+   star's radius by (1 + v·dt·K·z), so a negative v contracts the field toward
+   the vanishing point and draws each streak from outside in. The camera does
+   not move, the world does not move, the flight simply runs the other way.
+   It reads at 0.854× the climb — the reversal earns a little pace, and the
+   owner left that to the eye.                                               */
+const UPDUR = 4800, DOWNDUR = 4100;
+const REV = DOWNDUR / UPDUR;
+const mirror = t => UPDUR * (1 - Math.min(1, Math.max(0, t / DOWNDUR)));
+
 const UP = {
-  dur:3600, vpY:-0.55, a0:28, a1:152, pal:DAWN, props:PROPS_UP, K:7.4,
+  dur:UPDUR, vpY:-0.55, a0:28, a1:152, pal:DAWN, props:PROPS_UP, K:7.4,
   speed(t){
     if (t < 300) return .02 + .10 * (t / 300);
     if (t < 1350){ const u = (t - 300) / 1050; return .12 + .88 * Math.pow(u, 2.2); }
-    if (t < 2500) return 1;
-    if (t < 3250){ const u = (t - 2500) / 750; return 1 - Math.pow(u, 1.55); }
+    if (t < 2600) return 1;
+    if (t < 3500){ const u = (t - 2600) / 900; return 1 - Math.pow(u, 1.55); }
     return 0;
   },
   /* atmosphere: 0 = sitting on the login's dawn, 1 = clean of it */
   atm(t){ const u = Math.min(1, Math.max(0, (t - 240) / 1450)); return Math.pow(u, 1.9); }
 };
+
+/* the props, mirrored rather than re-authored: same traffic, same bearings,
+   met in the opposite order, turning the other way, passing at REV pace.
+   The one place the mirror cannot be literal: a prop keeps sailing at the
+   coast floor when the engine is idle, and the descent OPENS with the engine
+   idle (it is the climb's braking, run backwards). Left at 1:1 the last of
+   the traffic was still crossing the frame at touchdown; SWEEP pulls each
+   pass in so the sky is empty by the time the limb comes back up. */
+const SWEEP = .75;
+const PROPS_DOWN = PROPS_UP.map(g => ({
+  kind:g.kind, shape:g.shape, k:g.k, ang:g.ang, z:g.z,
+  spin: -(g.spin || 0),
+  dur: g.dur * REV * SWEEP,
+  t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV)
+}));
+
 const DOWN = {
-  dur:2600, vpY:1.55, a0:-152, a1:-28, pal:DUSK, props:PROPS_DOWN, K:5.2,
-  speed(t){
-    if (t < 160) return .70;
-    if (t < 2320){ const u = (t - 160) / 2160; return .70 * Math.pow(1 - u, 1.25); }
-    return 0;
-  },
-  atm(t){ const u = Math.min(1, t / 2380); return .86 * Math.pow(1 - u, .8); }
+  dur:DOWNDUR, vpY:UP.vpY, a0:UP.a0, a1:UP.a1, K:UP.K, props:PROPS_DOWN, rev:true,
+  /* the destination surface still wears DUSK (the family rule the owner kept
+     in the same breath), so the returning dawn COOLS into it across the last
+     third rather than being swapped for it at the handoff. Same geometry,
+     same limb, two palettes cross-dissolving on the way down. */
+  pal:DAWN, palTo:DUSK,
+  speed(t){ return -UP.speed(mirror(t)); },
+  atm(t){ return UP.atm(mirror(t)); },
+  duskMix(t){ return Math.max(0, Math.min(1, (t / DOWNDUR - .64) / .36)); }
 };
+
+/* ── THE REVEAL (§15 second pass, ruling 2) ───────────────────────────────
+   One function, read forwards by the climb and backwards by the descent. The
+   first pass ran 2760→3360 and read as a flash; this runs 3200→4500 (and
+   then holds, so the handoff happens in full light) and is built to be slow
+   on purpose: the SKY takes the colour well before the core
+   does (a 0.72 power curve against the core's 1.45), the core grows on an
+   eased radius rather than a smoothstep pop, and the two shockwaves are
+   halved in weight so nothing in it snaps. */
+const BLOOM_T0 = 3200, BLOOM_DUR = 1300;
+function bloomAt(tau){ return Math.max(0, Math.min(1, (tau - BLOOM_T0) / BLOOM_DUR)); }
+function drawBloom(b){
+  if (b <= 0) return;
+  const by = H * .5;
+  /* the whole sky takes the colour first, and takes its time about it */
+  const halo = ctx.createRadialGradient(W / 2, by, 0, W / 2, by, H * 1.35);
+  const hp = Math.pow(b, .72);
+  halo.addColorStop(0, hexa(PACK.accent, hp * .28));
+  halo.addColorStop(.5, hexa(PACK.accent, hp * .11));
+  halo.addColorStop(1, hexa(PACK.accent, 0));
+  ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
+  /* then the core: a star lighting, gently. It is still a hot centre — the
+     first pass's hardness was right — but it grows into the frame instead of
+     arriving already there. */
+  const e = Math.pow(b, 1.45), peak = Math.pow(b, 1.18);
+  const rad = H * .035 + e * H * .62;
+  const g = ctx.createRadialGradient(W / 2, by, 0, W / 2, by, rad);
+  g.addColorStop(0,   hexa(PACK.sunCore, Math.min(1, peak * 1.12)));
+  g.addColorStop(.11, hexa(PACK.sunCore, Math.min(1, peak * 1.02)));
+  g.addColorStop(.24, hexa(PACK.sun,     peak * .88));
+  g.addColorStop(.44, hexa(PACK.accent,  peak * .46));
+  g.addColorStop(.70, hexa(PACK.accent,  peak * .15));
+  g.addColorStop(1,   hexa(PACK.accent,  0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  /* two hairline shockwaves, and no more than two — quieter than the flash */
+  ctx.lineWidth = 1.3;
+  for (const [off, mul] of [[0, .48], [.26, .22]]) {
+    const q = Math.max(0, b - off);
+    ctx.strokeStyle = hexa(PACK.sun, Math.pow(1 - q, 1.4) * mul);
+    ctx.beginPath(); ctx.arc(W / 2, by, q * H * .95, 0, 6.284); ctx.stroke();
+  }
+}
 
 /* ── the world you are leaving / returning to ──────────────────────────────
    Geometry matched to family/login.html exactly at atm = 0: the limb's top
@@ -1223,8 +1482,10 @@ const DOWN = {
    (800, 920). So the crossfade from the real login DOM into the canvas has
    nothing to give it away. Then climbing shrinks the radius (the curve you
    only see from altitude) and lets the whole thing fall out of frame. */
-function drawWorld(c, pal){
+function drawWorld(c, pal, alpha){
   if (c >= 0.999) return;
+  if (alpha === undefined) alpha = 1;
+  if (alpha <= 0.002) return;
   const s = Math.max(W / 1600, H / 1000);
   const mx = x => W / 2 + (x - 800) * s, my = y => H / 2 + (y - 500) * s;
   const R0 = 3000 * s, top0 = my(920);
@@ -1234,7 +1495,10 @@ function drawWorld(c, pal){
   if (topY > H + 40 && c > .1) return;
   const R = R0 / (1 + Math.pow(c, 1.3) * 6);
   const cx = W / 2, cy = topY + R;
-  const fade = Math.max(0, 1 - c / .92);
+  /* `alpha` is how much of THIS palette is showing: on the way down the dawn
+     the reversal returns you to cross-dissolves into the dusk you set down
+     on, and both are drawn on the same geometry so nothing shifts. */
+  const fade = Math.max(0, 1 - c / .92) * alpha;
 
   /* The sky warming toward the horizon. It has to keep going PAST the limb —
      the disc curves away, and the sky either side of it is still air. Cutting
@@ -1279,6 +1543,8 @@ function drawWorld(c, pal){
   ctx.restore();
 
   /* the planet itself: everything below the limb is night */
+  ctx.save();
+  ctx.globalAlpha = alpha;
   ctx.fillStyle = pal.ground;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.fill();
   /* rim light */
@@ -1286,8 +1552,7 @@ function drawWorld(c, pal){
   rimg.addColorStop(0, hexa(pal.rim1, .9)); rimg.addColorStop(1, hexa(pal.rim2, .5));
   ctx.strokeStyle = rimg; ctx.lineWidth = Math.max(1.4, 2.6 * s);
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.stroke();
-  ctx.save();
-  ctx.filter = "blur(7px)"; ctx.globalAlpha = .55;
+  ctx.filter = "blur(7px)"; ctx.globalAlpha = .55 * alpha;
   ctx.lineWidth = Math.max(3, 6 * s);
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.stroke();
   ctx.restore();
@@ -1305,8 +1570,10 @@ function frame(now){
   const dt = Math.min(48, now - flight.last) / 1000;
   flight.last = now;
   const P = flight.P;
-  const v = P.speed(Math.min(t, P.dur));
-  const c = P.atm(Math.min(t, P.dur));
+  const tc = Math.min(t, P.dur);
+  const v = P.speed(tc);        /* negative on the way down: the flight reversed */
+  const av = Math.abs(v);
+  const c = P.atm(tc);
 
   ctx.setTransform(flight.dpr, 0, 0, flight.dpr, 0, 0);
   ctx.globalAlpha = 1;
@@ -1317,6 +1584,7 @@ function frame(now){
   for (const n of NEB) {
     n.p += v * dt * .085;
     if (n.p > 1.25) n.p -= 1.45;
+    else if (n.p < -0.20) n.p += 1.45;   /* dust falls the other way, reversed */
     const r = H * (-.15 + n.p * 2.5);
     const x = VPX + Math.cos(n.rad) * r, y = VPY + Math.sin(n.rad) * r;
     const rad = H * n.size * (.35 + n.p * .95);
@@ -1329,10 +1597,10 @@ function frame(now){
   }
   /* the way ahead: a faint bloom on the vanishing point, brighter the faster
      you go — the only thing on this canvas that says "forward" by itself */
-  if (v > .05) {
+  if (av > .05) {
     const g = ctx.createRadialGradient(VPX, VPY, 0, VPX, VPY, DIAG * 1.05);
-    g.addColorStop(0, hexa("#7f93c8", .16 * v));
-    g.addColorStop(.34, hexa("#3d4f86", .07 * v));
+    g.addColorStop(0, hexa("#7f93c8", .16 * av));
+    g.addColorStop(.34, hexa("#3d4f86", .07 * av));
     g.addColorStop(1, hexa("#3d4f86", 0));
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
@@ -1342,7 +1610,7 @@ function frame(now){
   ctx.globalCompositeOperation = "lighter";
   for (const st of STARS) {
     st.r *= (1 + v * dt * P.K * st.z);
-    if (st.r > RMAX || st.r < 1) { respawn(st); continue; }
+    if (st.r > RMAX || st.r < 1) { respawn(st, flight.rev); continue; }
     const x1 = VPX + Math.cos(st.a) * st.r, y1 = VPY + Math.sin(st.a) * st.r;
     if (x1 < -420 || x1 > W + 420 || y1 < -520 || y1 > H + 520) continue;
     const near = Math.min(1, st.r / RMAX);
@@ -1367,9 +1635,14 @@ function frame(now){
   for (const g of flight.props) {
     if (t < g.t0) continue;
     /* relative motion does not stop when the engine does — a prop that is
-       still on screen when you brake keeps sailing out of frame */
-    g.p += Math.max(v, .34) * (dt * 1000) / g.dur;
-    if (g.p >= 1) continue;
+       still on screen when you brake keeps sailing out of frame (at .50 of
+       cruise, raised from .34 so the last of the traffic is clear of the
+       frame before the reveal begins). Reversed,
+       the same traffic arrives from the frame edge and recedes to the
+       vanishing point: p runs 1 → 0 instead of 0 → 1. */
+    const step = Math.max(av, .50) * (dt * 1000) / g.dur;
+    g.p += flight.rev ? -step : step;
+    if (flight.rev ? g.p <= 0 : g.p >= 1) continue;
     const r = H * .34 + Math.pow(g.p, 1.12) * H * 1.95;
     const x = VPX + Math.cos(g.rad) * r, y = VPY + Math.sin(g.rad) * r;
     const sc = propScale(r) * g.z * 2.1;
@@ -1384,46 +1657,15 @@ function frame(now){
   }
   ctx.globalAlpha = 1;
 
-  /* the atmosphere you are leaving, or coming back down into */
-  drawWorld(c, P.pal);
+  /* the atmosphere you are leaving, or coming back up into. On the way down
+     the dawn you are returning to cools into the dusk you land on. */
+  const mix = P.duskMix ? P.duskMix(tc) : 0;
+  if (mix < .998) drawWorld(c, P.pal, 1 - mix);
+  if (mix > .002) drawWorld(c, P.palTo, mix);
 
-  /* arrival: the sun of your own household blooms where the mark went out */
-  if (flight.dir > 0 && t > 2760) {
-    const b = Math.min(1, (t - 2760) / 600);
-    const e = b * b * (3 - 2 * b);
-    const by = H * .5, peak = e;
-    /* the whole sky takes the colour before the core does */
-    const halo = ctx.createRadialGradient(W / 2, by, 0, W / 2, by, H * 1.35);
-    halo.addColorStop(0, hexa(PACK.accent, peak * .26));
-    halo.addColorStop(.5, hexa(PACK.accent, peak * .10));
-    halo.addColorStop(1, hexa(PACK.accent, 0));
-    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
-    /* then a hard, hot core: a star lighting, not a fog coming up */
-    const rad = H * .05 + e * H * .60;
-    const g = ctx.createRadialGradient(W / 2, by, 0, W / 2, by, rad);
-    g.addColorStop(0,   hexa(PACK.sunCore, Math.min(1, peak * 1.12)));
-    g.addColorStop(.11, hexa(PACK.sunCore, Math.min(1, peak * 1.02)));
-    g.addColorStop(.24, hexa(PACK.sun,     peak * .88));
-    g.addColorStop(.44, hexa(PACK.accent,  peak * .46));
-    g.addColorStop(.70, hexa(PACK.accent,  peak * .15));
-    g.addColorStop(1,   hexa(PACK.accent,  0));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    /* two hairline shockwaves, and no more than two */
-    ctx.lineWidth = 1.3;
-    for (const [off, mul] of [[0, .7], [.24, .34]]) {
-      const q = Math.max(0, b - off);
-      ctx.strokeStyle = hexa(PACK.sun, Math.pow(1 - q, 1.4) * mul);
-      ctx.beginPath(); ctx.arc(W / 2, by, q * H * .95, 0, 6.284); ctx.stroke();
-    }
-  }
-  /* leaving: one last quiet gold pulse where the dial's sun used to be */
-  if (flight.dir < 0 && t < 700) {
-    const b = 1 - t / 700;
-    const g = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, H * .5 * (1 + (1 - b)));
-    g.addColorStop(0, hexa(PACK.sun, b * .34));
-    g.addColorStop(1, hexa(PACK.sun, 0));
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  }
+  /* THE REVEAL, read forwards on the climb and backwards on the descent —
+     so the arrival's slow bloom is also the departure's slow contraction. */
+  drawBloom(bloomAt(flight.rev ? mirror(tc) : tc));
 
   if (t < P.dur + 400) flightRaf = requestAnimationFrame(frame);
   else { flightRaf = 0; flight = null; }
@@ -1444,13 +1686,18 @@ function clearAll(){
 function startFlight(P, dir){
   sizeCanvas(); setCamera(P); seedStars();
   for (const g of P.props) {
-    g.p = 0; g.rad = g.ang * Math.PI / 180;
+    g.p = P.rev ? 1 : 0;             /* reversed, the traffic starts at the edge */
+    g.rad = g.ang * Math.PI / 180;
     g.rot0 = (g.spin || 0) * -0.5;
     if (g.kind === "con") g.pts = CONS[g.shape];
     if (g.kind === "sys") g.bodies = systemBodies(g.k);
   }
-  for (const n of NEB) { n.rad = n.ang * Math.PI / 180; }
-  flight = { P, dir, start: performance.now(), last: performance.now(),
+  for (const n of NEB) {
+    n.rad = n.ang * Math.PI / 180;
+    if (n.p0 === undefined) n.p0 = n.p;
+    n.p = n.p0;                      /* every run starts from the same dust */
+  }
+  flight = { P, dir, rev: !!P.rev, start: performance.now(), last: performance.now(),
              props: P.props, dpr: Math.min(2, window.devicePixelRatio || 1) };
   flightRaf = requestAnimationFrame(frame);
 }
@@ -1483,96 +1730,166 @@ function dropMark(){
     el.style.visibility = "";
 }
 
-/* ── ASCENT · the launch. Fired by first-run success, and by every ordinary
-     successful sign-in (§15 amendment). ──────────────────────────────────── */
-function ascend(withForm){
+/* ── ASCENT · the launch. Fired by first-run success, by every ordinary
+     successful sign-in (§15 amendment), and by the newcomer who belongs to
+     nothing yet (§15 second pass, ruling 4 — same climb, different landing).
+
+     THE RESTAGED LANDING (ruling 3). Wall clock from the call:
+        0     arming; the mark's centre goes white
+        200   the canvas takes over and the flight starts
+        260   the mark leaves the card and rides to centre screen (1.08s)
+        430   the login and the form are released
+       1340   the mark puts itself out
+       1560   the household's name is written on the void
+       2600   and taken away again
+       3400   THE REVEAL begins (canvas t 3200): 1.3s of slow bloom, then it
+              holds, so the handoff happens in full light rather than in a
+              rising one
+       4800   handoff INSIDE the light — the canvas dissolves over 1.7s while
+              the bodies condense out of it over 1.3s
+       6400   the bare sky is readable: planets, sun, the household's name
+       9400   three seconds later the instrument arrives (1.3s, arrive style)
+      11150   the tour pops (first-run only)                                  */
+const T = { warp:200, mark:260, release:430, markOut:1340,
+            nameOn:1560, nameOff:2600,
+            land:4800, condensed:6400, dwell:3000, instrument:1300,
+            tourGap:450 };
+T.instrumentAt = T.condensed + T.dwell;                    /*  9400 */
+T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 11150 */
+
+function ascend(withForm, landing){
   clearAll();
-  body.classList.remove("tour", "grounded", "rejected", "descending", "farewell", "showdusk");
+  body.classList.remove("tour", "grounded", "rejected", "descending", "farewell",
+                        "showdusk", "belong", "instrument");
+  const newcomer = landing === "newcomer";
+  const surface = newcomer ? "shownew" : "showhome";
 
   if (RM.matches) {                       /* reduced motion: a plain crossfade */
     body.classList.remove("showform", "showdawn");
-    body.classList.add("showhome");
-    if (withForm) after(3000 + 700, () => body.classList.add("tour"));
+    body.classList.add(surface, "bare");
+    /* the staging survives: bare sky, three seconds, then the instrument */
+    after(700 + T.dwell, () => {
+      body.classList.remove("bare");
+      body.classList.add("instrument");
+      if (newcomer) body.classList.add("belong");
+    });
+    if (withForm) after(700 + T.dwell + 700, () => body.classList.add("tour"));
     return;
   }
 
-  document.getElementById("lnsub").textContent = withForm ? "first light" : "welcome back";
+  document.getElementById("lnsub").textContent =
+    newcomer ? "you are new here" : withForm ? "first light" : "welcome back";
   const src = withForm ? document.querySelector("#setup .mark")
                        : document.querySelector("#login-glyph svg");
   body.classList.add("arming");
-  after(260, () => {
+  after(T.mark, () => {
     body.classList.remove("arming");
     if (withForm) body.classList.add("igniting");
     liftMark(src, H * .5, withForm ? 2.3 : 2.6, 1080);
     body.classList.remove("recede");
   });
-  after(200, () => { body.classList.add("showwarp"); startFlight(UP, 1); });
-  after(430, () => body.classList.remove("showdawn", "showform"));
-  after(1340, dropMark);
+  after(T.warp, () => { body.classList.add("showwarp"); startFlight(UP, 1); });
+  after(T.release, () => body.classList.remove("showdawn", "showform"));
+  after(T.markOut, dropMark);
   /* the household's name, written once on the void at the top of the climb */
-  after(1560, () => lname.classList.add("on"));
-  after(2500, () => lname.classList.remove("on"));
-  /* handoff: the canvas is at its brightest, so the swap is inside a bloom */
-  after(3320, () => {
+  after(T.nameOn, () => lname.classList.add("on"));
+  after(T.nameOff, () => lname.classList.remove("on"));
+  /* THE HANDOFF happens INSIDE the light, not after it: the canvas is still
+     holding the bloom and takes 1.5s to dissolve, and the bodies condense out
+     of it in that time. Nothing pops; the light simply resolves into planets. */
+  after(T.land, () => {
     body.classList.remove("showwarp", "igniting");
-    body.classList.add("showhome");
+    body.classList.add(surface, "bare");
+    if (newcomer) renderNewSky();
   });
-  /* dwell three seconds on the populated sky, then the tour takes over */
-  if (withForm) after(3320 + 280 + 3000, () => body.classList.add("tour"));
+  /* THE DWELL, then the instrument (ruling 3) */
+  after(T.instrumentAt, () => {
+    body.classList.remove("bare");
+    body.classList.add("instrument");
+    if (newcomer) after(240, () => body.classList.add("belong"));
+  });
+  if (withForm) after(T.tourAt, () => body.classList.add("tour"));
 }
 
-/* ── DESCENT · logout. The emotional inverse: no acceleration anywhere in it,
-     colours warming back up out of the dark, a horizon that flattens as you
-     settle onto it. ─────────────────────────────────────────────────────── */
+/* ── DESCENT · logout, and nothing of its own (§15 second pass, ruling 1).
+     The flight is UP mirrored — see DOWN — and the DOM around it is mirrored
+     with it. The arrival went bloom → bodies → dwell → instrument; leaving
+     runs instrument out, bodies in, and the sun swallows them.
+
+     Wall clock from the call:
+        0     the instrument withdraws (arrive, reversed)
+       620    the bodies contract toward the centre
+       700    the canvas takes over with the bloom already at full, and the
+              reversed flight begins: the sun contracts over 1.2s
+      ~3655   the mark reappears at centre and rides down to the lockup
+       3600   the dusk surface comes up under the cooling dawn
+       4150   the flight is over and the canvas is released — a dissolve
+              between two drawings of the same world, so nothing moves
+       4578   the mark sets down on the goodbye's own glyph and waits there
+              while the lockup resolves around it
+       5100   it hands back to the lockup's own glyph
+       5350   the farewell speaks                                            */
 function descend(){
   if (!body.classList.contains("showhome")) { toHome(true); }
   clearAll();
   body.classList.remove("tour");
 
   if (RM.matches) {
-    body.classList.remove("showhome");
+    body.classList.remove("showhome", "instrument");
     body.classList.add("showdusk", "farewell");
     return;
   }
 
-  body.classList.add("descending");
-  after(140, () => {
-    const dial = document.querySelector(".hf .dial");
-    const r = dial.getBoundingClientRect();
-    /* the dial's sun contracts back into the mark, and the mark rides down
-       into the dusk lockup's place */
+  /* the instrument leaves first, because it arrived last */
+  body.classList.remove("instrument");
+  body.classList.add("withdrawing");
+  after(620, () => body.classList.add("descending"));
+  after(700, () => { body.classList.add("showwarp"); startFlight(DOWN, -1); });
+  after(1000, () => body.classList.remove("showhome", "descending", "withdrawing"));
+  /* the mark: on the climb it rode 260 → 1340 out of the login's glyph, so on
+     the way down it appears at centre and rides to the lockup over the
+     mirrored window — 2955 → 3878 of the descent, 700 later on the wall. */
+  after(700 + 2955, () => {
     fmark.style.transition = "none";
-    fmark.style.left = (r.left + r.width / 2 - 18) + "px";
-    fmark.style.top = (r.top + r.height / 2 - 18) + "px";
+    fmark.style.left = (W / 2 - 18) + "px"; fmark.style.top = (H / 2 - 18) + "px";
     fmark.style.width = "36px"; fmark.style.height = "36px";
     fmark.classList.remove("collapse"); fmark.classList.add("on");
     const glyph = document.querySelector("#dusk-glyph svg");
     const g = glyph.getBoundingClientRect();
     glyph.style.visibility = "hidden";
     requestAnimationFrame(() => {
-      fmark.style.transition = "left 1.9s cubic-bezier(.15,.6,.25,1),top 1.9s cubic-bezier(.15,.6,.25,1)," +
-        "width 1.9s cubic-bezier(.15,.6,.25,1),height 1.9s cubic-bezier(.15,.6,.25,1),opacity .5s ease";
+      const ms = 923;
+      fmark.style.transition = "left " + ms + "ms cubic-bezier(.35,0,.2,1)," +
+        "top " + ms + "ms cubic-bezier(.35,0,.2,1)," +
+        "width " + ms + "ms cubic-bezier(.35,0,.2,1)," +
+        "height " + ms + "ms cubic-bezier(.35,0,.2,1),opacity .4s ease";
       fmark.style.left = g.left + "px"; fmark.style.top = g.top + "px";
       fmark.style.width = g.width + "px"; fmark.style.height = g.height + "px";
     });
   });
-  after(170, () => { body.classList.add("showwarp"); startFlight(DOWN, -1); });
-  after(470, () => body.classList.remove("showhome", "descending"));
-  after(1450, () => body.classList.add("showdusk"));
-  after(2180, () => body.classList.remove("showwarp"));
-  after(2160, () => {
+  /* the name is written on the void on the way down too, in the mirror of the
+     window it was written in on the way up (1560–2600 becomes 1880–2767) */
+  after(700 + 1880, () => {
+    document.getElementById("lnsub").textContent = "signing out";
+    lname.classList.add("on");
+  });
+  after(700 + 2767, () => lname.classList.remove("on"));
+  after(3600, () => body.classList.add("showdusk"));
+  after(4150, () => body.classList.remove("showwarp"));
+  after(5100, () => {
     fmark.classList.remove("on");
     document.querySelector("#dusk-glyph svg").style.visibility = "";
   });
-  after(2400, () => body.classList.add("farewell"));
+  after(5350, () => body.classList.add("farewell"));
 }
 
 /* ══ stages ═══════════════════════════════════════════════════════════════ */
 function baseReset(){
   clearAll();
-  body.classList.remove("showform", "showdawn", "showhome", "showdusk", "showwarp",
-                        "igniting", "arming", "descending", "farewell", "tour",
-                        "grounded", "rejected");
+  body.classList.remove("showform", "showdawn", "showhome", "shownew", "showdusk",
+                        "showwarp", "igniting", "arming", "descending", "withdrawing",
+                        "farewell", "tour", "grounded", "rejected",
+                        "bare", "instrument", "belong");
   fmark.classList.remove("on", "collapse");
   lname.classList.remove("on");
   for (const el of document.querySelectorAll(".mark,#login-glyph svg,#dusk-glyph svg"))
@@ -1601,18 +1918,34 @@ function press(id, on){ const b = document.getElementById(id); if (b) b.setAttri
 
 /* ══ the demos ════════════════════════════════════════════════════════════ */
 function loginLaunch(){
+  lastRun = "login";
   toLogin();
   const gate = document.getElementById("gate");
   after(RM.matches ? 0 : 420, () => gate.classList.add("flash"));
   after(RM.matches ? 200 : 900, () => { gate.classList.remove("flash"); ascend(false); });
 }
 function logoutDescent(){
+  lastRun = "logout";
   if (!body.classList.contains("showhome")) { toHome(true); after(560, descend); }
   else descend();
+}
+/* §15 second pass, ruling 4: the newcomer. Not the first user, not an admin —
+   the same login, the same climb, and a sky that has no chart in it because
+   they belong to nothing yet. */
+function newcomerArrival(){
+  lastRun = "newcomer";
+  toLogin();
+  const gate = document.getElementById("gate");
+  after(RM.matches ? 0 : 420, () => gate.classList.add("flash"));
+  after(RM.matches ? 200 : 900, () => {
+    gate.classList.remove("flash");
+    ascend(false, "newcomer");
+  });
 }
 let lastRun = "form";
 function replay(){
   if (lastRun === "login") loginLaunch();
+  else if (lastRun === "newcomer") newcomerArrival();
   else if (lastRun === "logout") { toHome(true); after(560, () => { lastRun = "logout"; descend(); }); }
   else { toForm(); after(500, () => attempt(true)); }
 }
@@ -1623,80 +1956,33 @@ const lockup = document.getElementById("lockupname");
 const cap = document.getElementById("lockupcap");
 const goBtn = document.getElementById("gobtn");
 const goNote = document.getElementById("gonote");
-const chips = document.getElementById("chips");
-const own = document.getElementById("ownname");
 let armedError = false, rejectedName = "";
 
-const suggs = document.getElementById("suggs");
-const secHint = document.getElementById("sechint");
-const CAP = 12;                              /* twelve at most, unchanged */
+/* §15, "first-run asks three things only": there is nothing to count and
+   nothing to choose here any more. A name, a zone, a currency. The four
+   default sections are applied behind the scenes and are the household
+   screen's business afterwards. */
+const DEFAULT_SECTIONS = ["Home", "Vehicles", "Devices", "Services"];
 
-function chosen(){
-  return [...chips.querySelectorAll("button[aria-pressed=true]")].map(b => b.textContent.trim());
-}
-function seats(){ return chips.querySelectorAll("button:not(.add)").length; }
 function refresh(){
   const name = nameField.value.trim();
-  const sections = chosen();
-  const room = CAP - seats();
-  body.classList.toggle("full", room <= 0);
-  suggs.classList.toggle("spent", suggs.querySelectorAll("button").length === 0);
-  secHint.innerHTML = room > 0
-    ? "every entry wears one, printed beside it in the manifest &middot; room for " +
-      room + " more &middot; rename or hide them later"
-    : "twelve is the ceiling &middot; drop one to add another &middot; rename or hide them later";
   body.classList.toggle("named", name.length > 0);
   lockup.textContent = name || "unnamed";
   cap.textContent = name ? "your system, and its sun" : "the centre lights when you name it";
-  goBtn.disabled = name.length === 0 || sections.length === 0;
+  goBtn.disabled = name.length === 0;
   goBtn.textContent = name ? "create " + name + " →" : "create this system →";
   document.getElementById("lnword").textContent = name || "Lawson Home";
   document.getElementById("dial-name").textContent = name || "Lawson Home";
   if (!name) { goNote.textContent = "a name is all that’s missing"; return; }
-  if (!sections.length) { goNote.textContent = "keep at least one section"; return; }
-  goNote.textContent = sections.length + (sections.length === 1 ? " section" : " sections") +
-    " · " + document.getElementById("cur").value + " · " + document.getElementById("tz").value;
+  goNote.textContent = document.getElementById("tz").value + " · " +
+    document.getElementById("cur").value + " · " +
+    DEFAULT_SECTIONS.length + " sections to start";
 }
 /* Typing disarms the rejection, because the rejection was about the NAME:
    a different word is a different answer, and the server has not seen it. */
 function naming(){
   if (armedError && nameField.value.trim() !== rejectedName) clearError();
   body.classList.remove("rejected");
-  refresh();
-}
-function chip(btn){
-  btn.setAttribute("aria-pressed", String(btn.getAttribute("aria-pressed") !== "true"));
-  refresh();
-}
-/* a suggestion crosses the line into the chosen row, already switched on */
-function adopt(btn){
-  if (seats() >= CAP) return;
-  const made = document.createElement("button");
-  made.type = "button";
-  made.setAttribute("aria-pressed", "true");
-  made.textContent = btn.textContent.trim();
-  made.addEventListener("click", () => chip(made));
-  chips.insertBefore(made, chips.querySelector(".add"));
-  btn.remove();
-  refresh();
-}
-function openOwn(){
-  if (seats() >= CAP) return;
-  own.classList.add("open"); own.focus();
-}
-function ownKey(event){
-  if (event.key === "Escape") { own.classList.remove("open"); own.value = ""; return; }
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  const label = own.value.trim();
-  if (!label) { own.classList.remove("open"); return; }
-  const btn = document.createElement("button");
-  btn.type = "button"; btn.className = "own";
-  btn.setAttribute("aria-pressed", "true");
-  btn.textContent = label;
-  btn.addEventListener("click", () => chip(btn));
-  chips.insertBefore(btn, chips.querySelector(".add"));
-  own.value = ""; own.classList.remove("open");
   refresh();
 }
 /* enter, and the server answers. Only success flies. */
@@ -1735,8 +2021,173 @@ function setInstance(which){
   const adrift = which === "toggle" ? !body.classList.contains("adrift") : which === "adrift";
   body.classList.toggle("adrift", adrift);
   press("d-adrift", adrift);
+  /* the number is the real count, and the card only exists because there is
+     something to count: a virgin instance never renders it (owner, §15). */
+  const n = Object.keys(GALAXY).length;
+  document.getElementById("disc-n").textContent = n;
+  document.getElementById("disc-word").textContent = n === 1 ? "system" : "systems";
   if (!body.classList.contains("showform")) toForm();
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE NEWCOMER'S SKY (§15 second pass, ruling 4)
+   The #453 labelled sky, drawn the way the app draws it in
+   web/src/routes/home/+page.svelte's emptySky branch (mountEmptySky) and the
+   way design/v19/home.html draws its backdrop constellations: label, leader
+   rule that always runs AWAY from centre, ring, centre point, the household's
+   own planets, and the waiting note on one that has already been asked.
+
+   The placement is #428's law, verbatim from home.html (itself verbatim from
+   web/src/routes/home/placement.js): bearings are sacred, radii negotiate,
+   the whole thing is one pure function of (households, camera, viewport).
+   Camera is NULL here — a viewer with no household stands at the origin of
+   the shared map, not inside one of its systems. The one adaptation: the
+   app passes keepOut 0 because its adrift copy is two lines; here the
+   QUESTION is the centre of the frame, so it takes the keep-out the chart
+   would have had.
+   ══════════════════════════════════════════════════════════════════════════ */
+const GALAXY = {
+  lawson:  { name:"Lawson Home",     pos:[0,0],
+             planets:[[-9,21,2.4,"--warm"],[-25,8,2.4,"--warm"],[-13,-24,2.1,"--warm"]] },
+  seaside: { name:"Seaside Cottage", pos:[-617,-305],
+             planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  mumdad:  { name:"Mum & Dad’s",     pos:[452,522],
+             planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]], requested:true },
+  narrow:  { name:"The Narrowboat",  pos:[-515,393],
+             planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  grans:   { name:"Gran’s Flat",     pos:[722,-184],
+             planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+};
+const placementMemo = new Map();
+function minSeparationFor(w){ return Math.max(230, Math.min(340, w * 0.18)); }
+function reachOn(angle, w, h){
+  const rx = w / 2 + 40;
+  const ry = Math.max(80, h / 2 - (Math.sin(angle) < 0 ? 215 : 155));
+  return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
+}
+function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
+  const ids = Object.keys(galaxy).sort();
+  const key = `${camera ?? ""}@${w}x${h}/${keepOut}#${ids.join(",")}`;
+  if (placementMemo.has(key)) return placementMemo.get(key);
+  const origin = camera && galaxy[camera] ? galaxy[camera].pos : [0, 0];
+  const minSep = minSeparationFor(w);
+  const reach = (a) => reachOn(a, w, h);
+  const points = [], self = [];
+  for (const id of ids) {
+    const hh = galaxy[id];
+    if (id === camera) { self.push({ id, hh, isCamera:true, dist:0, angle:0, radius:0, ox:0, oy:0, dim:.9 }); continue; }
+    const dx = hh.pos[0] - origin[0], dy = hh.pos[1] - origin[1];
+    const dist = Math.hypot(dx, dy);
+    points.push({ id, hh, isCamera:false, dist, angle:Math.atan2(dy, dx), radius:0,
+                  ox:0, oy:0, dim: Math.max(.45, Math.min(.9, 1.05 - dist / 2600)) });
+  }
+  for (const p of points) p.radius = Math.max(keepOut, Math.min(p.dist, reach(p.angle)));
+  for (let round = 0; round < 6; round++) {
+    const push = points.map(() => 0);
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      const ax = Math.cos(a.angle) * a.radius, ay = Math.sin(a.angle) * a.radius;
+      const zx = Math.cos(z.angle) * z.radius, zy = Math.sin(z.angle) * z.radius;
+      const gap = Math.hypot(zx - ax, zy - ay);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / 2;
+      const aIn = a.radius < z.radius || (a.radius === z.radius && a.id < z.id);
+      push[aIn ? i : j] -= shove; push[aIn ? j : i] += shove;
+    }
+    if (!crowded) break;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      p.radius = push[i] < 0 ? Math.max(keepOut, p.radius + push[i])
+                             : Math.min(p.radius + push[i], reach(p.angle) + 40);
+    }
+  }
+  const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
+  for (const p of points) {
+    let ox = Math.cos(p.angle) * p.radius, oy = Math.sin(p.angle) * p.radius;
+    const lim = oy < 0 ? safeTop : safeBottom;
+    if (Math.abs(oy) > lim) {
+      oy = Math.sign(oy) * Math.max(lim, 0);
+      ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(p.radius * p.radius - oy * oy, 0));
+    }
+    p.ox = ox; p.oy = oy;
+  }
+  for (let round = 0; round < 4; round++) {
+    const push = points.map(() => 0);
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / 2;
+      const aLeft = a.ox < z.ox || (a.ox === z.ox && a.id < z.id);
+      push[aLeft ? i : j] -= shove; push[aLeft ? j : i] += shove;
+    }
+    if (!crowded) break;
+    for (let i = 0; i < points.length; i++)
+      points[i].ox = Math.max(-(w / 2) + 60, Math.min(w / 2 - 60, points[i].ox + push[i]));
+  }
+  const placed = [...points, ...self].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  placementMemo.set(key, placed);
+  return placed;
+}
+
+const newsky = document.getElementById("newsky");
+function renderNewSky(){
+  for (const old of newsky.querySelectorAll(".minisys")) old.remove();
+  const w = newsky.clientWidth, h = newsky.clientHeight;
+  const card = document.querySelector(".nf .belong");
+  const keepOut = Math.max(200, (card ? card.offsetWidth : 430) / 2 + 118);
+  /* The law bounds the RING, not the label, and a label runs ~112px further
+     out than its ring. So the sky it is placed in is 220px narrower than the
+     frame — the same trick reachOn already plays vertically for the create
+     handle — while the drawing still centres on the real middle. Nothing
+     about the bearings changes; the usable sky is simply inset. */
+  const sky = Math.max(640, w - 220);
+  for (const { hh, ox, oy, dim } of placeGalaxy({ galaxy:GALAXY, camera:null, width:sky, height:h, keepOut })) {
+    const away = ox > 0;
+    const mx = (x) => (away ? 210 - x : x);
+    const ringX = mx(118);
+    const div = document.createElement("div");
+    div.className = "minisys";
+    div.style.left = (w / 2 + ox - ringX) + "px";
+    div.style.top = (h / 2 + oy - 95) + "px";
+    div.style.opacity = dim;
+    const label = hh.name.toUpperCase();
+    const tw = Math.min(150, label.length * 6.6);
+    const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+    const anchor = away ? ' text-anchor="end"' : "";
+    div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
+      <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${anchor} style="fill:var(--accent)" opacity=".85">${label}</text>
+      ${hh.requested ? `<text x="${mx(6)}" y="30" font-size="8.5" letter-spacing=".14em"${anchor} style="fill:var(--ink-faint)">ASKED TO JOIN · WAITING</text>` : ""}
+      <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+      <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+      <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+      ${hh.planets.map(([px, py, pr, tok]) =>
+        `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+    </svg>`;
+    newsky.appendChild(div);
+  }
+}
+/* the card's list is the same households, in the same order, as words */
+function fillBelong(){
+  const list = document.getElementById("belonglist");
+  list.innerHTML = "";
+  for (const id of Object.keys(GALAXY).sort()) {
+    const hh = GALAXY[id];
+    const li = document.createElement("li");
+    if (hh.requested) li.className = "waiting";
+    li.innerHTML = `<button type="button">
+        <span class="dot"></span><span class="nm"></span>
+        <span class="act">${hh.requested ? "waiting" : "ask to join"}</span></button>`;
+    li.querySelector(".nm").textContent = hh.name;
+    list.appendChild(li);
+  }
+}
+fillBelong();
+addEventListener("resize", () => { if (body.classList.contains("shownew")) renderNewSky(); });
 function setTheme(name){
   document.documentElement.setAttribute("data-theme", name);
   for (const b of document.querySelectorAll("[data-swatch]"))
@@ -1772,6 +2223,16 @@ fillTile("dk-far", 100, .4, .55, .14, .28, true);
 fillTile("dk-near", 48, .8, .85, .40, .38, false);
 fillTile("hf-far", 95, .4, .5, .12, .23, false);
 fillTile("hf-near", 46, .8, .7, .30, .40, false);
+fillTile("nf-far", 95, .4, .5, .12, .23, false);
+fillTile("nf-near", 46, .8, .7, .30, .40, false);
+
+/* the count on the left-hand card is read off the households, never written.
+   A virgin instance starts WITHOUT the card — there is nothing to count. */
+(function countHouseholds(){
+  const n = Object.keys(GALAXY).length;
+  document.getElementById("disc-n").textContent = n;
+  document.getElementById("disc-word").textContent = n === 1 ? "system" : "systems";
+})();
 
 /* first light: the login's dawn breaks once, then the card rises onto it */
 toForm();
