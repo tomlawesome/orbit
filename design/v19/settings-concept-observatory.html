@@ -3,14 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — settings inside the observatory (concept 1 of 3, issue #472 · §15)</title>
+<title>Orbit — settings inside the observatory (chosen direction, polish pass · #472 · §15)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
   /* SETTINGS · CONCEPT 1 — INSIDE THE OBSERVATORY  (§15, issue #472)
      ================================================================
-     One of three concepts the owner asked to see mocked before ruling on the
-     settings backdrop. The cards, their copy and their behaviour are
+     The concept the owner chose of the three, now polished: "Observatory is
+     the strongest, but it definitely needs a lot more polish" (§15). The
+     cartographer's desk and the gimbal room stay as the record. The cards,
+     their copy and their behaviour are
      design/v19/settings.html reproduced faithfully — content is spec here.
      Only the story behind them is new.
 
@@ -52,10 +54,26 @@
 
      PER-LOAD ROLL (§14 "never the same twice")
      ------------------------------------------
-     One seed decides: the dome's rotation (rib phase and the slit's tilt),
-     which side of the column the slit stands on and how wide it is, the
-     tube's elevation and the two circle readings, whether the second shutter
-     panel is stowed, and everything that drifts past.
+     One seed decides: the dome's rotation (rib phase, the seam offset you can
+     see against the drum's datum, and the slit's tilt), which side of the
+     column the slit stands on and how wide it is, how far up the slit the
+     tube is aimed and the two circle readings, whether the second shutter
+     panel is stowed, and everything that drifts past. The log names the seed
+     as the night's PLATE number, so the roll is on the page in words.
+
+     THE POLISH PASS (owner, §15: "Observatory is the strongest, but it
+     definitely needs a lot more polish")
+     ------------------------------------------------------------------
+     The room is now placed against the READING COLUMN rather than the frame:
+     the slit stands centred in one clear margin, the instrument entire in the
+     other, and the whole room is masked back to a quarter of its weight under
+     the cards — the ratified trick from administration-iss, so no rib and no
+     tube ever competes with a word. Light has a direction, because there is
+     only one opening: a wash off the slit onto the plaster, a bloom at the
+     jambs, a rim down the instrument's slit-facing edges, and the red
+     observing lamp over the log. Depth is drawn — the shell is softened, the
+     shutter half so, the instrument dead sharp. And the caption became a LOG:
+     one tab stop, one baseline, three sections, every value a fact or a roll.
 
      BUILD NOTE: in the app the seed rolls fresh on every load. Under
      ORBIT_FIXTURES it MUST be pinned deterministically — derived from the
@@ -80,6 +98,12 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    /* THE ROOM'S LIGHT. One opening, one lamp. --spill is what the slit throws
+       on the plaster; --lamp is the red observing light over the log. */
+    --spill:#cfe0ff; --spill-op:.075; --slit-op:.14;
+    --lamp:#c47a63; --lamp-glow:rgba(198,92,64,.15);
+    --dome-op:1; --inst-op:1; --wall-op:.05;
+    --card-shadow:0 20px 46px rgba(0,0,0,.44),0 1px 0 rgba(255,255,255,.05) inset;
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -90,6 +114,10 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --spill:#c8d8f2; --spill-op:.06; --slit-op:.17;
+    --lamp:#b3705f; --lamp-glow:rgba(178,78,60,.13);
+    --dome-op:1; --inst-op:1; --wall-op:.05;
+    --card-shadow:0 20px 46px rgba(0,0,0,.58),0 1px 0 rgba(255,255,255,.04) inset;
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -100,6 +128,13 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* a lit room in daylight: the opening is the DARK thing, and it throws a
+       cool shadow rather than a glow. The instrument's ink is held right back
+       so the plaster stays paper, never mud. */
+    --spill:#1c2b4a; --spill-op:.055; --slit-op:.30;
+    --lamp:#8f5a1e; --lamp-glow:rgba(150,96,34,.10);
+    --dome-op:.5; --inst-op:.74; --wall-op:.03;
+    --card-shadow:0 16px 34px rgba(88,74,44,.20),0 1px 0 rgba(255,255,255,.55) inset;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -110,6 +145,10 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --spill:#1a2233; --spill-op:.06; --slit-op:.33;
+    --lamp:#8a5326; --lamp-glow:rgba(164,104,48,.10);
+    --dome-op:.46; --inst-op:.72; --wall-op:.028;
+    --card-shadow:0 16px 34px rgba(40,54,80,.20),0 1px 0 rgba(255,255,255,.72) inset;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -120,6 +159,10 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --spill:#9fd6e6; --spill-op:.07; --slit-op:.17;
+    --lamp:#ff6ba8; --lamp-glow:rgba(255,79,168,.11);
+    --dome-op:1; --inst-op:1; --wall-op:.05;
+    --card-shadow:0 20px 46px rgba(0,0,0,.58),0 1px 0 rgba(45,226,230,.07) inset;
   }
 
   *{box-sizing:border-box;margin:0}
@@ -134,12 +177,31 @@
   .room{position:fixed;inset:0;pointer-events:none;z-index:0}
   .room svg{position:absolute;inset:0;width:100%;height:100%}
   .skywrap{opacity:var(--stars);transition:opacity .4s}
-  /* indoors is darker than outdoors: a soft interior fall-off, and on the two
-     paper packs a warm lamp instead — a dome at dusk, never a black hole */
+  /* DEPTH IS DRAWN, NOT DECLARED (§5 "depth via differential blur"): the dome
+     shell sits furthest away and is softened; the shutter is mid-room; the
+     instrument is the only thing in the room you could touch, so it alone is
+     dead sharp. The two paper packs also hold the whole shell back, because
+     their ink is near-black on near-white and would otherwise read as mud. */
+  .g-dome{filter:blur(.7px);opacity:var(--dome-op);transition:opacity .4s}
+  .g-shut{filter:blur(.25px);opacity:var(--dome-op);transition:opacity .4s}
+  .g-inst{opacity:var(--inst-op);transition:opacity .4s}
+  /* indoors is darker than outdoors, and the darkness has a DIRECTION: the
+     interior falls away from the slit, because the slit is the only opening.
+     --slit-x is written by the script every time the dome is re-rolled. */
   .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-            background:radial-gradient(ellipse at 50% 40%, transparent 42%, rgba(0,0,0,.42) 100%)}
+            background:radial-gradient(ellipse 82% 96% at var(--slit-x,18%) 40%,
+              transparent 12%, rgba(0,0,0,.20) 64%, rgba(0,0,0,.34) 100%)}
+  /* on the paper packs the room is LIT and the night is outside: warmth off the
+     ceiling, a cool wash where the opening lets the dark in — never a glow
+     over the reading column, which is why the source sits on the top edge */
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{
-            background:radial-gradient(ellipse at 50% 34%, rgba(255,238,205,.30) 0%, transparent 58%)}
+            background:radial-gradient(ellipse 86% 40% at 50% -4%, rgba(255,238,205,.34), transparent 70%),
+                       radial-gradient(ellipse 46% 74% at var(--slit-x,18%) 44%, rgba(20,28,46,.11), transparent 72%)}
+  /* the red observing lamp over the log — real domes run red light so the eye
+     stays dark-adapted. Pooled on the instrument's side, never on the cards. */
+  .lamp{position:fixed;inset:0;pointer-events:none;z-index:1;
+        background:radial-gradient(ellipse 24% 40% at var(--lamp-x,84%) 20%,
+                   var(--lamp-glow), transparent 76%)}
 
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
         letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
@@ -182,8 +244,11 @@
   header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
   header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
+  /* the cards FLOAT in the room rather than lying flat on the wall: the family
+     card, plus the create screen's ratified lift — a cast shadow on the dome
+     behind and a one-pixel catch-light along the top edge */
   .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
-        border-radius:16px;padding:20px 22px;margin-top:22px}
+        border-radius:16px;padding:20px 22px;margin-top:22px;box-shadow:var(--card-shadow)}
   .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
            color:var(--ink-faint);margin-bottom:14px}
   .idrow{display:flex;align-items:center;gap:16px}
@@ -266,6 +331,7 @@
 <!-- the observatory: instrument, shutter and the one strip of sky ---------- -->
 <div class="room" aria-hidden="true"><svg id="room" preserveAspectRatio="none"></svg></div>
 <div class="vignette" aria-hidden="true"></div>
+<div class="lamp" aria-hidden="true"></div>
 
 <a class="back" href="home.html">&larr; YOUR SKY</a>
 <button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
@@ -413,10 +479,10 @@
   </span>
 </div>
 
-<footer>orbit &middot; settings &middot; <b>backdrop concept 1 of 3 &mdash; INSIDE THE OBSERVATORY</b> &middot; proposal only, no verdict yet &middot; #472 &middot; &sect;15<br>
+<footer>orbit &middot; settings &middot; <b>INSIDE THE OBSERVATORY</b> &mdash; the chosen backdrop of the three, polish pass &middot; #472 &middot; &sect;15<br>
 indoors at the controls: the sky exists only through the shutter slit, and everything else is the instrument &middot;
 the strip of sky drifts and never loops &mdash; what leaves at the top is gone, what arrives at the sill is rolled fresh from this load&rsquo;s seed &middot;
-the dome bearing, the slit, the elevation and what crosses are re-rolled on every load</footer>
+the dome bearing, the slit, the elevation and what crosses are re-rolled on every load &mdash; the log names the seed as the night&rsquo;s plate</footer>
 
 <script>
 function toggleAccount(orb){
@@ -521,8 +587,8 @@ function rollDome(){
   roll = {
     side,
     bearing: Math.floor(r() * 360),          /* where the dome has been turned to */
-    slitW: 186 + r() * 92,
-    elev: 24 + r() * 36,                     /* the tube's elevation, degrees */
+    slitW: 152 + r() * 62,
+    elev: 24 + r() * 36,                     /* how far up the slit the tube is aimed */
     dec: (r() * 2 - 1) * 62,                 /* declination the circle reads */
     ra: r() * 24,                            /* right ascension, hours */
     stowed: r() < 0.55,                      /* is the upper shutter panel stowed */
@@ -531,10 +597,23 @@ function rollDome(){
 }
 
 /* ---------- the room, drawn in viewport pixels ---------------------------- */
+const F = n => Number(n).toFixed(1);
+const CL = (v, a, b) => Math.max(a, Math.min(b, v));
+const ink = (sw, op) => ({ stroke:INK, fill:"none", "stroke-width":sw, opacity:op });
+const rimlit = (sw, op) => ({ stroke:"var(--spill)", fill:"none", "stroke-width":sw, opacity:op });
+const P = (d, a) => el("path", Object.assign({ d }, a));
+
 function slitPath(cx, w, sill){
-  const x0 = (cx - w / 2).toFixed(1), x1 = (cx + w / 2).toFixed(1);
-  return `M ${x0} -40 V ${sill.toFixed(1)} Q ${cx.toFixed(1)} ${(sill + w * 0.55).toFixed(1)} ` +
-         `${x1} ${sill.toFixed(1)} V -40 Z`;
+  const x0 = F(cx - w / 2), x1 = F(cx + w / 2);
+  return `M ${x0} -60 V ${F(sill)} Q ${F(cx)} ${F(sill + w * 0.46)} ${x1} ${F(sill)} V -60 Z`;
+}
+
+/* a gradient, in viewport pixels like everything else in this room */
+function grad(kind, id, attrs, stops){
+  const g = el(kind, Object.assign({ id, gradientUnits:"userSpaceOnUse" }, attrs));
+  for (const [o, c, op] of stops)
+    g.appendChild(el("stop", { offset:o, "stop-color":c, "stop-opacity":op }));
+  return g;
 }
 
 function drawRoom(){
@@ -543,16 +622,35 @@ function drawRoom(){
   room.setAttribute("viewBox", `0 0 ${W} ${H}`);
   room.textContent = "";
 
-  /* the slit stands clear of the helm's column wherever the column happens to
-     be — that is the whole reason this room is drawn in pixels */
-  const colHalf = Math.min(1060, W - 48) / 2;
-  const w = Math.min(roll.slitW, W * 0.34);
-  const want = W / 2 + roll.side * (colHalf + w * 0.62);
-  const cx = Math.max(w / 2 + 14, Math.min(W - w / 2 - 14, want));
-  const sill = H * 0.72;
-  const tilt = roll.ribPhase * 0.26;                     /* the dome's rotation, seen */
-  const pivot = `${cx.toFixed(1)} ${(H * 0.45).toFixed(1)}`;
+  /* ---- THE ROOM IS PLACED AGAINST THE READING COLUMN, not against the frame.
+     The helm's cards are the subject. The slit takes one clear margin and the
+     instrument takes the other, each centred in its own, and the drawing steps
+     back wherever a word is. ---- */
+  const colW = Math.min(1060, W - 48) - 48;      /* the cards' own box */
+  const colL = (W - colW) / 2, colR = W - colL;
+  const marg = colL;
+  const tight = marg < 176;                      /* no honest margin left: a phone */
+  const side = roll.side;                        /* -1 slit west, +1 slit east */
+  const ms = -side;                              /* the instrument stands opposite */
+
+  /* the slit stands CENTRED in its margin with air either side, so it reads as
+     an opening in a wall rather than a strip sliding off the edge of the frame */
+  const w = tight ? Math.min(roll.slitW, W * 0.30)
+                  : CL(roll.slitW, 116, marg * 0.68);
+  const cx = tight ? (side < 0 ? w / 2 + 20 : W - w / 2 - 20)
+                   : (side < 0 ? marg / 2 : W - marg / 2);
+  const sill = H * 0.735;
+  const seam = H * 0.885;                        /* turning dome, meet fixed drum */
+  const floor = seam + (H - seam) * 0.34;
+  const tilt = roll.ribPhase * 0.4;              /* the dome's rotation, seen */
+  const pivot = `${F(cx)} ${F(H * 0.42)}`;
   const sp = slitPath(cx, w, sill);
+
+  /* the interior fall-off and the observing lamp follow the ROOM, not the page:
+     darkness has a direction when there is only one opening */
+  const rs = document.documentElement.style;
+  rs.setProperty("--slit-x", (cx / W * 100).toFixed(1) + "%");
+  rs.setProperty("--lamp-x", ((ms < 0 ? marg * 0.44 : W - marg * 0.44) / W * 100).toFixed(1) + "%");
 
   const defs = el("defs");
   /* the dome is solid except where the shutter is open */
@@ -562,272 +660,477 @@ function drawRoom(){
   cut.appendChild(el("path", { d:sp, fill:"#000" }));
   mask.appendChild(cut);
   defs.appendChild(mask);
+
   const clip = el("clipPath", { id:"slitclip", clipPathUnits:"userSpaceOnUse" });
   clip.appendChild(el("path", { d:sp }));
   defs.appendChild(clip);
+
+  /* the dome shell stops at the seam; below it stands the fixed drum */
+  const shellc = el("clipPath", { id:"shellclip", clipPathUnits:"userSpaceOnUse" });
+  shellc.appendChild(el("rect", { x:0, y:-120, width:W, height:seam + 120 }));
+  defs.appendChild(shellc);
+
+  /* LEGIBILITY IS LAW — the ratified trick from the station screen: the room
+     reads boldest out at the edges and steps back under the column of cards,
+     so no rib and no tube ever competes with a word (administration-iss). */
+  const s0 = CL((colL - 130) / W, 0, 1), s1 = CL((colL + 52) / W, 0, 1);
+  const s2 = CL((colR - 52) / W, 0, 1), s3 = CL((colR + 130) / W, 0, 1);
+  defs.appendChild(grad("linearGradient", "colfade", { x1:0, y1:0, x2:W, y2:0 },
+    [[0, "#fff", 1], [s0, "#fff", 1], [s1, "#fff", .26], [s2, "#fff", .26],
+     [s3, "#fff", 1], [1, "#fff", 1]]));
+  const colmask = el("mask", { id:"colmask", maskUnits:"userSpaceOnUse", x:0, y:0, width:W, height:H });
+  colmask.appendChild(el("rect", { x:0, y:0, width:W, height:H, fill:"url(#colfade)" }));
+  defs.appendChild(colmask);
+
+  /* THE LIGHT. One opening, so one source: a wide wash reaching across the
+     plaster and a tighter bloom hugging the jambs. On the paper packs --spill
+     is the ink colour instead and the same two gradients read as the night
+     leaning IN through the slit — a lit room, looking out. */
+  const sw = Math.max(W, H);
+  defs.appendChild(grad("radialGradient", "spillwide",
+    { cx:F(cx), cy:F(H * 0.36), r:F(sw * 0.62),
+      gradientTransform:`translate(0 ${F(H * 0.36)}) scale(1 1.3) translate(0 ${F(-H * 0.36)})` },
+    [[0, "var(--spill)", 1], [.4, "var(--spill)", .38], [1, "var(--spill)", 0]]));
+  defs.appendChild(grad("radialGradient", "spilltight",
+    { cx:F(cx), cy:F(sill * 0.44), r:F(w * 2.2),
+      gradientTransform:`translate(0 ${F(sill * 0.44)}) scale(1 2.4) translate(0 ${F(-sill * 0.44)})` },
+    [[0, "var(--spill)", 1], [.55, "var(--spill)", .3], [1, "var(--spill)", 0]]));
+  /* the opening is not a lit panel: the sky in it is deepest overhead and
+     lifts toward the sill, the way real airglow does just above a horizon */
+  defs.appendChild(grad("linearGradient", "slitfill",
+    { x1:0, y1:-60, x2:0, y2:F(sill + w * 0.46) },
+    [[0, "var(--ink)", .38], [.58, "var(--ink)", .66], [1, "var(--ink)", 1]]));
   room.appendChild(defs);
 
-  /* ---- the sky, and only in the slit ---- */
+  /* ---- the sky, and only in the slit. Five depths, five speeds: dust, far
+     stars, the constellations, the households nearer still, and the near
+     grains that streak. Parallax is the depth (§14 "the sky drifts as one"). */
   const skyRot = el("g", { transform:`rotate(${tilt.toFixed(2)} ${pivot})` });
   const skyWrap = el("g", { class:"skywrap", "clip-path":"url(#slitclip)" });
-  /* the opening reads as night in both directions with one fill: on the dark
-     packs --ink is pale, so the slit lifts a shade above the interior; on the
-     paper packs --ink is navy, so it darkens — outside is the night, seen
-     from a room with the lamp on */
-  skyWrap.appendChild(el("path", { d:sp, fill:"var(--ink)", opacity:".07" }));
-  const gFar = el("g", { fill:"var(--star-far)" });
-  const gMark = el("g");
+  skyWrap.appendChild(el("path", { d:sp, fill:"url(#slitfill)", opacity:"var(--slit-op)" }));
+  const gDust = el("g", { fill:"var(--star-far)" });
+  const gFar  = el("g", { fill:"var(--star-far)" });
+  const gFig  = el("g");
+  const gHH   = el("g");
   const gNear = el("g", { fill:"var(--star-near)" });
-  skyWrap.appendChild(gFar); skyWrap.appendChild(gMark); skyWrap.appendChild(gNear);
+  for (const L of [gDust, gFar, gFig, gHH, gNear]) skyWrap.appendChild(L);
   skyRot.appendChild(skyWrap);
   room.appendChild(skyRot);
 
-  /* ---- the dome: ribs and two purlins, masked around the open shutter ---- */
-  const dome = el("g", { mask:"url(#shutter)" });
-  const ax = W / 2 + roll.ribPhase * 7, ay = -H * 0.46;
-  dome.appendChild(el("rect", { x:0, y:0, width:W, height:H, fill:INK, opacity:".055" }));
-  for (let k = -6; k <= 6; k++){
-    const a = (k * 14 + roll.ribPhase * 0.9) * Math.PI / 180;
-    const L = 2.7 * H;
-    dome.appendChild(el("line", { x1:ax.toFixed(1), y1:ay.toFixed(1),
-      x2:(ax + Math.sin(a) * L).toFixed(1), y2:(ay + Math.cos(a) * L).toFixed(1),
-      stroke:INK, "stroke-width":1.1, opacity:".42" }));
-  }
-  for (const R of [H * 0.92, H * 1.34, H * 1.74])
-    dome.appendChild(el("ellipse", { cx:ax.toFixed(1), cy:ay.toFixed(1),
-      rx:(R * 1.22).toFixed(1), ry:R.toFixed(1), fill:"none",
-      stroke:INK, "stroke-width":1.1, opacity:".32" }));
-  room.appendChild(dome);
+  /* everything from here is the ROOM, and the room defers to the cards */
+  const RM = el("g", { mask:"url(#colmask)" });
+  room.appendChild(RM);
 
-  /* ---- the shutter itself: jambs, runners, the stowed upper panel ---- */
-  const sh = el("g", { transform:`rotate(${tilt.toFixed(2)} ${pivot})` });
-  sh.appendChild(el("path", { d:sp, fill:"none", stroke:INK, "stroke-width":1.7, opacity:".85" }));
+  /* ---- the dome: plaster, the light that reaches it, meridian ribs, purlins.
+     Furthest away, so it is the softest thing in the frame (§5). ---- */
+  const dome = el("g", { class:"g-dome", mask:"url(#shutter)" });
+  const inner = el("g", { "clip-path":"url(#shellclip)" });
+  inner.appendChild(el("rect", { x:0, y:0, width:W, height:H, fill:INK, opacity:"var(--wall-op)" }));
+  inner.appendChild(el("rect", { x:0, y:0, width:W, height:H, fill:"url(#spillwide)", opacity:"var(--spill-op)" }));
+  inner.appendChild(el("rect", { x:0, y:0, width:W, height:H, fill:"url(#spilltight)", opacity:"var(--spill-op)" }));
+  const ax = W / 2 + roll.ribPhase * 14, ay = -H * 0.40;
+  for (let k = -6; k <= 6; k++){
+    const a = (k * 13.5 + roll.ribPhase * 1.4) * Math.PI / 180;
+    const L = 2.9 * H;
+    const ex = ax + Math.sin(a) * L, ey = ay + Math.cos(a) * L;
+    /* meridians of a hemisphere bow; and the ones out at the frame edge are
+       nearer to you than the ones overhead, so they carry the heavier line */
+    const bow = 0.05 * L * Math.sin(a);
+    const edge = Math.abs(k) / 6;
+    inner.appendChild(P(`M ${F(ax)} ${F(ay)} Q ${F((ax + ex) / 2 + bow)} ${F((ay + ey) / 2)} ${F(ex)} ${F(ey)}`,
+      ink((0.85 + edge * 0.55).toFixed(2), (0.2 + edge * 0.26).toFixed(2))));
+  }
+  for (const RR of [H * 0.84, H * 1.24, H * 1.66])
+    inner.appendChild(el("ellipse", Object.assign({ cx:F(ax), cy:F(ay), rx:F(RR * 1.24), ry:F(RR) },
+      ink(1, ".24"))));
+  dome.appendChild(inner);
+  RM.appendChild(dome);
+
+  /* ---- THE SEAM. The dome turns and the drum does not, so the rotation is a
+     thing you can SEE: the drum's datum notch below the line, the dome's own
+     mark above it, and the gap between them is the bearing in the log. ---- */
+  const drum = el("g", { class:"g-shut" });
+  drum.appendChild(el("line", { x1:0, y1:F(seam), x2:W, y2:F(seam), stroke:INK,
+    "stroke-width":1.2, opacity:".32" }));
+  drum.appendChild(el("line", { x1:0, y1:F(seam + 4), x2:W, y2:F(seam + 4), stroke:INK,
+    "stroke-width":.8, opacity:".17" }));
+  RM.appendChild(drum);
+
+  /* the drum's staves, standing under the seam: the room has a bottom, and the
+     eye needs to be told where the floor is */
+  for (let x = (W / 2 + roll.ribPhase * 3) % 52 - 52; x < W; x += 52)
+    drum.appendChild(el("line", { x1:F(x), y1:F(seam + 5), x2:F(x), y2:F(seam + 20),
+      stroke:INK, "stroke-width":.9, opacity:".2" }));
+  drum.appendChild(el("line", { x1:0, y1:F(floor), x2:W, y2:F(floor), stroke:INK,
+    "stroke-width":1, opacity:".22" }));
+
+  const bear = el("g", { class:"g-inst" });
+  const span = Math.min(marg - 96, 150);
+  for (let t = -5; t <= 5; t++){
+    const x = cx + t * (span / 10), big = t % 5 === 0;
+    bear.appendChild(el("line", { x1:F(x), y1:F(seam), x2:F(x), y2:F(seam - (big ? 9 : 5)),
+      stroke:INK, "stroke-width":big ? 1.1 : .9, opacity:big ? ".7" : ".42" }));
+  }
+  bear.appendChild(P(`M ${F(cx)} ${F(seam + 3)} l 4.5 9 l -9 0 Z`, { fill:INK, opacity:".62" }));
+  const boff = ((roll.bearing % 60) / 60 - 0.5) * span;
+  bear.appendChild(P(`M ${F(cx + boff)} ${F(seam - 3)} l 4.5 -9 l -9 0 Z`,
+    { fill:"var(--lamp)", opacity:".95" }));
+  bear.appendChild(txt(`${String(roll.bearing).padStart(3, "0")}°`,
+    { x:F(cx + boff), y:F(seam - 16), "font-size":8, "letter-spacing":".12em",
+      "text-anchor":"middle", fill:"var(--lamp)", opacity:"1" }));
+  RM.appendChild(bear);
+
+  /* ---- the shutter: the slit's frame, its jambs and runners, the stowed leaf.
+     The frame is the NEAREST piece of the shell, so it carries its heaviest
+     line — and the light bleeds round it before the ink lands. ---- */
+  const sh = el("g", { class:"g-shut", transform:`rotate(${tilt.toFixed(2)} ${pivot})` });
+  sh.appendChild(P(sp, { fill:"none", stroke:"var(--spill)", "stroke-width":8,
+    opacity:"var(--spill-op)" }));
+  sh.appendChild(P(sp, ink(2.1, ".95")));
   for (const s of [-1, 1]){
     const x = cx + s * (w / 2);
-    sh.appendChild(el("line", { x1:(x + s * 9).toFixed(1), y1:-40,
-      x2:(x + s * 9).toFixed(1), y2:(sill - w * 0.1).toFixed(1),
-      stroke:INK, "stroke-width":1, opacity:".45" }));
-    for (let y = 16; y < sill - w * 0.1; y += 34)
-      sh.appendChild(el("line", { x1:x.toFixed(1), y1:y, x2:(x + s * 9).toFixed(1), y2:y,
-        stroke:INK, "stroke-width":1, opacity:".38" }));
+    sh.appendChild(el("line", { x1:F(x + s * 10), y1:-60, x2:F(x + s * 10), y2:F(sill - w * 0.08),
+      stroke:INK, "stroke-width":1.1, opacity:".55" }));
+    for (let y = 18; y < sill - w * 0.08; y += 38)
+      sh.appendChild(el("line", { x1:F(x), y1:y, x2:F(x + s * 10), y2:y,
+        stroke:INK, "stroke-width":.9, opacity:".4" }));
   }
   if (roll.stowed){
-    /* the upper leaf, run back on its rails and folded against the dome */
-    const y0 = 24, y1 = 24 + w * 0.42;
-    sh.appendChild(el("rect", { x:(cx - w / 2 + 4).toFixed(1), y:y0, width:(w - 8).toFixed(1),
-      height:(y1 - y0).toFixed(1), fill:"none", stroke:INK, "stroke-width":1.2, opacity:".6" }));
-    for (let x = cx - w / 2 + 12; x < cx + w / 2 - 4; x += 15)
-      sh.appendChild(el("line", { x1:x.toFixed(1), y1:y0, x2:(x - 12).toFixed(1), y2:y1,
-        stroke:INK, "stroke-width":1, opacity:".34" }));
+    /* the upper leaf, run back on its rails and folded against the dome —
+       clear of the back link, which is a word and therefore wins */
+    const y0 = 60, y1 = 60 + w * 0.34;
+    sh.appendChild(P(`M ${F(cx - w / 2 + 5)} ${F(y0)} H ${F(cx + w / 2 - 5)} ` +
+      `M ${F(cx - w / 2 + 5)} ${F(y1)} H ${F(cx + w / 2 - 5)}`, ink(1.4, ".62")));
+    /* four rails, not a grille: a name crossing the opening must stay a name */
+    for (let q = 1; q <= 4; q++){
+      const x = cx - w / 2 + 5 + (w - 10) * q / 5;
+      sh.appendChild(P(`M ${F(x)} ${F(y0)} L ${F(x - 13)} ${F(y1)}`, ink(.9, ".2")));
+    }
   }
-  sh.appendChild(txt(`SLIT ${(w / 168).toFixed(2)} M · ${roll.stowed ? "UPPER LEAF STOWED" : "BOTH LEAVES RUN BACK"}`,
-    { x:cx.toFixed(1), y:(sill + w * 0.55 + 24).toFixed(1), "text-anchor":"middle",
-      "font-size":9.5, "letter-spacing":".14em", opacity:".8" }));
-  room.appendChild(sh);
+  RM.appendChild(sh);
+  /* the shutter's own label is TYPE, so it never takes the shell's dimming —
+     a word always wins over the wall it is written on */
+  const note = el("g", { class:"g-inst", transform:`rotate(${tilt.toFixed(2)} ${pivot})` });
+  note.appendChild(txt(roll.stowed ? "UPPER LEAF STOWED" : "BOTH LEAVES RUN BACK",
+    { x:F(cx), y:F(sill + w * 0.46 + 26), "text-anchor":"middle", "font-size":9,
+      "letter-spacing":".18em", opacity:".78" }));
+  RM.appendChild(note);
 
-  /* ---- the instrument: pier, polar axis, tube, setting circles ----------
-     The mount stands in the clear margin OPPOSITE the shutter, so it never
-     fights the helm's column for room, and the tube points at the slit
-     because a telescope inside a closed dome can point nowhere else. */
-  const inst = el("g");
-  const ms = -roll.side;                                  /* which margin the pier stands in */
-  const gap = Math.max(70, Math.min(122, (W / 2 - colHalf) * 0.5));
-  /* the pier is clamped so the polar axis, the dec circle AND its reading all
-     stay inside the frame on the side they lean towards */
-  const lo = 130 + (ms < 0 ? 138 : 0), hi = W - 130 - (ms > 0 ? 138 : 0);
-  const mx = Math.max(lo, Math.min(Math.max(lo, hi), W / 2 + ms * (colHalf + gap)));
-  const my = H * 0.80;                                    /* the pier head */
-  const lat = 34 * Math.PI / 180;                         /* the polar axis, tilted to the pole */
+  /* ---- THE INSTRUMENT, and the log beside it -------------------------------
+     Both need a clear margin to stand in. Below the helm's one-column
+     breakpoint there is no margin left, so rather than jam a telescope into
+     eight pixels of frame the room keeps only what still reads: the dome, the
+     seam and the opening. Degrading honestly beats degrading loudly. */
+  if (tight){
+    const bandT = { cx, w, sill };
+    layers = [
+      Stream(gDust, 1.5, 320, 320, 0x0a1, H + 140, (g, r) => stars(g, r, bandT, 40, .26, .3, .07, .13, 320)),
+      Stream(gFar,  2.7, 300, 300, 0x101, H + 140, (g, r) => stars(g, r, bandT, 24, .45, .55, .16, .28, 300)),
+      Stream(gFig,  3.3, 470, 470, 0x202, H + 140, (g, r) => { if (r() < .66) figure(g, r, bandT); }),
+      Stream(gHH,   4.8, 540, 540, 0x303, H + 140, (g, r, i) => { if (r() < .66) household(g, r, i, bandT); }),
+      Stream(gNear, 7.6, 300, 300, 0x404, H + 140, (g, r) => stars(g, r, bandT, 9, .9, .8, .34, .44, 300)),
+    ];
+    return;
+  }
+
+  /* ---- THE INSTRUMENT ------------------------------------------------------
+     One drawing, not a kit of parts: a tapered pier standing on the floor, the
+     polar axis raked to the latitude with its bearing housing, the declination
+     head carrying both circles, one tube and the weight that balances it. It
+     is the only thing in this room you could touch, so it alone is dead sharp,
+     and its slit-facing edges catch the one light there is. */
+  const inst = el("g", { class:"g-inst" });
+  const head = H * 0.715;                                /* short pier, tall sky */
+  const lat = 34 * Math.PI / 180;
   const ux = ms * Math.sin(lat), uy = -Math.cos(lat);
-  const dpx = mx + ux * 132, dpy = my + uy * 132;         /* where the dec axis crosses it */
+  const vx = -uy, vy = ux;                               /* across the polar axis */
+  const axl = 116;
+  /* the declination head is set so the WHOLE instrument lives in its margin:
+     the tube's aperture stops at the column's edge and the weight stops at the
+     frame's. An instrument you can only half see is not a drawing. */
+  const dpx = ms > 0 ? colR + marg * 0.62 : colL - marg * 0.62;
+  const dpy = head + uy * axl;
+  const px0 = dpx - ux * axl;                            /* the pier's centreline */
 
-  /* the pier */
-  const pier = el("g", { stroke:INK, fill:"none", "stroke-width":1.4, opacity:".68" });
-  pier.appendChild(el("path", { d:`M ${(mx - 12).toFixed(1)} ${my.toFixed(1)} V ${H} ` +
-    `M ${(mx + 12).toFixed(1)} ${my.toFixed(1)} V ${H}` }));
-  pier.appendChild(el("path", { d:`M ${(mx - 40).toFixed(1)} ${(H - 26).toFixed(1)} H ${(mx + 40).toFixed(1)}`,
-    "stroke-width":1.2, opacity:".9" }));
-  pier.appendChild(el("path", { d:`M ${(mx - 12).toFixed(1)} ${(my + 54).toFixed(1)} ` +
-    `L ${(mx - 40).toFixed(1)} ${(H - 26).toFixed(1)} M ${(mx + 12).toFixed(1)} ${(my + 54).toFixed(1)} ` +
-    `L ${(mx + 40).toFixed(1)} ${(H - 26).toFixed(1)}`, "stroke-width":1, opacity:".55" }));
-  /* the polar axis itself */
-  pier.appendChild(el("path", { d:`M ${mx.toFixed(1)} ${my.toFixed(1)} L ${dpx.toFixed(1)} ${dpy.toFixed(1)}`,
-    "stroke-width":1.6, opacity:".8" }));
-  inst.appendChild(pier);
+  /* the declination shaft carries the tube one side of the polar axis and the
+     weight the other; the tube's centreline, and everything about the tube, is
+     measured from THERE — which is what stops it reading as a bolted-on part */
+  const dOff = 42;
+  const tcx = dpx - vx * dOff, tcy = dpy - vy * dOff;
 
-  /* the tube, hung off the declination axis and aimed up the slit */
-  const aimx = cx, aimy = H * 0.06;
-  const ang = Math.atan2(aimy - dpy, aimx - dpx);
-  const len = Math.hypot(aimx - dpx, aimy - dpy) * 1.02;
-  const tr = Math.max(34, Math.min(66, H * 0.068));       /* tube radius */
-  const nx = -Math.sin(ang), ny = Math.cos(ang);          /* tube normal */
-  const px = Math.cos(ang), py = Math.sin(ang);
-  const bx = dpx - px * len * 0.17, by = dpy - py * len * 0.17;  /* the drawtube end */
-  const tube = el("g", { stroke:INK, fill:"none" });
+  /* how far up the slit the tube is aimed — the roll decides, and the log
+     prints the elevation the DRAWING has, never a number invented beside it */
+  const aimx = cx, aimy = H * (0.30 - (roll.elev - 24) / 36 * 0.26);
+  const ang = Math.atan2(aimy - tcy, aimx - tcx);
+  const elevTrue = Math.atan2(tcy - aimy, Math.abs(aimx - tcx)) * 180 / Math.PI;
+  const cpx = Math.cos(ang), cpy = Math.sin(ang);
+  const nx = -Math.sin(ang), ny = Math.cos(ang);
+  const lit = ny < 0 ? 1 : -1;                           /* the side turned to the slit */
+  const runin = Math.abs(tcx - (ms > 0 ? colR + 16 : colL - 16));
+  const len = CL(runin / (0.76 * Math.max(.4, Math.abs(cpx))), 150, H * 0.32);
+  const tr = len * 0.165;
+
+  /* the pier: a short block of masonry on a plinth, cap plate on top. Short,
+     because a pier is a pedestal, and a pedestal running half the frame is a
+     pylon — the instrument is the subject, not its stand. */
+  const capw = 25, basew = 35;
+  inst.appendChild(P(`M ${F(px0 - capw)} ${F(head)} L ${F(px0 - basew)} ${F(floor - 12)} ` +
+    `H ${F(px0 + basew)} L ${F(px0 + capw)} ${F(head)} Z`,
+    { stroke:INK, "stroke-width":1.7, opacity:".84", fill:INK, "fill-opacity":".07" }));
+  inst.appendChild(P(`M ${F(px0 - capw - 11)} ${F(head)} H ${F(px0 + capw + 11)}`, ink(2, ".95")));
+  inst.appendChild(P(`M ${F(px0 - capw - 11)} ${F(head + 8)} H ${F(px0 + capw + 11)}`, ink(1, ".5")));
+  inst.appendChild(el("rect", Object.assign({ x:F(px0 - basew - 15), y:F(floor - 12),
+    width:F((basew + 15) * 2), height:12, fill:INK, "fill-opacity":".07" }, ink(1.6, ".82"))));
+  inst.appendChild(P(`M ${F(px0 - basew - 24)} ${F(floor)} H ${F(px0 + basew + 24)}`, ink(1.6, ".6")));
+  inst.appendChild(P(`M ${F(px0 - ms * capw)} ${F(head + 4)} L ${F(px0 - ms * basew)} ${F(floor - 14)}`,
+    rimlit(1.6, ".22")));
+
+  /* the polar axis and its bearing housing, raked to the latitude */
   for (const s of [-1, 1])
-    tube.appendChild(el("line", { x1:(bx + nx * tr * s).toFixed(1), y1:(by + ny * tr * s).toFixed(1),
-      x2:(bx + px * len + nx * tr * s).toFixed(1), y2:(by + py * len + ny * tr * s).toFixed(1),
-      "stroke-width":1.5, opacity:".76" }));
-  for (const f of [0.3, 0.5, 0.7, 0.9])
-    tube.appendChild(el("line", { x1:(bx + px * len * f + nx * tr).toFixed(1), y1:(by + py * len * f + ny * tr).toFixed(1),
-      x2:(bx + px * len * f - nx * tr).toFixed(1), y2:(by + py * len * f - ny * tr).toFixed(1),
-      "stroke-width":1, opacity:".3" }));
-  /* the aperture, foreshortened — you are looking along the tube, not at it */
-  tube.appendChild(el("ellipse", { cx:(bx + px * len).toFixed(1), cy:(by + py * len).toFixed(1),
-    rx:(tr * 0.4).toFixed(1), ry:tr.toFixed(1), fill:"none", "stroke-width":1.5, opacity:".78",
-    transform:`rotate(${(ang * 180 / Math.PI).toFixed(2)} ${(bx + px * len).toFixed(1)} ${(by + py * len).toFixed(1)})` }));
-  tube.appendChild(el("ellipse", { cx:bx.toFixed(1), cy:by.toFixed(1),
-    rx:(tr * 0.32).toFixed(1), ry:(tr * 0.8).toFixed(1), fill:"none", "stroke-width":1.2, opacity:".55",
-    transform:`rotate(${(ang * 180 / Math.PI).toFixed(2)} ${bx.toFixed(1)} ${by.toFixed(1)})` }));
-  /* the finder, riding the tube's shoulder */
-  const fx = bx + px * len * 0.46 + nx * (tr + 14), fy = by + py * len * 0.46 + ny * (tr + 14);
-  tube.appendChild(el("path", { d:`M ${fx.toFixed(1)} ${fy.toFixed(1)} l ${(px * 104).toFixed(1)} ${(py * 104).toFixed(1)} ` +
-    `M ${(fx + nx * 9).toFixed(1)} ${(fy + ny * 9).toFixed(1)} l ${(px * 104).toFixed(1)} ${(py * 104).toFixed(1)}`,
-    "stroke-width":1.2, opacity:".5" }));
-  /* the counterweight, balancing it about the same axis */
-  tube.appendChild(el("circle", { cx:(dpx - px * len * 0.2).toFixed(1), cy:(dpy - py * len * 0.2).toFixed(1),
-    r:13, "stroke-width":1.3, opacity:".62" }));
-  inst.appendChild(tube);
+    inst.appendChild(P(`M ${F(px0 + vx * 12 * s)} ${F(head + vy * 12 * s)} ` +
+      `L ${F(px0 + ux * 66 + vx * 12 * s)} ${F(head + uy * 66 + vy * 12 * s)}`, ink(1.3, ".66")));
+  inst.appendChild(P(`M ${F(px0 + ux * 66 + vx * 12)} ${F(head + uy * 66 + vy * 12)} ` +
+    `L ${F(px0 + ux * 66 - vx * 12)} ${F(head + uy * 66 - vy * 12)}`, ink(1.2, ".6")));
+  inst.appendChild(P(`M ${F(px0)} ${F(head)} L ${F(dpx)} ${F(dpy)}`, ink(2.1, ".92")));
 
-  /* THE SETTING CIRCLES — degree-ticked, and they read what this load rolled.
-     The larger sits on the polar axis and gives the hour angle; the smaller
-     rides the declination axis. They are the numbers the caption states. */
-  inst.appendChild(circle(mx + ux * 46, my + uy * 46, 46, 24, roll.ra / 24 * 360, "HOUR ANGLE",
-    `${Math.floor(roll.ra)}h ${String(Math.floor(roll.ra % 1 * 60)).padStart(2, "0")}m`, 1));
-  inst.appendChild(circle(dpx, dpy, 32, 18, roll.dec + 90, "DECLINATION",
-    `${roll.dec >= 0 ? "+" : "\u2212"}${Math.abs(roll.dec).toFixed(1)}\u00b0`, -1));
-  room.appendChild(inst);
+  /* THE DECLINATION AXIS — this is what makes it one machine rather than a
+     kit: the tube and the weight hang off the SAME shaft, at right angles to
+     the polar axis, tube high on one end and weight low on the other. */
+  const clearx = ms > 0 ? (W - 30 - dpx) : (dpx - 30);
+  const cwl = CL(len * 0.30, 46, (clearx - 19) / Math.max(.35, Math.abs(vx)));
+  const cwx = dpx + vx * cwl, cwy = dpy + vy * cwl;
+  inst.appendChild(P(`M ${F(tcx)} ${F(tcy)} L ${F(cwx + vx * 8)} ${F(cwy + vy * 8)}`, ink(1.7, ".84")));
+  inst.appendChild(el("circle", Object.assign({ cx:F(cwx), cy:F(cwy), r:18,
+    fill:INK, "fill-opacity":".08" }, ink(1.8, ".92"))));
+  inst.appendChild(el("circle", Object.assign({ cx:F(cwx), cy:F(cwy), r:10 }, ink(1.05, ".46"))));
+  inst.appendChild(el("circle", Object.assign({ cx:F(dpx), cy:F(dpy), r:8 }, ink(1.2, ".6"))));
 
-  /* ---- the caption: this load's roll, and the instance's own facts.
-     Set in short lines against the outer edge so it lives in the same clear
-     margin as the pier and never runs under a card. ---- */
-  const cap = el("g", { opacity:".95" });
-  const anchor = ms > 0 ? "end" : "start";
-  const capx = ms > 0 ? W - 22 : 22;
-  const capy = Math.max(120, dpy - 150);
-  const lines = [
-    ["THE OBSERVATORY", 11, ".2em", "1"],
-    ["IN.LAWSON-HOME.ORBIT", 9.5, ".16em", ".88"],
-    ["5 SYSTEMS \u00b7 1 ARRIVAL HELD", 9.5, ".13em", ".88"],
-    [`DOME ${String(roll.bearing).padStart(3, "0")}\u00b0 \u00b7 SLIT ${roll.side < 0 ? "WEST" : "EAST"}`, 9.5, ".13em", ".88"],
-    [`ELEVATION ${roll.elev.toFixed(1)}\u00b0 \u00b7 DRIVE OFF`, 9.5, ".13em", ".88"],
-  ];
-  lines.forEach(([s0, fs, ls, op], i) => cap.appendChild(txt(s0,
-    { x:capx, y:capy + i * 16, "font-size":fs, "letter-spacing":ls,
-      "text-anchor":anchor, opacity:op })));
-  room.appendChild(cap);
+  /* the tube, cradled on the dec axis and aimed up the slit */
+  const bx = tcx - cpx * len * 0.22, by = tcy - cpy * len * 0.22;
+  const apx = bx + cpx * len, apy = by + cpy * len;
+  const rot = (ang * 180 / Math.PI).toFixed(2);
+  for (const s of [-1, 1])
+    inst.appendChild(P(`M ${F(bx + nx * tr * s)} ${F(by + ny * tr * s)} ` +
+      `L ${F(apx + nx * tr * s)} ${F(apy + ny * tr * s)}`, ink(1.8, ".94")));
+  for (const f of [0.26, 0.5, 0.74])
+    inst.appendChild(P(`M ${F(bx + cpx * len * f + nx * tr)} ${F(by + cpy * len * f + ny * tr)} ` +
+      `L ${F(bx + cpx * len * f - nx * tr)} ${F(by + cpy * len * f - ny * tr)}`, ink(.95, ".28")));
+  /* the two cradle rings that clamp it to the dec axis */
+  for (const f of [-0.06, 0.06])
+    inst.appendChild(P(`M ${F(tcx + cpx * len * f + nx * tr)} ${F(tcy + cpy * len * f + ny * tr)} ` +
+      `L ${F(tcx + cpx * len * f - nx * tr)} ${F(tcy + cpy * len * f - ny * tr)}`, ink(1.5, ".66")));
+  /* the aperture, foreshortened — you are looking ALONG the tube, not at it */
+  inst.appendChild(el("ellipse", Object.assign({ cx:F(apx), cy:F(apy), rx:F(tr * 0.4), ry:F(tr),
+    transform:`rotate(${rot} ${F(apx)} ${F(apy)})` }, ink(1.9, "1"))));
+  inst.appendChild(el("ellipse", Object.assign({ cx:F(apx - cpx * 15), cy:F(apy - cpy * 15),
+    rx:F(tr * 0.4), ry:F(tr), transform:`rotate(${rot} ${F(apx - cpx * 15)} ${F(apy - cpy * 15)})` },
+    ink(1.05, ".34"))));
+  /* the eye end: a flat cap plate and the drawtube standing off it */
+  inst.appendChild(P(`M ${F(bx + nx * tr)} ${F(by + ny * tr)} L ${F(bx - nx * tr)} ${F(by - ny * tr)}`,
+    ink(1.6, ".82")));
+  const dux = bx - nx * tr * lit * 0.42, duy = by - ny * tr * lit * 0.42;
+  inst.appendChild(P(`M ${F(dux - cpx * 7)} ${F(duy - cpy * 7)} l ${F(-nx * 17 * lit)} ${F(-ny * 17 * lit)} ` +
+    `M ${F(dux + cpx * 7)} ${F(duy + cpy * 7)} l ${F(-nx * 17 * lit)} ${F(-ny * 17 * lit)}`, ink(1.3, ".64")));
+  inst.appendChild(P(`M ${F(dux - cpx * 7 - nx * 17 * lit)} ${F(duy - cpy * 7 - ny * 17 * lit)} ` +
+    `L ${F(dux + cpx * 7 - nx * 17 * lit)} ${F(duy + cpy * 7 - ny * 17 * lit)}`, ink(1.3, ".6")));
+  /* the finder, riding the tube's shoulder in its two rings */
+  const fx = bx + cpx * len * 0.34 + nx * (tr + 12) * lit;
+  const fy = by + cpy * len * 0.34 + ny * (tr + 12) * lit;
+  for (const s of [0, 7])
+    inst.appendChild(P(`M ${F(fx + nx * s * lit)} ${F(fy + ny * s * lit)} ` +
+      `l ${F(cpx * len * 0.3)} ${F(cpy * len * 0.3)}`, ink(1.15, ".6")));
+  for (const f of [0.02, 0.24])
+    inst.appendChild(P(`M ${F(bx + cpx * len * (0.34 + f) + nx * tr * lit)} ` +
+      `${F(by + cpy * len * (0.34 + f) + ny * tr * lit)} ` +
+      `L ${F(fx + cpx * len * f + nx * 7 * lit)} ${F(fy + cpy * len * f + ny * 7 * lit)}`, ink(1.05, ".44")));
+  /* the rim of starlight down the side turned toward the opening */
+  inst.appendChild(P(`M ${F(bx + nx * tr * lit)} ${F(by + ny * tr * lit)} ` +
+    `L ${F(apx + nx * tr * lit)} ${F(apy + ny * tr * lit)}`, rimlit(1.8, ".26")));
+
+  /* THE SETTING CIRCLES — the hour circle on the polar axis, the declination
+     circle on the dec head. They read what this load rolled; the log spells it. */
+  inst.appendChild(dial(px0 + ux * 48, head + uy * 48, 36, roll.ra / 24 * 360, "ha", "HA", ms, 1));
+  inst.appendChild(dial(dpx + vx * 15, dpy + vy * 15, 26, roll.dec + 90, "dec", "DEC", ms));
+  RM.appendChild(inst);
+
+  /* ---- THE LOG. One block, one tab stop, one baseline rhythm, three rules.
+     It stands at the top of the instrument's margin, under the red lamp, as
+     far from the circles as the frame allows. Every value on it is this load's
+     roll or the instance's own fact — nothing on it is filler (§12). ---- */
+  const hh = Math.floor(roll.ra), mm = Math.floor(roll.ra % 1 * 60);
+  room.appendChild(logPanel(ms < 0 ? 24 : W - marg + 24, marg - 48, 128, [
+    { h:"THE OBSERVATORY", fs:11, ls:".2em", op:".92" },
+    { h:"in.lawson-home.orbit", fs:9, ls:".14em", op:".7" },
+    "-",
+    ["SYSTEMS", "5"],
+    ["ARRIVALS", "1 HELD"],
+    "-",
+    ["DOME", `${String(roll.bearing).padStart(3, "0")}°`, 1],
+    ["SLIT", `${side < 0 ? "WEST" : "EAST"} · ${(w / 104).toFixed(2)} M`],
+    ["ELEVATION", `${elevTrue.toFixed(1)}°`, 1],
+    ["DRIVE", "OFF"],
+    "-",
+    ["HOUR ANGLE", `${hh}h ${String(mm).padStart(2, "0")}m`, 1],
+    ["DECLINATION", `${roll.dec >= 0 ? "+" : "−"}${Math.abs(roll.dec).toFixed(1)}°`, 1],
+    ["PLATE", `#${seed}`],
+  ]));
 
   /* ---- the streams, now that their hosts exist ---- */
   const band = { cx, w, sill };
   layers = [
-    Stream(gFar,  2.4, 300, 120, 0x101, H + 90, (g, r) => stars(g, r, band, 30, 0.4, 0.5, 0.14, 0.26)),
-    Stream(gMark, 3.6, 470, 460, 0x202, H + 90, (g, r, i) => mark(g, r, i, band)),
-    Stream(gNear, 6.1, 300, 120, 0x303, H + 90, (g, r) => stars(g, r, band, 13, 0.85, 0.75, 0.32, 0.42)),
+    Stream(gDust, 1.5, 320, 320, 0x0a1, H + 140, (g, r) => stars(g, r, band, 40, .26, .3, .07, .13, 320)),
+    Stream(gFar,  2.7, 300, 300, 0x101, H + 140, (g, r) => stars(g, r, band, 24, .45, .55, .16, .28, 300)),
+    Stream(gFig,  3.3, 470, 470, 0x202, H + 140, (g, r) => { if (r() < .66) figure(g, r, band); }),
+    Stream(gHH,   4.8, 540, 540, 0x303, H + 140, (g, r, i) => { if (r() < .66) household(g, r, i, band); }),
+    Stream(gNear, 7.6, 300, 300, 0x404, H + 140, (g, r) => stars(g, r, band, 9, .9, .8, .34, .44, 300)),
   ];
 }
 
-/* a degree-ticked setting circle with an index reading the roll */
-function circle(cx, cy, R, majorEvery, at, label, reading, where){
+/* A SETTING CIRCLE, engraved the way a real one is: the hour circle in hours
+   round to 24, the declination circle counting 0-90 out to each pole and back.
+   Vernier plate, index arm and centre boss; the arm is lamp-lit because the
+   reading is the one thing in this room you are meant to read. */
+function dial(cx, cy, R, at, kind, tag, tagSide, tagDown){
   const g = el("g");
-  g.appendChild(el("circle", { cx:cx.toFixed(1), cy:cy.toFixed(1), r:R, fill:"none",
-    stroke:INK, "stroke-width":1.3, opacity:".62" }));
-  g.appendChild(el("circle", { cx:cx.toFixed(1), cy:cy.toFixed(1), r:(R - 9).toFixed(1), fill:"none",
-    stroke:INK, "stroke-width":1, opacity:".34" }));
-  for (let d = 0; d < 360; d += 6){
-    const major = d % majorEvery === 0;
-    const a = (d - 90) * Math.PI / 180, L = major ? 9 : 4.5;
-    g.appendChild(el("line", { x1:(cx + Math.cos(a) * R).toFixed(1), y1:(cy + Math.sin(a) * R).toFixed(1),
-      x2:(cx + Math.cos(a) * (R - L)).toFixed(1), y2:(cy + Math.sin(a) * (R - L)).toFixed(1),
-      stroke:INK, "stroke-width":major ? 1.2 : 0.9, opacity:major ? ".6" : ".34" }));
-    if (major && d % (majorEvery * 3) === 0){
-      const t = txt(String(d), { x:(cx + Math.cos(a) * (R - 19)).toFixed(1),
-        y:(cy + Math.sin(a) * (R - 19) + 3).toFixed(1), "font-size":7.5,
-        "text-anchor":"middle", opacity:".58" });
-      g.appendChild(t);
+  g.appendChild(el("circle", Object.assign({ cx:F(cx), cy:F(cy), r:F(R) }, ink(1.5, ".9"))));
+  g.appendChild(el("circle", Object.assign({ cx:F(cx), cy:F(cy), r:F(R - 7) }, ink(.85, ".42"))));
+  const step = R >= 34 ? 5 : 6;                        /* a small circle is
+     engraved coarser than a large one, or the graduations read as hatching */
+  const maj  = R >= 34 ? 15 : 30;
+  const nam  = kind === "ha" ? 45 : 30;
+  for (let d = 0; d < 360; d += step){
+    const isMaj = d % maj === 0, isNam = d % nam === 0;
+    const a = (d - 90) * Math.PI / 180, L = isNam ? 7 : isMaj ? 5 : 2.6;
+    g.appendChild(el("line", { x1:F(cx + Math.cos(a) * R), y1:F(cy + Math.sin(a) * R),
+      x2:F(cx + Math.cos(a) * (R - L)), y2:F(cy + Math.sin(a) * (R - L)),
+      stroke:INK, "stroke-width":isMaj ? 1.1 : .7, opacity:isMaj ? ".78" : ".4" }));
+    if (isNam && R >= 34)
+      g.appendChild(txt(kind === "ha" ? String(Math.round(d / 15) % 24)
+                                      : String(Math.abs(d <= 180 ? d - 90 : 270 - d)),
+        { x:F(cx + Math.cos(a) * (R - 14)), y:F(cy + Math.sin(a) * (R - 14) + 2.4),
+          "font-size":6.5, "text-anchor":"middle", opacity:".62" }));
+  }
+  const a = (at - 90) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  for (let k = -2; k <= 2; k++){                       /* the vernier plate */
+    const b = a + k * 0.058;
+    g.appendChild(el("line", { x1:F(cx + Math.cos(b) * (R + 3)), y1:F(cy + Math.sin(b) * (R + 3)),
+      x2:F(cx + Math.cos(b) * (R + 8.5)), y2:F(cy + Math.sin(b) * (R + 8.5)),
+      stroke:INK, "stroke-width":.85, opacity:".56" }));
+  }
+  g.appendChild(P(`M ${F(cx - s * 3)} ${F(cy + c * 3)} L ${F(cx + s * 3)} ${F(cy - c * 3)} ` +
+    `L ${F(cx + c * (R + 6))} ${F(cy + s * (R + 6))} Z`, { fill:"var(--lamp)", opacity:".92" }));
+  g.appendChild(el("circle", Object.assign({ cx:F(cx), cy:F(cy), r:4.4 }, ink(1.1, ".72"))));
+  g.appendChild(el("circle", { cx:F(cx), cy:F(cy), r:1.8, fill:INK, opacity:".85" }));
+  g.appendChild(txt(tag, { x:F(cx + tagSide * (R + 13)), y:F(cy + R * (tagDown ? .95 : -.5)),
+    "font-size":7.5,
+    "letter-spacing":".16em", "text-anchor":tagSide > 0 ? "start" : "end", opacity:".72" }));
+  return g;
+}
+
+/* the log's grid: labels left, values right, rules between the sections */
+function logPanel(x, wd, y, rows){
+  const g = el("g");
+  let yy = y;
+  for (const row of rows){
+    if (row === "-"){
+      g.appendChild(el("line", { x1:F(x), y1:F(yy - 5), x2:F(x + wd), y2:F(yy - 5),
+        stroke:INK, "stroke-width":1, opacity:".24" }));
+      yy += 13;
+    } else if (Array.isArray(row)){
+      const [k, v, warm] = row;
+      g.appendChild(txt(k, { x:F(x), y:F(yy), "font-size":8.5, "letter-spacing":".16em", opacity:".8" }));
+      g.appendChild(txt(v, { x:F(x + wd), y:F(yy), "font-size":9.5, "letter-spacing":".08em",
+        "text-anchor":"end", fill:warm ? "var(--lamp)" : "var(--ink-mid)",
+        opacity:warm ? "1" : ".9" }));
+      yy += 15;
+    } else {
+      g.appendChild(txt(row.h, { x:F(x), y:F(yy), "font-size":row.fs,
+        "letter-spacing":row.ls, opacity:row.op }));
+      yy += row.fs + 7;
     }
   }
-  /* the index arm: this is what the circle is FOR */
-  const a = (at - 90) * Math.PI / 180;
-  g.appendChild(el("line", { x1:cx.toFixed(1), y1:cy.toFixed(1),
-    x2:(cx + Math.cos(a) * (R + 12)).toFixed(1), y2:(cy + Math.sin(a) * (R + 12)).toFixed(1),
-    stroke:INK, "stroke-width":1.5, opacity:".85" }));
-  g.appendChild(el("circle", { cx:cx.toFixed(1), cy:cy.toFixed(1), r:2.6, fill:INK, opacity:".85" }));
-  const ly = where < 0 ? cy - R - 26 : cy + R + 21;
-  g.appendChild(txt(label, { x:cx.toFixed(1), y:ly.toFixed(1), "font-size":9,
-    "letter-spacing":".18em", "text-anchor":"middle", opacity:".82" }));
-  g.appendChild(txt(reading, { x:cx.toFixed(1), y:(ly + 13).toFixed(1), "font-size":10.5,
-    "letter-spacing":".1em", "text-anchor":"middle", opacity:".92" }));
   return g;
 }
 
 /* ---- what climbs the slit ------------------------------------------------ */
-function stars(g, r, band, n, r0, r1, o0, o1){
+function stars(g, r, band, n, r0, r1, o0, o1, ch){
   for (let i = 0; i < n; i++) g.appendChild(el("circle", {
-    cx:(band.cx - band.w / 2 + r() * band.w).toFixed(1),
-    cy:(r() * 300).toFixed(1),
+    cx:F(band.cx - band.w / 2 + r() * band.w),
+    cy:(r() * ch).toFixed(1),
     r:(r0 + r() * r1).toFixed(2), opacity:(o0 + r() * o1).toFixed(2) }));
 }
 
-function mark(g, r, i, band){
-  const roll0 = r();
-  if (roll0 < 0.34) household(g, r, i, band);
-  else if (roll0 < 0.82) figure(g, r, band);
+/* a name that survives a starfield: painted stroke-first in the room's own
+   dark, so a star can never land inside a letter (§14, legibility is law) */
+function halo(t){
+  t.setAttribute("paint-order", "stroke");
+  t.setAttribute("stroke", "var(--bg)");
+  t.setAttribute("stroke-width", "3.2");
+  t.setAttribute("stroke-linejoin", "round");
+  t.setAttribute("stroke-opacity", ".7");
+  return t;
 }
 
 /* one real household, crossing the slit. Its bearing is sacred: it decides
-   where across the slit it passes and which way the name reads. */
+   where across the slit it passes and which way the name reads. Households
+   ride their own layer, faster than the constellations behind them — the
+   nearer a thing is, the quicker it crosses (§14 parallax). */
 function household(g, r, i, band){
   const n = SYSTEMS.length;
   const hh = SYSTEMS[(((i * 3) % n) + n) % n];
   const bearing = Math.atan2(hh.pos[1], hh.pos[0]);
   const x = band.cx + Math.cos(bearing) * band.w * 0.16;
-  const y = 90 + r() * 300;
+  const y = 170 + r() * 280;
   const far = r();
-  const sc = 0.74 - far * 0.24;
+  const sc = 0.76 - far * 0.22;
   /* §14: the real-world marks read a notch clearer than the first pass */
-  const dim = (0.82 - far * 0.18).toFixed(2);
+  const dim = (0.88 - far * 0.14).toFixed(2);
 
-  const root = el("g", { transform:`translate(${x.toFixed(1)},${y.toFixed(1)})`, opacity:dim });
+  const root = el("g", { transform:`translate(${F(x)},${F(y)})`, opacity:dim });
   const s = el("g", { transform:`scale(${sc.toFixed(3)})` });
   /* dashed chart ink, not accent: on home an accent ring means "fly here", and
      from the helm you may only look */
-  s.appendChild(el("circle", { r:44, fill:"none", stroke:INK, "stroke-width":1.3, "stroke-dasharray":"3 8" }));
-  s.appendChild(el("circle", { r:2.6, fill:INK }));
+  s.appendChild(el("circle", { r:44, fill:"none", stroke:INK, "stroke-width":1.4, "stroke-dasharray":"3 8" }));
+  s.appendChild(el("circle", { r:2.8, fill:INK }));
   for (const [px, py, pr, tok] of hh.planets)
-    s.appendChild(el("circle", { cx:px * 0.86, cy:py * 0.86, r:pr, fill:`var(${tok})`, opacity:.9 }));
+    s.appendChild(el("circle", { cx:px * 0.86, cy:py * 0.86, r:pr, fill:`var(${tok})`, opacity:.92 }));
   root.appendChild(s);
-  /* the name reads across the slit, centred, because the slit is narrow —
-     §14: the real-world names must read at a glance without pulling the eye */
-  root.appendChild(el("line", { x1:0, y1:-(44 * sc + 4), x2:0, y2:-(44 * sc + 14),
-    stroke:INK, "stroke-width":1, opacity:".7" }));
-  root.appendChild(txt(hh.name.toUpperCase(), { x:0, y:-(44 * sc + 24), "font-size":10.5,
-    "letter-spacing":".14em", "text-anchor":"middle" }));
-  root.appendChild(txt(hh.items + (hh.items === 1 ? " ITEM" : " ITEMS"),
-    { x:0, y:44 * sc + 20, "font-size":8.5, "letter-spacing":".12em",
-      "text-anchor":"middle", opacity:".82" }));
+  /* the name reads across the slit, centred, because the slit is narrow — and
+     it is SIZED to the slit it is crossing, so it can never run out of the
+     opening and be sliced in half by the jamb */
+  root.appendChild(el("line", { x1:0, y1:-(44 * sc + 5), x2:0, y2:-(44 * sc + 16),
+    stroke:INK, "stroke-width":1, opacity:".66" }));
+  const nm = hh.name.toUpperCase();
+  root.appendChild(halo(txt(nm, { x:0, y:-(44 * sc + 26),
+    "font-size":CL((band.w - 20) / (nm.length * 0.74), 7.8, 10.5).toFixed(1),
+    "letter-spacing":".13em", "text-anchor":"middle", opacity:".96" })));
+  root.appendChild(halo(txt(hh.items + (hh.items === 1 ? " ITEM" : " ITEMS"),
+    { x:0, y:44 * sc + 21, "font-size":8.5, "letter-spacing":".12em",
+      "text-anchor":"middle", opacity:".78" })));
   g.appendChild(root);
 }
 
 /* one named constellation: legible, and deliberately a notch under a
-   household on every axis — dimmer body, thinner line, smaller name (§14) */
+   household on every axis — dimmer body, thinner line, smaller name, and a
+   slower layer, because it is further away (§14) */
 function figure(g, r, band){
   const f = FIGURES[Math.floor(r() * FIGURES.length)];
   const spanx = Math.max(...f.pts.map(p => p[0])), spany = Math.max(...f.pts.map(p => p[1]));
-  const sc = Math.min((band.w * 0.62) / Math.max(60, spanx), 1.05) * (0.8 + r() * 0.3);
-  const x = band.cx - spanx * sc / 2 + (r() - 0.5) * band.w * 0.16;
-  const y = 60 + r() * 320;
-  const dim = (0.52 + r() * 0.16).toFixed(2);      /* still under a household, on every axis */
-  const root = el("g", { transform:`translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${sc.toFixed(3)})`,
+  const sc = Math.min((band.w * 0.60) / Math.max(60, spanx), 1.0) * (0.8 + r() * 0.28);
+  const x = band.cx - spanx * sc / 2 + (r() - 0.5) * band.w * 0.14;
+  const y = 60 + r() * 300;
+  const dim = (0.5 + r() * 0.16).toFixed(2);       /* still under a household, on every axis */
+  const root = el("g", { transform:`translate(${F(x)},${F(y)}) scale(${sc.toFixed(3)})`,
                          opacity:dim });
   let d = "";
   for (const [a, b] of f.edges)
     d += `M ${f.pts[a][0]} ${f.pts[a][1]} L ${f.pts[b][0]} ${f.pts[b][1]} `;
-  root.appendChild(el("path", { d, fill:"none", stroke:INK, "stroke-width":1.2, opacity:".78" }));
+  root.appendChild(el("path", { d, fill:"none", stroke:INK, "stroke-width":1.1, opacity:".72" }));
   for (const [px, py] of f.pts)
     root.appendChild(el("circle", { cx:px, cy:py, r:(1.5 + r() * 1).toFixed(2),
       fill:"var(--star-far)", opacity:".9" }));
-  root.appendChild(txt(f.name, { x:spanx / 2, y:spany + 20, "font-size":9.5,
-    "letter-spacing":".2em", "text-anchor":"middle", opacity:".9" }));
+  root.appendChild(halo(txt(f.name, { x:spanx / 2, y:spany + 20, "font-size":9,
+    "letter-spacing":".2em", "text-anchor":"middle", opacity:".9" })));
   g.appendChild(root);
 }
 
