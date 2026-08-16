@@ -92,3 +92,25 @@
 .pocket .mark-row{display:flex;align-items:center;gap:10px;font-family:var(--display);
                   font-weight:600;font-size:17px;letter-spacing:.02em}
 @media (prefers-reduced-motion:reduce){ .pocket .sky g{animation:none} }
+
+/* ---- #466: the signals surface — what the relay caught, pocket grammar -- */
+.pocket .mitem.suggest{border-style:dashed;cursor:pointer}
+.pocket .mitem.suggest span{color:var(--accent)}
+.pocket .dot.sug{background:none;border:1.6px solid var(--accent)}
+.pocket .mitem.reading b{color:var(--ink-mid);font-weight:500}
+.pocket .mitem.reading .dot{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
+@keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
+.pocket .mitem.failed .dot{background:var(--degraded,#fb8b24)}
+.pocket .mitem.failed span{color:var(--ink-mid)}
+.pocket .burnup{font:9.5px var(--mono);color:var(--ink-faint);text-align:center;
+                margin:10px 0 0;letter-spacing:.06em}
+/* the suggestion sheet: the pocket's review surface */
+.pocket .sheet .fields:not(:empty){margin-bottom:8px}
+.pocket .sheet .kv{display:flex;justify-content:space-between;font:11px var(--mono);
+                   color:var(--ink-mid);padding:6px 2px;border-bottom:1px solid var(--line-soft)}
+.pocket .sheet .kv:last-of-type{border:0}
+.pocket .sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
+.pocket .sheet .amend{display:block;text-align:center;font:10.5px var(--mono);
+                      color:var(--ink-mid);text-decoration:none;margin-top:12px}
+.pocket .sheet .amend:hover{color:var(--accent)}
+@media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }

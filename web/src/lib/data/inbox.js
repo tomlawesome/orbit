@@ -19,6 +19,9 @@ export function receiptSuggestionsOf(receipts = []) {
       householdId: receipt.householdId ?? null,
       title: receipt.proposal?.title ?? "Forwarded email",
       renewsOn: receipt.proposal?.dueDate ?? null,
+      provider: receipt.proposal?.provider ?? null,
+      expiresAt: receipt.expiresAt ?? null,
+      receivedAt: receipt.receivedAt ?? null,
       costMinor: receipt.proposal?.costMinor ?? null,
       currency: receipt.proposal?.currency ?? "GBP",
       sourceDocument:
