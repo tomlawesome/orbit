@@ -502,6 +502,11 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **Settings is the observatory** (owner, choosing among the three §15
+  concepts): "Observatory is the strongest, but it definitely needs a lot
+  more polish." The slit-and-instrument room is the direction; the
+  cartographer's desk and the gimbal room are set aside (their files stay
+  as the record). Polish before any build.
 - **The household-management rulings (2a–2m)** (owner, on the first
   drafts): email invitations are deferred as a cleanly isolated later
   package — v1.3 adds members from registered accounts only. Sections:
