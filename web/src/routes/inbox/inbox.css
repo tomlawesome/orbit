@@ -1,0 +1,102 @@
+/* Inbox — the relay queue (#463), from design/v19/inbox.html. Tokens come
+ * from packs.css; everything here is scoped under .inbox-page. */
+
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.inbox-page *{box-sizing:border-box;margin:0}
+.inbox-page{min-height:100vh}
+
+.inbox-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.inbox-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.inbox-page .sky .far{animation:inbox-drift 400s linear infinite}
+.inbox-page .sky .near{animation:inbox-drift 195s linear infinite}
+@keyframes inbox-drift{to{transform:translateX(-1600px)}}
+.inbox-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .inbox-page .vignette,[data-theme=dawn] .inbox-page .vignette{background:none}
+
+.inbox-page .page{position:relative;z-index:2;max-width:640px;margin:0 auto;padding:96px 24px 120px}
+.inbox-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.inbox-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+/* the dish: the relay's live status, condensed from the relay screen */
+.inbox-page .relaybar{display:flex;align-items:center;gap:16px;margin-top:26px;
+          background:var(--panel);backdrop-filter:blur(8px);
+          border:1px solid var(--line-soft);border-radius:14px;padding:14px 18px}
+.inbox-page .dish{position:relative;width:34px;height:34px;flex:none}
+.inbox-page .dish i{position:absolute;inset:14px;border-radius:50%;background:var(--ok)}
+.inbox-page .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+           animation:inbox-signal 3s ease-out infinite;opacity:0}
+.inbox-page .dish span:nth-child(2){animation-delay:1s}.inbox-page .dish span:nth-child(3){animation-delay:2s}
+@keyframes inbox-signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+.inbox-page .relaybar .alias{flex:1;min-width:0}
+.inbox-page .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent);
+                   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inbox-page .relaybar .alias span{font:10.5px var(--mono);color:var(--ink-mid)}
+.inbox-page .relaybar .alias .live{color:var(--ok)}
+.inbox-page .relaybar a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;
+            border:1px solid var(--line);border-radius:9px;padding:7px 13px;flex:none}
+.inbox-page .relaybar a:hover{border-color:var(--accent);color:var(--accent)}
+
+.inbox-page .group{margin-top:32px}
+.inbox-page .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+          color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+
+/* a receipt awaiting review: the dashed vocabulary of "not yet in orbit" */
+.inbox-page .receipt{border:1px dashed var(--line);border-radius:14px;background:var(--panel);
+         backdrop-filter:blur(8px);padding:16px 18px;margin-bottom:10px}
+.inbox-page .receipt .head{display:flex;align-items:baseline;gap:12px}
+.inbox-page .receipt .head .dot{width:8px;height:8px;border-radius:50%;flex:none;align-self:center;
+                    background:none;border:1.6px solid var(--accent)}
+.inbox-page .receipt .head b{flex:1;font-size:14.5px;font-weight:560}
+.inbox-page .receipt .head small{font:10.5px var(--mono);color:var(--ink-faint)}
+.inbox-page .receipt .head small .exp{color:var(--warm)}
+.inbox-page .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px;margin:12px 0 4px}
+.inbox-page .fields .kv{display:flex;justify-content:space-between;gap:10px;
+            font:11.5px var(--mono);color:var(--ink-mid);
+            padding:6px 2px;border-bottom:1px solid var(--line-soft)}
+.inbox-page .fields .kv b{color:var(--ink);font-weight:500;text-align:right}
+.inbox-page .fields .kv b .conf{color:var(--ink-faint);font-size:9.5px;letter-spacing:.06em;margin-left:6px}
+.inbox-page .attach{display:inline-flex;align-items:center;gap:8px;font:11px var(--mono);
+        color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
+        padding:6px 11px;margin-top:10px}
+.inbox-page .attach .clean{color:var(--ok)}
+.inbox-page .receipt .actions{display:flex;gap:8px;margin-top:14px;align-items:center}
+.inbox-page .receipt .actions button{font-size:12.5px;border-radius:9px;padding:7px 15px;cursor:pointer;
+                         border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
+.inbox-page .receipt .actions button.yes{border-color:var(--accent);color:var(--accent)}
+.inbox-page .receipt .actions a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
+.inbox-page .receipt .actions a:hover{color:var(--accent)}
+.inbox-page .twotap{font:10.5px var(--mono);color:var(--ink-faint)}
+.inbox-page .mail-problem{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+
+/* still reading: the only honest thing to show is that we are reading */
+.inbox-page .reading{display:flex;align-items:center;gap:13px;border:1px dashed var(--line-soft);
+         border-radius:14px;background:var(--panel);padding:14px 18px;margin-bottom:10px}
+.inbox-page .reading i{width:8px;height:8px;border-radius:50%;background:var(--upcoming);flex:none;
+           animation:inbox-breathe 2.4s ease-in-out infinite}
+@keyframes inbox-breathe{0%,100%{opacity:1}50%{opacity:.4}}
+.inbox-page .reading .body{flex:1}
+.inbox-page .reading .body b{display:block;font-size:13.5px;font-weight:520;color:var(--ink-mid)}
+.inbox-page .reading .body span{font:10.5px var(--mono);color:var(--ink-faint)}
+
+/* arrived, but could not be read: plain words, bounded states (#434) */
+.inbox-page .failed{display:flex;align-items:flex-start;gap:13px;border:1px solid var(--line-soft);
+        border-radius:14px;background:var(--panel);padding:14px 18px;margin-bottom:10px}
+.inbox-page .failed i{width:8px;height:8px;border-radius:50%;background:var(--degraded);flex:none;margin-top:6px}
+.inbox-page .failed .body{flex:1}
+.inbox-page .failed .body b{display:block;font-size:13.5px;font-weight:520}
+.inbox-page .failed .body span{font:11px var(--mono);color:var(--ink-mid);line-height:1.7}
+.inbox-page .failed button{font:11px var(--mono);border:0;background:none;color:var(--ink-faint);
+               cursor:pointer;padding:4px 0;flex:none}
+.inbox-page .failed button:hover{color:var(--overdue)}
+
+.inbox-page .retention{margin-top:26px;text-align:center;font:10.5px var(--mono);
+           color:var(--ink-faint);letter-spacing:.06em;line-height:1.9}
+.inbox-page .quietnote{margin-top:60px;text-align:center}
+.inbox-page .quietnote .dish{margin:0 auto 14px}
+.inbox-page .quietnote p{font:12px var(--mono);color:var(--ink-mid);line-height:2}
+@media (prefers-reduced-motion: reduce){
+  .inbox-page .sky .far,.inbox-page .sky .near,.inbox-page .dish span,.inbox-page .reading i{animation:none!important}
+}

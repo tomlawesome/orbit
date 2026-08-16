@@ -26,3 +26,23 @@ export const money = (minor, currency, estimate = false) => {
 
 export const every = (months) =>
   months === 12 ? "every year" : months === 1 ? "every month" : `every ${months} months`;
+
+/* Elapsed time in the relay's two registers: "4m ago" for chrome lines,
+   "4 minutes ago" for sentences. `now` is passed in, never read from the
+   clock, so fixtures pin it and the gate holds still. */
+export const ago = (iso, now) => {
+  const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(iso)) / 60000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+};
+
+export const agoLong = (iso, now) => {
+  const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(iso)) / 60000));
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"} ago`;
+  if (minutes < 60) return unit(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return unit(hours, "hour");
+  return unit(Math.round(hours / 24), "day");
+};

@@ -11,7 +11,7 @@
   const NAV = [
     ["due-next", "Due next", "/due-next"],
     ["documents", "Documents", "#"],
-    ["inbox", "Inbox", "#"],
+    ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "#"],
     ["administration", "Administration", "#"],
   ];
