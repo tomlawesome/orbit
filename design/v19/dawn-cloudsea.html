@@ -673,6 +673,96 @@
   .demos .seedtag{color:var(--ink-faint);letter-spacing:.08em}
   .demos .seedtag b{color:var(--ink-mid);font-weight:400}
   /* /PACK REFRESH — dawn */
+
+  /* ======================================================================
+     THE DESCENT (owner, §15: "Dawn-cloudsea: nice idea, and its scroll
+     descends too" — below the cloudline, into more blue hues; the deep page
+     reads as under-the-weather altitude, not sky).
+
+     SCROLL IS ALTITUDE. The first screen is the approved concept and is
+     untouched: every rule below is gated on html.descending, which JS only
+     puts on the element once scrollY leaves zero. At rest the file computes
+     to the ratified pixels, not to an approximation of them.
+
+     Three progresses, all POSITION — nothing here is on a clock:
+       --pass   0→1 over the deck passage (the shorter of four-fifths of a
+                screen and two-fifths of the page, so short pages still
+                arrive underneath).
+       --below  0→1 just behind it, eased: the blue world coming in.
+       --deep   0→1 from the end of the passage to the very bottom of the
+                page: the slow darkening, spread over everything that is
+                left, so it is never a step.
+
+     Reduced motion keeps all three — a position readout is not an
+     animation, and someone who has turned motion off still has to know
+     which way is down. What it drops is the flourish: the swell of the
+     deck as it comes at you, and the whiteout of being inside it.
+     ====================================================================== */
+  :root{--pass:0;--below:0;--deep:0;--mist:0}
+  html:not(.descending) :is(.mist,.underlight,.underdeep){display:none}
+
+  /* 1. The deck comes UP past you. It lay low across the first screen; as
+     you descend it rises, swells (you are getting nearer to it), and leaves
+     over the top of the window. It thins to nothing on the way out — a
+     cloud has no underside edge, and neither may this one. */
+  html.descending .weather{
+    transform-origin:50% 100%;
+    transform:translate3d(0,calc(var(--pass) * -142vh),0)
+              scale(calc(1 + var(--pass) * .30));
+    opacity:clamp(0,calc((.80 - var(--pass)) / .32),1)}
+  /* the svg viewport is one screen tall, so as the layer rides up its own
+     bottom edge would cut the deck off in a straight line across the
+     window. Let the deck draw past it — everything it gains is outside the
+     screen at rest (the slice already covers), and while you are inside the
+     cloud it is the whole point: there is no floor to it. */
+  html.descending .weather svg{overflow:visible}
+
+  /* 2. The passage. For a few hundred pixels the deck is AROUND you and the
+     light goes flat, close and colourless — warm still at the top where the
+     sun is, cooling underneath as you come out. It sits behind the page, so
+     the manifest stays crisp the whole way through: fog, not frosting. */
+  .mist{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:var(--mist);
+        background:linear-gradient(180deg,rgba(250,244,236,.98) 0%,
+          rgba(243,240,240,.98) 42%,rgba(228,234,245,.98) 100%)}
+
+  /* 3. Underneath, the world is blue. Not sky-blue — sky is above the deck
+     now and you cannot see it. This is the light that gets THROUGH a cloud
+     layer: flat, cool, dimmest overhead where the deck is, hazing paler
+     down toward a ground too far below to resolve. */
+  .underlight{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:var(--below);
+    background:linear-gradient(180deg,#93a8c6 0%,#a2b6d1 34%,#b3c6de 70%,#c4d4e7 100%)}
+  /* 4. …and it goes on losing height. The same four stops, carried down a
+     third of the way to dusk, faded in across the whole remaining page so
+     the change is never visible AS a change — only as having arrived. */
+  .underdeep{position:fixed;inset:0;z-index:1;pointer-events:none;opacity:var(--deep);
+    background:linear-gradient(180deg,#4d6489 0%,#5c7aa4 34%,#7191b7 70%,#89a7c9 100%)}
+
+  /* 5. The stars leave with the deck. They were already washing out toward
+     the crest; under it there is nothing above you but cloud. */
+  html.descending[data-theme=dawn] .sky{
+    opacity:calc(var(--stars) * (1 - var(--below)))}
+
+  /* 6. The ink follows the light. Dawn's faint tokens were set against a
+     pale amber horizon; on under-cloud blue they would float off it, so
+     they go firmer as the ground goes deeper. --bg is not a colour anyone
+     sees here — it backs the corridor's knockouts and the star strokes —
+     so it tracks the middle of whatever ground is actually showing. */
+  html.descending[data-theme=dawn]{
+    --bg:color-mix(in srgb,#6b88ae calc(var(--deep) * 100%),
+         color-mix(in srgb,#b5c6dc calc(var(--below) * 100%),#d2d3d4));
+    --ink-faint:color-mix(in srgb,#2f3f5e calc(var(--deep) * 100%),
+         color-mix(in srgb,#5c6c8e calc(var(--below) * 100%),#78849b));
+    --chart-ink:color-mix(in srgb,#22314f calc(var(--deep) * 100%),#40506e);
+    --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d)}
+
+  @media (prefers-reduced-motion: reduce){
+    /* position kept, flourish dropped: the deck still rises and still goes,
+       but it does not swell at you and you are not put inside it. */
+    html.descending .weather{
+      transform:translate3d(0,calc(var(--pass) * -142vh),0)}
+    .mist{display:none}
+  }
+  /* /THE DESCENT */
 </style>
 </head>
 <body>
@@ -733,6 +823,13 @@
     <g id="cs-s2" filter="url(#cs-b2)" fill="url(#cs-g2)" opacity="1"></g>
   </svg>
 </div>
+<!-- §15 the descent: the three layers of "below". They paint after the
+     weather and before the page, so the cloud passes in front of the blue
+     and the manifest stays in front of both. All three are display:none
+     until the first pixel of scroll. -->
+<div class="mist" aria-hidden="true"></div>
+<div class="underlight" aria-hidden="true"></div>
+<div class="underdeep" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
@@ -1408,8 +1505,12 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
   for (const L of STRATA){ L.node = document.getElementById(L.host); L.live = new Map(); }
 
   function buildStratum(L, g, r){
-    /* the deck: solid, seamless across the chunk join */
-    g.appendChild(svgel("rect", { x:-1, y:L.shoulder + 6, width:L.w + 2, height:1300 - L.shoulder }));
+    /* the deck: solid, seamless across the chunk join. §15 the descent: it
+       runs to 2200 rather than 1300 — a cloud layer has THICKNESS, and on
+       the way through it the old bottom edge would have swung up into the
+       window as a ruled line. Below the first screen either way, so nothing
+       at rest moves by a pixel. */
+    g.appendChild(svgel("rect", { x:-1, y:L.shoulder + 6, width:L.w + 2, height:2200 - L.shoulder }));
     for (let k = 0; k < L.n; k++){
       const slot = L.w / L.n;
       g.appendChild(svgel("ellipse", {
@@ -1517,6 +1618,70 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     seed = Math.floor(Math.random() * 2147483646) + 1; draw();
   };
   draw();
+})();
+</script>
+<script>
+/* ======================================================================
+   THE DESCENT — the altimeter (owner, §15)
+
+   The only job here is to turn scroll position into three numbers and put
+   them on the root element. Every appearance decision is in the stylesheet
+   under "THE DESCENT"; nothing below chooses a colour.
+
+   Position, not time. There is no clock, no easing-over-duration and no
+   transition on anything it writes: scroll up and you climb back through
+   the deck at exactly the rate you scroll, frame for frame. Reads are
+   coalesced onto one rAF so a fast wheel cannot thrash layout.
+
+   BUILD NOTE: in the app this is the same handler for both dawn scroll
+   proposals; the constants (PASS_SCREEN / PASS_PAGE) are the only tuning,
+   and under ORBIT_FIXTURES the fidelity gate can pin scrollY and get a
+   deterministic frame, because nothing here depends on elapsed time.
+   ====================================================================== */
+(function(){
+  const root = document.documentElement;
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const smooth  = (t) => t * t * (3 - 2 * t);
+  /* the passage is the shorter of four-fifths of a screen and two-fifths of
+     the page: a tall screen must not make it feel like a long fall, and a
+     short manifest must not leave you still inside the cloud at the end */
+  const PASS_SCREEN = .80, PASS_PAGE = .42;
+  let queued = false;
+
+  function measure(){
+    const vh   = innerHeight || 1;
+    const max  = Math.max(1, root.scrollHeight - vh);
+    const y    = Math.max(0, scrollY);
+    const len  = Math.max(1, Math.min(vh * PASS_SCREEN, max * PASS_PAGE));
+
+    /* the deck coming up past you */
+    const pass  = clamp01(y / len);
+    /* the blue arriving underneath it — starts a third of the way into the
+       passage, complete just after you are out */
+    const below = smooth(clamp01((y - len * .30) / (len * .78)));
+    /* and the long slow loss of height: nothing until you are through, then
+       the whole of what is left of the page */
+    const deep  = smooth(clamp01((y - len) / Math.max(1, max - len)));
+    /* inside it: a single soft rise and fall across the passage */
+    const mist  = still.matches ? 0
+                : Math.sin(Math.PI * clamp01((pass - .08) / .78)) * .66;
+
+    root.classList.toggle("descending", y > .5);
+    root.style.setProperty("--pass",  pass.toFixed(4));
+    root.style.setProperty("--below", below.toFixed(4));
+    root.style.setProperty("--deep",  deep.toFixed(4));
+    root.style.setProperty("--mist",  mist.toFixed(4));
+  }
+  function onScroll(){
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; measure(); });
+  }
+  addEventListener("scroll", onScroll, { passive:true });
+  addEventListener("resize", onScroll);
+  still.addEventListener("change", measure);
+  measure();
 })();
 </script>
 </body>
