@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { readSettingsScreen } from "$lib/data/workspace.js";
+  import { readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./settings.css";
@@ -9,8 +9,8 @@
    * Settings — the helm (#464). Built from design/v19/settings.html
    * (ratified §13): your own controls and only yours — identity, sky,
    * reminders, relay and memberships. Instance-wide levers live on
-   * Administration. Reminder timing renders from a fixture until #468 gives
-   * it a route; "sign out of every device" waits on the same issue.
+   * Administration. Reminder timing and "sign out of every device" are both
+   * live against #468's routes.
    *
    * NOTE: the composite dispatcher still sends /settings to the old engine —
    * it manages households, which this screen deliberately does not. The flip
@@ -36,7 +36,63 @@
     document.documentElement.dataset.theme = name;
     try { localStorage.setItem("orbit-theme", name); } catch {}
   }
+  /**
+   * Reminders (#468). The ratified card shows the two warning offsets as
+   * VALUES — one toggle is the only control §13 draws — so the write below is
+   * the flag's alone. A timing editor is undrawn: changing 14/3 has no
+   * approved surface, and inventing one here would put UI on this screen the
+   * owner has not seen. Awaiting design; the route already accepts the pair,
+   * which is why it is read and handed straight back.
+   */
   let emailReminders = $state(true);
+  let reminderProblem = $state(null);
+
+  async function toggleEmailReminders() {
+    if (!view) return;
+    const previous = emailReminders;
+    /* Optimistic: a toggle that waits for a round trip reads as a dead
+       control. The revert below is what makes that honest. */
+    emailReminders = !previous;
+    reminderProblem = null;
+    try {
+      const reminders = await writeReminders({
+        emailEnabled: emailReminders,
+        firstWarningDays: view.reminders.firstWarningDays,
+        finalWarningDays: view.reminders.finalWarningDays,
+      });
+      /* The server's answer wins over the guess, sentences included. */
+      view = { ...view, reminders };
+      emailReminders = reminders.emailEnabled;
+    } catch {
+      emailReminders = previous;
+      reminderProblem = "not saved — Orbit could not reach your reminder settings";
+    }
+  }
+
+  /**
+   * "Sign out of every device" — armed by a first tap, done by a second, the
+   * family protocol the inbox and the item view already use for anything
+   * that cannot be undone. This one ends the caller's own session too, so on
+   * success there is no page left to return to: the cookie is dead and the
+   * sign-in is the only honest destination.
+   */
+  let armedSignOut = $state(false);
+  let signOutProblem = $state(null);
+
+  async function tapSignOutEverywhere() {
+    signOutProblem = null;
+    if (!armedSignOut) {
+      armedSignOut = true;
+      return;
+    }
+    try {
+      await signOutEverywhere();
+      location.assign("/login");
+    } catch {
+      armedSignOut = false;
+      signOutProblem = "still signed in — try again";
+    }
+  }
 
   const initials = $derived(
     (view?.user?.displayName ?? "")
@@ -101,10 +157,11 @@
 
     <div class="card">
       <h3>Reminders</h3>
-      <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={() => (emailReminders = !emailReminders)}><i></i></button></div>
+      <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
       <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
       <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
       <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
+      {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
     </div>
 
     <div class="card">
@@ -127,7 +184,7 @@
 
     </div><!-- /cards -->
 
-    <div class="danger"><button title="Waits on #468 — no sessions-revocation route yet">sign out of every device →</button></div>
+    <div class="danger"><button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}</div>
   {/if}
 </div>
 </div>
