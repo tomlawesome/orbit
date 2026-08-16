@@ -10,7 +10,7 @@
 
   const NAV = [
     ["due-next", "Due next", "/due-next"],
-    ["documents", "Documents", "#"],
+    ["documents", "Documents", "/documents"],
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "#"],
     ["administration", "Administration", "#"],
