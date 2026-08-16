@@ -68,6 +68,36 @@ export const themePreferenceSchema = z.object({
 
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
+/**
+ * The reader's own reminder timing (#468, settings §13). Two offsets, both in
+ * days before the date: the first warning is the far one, the final warning
+ * the near one, so the final must always be the smaller number — a pair that
+ * crossed over would mean an item's last word arrived before its first.
+ *
+ * The bounds mirror the reminder offsets an item already accepts
+ * (workspace.ts: 0-365 days) and the CHECK constraints on user_preferences,
+ * so an out-of-range pair is refused by the schema, by the route, and by the
+ * database rather than by any one of them alone.
+ */
+export const DEFAULT_FIRST_WARNING_DAYS = 14;
+export const DEFAULT_FINAL_WARNING_DAYS = 3;
+
+export const reminderPreferenceSchema = z.object({
+  emailEnabled: z.boolean(),
+  firstWarningDays: z.number().int().min(1).max(365),
+  finalWarningDays: z.number().int().min(0).max(365),
+}).superRefine((preference, context) => {
+  if (preference.finalWarningDays >= preference.firstWarningDays) {
+    context.addIssue({
+      code: "custom",
+      path: ["finalWarningDays"],
+      message: "The final warning must be closer to the date than the first warning",
+    });
+  }
+});
+
+export type ReminderPreference = z.infer<typeof reminderPreferenceSchema>;
+
 export const sectionPreferenceSchema = z.array(z.object({
   id: z.string().min(1).max(80),
   name: z.string().max(30),

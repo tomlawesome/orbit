@@ -71,8 +71,18 @@ export const userPreferences = pgTable("user_preferences", {
   urgencyPalette: text("urgency_palette").notNull().default("themed"),
   emailNotifications: boolean("email_notifications").notNull().default(true),
   pushNotifications: boolean("push_notifications").notNull().default(true),
+  // The reader's own reminder timing (#468, settings §13): how far ahead the
+  // first warning is raised, and how close in the final one lands. Stored per
+  // user because the settings screen presents them as the reader's own
+  // choice; per-item overrides remain in reminder_rules.
+  firstWarningDays: integer("first_warning_days").notNull().default(14),
+  finalWarningDays: integer("final_warning_days").notNull().default(3),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
+  // The final warning is the closer one, so it is always the smaller offset.
+  check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
+]);
 
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
