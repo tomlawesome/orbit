@@ -11,7 +11,11 @@
    * say "listening" without a word of status copy.
    *
    * Built from design/family/settings-mail.html and owned here from that point
-   * on. The four values are a seam — see relay.fixture.js.
+   * on. The four values read through the seam (readRelay in
+   * $lib/data/workspace.js) and are live since #432; the gate still renders the
+   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" and
+   * "pause ingest" are still inert — the machinery exists, the user-facing
+   * commands do not, and #432 put both out of scope.
    */
   let { data } = $props();
   const relay = $derived(data.relay);

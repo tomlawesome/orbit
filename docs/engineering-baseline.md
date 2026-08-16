@@ -97,6 +97,7 @@ critical integration layers are still missing.
 | `/api/document-drafts/*` | source-aware suggestion pure units | Tika bounds/failure contract, no-document path, explicit-submit/abandonment semantics, authorization and editable browser flow |
 | `/api/portable-archives/*` | crypto/storage units | household authorization, atomic import, conflicts, expiry and corrupt/wrong-passphrase cases |
 | `/api/imap-inbox/*` | IMAP helper units | user isolation, hostile/duplicate receipt states, recovery and browser review remain required in #22 |
+| `/api/settings/mail-relay` | route contract units: session-derived alias, bounded listening/ingest words, `no-store`, instance-admin and mail-in-off states, and nothing leaked about host/port/mailbox | PostgreSQL evidence that the newest receipt read is the caller's own, plus rotation and per-user pause when those land |
 | `/api/admin/*` | health smoke only | non-admin denial, safe redaction, corrective-state transitions and audit evidence |
 | `/api/health` | running-container smoke | degraded optional dependencies and migration/readiness semantics |
 
