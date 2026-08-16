@@ -576,6 +576,11 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The landing dwell trims, the dial slows** (owner: "First run is
+  excellent, but—"): the dwell on the bare sky before the instrument
+  arrives is 1s too long (3s → 2s), and the dial's pop is slightly too
+  fast — slow its draw-in a touch. The stated test: it must feel like
+  a DELIBERATE WAIT, not a slow load. Otherwise perfect.
 - **Retrograde trial: bare dial, walls only** (owner): try a version
   with NO grid on the dial view — no floor, no ceiling at rest — where
   the only grids are the side walls that rotate in as you scroll down.
