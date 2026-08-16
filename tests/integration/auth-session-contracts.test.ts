@@ -2,10 +2,11 @@ import { eq } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, type NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { sessions } from "@/db/schema";
+import { auditLog, sessions } from "@/db/schema";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { GET as sessionStatus } from "@/app/api/auth/session/route";
 import { POST as refresh } from "@/app/api/auth/session/refresh/route";
+import { POST as revokeSessions } from "@/app/api/auth/sessions/revoke/route";
 import { AuthError } from "@/lib/auth/errors";
 import { getAuthConfig } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
@@ -27,6 +28,8 @@ afterAll(async () => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const REVOKE_URL = "http://127.0.0.1:3000/api/auth/sessions/revoke";
 
 function sessionRequest(session: IntegrationSession, overrides: Record<string, string> = {}): NextRequest {
   return requestForSession(session, "http://127.0.0.1:3000/api/auth/session", {
@@ -161,6 +164,78 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(response.headers.get("location")).toBe(config.appUrl.href);
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(await getDb().select({ id: sessions.id }).from(sessions)).toEqual(before);
+  });
+
+  it("signs every device out at once, and each one is refused on its next request", async () => {
+    const fixture = await createIntegrationFixture("auth-revoke-everywhere");
+    const laptop = await fixture.session("member");
+    const phone = await fixture.session("member");
+    const someoneElse = await fixture.session("owner");
+    const config = getAuthConfig();
+
+    const response = await revokeSessions(requestForSession(laptop, REVOKE_URL, { method: "POST" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ revoked: 2 });
+    expect(response.cookies.get(sessionCookieName(config))?.value).toBe("");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+
+    // The point of the action: the device that asked, and the one that did
+    // not, are both gone — from the database and from the next request.
+    expect(await sessionRows(laptop.sessionId)).toHaveLength(0);
+    expect(await sessionRows(phone.sessionId)).toHaveLength(0);
+    expect((await sessionStatus(sessionRequest(laptop))).status).toBe(401);
+    expect((await sessionStatus(sessionRequest(phone))).status).toBe(401);
+    expect((await refresh(requestForSession(phone, "http://127.0.0.1:3000/api/auth/session/refresh", {
+      method: "POST",
+    }))).status).toBe(401);
+
+    // Another account's session is untouched: the scope is the caller's user.
+    expect((await sessionStatus(sessionRequest(someoneElse))).status).toBe(200);
+    expect(await sessionRows(someoneElse.sessionId)).toHaveLength(1);
+
+    const [entry] = await getDb().select({
+      actorUserId: auditLog.actorUserId,
+      entityType: auditLog.entityType,
+      entityId: auditLog.entityId,
+      action: auditLog.action,
+      changes: auditLog.changes,
+    }).from(auditLog).where(eq(auditLog.entityId, laptop.userId));
+    expect(entry).toEqual({
+      actorUserId: laptop.userId,
+      entityType: "user",
+      entityId: laptop.userId,
+      action: "sessions_revoked",
+      changes: { sessions: 2 },
+    });
+  });
+
+  it("revokes nothing without a session, a CSRF token, or a same-origin post", async () => {
+    const fixture = await createIntegrationFixture("auth-revoke-refused");
+    const session = await fixture.session("member");
+    const config = getAuthConfig();
+
+    const signedOut = await revokeSessions(requestWithoutSession(REVOKE_URL, {
+      method: "POST",
+      headers: { origin: config.appUrl.origin },
+    }));
+    expect(signedOut.status).toBe(401);
+
+    const noCsrf = await revokeSessions(requestForSession(session, REVOKE_URL, {
+      method: "POST",
+      headers: { "x-csrf-token": "invalid-csrf" },
+    }));
+    expect(noCsrf.status).toBe(403);
+
+    const crossSite = await revokeSessions(requestForSession(session, REVOKE_URL, {
+      method: "POST",
+      headers: { origin: "https://attacker.invalid" },
+    }));
+    expect(crossSite.status).toBe(403);
+
+    expect(await sessionRows(session.sessionId)).toHaveLength(1);
+    expect((await sessionStatus(sessionRequest(session))).status).toBe(200);
+    expect(await fixture.auditCount(session.userId)).toBe(0);
   });
 
   it("preserves the session for invalid logout origin and CSRF", async () => {
