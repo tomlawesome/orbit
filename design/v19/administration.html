@@ -11,9 +11,12 @@
      and a porthole onto operations. §15 — the relay lives in one place (the
      helm's card); what stands here is the instance's mail MACHINERY, and it
      sits with operations in one panel. Admins see everything by design
-     (owner ruling §11); owners approve their own joiners, admins can place
-     anyone anywhere. Each system's ring wears its REAL due-state dots — the
-     same truths its constellation shows on home. */
+     (owner ruling §11); admins can place anyone anywhere. §15-2g: JOIN
+     REQUESTS LIVE IN HOUSEHOLD MANAGEMENT ONLY — this screen carries no
+     join-request block at all, because admin surfaces are for admin-only
+     functions; an admin who needs owner powers sees the owner's household
+     screen for the system chosen on the dial. Each system's ring wears its
+     REAL due-state dots — the same truths its constellation shows on home. */
   :root{
     --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -155,19 +158,12 @@
   .system .who{flex:1;min-width:0}
   .system .who b{display:block;font-size:13.5px;font-weight:530}
   .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
-  .joinbadge{font:10px var(--mono);letter-spacing:.08em;color:var(--warm);
-             border:1px dashed var(--warm);border-radius:99px;padding:3px 10px;flex:none}
-
-  .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--line);
-           border-radius:12px;padding:11px 14px;margin-top:12px}
-  .joinreq .avatar{width:28px;height:28px;border-radius:50%;flex:none;
-                   border:1px solid var(--line);display:grid;place-items:center;
-                   font:10px var(--mono);color:var(--ink-mid)}
-  .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
-  .joinreq p b{color:var(--ink);font-weight:530}
-  .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;cursor:pointer;
-                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+  /* §15-2g removed the joinbadge and the dashed join-request row from this
+     panel. Nothing replaces them and no spacing is patched in: the roster
+     closes on its last system (which loses its rule to :last-child), so the
+     card ends on a finished row rather than a cut edge — and the two columns
+     now sit far closer in height than they did with the decision row hanging
+     below the roster. */
 
   .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
       font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;
@@ -293,7 +289,6 @@
           <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
         </svg>
         <div class="who"><b>Seaside Cottage</b><span>3 members · owner Emma Lawson · 3 items</span></div>
-        <span class="joinbadge">1 wants in</span>
       </div>
       <div class="system">
         <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
@@ -321,13 +316,6 @@
           <circle cx="14.6" cy="19.6" r="1.6" style="fill:var(--ok)" opacity=".8"/>
         </svg>
         <div class="who"><b>Gran’s Flat</b><span>2 members · owner Emma Lawson · 2 items</span></div>
-      </div>
-
-      <div class="joinreq">
-        <span class="avatar">RL</span>
-        <p><b>Rob Lawson</b> asks to join <b>Seaside Cottage</b> · 2d ago</p>
-        <button class="yes">approve</button>
-        <button>decline</button>
       </div>
     </div>
 
@@ -357,7 +345,7 @@
   <div class="strip">ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6 · self-hosted — nothing leaves this machine</div>
 </div>
 
-<footer>orbit · administration · issue #452 · each ring wears its system’s real due-state dots · owners approve their joiners, admins can place anyone (§11) · mail machinery sits with operations (§15)</footer>
+<footer>orbit · administration · issue #452 · each ring wears its system’s real due-state dots · admins can place anyone (§11) · join requests live in household management only (§15-2g) · mail machinery sits with operations (§15)</footer>
 
 <script>
 function toggleAccount(orb){

@@ -1,8 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import { addMember, decideJoinRequest, readAdminScreen } from "$lib/data/workspace.js";
+  import { addMember, readAdminScreen } from "$lib/data/workspace.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
-  import { ago } from "$lib/format.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./administration.css";
@@ -10,37 +9,32 @@
   /**
    * Administration — mission control (#465). Built from
    * design/v19/administration.html (ratified §13): the instance from above.
-   * Admins see everything by design (§11); owners approve their own joiners,
-   * admins can place anyone anywhere. People come from the real
-   * /api/admin/users route; ownership, membership counts and join requests
-   * are the #453 epic's admin surface and render from the fixture until it
-   * lands. Each system's ring wears its REAL due-state dots — the same
-   * truths its constellation shows on home (§12). §15: the relay lives in one
-   * place — the helm's card; what stands here is MAIL MACHINERY, joined to
-   * operations in a single panel.
+   * Admins see everything by design (§11); admins can place anyone anywhere.
+   * People come from the real /api/admin/users route; ownership and
+   * membership counts are the #453 epic's admin surface and render from the
+   * fixture until it lands. Each system's ring wears its REAL due-state dots
+   * — the same truths its constellation shows on home (§12). §15: the relay
+   * lives in one place — the helm's card; what stands here is MAIL
+   * MACHINERY, joined to operations in a single panel.
+   *
+   * §15-2g: JOIN REQUESTS DO NOT APPEAR HERE. They live in household
+   * management only — admin surfaces are for admin-only functions, and an
+   * instance admin who needs owner powers simply sees the owner's household
+   * screen for the system chosen on the dial. The /api/join-requests routes
+   * and their server code stay put; household-manage will consume them when
+   * it is built.
    */
   let view = $state(null);
 
   const initialsOf = (name) =>
     name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
 
-  /* §11 (#453): decisions and direct placement — both land on the real
-     routes, both refresh the screen with the server's answer. */
+  /* §11 (#453): direct placement — it lands on the real route and refreshes
+     the screen with the server's answer. Deciding join requests is NOT an
+     admin-screen function (§15-2g). */
   let busy = $state(null);
   let problem = $state(null);
   let placing = $state(null); // user id whose system picker is open
-  async function decide(requestId, action) {
-    busy = requestId;
-    problem = null;
-    try {
-      await decideJoinRequest(requestId, action);
-      view = await readAdminScreen();
-    } catch (error) {
-      problem = error?.message ?? String(error);
-    } finally {
-      busy = null;
-    }
-  }
   async function place(userId, householdId) {
     busy = userId;
     problem = null;
@@ -140,18 +134,6 @@
                 `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" · ")}</span>
             </div>
-            {#if view.joinRequests.some((request) => request.householdId === household.id)}
-              <span class="joinbadge">{view.joinRequests.filter((request) => request.householdId === household.id).length} want{view.joinRequests.filter((request) => request.householdId === household.id).length === 1 ? "s" : ""} in</span>
-            {/if}
-          </div>
-        {/each}
-
-        {#each view.joinRequests as request (request.id)}
-          <div class="joinreq">
-            <span class="avatar">{initialsOf(request.displayName)}</span>
-            <p><b>{request.displayName}</b> asks to join <b>{request.householdName}</b> · {ago(request.createdAt, view.now)}</p>
-            <button class="yes" disabled={busy === request.id} onclick={() => decide(request.id, "approve")}>approve</button>
-            <button disabled={busy === request.id} onclick={() => decide(request.id, "decline")}>decline</button>
           </div>
         {/each}
       </div>
