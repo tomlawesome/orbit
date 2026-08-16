@@ -70,7 +70,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   /* The label is the surface; the question is the dialogue. */
   await target.click();
   await expect(page.getByRole("heading", { name: `Request to join ${HOUSEHOLD} system?` })).toBeVisible();
-  await page.getByRole("button", { name: "request to join" }).click();
+  await page.locator(".askcard").getByRole("button", { name: "request to join" }).click();
   await expect(target.locator("text=ASKED TO JOIN · WAITING")).toBeVisible();
 
   /* Asking again does nothing — the pending state absorbs the tap. */
