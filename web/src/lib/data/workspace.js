@@ -672,6 +672,34 @@ export async function signOutEverywhere() {
   return body?.revoked ?? 0;
 }
 
+/**
+ * Sign out of THIS device (#410, §15) — the ordinary end of a session, and
+ * the thing the ratified descent is a farewell to.
+ *
+ * `Accept: application/json` matters: without it the engine's route answers a
+ * 303 to the identity provider's end-session endpoint, which a fetch would
+ * follow across origins for no one's benefit. With it, the session row is
+ * deleted, this browser's cookie is cleared, and the provider's own logout URL
+ * comes back as a string for the caller to use when it suits the journey.
+ *
+ * It resolves only once the server has actually ended the session, so a caller
+ * can safely treat "this returned" as "there is nothing left to revoke".
+ */
+export async function signOut() {
+  const { csrfToken } = await readSession();
+  const response = await fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { accept: "application/json", "x-csrf-token": csrfToken },
+  });
+  if (!response.ok) {
+    throw new WorkspaceError("The session could not be ended", { status: response.status });
+  }
+  const body = await response.json().catch(() => null);
+  sessionPromise = null;              /* the cached session is a dead letter now */
+  return body?.redirectTo ?? null;
+}
+
 /* ---------------------------------------------------------------------------
  * Household management (#410, §15) — ONE system, seen from inside.
  *

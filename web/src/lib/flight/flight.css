@@ -1,0 +1,146 @@
+/*
+ * THE FLIGHT'S OWN SURFACES (#410, §15) — the dawn you leave, the dusk you
+ * land on, the canvas between them, the mark that rides it and the name
+ * written on the void.
+ *
+ * Every rule is design/v19/first-run.html's own at 159ec9f, the sheet the
+ * owner ratified verbatim. The body-class vocabulary is the mockup's too
+ * (showdawn / showdusk / showwarp / arming / bare / instrument / withdrawing /
+ * descending / farewell), because the staging is class-driven, which is
+ * exactly what lets reduced motion keep the whole story and drop only the
+ * movement.
+ */
+
+/* ══ THE DAWN AND THE DUSK ═══════════════════════════════════════════════ */
+/* the sign-in's own ground, under its dawn */
+.signin-stage{position:fixed;inset:0;z-index:0;background:#04060e}
+
+#dawn,#dusk{position:fixed;inset:0;z-index:1;opacity:0;
+            transition:opacity .7s ease}
+/* `shown` is a surface standing on its own (the sign-in); the body classes are
+   the FLIGHT holding it up and then letting it go. */
+#dawn.shown{opacity:1}
+body.showdawn #dawn{opacity:1}
+body.showdusk #dusk{opacity:1}
+#dawn .sky,#dusk .sky{position:absolute;inset:-4%}
+#dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
+    position:absolute;inset:0;width:100%;height:100%}
+#dawn .world,#dusk .world{position:absolute;inset:0}
+#dawn .sky .far,#dusk .sky .far{animation:appr 360s linear infinite}
+#dawn .sky .near,#dusk .sky .near{animation:appr 180s linear infinite}
+@keyframes appr{to{transform:translateX(-1600px)}}
+#dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
+/* first light: dawn breaks once on load, exactly as the login does it */
+.dawnlayer{opacity:0;transition:opacity 3s ease}
+body.lit .dawnlayer{opacity:1}
+.rim{opacity:0;transition:opacity 2.2s ease .3s}
+body.lit .rim{opacity:1}
+.shimmer{stroke-dasharray:3 97;animation:sweep 22s linear infinite;opacity:0;
+         transition:opacity 1.8s ease 1.2s}
+body.lit .shimmer{opacity:.9}
+@keyframes sweep{to{stroke-dashoffset:-100}}
+.sunpt{opacity:0;transition:opacity 3.2s ease .5s}
+body.lit .sunpt{opacity:1}
+.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
+.rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
+      transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
+      mix-blend-mode:screen}
+body.lit .rays{opacity:1;transform:scale(1,1)}
+.rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+@keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+@keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+.scatter{animation:breathe-band 9s ease-in-out infinite alternate}
+@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+
+/* ══ THE LOCKUP, THE GATE, THE RIBBON ════════════════════════════════════ */
+.loginchrome{position:absolute;inset:0;z-index:3;
+             transition:opacity .8s ease,transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
+.loginchrome .lockup{position:absolute;left:0;right:0;top:37vh;text-align:center;
+        transform-origin:50% 0;
+        transition:transform 1s cubic-bezier(.3,.7,.3,1)}
+/* No `line-height:0` here, tempting as it is: the mockup lets the glyph sit in
+   a normal line box, and the few pixels of descender space under it are what
+   put the wordmark where the ratified drawing puts it. */
+.loginchrome .lockup .glyph{margin-bottom:18px}
+.loginchrome .lockup .name{font:600 58px var(--display);letter-spacing:.015em;
+        line-height:1;color:#e9edf8}
+.gate-wrap{position:absolute;left:0;right:0;bottom:23vh;text-align:center;
+           opacity:0;transform:translateY(10px);
+           transition:opacity 1.6s ease 1.6s,transform 1.6s ease 1.6s,bottom 1s cubic-bezier(.3,.7,.3,1)}
+body.lit .gate-wrap{opacity:1;transform:none}
+.gate{font:600 14.5px var(--display);color:#04060e;background:#d8b45a;
+      border:0;border-radius:99px;padding:14px 34px;cursor:pointer;
+      box-shadow:0 0 34px rgba(216,180,90,.25);transition:box-shadow .3s,filter .3s}
+.gate:hover{filter:brightness(1.08)}
+.gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
+.below{position:absolute;bottom:4.5vh;left:0;right:0;text-align:center;
+       font:10.5px var(--mono);color:#4d5878;letter-spacing:.16em}
+
+/* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
+#warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
+      transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
+body.showwarp #warp{opacity:1;transition:opacity .45s ease}
+/* §15 second pass, ruling 2: the canvas does NOT cut out under the bloom. It
+   dissolves over 1.7 near-linear seconds, so the glow it is holding is still
+   on the screen while the planets condense out of it. */
+#flightmark{position:fixed;z-index:6;opacity:0;pointer-events:none;
+            transition:opacity .35s ease}
+#flightmark.on{opacity:1}
+#flightmark.collapse{opacity:0;transform:scale(.05);
+            transition:opacity .55s ease .1s,transform .7s cubic-bezier(.6,0,.9,.4)}
+#flightmark svg{width:100%;height:100%;display:block}
+#flightmark .core{fill:#fff6e6}
+/* the household's name written on the void, once, at the top of the climb */
+#launchname{position:fixed;left:0;right:0;top:26%;z-index:7;text-align:center;
+            pointer-events:none;opacity:0;transition:opacity .55s ease;
+            font:600 13px var(--display);letter-spacing:.62em;text-transform:uppercase;
+            color:#dfe6f7;text-shadow:0 0 30px rgba(216,180,90,.4)}
+#launchname.on{opacity:1}
+#launchname i{display:block;font:10px var(--mono);font-style:normal;letter-spacing:.3em;
+              color:#8791b3;margin-top:11px;text-transform:uppercase}
+
+/* ══ THE DUSK GOODBYE (where the descent lands) ══════════════════════════ */
+#dusk .lockup .name{color:#e4e2ee}
+#dusk .farewell{position:absolute;left:0;right:0;bottom:26vh;text-align:center;
+      opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
+body.farewell #dusk .farewell{opacity:1;transform:none}
+#dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
+#dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
+#dusk .farewell .again{display:inline-block;margin-top:22px;text-decoration:none;
+      font:600 13.5px var(--display);color:#0a0812;
+      background:#e0b06a;border:0;border-radius:99px;padding:12px 30px;cursor:pointer;
+      box-shadow:0 0 34px rgba(224,176,106,.2)}
+#dusk .farewell .again:hover{filter:brightness(1.08)}
+
+/* film grain over the dawn/dusk surfaces, as the login has it */
+body.showwarp .grain{opacity:.26}
+
+/* ══ PINNED ══════════════════════════════════════════════════════════════
+   A fixture asks for one millisecond of the flight and then holds it still.
+   Every beat up to that moment is applied at once, so the transitions must
+   not then play out from where they were — they are the journey, and the
+   journey is already over. Fixture-only: nothing sets `pinned` in the
+   product. */
+body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #flightmark,
+body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate-wrap{
+  transition:none!important}
+
+/* ══ REDUCED MOTION ══════════════════════════════════════════════════════
+   The launch is the one thing here that cannot simply be slowed down, so
+   under prefers-reduced-motion it is NOT played at all: the canvas never
+   runs, no starfield streaks, no camera. The flight becomes a plain
+   crossfade, and the 3s dwell and the staging still happen, so the sequence
+   tells the same story without any motion. */
+@media (prefers-reduced-motion: reduce){
+  #dawn *,#dusk *{animation:none!important}
+  #flightmark,#launchname,#warp{display:none!important}
+  #dawn,#dusk,.loginchrome,.loginchrome .lockup,.gate-wrap{
+    transition-duration:.7s!important;transition-timing-function:ease!important}
+  .dawnlayer,.rim,.shimmer,.sunpt,.rays,.gate-wrap{
+    opacity:1!important;transform:none!important;transition:none}
+}

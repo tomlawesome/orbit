@@ -1,19 +1,13 @@
-import { redirect } from "@sveltejs/kit";
-
-/**
- * Orbit's front door (#429).
+/*
+ * The front door holds no data — it is artwork, a name and one button — so it
+ * is prerendered to plain HTML, the same way /login is. That keeps it
+ * servable as static files and means the signed-out surface reaches no
+ * database and no session at all: whether the reader is signed in is asked
+ * afterwards, in the browser, of GET /api/auth/session.
  *
- * Home lives at /home: the fidelity gate, the account panel and the 404's own
- * links all address it, and moving the route would churn all three for no
- * user-visible gain. So the root redirects rather than being rehomed.
- *
- * 308 rather than 307: the mapping is permanent and the method is always GET,
- * so it is cacheable.
- *
- * Deliberately not session-aware. Signing out should land on the sign-in, but
- * auth is not wired into this front end yet, and redirecting by session state
- * now would be half-building it against a session this app cannot read.
+ * Was a 308 to /home (#429). The redirect could not stay once "/" became the
+ * sign-in: a signed-out reader would have been bounced to a screen that
+ * bounces them to the identity provider, and the ratified door would never
+ * have been seen.
  */
-export function load() {
-  redirect(308, "/home");
-}
+export const prerender = true;

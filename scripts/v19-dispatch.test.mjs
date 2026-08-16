@@ -12,6 +12,7 @@ import { isV19Path } from "./v19-dispatch.mjs";
 // is the entire routing decision; nothing about it may depend on headers.
 describe("v19 path dispatch", () => {
   it("routes every v19 page to the v19 handler", () => {
+    expect(isV19Path("/")).toBe(true);
     expect(isV19Path("/home")).toBe(true);
     expect(isV19Path("/create")).toBe(true);
     expect(isV19Path("/login")).toBe(true);
@@ -28,12 +29,13 @@ describe("v19 path dispatch", () => {
     expect(isV19Path("/screens/family.css")).toBe(true);
   });
 
-  // `/` must stay on Next while the nine root e2e specs start at goto("/");
+  // `/` is the ratified v19 sign-in from #410/§15 on; the retiring engine's
+  // workspace answers at /workspace so its acceptance suite keeps a door.
   // /admin and /settings are LIVE Next routes (admin-operations.spec.ts, and
   // App Router client navigation fetches RSC payloads from the server for
   // them) — they move to v19 at the cutover, not in this slice.
   it("leaves the existing application on Next", () => {
-    expect(isV19Path("/")).toBe(false);
+    expect(isV19Path("/workspace")).toBe(false);
     expect(isV19Path("/admin")).toBe(false);
     expect(isV19Path("/settings")).toBe(false);
     expect(isV19Path("/auth/error")).toBe(false);
