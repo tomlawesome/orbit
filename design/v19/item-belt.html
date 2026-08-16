@@ -3,47 +3,68 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — the document belt: a rainbow, and the card rides in it (proposal, issue #458)</title>
+<title>Orbit — the document belt v2: the card rides in the belt (proposal, issue #458)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
   /*
-   * THE DOCUMENT BELT — issue #458, in the owner's corrected shape
-   * (design/owner-decisions.md §15, "The belt is a rainbow, and the card
-   * rides in it", 2026-08-16).
+   * THE DOCUMENT BELT — v2, issue #458.
+   * design/owner-decisions.md §15, "Belt, second pass" (owner: "GREAT first
+   * pass. But...").
    *
-   *   "The documents do NOT orbit the item card. The documents nestle in a
-   *    rainbow-shaped belt — an arc of asteroids — and the card itself is one
-   *    of the asteroids. Clicking an asteroid moves the belt so that one
-   *    comes to the centre and displays."
+   * Four corrections, and what each one does here:
    *
-   * So: one rainbow arc across the sky. Riding it, small bodies — the item's
-   * own planet (drawn exactly as the dial draws it, #458's asteroid-belt pun
-   * made literal) and one rock per attached document. The crown of the arc is
-   * the held position: whatever sits there is what displays, large, beneath.
+   * 1. THE CARD RIDES IN THE BELT. No crown asteroid stands in for the
+   *    centred thing any more. The centred entity's CARD is the body at the
+   *    apex: it sits IN the band, rubble streaming behind it (through it —
+   *    the glass blurs what passes) and a few motes drifting in front. The
+   *    other members stay small asteroid bodies out on the flanks. Clicking
+   *    one rolls the belt; as it reaches the apex it stops being a rock and
+   *    is its card.
+   * 2. THE APEX IS AT SCREEN CENTRE. The band's highest point is pinned to
+   *    the horizontal centre of the viewport at every size, and the card is
+   *    hung on that point.
+   * 3. NOT A SEMICIRCLE. The rainbow was the owner's word for "an arc". This
+   *    is a real ring seen at an angle: a circular belt of radius A,
+   *    inclined 40° to the line of sight and with its node line rolled 12°,
+   *    projected to screen. That projection is an ellipse segment — shallow,
+   *    and asymmetric because the tilt is real: the left flank falls ~300px
+   *    and turns toward you, the right flank falls ~240px and runs away
+   *    foreshortened. Nothing here is a semicircle and nothing is symmetric.
+   * 4. DENSER AND DISORDERLY. The band is a scattered population, not beads
+   *    on a wire: ~2100 seeded bodies at scattered radii (a peaked ±19% of
+   *    A, one in seven thrown 1.75× further out) and out-of-plane heights
+   *    (±6.6% of A), sized from dust to rubble, drawn at depth — nearer
+   *    bodies larger, brighter, faster, and the highest of them passing in
+   *    FRONT of the card. At 1600×1000 the band is ~440px thick at its
+   *    apex, which is deeper than the card is tall. They drift along the
+   *    ring for ever and NEVER loop: a body leaving the left edge is
+   *    respawned on the right out of the same running seeded stream with
+   *    fresh radius, height, size and shape, so revealed band is always new
+   *    band (§14, "the sky never loops"). Inner bodies drift faster than
+   *    outer ones — Keplerian shear, which is what keeps the band from ever
+   *    reading as one rigid object sliding past.
    *
-   * The vocabulary is native, not new. CON-1: a belt around a body already
-   * MEANS documents attached, so drawing the documents themselves as belt
-   * bodies is the chart's own pen at screen scale. The hairline arc is the
-   * dial's belt ellipse; the planet is home.html's i-svc body, gradient,
-   * gloss, status halo and belt ellipse unchanged; the dust is the belt's
-   * substance. Owner, #458: the belt floats on the sky — no panel behind it,
-   * the starfield shows through the gaps.
-   *
-   * Belt v1 displays what Orbit HONESTLY has for a centred document: what it
-   * is, when it arrived, that it scanned clean, and the original in your
-   * hands. The page itself — a render of page one, filling the view — is belt
-   * v2 and waits on #476. Nothing here fakes a preview.
+   * The three MEMBERS — the item and its two documents — must read instantly
+   * as the things that mean something. Four separations: they are 25px
+   * bodies against rubble that tops out near 9px; they are drawn (planet
+   * gradient / faceted rock) where the rubble is a flat tone; they carry
+   * labels and a focus ring; and each has SWEPT ITS NEIGHBOURHOOD — the
+   * rubble thins to nothing in a 74px disc around every member, the way a
+   * body big enough to be a body clears its own orbit.
    *
    * Everything drawn is fixture-true: web/src/lib/data/fixtures/workspace.js
    * (i-svc "Car full service" and its two documents; i-boiler for the empty
    * belt) rendered through web/src/lib/format.js, exactly as the built item
    * screen (web/src/routes/item/[id]/+page.svelte + item.css) renders it.
    *
+   * Belt v2 still displays what Orbit HONESTLY has for a centred document:
+   * what it is, when it arrived, that it scanned clean, and the original in
+   * your hands. The page itself — a render of page one — waits on #476.
+   *
    * Backdrop: the item screen's own — the shared tiled starfield (#445, seed
    * 17170812, 95 far + 46 near) drifting per POL-11, fixed, with the family
-   * vignette. The item screen has no heliosphere to lift away, so §15's
-   * universal descent has nothing to do here; its sky is not re-invented.
+   * vignette.
    */
   :root{
     --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -61,6 +82,7 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    --rubble:#7d88ab; --rubble-gain:1;
     --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
     --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
     --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
@@ -75,6 +97,7 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --rubble:#78849b; --rubble-gain:1;
     --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
     --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
     --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
@@ -89,6 +112,7 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --rubble:#3d4a70; --rubble-gain:1.55;
     /* Printed charts do not glow: flat ink discs, status surviving as colour. */
     --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
     --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
@@ -104,6 +128,7 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --rubble:#3a4966; --rubble-gain:1.5;
     --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
     --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
     --p-ruby-1:var(--overdue); --p-ruby-2:var(--overdue); --p-ruby-3:var(--overdue);
@@ -118,6 +143,7 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --rubble:#6ea6b8; --rubble-gain:1;
     --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
     --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
     --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
@@ -125,11 +151,13 @@
   }
 
   *{box-sizing:border-box;margin:0}
-  html,body{min-height:100%}
-  /* item.css's own override: a detail view has to be able to grow past the
-     fold, so this screen scrolls where the family stage does not. */
+  html,body{height:100%}
+  /* The belt is a stage, not a document: the band is pinned to the viewport
+     so its apex can BE the screen centre, and the card is hung on that
+     point. The card scrolls inside itself if a viewport is too short for it
+     rather than sliding the belt off the top of the sky. */
   body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
-       transition:background .4s,color .4s;overflow-x:hidden;overflow-y:auto}
+       transition:background .4s,color .4s;overflow:hidden}
 
   /* family.css / item.css: the sky is fixed and drifts (POL-11); the item
      screen has no descent of its own and none is invented here. */
@@ -143,70 +171,65 @@
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
 
-  .page{position:relative;z-index:2;padding:26px 0 40px}
-
-  /* ---- the belt ------------------------------------------------------
-     The arc is authored against a 1600-wide plate, centred, so the rainbow's
-     geometry is exact at the design width and simply runs off the edges on a
-     narrower one — which is what a rainbow does. The crown block reserves
-     only the height the held body needs; the arc's flanks overflow past it,
-     well outside the display panel's column. */
-  .belt{position:relative;height:342px}
-  .belt svg{position:absolute;top:0;left:50%;margin-left:-800px;
-            width:1600px;height:700px;overflow:visible;pointer-events:none}
-
-  /* One motion for the whole belt: seats, their captions and the dust all
-     ride the same rotation, so it reads as the belt moving rather than the
-     bodies sliding along a fixed track. 420ms — long enough to be seen as a
-     movement, short enough never to be waited on. */
-  .seat,.capseat,.dust{transition:transform .42s cubic-bezier(.32,.72,.26,1)}
-  .seat,.capseat,.dust{transform-box:view-box;transform-origin:800px 1083px}
+  /* ---- the band ------------------------------------------------------
+     Two canvases sandwich the card, because the card is IN the band:
+     everything at or behind the ring plane paints under it (and blurs
+     through its glass), the nearest few per cent of the population paints
+     over it. The members ride an SVG between them so they keep real hit
+     targets, labels and focus rings. */
+  #band,#fore{position:fixed;inset:0;pointer-events:none}
+  #band{z-index:2}
+  #fore{z-index:5}
+  #members{position:fixed;inset:0;z-index:3;overflow:visible}
   .hit{pointer-events:auto;cursor:pointer}
   .hit .fring{opacity:0}
   .hit:focus-visible{outline:none}
   .hit:focus-visible .fring{opacity:1}
-  .body{transition:opacity .42s ease}
-  .seat .held{opacity:0;transition:opacity .42s ease}
-  .seat.on .held{opacity:1}
-  .hit:hover .rim{opacity:.85}
+  .hit:hover .rim{opacity:.9}
   .rim{transition:opacity .25s ease}
-  .cap-name{font:11px var(--mono);fill:var(--ink-mid);text-anchor:middle;
-            transition:fill .3s ease,font-size .3s ease}
+  .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
   .cap-sub{font:9.5px var(--mono);letter-spacing:.14em;fill:var(--ink-faint);
            text-anchor:middle;text-transform:uppercase}
-  .capseat.on .cap-name{fill:var(--ink);font-size:12.5px}
-  .capseat.on .cap-sub{fill:var(--accent)}
 
-  /* ---- the held display ---------------------------------------------
-     item.css, unchanged: the family glass card at the item view's own width,
-     its h2/.sub, the settings-mail .kv rows, the drawer's h4, create.html's
-     action pills and its way back. */
-  .display{position:relative;z-index:3;width:100%;max-width:520px;margin:0 auto;
-           transition:opacity .17s ease,transform .17s ease}
-  .display.swap{opacity:0;transform:translateY(7px)}
+  /* ---- the card, seated at the apex ----------------------------------
+     item.css's glass card, unchanged in its parts, hung so that the band's
+     highest point crosses it a third of the way down: the band's thickness
+     (~370px at the apex) and the card's height are of an order, which is
+     what makes it read as riding IN the belt rather than floating above it.
+     The 16px backdrop blur is doing real work here — the rubble streaming
+     behind the card is visible through it, smeared. */
+  .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+    max-height:calc(100vh - 150px);overflow:auto;
+    --cdx:0px; --cdy:0px; --csc:1;
+    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 34%;}
+  .cardwrap.rollout{opacity:0;
+    transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
+  .cardwrap.rollpre{transition:none;opacity:0}
+  .cardwrap.rollin{transition:transform 230ms cubic-bezier(.16,.72,.3,1),opacity 205ms linear}
   .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
          border:1px solid var(--line);border-radius:18px}
-  .item-card{padding:30px 34px}
-  .item-card h2{font:600 22px var(--display);line-height:1.25}
+  .item-card{padding:24px 28px 22px}
+  .item-card h2{font:600 21px var(--display);line-height:1.25}
   .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
-                  margin:6px 0 22px}
+                  margin:5px 0 18px}
   .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
-      color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+      color:var(--ink-mid);padding:7px 2px;border-bottom:1px solid var(--line-soft)}
   .kv:last-of-type{border:0}
   .kv b{color:var(--ink);font-weight:500;text-align:right}
   .kv b.clean{color:var(--ok)}
   .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-                color:var(--ink-faint);margin:22px 0 8px}
-  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:18px;line-height:1.8}
-  .acts{display:flex;flex-wrap:wrap;gap:8px}
+                color:var(--ink-faint);margin:18px 0 8px}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:15px;line-height:1.75}
+  .acts{display:flex;flex-wrap:wrap;gap:7px}
   .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
     border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
-    border-radius:999px;padding:7px 14px;cursor:pointer}
+    border-radius:999px;padding:6px 13px;cursor:pointer}
   .acts button:hover{border-color:var(--act,var(--ink))}
-  .btn-primary{padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
-    font:600 13px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  .btn-primary{padding:9px 20px;border-radius:11px;border:0;cursor:pointer;
+    font:600 12.5px var(--display);color:var(--bg);background:var(--act,var(--accent))}
   .btn-primary:hover{filter:brightness(1.05)}
-  .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
+  .back{display:inline-block;margin-top:16px;font:11.5px var(--mono);
         color:var(--ink-mid);text-decoration:none;background:none;border:0;
         cursor:pointer;padding:0}
   .back:hover{color:var(--accent)}
@@ -214,21 +237,21 @@
   /* The document's honest display. No fabricated page image: the plate says
      what the file is, the rows say what Orbit knows, the button hands over
      the original. #476's page-one render turns this half into the page
-     itself — belt v2. */
-  .docview{display:flex;gap:24px;align-items:flex-start}
-  .plate{flex:none;width:118px;height:150px;border-radius:8px;position:relative;
+     itself — belt v3. */
+  .docview{display:flex;gap:20px;align-items:flex-start}
+  .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;
          border:1px solid var(--line);background:var(--panel);
-         display:grid;place-items:end center;padding-bottom:9px;
+         display:grid;place-items:end center;padding-bottom:8px;
          font:9.5px var(--mono);letter-spacing:.1em;color:var(--ink-faint)}
-  .plate::before{content:"";position:absolute;left:16px;right:16px;top:22px;height:1px;
+  .plate::before{content:"";position:absolute;left:14px;right:14px;top:20px;height:1px;
      background:var(--line);
-     box-shadow:0 11px 0 var(--line),0 22px 0 var(--line-soft),0 33px 0 var(--line-soft),
-                0 44px 0 var(--line-soft),0 55px 0 var(--line-soft)}
+     box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
+                0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
   .docbody{flex:1;min-width:0}
-  .docbody h3{font:520 15px var(--mono);line-height:1.35;word-break:break-all}
-  .docbody .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
-                margin:5px 0 16px}
-  .getrow{display:flex;align-items:center;gap:18px;margin-top:18px}
+  .docbody h3{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
+  .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                margin:5px 0 12px}
+  .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}
 
   /* ---- chrome --------------------------------------------------------- */
   .demos{position:fixed;left:22px;bottom:18px;z-index:7;display:flex;gap:7px;
@@ -243,15 +266,16 @@
   .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .demos i{width:1px;height:16px;background:var(--line);display:inline-block;margin:0 3px}
 
-  footer{position:relative;z-index:2;text-align:center;font:10.5px var(--mono);
-         color:var(--ink-faint);padding:0 26px 60px;line-height:1.9;max-width:1420px;
-         margin:0 auto}
+  footer{position:fixed;left:50%;transform:translateX(-50%);bottom:58px;z-index:6;
+         text-align:center;font:10.5px var(--mono);color:var(--ink-faint);
+         line-height:1.85;max-width:min(1080px,calc(100vw - 80px));pointer-events:none}
 
   @media (prefers-reduced-motion: reduce){
-    /* The swap is instant rather than animated — the belt still moves the
-       clicked body to the crown, it simply arrives there. */
+    /* The swap is instant rather than animated — the belt still puts the
+       clicked body at the apex, it simply arrives there, and the band's
+       drift holds still. */
     *{animation:none!important}
-    .seat,.capseat,.dust,.display,.body,.held{transition:none!important}
+    .cardwrap{transition:none!important}
   }
 </style>
 </head>
@@ -265,53 +289,37 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<div class="page">
-  <div class="belt">
-    <svg id="beltsvg" viewBox="0 0 1600 700" aria-label="The document belt: the item and its documents ride one arc; the body at the crown is the one on display">
-      <defs>
-        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
-          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
-        </radialGradient>
-        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
-          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
-          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
-        </radialGradient>
-        <!-- The rock's shading, lit from the same quarter as the planets, so
-             a document body and an item body share one light. Shadow rather
-             than tint, so stone reads as stone on paper and on night alike. -->
-        <radialGradient id="rockshade" cx="32%" cy="26%" r="82%">
-          <stop offset="0%" stop-color="#000" stop-opacity="0"/>
-          <stop offset="55%" stop-color="#000" stop-opacity=".16"/>
-          <stop offset="100%" stop-color="#000" stop-opacity=".46"/>
-        </radialGradient>
-        <linearGradient id="fadegrad" x1="0" y1="0" x2="1600" y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#000"/><stop offset=".08" stop-color="#fff"/>
-          <stop offset=".92" stop-color="#fff"/><stop offset="1" stop-color="#000"/>
-        </linearGradient>
-        <mask id="edgefade" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="700">
-          <rect x="0" y="0" width="1600" height="700" fill="url(#fadegrad)"/>
-        </mask>
-      </defs>
+<!-- the band: everything at or behind the ring plane -->
+<canvas id="band" aria-hidden="true"></canvas>
 
-      <!-- The track and its dust fade out at the edges of the sky rather than
-           stopping: the belt goes on, the window does not. -->
-      <g mask="url(#edgefade)">
-        <path id="track" fill="none" stroke="var(--chart-line)" stroke-width="1.1" opacity=".85"/>
-        <g class="dust" id="dust"></g>
-      </g>
-      <!-- The crown: the seat that displays. Marked the way the chart marks
-           anything — a brighter run of the same line, not a new symbol. It
-           does not rotate: the belt moves, the crown stays. -->
-      <path id="crown" fill="none" stroke="var(--accent)" stroke-width="1.7"
-            stroke-linecap="round" opacity=".5"/>
-      <g id="seats"></g>
-      <g id="caps"></g>
-    </svg>
-  </div>
+<!-- the members: the item and its documents, the only bodies that mean anything -->
+<svg id="members" aria-label="The belt's members: the item and its documents. The body at the apex of the band is shown as its card.">
+  <defs>
+    <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
+      <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
+      <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
+    </radialGradient>
+    <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
+      <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
+      <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
+    </radialGradient>
+    <!-- The rock's shading, lit from the same quarter as the planets, so a
+         document body and an item body share one light. -->
+    <radialGradient id="rockshade" cx="32%" cy="26%" r="82%">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="55%" stop-color="#000" stop-opacity=".16"/>
+      <stop offset="100%" stop-color="#000" stop-opacity=".46"/>
+    </radialGradient>
+  </defs>
+  <g id="seats"></g>
+  <g id="caps"></g>
+</svg>
 
-  <div class="display" id="display"></div>
-</div>
+<!-- the card, riding at the apex -->
+<div class="cardwrap" id="cardwrap"></div>
+
+<!-- the nearest few per cent of the band: rubble that passes in FRONT -->
+<canvas id="fore" aria-hidden="true"></canvas>
 
 <div class="demos" aria-label="Mockup state demos">
   <span>CENTRE</span>
@@ -331,29 +339,106 @@
   <button class="sw" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
 </div>
 
-<footer>orbit · the document belt · issue #458 · §15: the belt is a rainbow and the card rides in it — the item is one asteroid, its documents are the others ·
-click any body (or ← →) and the belt rolls it to the crown, where it displays · no panel behind the belt: the sky shows through the gaps ·
-the card no longer lists its documents — the belt is that list · a centred document shows what Orbit honestly holds; the page itself is belt v2, waiting on #476</footer>
+<footer>orbit · the document belt v2 · issue #458 · §15 "belt, second pass": the CARD rides in the belt, apex at screen centre, no semicircle, denser and disorderly ·
+a real ring at 40° inclination with a 12° node roll · ~2100 scattered bodies drifting for ever and never looping · the item and its documents are the only bodies that mean anything — they have swept their own neighbourhoods ·
+click a body (or ← →) and the belt rolls it to the apex, where it becomes its card · a centred document shows what Orbit honestly holds; the page itself waits on #476</footer>
 
 <script>
-/* ------------------------------------------------------------------ *
- * The geometry.
+/* ==================================================================== *
+ * THE GEOMETRY — a ring seen at an angle, not a rainbow.
  *
- * One circle, centred well below the fold, drawn only across its crown:
- * a rainbow. R = 873 and C = (800, 1083) put the apex at y = 210 and carry
- * the arc down to y = 620 at the edges of a 1600-wide sky — 1480 across and
- * 410 tall, which is the proportion of a rainbow rather than of a shallow
- * bow. Bodies are seated every 26° along it; two steps out (the furthest a
- * three-body belt ever rolls) is x = 1488, still comfortably in the sky.
- * ------------------------------------------------------------------ */
-const C = { x: 800, y: 1083 }, R = 873, APEX_Y = C.y - R, STEP = 26;
-const R_BODY = 20;      /* a body on the flank */
-const HELD_SCALE = 1.7; /* the crown holds it larger: 34 */
+ * The belt is a circle of radius A lying in its own plane. Two rotations
+ * put it on screen:
+ *   INC   40°  inclination — how far the ring plane is tipped away from us.
+ *              This is what turns the circle into a shallow ellipse
+ *              (minor/major = cos 40° = .766) and what makes the arc across
+ *              the sky a sweep rather than a bow.
+ *   NODE −12°  the node roll — the ring's line of nodes is not level with
+ *              the horizon. This is the asymmetry: it drops the left flank
+ *              and lifts the right, so the two halves of the visible band
+ *              fall by different amounts (~300px left, ~240px right at
+ *              1600×1000) and foreshorten differently.
+ *
+ * The apex — the highest point of the projected ellipse, found analytically,
+ * not assumed — is then translated to the horizontal centre of the viewport
+ * at 33.5% of its height. Everything else follows from that one pin.
+ *
+ * Ring angle phi runs anticlockwise; on screen INCREASING PHI MOVES LEFT.
+ * The visible window is the arc between the two screen edges (plus margin);
+ * the band's far side is what we see, so the card sits in front of it and
+ * only the nearest bodies cross in front of the card.
+ * ==================================================================== */
+const RAD = Math.PI / 180;
+const INC = 40 * RAD, NODE = -12 * RAD;
+const COS_I = Math.cos(INC), SIN_I = Math.sin(INC);
+const COS_N = Math.cos(NODE), SIN_N = Math.sin(NODE);
+const A_FRAC = 0.74, A_MIN = 1150;   /* ring radius against the viewport */
+const APEX_FRAC = 0.35;              /* where the apex hangs in the sky   */
+let STEP = 17 * RAD;                 /* one seat: ~350px at the apex      */
+const R_BODY = 25;                   /* a member's radius                 */
+const RADIAL = 0.19;                 /* the band's radial half-spread     */
+const HFRAC = 0.066;                 /* its out-of-plane half-thickness   */
+const SWEEP = 74;                    /* the neighbourhood a member clears */
+const DRIFT = 0.0125;                /* rad/s along the ring, leftward    */
+const GLIDE = 420;                   /* the roll, unchanged from v1       */
 
-/* ------------------------------------------------------------------ *
+let W = 0, H = 0, A = 0, CX = 0, CY = 0, APEX_Y = 0;
+let PHI_APEX = 0, PHI_L = 0, PHI_R = 0, DIP_L = 0, DIP_R = 0;
+
+function project(phi, rho, hh) {
+  const s = Math.sin(phi), c = Math.cos(phi);
+  const u = rho * c;                          /* along the node line       */
+  const v = rho * s * COS_I + hh * SIN_I;     /* screen-up, foreshortened  */
+  const d = -rho * s * SIN_I + hh * COS_I;    /* toward the viewer         */
+  return { x: CX + u * COS_N - v * SIN_N, y: CY - (u * SIN_N + v * COS_N), d };
+}
+
+/* x(phi) falls monotonically across the visible arc, so a walk-and-refine
+   is exact enough and cannot be tripped by the ellipse's turning points. */
+function phiAtX(targetX, dir) {
+  let phi = PHI_APEX, step = 0.02 * dir, last = project(phi, A, 0).x;
+  for (let i = 0; i < 400; i++) {
+    const next = phi + step, x = project(next, A, 0).x;
+    if ((dir < 0 && x >= targetX) || (dir > 0 && x <= targetX)) {
+      const t = (targetX - last) / (x - last);
+      return phi + step * Math.max(0, Math.min(1, t));
+    }
+    if ((dir < 0 && x < last) || (dir > 0 && x > last)) return phi; /* turned */
+    phi = next; last = x;
+  }
+  return phi;
+}
+
+function computeGeometry() {
+  W = window.innerWidth; H = window.innerHeight;
+  A = Math.max(A_MIN, W * A_FRAC);
+  APEX_Y = Math.round(H * APEX_FRAC);
+  /* d/dphi of the projected height, solved: the true apex of the tilted
+     ellipse, which is NOT the top of the untilted one. */
+  PHI_APEX = Math.atan2(COS_I * COS_N, SIN_N);
+  if (PHI_APEX < 0) PHI_APEX += Math.PI * 2;
+  CX = 0; CY = 0;
+  const p = project(PHI_APEX, A, 0);
+  CX = W / 2 - p.x; CY = APEX_Y - p.y;
+  PHI_R = phiAtX(W + 200, -1);
+  PHI_L = phiAtX(-200, +1);
+  /* The seats are 17° of real ring apart, but a narrow sky cannot hold two
+     of those either side of the apex: on one the belt sits its members
+     closer together rather than rolling one of them off the world. */
+  STEP = 17 * RAD;
+  while (STEP > 11 * RAD &&
+         (project(PHI_APEX - 2 * STEP, A, 0).x > W - 108 ||
+          project(PHI_APEX + 2 * STEP, A, 0).x < 108)) STEP -= 0.5 * RAD;
+  /* How far the band falls 300px either side of the apex: the card slides
+     ALONG the band when it leaves, so it has to know the dip. */
+  DIP_L = project(phiAtX(W / 2 - 300, +1), A, 0).y - APEX_Y;
+  DIP_R = project(phiAtX(W / 2 + 300, -1), A, 0).y - APEX_Y;
+}
+
+/* ==================================================================== *
  * The data — fixture-true, from web/src/lib/data/fixtures/workspace.js,
  * rendered through web/src/lib/format.js against DESIGN_TODAY 2026-08-13.
- * ------------------------------------------------------------------ */
+ * ==================================================================== */
 const ITEMS = {
   svc: {
     id: "i-svc", title: "Car full service", sub: "Vehicles · service",
@@ -371,9 +456,10 @@ const ITEMS = {
         added: "12 June 2026", size: "88 KB", type: "PDF (application/pdf)" },
     ],
   },
-  /* The empty belt: a real item that has no documents. Its body is amber and
+  /* The empty belt: a real item with no documents. Its body is amber and
      wears the dial's plain separator stroke rather than a status halo,
-     because that is how home.html draws i-boiler. */
+     because that is how home.html draws i-boiler. The band around it is
+     sparser — an item with nothing attached has swept a quieter orbit. */
   boiler: {
     id: "i-boiler", title: "Boiler service", sub: "Home · service",
     kv: [
@@ -394,40 +480,106 @@ const el = (name, attrs = {}) => {
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
   return node;
 };
-const rngFrom = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/* ------------------------------------------------------------------ *
- * The belt's order: the item takes the middle seat and its documents fan
- * out either side of it. Position on a belt is spatial, not chronological,
- * and an item opening with its own card at the crown — flanked, balanced —
- * is the view #424 already promises.
- * ------------------------------------------------------------------ */
-let key = "svc", bodies = [], selected = 0, swapTimer = null;
+/* A Lehmer stream. Two of them: one fixed seed for the members' silhouettes
+   (so a rock is the same rock every load, fixture truth), and one that runs
+   for ever for the band — never rewound, which is exactly why the band can
+   never repeat itself. */
+const rngFrom = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+const bandRng = rngFrom(19170812);
+
+/* ==================================================================== *
+ * The band's population.
+ *
+ * Bodies are scattered in three dimensions of the ring, not along a line:
+ *   phi   where round the belt
+ *   rho   A · (1 ± .155), triangular — dense at the ring radius, frayed out
+ *   h     ±.058·A out of the ring plane, triangular
+ * and each carries its own size, tone and silhouette. Sizes are cubed so
+ * the population is overwhelmingly dust with a scattering of real rubble:
+ * that ratio, not the count, is what makes a belt look like a belt.
+ *
+ * Drift: leftward along the ring for ever. Inner bodies run faster than
+ * outer ones (Keplerian shear, softened to a ±15% spread so the band shears
+ * rather than smears), and near bodies faster than far ones. A body that
+ * leaves the left edge does not come back: it is REBUILT from the running
+ * stream at the right edge with fresh radius, height, size and shape. The
+ * band you are shown one minute is not the band you were shown before.
+ * ==================================================================== */
+let rubble = [];
+
+function spawn(rk, phiNow) {
+  const r = bandRng;
+  /* A belt has a core and a fray, not an even slab: radius and height come
+     off a peaked distribution, and one body in seven is a stray thrown well
+     outside it. That is what stops the population reading as a rectangle of
+     confetti and lets the sweep of the ring still be seen through it. */
+  const stray = r() < 0.14 ? 1.75 : 1;
+  rk.rho = A * (1 + ((r() + r() + r() - 1.5) / 1.5) * RADIAL * stray);
+  rk.h = A * ((r() + r() + r() - 1.5) / 1.5) * HFRAC * stray;
+  const g = r();
+  rk.size = 0.42 + g * g * g * 7.6;
+  rk.tone = r() < 0.17 ? 1 : 0;               /* 1 = accent-lit, 0 = ink   */
+  rk.alpha = (0.2 + r() * 0.55) / (stray > 1 ? 1.5 : 1);
+  rk.rate = Math.pow(A / rk.rho, 0.9) * (0.94 + (rk.h / (A * HFRAC)) * 0.12);
+  rk.poly = null;
+  if (rk.size > 2.3) {                        /* big enough to have a shape */
+    const n = 7, pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r() * 0.5;
+      const rr = 0.72 + r() * 0.5;
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.9]);
+    }
+    rk.poly = pts;
+  }
+  /* stored as the ring angle it was BORN at, so the running drift and the
+     belt's roll both apply to it at its own rate for the rest of its life */
+  rk.phi = phiNow - (drift + roll) * rk.rate;
+  return rk;
+}
+
+function buildBand() {
+  const n = ITEMS[key].docs.length ? 2100 : 880;
+  rubble = [];
+  for (let i = 0; i < n; i++)
+    rubble.push(spawn({}, PHI_R - 0.16 + bandRng() * (PHI_L - PHI_R + 0.32)));
+}
+
+/* ==================================================================== *
+ * The order of the belt: the item takes the middle seat and its documents
+ * fan out either side of it. Position on a belt is spatial, not
+ * chronological, and an item opening with its own card at the apex —
+ * flanked, balanced — is the view #424 already promises.
+ * ==================================================================== */
+let key = "svc", bodies = [], selected = 0, prevSel = 0, mid = 0;
+let roll = 0, rollFrom = 0, rollTo = 0, rollT0 = -1, drift = 0, swapTimer = null;
 
 function buildBodies() {
   const item = ITEMS[key];
-  const left = item.docs.slice(0, Math.ceil(item.docs.length / 2));
-  const right = item.docs.slice(Math.ceil(item.docs.length / 2));
+  const cut = Math.ceil(item.docs.length / 2);
   bodies = [
-    ...left.map((d) => ({ kind: "doc", doc: d, id: d.id })),
+    ...item.docs.slice(0, cut).map((d) => ({ kind: "doc", doc: d, id: d.id })),
     { kind: "item", id: item.id },
-    ...right.map((d) => ({ kind: "doc", doc: d, id: d.id })),
+    ...item.docs.slice(cut).map((d) => ({ kind: "doc", doc: d, id: d.id })),
   ];
-  selected = bodies.findIndex((b) => b.kind === "item");
+  selected = prevSel = bodies.findIndex((b) => b.kind === "item");
+  mid = (bodies.length - 1) / 2;
+  roll = rollFrom = rollTo = (selected - mid) * STEP;
 }
 
-/* ---- the pen ------------------------------------------------------ *
- * The item's body is home.html's, to the pixel-ratio: gradient sphere,
- * gloss at (-0.2r, +0.25r) r 0.33r, and its status halo. The one thing it
- * leaves behind is its dial belt ellipse — CON-1's mark for "documents
- * attached" — because on THIS screen that sentence is already spoken, at
- * screen scale, by the rainbow the body is sitting on. Drawing it twice
- * would only compete with the thing that has to read first.
- * A document is a rock: a faceted silhouette in the belt's own ink, shaded
- * by shadow rather than by tint and cratered out of the ground, so it reads
- * as stone on paper and on night alike.
- * ------------------------------------------------------------------ */
+const seatPhi = (i) => PHI_APEX - (i - mid) * STEP + roll;
+
+/* ==================================================================== *
+ * The members' pen — unchanged from v1, at a size the rubble cannot reach.
+ * The item's body is home.html's to the pixel-ratio: gradient sphere, gloss
+ * at (−0.2r, +0.25r) r 0.33r, status halo. It leaves behind only its dial
+ * belt ellipse (CON-1's "documents attached"), because on THIS screen that
+ * sentence is spoken at screen scale by the band the body is sitting in.
+ * A document is a rock: faceted, shaded by shadow rather than tint, so it
+ * reads as stone on paper and on night alike.
+ * ==================================================================== */
 function drawItemBody(g, item) {
   const r = R_BODY;
   g.appendChild(el("circle", { r, fill: "none", stroke: item.halo,
@@ -448,7 +600,7 @@ function drawRock(g, seed) {
   const points = pts.join(" ");
   g.appendChild(el("polygon", { points,
     fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
-    stroke: "var(--accent)", "stroke-opacity": ".75", "stroke-width": "1.1",
+    stroke: "var(--accent)", "stroke-opacity": ".8", "stroke-width": "1.2",
     "stroke-linejoin": "round" }));
   for (let i = 0; i < 3; i++) {
     const a = rng() * Math.PI * 2, d = rng() * 0.5 * r;
@@ -459,52 +611,6 @@ function drawRock(g, seed) {
   g.appendChild(el("polygon", { points, fill: "url(#rockshade)" }));
 }
 
-/* ---- the belt's substance ------------------------------------------ *
- * Dust, seeded, over ±150° so the belt is never seen to end however far it
- * rolls; it rides the same rotation as the bodies, which is what makes the
- * motion read as a belt moving rather than bodies sliding on a rail.
- * ------------------------------------------------------------------ */
-function drawDust() {
-  const dust = document.getElementById("dust");
-  dust.textContent = "";
-  const rng = rngFrom(19170812);
-  for (let i = 0; i < 520; i++) {
-    const a = (-150 + rng() * 300) * Math.PI / 180;
-    /* Densest on the line, thinning outward — a belt has an edge that
-       frays, not a wall. */
-    const spread = (rng() + rng() + rng() - 1.5) * 15;
-    const rr = R + spread;
-    dust.appendChild(el("circle", {
-      cx: (C.x + Math.sin(a) * rr).toFixed(1),
-      cy: (C.y - Math.cos(a) * rr).toFixed(1),
-      r: (0.55 + rng() * 1.5).toFixed(2),
-      fill: rng() < 0.4 ? "var(--accent)" : "var(--chart-ink)",
-      opacity: (0.28 + rng() * 0.42).toFixed(2),
-    }));
-  }
-}
-
-/* Both arcs come off the same circle: the track across the whole sky, and
-   the crown — the ±13° of it that is the seat on display. */
-const arcPath = (deg) => {
-  const t = (deg * Math.PI) / 180;
-  const dx = Math.sin(t) * R, y = (C.y - Math.cos(t) * R).toFixed(1);
-  return `M ${(C.x - dx).toFixed(1)} ${y} A ${R} ${R} 0 0 1 ${(C.x + dx).toFixed(1)} ${y}`;
-};
-function drawTrack() {
-  document.getElementById("track").setAttribute("d", arcPath(58));
-  document.getElementById("crown").setAttribute("d", arcPath(13));
-}
-
-/* ---- the seats ------------------------------------------------------ *
- * A seat is a direct child of the plate with one CSS transform:
- *   rotate(A) translate(0,-873) scale(k)   about the arc's centre
- * so a body authored at the origin lands on the arc, tangent to it, at the
- * size its position earns. Its caption is a twin seat carrying
- *   rotate(A) translate(0,-873) rotate(-A) translate(0,D)
- * — the rotations cancel exactly, at every instant of the transition, so
- * the label travels the arc with its body and never tilts.
- * ------------------------------------------------------------------ */
 function buildSeats() {
   const seats = document.getElementById("seats"), caps = document.getElementById("caps");
   seats.textContent = ""; caps.textContent = "";
@@ -512,74 +618,280 @@ function buildSeats() {
 
   bodies.forEach((b, i) => {
     const seat = el("g", { class: "seat" });
-    const inner = el("g", { transform: `translate(${C.x} ${C.y})` });
     const hit = el("g", { class: "hit", role: "button", tabindex: "0" });
     hit.setAttribute("aria-label", b.kind === "item"
       ? `${item.title} — the item itself`
       : `${b.doc.name}, ${b.doc.size}`);
-    /* A comfortable target regardless of the silhouette. */
-    hit.appendChild(el("circle", { r: R_BODY * 1.7, fill: "transparent" }));
-    hit.appendChild(el("circle", { class: "fring", r: R_BODY + 10, fill: "none",
+    hit.appendChild(el("circle", { r: R_BODY * 1.8, fill: "transparent" }));
+    hit.appendChild(el("circle", { class: "fring", r: R_BODY + 11, fill: "none",
       stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
     if (b.kind === "item") drawItemBody(hit, item);
     else drawRock(hit, 7717 + i * 913);
-    /* Hover rim and the held ring: the same circle, two reasons. */
-    hit.appendChild(el("circle", { class: "rim", r: R_BODY + 7, fill: "none",
+    hit.appendChild(el("circle", { class: "rim", r: R_BODY + 8, fill: "none",
       stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
-    const held = el("circle", { class: "held", r: R_BODY + 7, fill: "none",
-      stroke: "var(--accent)", "stroke-width": "1", opacity: "0" });
-    hit.appendChild(held);
     hit.addEventListener("click", () => centre(i));
     hit.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); centre(i); }
     });
-    inner.appendChild(hit); seat.appendChild(inner); seats.appendChild(seat);
+    seat.appendChild(hit); seats.appendChild(seat);
 
-    const capseat = el("g", { class: "capseat" });
-    const capInner = el("g", { transform: `translate(${C.x} ${C.y})` });
-    const name = el("text", { class: "cap-name", y: "38" });
+    const cap = el("g", { class: "capseat" });
+    const name = el("text", { class: "cap-name", y: "46" });
     name.textContent = b.kind === "item" ? item.title : b.doc.name;
-    const sub = el("text", { class: "cap-sub", y: "53.5" });
+    const sub = el("text", { class: "cap-sub", y: "61.5" });
     sub.textContent = b.kind === "item" ? "the item" : b.doc.size;
-    capInner.append(name, sub); capseat.appendChild(capInner); caps.appendChild(capseat);
+    cap.append(name, sub); caps.appendChild(cap);
   });
 }
 
-function layout() {
-  const seats = [...document.getElementById("seats").children];
-  const caps = [...document.getElementById("caps").children];
-  const mid = (bodies.length - 1) / 2;
+/* Where each member is, and how solid it is at this instant of the roll.
+   The body at the apex is NOT drawn: it is the card. Its rock fades back in
+   as it leaves, and the arriving one fades out as the card blooms — which
+   is the whole trick of "the card rides in the belt". */
+function bodyOpacity(i, p) {
+  /* The rock the card is collapsing back into is already there before the
+     card has finished leaving, and the rock the card blooms out of is still
+     there as it starts to bloom: the two never both go missing, which is
+     what would give the trick away. */
+  if (i === selected) return 1 - clamp01((p - 0.32) / 0.34);
+  if (i === prevSel) return clamp01((p - 0.1) / 0.42);
+  return 1;
+}
+
+function paintMembers(p) {
+  const seats = document.getElementById("seats").children;
+  const caps = document.getElementById("caps").children;
   bodies.forEach((b, i) => {
-    const slot = (i - mid) * STEP;                 /* where it sits on the belt */
-    const A = slot - (selected - mid) * STEP;      /* after the belt has rolled */
-    const on = i === selected;
-    const k = on ? HELD_SCALE : 1;
-    seats[i].style.transform = `rotate(${A}deg) translate(0,${-R}px) scale(${k})`;
-    seats[i].classList.toggle("on", on);
-    caps[i].style.transform =
-      `rotate(${A}deg) translate(0,${-R}px) rotate(${-A}deg) translate(0,${on ? 24 : 0}px)`;
-    caps[i].classList.toggle("on", on);
-    /* Depth: the further from the crown, the further into the sky. */
-    seats[i].querySelector(".hit").style.opacity = on ? 1 : Math.max(0.55, 0.92 - Math.abs(A) / 260);
+    const phi = seatPhi(i);
+    const a = project(phi, A, 0), q = project(phi + 0.03, A, 0);
+    const ang = Math.atan2(a.y - q.y, a.x - q.x) / RAD;
+    const o = bodyOpacity(i, p);
+    seats[i].setAttribute("transform",
+      `translate(${a.x.toFixed(1)},${a.y.toFixed(1)}) rotate(${ang.toFixed(2)})`);
+    seats[i].setAttribute("opacity", o.toFixed(3));
+    /* The body at the apex is the card: it is neither clickable nor
+       tabbable while it is being the card, or the keyboard would land on
+       something nobody can see. */
+    const gone = o < 0.5;
+    seats[i].style.pointerEvents = gone ? "none" : "";
+    const hit = seats[i].firstChild;
+    hit.setAttribute("tabindex", gone ? "-1" : "0");
+    hit.setAttribute("aria-hidden", gone ? "true" : "false");
+    caps[i].setAttribute("transform", `translate(${a.x.toFixed(1)},${a.y.toFixed(1)})`);
+    caps[i].setAttribute("opacity", o.toFixed(3));
   });
-  document.getElementById("dust").style.transform = `rotate(${-(selected - mid) * STEP}deg)`;
-  for (const [n, id] of [[0, "d-svc-invoice"], [1, "i-svc"], [2, "d-svc-checklist"]]) {
-    const btn = document.getElementById("d" + n);
-    btn.setAttribute("aria-pressed", String(bodies[selected]?.id === id));
-    btn.disabled = !bodies.some((b) => b.id === id);
-    btn.style.opacity = btn.disabled ? ".38" : "1";
+}
+
+/* ==================================================================== *
+ * Painting the band.
+ * ==================================================================== */
+const bandC = document.getElementById("band"), foreC = document.getElementById("fore");
+const bctx = bandC.getContext("2d"), fctx = foreC.getContext("2d");
+const hazeCanvas = document.createElement("canvas"), hctx = hazeCanvas.getContext("2d");
+let TONE = ["#4d5878", "#d8b45a", "#243259"], hazePts = [], cardRect = null;
+
+let GAIN = 1;
+function readTones() {
+  const cs = getComputedStyle(document.documentElement);
+  TONE = [cs.getPropertyValue("--rubble").trim() || cs.getPropertyValue("--chart-ink").trim(),
+          cs.getPropertyValue("--accent").trim(),
+          cs.getPropertyValue("--chart-line").trim()];
+  /* Dark ink on a printed sky needs more weight than lit stone on a night
+     sky to carry the same amount of belt: the packs say how much. */
+  GAIN = parseFloat(cs.getPropertyValue("--rubble-gain")) || 1;
+}
+
+function sizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  for (const [c, ctx] of [[bandC, bctx], [foreC, fctx]]) {
+    c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+    c.style.width = W + "px"; c.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 }
 
-/* ---- what the crown displays ---------------------------------------- */
-function renderDisplay() {
+function buildHaze() {
+  hazePts = [];
+  for (let k = 0; k <= 80; k++)
+    hazePts.push(project(PHI_R + ((PHI_L - PHI_R) * k) / 80, A, 0));
+  /* The glow never changes between resizes, and it is by far the most
+     expensive thing on the plate, so it is rasterised once and blitted. */
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  hazeCanvas.width = Math.round(W * dpr); hazeCanvas.height = Math.round(H * dpr);
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  hctx.clearRect(0, 0, W, H);
+  paintHaze(hctx);
+}
+
+/* The band's body: a broad, soft glow along the ring, fading out at the
+   edges of the sky rather than stopping. No hairline track — v1's wire is
+   exactly what the owner said a belt is not, and a hard-edged glow is only
+   a fatter wire, so the glow is laid down as eighteen near-transparent
+   passes of falling width. The profile that builds up has no edge at all;
+   the band simply stops being there. */
+function paintHaze(ctx) {
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  for (const [o, a] of [[0, 0], [0.17, 1], [0.83, 1], [1, 0]])
+    grad.addColorStop(o, tint(TONE[2], a));
+  ctx.strokeStyle = grad; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const thick = A * RADIAL * COS_I * 2 + A * HFRAC * SIN_I * 2;
+  const passes = 18;
+  for (let k = 0; k < passes; k++) {
+    const t = k / (passes - 1);
+    ctx.globalAlpha = 0.0135;
+    ctx.lineWidth = thick * (0.78 - 0.7 * t * t);
+    ctx.beginPath();
+    hazePts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function tint(col, a) {
+  if (col.startsWith("rgba")) return col.replace(/[\d.]+\)$/, a + ")");
+  if (col.startsWith("rgb")) return col.replace("rgb(", "rgba(").replace(")", `,${a})`);
+  const h = col.replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const v = parseInt(n, 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
+}
+
+function paintBand() {
+  bctx.clearRect(0, 0, W, H); fctx.clearRect(0, 0, W, H);
+  bctx.drawImage(hazeCanvas, 0, 0, W, H);
+
+  /* The members' swept neighbourhoods, and the card's own footprint (the
+     card is a body in the band too — nothing sits on top of it). */
+  const clears = bodies.map((_, i) => project(seatPhi(i), A, 0));
+  const hMax = A * HFRAC;
+  const foreCut = hMax * 0.58;   /* above this, a body passes in FRONT */
+  const fadeIn = 0.14 * W;   /* the belt leaves the sky, it does not stop */
+
+  for (const rk of rubble) {
+    const phi = rk.phi + (drift + roll) * rk.rate;
+    if (phi > PHI_L + 0.16) { spawn(rk, PHI_R - 0.16); continue; }
+    const p = project(phi, rk.rho, rk.h);
+    if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
+
+    /* depth: the arc's ends lean toward you, and height above the plane
+       brings a body forward. Near bodies are bigger, brighter, quicker. */
+    const dn = clamp01(0.5 + (p.d / (A * 0.62)) * 0.9);
+    let a = rk.alpha * (0.55 + dn * 0.75) * GAIN;
+    const s = rk.size * (0.78 + dn * 0.5);
+
+    a *= Math.min(1, p.x / fadeIn) * Math.min(1, (W - p.x) / fadeIn);
+    for (const c of clears) {
+      const d = Math.hypot(p.x - c.x, p.y - c.y);
+      if (d < SWEEP) { a *= clamp01((d - SWEEP * 0.45) / (SWEEP * 0.55)); }
+    }
+    if (a <= 0.012) continue;
+
+    /* Bodies riding high above the ring plane pass in FRONT of the card:
+       the card is IN the belt, so some of the belt is between it and you.
+       Dimmed, and dimmed again over the card, so it never fights the text. */
+    const front = rk.h > foreCut && rk.size < 5.6;
+    const ctx = front ? fctx : bctx;
+    if (front) {
+      a *= 0.8;
+      if (cardRect && p.x > cardRect.l && p.x < cardRect.r && p.y > cardRect.t && p.y < cardRect.b)
+        a *= 0.85;
+    }
+    ctx.globalAlpha = Math.min(a, 0.95);
+    ctx.fillStyle = TONE[rk.tone];
+    if (rk.poly) {
+      ctx.beginPath();
+      rk.poly.forEach(([px, py], i) =>
+        i ? ctx.lineTo(p.x + px * s, p.y + py * s) : ctx.moveTo(p.x + px * s, p.y + py * s));
+      ctx.closePath(); ctx.fill();
+      if (s > 4) {           /* a lit edge on the biggest rubble only */
+        ctx.globalAlpha = Math.min(a * 0.5, 0.4);
+        ctx.strokeStyle = TONE[1]; ctx.lineWidth = 0.7; ctx.stroke();
+      }
+    } else {
+      ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, 6.2832); ctx.fill();
+    }
+  }
+  bctx.globalAlpha = 1; fctx.globalAlpha = 1;
+}
+
+/* ==================================================================== *
+ * The roll — one motion, 420ms, unchanged in length from v1 but now
+ * choreographed around a card that is itself a body in the belt:
+ *
+ *   0ms    the belt starts turning. The card, which IS the apex body,
+ *          leaves with it: it slides along the band in the direction of
+ *          travel (dipping as the band dips away from the apex), shrinking
+ *          toward body size and fading — collapsing back into its rock.
+ *   ~190ms the rock it collapsed into has faded up at the seat the card
+ *          slid toward; the card's content swaps out of sight.
+ *   190ms  the arriving body's rock is gone and the new card blooms out of
+ *          it, riding IN from the opposite side along the band.
+ *   420ms  the belt settles; the card is seated at the apex.
+ *
+ * Under reduced motion the same thing happens with no tween: the belt is
+ * simply already turned and the card is simply already the new one.
+ * ==================================================================== */
+const bez = (p1x, p1y, p2x, p2y) => (t) => {
+  let lo = 0, hi = 1, u = t;
+  const bx = (u) => 3 * (1 - u) * (1 - u) * u * p1x + 3 * (1 - u) * u * u * p2x + u * u * u;
+  for (let i = 0; i < 22; i++) { const x = bx(u); if (x < t) lo = u; else hi = u; u = (lo + hi) / 2; }
+  return 3 * (1 - u) * (1 - u) * u * p1y + 3 * (1 - u) * u * u * p2y + u * u * u;
+};
+const ease = bez(0.32, 0.72, 0.26, 1);
+
+function centre(i) {
+  if (i === selected || i < 0 || i >= bodies.length) return;
+  const dir = Math.sign(i - selected);          /* +1: clicked to the right */
+  prevSel = selected; selected = i;
+  rollFrom = roll; rollTo = (selected - mid) * STEP; rollT0 = performance.now();
+  syncDemos();
+
+  const wrap = document.getElementById("cardwrap");
+  clearTimeout(swapTimer);
+  if (reduced()) {
+    roll = rollTo; rollT0 = -1;
+    renderCard(); paintMembers(1); measureCard(); paintBand();
+    return;
+  }
+  /* The card leaves the apex the way the belt leaves it: along the band. */
+  const outDx = dir > 0 ? -300 : 300, outDy = dir > 0 ? DIP_L : DIP_R;
+  wrap.classList.remove("rollin", "rollpre");
+  wrap.classList.add("rollout");
+  wrap.style.setProperty("--cdx", outDx + "px");
+  wrap.style.setProperty("--cdy", outDy.toFixed(1) + "px");
+  wrap.style.setProperty("--csc", "0.5");
+  swapTimer = setTimeout(() => {
+    renderCard();
+    wrap.classList.remove("rollout");
+    wrap.classList.add("rollpre");
+    wrap.style.setProperty("--cdx", (dir > 0 ? 300 : -300) + "px");
+    wrap.style.setProperty("--cdy", (dir > 0 ? DIP_R : DIP_L).toFixed(1) + "px");
+    void wrap.offsetWidth;                       /* commit the pre-state */
+    wrap.classList.remove("rollpre");
+    wrap.classList.add("rollin");
+    wrap.style.removeProperty("opacity");
+    wrap.style.setProperty("--cdx", "0px");
+    wrap.style.setProperty("--cdy", "0px");
+    wrap.style.setProperty("--csc", "1");
+    setTimeout(measureCard, 240);
+  }, 190);
+}
+function centreById(id) {
+  const i = bodies.findIndex((b) => b.id === id);
+  if (i >= 0) centre(i);
+}
+
+/* ==================================================================== *
+ * What the apex displays — the card, which is the body.
+ * ==================================================================== */
+function renderCard() {
   const item = ITEMS[key], b = bodies[selected];
-  const display = document.getElementById("display");
+  const wrap = document.getElementById("cardwrap");
   if (b.kind === "item") {
     /* The item view (#424) exactly as web/src/routes/item/[id] renders it —
-       with one change the belt earns: the card no longer repeats a list of
-       documents, because the belt directly above IS that list. */
-    display.innerHTML = `
+       with the one change the belt earns: the card no longer repeats a list
+       of documents, because the belt it is riding in IS that list. */
+    wrap.innerHTML = `
       <article class="glass item-card">
         <h2>${item.title}</h2>
         <div class="sub">${item.sub}</div>
@@ -593,12 +905,12 @@ function renderDisplay() {
           <button style="--act:var(--overdue)">retire</button>
         </div>
         ${item.docs.length ? "" : `<div class="note">no documents yet — anything you
-          attach, or mail in to your relay, takes a seat on this belt beside the item.</div>`}
+          attach, or mail in to your relay, takes a seat in this belt beside the item.</div>`}
         <a class="back" href="home.html">← back to your orbit</a>
       </article>`;
   } else {
     const d = b.doc;
-    display.innerHTML = `
+    wrap.innerHTML = `
       <article class="glass item-card">
         <div class="docview">
           <div class="plate" aria-hidden="true">PDF</div>
@@ -614,7 +926,7 @@ function renderDisplay() {
             </div>
           </div>
         </div>
-        <!-- Belt v2 (#476): when Orbit can render page one, that render fills
+        <!-- Belt v3 (#476): when Orbit can render page one, that render fills
              this half of the card and the plate retires. Until it can, the
              screen says what it holds and hands over the file — it does not
              draw a page it has never seen. -->
@@ -625,37 +937,84 @@ function renderDisplay() {
   }
 }
 
-function centre(i) {
-  if (i === selected || i < 0 || i >= bodies.length) return;
-  selected = i;
-  layout();
-  const display = document.getElementById("display");
-  clearTimeout(swapTimer);
-  if (reduced()) { renderDisplay(); return; }
-  /* The card leaves while the belt is still moving and the new one arrives
-     as it settles: one motion, not two. */
-  display.classList.add("swap");
-  swapTimer = setTimeout(() => { renderDisplay(); display.classList.remove("swap"); }, 170);
+function measureCard() {
+  const r = document.getElementById("cardwrap").getBoundingClientRect();
+  cardRect = { l: r.left, r: r.right, t: r.top, b: r.bottom };
 }
-function centreById(id) {
-  const i = bodies.findIndex((b) => b.id === id);
-  if (i >= 0) centre(i);
+
+function syncDemos() {
+  for (const [n, id] of [[0, "d-svc-invoice"], [1, "i-svc"], [2, "d-svc-checklist"]]) {
+    const btn = document.getElementById("d" + n);
+    btn.setAttribute("aria-pressed", String(bodies[selected]?.id === id));
+    btn.disabled = !bodies.some((b) => b.id === id);
+    btn.style.opacity = btn.disabled ? ".38" : "1";
+  }
 }
+
+/* ==================================================================== *
+ * The loop. The rubble drifts; the members do not — they are the
+ * instrument, held at their seats the way §14 holds the dial's
+ * constellations still because there they mean something. Everything else
+ * in this sky is scenery, and scenery moves.
+ * ==================================================================== */
+let last = 0, lastPaint = 0;
+function frame(now) {
+  const dt = last ? Math.min((now - last) / 1000, 0.08) : 0;
+  last = now;
+  const rolling = rollT0 >= 0;
+  if (rolling) {
+    const p = clamp01((now - rollT0) / GLIDE);
+    roll = rollFrom + (rollTo - rollFrom) * ease(p);
+    paintMembers(p);
+    if (p >= 1) rollT0 = -1;
+  }
+  drift += DRIFT * dt;
+  /* The roll gets every frame it can have. The idle drift is fifteen pixels
+     a second and does not: repainting a full-width plate under the card's
+     backdrop blur sixty times a second to move it a quarter of a pixel is
+     work nobody can see. */
+  if (rolling || now - lastPaint > 30) { paintBand(); lastPaint = now; }
+  requestAnimationFrame(frame);
+}
+
+function layout() {
+  computeGeometry();
+  sizeCanvas(); readTones(); buildHaze(); buildBand();
+  if (rollT0 < 0) roll = rollFrom = rollTo = (selected - mid) * STEP;
+  document.getElementById("members").setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const wrap = document.getElementById("cardwrap");
+  wrap.style.top = APEX_Y + "px";
+  /* The card is a body in the belt, so it has to fit BETWEEN its neighbours:
+     it takes the seat gap less a clear berth for the next body along. */
+  const gap = Math.abs(project(PHI_APEX - STEP, A, 0).x - W / 2);
+  wrap.style.width = Math.max(340, Math.min(480, 2 * (gap - 104), W - 56)) + "px";
+  paintMembers(rollT0 < 0 ? 1 : 0);
+  measureCard(); paintBand();
+}
+
 function setItem(which) {
   key = which;
   document.getElementById("two").setAttribute("aria-pressed", String(which === "svc"));
   document.getElementById("none").setAttribute("aria-pressed", String(which === "boiler"));
-  buildBodies(); buildSeats(); layout(); renderDisplay();
+  buildBodies(); buildSeats(); renderCard(); syncDemos();
+  const wrap = document.getElementById("cardwrap");
+  wrap.classList.remove("rollout", "rollin", "rollpre");
+  wrap.style.removeProperty("opacity");
+  wrap.style.setProperty("--cdx", "0px"); wrap.style.setProperty("--cdy", "0px");
+  wrap.style.setProperty("--csc", "1");
+  layout();
 }
 function setSwatch(name, btn) {
   document.documentElement.setAttribute("data-theme", name);
   for (const b of btn.parentElement.querySelectorAll(".sw"))
     b.setAttribute("aria-pressed", String(b === btn));
+  requestAnimationFrame(() => { readTones(); buildHaze(); paintBand(); });
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") { e.preventDefault(); centre(selected - 1); }
   if (e.key === "ArrowRight") { e.preventDefault(); centre(selected + 1); }
 });
+window.addEventListener("resize", layout);
 
 /* The item screen's own sky: the shared generator's seed and layers. */
 (function stars() {
@@ -673,11 +1032,12 @@ document.addEventListener("keydown", (e) => {
   }
 })();
 
-drawTrack();
-drawDust();
+computeGeometry();
 buildBodies();
 buildSeats();
+renderCard();
+syncDemos();
 layout();
-renderDisplay();
+if (!reduced()) requestAnimationFrame(frame);
 </script>
 </body></html>
