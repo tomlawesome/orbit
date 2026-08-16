@@ -204,7 +204,8 @@
     <span>THEME</span>
     <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
-    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <!-- atlas is retired from the release roster (§15, owner): its pack still
+         exists and still renders if forced, but it is no longer offered. -->
     <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
     <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
   </div>
@@ -248,15 +249,10 @@
         </span>
         <span class="label"><b>after dark</b><span>lights out, ink up</span></span>
       </button>
-      <button class="pack" aria-pressed="false" onclick="pickPack('atlas',this)">
-        <span class="strip" style="background:#c9bfa6" aria-hidden="true">
-          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#1c2b4a,#8f6c00 45%,transparent 72%)"></i>
-          <i style="left:64px;top:38px;width:7px;height:7px;background:#8f6c00"></i>
-          <i style="left:92px;top:22px;width:5px;height:5px;background:#1e7a45"></i>
-          <i style="left:120px;top:44px;width:4px;height:4px;background:#2b6cb0"></i>
-        </span>
-        <span class="label"><b>atlas</b><span>aged paper at dusk</span></span>
-      </button>
+      <!-- atlas is retired from the release roster (§15, owner): the pack is
+           still defined and still renders if data-theme is forced, but the
+           helm no longer offers it. The card row is the only place in the
+           product that made the offer. -->
       <button class="pack" aria-pressed="false" onclick="pickPack('dawn',this)">
         <span class="strip" style="background:#c3ccdb" aria-hidden="true">
           <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#1a2233,#8f6c00 45%,transparent 72%)"></i>
@@ -339,7 +335,7 @@ function pickPack(name, btn){
   document.documentElement.setAttribute("data-theme", name);
   for (const b of btn.parentElement.querySelectorAll(".pack")) b.setAttribute("aria-pressed", String(b === btn));
   /* keep the orb swatches honest too */
-  const order = ["starchart","afterdark","atlas","dawn","retrograde"];
+  const order = ["starchart","afterdark","dawn","retrograde"];
   const dots = document.querySelectorAll(".swatches button");
   dots.forEach((d, i) => d.setAttribute("aria-pressed", String(order[i] === name)));
 }

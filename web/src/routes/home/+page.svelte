@@ -427,6 +427,13 @@
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
+  <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
+       own ::before so it stays under the starfield; the ceiling answers it on
+       tall viewports; and the two side planes are what the pair turns into as
+       the reader descends to the manifest. Inert in every other pack. -->
+  <div class="ceiling" aria-hidden="true"></div>
+  <div class="wall wl" aria-hidden="true"></div>
+  <div class="wall wr" aria-hidden="true"></div>
 </div>
 <div class="vignette" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
@@ -458,7 +465,9 @@
     <span>THEME</span>
     <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <button style="background:#c9bfa6" title="atlas" aria-pressed="false"></button>
+    <!-- atlas is retired from the release roster (§15, owner): its pack still
+         exists in packs.css and still renders if forced, but it is no longer
+         offered. -->
     <button style="background:#c3ccdb" title="dawn" aria-pressed="false"></button>
     <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
             aria-pressed="false"></button>
@@ -483,11 +492,32 @@
   </div>
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <g class="glint" style="transform-origin:0 0">
+      <defs>
+        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--upcoming)"/>
+          <stop offset=".55" stop-color="var(--upcoming)"/>
+          <stop offset="1" stop-color="var(--accent)"/>
+        </linearGradient>
+      </defs>
+      <!-- the mark has two forms and only one is ever up: the four-point glint
+           every pack has always had, and retrograde's neon wireframe beacon
+           (§15/#480). The pack chooses between them in CSS. -->
+      <g class="glint classic" style="transform-origin:0 0">
         <circle r="9" fill="var(--ink)" opacity=".12"/>
         <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
               fill="var(--ink)" opacity=".9"/>
         <circle r="2" fill="var(--ink)"/>
+      </g>
+      <g class="glint tron" style="transform-origin:0 0">
+        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
+        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
+              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
+        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
+              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
+        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
+          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
+          <line x1="10" y1="0" x2="13.4" y2="0"/>
+        </g>
       </g>
     </svg>
     <span>create</span>
