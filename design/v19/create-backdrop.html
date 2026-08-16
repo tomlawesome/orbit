@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — create over a chart in progress (proposal, issue #472) · Orbit — new entry — one form, unfolding</title>
+<title>Orbit — create over a chart in progress v2 (proposal, issue #472) · Orbit — new entry — one form, unfolding</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../family/family.css">
@@ -74,7 +74,7 @@ body{overflow-y:auto;overflow-x:hidden}
 .btn-primary:hover{filter:brightness(1.05)}
 .cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
 .cancel-link:hover{color:var(--ink-mid)}
-.chartback{position:fixed;inset:-5%;pointer-events:none;z-index:1;opacity:.55}
+.chartback{position:fixed;inset:-5%;pointer-events:none;z-index:1;opacity:.75}
 .chartback svg{position:absolute;inset:0;width:100%;height:100%}
 </style></head><body>
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
@@ -170,24 +170,36 @@ body{overflow-y:auto;overflow-x:hidden}
       <circle cx="880.6" cy="672.9" r="0.76" opacity="0.14"/></g></svg></div>
 <div class="chartback" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <!-- §14/#472: a NEW entry deserves a chart still being drawn — an
-         unfinished ring, plotted points not yet joined, one pencil line. -->
-    <g fill="none" stroke="var(--line)" stroke-width="1">
-      <path d="M 330 660 A 210 210 0 1 1 540 500" stroke-dasharray="4 7"/>
-      <circle cx="1280" cy="320" r="170" stroke-dasharray="4 7" opacity=".8"/>
+    <!-- v2 (owner: bolder, keep the starfield): the chart being drawn AROUND
+         the form — a protractor quadrant, plotted-but-unjoined points, the
+         pencil line mid-stroke, registration marks. -->
+    <g fill="none" stroke="var(--line)" stroke-width="1.2">
+      <path d="M 800 190 A 460 460 0 0 1 1260 650" stroke-dasharray="5 8"/>
+      <path d="M 800 250 A 400 400 0 0 1 1200 650" stroke-dasharray="2 6" opacity=".7"/>
+      <path d="M 340 650 A 460 460 0 0 1 800 190" opacity=".35" stroke-dasharray="5 8"/>
+    </g>
+    <g stroke="var(--line)" stroke-width="1">
+      <line x1="1260" y1="650" x2="1246" y2="650"/><line x1="1252" y1="530" x2="1238" y2="533"/>
+      <line x1="1224" y1="415" x2="1211" y2="420"/><line x1="1168" y1="311" x2="1156" y2="318"/>
+      <line x1="1086" y1="224" x2="1076" y2="234"/><line x1="984" y1="161" x2="977" y2="173"/>
     </g>
     <g fill="var(--ink-faint)">
-      <circle cx="330" cy="450" r="1.8"/><circle cx="255" cy="560" r="1.4"/>
-      <circle cx="410" cy="610" r="1.8"/><circle cx="1215" cy="255" r="1.6"/>
-      <circle cx="1350" cy="390" r="1.4"/>
+      <circle cx="330" cy="450" r="2"/><circle cx="255" cy="560" r="1.6"/>
+      <circle cx="410" cy="610" r="2"/><circle cx="470" cy="700" r="1.6"/>
+      <circle cx="1215" cy="255" r="1.8"/><circle cx="1350" cy="390" r="1.6"/>
     </g>
-    <g stroke="var(--accent)" stroke-width="1" opacity=".5" fill="none">
-      <path d="M 330 450 L 255 560 L 410 610" stroke-dasharray="1 5" stroke-linecap="round"/>
-      <path d="M 410 610 L 505 585" stroke-dasharray="1 5" stroke-linecap="round" opacity=".5"/>
+    <g stroke="var(--accent)" stroke-width="1.1" opacity=".55" fill="none">
+      <path d="M 330 450 L 255 560 L 410 610 L 470 700" stroke-dasharray="1 5" stroke-linecap="round"/>
+      <path d="M 470 700 L 560 668" stroke-dasharray="1 5" stroke-linecap="round" opacity=".6"/>
     </g>
-    <g fill="var(--ink-faint)" font-size="9" font-family="var(--mono)" letter-spacing=".16em" opacity=".8">
-      <text x="240" y="415">UNCHARTED</text>
-      <text x="1180" y="215">PENDING ENTRY</text>
+    <g stroke="var(--ink-faint)" stroke-width="1" opacity=".8">
+      <path d="M 330 450 m -6 0 h 12 M 330 450 m 0 -6 v 12"/>
+      <path d="M 1215 255 m -6 0 h 12 M 1215 255 m 0 -6 v 12"/>
+    </g>
+    <g fill="var(--ink-faint)" font-size="9.5" font-family="var(--mono)" letter-spacing=".16em">
+      <text x="238" y="412">UNCHARTED</text>
+      <text x="1130" y="212">PENDING ENTRY</text>
+      <text x="1282" y="668">0°</text><text x="998" y="150">75°</text>
     </g>
   </svg>
 </div>
