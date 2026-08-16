@@ -18,6 +18,7 @@ import {
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
+import { DEFAULT_FINAL_WARNING_DAYS, DEFAULT_FIRST_WARNING_DAYS } from "@/lib/preferences";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const notificationEnvironmentSchema = z.object({
@@ -317,6 +318,105 @@ export function enabledDeliveryChannels(input: {
   return channels;
 }
 
+/** One warning: how many days before the date it fires, and which channels it may use. */
+export interface ReminderOffset {
+  daysBefore: number;
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+}
+
+/** The recipient's own stored pair, as read from `user_preferences` (#468). */
+export interface RecipientWarningDays {
+  firstWarningDays: number | null;
+  finalWarningDays: number | null;
+}
+
+/**
+ * A stored offset that is missing, fractional, or outside the range the
+ * settings screen and the CHECK constraints allow falls back to the
+ * documented default for its own slot rather than scheduling a date nobody
+ * asked for. Unreachable through the route or the database today; this is the
+ * behaviour if a row ever arrives by another path.
+ */
+function warningDaysOrDefault(stored: number | null, fallback: number, floor: number): number {
+  if (stored === null || !Number.isInteger(stored) || stored < floor || stored > 365) return fallback;
+  return stored;
+}
+
+/**
+ * The offsets a single recipient's reminders for one item actually fire at (#479).
+ *
+ * Precedence, as scoped in the issue: an item that carries its own reminder
+ * rules keeps them exactly: the reader set those per item, and the settings
+ * screen never claimed to overrule them. The user-level pair is the default
+ * for every item that says nothing — until #479 those items produced no
+ * reminder at all, because the worker inner-joined `reminder_rules` and an
+ * item without rules simply fell out of the join.
+ *
+ * The pair is per recipient, not per household, and that is the only honest
+ * reading of the surrounding code: `notification_deliveries` already carries a
+ * `user_id`, materialization already fans one row out per membership, and the
+ * recipient's own `email_notifications`/`push_notifications` toggles already
+ * decide their own channels. Two people in one household therefore each hear
+ * about the same item on their own schedule, which is what a screen headed
+ * with the reader's own name promises. Nothing here reads another user's row.
+ *
+ * The two warnings are returned as a set of offsets, not an ordered pair: the
+ * first/final ordering is a promise the *labels* make ("14 days before closest
+ * approach", then "3 days before"), and each offset is scheduled
+ * independently, so a pair that somehow crossed over still raises two warnings
+ * rather than none. A pair whose halves are equal is one warning, not a
+ * duplicate. Both channels are open at this level because the item said
+ * nothing about channels; the recipient's own toggles still gate them in
+ * `enabledDeliveryChannels`.
+ *
+ * Two consequences worth naming, both inherited rather than introduced and
+ * both handled by the caller's existing catch-up window:
+ *  - An item created closer to its date than the first warning has already
+ *    missed that warning; the moment is in the past, so only the final warning
+ *    lands. The worker never back-fires a warning more than 24 hours stale.
+ *  - A warning longer than the item's orbital period lands before the previous
+ *    occurrence's date. Only the currently open `due_event` is ever considered,
+ *    so that warning is simply already past and is skipped, rather than firing
+ *    against an occurrence the reader has already dealt with.
+ */
+export function effectiveReminderOffsets(
+  itemRules: readonly ReminderOffset[],
+  recipient: RecipientWarningDays,
+): ReminderOffset[] {
+  if (itemRules.length) return [...itemRules];
+  const first = warningDaysOrDefault(recipient.firstWarningDays, DEFAULT_FIRST_WARNING_DAYS, 1);
+  const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
+  return [...new Set([first, final])]
+    .sort((left, right) => right - left)
+    .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
+}
+
+/**
+ * The offsets for one materialization candidate row. The left join against
+ * `reminder_rules` yields one row per rule for an item that has any, and a
+ * single row with a null offset for an item that has none — which is exactly
+ * the "no explicit rules" case the recipient's pair answers.
+ */
+function candidateReminderOffsets(candidate: {
+  daysBefore: number | null;
+  emailEnabled: boolean | null;
+  pushEnabled: boolean | null;
+  firstWarningDays: number | null;
+  finalWarningDays: number | null;
+}): ReminderOffset[] {
+  return effectiveReminderOffsets(
+    candidate.daysBefore === null
+      ? []
+      : [{
+        daysBefore: candidate.daysBefore,
+        emailEnabled: candidate.emailEnabled ?? true,
+        pushEnabled: candidate.pushEnabled ?? true,
+      }],
+    candidate,
+  );
+}
+
 /** True for IPv4 addresses reserved for loopback, link-local, or private use. */
 function isPrivateOrReservedIPv4(address: string): boolean {
   const parts = address.split(".").map(Number);
@@ -401,12 +501,18 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
       pushEnabled: reminderRules.pushEnabled,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
       userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
+      firstWarningDays: userPreferences.firstWarningDays,
+      finalWarningDays: userPreferences.finalWarningDays,
       snoozedUntil: items.snoozedUntil,
     })
     .from(dueEvents)
     .innerJoin(items, eq(items.id, dueEvents.itemId))
     .innerJoin(households, eq(households.id, dueEvents.householdId))
-    .innerJoin(reminderRules, eq(reminderRules.itemId, dueEvents.itemId))
+    // #479: a left join, so an item that carries no reminder rule of its own
+    // still yields one candidate row per member — with a null offset, which
+    // `candidateReminderOffsets` answers from that member's stored pair.
+    // Under the old inner join such an item produced no reminder at all.
+    .leftJoin(reminderRules, eq(reminderRules.itemId, dueEvents.itemId))
     .innerJoin(memberships, eq(memberships.householdId, dueEvents.householdId))
     .innerJoin(users, eq(users.id, memberships.userId))
     .leftJoin(userPreferences, eq(userPreferences.userId, memberships.userId))
@@ -415,15 +521,25 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
       eq(items.status, "active"),
       isNull(users.disabledAt),
       isNull(households.deletionRequestedAt),
-      sql`(${dueEvents.dueDate}::date - ${reminderRules.daysBefore}) between ${windowFloorDate}::date and ${windowCeilingDate}::date`,
+      // The same bounded-window predicate as before, now branching on which
+      // offsets the row will actually use. An item with rules is still judged
+      // rule by rule (a rule out of the window drops its own row and cannot
+      // fall through to the pair, because the left join only nulls the offset
+      // when the item has no rule at all); an item without them is judged
+      // against the recipient's own two offsets, defaults included.
+      sql`case when ${reminderRules.daysBefore} is not null
+            then (${dueEvents.dueDate}::date - ${reminderRules.daysBefore}) between ${windowFloorDate}::date and ${windowCeilingDate}::date
+            else (${dueEvents.dueDate}::date - coalesce(${userPreferences.firstWarningDays}, ${DEFAULT_FIRST_WARNING_DAYS})) between ${windowFloorDate}::date and ${windowCeilingDate}::date
+              or (${dueEvents.dueDate}::date - coalesce(${userPreferences.finalWarningDays}, ${DEFAULT_FINAL_WARNING_DAYS})) between ${windowFloorDate}::date and ${windowCeilingDate}::date
+          end`,
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-  const deliveries = candidates.flatMap((candidate) => {
-    const scheduledFor = householdReminderTime(candidate.dueDate, candidate.daysBefore, candidate.timezone);
+  const deliveries = candidates.flatMap((candidate) => candidateReminderOffsets(candidate).flatMap((offset) => {
+    const scheduledFor = householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone);
     if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
     if (reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)) return [];
-    const channels = enabledDeliveryChannels(candidate);
+    const channels = enabledDeliveryChannels({ ...candidate, ...offset });
     return channels.map((channel) => ({
       householdId: candidate.householdId,
       eventId: candidate.eventId,
@@ -431,7 +547,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
       channel,
       scheduledFor,
     }));
-  });
+  }));
 
   if (deliveries.length) {
     await db.insert(notificationDeliveries).values(deliveries).onConflictDoNothing();
@@ -644,6 +760,12 @@ async function deliverClaimed(
       isMember: sql<boolean>`${memberships.userId} is not null`,
       userEmailEnabled: sql<boolean>`coalesce(${userPreferences.emailNotifications}, true)`,
       userPushEnabled: sql<boolean>`coalesce(${userPreferences.pushNotifications}, true)`,
+      // #479: re-read at send time for the same reason the membership is —
+      // a queued delivery must still match a warning the recipient currently
+      // asks for, so retiming the pair retires the reminders it no longer
+      // justifies instead of sending them on the old schedule.
+      firstWarningDays: userPreferences.firstWarningDays,
+      finalWarningDays: userPreferences.finalWarningDays,
     })
     .from(notificationDeliveries)
     .innerJoin(users, eq(users.id, notificationDeliveries.userId))
@@ -674,9 +796,9 @@ async function deliverClaimed(
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
       const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-      const matchingRule = (rulesByItem.get(delivery.itemId) ?? []).find((rule) => (
-        householdReminderTime(delivery.dueDate, rule.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
-        && (delivery.channel === "email" ? rule.emailEnabled : rule.pushEnabled)
+      const matchingRule = effectiveReminderOffsets(rulesByItem.get(delivery.itemId) ?? [], delivery).find((offset) => (
+        householdReminderTime(delivery.dueDate, offset.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
+        && (delivery.channel === "email" ? offset.emailEnabled : offset.pushEnabled)
       ));
       const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled

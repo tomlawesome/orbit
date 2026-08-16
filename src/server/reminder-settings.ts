@@ -12,6 +12,13 @@
  * There is no user parameter on the read: the caller passes the session's own
  * id, so there is nothing to name and therefore no way to read or write
  * someone else's timing.
+ *
+ * Since #479 the stored pair is dispatch truth, not only displayed truth: the
+ * notification worker schedules an item's reminders from the recipient's own
+ * pair whenever the item carries no reminder rule of its own
+ * (`effectiveReminderOffsets` in server/notification-worker.ts). An item with
+ * its own offsets still keeps them, so the two sentences this screen writes
+ * describe what actually arrives for everything else.
  */
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
