@@ -422,6 +422,20 @@ export async function readAdminScreen() {
     readJoinRequests().catch(() => []),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  /* Real owner names where the members route answers (#453); the fixture's
+     stay as the gate's fallback where it doesn't. */
+  const owners = { ...adminFixture.owners };
+  await Promise.all(
+    workspace.households.map(async (household) => {
+      try {
+        const body = await json(
+          await fetch(`/api/households/${household.id}/members`, { credentials: "same-origin" }),
+        );
+        const owner = (body.members ?? []).find((member) => member.role === "owner");
+        if (owner?.displayName) owners[household.id] = owner.displayName;
+      } catch { /* additive: a household that cannot answer keeps its label */ }
+    }),
+  );
   return {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
@@ -431,6 +445,7 @@ export async function readAdminScreen() {
     users,
     households: workspace.households,
     ...adminFixture,
+    owners,
     joinRequests,
   };
 }
