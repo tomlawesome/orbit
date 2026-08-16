@@ -164,7 +164,18 @@
       /* Tear the old dialect down before standing the new one up. */
       teardown = query.matches
         ? mountHome({ galaxy: view.galaxy, primary: view.primary })
-        : mountPocket();
+        : mountPocket({
+            /* #466: the sheet's two-tap lands on the same idempotent approve
+               protocol the desk rows use — one operation id per receipt. */
+            approve: (id) => {
+              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
+              if (suggestion) { armed = { id: suggestion.id, act: "approve" }; tapReceipt(suggestion, "approve"); }
+            },
+            dismiss: (id) => {
+              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
+              if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
+            },
+          });
     };
     /* The home view comes through the seam, live (#451). onMount must stay
        synchronous — an async callback's return value is discarded, which
