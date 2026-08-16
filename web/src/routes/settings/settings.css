@@ -69,6 +69,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .toggle[aria-pressed=true]{border-color:var(--ok)}
 .helm-page .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
 
+/* What a control says when it could not do what it looked like it did — the
+   inbox's .mail-problem, in the helm's own type. Never on the happy path, so
+   the ratified card is unchanged; the :has rule keeps the row above it the
+   last one for the purposes of the divider. */
+.helm-page .note{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+.helm-page .kv:has(+ .note){border:0}
+.helm-page .danger .note{margin-top:8px}
+
 .helm-page .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
       border-bottom:1px solid var(--line-soft);font-size:13.5px}
 .helm-page .memb:last-child{border:0}
