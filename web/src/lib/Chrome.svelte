@@ -12,7 +12,7 @@
     ["due-next", "Due next", "/due-next"],
     ["documents", "Documents", "/documents"],
     ["inbox", "Inbox", "/inbox"],
-    ["settings", "Settings", "#"],
+    ["settings", "Settings", "/settings"],
     ["administration", "Administration", "#"],
   ];
   const PACKS = [

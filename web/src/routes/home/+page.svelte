@@ -218,7 +218,7 @@
     <a href="/due-next">Due next</a>
     <a href="/documents">Documents</a>
     <a href="/inbox">Inbox</a>
-    <a href="#">Settings</a>
+    <a href="/settings">Settings</a>
     <a href="#">Administration</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
