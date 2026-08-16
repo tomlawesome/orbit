@@ -1,0 +1,130 @@
+<script>
+  import { onMount } from "svelte";
+  import { readSettingsScreen } from "$lib/data/workspace.js";
+  import { fillStarTiles } from "$lib/sky.js";
+  import Chrome from "$lib/Chrome.svelte";
+  import "./settings.css";
+
+  /**
+   * Settings — the helm (#464). Built from design/v19/settings.html
+   * (ratified §13): your own controls and only yours — identity, sky,
+   * reminders, relay and memberships. Instance-wide levers live on
+   * Administration. Reminder timing renders from a fixture until #468 gives
+   * it a route; "sign out of every device" waits on the same issue.
+   *
+   * NOTE: the composite dispatcher still sends /settings to the old engine —
+   * it manages households, which this screen deliberately does not. The flip
+   * is a cutover line once those journeys exist v19-side (#453).
+   */
+  let view = $state(null);
+
+  const PACKS = [
+    ["starchart", "star-chart", "the ratified night", "#060b1c",
+      ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
+    ["afterdark", "after dark", "lights out, ink up", "#05070d",
+      ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
+    ["atlas", "atlas", "aged paper at dusk", "#c9bfa6",
+      ["radial-gradient(circle at 35% 30%,#1c2b4a,#8f6c00 45%,transparent 72%)", "#8f6c00", "#1e7a45", "#2b6cb0"]],
+    ["dawn", "dawn", "first light", "#c3ccdb",
+      ["radial-gradient(circle at 35% 30%,#1a2233,#8f6c00 45%,transparent 72%)", "#8f6c00", "#178a4c", "#1f7ac2"]],
+    ["retrograde", "retrograde", "the eighties, classy", "#080a14",
+      ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
+  ];
+  let active = $state("starchart");
+  function pickPack(name) {
+    active = name;
+    document.documentElement.dataset.theme = name;
+    try { localStorage.setItem("orbit-theme", name); } catch {}
+  }
+  let emailReminders = $state(true);
+
+  const initials = $derived(
+    (view?.user?.displayName ?? "")
+      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+  );
+
+  onMount(async () => {
+    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
+    active = document.documentElement.dataset.theme || "starchart";
+    view = await readSettingsScreen();
+    emailReminders = view.reminders.emailEnabled;
+  });
+</script>
+
+<svelte:head><title>Orbit — settings</title></svelte:head>
+
+<div class="helm-page">
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<Chrome user={view?.user} current="settings"
+        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+
+<div class="page">
+  <header class="screen">
+    <h1>Settings</h1>
+    <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
+  </header>
+
+  {#if view}
+    <div class="card">
+      <h3>You</h3>
+      <div class="idrow">
+        <span class="avatar" aria-hidden="true">{initials}</span>
+        <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""} · signed in via your identity provider</span></div>
+        <button>edit name</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Your sky</h3>
+      <div class="packs" role="group" aria-label="Theme pack">
+        {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
+          <button class="pack" aria-pressed={active === name} onclick={() => pickPack(name)}>
+            <span class="strip" style="background:{ground}" aria-hidden="true">
+              <i style="left:18px;top:18px;width:26px;height:26px;background:{sun}"></i>
+              <i style="left:64px;top:38px;width:7px;height:7px;background:{warm}"></i>
+              <i style="left:92px;top:22px;width:5px;height:5px;background:{ok}"></i>
+              <i style="left:120px;top:44px;width:4px;height:4px;background:{upcoming}"></i>
+            </span>
+            <span class="label"><b>{title}</b><span>{line}</span></span>
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Reminders</h3>
+      <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={() => (emailReminders = !emailReminders)}><i></i></button></div>
+      <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
+      <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
+      <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Your relay</h3>
+      <div class="kv"><span>address</span><b style="color:var(--accent)">{view.relay.address}</b></div>
+      <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
+      <div class="kv"><span>waiting for review</span><a href="/inbox">{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
+      <div class="kv"><span>rotate · pause · details</span><a href="/settings/mail">open the relay →</a></div>
+    </div>
+
+    <div class="card">
+      <h3>Your systems</h3>
+      {#each view.memberships as membership (membership.id)}
+        <div class="memb">
+          <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var({membership.primary ? "--sun" : "--ink-mid"})"/></svg>
+          <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
+        </div>
+      {/each}
+    </div>
+
+    <div class="danger"><button title="Waits on #468 — no sessions-revocation route yet">sign out of every device →</button></div>
+  {/if}
+</div>
+</div>

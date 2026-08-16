@@ -125,6 +125,7 @@ export async function activeHousehold() {
  */
 import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
+import { settingsFixture } from "./fixtures/settings.js";
 import { galaxyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 
@@ -323,6 +324,37 @@ export async function readDocumentsScreen() {
     today: todayOf(workspace),
     receipts: inbox.receipts ?? [],
     documentsByItem,
+  };
+}
+
+/**
+ * Everything the helm renders (#464): who you are, your systems and roles,
+ * the relay summary with how many arrivals wait, and the reminder timing —
+ * the last from a fixture until #468 gives it a route.
+ */
+export async function readSettingsScreen() {
+  const [workspace, session, inbox, relay] = await Promise.all([
+    readWorkspace(),
+    readSession(),
+    readInbox().catch(() => ({ receipts: [] })),
+    readRelay(),
+  ]);
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  return {
+    user: session?.user ?? null,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    primary,
+    memberships: workspace.households.map((household) => ({
+      id: household.id,
+      name: household.name,
+      memberCount: household.memberCount ?? null,
+      itemCount: (household.items ?? []).length,
+      role: household.canManage ? "owner" : "member",
+      primary: household.id === primary,
+    })),
+    relay,
+    waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
+    reminders: settingsFixture.reminders,
   };
 }
 
