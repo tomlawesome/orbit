@@ -111,7 +111,13 @@
   .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue)}
 
-  .page{position:relative;z-index:2;max-width:640px;margin:0 auto;padding:96px 24px 120px}
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+  /* §14: the helm uses the desk — one full row for the sky, two columns for
+     the rest, collapsing to one on a narrow viewport. */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
+  .cards .card{margin-top:0}
+  .card.wide{grid-column:1 / -1}
+  @media (max-width:880px){.cards{grid-template-columns:1fr}}
   header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
   header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
@@ -211,7 +217,8 @@
     <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
   </header>
 
-  <div class="card">
+  <div class="cards">
+  <div class="card wide">
     <h3>You</h3>
     <div class="idrow">
       <span class="avatar" aria-hidden="true">TL</span>
@@ -220,7 +227,7 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card wide">
     <h3>Your sky</h3>
     <div class="packs" role="group" aria-label="Theme pack">
       <button class="pack" aria-pressed="true" onclick="pickPack('starchart',this)">
@@ -310,6 +317,8 @@
       <b>Gran’s Flat</b><small>2 members · 2 items</small><span class="role">member</span>
     </div>
   </div>
+
+  </div><!-- /cards -->
 
   <div class="danger"><button>sign out of every device →</button></div>
 </div>

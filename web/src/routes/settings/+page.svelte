@@ -72,7 +72,8 @@
   </header>
 
   {#if view}
-    <div class="card">
+    <div class="cards">
+    <div class="card wide">
       <h3>You</h3>
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
@@ -81,7 +82,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card wide">
       <h3>Your sky</h3>
       <div class="packs" role="group" aria-label="Theme pack">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
@@ -123,6 +124,8 @@
         </div>
       {/each}
     </div>
+
+    </div><!-- /cards -->
 
     <div class="danger"><button title="Waits on #468 — no sessions-revocation route yet">sign out of every device →</button></div>
   {/if}

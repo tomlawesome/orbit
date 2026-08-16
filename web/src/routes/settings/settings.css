@@ -17,7 +17,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
 [data-theme=atlas] .helm-page .vignette,[data-theme=dawn] .helm-page .vignette{background:none}
 
-.helm-page .page{position:relative;z-index:2;max-width:640px;margin:0 auto;padding:96px 24px 120px}
+.helm-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+/* §14: the helm uses the desk — one full row for the sky, two columns for
+   the rest, collapsing to one on a narrow viewport. */
+.helm-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
+.helm-page .cards .card{margin-top:0}
+.helm-page .card.wide{grid-column:1 / -1}
+@media (max-width:880px){.helm-page .cards{grid-template-columns:1fr}}
 .helm-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
 .helm-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
