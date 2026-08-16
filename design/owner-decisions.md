@@ -527,6 +527,28 @@ The full open-questions list, walked in order and ruled:
   it's missing something that makes it unmistakably OBSERVATORY DOORS —
   research real observatories for the telling details, and subtly
   name-drop a real one in the background.
+- **The login/logout flight is ratified verbatim** (owner: "nothing
+  short of amazing... Ship these in that exact form."): first-run v2's
+  ascent (ignition, climb, slowed bloom reveal, bodies condensing, the
+  dwell) and its mirrored descent (logout = the login played backwards,
+  name written on the void, dusk farewell) ship into the app exactly
+  as the mockup plays them at 159ec9f. And they are NOT first-run
+  dressing (owner: "they're too good") — they ship as THE login and
+  logout screens for every user, every time; first-run just happens
+  to use them. The create-system card is NOT part of this ratification
+  (it failed separately, below).
+- **Newcomer arrival is ratified verbatim** (owner: "fantastic, great
+  job. It ships exactly like that."): the non-admin newcomer's journey
+  as first-run v2 plays it at 159ec9f — the same login climb, settling
+  on the labelled sky with every household as sub-systems, the 3s bare
+  dwell, then the north star and the centred "where do you belong?"
+  card (ask to join, or name your own system) — ships exactly as is,
+  with one amendment (owner, immediately after): the "5 systems
+  discovered in this universe already.." count belongs to the NEWCOMER
+  journey, not the first admin's create screen — a first admin always
+  joins with 0 households, so it would be pointless there. And it is
+  boxless: no card, no border — the words and the big number sit
+  directly on the sky.
 - **The observatory has failed** (owner, after the second pass): the
   slit/dome-doors concept is retired for settings — two passes could
   not make it earn the screen. Three fresh concepts commissioned in
