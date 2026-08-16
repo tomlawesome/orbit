@@ -405,3 +405,6 @@ as ordinary fix-both changes rather than blocking the build.
   is titled **Filed**; on a large screen the inbox runs Filed → For your
   review → Failed to process as three lanes, stacking vertically on mobile.
   Still reading sits below the for-your-review items.
+- **The corridor spine fades out** (owner, mid-review): the manifest's
+  time-spine is right, but its ends fade into the background rather than
+  stopping hard; the red zone's edge-line fades in the same way.
