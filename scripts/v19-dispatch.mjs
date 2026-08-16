@@ -3,11 +3,19 @@
 // one-origin security properties — __Host- session cookies and
 // assertSameOrigin's 403 on foreign writes — hold unchanged.
 //
-// `/` stays on Next while the nine root e2e specs start at goto("/"); /admin
-// and bare /settings are live Next routes and move to v19 at the cutover.
+// `/` MOVED TO v19 (#410, §15). The owner ratified the login/logout flight
+// verbatim on 2026-08-16 and ruled it is not first-run dressing: it ships as
+// THE login screen for every user, every time. A login screen that is not the
+// front door is not the login screen, so "/" is now the v19 sign-in — which
+// hands a signed-in reader on to /home in the browser, as the v19 root always
+// did. The retiring engine's workspace keeps an address of its own at
+// /workspace so its acceptance suite still has something to sign in to; it is
+// Next by default, like everything not listed here.
+// /admin and bare /settings are live Next routes and move at the cutover.
 // /settings/mail shadows nothing: Next's settings has no subroutes.
 
 const V19_PAGES = new Set([
+  "/",
   "/home",
   /* /due-next and /documents are mothballed (§14): the manifest IS the
      corridor now, and the belt (#458) is the document surface. */

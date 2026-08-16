@@ -851,8 +851,9 @@
    household's name — and nothing else. `bare` takes away the rings, the
    ticks, the months, the now-marker, the trails, the constellation leg, the
    inbox orb, the account orb, the north star, the search line and the scroll
-   cue. Three seconds pass there. Then the instrument arrives in the family's
-   own arrive style, and the chrome fades up behind it.
+   cue. Two seconds pass there (the owner trimmed the dwell from three on
+   2026-08-16). Then the instrument arrives in the family's own arrive style,
+   slowed to 1.7s by the same ruling, and the chrome fades up behind it.
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Home is not on the screen at all until the flight lands on it.
@@ -884,7 +885,10 @@ body.bare .desk .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both
   to{transform:scale(1);filter:blur(0)}}
 
 .desk .dial .chrome{transform-box:view-box;transform-origin:50% 50%}
-body.instrument .desk .dial .chrome{animation:arrive 1.3s cubic-bezier(.2,.7,.2,1) both}
+/* 1.7s, not the sheet's 1.3s: the owner's 2026-08-16 amendment (ledger
+   7f7d813) — "the dial's pop is slightly too fast... a DELIBERATE WAIT, not a
+   slow load". The curve is the family's own `arrive`, untouched. */
+body.instrument .desk .dial .chrome{animation:arrive 1.7s cubic-bezier(.2,.7,.2,1) both}
 body.instrument .desk .orb,
 body.instrument .desk .nstar,
 body.instrument .desk .drawer,

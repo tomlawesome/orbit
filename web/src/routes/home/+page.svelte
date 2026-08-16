@@ -1,9 +1,14 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { browser } from "$app/environment";
   import { afterNavigate, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { mountEmptySky, mountHome } from "./home.behaviour.js";
-  import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin } from "$lib/data/workspace.js";
+  import Flight from "$lib/flight/Flight.svelte";
+  import Dawn from "$lib/flight/Dawn.svelte";
+  import Dusk from "$lib/flight/Dusk.svelte";
+  import { consumeLaunch } from "$lib/flight/arrival.js";
+  import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
@@ -37,11 +42,118 @@
    * height (SvelteKit's own restoration fires before the fetch resolves, so
    * it lands at the top without this).
    */
-  let arrive = $state(true);
+  /* ---- THE LAUNCH LANDS HERE (#410, §15) --------------------------------
+   *
+   * The owner ratified the login flight verbatim and ruled it ships as THE
+   * login for every user, every time. The climb cannot play from the button —
+   * that press leaves Orbit for the identity provider — so it plays HERE, on
+   * the authenticated return, whole and unaltered, and home settles out of
+   * its light: the bare sky first (planets, sun, the household's name), three
+   * seconds of it, and only then the instrument.
+   *
+   * Decided during initialisation rather than in onMount, and the body class
+   * with it, so the dawn is already over home in the first painted frame
+   * instead of home flashing behind it. consumeLaunch() takes the marker away
+   * as it reads it: an ordinary navigation, a refresh, a Back or a second tab
+   * never flies. See $lib/flight/arrival.js.
+   */
+  let { data } = $props();
+  /* The fixture harness (see +page.server.js): drives either journey to one
+     millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
+     so the query string is inert in the product. */
+  const fixtureFlight = browser && data?.fixtures ? page.url.searchParams.get("flight") : null;
+  const fixtureAt = Number(page.url.searchParams.get("at") ?? 0) || 0;
+
+  const launching = browser && (consumeLaunch() || fixtureFlight === "up");
+  if (launching) {
+    document.body.classList.add("launching");
+    /* Reduced motion keeps every state change and drops the flight, so it
+       never puts the dawn up — there would be nothing to take it away. */
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.body.classList.add("showdawn");
+    }
+  }
+  onMount(() => {
+    /* A real launch starts the moment the document does — the reader is
+       coming back from the identity provider and the dawn must already be
+       over home. A fixture waits for the household to arrive first, so the
+       beats after the landing have a dial to land on. */
+    if (launching && !fixtureFlight) flight?.ascend();
+  });
+  async function driveFixture() {
+    if (!fixtureFlight) return;
+    await tick();
+    if (fixtureFlight === "up") flight?.ascend({ at: fixtureAt });
+    else if (fixtureFlight === "down") {
+      /* the descent leaves from a settled arrival, so it starts from one */
+      document.body.classList.add("instrument");
+      await tick();
+      flight?.descend({ at: fixtureAt });
+    }
+  }
+
+  /* POL-1's own fanfare would fight the landing for the dial: on a launch the
+     flight owns the arrival, and this is its opening beat, not a second one. */
+  let arrive = $state(!launching);
   let restoreScroll = null;
   afterNavigate((navigation) => {
+    if (launching) return;
     arrive = navigation.type !== "popstate";
   });
+
+  /* ---- AND THE DESCENT LEAVES FROM HERE ---------------------------------
+   * The logout is the login played backwards (§15 second pass, ruling 1), so
+   * it starts on the surface the login landed on: the instrument withdraws
+   * because it arrived last, the bodies disperse, the bloom is read
+   * backwards, the name is written on the void with "signing out" under it,
+   * and the mark sets down on the dusk's own lockup.
+   */
+  let flight = $state(null);
+  let leaving = $state(fixtureFlight === "down");
+  let armedOut = $state(false);
+  let signOutProblem = $state(null);
+
+  async function tapSignOut() {
+    /* Two taps, as every destructive control in this app arms and fires. */
+    if (!armedOut) { armedOut = true; return; }
+    signOutProblem = null;
+    /*
+     * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
+     * POST /api/auth/logout deletes the session row and clears the cookie, and
+     * only when the server has said so does the descent begin. A crash, a
+     * closed lid or a killed tab at any point in the next six seconds can
+     * therefore never leave a live session behind — the flight is a farewell
+     * to something already ended, not the act of ending it.
+     */
+    let redirectTo = null;
+    try {
+      redirectTo = await signOut();
+    } catch (error) {
+      armedOut = false;
+      signOutProblem = error?.message ?? "still signed in — try again";
+      return;
+    }
+    providerLogout = redirectTo;
+    leaving = true;
+    await tick();
+    flight?.descend();
+  }
+  /* The provider's own end-session URL, kept for the way back: following it
+     now would yank the reader off the ratified goodbye, so "sign back in"
+     carries it instead, and the identity provider asks its question again. */
+  let providerLogout = $state(null);
+  const backIn = $derived(providerLogout ?? "/");
+
+  function onFarewell() {
+    /*
+     * The address catches up with the state. The descent plays over home, but
+     * the reader is signed out when it ends, and /home is no longer theirs: a
+     * refresh here would bounce them at the identity provider instead of
+     * showing them the goodbye. Replace, never push — Back must not walk into
+     * a signed-out /home either.
+     */
+    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+  }
   export const snapshot = {
     capture: () => window.scrollY,
     restore: (y) => { restoreScroll = y; },
@@ -396,6 +508,7 @@
       /* #424: the address may already name a row. Do it before the scroll
          restore below, which a history return owns and a deep link does not. */
       openFromAddress();
+      driveFixture();
       if (restoreScroll !== null) {
         const y = restoreScroll;
         restoreScroll = null;
@@ -421,6 +534,19 @@
 
 <Pocket {view} />
 
+<!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
+     descent lands on, and the canvas, mark and void-name between them. Each
+     is here only for the journey that needs it. -->
+{#if launching}<Dawn />{/if}
+{#if leaving}
+  <Dusk>
+    {#snippet children()}<a class="again" href={backIn}>Sign back in</a>{/snippet}
+  </Dusk>
+{/if}
+{#if launching || leaving}
+  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
+{/if}
+
 <div class="desk" class:arrive>
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
@@ -429,7 +555,7 @@
   </svg>
   <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
        own ::before so it stays under the starfield; the ceiling answers it on
-       tall viewports; and the two side planes are what the pair turns into as
+       every viewport; and the two side planes are what the pair turns into as
        the reader descends to the manifest. Inert in every other pack. -->
   <div class="ceiling" aria-hidden="true"></div>
   <div class="wall wl" aria-hidden="true"></div>
@@ -472,7 +598,13 @@
     <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
             aria-pressed="false"></button>
   </div>
-  <button class="signout">sign out →</button>
+  <!-- Two taps to leave, and the second one revokes the session before a
+       single frame of the descent is drawn (§15: logout is the login played
+       backwards, and it is a real sign-out, not an animation about one). -->
+  <button class="signout" onclick={tapSignOut}>
+    {armedOut ? "tap again to sign out" : "sign out →"}
+  </button>
+  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
 
 <!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->

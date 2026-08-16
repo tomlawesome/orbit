@@ -41,7 +41,7 @@ function newFixture(): AccessibilityFixture {
 }
 
 async function signIn(page: Page) {
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
@@ -460,7 +460,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expect(page).toHaveURL(/\/admin$/);
       await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
 
-      await page.goto("/");
+      await page.goto("/workspace");
       await expect(trigger).toBeVisible();
       await trigger.click();
       await expect(menu.getByRole("menuitem", { name: "Settings", exact: true })).toBeFocused();
@@ -575,7 +575,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
           emailNotifications: true,
           pushNotifications: true,
         };
-        await page.goto("/");
+        await page.goto("/workspace");
         await setThemePreference(page, preference);
         await page.goto("/admin");
         await expectAdminTheme(page, preference);
