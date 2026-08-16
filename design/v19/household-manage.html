@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — your system: household management (first-draft proposal, #410 cutover)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ONE household, seen by the person who owns it. Administration is the
+     instance from above; this is a single system from inside — reached from
+     the helm's memberships card ("Your systems" → a row → manage).
+
+     Everything drawn here is served by a route that already exists (#410):
+       rename / time zone / currency  → /api/workspace/commands household.update
+       sections                       → /api/workspace/commands sections.replace
+       members, add, remove, leave    → /api/households/{id}/members
+       hand the system over           → /api/households/{id}/members  (PATCH)
+       joiners                        → /api/join-requests/{id}       (§11)
+       request deletion, restore      → /api/households/{id}/lifecycle
+     The shapes those routes take are what set the shape of these cards: the
+     three identity fields save as ONE write because the command carries all
+     three; sections save as ONE list because the command replaces the list.
+
+     BACKDROP: the standard drifting star tiles, provisionally. The settings
+     backdrop is still out for a ruling (§15 — observatory / cartographer's
+     desk / gimbal room); this family adopts whichever is chosen, unchanged
+     in every other respect. §14's non-looping sky arrives with it. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  /* §14: the desk. Same scale as the helm and administration. */
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+  header.screen{display:flex;align-items:center;gap:17px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
+  header.screen .glyph{flex:none}
+
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px}
+  .card.wide{grid-column:1 / -1}
+  @media (max-width:880px){.cards{grid-template-columns:1fr}}
+  .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+  .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+  .cardhead .act{margin-left:auto;font:11px var(--mono);color:var(--ink-mid);background:none;
+                 border:1px solid var(--line);border-radius:9px;padding:6px 12px;cursor:pointer}
+  .cardhead .act:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* the create screen's field vocabulary, unchanged */
+  .field{margin-bottom:13px}
+  .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+               text-transform:uppercase;margin:0 0 6px}
+  .field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
+         border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+  .field input::placeholder{color:var(--ink-faint)}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+  .field input:disabled,.field select:disabled{opacity:.62;cursor:default}
+  .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+  .row2{display:flex;gap:13px}
+  .row2>.field{flex:1;min-width:0}
+  .selwrap{position:relative}
+  .selwrap::after{content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;
+                  border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
+                  transform:translateY(-72%) rotate(45deg);pointer-events:none}
+
+  .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
+  .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
+       border-radius:10px;padding:9px 19px;cursor:pointer}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
+  .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
+         border-radius:9px;padding:7px 13px;cursor:pointer}
+  .ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .ghost.armed,.dangerbtn.armed{color:var(--overdue);border-color:var(--overdue)}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
+  .note.top{margin-top:13px}
+  .note b{color:var(--ink-mid);font-weight:400}
+  .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok);line-height:1.8}
+  .said.show{display:block}
+
+  /* sections: one editable list, saved whole */
+  .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;
+       border-bottom:1px solid var(--line-soft)}
+  .sec:last-of-type{border-bottom:0}
+  .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
+             color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
+  .sec input:focus{outline:none;border-bottom-color:var(--accent)}
+  .sec input:disabled{color:var(--ink-mid)}
+  .sec .used{font:10.5px var(--mono);color:var(--ink-faint);flex:none}
+  .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
+              text-align:right;flex:none}
+  .sec.off{opacity:.55}
+  .sec.off .state{color:var(--ink-faint)}
+  .sec .drop{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+             cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
+  .sec.empty .drop{visibility:visible}
+  .sec .drop:hover{color:var(--overdue)}
+  /* the switch that tells the truth: filled when on, hollow when off */
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+          background:none;cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+            background:var(--ink-faint);transition:left .2s,background .2s}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+  .toggle:disabled{opacity:.5;cursor:default}
+  .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+          border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
+  .addsec:hover{border-color:var(--accent);color:var(--accent)}
+  .addsec:disabled{opacity:.4;cursor:not-allowed}
+
+  /* members */
+  .memb{display:flex;align-items:center;gap:12px;padding:9px 2px;
+        border-bottom:1px solid var(--line-soft)}
+  .memb:last-of-type{border-bottom:0}
+  .memb.hidden{display:none}
+  .avatar{width:32px;height:32px;border-radius:50%;flex:none;border:1px solid var(--line);
+          background:var(--panel-raised);display:grid;place-items:center;
+          font:11px var(--mono);color:var(--ink-mid)}
+  .memb b{flex:1;min-width:0;font-size:13.5px;font-weight:530}
+  .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+  .role.owner{color:var(--accent);border-color:var(--accent)}
+  .memb .ghost{padding:5px 11px}
+
+  /* add someone: registered accounts only — the route has no email invite */
+  .drawer{display:none;margin-top:14px;border:1px dashed var(--line);border-radius:13px;
+          padding:15px 17px}
+  .drawer.open{display:block}
+  .drawer h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--ink-faint);margin-bottom:10px}
+  .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
+        border-bottom:1px solid var(--line-soft)}
+  .cand:last-of-type{border-bottom:0}
+  .cand b{flex:1;font-size:13px;font-weight:520}
+
+  /* the handover: two deliberate steps, and the second asks twice */
+  .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
+            background:var(--panel-raised);padding:16px 18px}
+  .handover.open{display:block}
+  .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--accent);margin-bottom:12px}
+  .step{margin-bottom:13px}
+  .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+           margin-bottom:7px}
+  .pick{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:5px 2px;cursor:pointer}
+  .pick input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+  .handover .row{display:flex;align-items:center;gap:12px}
+
+  /* joiners (§11) — the same protocol administration draws */
+  .joinreq{display:none;align-items:center;gap:12px;border:1px dashed var(--warm);
+           border-radius:12px;padding:11px 14px;margin-top:14px}
+  body.wants .joinreq{display:flex}
+  .joinreq .avatar{width:28px;height:28px;font-size:10px}
+  .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
+  .joinreq p b{color:var(--ink);font-weight:530}
+  .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
+                  cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+
+  /* the danger line */
+  .card.dangercard{border-color:var(--line-soft)}
+  .dangercard p{font-size:13.5px;color:var(--ink-mid);max-width:62ch}
+  .dangercard p b{color:var(--ink);font-weight:530}
+  .dangerbtn{margin-top:15px;font:11.5px var(--mono);color:var(--ink-faint);background:none;
+             border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
+  .dangerbtn:hover{color:var(--overdue);border-color:var(--overdue)}
+  .confirm{display:none;margin-top:15px;padding-top:15px;border-top:1px solid var(--line-soft)}
+  .confirm.open{display:block}
+  .confirm .row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+  .confirm .field{margin-bottom:0;flex:0 1 340px;min-width:220px}
+  .confirm .field input{font-family:var(--mono);font-size:12.5px}
+
+  /* scheduled for deletion — the recovery window, drawn */
+  .sched{display:none;align-items:center;gap:15px;border:1px dashed var(--overdue);
+         border-radius:14px;padding:14px 18px;margin-top:24px}
+  body.doomed .sched{display:flex}
+  .sched i{width:9px;height:9px;border-radius:50%;background:var(--overdue);flex:none;
+           animation:pulse 3.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .sched .body{flex:1}
+  .sched .body b{display:block;font-size:13.5px;font-weight:530}
+  .sched .body span{font:10.5px var(--mono);color:var(--ink-mid)}
+  body.doomed .cards{opacity:.42;pointer-events:none;transition:opacity .4s}
+
+  /* who may do what */
+  body.member .own-only{display:none!important}
+  .mem-only{display:none!important}
+  body.member .mem-only{display:revert!important}
+
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 24px 44px;line-height:1.95;max-width:960px;margin:0 auto}
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:74vw;font:10.5px var(--mono);color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos .sw{width:15px;height:15px;border-radius:50%;padding:0;backdrop-filter:none}
+  .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="settings.html">← SETTINGS</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html" aria-current="page">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
+    <button data-swatch="afterdark" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setTheme('afterdark')"></button>
+    <button data-swatch="atlas" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setTheme('atlas')"></button>
+    <button data-swatch="dawn" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setTheme('dawn')"></button>
+    <button data-swatch="retrograde" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setTheme('retrograde')"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <!-- the same ring administration draws for this system, wearing its real
+         due-state dots (§12: nothing on it is decoration) -->
+    <svg class="glyph own-only" width="44" height="44" viewBox="0 0 34 34" aria-hidden="true">
+      <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+      <circle cx="17" cy="17" r="2.6" style="fill:var(--sun)"/>
+      <circle cx="15.5" cy="20.5" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="12.8" cy="18.3" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="14.8" cy="13" r="1.5" style="fill:var(--warm)" opacity=".8"/>
+    </svg>
+    <svg class="glyph mem-only" width="44" height="44" viewBox="0 0 34 34" aria-hidden="true">
+      <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+      <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+      <circle cx="21.7" cy="18.7" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="13" cy="15.7" r="1.5" style="fill:var(--ok)" opacity=".8"/>
+      <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+    </svg>
+    <div>
+      <h1><span class="own-only">Lawson Home</span><span class="mem-only">Seaside Cottage</span></h1>
+      <div class="sub">
+        <span class="own-only">your system · you own it · 2 members · 6 entries in orbit</span>
+        <span class="mem-only">a system you’re in · Emma Lawson owns it · 3 members · 3 entries in orbit</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- the recovery window, drawn: 30 days between asking and gone -->
+  <div class="sched own-only" role="status">
+    <i aria-hidden="true"></i>
+    <div class="body">
+      <b>Lawson Home is scheduled for deletion</b>
+      <span>asked for today · 30 days to change your mind · reminders already queued are cancelled</span>
+    </div>
+    <button class="ghost" onclick="restore()">restore this system</button>
+  </div>
+
+  <div class="cards">
+
+    <!-- ── the system: the three fields household.update carries, saved as one ── -->
+    <div class="card">
+      <div class="cardhead"><h3>The system</h3></div>
+      <div class="field">
+        <label>name</label>
+        <input id="hhname" class="lock" value="Lawson Home" maxlength="60" autocomplete="off"
+               aria-label="Household name">
+      </div>
+      <div class="row2">
+        <div class="field selwrap">
+          <label>time zone</label>
+          <select class="lock" aria-label="Time zone">
+            <option>Europe/London</option><option>Europe/Dublin</option>
+            <option>Europe/Paris</option><option>America/New York</option>
+            <option>Australia/Sydney</option><option>UTC</option>
+          </select>
+        </div>
+        <div class="field selwrap">
+          <label>currency</label>
+          <select class="lock" aria-label="Currency">
+            <option>GBP</option><option>EUR</option><option>USD</option>
+            <option>CAD</option><option>AUD</option><option>NZD</option>
+          </select>
+        </div>
+      </div>
+      <div class="savebar own-only">
+        <button class="btn" onclick="say('identity')">save</button>
+        <span class="note">the three save together — one write</span>
+      </div>
+      <p class="said" id="said-identity">saved · every member sees the new name on their sky</p>
+      <p class="note top">
+        the name is what you type to delete this system later,<br>
+        and what a joiner sees when they ask to come in
+      </p>
+      <p class="note top mem-only"><b>read-only</b> — only Emma Lawson can change this system</p>
+    </div>
+
+    <!-- ── sections: one list, replaced whole ── -->
+    <div class="card">
+      <div class="cardhead">
+        <h3>Sections</h3><span class="count" id="seccount">3 of 12</span>
+      </div>
+
+      <div class="own-only" id="secs-own">
+        <div class="sec">
+          <input class="lock" value="Home" maxlength="30" aria-label="Section name">
+          <span class="used">3 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Home on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec">
+          <input class="lock" value="Vehicles" maxlength="30" aria-label="Section name">
+          <span class="used">2 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Vehicles on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec">
+          <input class="lock" value="Devices" maxlength="30" aria-label="Section name">
+          <span class="used">1 entry</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Devices on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+      </div>
+
+      <div class="mem-only" id="secs-mem">
+        <div class="sec">
+          <input value="Home" disabled aria-label="Section name">
+          <span class="used">1 entry</span>
+          <span class="state">shown</span>
+        </div>
+        <div class="sec">
+          <input value="Outside" disabled aria-label="Section name">
+          <span class="used">2 entries</span>
+          <span class="state">shown</span>
+        </div>
+      </div>
+
+      <button class="addsec own-only lock" id="addsec" onclick="addSec()">+ add a section</button>
+      <div class="savebar own-only">
+        <button class="btn" onclick="say('sections')">save</button>
+        <span class="note">the whole list saves at once</span>
+      </div>
+      <p class="said" id="said-sections">saved · the manifest prints the new names beside their entries</p>
+      <p class="note top">
+        each entry wears one section, printed beside it in the manifest.<br>
+        a section holding entries can be <b>hidden</b>, never removed — its<br>
+        entries would have nowhere to sit.
+      </p>
+    </div>
+
+    <!-- ── members ── -->
+    <div class="card wide">
+      <div class="cardhead">
+        <h3>Members</h3><span class="count" id="membcount">2 in this system</span>
+        <button class="act own-only" id="addbtn" onclick="toggleDrawer('adddrawer', this)">add someone</button>
+      </div>
+
+      <div class="roster own-only" id="roster-own">
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">TL</span>
+          <b>Tom Lawson <em>· you</em></b>
+          <span class="role owner">owner</span>
+          <button class="ghost" onclick="toggleDrawer('handover', this)">hand over →</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">EL</span>
+          <b>Emma Lawson</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+      </div>
+
+      <div class="roster mem-only">
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">EL</span>
+          <b>Emma Lawson</b>
+          <span class="role owner">owner</span>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">TL</span>
+          <b>Tom Lawson <em>· you</em></b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="leave this system"
+                  onclick="twoTap(this,'tap again to leave',left)">leave this system</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">RL</span>
+          <b>Rob Lawson</b>
+          <span class="role">member</span>
+        </div>
+      </div>
+      <p class="said" id="said-left">you’ve left Seaside Cottage · it becomes a label in your sky again, and you can ask to rejoin</p>
+
+      <!-- §11: the owner decides who comes in -->
+      <div class="joinreq own-only">
+        <span class="avatar" aria-hidden="true">RL</span>
+        <p><b>Rob Lawson</b> asks to join <b>Lawson Home</b> · 2d ago</p>
+        <button class="yes" onclick="approveJoin(this)">approve</button>
+        <button onclick="declineJoin(this)">decline</button>
+      </div>
+      <p class="said" id="said-join">Rob Lawson is in · he sees this system’s entries from his next sign-in</p>
+
+      <div class="drawer own-only" id="adddrawer">
+        <h4>Add someone who already has an account</h4>
+        <div class="cand"><span class="avatar" aria-hidden="true">RL</span><b>Rob Lawson</b>
+          <button class="ghost" onclick="addMember('Rob Lawson','RL')">add</button></div>
+        <div class="cand"><span class="avatar" aria-hidden="true">SL</span><b>Sue Lawson</b>
+          <button class="ghost" onclick="addMember('Sue Lawson','SL')">add</button></div>
+        <div class="cand"><span class="avatar" aria-hidden="true">GL</span><b>Gran</b>
+          <button class="ghost" onclick="addMember('Gran','GL')">add</button></div>
+        <p class="note top">
+          Orbit has no email invitations — people sign in through your identity<br>
+          provider first, then an owner puts them in a system. Nobody’s email<br>
+          address is shown here, only the name they chose.
+        </p>
+      </div>
+
+      <div class="handover own-only" id="handover">
+        <h4>Hand this system over</h4>
+        <div class="step">
+          <span class="n">STEP ONE — WHO TAKES IT</span>
+          <label class="pick"><input type="radio" name="heir" onchange="armHeir(this)" value="Emma Lawson"> Emma Lawson</label>
+        </div>
+        <div class="step">
+          <span class="n">STEP TWO — CONFIRM</span>
+          <div class="row">
+            <button class="ghost" id="heirbtn" data-rest="hand over" disabled
+                    onclick="twoTap(this,'tap again to hand over',handedOver)">hand over</button>
+            <button class="ghost" onclick="closeDrawer('handover')">cancel</button>
+          </div>
+        </div>
+        <p class="note">
+          you stay a member and keep everything you added. only the new owner<br>
+          can hand it back — and an owner can never leave a system, so this is<br>
+          the way out.
+        </p>
+        <p class="said" id="said-handover">Emma Lawson owns Lawson Home now · you’re a member</p>
+      </div>
+
+      <p class="note top own-only">
+        an owner can’t be removed and can’t leave — hand the system over first.
+      </p>
+    </div>
+
+    <!-- ── the danger line ── -->
+    <div class="card wide dangercard own-only">
+      <div class="cardhead"><h3>The danger line</h3></div>
+      <p>
+        <b>Request deletion.</b> Everything in Lawson Home — 6 entries, their documents,
+        their history and every reminder still queued — stops the moment you ask.
+        You have <b>30 days</b> to change your mind; after that it is gone for good,
+        and nothing on this machine can bring it back.
+      </p>
+      <button class="dangerbtn" onclick="openConfirm(this)">request deletion →</button>
+      <div class="confirm" id="delconfirm">
+        <div class="row">
+          <div class="field">
+            <label>type the system’s name exactly</label>
+            <input id="delname" placeholder="Lawson Home" autocomplete="off" oninput="checkName()"
+                   aria-label="Type the household name to confirm">
+          </div>
+          <button class="dangerbtn" id="delbtn" data-rest="request deletion" disabled
+                  style="margin-top:0" onclick="twoTap(this,'tap again to schedule deletion',doomed)">request deletion</button>
+        </div>
+        <p class="note top">
+          the name is the first ask, the second tap is the second — both, because
+          this is the one act with a clock on it.
+        </p>
+      </div>
+    </div>
+
+    <div class="card wide mem-only">
+      <div class="cardhead"><h3>Leaving</h3></div>
+      <p style="font-size:13.5px;color:var(--ink-mid);max-width:62ch">
+        You can leave Seaside Cottage whenever you like. Nothing you added goes with you —
+        the entries belong to the system, not to you. It returns to your sky as a label,
+        and you can ask to come back.
+      </p>
+      <p class="note top">only Emma Lawson can rename, restructure or delete this system.</p>
+    </div>
+
+  </div><!-- /cards -->
+</div>
+
+<div class="demos" aria-label="Mockup state demos">
+  <span>DEMOS</span>
+  <button id="d-owner" aria-pressed="true" onclick="setRole('owner')">owner</button>
+  <button id="d-member" aria-pressed="false" onclick="setRole('member')">non-owner</button>
+  <button id="d-wants" aria-pressed="false" onclick="toggleWants()">someone wants in</button>
+  <button id="d-doom" aria-pressed="false" onclick="toggleDoom()">deletion pending</button>
+  <button onclick="location.reload()">reset</button>
+  <span style="margin-left:6px">THEME</span>
+  <button class="sw" data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
+  <button class="sw" data-swatch="afterdark" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setTheme('afterdark')"></button>
+  <button class="sw" data-swatch="atlas" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setTheme('atlas')"></button>
+  <button class="sw" data-swatch="dawn" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setTheme('dawn')"></button>
+  <button class="sw" data-swatch="retrograde" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setTheme('retrograde')"></button>
+</div>
+
+<footer>
+  orbit · your system · FIRST-DRAFT PROPOSAL for the /settings cutover family (#410, cutover) ·
+  reached from the helm’s memberships card · name + time zone + currency are one write, sections are one list,
+  because that is the shape the commands take · every destructive act asks twice (§14) and deletion also asks
+  for the name · members are shown by the name they chose, never by email, because the route never discloses one
+</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setTheme(name){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of document.querySelectorAll("[data-swatch]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.swatch === name));
+  }
+}
+
+/* ── the two-tap protocol (§14): the first tap arms, the second fires, and an
+      unfired arm relaxes on its own so nothing stays cocked. ─────────────── */
+const armed = new WeakMap();
+function disarm(btn){
+  const state = armed.get(btn);
+  if (!state) return;
+  clearTimeout(state.timer);
+  armed.delete(btn);
+  btn.textContent = btn.dataset.rest;
+  btn.classList.remove("armed");
+}
+function twoTap(btn, label, fire){
+  if (armed.get(btn)) { disarm(btn); fire(btn); return; }
+  btn.classList.add("armed");
+  btn.textContent = label;
+  armed.set(btn, { timer: setTimeout(() => disarm(btn), 5000) });
+}
+
+function say(which){
+  const line = document.getElementById("said-" + which);
+  if (line) line.classList.add("show");
+}
+
+/* ── sections ─────────────────────────────────────────────────────────────── */
+function countSecs(){
+  const member = document.body.classList.contains("member");
+  const list = document.getElementById(member ? "secs-mem" : "secs-own");
+  const n = list ? list.querySelectorAll(".sec").length : 0;
+  const label = document.getElementById("seccount");
+  if (label) label.textContent = n + " of 12";
+  const add = document.getElementById("addsec");
+  if (add) add.disabled = n >= 12 || member;
+}
+function flipSec(btn){
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", String(on));
+  const row = btn.closest(".sec");
+  row.classList.toggle("off", !on);
+  row.querySelector(".state").textContent = on ? "shown" : "hidden";
+}
+function dropSec(btn){
+  const row = btn.closest(".sec");
+  if (!row.classList.contains("empty")) return;
+  row.remove();
+  countSecs();
+}
+function addSec(){
+  const list = document.getElementById("secs-own");
+  if (!list || list.querySelectorAll(".sec").length >= 12) return;
+  const row = document.createElement("div");
+  row.className = "sec empty";
+  row.innerHTML =
+    '<input class="lock" value="" maxlength="30" placeholder="name it" aria-label="Section name">' +
+    '<span class="used">0 entries</span>' +
+    '<button class="toggle lock" aria-pressed="true" aria-label="On the chart" onclick="flipSec(this)"><i></i></button>' +
+    '<span class="state">shown</span>' +
+    '<button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>';
+  list.appendChild(row);
+  countSecs();
+  row.querySelector("input").focus();
+}
+
+/* ── members ──────────────────────────────────────────────────────────────── */
+function countMembers(){
+  const roster = document.getElementById("roster-own");
+  const n = roster ? roster.querySelectorAll(".memb:not(.hidden)").length : 0;
+  const label = document.getElementById("membcount");
+  if (label && !document.body.classList.contains("member")) {
+    label.textContent = n + " in this system";
+  }
+}
+function toggleDrawer(id, btn){
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  const open = !panel.classList.contains("open");
+  for (const other of document.querySelectorAll(".drawer.open,.handover.open")) other.classList.remove("open");
+  panel.classList.toggle("open", open);
+  if (btn) btn.setAttribute("aria-expanded", String(open));
+}
+function closeDrawer(id){
+  const panel = document.getElementById(id);
+  if (panel) panel.classList.remove("open");
+}
+function dropMember(btn){
+  const row = btn.closest(".memb");
+  row.classList.add("hidden");
+  countMembers();
+}
+function addMember(name, initials){
+  const roster = document.getElementById("roster-own");
+  if (!roster) return;
+  const row = document.createElement("div");
+  row.className = "memb";
+  row.innerHTML =
+    '<span class="avatar" aria-hidden="true">' + initials + '</span>' +
+    '<b>' + name + '</b><span class="role">member</span>' +
+    '<button class="ghost" data-rest="remove">remove</button>';
+  const drop = row.querySelector("button");
+  drop.addEventListener("click", () => twoTap(drop, "tap again to remove", () => dropMember(drop)));
+  roster.appendChild(row);
+  closeDrawer("adddrawer");
+  countMembers();
+}
+function armHeir(radio){
+  const btn = document.getElementById("heirbtn");
+  if (!btn) return;
+  btn.disabled = false;
+  btn.dataset.rest = "hand over to " + radio.value;
+  if (!armed.get(btn)) btn.textContent = btn.dataset.rest;
+}
+function handedOver(){
+  say("handover");
+}
+function left(){
+  say("left");
+}
+function approveJoin(btn){
+  btn.closest(".joinreq").style.display = "none";
+  addMember("Rob Lawson", "RL");
+  say("join");
+}
+function declineJoin(btn){
+  btn.closest(".joinreq").style.display = "none";
+}
+
+/* ── the danger line ──────────────────────────────────────────────────────── */
+function openConfirm(btn){
+  const panel = document.getElementById("delconfirm");
+  panel.classList.add("open");
+  btn.style.display = "none";
+  const field = document.getElementById("delname");
+  if (field) field.focus();
+}
+function checkName(){
+  const field = document.getElementById("delname");
+  const btn = document.getElementById("delbtn");
+  const target = (document.getElementById("hhname") || {}).value || "";
+  const ok = field.value.trim() === target.trim() && target.trim().length > 0;
+  disarm(btn);
+  btn.disabled = !ok;
+}
+function doomed(){
+  document.body.classList.add("doomed");
+  document.getElementById("d-doom").setAttribute("aria-pressed", "true");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function restore(){
+  document.body.classList.remove("doomed");
+  document.getElementById("d-doom").setAttribute("aria-pressed", "false");
+}
+
+/* ── demo states ──────────────────────────────────────────────────────────── */
+function setRole(role){
+  const member = role === "member";
+  document.body.classList.toggle("member", member);
+  document.getElementById("d-owner").setAttribute("aria-pressed", String(!member));
+  document.getElementById("d-member").setAttribute("aria-pressed", String(member));
+  if (member) {
+    document.body.classList.remove("doomed");
+    document.getElementById("d-doom").setAttribute("aria-pressed", "false");
+    for (const open of document.querySelectorAll(".drawer.open,.handover.open")) open.classList.remove("open");
+  }
+  for (const control of document.querySelectorAll(".lock")) control.disabled = member;
+  /* the read-only view is a DIFFERENT system — Seaside Cottage, which Tom is
+     only a member of — so the identity card has to say so */
+  const field = document.getElementById("hhname");
+  if (field) field.value = member ? "Seaside Cottage" : "Lawson Home";
+  const label = document.getElementById("membcount");
+  if (label) label.textContent = member ? "3 in this system" : "";
+  countMembers();
+  countSecs();
+}
+function toggleWants(){
+  const on = document.body.classList.toggle("wants");
+  document.getElementById("d-wants").setAttribute("aria-pressed", String(on));
+}
+function toggleDoom(){
+  /* a non-owner can neither ask for deletion nor see the countdown */
+  if (document.body.classList.contains("member")) return;
+  const on = document.body.classList.toggle("doomed");
+  document.getElementById("d-doom").setAttribute("aria-pressed", String(on));
+}
+
+countSecs();
+countMembers();
+
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+</script>
+</body></html>
