@@ -509,6 +509,37 @@ The full open-questions list, walked in order and ruled:
   further: from the lighter colour at the top down to the pinky-orange
   that sits at the bottom of the dial screen. The deep manifest reads
   over warm surface light, not sky.
+- **Cloud sea is approved too** (owner): both dawn skies are ratified —
+  the terminator (with its visibility fix) and the cloud sea with its
+  through-the-deck descent. Cloud sea survives as an approved treatment
+  for the homescreen-style family rather than retiring; how the two are
+  offered (which is dawn's default, where the other is selected) is a
+  build-time question for the style selector.
+- **Dawn is the terminator, approved — except the crossing must be seen**
+  (owner, with screenshot): the diagonal split's position/scale fails in
+  practice — "mostly non-existent on a 14-inch laptop, barely shows on a
+  32-inch desktop, won't show on mobile at all". The night side must
+  occupy a meaningful, always-visible share of the sky at every viewport;
+  the seeded variation gets bounded so no roll can hide it. (This also
+  resolves the earlier mis-send: the "approved + custom symbols" message
+  said solarium but the owner had dawn-terminator open.)
+- **Every theme earns its own symbols** (owner): every theme gains real
+  character the way retrograde did — custom theme-specific symbols.
+  ALL themes carry their own symbol
+  vocabulary, EXCEPT star-chart and after dark, which SHARE theirs:
+  "they just both look great, they're slight twists on one theme."
+  (Hanami's symbol set follows once its base is reviewed.)
+- **Every theme's backdrop changes as you scroll away from the dial**
+  (owner): the descent law goes universal. Dawn's variants already
+  descend; each theme answers in its own vocabulary. For star-chart and
+  after dark specifically: the heliosphere lifts up out of sight as you
+  scroll down, leaving the plain starfield behind the deep manifest.
+- **Porcelain: the palette pleases, the pattern doesn't fit** (owner):
+  "the blues, the whites, the gradient, nice, but the pattern just does
+  not fit with the starfield." In its place, try a JAPANESE-INSPIRED
+  light theme: soft creamy whites, cherry-blossom hues, elegant not
+  tacky — the starfield a mix of cherries, plums and pinks. The
+  porcelain file stays as the record.
 - **The heliosphere is home's default — and home styles become a choice**
   (owner): the sub-identity mockups were a happy misunderstanding (the
   ask had been backdrops for the HOUSEHOLD screen), but the heliosphere
