@@ -502,6 +502,19 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **Dawn-terminator: liked, and the scroll is a descent** (owner): on
+  scrolling down, the sky — the terminator crossing and its stars — goes
+  out of view above, "like you're going down over the planet/sun's
+  surface", leaving a gradient that changes very slowly as you scroll
+  further: from the lighter colour at the top down to the pinky-orange
+  that sits at the bottom of the dial screen. The deep manifest reads
+  over warm surface light, not sky.
+- **Dawn-rays is dropped** (owner): the crepuscular-rays concept is out;
+  the dawn decision now sits between terminator and cloud sea, both of
+  which gain scroll-descents. The rays file stays as the record.
+- **Dawn-cloudsea: nice idea, and its scroll descends too** (owner):
+  scrolling down takes you below the cloudline and into more blue hues —
+  the deep page reads as under-the-weather altitude, not sky.
 - **Home's sub-identity: heliosphere and bridge go to mockup** (owner):
   of the three directions pitched, the living heliosphere (the sun's
   weather) and the bridge view (faint HUD furniture) are to be tried;
@@ -514,6 +527,11 @@ The full open-questions list, walked in order and ruled:
   do it your way." The inlaid orrery is rejected. Dawn is liked and
   keeps its place; the new pair are additional options, not dawn
   replacements.
+- **Household-manage v2 review** (owner, with screenshot): sections moves
+  UNDER "the system" card in the left column, and members takes the
+  right-hand side instead of sitting below — no awkward unfilled area.
+  And the danger line must look like one: request-deletion gets far more
+  angry — red, a proper danger zone, not a polite paragraph.
 - **Settings is the observatory** (owner, choosing among the three §15
   concepts): "Observatory is the strongest, but it definitely needs a lot
   more polish." The slit-and-instrument room is the direction; the
