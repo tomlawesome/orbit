@@ -578,6 +578,11 @@ The full open-questions list, walked in order and ruled:
   ("the rainbow was just a description... I could think of at the
   time") — and real asteroid belts are denser and disorderly: make the
   belt WIDER, more items, a scattered band rather than beads on a line.
+- **Belt, third pass** (owner: "Better... but"): the asteroid belt
+  should be made up of document items — LOTS of them, all over the
+  place. The band's ambient population reads as tumbling sheets of
+  paper at every attitude, not anonymous rocks and dust; the item's
+  real documents stay clearly more substantial than the ambient paper.
 - **The belt is a rainbow, and the card rides in it** (owner, correcting
   the #458 shape): the documents do NOT orbit the item card. The
   documents nestle in a rainbow-shaped belt — an arc of asteroids — and
