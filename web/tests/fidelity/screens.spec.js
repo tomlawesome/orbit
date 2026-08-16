@@ -156,6 +156,19 @@ const SCREENS = [
     mockupOnly: [".demos", "footer"],
   },
   {
+    name: "household",
+    /* The workspace fixture's own primary household, so the screen is read in
+       its OWNER state — the one the mockup draws by default. */
+    path: "/household/hh-lawson-1",
+    stage: "porting",
+    mockup: "/design/v19/household-manage.html",
+    /* Settled once the roster has arrived — every payload this screen needs is
+       fetched client-side, and the sections editor lays out beside it. */
+    settle: () => document.querySelectorAll(".memb").length > 0 && Boolean(document.querySelector(".sec .toggle")),
+    /* The mockup's owner/non-owner state toolbar and its self-description. */
+    mockupOnly: [".demos", "footer"],
+  },
+  {
     name: "home",
     path: "/home",
     stage: "porting",
