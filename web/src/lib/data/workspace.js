@@ -227,8 +227,14 @@ export async function readHome() {
       ...receiptSuggestionsOf(inbox.receipts),
     ],
     mailFailures: receiptFailuresOf(inbox.receipts),
+    mailReading: (inbox.receipts ?? []).filter(
+      (receipt) => !receipt.canApprove && receipt.classification === "waiting",
+    ),
     user: session?.user ?? null,
     today,
+    /* Pinned "now" for elapsed-time lines (the pocket's signals): fixture
+       noon under the gate, the clock in production. */
+    now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
   };
 }
 

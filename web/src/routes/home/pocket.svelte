@@ -1,7 +1,7 @@
 <script>
   import "./pocket.css";
-  import { dialBodiesOf, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
+  import { ago, money } from "$lib/format.js";
 
   /**
    * Home in the mobile dialect (CON-10, #430) — the dial owns the width, the
@@ -27,7 +27,7 @@
     view ? dialBodiesOf(view.household, { suggestions: view.suggestions, today: view.today }) : [],
   );
   const pocketBodies = $derived(
-    bodies.filter((b) => b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
+    bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
   );
   const groups = $derived(
     view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
@@ -77,6 +77,10 @@
       b.costMinor ? money(b.costMinor, b.currency, b.costIsEstimate) : null,
       b.documentCount > 0 ? `◆ ${b.documentCount} documents` : null,
     ].filter(Boolean).join(" · ");
+  /* #466: the relay's signals — days until an unreviewed arrival burns up,
+     elapsed time in the pocket's short register. `now` is pinned by the seam. */
+  const burnsIn = (s) => (s.expiresAt ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
+  const agoShort = (iso) => ago(iso, view.now ?? new Date().toISOString());
 </script>
 
 <div class="pocket">
@@ -156,12 +160,21 @@
       <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
       <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
       {#each pocketBodies as b (b.id)}
-        <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
-                data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}/>
-        {#if b.documentCount > 0 && b.paint === "jade"}
-          <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
-                   transform="rotate(-24 {b.placement.x} {b.placement.y})"
-                   fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+        {#if b.suggestion}
+          <!-- #466: the relay's catch is ON the dial at its law position —
+               the same hollow accent body the desk shows (§12). -->
+          <g data-sheet-sugg={b.id} style="cursor:pointer">
+            <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+            <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+          </g>
+        {:else}
+          <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
+                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}/>
+          {#if b.documentCount > 0 && b.paint === "jade"}
+            <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
+                     transform="rotate(-24 {b.placement.x} {b.placement.y})"
+                     fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+          {/if}
         {/if}
       {/each}
     </svg>
@@ -181,10 +194,58 @@
     {/each}
   </div>
   {/if}
+  <!-- #466: the pocket's signals surface — what the relay caught, in the
+       pocket's own grammar. Suggestion rows raise the suggestion sheet;
+       failures speak the server's words. -->
+  {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
+  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
+    {#each view.suggestions as s (s.id)}
+      <div class="mitem suggest" data-sheet-sugg={s.id}>
+        <span class="dot sug"></span>
+        <div class="flex"><b>{s.title}</b><span>{[
+          `from ${s.sourceDocument}`,
+          burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
+        ].filter(Boolean).join(" · ")}</span></div>
+        <div class="mt" style="color:var(--accent)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
+      </div>
+    {/each}
+    {#each view.mailReading as r (r.id)}
+      <div class="mitem reading">
+        <span class="dot"></span>
+        <div class="flex"><b>A message arrived {agoShort(r.receivedAt)}</b><span>still reading its document</span></div>
+      </div>
+    {/each}
+    {#each view.mailFailures as f (f.id)}
+      <div class="mitem failed">
+        <span class="dot"></span>
+        <div class="flex"><b>A message from {short(f.receivedAt.slice(0, 10))}</b><span>{f.message}</span></div>
+      </div>
+    {/each}
+    <div class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</div>
+  </div>
+  {/if}
 </div>
 <div class="sheet" id="sheet">
   <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
-  <div class="acts"><button class="pri">open</button><button>documents</button><button
+  <div class="fields" id="sh-fields"></div>
+  <div class="acts" id="sh-acts-item"><button class="pri">open</button><button>documents</button><button
     data-sheet-close>close</button></div>
+  <div class="acts" id="sh-acts-sugg" hidden>
+    <button class="pri" data-sugg-act="approve">Add to orbit</button>
+    <button data-sugg-act="dismiss">Dismiss</button>
+    <button data-sheet-close>close</button>
+  </div>
+  <a class="amend" id="sh-amend" href="/home" hidden>review &amp; amend →</a>
 </div>
+{#each view?.suggestions ?? [] as s (s.id)}
+  <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the
+       sheet by the behaviour — no markup is ever built from strings. -->
+  <template data-sugg-template={s.id} data-title={s.title}
+            data-meta={`caught by your relay ${short((s.receivedAt ?? view.today).slice(0, 10))} · burns up in ${burnsIn(s)}d`}>
+    {#if s.provider}<div class="kv"><span>provider</span><b>{s.provider}</b></div>{/if}
+    {#if s.renewsOn}<div class="kv"><span>renews</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
+    {#if s.costMinor}<div class="kv"><span>cost</span><b>{money(s.costMinor, s.currency, true)}</b></div>{/if}
+    <div class="kv"><span>document</span><b>◆ {s.sourceDocument} · scanned clean</b></div>
+  </template>
+{/each}
 </div>

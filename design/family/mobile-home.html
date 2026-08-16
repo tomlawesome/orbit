@@ -33,6 +33,16 @@ body{overflow-y:auto;overflow-x:hidden}
 .mt{font:500 12px var(--mono);text-align:right}
 .mt small{display:block;font-size:9.5px;color:var(--ink-faint)}
 .dot{width:7px;height:7px;border-radius:50%;flex:none}
+/* #466: the signals surface — what the relay caught, pocket grammar */
+.mitem.suggest{border-style:dashed;cursor:pointer}
+.mitem.suggest span{color:var(--accent)}
+.dot.sug{background:none;border:1.6px solid var(--accent)}
+.mitem.reading b{color:var(--ink-mid);font-weight:500}
+.mitem.reading .dot{background:var(--upcoming);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.4}}
+.mitem.failed .dot{background:#fb8b24}
+.mitem.failed span{color:var(--ink-mid)}
+.burnup{font:9.5px var(--mono);color:var(--ink-faint);text-align:center;margin:10px 0 0;letter-spacing:.06em}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
        background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
        padding:18px 22px 26px;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
@@ -128,6 +138,12 @@ body{overflow-y:auto;overflow-x:hidden}
       <circle cx="222.9" cy="285.5" r="7.5" style="fill:var(--ok)" onclick="openSheet('Car full service','T&#8722;161d &middot; 21 Jan &middot; ~£300 &middot; ◆ 2 documents')"/>
       <ellipse cx="222.9" cy="285.5" rx="14" ry="5" transform="rotate(-24 222.9 285.5)"
                fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+      <!-- #466: the relay's catch ON the dial at its law position — the same
+           hollow accent body the desk shows (§12). -->
+      <g style="cursor:pointer">
+        <circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+        <circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/>
+      </g>
     </svg>
   </div>
   <div class="skies">
@@ -139,14 +155,34 @@ body{overflow-y:auto;overflow-x:hidden}
   <div class="msearch"><input placeholder="explore your world" readonly></div>
   <div class="mgroup"><h3>NEEDS ATTENTION</h3>
     <div class="mitem"><span class="dot" style="background:var(--overdue)"></span>
-      <div class="flex"><b>Gutter clearing</b><span>Home &middot; ~£150</span></div>
+      <div class="flex"><b>Gutter clearing</b><span>Home &middot; ~£150.00</span></div>
       <div class="mt" style="color:var(--overdue)">T+16d<small>28 Jul</small></div></div>
     <div class="mitem"><span class="dot" style="background:var(--warm)"></span>
       <div class="flex"><b>Car MOT — Volvo V60</b><span>Vehicles &middot; £54.85</span></div>
       <div class="mt" style="color:var(--warm)">T&#8722;16d<small>29 Aug</small></div></div>
     <div class="mitem"><span class="dot" style="background:var(--warm)"></span>
-      <div class="flex"><b>Boiler service</b><span>Home &middot; ~£120</span></div>
+      <div class="flex"><b>Boiler service</b><span>Home &middot; ~£120.00</span></div>
       <div class="mt" style="color:var(--warm)">T&#8722;22d<small>04 Sep</small></div></div>
+  </div>
+  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
+    <div class="mitem suggest">
+      <span class="dot sug"></span>
+      <div class="flex"><b>Home insurance renewal</b><span>from 1 forwarded document &middot; burns up in 43d</span></div>
+      <div class="mt" style="color:var(--accent)">~£400.00<small>renews 03 Oct</small></div>
+    </div>
+    <div class="mitem reading">
+      <span class="dot"></span>
+      <div class="flex"><b>A message arrived 4m ago</b><span>still reading its document</span></div>
+    </div>
+    <div class="mitem failed">
+      <span class="dot"></span>
+      <div class="flex"><b>A message from 09 Aug</b><span>Its attachment is a picture-only scan, and Orbit couldn&rsquo;t read any text from it. You can add the item yourself and attach the file from Documents.</span></div>
+    </div>
+    <div class="mitem failed">
+      <span class="dot"></span>
+      <div class="flex"><b>A message from 06 Aug</b><span>It carried no document Orbit can read (PDFs work best). Nothing was kept.</span></div>
+    </div>
+    <div class="burnup">unreviewed arrivals burn up after 45 days &middot; nothing is added without you</div>
   </div>
 </div>
 <div class="sheet" id="sheet">
