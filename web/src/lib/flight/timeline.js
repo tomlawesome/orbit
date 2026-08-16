@@ -19,9 +19,8 @@
  *     4800   handoff INSIDE the light — the canvas dissolves over 1.7s while
  *            the bodies condense out of it over 1.3s
  *     6400   the bare sky is readable: planets, sun, the household's name
- *     8400   two seconds later the instrument arrives (1.7s, arrive style) —
- *            the dwell trimmed and the draw-in slowed by the owner's
- *            2026-08-16 amendment; see T below
+ *     8400   two seconds later the instrument arrives (1.8s, arrive style) —
+ *            v5's draw-in, slower again and on a softer curve; see T below
  *
  *   DESCENT · the ascent mirrored, in the DOM as well as on the canvas
  *      0     the instrument withdraws (arrive, reversed)
@@ -38,27 +37,26 @@
  */
 
 /*
- * THE ONE AMENDMENT TO THE RATIFIED SHEET (owner, 2026-08-16, ledger 7f7d813):
- * "the dwell on the bare sky before the instrument arrives is 1s too long
- *  (3s → 2s), and the dial's pop is slightly too fast — slow its draw-in a
- *  touch. The stated test: it must feel like a DELIBERATE WAIT, not a slow
- *  load. Otherwise perfect."
+ * THE OWNER'S 2026-08-16 AMENDMENT (ledger 7f7d813) trimmed the dwell 3s → 2s
+ * and slowed the draw-in 1300 → 1700, curve untouched, and said as much: "if
+ * v5 chose different figures, v5 wins and this table follows it."
  *
- * So `dwell` is 2000 and `instrument` stretches 1300 → 1700; the CURVE is
- * untouched, because the ruling is about pace, not shape, and duration is the
- * smallest change that answers it. Everything else on the clock stays
- * verbatim. first-run v5 carries these numbers in the mockup — when it lands,
- * re-read them from it: if v5 chose different figures, v5 wins and this table
- * follows it.
+ * v5 has landed (design/v19/first-run.html at 9476480) and chose different
+ * figures: the draw-in stretches again, 1700 → 1800, and this time the CURVE
+ * moves too — cubic-bezier(.2,.7,.2,1) → (.2,.26,.35,1) — tuned frame by
+ * frame, because a gentler curve at the same length made the wait read worse,
+ * not better (a slow start is an invisible start at scale .16). The opacity
+ * stop that rides along with it (60% → 55%) lives in the CSS, not here.
+ * `dwell` is untouched at 2000; only `instrument` changes in this table.
  */
 export const T = {
   warp: 200, mark: 260, release: 430, markOut: 1340,
   nameOn: 1560, nameOff: 2600,
-  land: 4800, condensed: 6400, dwell: 2000, instrument: 1700,
+  land: 4800, condensed: 6400, dwell: 2000, instrument: 1800,
   tourGap: 450,
 };
 T.instrumentAt = T.condensed + T.dwell;                    /*  8400 */
-T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10550 */
+T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10650 */
 
 /* the descent's own offsets, kept as the mockup wrote them: the flight starts
    700ms in, and the mirrored windows are quoted against that. */
