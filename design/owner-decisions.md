@@ -502,6 +502,14 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **Two light-theme candidates, and dawn stays** (owner, on the atlas
+  succession): Porcelain (cobalt underglaze on glazed white) and Solarium
+  (light through frosted glass, etched lines, stained-glass bodies) are
+  both to be tried — with the explicit warning that each "will require
+  very clever execution to be visually impressive and remain clear...
+  do it your way." The inlaid orrery is rejected. Dawn is liked and
+  keeps its place; the new pair are additional options, not dawn
+  replacements.
 - **Settings is the observatory** (owner, choosing among the three §15
   concepts): "Observatory is the strongest, but it definitely needs a lot
   more polish." The slit-and-instrument room is the direction; the
