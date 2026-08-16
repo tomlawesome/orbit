@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — your relay, with satellites (proposal, issue #475)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* THE RELAY, WITH SATELLITES — §14 (#475), "backdrops are alive, and never
+     the same twice".
+
+     The card itself is untouched: it is design/family/settings-mail.html
+     reproduced exactly — dish rings, alias, three kv rows, the two buttons,
+     the arrived-but-could-not-be-read list, the note. This proposal only
+     decorates the sky behind it.
+
+     What the sky gains:
+       · 2–3 line-drawn craft, placed and oriented at random on every load,
+         never overlapping the card, drifting a few pixels over minutes;
+       · each craft's dish is on a gimbal that TRACKS the relay dish on the
+         card, so the whole sky is pointed at your address;
+       · a faint dotted signal travelling along an arc from craft to dish —
+         the conveyed message, the only reason the craft are there at all;
+       · the instance's own households, faint, in the far distance — not all
+         of them every load, and always on their TRUE bearings (CON-13:
+         bearings can never move, so the subset rolls, the direction never
+         does). Display-only: no labels, no pointer, nothing to click.
+
+     Nothing here is ornament. A satellite conveys; a household is a real
+     household; the dish is already the relay's status. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:3;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* ---- the traffic layer: satellites, their signals, distant households ----
+     One overlay sized 1:1 with the viewport (viewBox in CSS pixels) so a
+     craft's signal arc can be aimed at the real dish on the real card. It
+     sits above the starfield and below the card, so a signal that reaches
+     the relay is swallowed by the glass rather than drawn over it. */
+  .traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
+  .traffic svg{position:absolute;inset:0;width:100%;height:100%}
+
+  /* drift: tens of pixels over minutes, easing back and forth — the sky is
+     alive but nothing ever demands the eye */
+  @keyframes crawl{from{transform:translate(0,0)}to{transform:translate(var(--dx),var(--dy))}}
+  .craft{animation:crawl var(--dur) ease-in-out infinite alternate}
+  /* attitude: the barely-perceptible sway of something station-keeping */
+  @keyframes sway{from{transform:rotate(calc(var(--sw) * -1))}to{transform:rotate(var(--sw))}}
+  .hull .sway{animation:sway var(--swdur) ease-in-out infinite alternate;
+              transform-box:fill-box;transform-origin:center}
+  /* the station light: a slow blink, never a strobe */
+  @keyframes blink{0%,62%{opacity:.16}72%,86%{opacity:1}100%{opacity:.16}}
+  .lamp{opacity:.85;animation:blink var(--bldur) ease-in-out infinite}
+  /* the conveyed message: dashes travelling craft → relay dish */
+  @keyframes convey{from{stroke-dashoffset:13}to{stroke-dashoffset:0}}
+  .beam{stroke-dasharray:1.6 11.4;animation:convey var(--bmdur) linear infinite}
+
+  /* ---- the ratified relay card, reproduced (design/family/settings-mail.html) ---- */
+  /* the card is centred when the sky has room and simply starts at the top
+     when it hasn't — a short laptop must never clip the note off the bottom */
+  .stage{position:relative;z-index:2;min-height:calc(100vh - 102px);display:flex;
+         align-items:flex-start;justify-content:center;padding:64px 20px 16px}
+  .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .relay-card{width:430px;max-width:100%;padding:30px 32px;margin:auto}
+  .relay-card h2{font:600 19px var(--display)}
+  .relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
+  .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
+  .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
+  .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+             animation:signal 3s ease-out infinite;opacity:0}
+  .dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
+  @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+  .alias{font:13px var(--mono);color:var(--accent);background:var(--panel);
+         border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
+  .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .kv:last-of-type{border:0}
+  .kv b{color:var(--ok);font-weight:500}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:16px;line-height:1.8}
+  .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+  .failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--ink-faint);margin:0 0 8px}
+  .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+  .failures .kv span:last-child{color:var(--overdue);text-align:right}
+  .btns{display:flex;gap:10px;margin-top:16px}
+  .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+               background:none;border:1px solid var(--line);color:var(--ink-mid)}
+  .btns button.pri{color:var(--accent);border-color:var(--accent)}
+
+  .foot{position:relative;z-index:4;text-align:center;padding:12px 16px 74px;
+        font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.1em}
+  /* mockup furniture only — it sits on a panel so it stays legible where a
+     short viewport slides the card underneath it */
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:64vw;font:10.5px var(--mono);color:var(--ink-faint);
+         background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--line-soft);
+         border-radius:20px;padding:7px 13px}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  .demos .swatch{width:16px;height:16px;padding:0;border-radius:50%}
+  .demos .swatch[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .demos .seed{letter-spacing:.12em;opacity:.8}
+  /* on a phone the card owns nearly all the sky: the craft take the strip
+     above and below it, and the demos row wraps rather than running off */
+  @media (max-width:620px){
+    .stage{padding:52px 16px 12px}
+    .demos{max-width:calc(100% - 44px)}
+  }
+
+  /* the law, everywhere: if you have asked for stillness, the sky is still */
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+  body.frozen *{animation:none!important}
+</style>
+</head>
+<body>
+
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+
+<div class="traffic" aria-hidden="true"><svg id="traffic" preserveAspectRatio="none">
+  <g id="distant"></g>
+  <g id="fleet"></g>
+</svg></div>
+
+<div class="stage">
+  <div class="glass relay-card">
+    <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
+    <h2 style="text-align:center">Your relay</h2>
+    <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
+    <div class="alias">tom-k7f2m@in.lawson-home.orbit</div>
+    <div class="kv"><span>status</span><b>connected &middot; listening</b></div>
+    <div class="kv"><span>last received</span><span>policy-schedule.pdf &middot; 2d ago</span></div>
+    <div class="kv"><span>ingest</span><b>enabled</b></div>
+    <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+    <div class="failures">
+      <h4>arrived, but could not be read</h4>
+      <div class="kv"><span>09 Aug</span><span>Its attachment is a picture-only scan, and Orbit couldn&rsquo;t read any text from it. You can add the item yourself and attach the file from Documents.</span></div>
+      <div class="kv"><span>06 Aug</span><span>It carried no document Orbit can read (PDFs work best). Nothing was kept.</span></div>
+    </div>
+    <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
+    outbound reminder email remains configured by your administrator</div>
+  </div>
+</div>
+
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="demos" aria-label="Mockup backdrop demos">
+  <span>DEMOS</span>
+  <button onclick="reroll()">re-roll backdrop</button>
+  <button onclick="document.body.classList.toggle('frozen')">freeze motion</button>
+  <span class="seed" id="seedout">seed —</span>
+  <span>THEME</span>
+  <button class="swatch" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+  <button class="swatch" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+  <button class="swatch" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+  <button class="swatch" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+  <button class="swatch" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+</div>
+
+<div class="foot">relay &middot; living backdrop proposal &middot; #475 &middot; §14</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll(".swatch")) b.setAttribute("aria-pressed", String(b === btn));
+}
+
+/* ---------------------------------------------------------------------------
+   THE ROLL
+
+   One seeded generator drives the whole backdrop, so an arrangement is a
+   single number: star scatter, which households are visible, and how many
+   craft there are, where they sit, how they lie and how they drift.
+
+   In the app this seed is rolled fresh on every load — "never the same
+   arrangement twice" (§14). BUILD NOTE: under ORBIT_FIXTURES the seed MUST be
+   fixed (derive it from the fixture workspace id, not from time or
+   Math.random), so the fidelity gate compares one deterministic sky against
+   this mockup's. The roll is the only source of randomness on the screen —
+   pin it and the whole backdrop is reproducible pixel for pixel.
+--------------------------------------------------------------------------- */
+const makeRng = (s) => { s = (s % 2147483647) || 17170812; return () => (s = (s * 48271) % 2147483647) / 2147483647; };
+let seed = Math.floor(Math.random() * 2147483646) + 1;
+let rng = makeRng(seed);
+const between = (a, b) => a + rng() * (b - a);
+const pick = (a, b) => Math.round(between(a, b));
+
+/* ---- the starfield: two depth layers, re-scattered on every roll ---- */
+function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  far.textContent = ""; near.textContent = "";
+  const layer = (host, n, rmin, rspan, omin, ospan) => {
+    for (let i = 0; i < n; i++) {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+      c.setAttribute("r", (rmin + rng() * rspan).toFixed(2));
+      c.setAttribute("opacity", (omin + rng() * ospan).toFixed(2));
+      host.appendChild(c);
+    }
+  };
+  layer(far, 95, 0.4, 0.5, 0.12, 0.23);
+  layer(near, 46, 0.8, 0.7, 0.3, 0.4);
+}
+
+/* ---------------------------------------------------------------------------
+   ONE CRAFT
+
+   Drawn in the chart vocabulary the rest of the family uses: ~1px strokes in
+   --chart-ink, ruling in --chart-line, no fills, no gloss, no gradients — the
+   same pen as the star charts. Local units, ~80 across at scale 1.
+
+     bus      a small rounded body, with two stub antennae
+     wings    two panels on short booms, ruled into cells
+     lamp     a station light at one wing tip — a slow blink, never a strobe
+     dish     on a gimbal — always turned toward the relay dish on the card
+
+   The dish is the point of the whole drawing: whatever attitude the craft is
+   lying at, its aerial is pointed at YOUR address.
+--------------------------------------------------------------------------- */
+function craftShapes(dishRotation, lampPeriod, swayAmount, swayPeriod){
+  return `<g class="sway" style="--sw:${swayAmount}deg;--swdur:${swayPeriod}s">
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="1.1" stroke-linejoin="round">
+      <rect x="-9" y="-6.5" width="18" height="13" rx="2.5"/>
+      <path d="M -9 0 H -15.5 M 9 0 H 15.5"/>
+      <rect x="-40" y="-9.5" width="24.5" height="19" rx="1"/>
+      <rect x="15.5" y="-9.5" width="24.5" height="19" rx="1"/>
+      <path d="M -3.5 -6.5 V -9 M 3.5 -6.5 V -9" stroke-width="0.8"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="0.7">
+      <path d="M -32 -9.5 V 9.5 M -24 -9.5 V 9.5 M 24 -9.5 V 9.5 M 32 -9.5 V 9.5"/>
+      <path d="M -40 0 H -15.5 M 15.5 0 H 40" opacity=".7"/>
+      <path d="M -5 -3 H 5 M -5 3 H 5" opacity=".55"/>
+    </g>
+    <circle class="lamp" cx="-42.6" cy="0" r="1.7" fill="var(--accent)" style="--bldur:${lampPeriod}s"/>
+    <g transform="rotate(${dishRotation})">
+      <g fill="none" stroke="var(--chart-ink)" stroke-width="1.1" stroke-linecap="round">
+        <path d="M -7 6.5 A 7 7 0 0 0 7 6.5"/>
+        <path d="M 0 6.5 V 12"/>
+      </g>
+      <circle cx="0" cy="12.6" r="1.3" fill="none" stroke="var(--chart-ink)" stroke-width="0.9"/>
+    </g>
+  </g>`;
+}
+
+/* ---------------------------------------------------------------------------
+   THE HOUSEHOLDS IN THE FAR DISTANCE
+
+   Real coordinates, lifted from the galaxy map on home.html. CON-13 says a
+   bearing can never move, so the ROLL only decides which households are out
+   tonight — never where they are. Faint, unlabelled, no pointer: display-only.
+--------------------------------------------------------------------------- */
+const GALAXY = {
+  seaside: { pos:[-617,-305], planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  mumdad:  { pos:[452,522],   planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]] },
+  narrow:  { pos:[-515,393],  planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  grans:   { pos:[722,-184],  planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+};
+/* the camera is inside Lawson Home — you never see your own constellation */
+
+function layout(){
+  const svg = document.getElementById("traffic");
+  const fleet = document.getElementById("fleet");
+  const distant = document.getElementById("distant");
+  const W = window.innerWidth, H = window.innerHeight;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  fleet.textContent = ""; distant.textContent = "";
+
+  /* everything is aimed at the dish on the card, wherever the card is */
+  const card = document.querySelector(".relay-card").getBoundingClientRect();
+  const d = document.getElementById("relaydish").getBoundingClientRect();
+  const target = { x: d.left + d.width / 2, y: d.top + d.height / 2 };
+
+  /* the roll is replayed from the seed, so a resize keeps the same sky */
+  const roll = makeRng(seed);
+  const rnd = (a, b) => a + roll() * (b - a);
+
+  /* --- distant households: true bearings, rolled subset --- */
+  const keys = Object.keys(GALAXY);
+  for (let i = keys.length - 1; i > 0; i--) { const j = Math.floor(roll() * (i + 1)); [keys[i], keys[j]] = [keys[j], keys[i]]; }
+  const showing = keys.slice(0, 1 + Math.floor(roll() * Math.min(3, keys.length)));
+  for (const key of showing) {
+    const hh = GALAXY[key];
+    let [ox, oy] = hh.pos;
+    const dist = Math.hypot(ox, oy);
+    /* push out along the true bearing until it reaches the far edge of the sky */
+    const f = 1 / Math.max(1, Math.hypot(ox / (W / 2 - 60), oy / (H / 2 - 60)));
+    ox *= f * 0.94; oy *= f * 0.94;
+    const cx = W / 2 + ox, cy = H / 2 + oy;
+    const dim = Math.max(.14, Math.min(.3, .34 - dist / 9000));
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("opacity", dim.toFixed(2));
+    g.innerHTML = `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="34" fill="none"
+                      stroke="var(--chart-line)" stroke-width="1"/>
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2.4" fill="var(--ink)"/>` +
+      hh.planets.map(([px, py, pr, tok]) =>
+        `<circle cx="${(cx + px * .85).toFixed(1)}" cy="${(cy + py * .85).toFixed(1)}" r="${pr}" fill="var(${tok})"/>`).join("");
+    distant.appendChild(g);
+  }
+
+  /* --- 2 or 3 craft: never over the card, never crowding each other ---
+     The sky around the card is cut into four bands (left, right, above,
+     below); a craft lands in one of them, chosen in proportion to its area,
+     so a wide desk scatters them and a phone tucks them into the strips the
+     card leaves free. Clearance and spacing relax by steps rather than
+     letting a craft ever sit on the card. */
+  const count = 2 + Math.floor(roll() * 2);
+  const placed = [];
+  const marginX = Math.min(80, Math.max(36, W * 0.075)), marginTop = 44, marginBottom = 100;
+  const findSpot = (halfSpan) => {
+    /* pad = clearance from the card · sep = clearance from another craft ·
+       inset = how much of the craft must stay inside the band. The last step
+       is the phone: a craft may be clipped by the edge of the sky or slip
+       behind the card's corner, but its centre never sits on the card. */
+    const steps = [
+      { pad: 70, sep: 250, inset: 1, min: halfSpan * 2 },
+      { pad: 44, sep: 190, inset: 1, min: halfSpan * 2 },
+      { pad: 22, sep: 140, inset: 1, min: halfSpan * 2 },
+      { pad: 8, sep: 96, inset: .5, min: halfSpan },
+      { pad: 0, sep: 64, inset: 0, min: 26 },
+    ];
+    for (const { pad, sep, inset, min } of steps) {
+      const mx = inset ? marginX : 8, mt = inset ? marginTop : 8;
+      const mb = inset ? marginBottom : 8;
+      const ko = { l: card.left - pad, r: card.right + pad, t: card.top - pad, b: card.bottom + pad };
+      const bands = [
+        { x0: mx, x1: ko.l, y0: mt, y1: H - mb },
+        { x0: ko.r, x1: W - mx, y0: mt, y1: H - mb },
+        { x0: mx, x1: W - mx, y0: mt, y1: ko.t },
+        { x0: mx, x1: W - mx, y0: ko.b, y1: H - mb },
+      ].filter(b => b.x1 - b.x0 > min && b.y1 - b.y0 > min * .8);
+      if (!bands.length) continue;
+      const total = bands.reduce((sum, b) => sum + (b.x1 - b.x0) * (b.y1 - b.y0), 0);
+      for (let attempt = 0; attempt < 30; attempt++) {
+        let ticket = roll() * total, band = bands[0];
+        for (const b of bands) { ticket -= (b.x1 - b.x0) * (b.y1 - b.y0); band = b; if (ticket <= 0) break; }
+        const x = rnd(band.x0 + halfSpan * inset, band.x1 - halfSpan * inset);
+        const y = rnd(band.y0 + halfSpan * inset * .8, band.y1 - halfSpan * inset * .8);
+        if (placed.some(p => Math.hypot(p.x - x, p.y - y) < sep)) continue;
+        return { x, y };
+      }
+    }
+    return null;
+  };
+  /* a phone gets slightly smaller craft — same presence, less of the sky */
+  const sizeF = Math.max(0.72, Math.min(1, W / 1200));
+  for (let i = 0; i < count; i++) {
+    const scale = rnd(0.62, 0.92) * sizeF;
+    const spot = findSpot(42 * scale + 10);
+    if (!spot) continue;                                  /* a phone-sized sky may only fit two */
+    placed.push(spot);
+
+    const attitude = rnd(0, 360);
+    const bearing = Math.atan2(target.y - spot.y, target.x - spot.x) * 180 / Math.PI;
+    /* the gimbal: page-frame bearing brought into the craft's own frame,
+       then a quarter turn because the dish is drawn facing local +y */
+    const gimbal = bearing - attitude - 90;
+
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("class", "craft");
+    g.style.setProperty("--dx", rnd(-13, 13).toFixed(1) + "px");
+    g.style.setProperty("--dy", rnd(-9, 9).toFixed(1) + "px");
+    g.style.setProperty("--dur", rnd(150, 280).toFixed(0) + "s");
+
+    /* the signal: dotted, travelling craft → relay, curving as a real pass
+       would. It ends at the dish itself and is swallowed by the glass. */
+    const talking = i === 0 || roll() < 0.6;
+    if (talking) {
+      const dx = target.x - spot.x, dy = target.y - spot.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const sx = spot.x + (dx / len) * 15 * scale, sy = spot.y + (dy / len) * 15 * scale;
+      const bow = (roll() < 0.5 ? -1 : 1) * len * rnd(0.08, 0.17);
+      const mx = (sx + target.x) / 2 - (dy / len) * bow;
+      const my = (sy + target.y) / 2 + (dx / len) * bow;
+      const beam = document.createElementNS(NS, "path");
+      beam.setAttribute("class", "beam");
+      beam.setAttribute("d", `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`);
+      beam.setAttribute("fill", "none");
+      beam.setAttribute("stroke", "var(--accent)");
+      beam.setAttribute("stroke-width", "1.1");
+      beam.setAttribute("stroke-linecap", "round");
+      beam.setAttribute("opacity", rnd(0.26, 0.42).toFixed(2));
+      beam.style.setProperty("--bmdur", rnd(3.4, 5.6).toFixed(1) + "s");
+      g.appendChild(beam);
+    }
+
+    const hull = document.createElementNS(NS, "g");
+    hull.setAttribute("class", "hull");
+    hull.setAttribute("transform",
+      `translate(${spot.x.toFixed(1)} ${spot.y.toFixed(1)}) rotate(${attitude.toFixed(1)}) scale(${scale.toFixed(3)})`);
+    hull.setAttribute("opacity", rnd(0.68, 1).toFixed(2));
+    hull.innerHTML = craftShapes(gimbal.toFixed(1), rnd(4.5, 8.5).toFixed(1), rnd(0.8, 1.8).toFixed(2), rnd(26, 46).toFixed(0));
+    g.appendChild(hull);
+    fleet.appendChild(g);
+  }
+}
+
+function reroll(){
+  seed = Math.floor(Math.random() * 2147483646) + 1;
+  rng = makeRng(seed);
+  document.getElementById("seedout").textContent = "seed " + seed;
+  stars();
+  layout();
+}
+
+document.getElementById("seedout").textContent = "seed " + seed;
+stars();
+layout();
+
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 140); });
+</script>
+</body></html>
