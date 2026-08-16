@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — the inbox orb (proposal, issue #472)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* v17: the galaxy is a coordinate system. Every household owns a fixed
+     place; "centre" is only where the camera is parked. Flying moves the
+     starfield, never the destination. Display font fetched in mockup only. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#efe9db; --panel:rgba(247,243,234,.8); --panel-raised:#fbf8f1;
+    --line:#d8cfba; --line-soft:#e4dcc9;
+    --ink:#1c2b4a; --ink-mid:#5d6a87; --ink-faint:#98a0b4;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:#f3dfae; --sun-core:#1c2b4a; --stars:0; --celestial:block;
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#eef1f6; --panel:rgba(255,255,255,.85); --panel-raised:#ffffff;
+    --line:#dde3ee; --line-soft:#e8edf5;
+    --ink:#1a2233; --ink-mid:#5d6b85; --ink-faint:#9aa5ba;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:#cfe4f7; --sun-core:#1a2233; --stars:0; --celestial:none;
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html{scroll-behavior:smooth}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  /* the camera: each household has its own absolute starfield offset, so a
+     flight animates between two truths and never snaps back */
+  .cam{transition:transform 1.25s cubic-bezier(.5,.4,.15,1)}
+  /* the sky never sits still — constant seamless drift, perceptible within
+     a few seconds (owner rule), wrapping over a tiled field so it never
+     snaps or reverses */
+  .sky .far{animation:driftf 400s linear infinite}
+  .sky .near{animation:driftn 195s linear infinite}
+  @keyframes driftf{to{transform:translateX(-1600px)}}
+  @keyframes driftn{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
+  .hero{display:grid;place-items:center;padding:0;min-height:100vh;position:relative}
+  .hero-foot{position:absolute;top:calc(75vh + 160px);left:50%;
+             transform:translate(-50%,-50%);
+             display:flex;flex-direction:column;align-items:center;gap:13px}
+  .scrollcue{font:11px var(--mono);color:var(--ink-faint);text-align:center;letter-spacing:.14em}
+  .splash-search input{background:none;border:0;outline:0;
+             border-bottom:1px solid var(--line);width:320px;text-align:center;
+             font:12.5px var(--mono);color:var(--ink);padding:6px 4px;
+             transition:border-color .25s}
+  .splash-search input::placeholder{color:var(--ink-faint)}
+  .splash-search input:focus{border-color:var(--accent)}
+
+  /* CON-7: the word IS the handle — attached to the drawer edge, riding the
+     slide. v17: key is quiet ink, degraded is unmistakably orange, and the
+     right handle keeps its type clear of overlay scrollbars. */
+  .handle{position:absolute;right:-31px;top:50%;transform:translateY(-50%);
+          display:none;align-items:center;gap:8px;cursor:pointer;
+          font:11px var(--mono);letter-spacing:.14em;writing-mode:vertical-rl;
+          color:var(--warm);background:var(--panel);border:1px solid var(--line);
+          border-left:0;border-radius:0 10px 10px 0;padding:14px 6px}
+  .handle i{width:7px;height:7px;border-radius:50%;background:var(--warm);
+            animation:breathe 3s ease-in-out infinite}
+  .drawer-left .handle{display:flex;color:var(--ok)}
+  .drawer-left .handle i{background:var(--ok)}
+  body.health-degraded .drawer-left .handle{color:var(--degraded)}
+  body.health-degraded .drawer-left .handle i{background:var(--degraded)}
+  body.health-offline .drawer-left .handle{color:var(--overdue)}
+  body.health-offline .drawer-left .handle i{background:var(--overdue)}
+  .drawer-right .handle{display:flex;right:auto;left:-46px;width:46px;
+      color:var(--ink);padding:14px 21px 14px 7px;
+      border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px}
+  .drawer-right .handle i{display:none}
+  /* healthy deployments render nothing on the left at all */
+
+  .body-link{cursor:pointer}
+  .body-link :is(circle,path){pointer-events:all}
+  .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
+  .body-link:hover circle{transform:scale(1.5)}
+  .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+  .group.seen{opacity:1;transform:none}
+  .item{scroll-margin-top:130px}
+  .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .dialwrap{position:relative}
+  .dialwrap>svg{display:block} /* no baseline gap — the dial centre IS the hero centre */
+  .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
+  @keyframes rotor{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+  .breathe{animation:breathe 4.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;
+           border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .manifest{max-width:820px;margin:34px auto 0}
+  .group{margin-bottom:30px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+  .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
+  .item{display:flex;align-items:center;gap:15px;border-radius:14px;
+        padding:14px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
+        background:var(--panel);backdrop-filter:blur(8px)}
+  .item:hover{background:var(--panel-raised);border-color:var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
+           background-color:currentColor!important}
+  .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
+  .dot.sug{background:none!important;border:1.6px solid currentColor}
+  .item .body{flex:1;min-width:0}
+  .item .body b{display:block;font-size:14.5px;font-weight:520}
+  .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+  .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
+  .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
+  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  /* §14 (#469): the corridor — the due-next spine of time, now the manifest */
+  .manifest .corridor{position:relative;margin-top:34px;padding-left:46px}
+  .manifest .corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
+                    background:var(--chart-line)}
+  .manifest .corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
+           background:linear-gradient(180deg,
+             color-mix(in srgb,var(--overdue) 7%, transparent),
+             color-mix(in srgb,var(--overdue) 2%, transparent))}
+  .manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
+                   background:var(--overdue);opacity:.55}
+  .manifest .corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
+  .manifest .corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
+  .manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
+                    filter:blur(4px);opacity:.8}
+  .manifest .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
+  .manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+  .manifest .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
+  .manifest .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
+  .manifest .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
+                 border:1px solid var(--chart-ink);background:var(--bg)}
+  .manifest .corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
+  .manifest .corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
+  .manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+  .manifest .corridor .item{position:relative}
+  .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
+  .manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
+                  box-shadow:0 0 0 2.5px var(--bg)}
+  .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
+  .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+  .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
+  .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+  .suggest{border-style:dashed}
+  .suggest .body span{color:var(--accent)}
+  .suggest .actions{display:flex;gap:8px}
+  .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+  svg text{font-family:var(--mono)}
+
+  .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
+           max-height:76vh;overflow:auto;
+           width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
+           border:1px solid var(--line);border-radius:16px;padding:20px 22px;
+           opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+  .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
+          background:var(--panel-raised);backdrop-filter:blur(16px);
+          padding:26px;transition:transform .35s cubic-bezier(.3,.7,.3,1)}
+  .drawer h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--ink-faint);margin:18px 0 10px}
+  .drawer .close{position:absolute;top:12px;background:none;border:0;
+                 color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+  .drawer-left{left:0;border-right:1px solid var(--line);transform:translateX(-102%)}
+  .drawer-left.open{transform:none}
+  .drawer-left .close{right:14px}
+  .drawer-right{right:0;border-left:1px solid var(--line);transform:translateX(102%)}
+  .drawer-right.open{transform:none}
+  .drawer-right .close{left:14px}
+  .svc{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);padding:7px 2px}
+  .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+  .svc b{color:var(--ink);font-weight:500;flex:1}
+  .svc small{color:var(--ink-faint);font-size:10.5px}
+  .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
+  .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
+  .docview h4{font-size:14.5px;font-weight:600}
+  .docview .sub{font:11px var(--mono);color:var(--ink-faint);margin:2px 0 14px}
+  .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+                border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+  .docview .doc:hover{border-color:var(--accent)}
+  .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
+                  color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+
+  /* CON-12 (new): the north star — creation lives in the sky. The star is
+     the handle of a full-width top drawer; like every edge word, it rides
+     its drawer. */
+  .drawer-top{position:fixed;top:0;left:0;right:0;z-index:11;
+              background:var(--panel-raised);backdrop-filter:blur(16px);
+              border-bottom:1px solid var(--line);
+              transform:translateY(-102%);transition:transform .4s cubic-bezier(.3,.7,.3,1)}
+  .drawer-top.open{transform:none}
+  .drawer-top .inner{max-width:880px;margin:0 auto;padding:30px 24px 26px;
+                     display:flex;flex-direction:column;gap:18px;align-items:center}
+  .drawer-top .crow{align-self:stretch}
+  .drawer-top h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                 color:var(--ink-faint)}
+  .ctypes{display:flex;gap:10px;flex-wrap:wrap}
+  .ctype{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);
+         border:1px solid var(--line);border-radius:99px;padding:8px 16px;cursor:pointer;
+         background:var(--panel)}
+  .ctype:hover{border-color:var(--accent);color:var(--ink)}
+  .ctype .dot{color:var(--ink-mid);background:var(--ink-mid)}
+  .crow{display:flex;gap:14px;align-items:stretch}
+  .cdrop{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:16px 18px;
+         font:12.5px var(--mono);color:var(--ink-faint);text-align:center;cursor:pointer}
+  .cdrop:hover{border-color:var(--accent);color:var(--ink-mid)}
+  .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent);
+         text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:0 18px}
+  .cfull:hover{border-color:var(--accent)}
+  .nstar{position:absolute;top:100%;left:50%;transform:translateX(-50%);
+         display:flex;flex-direction:column;align-items:center;gap:3px;
+         background:none;border:0;cursor:pointer;padding:8px 16px}
+  .nstar svg{overflow:visible}
+  .nstar .glint{animation:northpulse 5.5s ease-in-out infinite}
+  @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
+  .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);
+              text-transform:uppercase;opacity:0;transition:opacity .3s}
+  .nstar:hover span,.drawer-top.open .nstar span{opacity:1;color:var(--accent)}
+  /* v18: while open, the star-handle earns a chip so the way back up is
+     unmistakable, and everything beneath dims behind a scrim */
+  .drawer-top.open .nstar{background:var(--panel-raised);border:1px solid var(--line);
+                          border-top:0;border-radius:0 0 14px 14px}
+  .drawer-top.open .nstar .glint path{fill:var(--accent)}
+  .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
+         backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
+  body.create-open .scrim{opacity:1;pointer-events:auto}
+
+  /* POL-1: arrival — the mark expands into the dial once per load */
+  .dial{transform-origin:50% 50%;animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
+  @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
+  @media (prefers-reduced-motion: reduce){.dial{animation:none}}
+  /* /POL-1 */
+  /* POL-2: perihelion ping */
+  .ping{animation:ping 3.4s ease-out infinite;transform-origin:center;transform-box:fill-box}
+  @keyframes ping{0%{transform:scale(.6);stroke-opacity:.7}70%{transform:scale(3.2);stroke-opacity:0}100%{stroke-opacity:0}}
+  @media (prefers-reduced-motion: reduce){.ping{display:none}}
+  /* /POL-2 */
+  /* POL-3: the current month reads brighter */
+  .now-month{fill:var(--accent);font-weight:600}
+  /* POL-4: bidirectional highlight */
+  .body-link.lit :is(circle,path){transform:scale(1.6)}
+  .item.lit{border-color:var(--accent)}
+  /* POL-5: constellations light on section hover */
+  .celestial polyline{transition:stroke-opacity .3s}
+  .constellation-lit .celestial polyline{stroke-opacity:.85}
+  /* POL-6: chart callout — legible, quadrant-aware */
+  .callout{position:fixed;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
+           background:var(--panel-raised);backdrop-filter:blur(12px);
+           border:1px solid var(--line);border-radius:10px;padding:9px 13px;
+           font:13.5px var(--ui);color:var(--ink);white-space:nowrap}
+  .callout.show{opacity:1;pointer-events:auto}
+  .callout .line{position:absolute;top:50%;width:26px;height:1px;background:var(--accent);opacity:.85}
+  .callout.side-right .line{left:-27px}
+  .callout.side-left .line{right:-27px}
+  .callout b{display:block;font-weight:600;font-size:13.5px}
+  .callout small{font:11.5px var(--mono);color:var(--ink-mid)}
+  .callout .chip{display:none;margin-top:7px;font:11px var(--mono);color:var(--accent);
+                 border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:pointer;background:none}
+  .callout.has-docs .chip{display:inline-block}
+  .callout .chip:hover{border-color:var(--accent)}
+  /* POL-7: restored orbit */
+  #b-mot.restored{transition:transform 1.6s cubic-bezier(.3,.6,.2,1);
+                  transform:translate(28.2px,-99.7px);animation:none}
+  #b-mot.restored circle{fill:var(--ok)!important;transition:fill 1.6s}
+  .comet{stroke:var(--ok);stroke-width:2;stroke-linecap:round;opacity:0}
+  .comet.fly{animation:comet 1.6s ease-out 1}
+  @keyframes comet{0%{opacity:.7;stroke-dashoffset:110}100%{opacity:0;stroke-dashoffset:0}}
+  /* POL-8 v3: quiet is a reward — the CHART ITSELF fades away. Nothing needs
+     you, so there is nothing to read: just the sun, the far greens, and the
+     sky celebrating. No text, no instrument. */
+  body.quiet .breathe, body.quiet .ping, body.quiet [data-body="i-gutter"],
+  body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"]{display:none}
+  .chrome{transition:opacity 2.2s ease}
+  body.quiet .chrome{opacity:.06}
+  #dial-name{transition:opacity 2.2s ease}
+  body.quiet #dial-name{opacity:.3}
+  circle[fill="url(#danger4)"], .dial circle[stroke-dasharray="3 5"]{transition:opacity 1.2s}
+  body.quiet circle[fill="url(#danger4)"]{opacity:0}
+  body.quiet .sky{opacity:1}
+  body.quiet .sky .near{animation-duration:80s}
+  body.quiet .sky .near circle{animation:twinkle 3.6s ease-in-out infinite alternate}
+  @keyframes twinkle{from{opacity:.35}to{opacity:.95}}
+  .meteor{position:fixed;width:130px;height:1px;z-index:1;opacity:0;pointer-events:none;
+          background:linear-gradient(90deg,transparent,#f4f0ff);transform:rotate(-32deg)}
+  body.quiet .meteor{animation:meteor 7s linear infinite}
+  .meteor.m2{animation-delay:3.4s !important;top:22% !important;left:60% !important}
+  .meteor.m3{top:34% !important;left:30% !important}
+  @keyframes meteor{0%,74%{opacity:0;translate:0 0}76%{opacity:.9}86%{opacity:0;translate:210px 131px}100%{opacity:0}}
+  /* POL-10 v2: storm — the camera leans IN on the trouble. The dial zooms
+     toward the inner rings, the far greens are pushed out past the month
+     ring, and every angry colour pops. Meteors burn warm. */
+  body.storm .sky .far{animation-duration:60s}
+  body.storm .sky .near{animation-duration:34s;animation-name:driftjitter}
+  @keyframes driftjitter{0%{transform:translate(0,0)}25%{transform:translate(-18px,2px)}
+    50%{transform:translate(-32px,-2px)}75%{transform:translate(-46px,1px)}100%{transform:translate(-60px,0)}}
+  .dial{transition:transform 2s cubic-bezier(.3,.6,.2,1)}
+  body.storm .dial{transform:scale(1.26)}
+  .dial g[fill="url(#p-jade)"],
+  .dial [data-body="i-smoke"],.dial [data-body="i-svc"]{
+    transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
+  body.storm .dial g[fill="url(#p-jade)"],
+  body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"]{
+    transform:scale(1.17)}
+  .dial .belt{transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
+  body.storm .dial .belt{transform:scale(1.17)}
+  body.storm circle[fill="url(#danger4)"]{opacity:1.6;transform:scale(1.35);transform-origin:190px 190px}
+  body.storm .dial circle[stroke-dasharray="3 5"]{stroke:var(--overdue);stroke-opacity:.85;
+    stroke-width:1.6;filter:drop-shadow(0 0 5px var(--overdue));
+    animation:threshpulse 1.8s ease-in-out infinite}
+  @keyframes threshpulse{0%,100%{stroke-opacity:.35}50%{stroke-opacity:.9}}
+  body.storm [data-body="i-gutter"] circle{filter:saturate(1.5) brightness(1.12) drop-shadow(0 0 7px var(--overdue))}
+  body.storm [data-body="i-mot"] circle,body.storm [data-body="i-boiler"] circle{
+    filter:saturate(1.45) brightness(1.1) drop-shadow(0 0 6px var(--warm))}
+  body.storm circle[filter="url(#sun)"]{opacity:.5}
+  body.storm .meteor{animation:meteor 5.5s linear infinite;
+    background:linear-gradient(90deg,transparent,#ff8a4d)}
+  body.storm .meteor.m2{background:linear-gradient(90deg,transparent,#f87171)}
+  body.storm .meteor.m3{animation-delay:1.7s !important;
+    background:linear-gradient(90deg,transparent,#ffd166)}
+  /* POL-9: command palette on the explore field */
+  .palette{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:10px;
+           width:340px;background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:14px;padding:8px;display:none;text-align:left}
+  .palette.open{display:block}
+  .palette div{font:12.5px var(--mono);color:var(--ink-mid);padding:8px 10px;border-radius:8px}
+  .palette div b{color:var(--ink);font-weight:500}
+  .palette div:hover{background:var(--panel)}
+  .palette .act{color:var(--accent)}
+
+  /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
+     starfield streams past with parallax, the destination holds its place
+     and grows as we approach. Nothing ever swaps. */
+  .minisys{position:absolute;cursor:pointer;z-index:3;
+           transform-origin:118px 95px; /* the ring centre — flights pivot on it */
+           transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s}
+  .minisys:hover .msring{stroke-opacity:.9}
+  .msring{transition:stroke-opacity .3s}
+  .dialwrap{transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity .9s ease}
+  /* v18: the old chart leaves COMPLETELY with the flight — no low-opacity
+     remnant trailing the camera. The new dial then does its full fanfare
+     arrival at the destination. */
+  .hero.flying .dialwrap{transform:translate(calc(var(--flyx)*-1.7),calc(var(--flyy)*-1.7)) scale(.45);
+                         opacity:0}
+  .hero.flying .minisys{opacity:.08;
+    transform:translate(calc(var(--flyx)*-1),calc(var(--flyy)*-1))}
+  /* v18.1: the destination rides the same camera motion as the world, so it
+     arrives EXACTLY at centre screen, growing all the way — and the chart
+     blooms out of its ring while it is still settling: one motion, no dwell */
+  /* the target flies home by its OWN rendered offset (clamped/relaxed), not
+     the raw galaxy delta — so its ring centre lands exactly on the dial sun */
+  .hero.flying .minisys.target{opacity:1;
+    transform:translate(calc(var(--tox)*-1),calc(var(--toy)*-1)) scale(2.3)}
+  .minisys.dissolve{opacity:0!important;transition:opacity .55s ease!important}
+  .hero.flying.arriving .dialwrap{transform:none;opacity:1;transition:none}
+  /* v18.2: the dial GROWS out of the aligned centre — slow, deliberate */
+  @keyframes bloom{from{transform:scale(.28);opacity:0}28%{opacity:1}to{transform:scale(1);opacity:1}}
+  .minisys.settle{animation:settle 1s ease .2s backwards}
+  @keyframes settle{from{opacity:0}to{opacity:1}}
+
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         font:10.5px var(--mono);color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  @media (prefers-reduced-motion: reduce){
+    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+  }
+  .inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
+  .inbox-orb.waiting{color:var(--accent);border-color:var(--accent)}
+  .inbox-orb.waiting svg{animation:breathe 3.2s ease-in-out infinite}
+  .inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
+    background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
+    display:grid;place-items:center}
+  .inbox-orb:not(.waiting) .count{display:none}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g id="cam-far" class="cam"><g class="far" fill="#e9edf8"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
+    <g id="cam-near" class="cam"><g class="near" fill="#f4f0ff"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+<div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
+<div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
+<div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
+
+<!-- §14/#472: the inbox, one click from anywhere — and a colour change
+     IS the notification. Quiet ink when nothing waits; the dish ring breathes
+     accent when something does. The count is real information (§12). -->
+<a class="orb inbox-orb waiting" href="inbox.html" title="Inbox — 1 waiting" aria-label="Inbox — 1 waiting">
+  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <circle cx="9" cy="11" r="2.6" fill="currentColor"/>
+    <path d="M 3 11 A 6 6 0 0 1 15 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65"/>
+    <path d="M 5.4 11 A 3.6 3.6 0 0 1 12.6 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".85"/>
+  </svg>
+  <i class="count">1</i>
+</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu"
+        onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span id="who-role">Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#070d1f" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+    <button style="background:#efe9db" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <button style="background:#eef1f6" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
+<aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
+  <div class="inner">
+    <h4>Add to your orbit</h4>
+    <div class="ctypes">
+      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>service</button>
+      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+    </div>
+    <div class="crow">
+      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <a class="cfull" href="../family/create.html">open the full form →</a>
+    </div>
+  </div>
+  <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit"
+          onclick="toggleCreate(this)">
+    <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
+      <g class="glint" style="transform-origin:0 0">
+        <circle r="9" fill="var(--ink)" opacity=".12"/>
+        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
+              fill="var(--ink)" opacity=".9"/>
+        <circle r="2" fill="var(--ink)"/>
+      </g>
+    </svg>
+    <span>create</span>
+  </button>
+</aside>
+
+<div class="scrim" onclick="toggleCreate(document.getElementById('nstar'))" aria-hidden="true"></div>
+<div class="page">
+    <div class="hero" id="hero">
+    <!-- backdrop constellations are generated from the galaxy map -->
+    <div class="dialwrap">
+      <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="img"
+         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
+      <defs>
+        <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="4"/>
+        </filter>
+        <filter id="sun" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur stdDeviation="9"/>
+        </filter>
+        <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="#ffb3ab"/><stop offset="42%" stop-color="#e0453e"/>
+          <stop offset="100%" stop-color="#7e1a1f"/>
+        </radialGradient>
+        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/>
+          <stop offset="100%" stop-color="#12603a"/>
+        </radialGradient>
+        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="#ffe1a0"/><stop offset="45%" stop-color="#f0a52b"/>
+          <stop offset="100%" stop-color="#8a5a10"/>
+        </radialGradient>
+        <radialGradient id="p-sky" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="#cfe4ff"/><stop offset="45%" stop-color="#6fa3ef"/>
+          <stop offset="100%" stop-color="#2a4f8f"/>
+        </radialGradient>
+        <radialGradient id="danger4" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
+          <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
+          <stop offset="85%" stop-color="#f87171" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <g class="chrome">
+      <g class="celestial rotor">
+        <g stroke="var(--chart-line-soft)" stroke-width=".5">
+          <line x1="190" y1="14" x2="190" y2="34"/><line x1="314.5" y1="65.5" x2="300" y2="80"/>
+          <line x1="366" y1="190" x2="346" y2="190"/><line x1="314.5" y1="314.5" x2="300" y2="300"/>
+          <line x1="190" y1="366" x2="190" y2="346"/><line x1="65.5" y1="314.5" x2="80" y2="300"/>
+          <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
+        </g>
+        <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
+      </g>
+      <g class="celestial">
+        <polyline points="175.7,140 215.2,127.6 257.1,152.8" fill="none"
+                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
+                  stroke-dasharray="1 5" stroke-linecap="round"/>
+      </g>
+
+      <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
+              stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+      <circle cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+      <circle cx="190" cy="190" r="150" fill="none" stroke="var(--chart-line)" stroke-width="1.5"/>
+
+      <g stroke="var(--chart-line)" stroke-width="1.5">
+        <line x1="190" y1="40" x2="190" y2="47"/><line x1="265" y1="60.1" x2="261.5" y2="66.2"/>
+        <line x1="319.9" y1="115" x2="313.8" y2="118.5"/><line x1="340" y1="190" x2="333" y2="190"/>
+        <line x1="319.9" y1="265" x2="313.8" y2="261.5"/><line x1="265" y1="319.9" x2="261.5" y2="313.8"/>
+        <line x1="190" y1="340" x2="190" y2="333"/><line x1="115" y1="319.9" x2="118.5" y2="313.8"/>
+        <line x1="60.1" y1="265" x2="66.2" y2="261.5"/><line x1="40" y1="190" x2="47" y2="190"/>
+        <line x1="60.1" y1="115" x2="66.2" y2="118.5"/><line x1="115" y1="60.1" x2="118.5" y2="66.2"/>
+      </g>
+      <g font-size="9" fill="var(--chart-ink)" text-anchor="middle">
+        <text x="190" y="31" class="now-month" data-polish="POL-3">AUG</text><text x="271" y="53">SEP</text>
+        <text x="330" y="112">OCT</text><text x="352" y="194">NOV</text>
+        <text x="330" y="274">DEC</text><text x="271" y="333">JAN</text>
+        <text x="190" y="355">FEB</text><text x="109" y="333">MAR</text>
+        <text x="50" y="274">APR</text><text x="28" y="194">MAY</text>
+        <text x="50" y="112">JUN</text><text x="109" y="53">JUL</text>
+      </g>
+
+      <path d="M190 38 l5.5 9 h-11 Z" style="fill:var(--accent)"/>
+
+      <!-- Trails, comet and bodies below are generated by the app's chart
+           transform (#451/#414, fix-both): the dial is an orbital calendar
+           (angle = days − 90, radius = 62 + 0.242·days) and every value here
+           is the law's own output for the sample workspace. -->
+      <g fill="none" stroke-linecap="round">
+        <path d="M 169.7 142.1 A 52 52 0 0 1 173.1 140.8" stroke="var(--overdue)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 200.3 124.9 A 65.872 65.872 0 0 1 204.8 125.8" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 207.4 125 A 67.324 67.324 0 0 1 211.9 126.3" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 250.1 146.3 A 74.342 74.342 0 0 1 253 150.6" stroke="var(--upcoming)" stroke-opacity=".45" stroke-width="2"/>
+      </g>
+
+      <line data-polish="POL-7" id="comet" class="comet" x1="208.2" y1="126.7" x2="236.4" y2="27"
+            stroke-dasharray="110" stroke-dashoffset="110"/>
+      </g><!-- /chrome -->
+      <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
+      <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+
+      <circle data-polish="POL-2" class="ping" cx="175.7" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
+      <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><g class="breathe"><circle cx="175.7" cy="140" r="6.3" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/><circle cx="174.44" cy="141.575" r="2.079" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="208.2" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><path d="M 208.2 121.5 A 5.2 5.2 0 0 1 208.2 131.9 Z" fill="rgba(0,0,0,.42)"/><circle cx="207.16" cy="128" r="1.716" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-boiler" data-title="Boiler service" data-t="T−22d" data-cost="~£120" href="#i-boiler"><g class="breathe"><circle cx="215.2" cy="127.6" r="6" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="214" cy="129.1" r="1.98" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/></g></a>
+      <a class="body-link" data-body="i-chimney" data-title="Chimney sweep" data-t="T−61d" data-cost="~£90" href="#i-chimney"><g><circle cx="257.1" cy="152.8" r="5.7" style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/><circle cx="255.96" cy="154.225" r="1.881" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-smoke" data-title="Smoke alarm batteries" data-t="T−122d" data-cost="~£12" href="#i-smoke"><circle cx="267.6" cy="238.5" r="3.5" fill="url(#p-jade)"/></a>
+      <a class="body-link" data-body="i-svc" data-title="Car full service" data-t="T&#8722;161d" data-cost="~&pound;300" data-docs="2" href="#i-svc"><g><circle cx="222.9" cy="285.5" r="7" style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/><circle cx="221.5" cy="287.25" r="2.31" fill="rgba(255,255,255,.38)"/></g></a>
+      <g class="belt" aria-hidden="true">
+        <ellipse cx="222.9" cy="285.5" rx="13.5" ry="4.6" transform="rotate(-24 222.9 285.5)"
+                 fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
+      </g>
+    </svg>
+    </div>
+    <div class="hero-foot">
+      <div class="splash-search" style="position:relative">
+        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
+               onfocus="openPalette(true)" onblur="setTimeout(()=>openPalette(false),150)">
+        <div class="palette" data-polish="POL-9" id="palette">
+          <div><b>Car MOT — Volvo V60</b> <small>· T−16d</small></div>
+          <div><b>Boiler service</b> <small>· T−22d</small></div>
+          <div class="act">→ complete "Car MOT — Volvo V60"</div>
+          <div class="act">→ add an item</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — the
+         due-next screen's spine of time, transplanted; that screen retires.
+         Full scrollback, nearest at the top, suggestions in date order. -->
+    <div class="manifest" id="manifest-top">
+    <div class="corridor">
+      <div class="redzone">
+        <div class="item" id="i-gutter">
+          <span class="planet" style="color:var(--overdue)"><i></i></span>
+          <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150.00</span></div>
+          <div class="t over">T+16d<small>28 Jul</small></div>
+        </div>
+      </div>
+      <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · WED 13 AUG</span><div class="rule"></div></div>
+      <div class="item" id="i-mot">
+        <span class="planet ter" style="color:var(--warm)"><i></i></span>
+        <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
+        <div class="t soon">T−16d<small>29 Aug</small></div>
+      </div>
+      <div class="month"><span>SEP</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-boiler">
+        <span class="planet" style="color:var(--warm)"><i></i></span>
+        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120.00</span></div>
+        <div class="t soon">T−22d<small>04 Sep</small></div>
+      </div>
+      <div class="month"><span>OCT</span><div class="rule"></div><small>2 approaching</small></div>
+      <div class="item suggest" id="i-insurance">
+        <span class="planet sug"><i></i></span>
+        <div class="body"><b>Home insurance renewal</b><span>Found in 1 forwarded document · renews 03 Oct · ~£400.00</span></div>
+        <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+      </div>
+      <div class="item" id="i-chimney">
+        <span class="planet" style="color:var(--upcoming)"><i></i></span>
+        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90.00</span></div>
+        <div class="t up">T−61d<small>13 Oct</small></div>
+      </div>
+      <div class="month"><span>DEC</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-smoke">
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12.00</span></div>
+        <div class="t ok">T−122d<small>13 Dec</small></div>
+      </div>
+      <div class="month"><span>JAN</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-svc">
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Car full service</b><span>Vehicles · orbital period 1 year · ~£300.00</span></div>
+        <div class="t ok">T−161d<small>21 Jan</small></div>
+      </div>
+    </div>
+    <div class="horizon">— beyond the horizon: nothing scheduled past January —</div>
+  </div>
+</div>
+
+<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-label="System status">
+  <button class="handle" id="edge-health" aria-expanded="false"
+          onclick="const d=this.parentElement;const open=d.classList.toggle('open');this.setAttribute('aria-expanded',String(open))">
+    <i></i><span>degraded</span></button>
+  <h4>System status</h4>
+  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
+  <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
+  <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
+  <h4>Last health check</h4>
+  <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
+  <h4>Full diagnostics</h4>
+  <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
+</aside>
+<aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
+  <button class="handle" aria-expanded="false"
+          onclick="const d=this.parentElement;const open=d.classList.toggle('open');this.setAttribute('aria-expanded',String(open))">
+    <i></i><span>key</span></button>
+  <h4>Urgency</h4>
+  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
+  <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
+  <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
+  <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
+  <h4>Types</h4>
+  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
+  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
+  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
+  <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
+  <h4>Physics</h4>
+  <div class="keyrow">closer = sooner</div>
+  <div class="keyrow">bigger = costlier</div>
+  <div class="keyrow">belt = documents attached</div>
+  <div class="keyrow">the sky&rsquo;s weather = your workload</div>
+</aside>
+<div class="docview" id="docview" role="dialog" aria-label="Documents">
+  <button class="close" onclick="document.getElementById('docview').classList.remove('open')">×</button>
+  <h4 id="docview-title">Car full service</h4>
+  <div class="sub">2 documents · encrypted · scanned clean</div>
+  <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
+  <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
+</div>
+<div class="demos" aria-label="Mockup animation demos">
+  <span>DEMOS</span>
+  <button onclick="replayArrival()">replay arrival</button>
+  <button onclick="restoreOrbit()">complete Car MOT</button>
+  <button onclick="document.body.classList.remove('storm');document.body.classList.toggle('quiet')">quiet state</button>
+  <button onclick="document.body.classList.remove('quiet');document.body.classList.toggle('storm')">storm state</button>
+  <button onclick="cycleHealth()">health: cycle</button>
+</div>
+<footer>orbit · the inbox orb · issue #472 · quiet ink when nothing waits, breathing accent + a real count when something does · clean flights: the old chart leaves with the camera, the new one arrives with fanfare · scrim under the create drawer · the sky always drifts</footer>
+
+<script>
+/* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
+/* Values generated by the app's own chart transform (#451, fix-both): a
+   household's position derives from its identity (CON-13 — bearings can
+   never move) and its planet dots from its items' identities and due states.
+   The scatter matches the previously hand-placed layout to within a few px;
+   the sample workspace's ids were chosen so it does. */
+const GALAXY = {
+  lawson:  { name:"Lawson Home",     pos:[0,0],
+             planets:[[-9,21,2.4,"--warm"],[-25,8,2.4,"--warm"],[-13,-24,2.1,"--warm"]] },
+  seaside: { name:"Seaside Cottage", pos:[-617,-305],
+             planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  mumdad:  { name:"Mum & Dad’s", pos:[452,522],
+             planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]] },
+  narrow:  { name:"The Narrowboat",  pos:[-515,393],
+             planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  grans:   { name:"Gran’s Flat", pos:[722,-184],
+             planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+};
+let camera = "lawson";
+let flying = false;
+const hero = document.getElementById("hero");
+
+/* the starfield offset is a pure function of the camera position, so a
+   flight animates between two truths and there is nothing to snap back */
+function pointSky(){
+  const [cx, cy] = GALAXY[camera].pos;
+  document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
+  document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
+}
+
+function renderGalaxy(settle){
+  for (const old of hero.querySelectorAll(".minisys")) old.remove();
+  const w = hero.clientWidth, h = hero.clientHeight;
+  const [cx, cy] = GALAXY[camera].pos;
+  const placed = [];
+  for (const [key, hh] of Object.entries(GALAXY)) {
+    if (key === camera) continue;   // you never see your own constellation — you're inside it
+    let ox = hh.pos[0] - cx, oy = hh.pos[1] - cy;
+    const dist = Math.hypot(ox, oy);
+    // clamp to the visible sky along the true bearing; dim with distance
+    const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - (oy < 0 ? 215 : 155))));
+    ox *= f; oy *= f;
+    placed.push({ key, hh, ox, oy, dist });
+  }
+  // narrow viewports can fold two bearings onto the same patch of sky —
+  // relax overlaps apart so every constellation stays individually clickable.
+  // Separation scales with the viewport (§14/#473): a wide desk has room to
+  // spare, so the sky breathes into it.
+  const minSep = Math.max(230, Math.min(340, w * 0.18));
+  for (let round = 0; round < 4; round++) {
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i], z = placed[j];
+      let dx = z.ox - a.ox, dy = z.oy - a.oy;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d < minSep) {
+        const push = (minSep - d) / 2;
+        dx /= d; dy /= d;
+        a.ox -= dx * push; a.oy -= dy * push;
+        z.ox += dx * push; z.oy += dy * push;
+      }
+    }
+  }
+  // The one case the bearing yields (mirrors the app, owner 2026-08-15):
+  // no position on a steep bearing is both clear of the dial and inside the
+  // sky, so it slides around its circle to the band edge on its own side.
+  // Clamp first, then one horizontal relax: the clamp can fold separated
+  // bearings onto the same band edge (§14/#473).
+  for (const point of placed) {
+    const lim = point.oy < 0 ? h / 2 - 215 : h / 2 - 155;
+    if (Math.abs(point.oy) > lim) {
+      const r = Math.hypot(point.ox, point.oy);
+      const side = Math.sign(point.ox) || 1;
+      point.oy = Math.sign(point.oy) * Math.max(lim, 0);
+      point.ox = side * Math.sqrt(Math.max(r * r - point.oy * point.oy, 0));
+    }
+  }
+  for (let round = 0; round < 4; round++) {
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i], z = placed[j];
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      const push = (minSep - gap) / 2;
+      const left = a.ox <= z.ox ? a : z;
+      const right = left === a ? z : a;
+      left.ox = Math.max(-(w / 2) + 60, left.ox - push);
+      right.ox = Math.min(w / 2 - 60, right.ox + push);
+    }
+  }
+  for (const { key, hh, ox, oy, dist } of placed) {
+    const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
+    const div = document.createElement("div");
+    div.className = "minisys" + (settle ? " settle" : "");
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-label", "Fly to " + hh.name);
+    // The label and its leader always extend AWAY from the dial (owner,
+    // 2026-08-16): left of centre reads leftward, right of centre is the
+    // horizontal mirror. Verbatim from the app (home.behaviour.js).
+    const away = ox > 0;
+    const mx = (x) => (away ? 210 - x : x);
+    const ringX = mx(118);
+    div.style.left = (w / 2 + ox - ringX) + "px";
+    div.style.top = (h / 2 + oy - 95) + "px";
+    div.style.setProperty("--tox", ox + "px");
+    div.style.setProperty("--toy", oy + "px");
+    div.style.opacity = dim;
+    const label = hh.name.toUpperCase();
+    const tw = Math.min(150, label.length * 6.6);
+    // the arrow extends underneath the text, then veers toward the ring
+    const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+    div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
+      <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent)" opacity=".85">${label}</text>
+      <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+      <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+      <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+      ${hh.planets.map(([px, py, pr, tok]) =>
+        `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+    </svg>`;
+    div.addEventListener("click", () => flyTo(key, div));
+    hero.appendChild(div);
+  }
+}
+
+function flyTo(key, mini){
+  if (flying) return;
+  flying = true;
+  const [cx, cy] = GALAXY[camera].pos;
+  const dx = GALAXY[key].pos[0] - cx, dy = GALAXY[key].pos[1] - cy;
+  hero.style.setProperty("--flyx", dx + "px");
+  hero.style.setProperty("--flyy", dy + "px");
+  hero.classList.add("flying");
+  mini.classList.add("target");
+  camera = key;
+  pointSky();               // the starfield streams to the new truth
+  // one continuous motion in two beats that overlap by a breath: the flight
+  // lands the ring centre EXACTLY concentric with the dial's sun, and only
+  // then does the chart grow out of that shared centre — slow and deliberate
+  setTimeout(() => {
+    document.getElementById("dial-name").textContent = GALAXY[key].name;
+    document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
+      (key === "lawson" ? "owner" : "member");
+    hero.classList.add("arriving");   // dial pinned at centre, under the ring
+    mini.classList.add("dissolve");   // the ring hands the centre to the chart
+    const dial = document.querySelector(".dial");
+    dial.style.animation = "none"; void dial.offsetWidth;
+    dial.style.animation = "bloom 2.4s cubic-bezier(.22,.61,.21,1) 1";
+  }, 1120);
+  setTimeout(() => {
+    const wrap = hero.querySelector(".dialwrap");
+    wrap.style.transition = "none";
+    hero.classList.remove("flying");
+    hero.classList.remove("arriving");
+    void wrap.offsetWidth;
+    wrap.style.transition = "";
+    renderGalaxy(true);     // home appears on the reverse bearing of the flight
+    flying = false;
+  }, 1600);
+}
+
+/* ---- starfield: generated, two depth layers ---- */
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+
+function setTheme(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries)
+    if (entry.isIntersecting) entry.target.classList.add("seen");
+}, { threshold: 0.15 });
+for (const group of document.querySelectorAll(".group")) observer.observe(group);
+/* POL-6 + POL-4: callout tooltip and bidirectional highlight */
+const callout = document.createElement("div");
+callout.className = "callout";
+callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+document.body.appendChild(callout);
+for (const link of document.querySelectorAll(".body-link")) {
+  link.addEventListener("mouseenter", () => {
+    const rect = link.getBoundingClientRect();
+    const dial = document.querySelector(".dial").getBoundingClientRect();
+    const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
+    callout.querySelector("b").textContent = link.dataset.title;
+    callout.querySelector("small").textContent = link.dataset.t + " · " + link.dataset.cost;
+    callout.classList.toggle("side-right", rightSide);
+    callout.classList.toggle("side-left", !rightSide);
+    callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
+    callout.style.right = rightSide ? "" : (innerWidth - rect.left + 34) + "px";
+    callout.style.top = (rect.top - 14) + "px";
+    const docs = link.dataset.docs;
+    callout.classList.toggle("has-docs", Boolean(docs));
+    if (docs) {
+      const chip = callout.querySelector(".chip");
+      chip.textContent = "◆ " + docs + " documents";
+      chip.onclick = () => openDocsByTitle(link.dataset.title);
+    }
+    callout.classList.add("show");
+    document.getElementById(link.dataset.body)?.classList.add("lit");
+    document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+  });
+  link.addEventListener("mouseleave", () => {
+    setTimeout(() => { if (!callout.matches(":hover")) {
+      callout.classList.remove("show");
+      document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+    }}, 160);
+  });
+}
+for (const item of document.querySelectorAll(".item[id]")) {
+  item.addEventListener("mouseenter", () => {
+    document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+  });
+  item.addEventListener("mouseleave", () => {
+    document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+  });
+}
+/* POL-5: constellations on section-header hover */
+const homeHeader = [...document.querySelectorAll(".group h3")]
+  .find((h) => h.textContent.includes("Needs attention"));
+if (homeHeader) {
+  homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
+  homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
+}
+function replayArrival(){
+  const dial = document.querySelector(".dial");
+  dial.style.animation = "none"; void dial.offsetWidth;
+  dial.style.animation = "";
+}
+function restoreOrbit(){
+  document.getElementById("b-mot").classList.add("restored");
+  const comet = document.getElementById("comet");
+  comet.classList.remove("fly"); void comet.getBBox; comet.classList.add("fly");
+}
+/* POL-9 */
+function openPalette(open){
+  document.getElementById("palette").classList.toggle("open", open);
+}
+addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+    event.preventDefault(); document.getElementById("explore").focus();
+  }
+});
+function openDocsByTitle(title){
+  callout.classList.remove("show");
+  document.getElementById("docview-title").textContent = title;
+  document.getElementById("docview").classList.add("open");
+}
+callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
+const healthStates = ["healthy","degraded","offline"];
+let healthIndex = 1;
+function applyHealth(){
+  document.body.classList.toggle("health-degraded", healthStates[healthIndex]==="degraded");
+  document.body.classList.toggle("health-offline", healthStates[healthIndex]==="offline");
+  const word = healthStates[healthIndex]==="healthy" ? "status" :
+    healthStates[healthIndex]==="offline" ? "offline" : "degraded";
+  document.querySelector("#edge-health span").textContent = word;
+  if (healthStates[healthIndex]==="healthy") document.getElementById("statusdrawer").classList.remove("open");
+}
+function cycleHealth(){ healthIndex = (healthIndex+1)%3; applyHealth(); }
+applyHealth();
+function toggleAccount(button){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+function toggleCreate(button){
+  const drawer = document.getElementById("createdrawer");
+  const open = drawer.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("create-open", open);
+  button.querySelector("span").textContent = open ? "close" : "create";
+}
+addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("create-open"))
+    toggleCreate(document.getElementById("nstar"));
+});
+/* v17: every drawer animates home when you scroll down */
+let lastY = scrollY;
+addEventListener("scroll", () => {
+  if (scrollY > lastY + 4) {
+    for (const id of ["statusdrawer", "keydrawer"]) {
+      const drawer = document.getElementById(id);
+      if (drawer.classList.contains("open")) {
+        drawer.classList.remove("open");
+        drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+      }
+    }
+    if (document.body.classList.contains("create-open"))
+      toggleCreate(document.getElementById("nstar"));
+  }
+  lastY = scrollY;
+}, { passive: true });
+
+pointSky();
+renderGalaxy(false);
+addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
+</script>
+</body>
+</html>
