@@ -456,6 +456,12 @@ as ordinary fix-both changes rather than blocking the build.
   galaxy/constellation names (genuine astronomy — Lyra, Vela, Cassiopeia,
   Andromeda — never invented words), so the universe reads bigger than the
   instance while the household marks stay the only ones that mean anything.
+- **The living backdrops are ratified; the real world reads a notch clearer**
+  (owner: "Love love love the new back drops"): the direction stands, but
+  the names and lines of the real-world objects — the famous craft, the
+  real star systems and constellations — are all a bit too faded. They
+  must be easier to read without becoming bright or distracting: up from
+  too-subtle, still below the household marks that mean something.
 - **Backdrops are alive, and never the same twice** (owner, mid-review,
   mockups first): the relay backdrop gets 2–3 satellites — "we're conveying
   messages after all" — not too big, not too small, placed at random. The
