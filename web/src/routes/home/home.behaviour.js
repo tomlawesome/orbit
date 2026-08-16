@@ -15,6 +15,7 @@
  *      Inline handlers need their functions to be globals; a module has none.
  */
 import { fillStarTiles } from "$lib/sky.js";
+import { placeGalaxy } from "./placement.js";
 
 export function mountHome({ galaxy, primary }) {
   /*
@@ -69,40 +70,6 @@ export function mountHome({ galaxy, primary }) {
     for (const old of hero.querySelectorAll(".minisys")) old.remove();
     if (!GALAXY[camera]) return; // no household yet — see pointSky (#453)
     const w = hero.clientWidth, h = hero.clientHeight;
-    const [cx, cy] = GALAXY[camera].pos;
-    const placed = [];
-    for (const [key, hh] of Object.entries(GALAXY)) {
-      if (key === camera) continue;   // you never see your own constellation — you're inside it
-      const dx = hh.pos[0] - cx, dy = hh.pos[1] - cy;
-      const dist = Math.hypot(dx, dy);
-      /*
-       * CON-13, honoured properly (#428). A household is a fixed point of
-       * navigation, so its BEARING is the part of its position that carries
-       * meaning and nothing below is allowed to change it. Distance is
-       * expressed as radius, which every later pass may negotiate freely.
-       *
-       * Previously the offset was clamped as a vector and then shoved about by
-       * the overlap pass and the keep-out, both of which moved constellations
-       * off their true bearing — so after a flight the survivors landed
-       * wherever the arithmetic left them, and the sky read as reshuffled
-       * rather than rotated.
-       */
-      placed.push({ key, hh, dist, angle: Math.atan2(dy, dx), radius: 0 });
-    }
-
-    /* How far the visible sky extends on a given bearing: the ellipse the
-       clamp used to apply, expressed as a radius so it can bound one instead
-       of redirecting it. */
-    const reachOn = (angle) => {
-      /* The top of the sky is busier than the bottom — the north-star create
-         handle and the account row live there — so upward bearings get 60px
-         more clearance (owner-found: a constellation squashed behind the
-         handle, 2026-08-15). */
-      const rx = w / 2 + 40;
-      const ry = Math.max(80, h / 2 - (Math.sin(angle) < 0 ? 215 : 155));
-      const c = Math.cos(angle), sn = Math.sin(angle);
-      return 1 / Math.hypot(c / rx, sn / ry);
-    };
     /* .dialwrap's offsetWidth, not the dial's bounding rect: the rect includes
        transforms, and the chart is mid-fanfare (POL-1) on first render, so
        measuring it there yields a keep-out sized for a chart that is still
@@ -112,84 +79,21 @@ export function mountHome({ galaxy, primary }) {
        clear while the ring sat on the dial (owner, 2026-08-16). */
     const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
 
-    for (const point of placed) {
-      /* Nearer households sit closer in, but never inside the chart. Where a
-         bearing cannot clear the chart within the visible band — near-vertical
-         on a short viewport — the keep-out wins and the constellation sits
-         partly outside the band. The bearing is never the thing that gives. */
-      point.radius = Math.max(keepOut, Math.min(point.dist, reachOn(point.angle)));
-    }
-
-    /* Two bearings can fold onto the same patch of sky. Separate them by
-       pushing one further out and drawing the other closer in — radius only,
-       so both keep their true direction. The minimum separation scales with
-       the viewport (§14/#473): a wide desk has room to spare, so the sky
-       breathes into it instead of huddling at mockup spacing. */
-    const minSep = Math.max(230, Math.min(340, w * 0.18));
-    for (let round = 0; round < 6; round++) {
-      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-        const a = placed[i], z = placed[j];
-        const ax = Math.cos(a.angle) * a.radius, ay = Math.sin(a.angle) * a.radius;
-        const zx = Math.cos(z.angle) * z.radius, zy = Math.sin(z.angle) * z.radius;
-        const gap = Math.hypot(zx - ax, zy - ay);
-        if (gap >= minSep) continue;
-        const push = (minSep - gap) / 2;
-        const inner = a.radius <= z.radius ? a : z;
-        const outer = inner === a ? z : a;
-        inner.radius = Math.max(keepOut, inner.radius - push);
-        /* Capped: an uncapped push could shove the outer constellation past
-           the visible band — the other half of the trapped-behind-the-handle
-           bug. */
-        outer.radius = Math.min(outer.radius + push, reachOn(outer.angle) + 40);
-      }
-    }
-
-    /* The sky's usable vertical half-extents: the top is busier (the
-       north-star create handle, the account row), so it ends sooner. */
-    const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
-
-    for (const point of placed) {
-      let ox = Math.cos(point.angle) * point.radius, oy = Math.sin(point.angle) * point.radius;
-      /*
-       * The one case where the bearing yields (#428 amendment, owner-found
-       * twice: a constellation trapped behind the create handle). On a short
-       * hero the keep-out radius exceeds the sky's vertical extent, so a
-       * steep bearing has NO position that is both outside the dial and
-       * inside the sky. Sitting behind a control is worse than bending: the
-       * constellation keeps its radius (the keep-out holds) and slides
-       * around the circle to the band edge on its own side — minimally, and
-       * deterministically, so the sky is still fixed for a given viewport.
-       */
-      const limit = oy < 0 ? safeTop : safeBottom;
-      if (Math.abs(oy) > limit) {
-        oy = Math.sign(oy) * Math.max(limit, 0);
-        ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(point.radius * point.radius - oy * oy, 0));
-      }
-      point.ox = ox;
-      point.oy = oy;
-    }
     /*
-     * The clamp can undo the separation (§14/#473, owner screenshot: two
-     * rings interleaved at a band edge) — bearings that yielded to the same
-     * band land on the same patch. One horizontal relax AFTER the clamp:
-     * clamped neighbours slide apart along the band, deterministically,
-     * still on their own side of the sky.
+     * THE FIXED MAP (#428, ratified 2026-08-16). The whole arrangement is one
+     * pure function of the household set, the camera and the viewport — see
+     * placement.js for the law and for why it had to stop being computed
+     * inline here. Nothing in this function may nudge a position afterwards:
+     * a flight re-renders, and a re-render that could arrive at a different
+     * answer is exactly the sky reshuffling itself.
+     *
+     * The camera's own constellation is in the answer and dropped here: you
+     * never see it, because you are inside it.
      */
-    for (let round = 0; round < 4; round++) {
-      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-        const a = placed[i], z = placed[j];
-        const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
-        if (gap >= minSep) continue;
-        const push = (minSep - gap) / 2;
-        const left = a.ox <= z.ox ? a : z;
-        const right = left === a ? z : a;
-        left.ox = Math.max(-(w / 2) + 60, left.ox - push);
-        right.ox = Math.min(w / 2 - 60, right.ox + push);
-      }
-    }
+    const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
+      .filter((point) => !point.isCamera);
 
-    for (const { key, hh, dist, ox, oy } of placed) {
-      const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
+    for (const { id: key, household: hh, dim, ox, oy } of placed) {
       const div = document.createElement("div");
       div.className = "minisys" + (settle ? " settle" : "");
       div.setAttribute("role", "button");
@@ -549,9 +453,9 @@ export function mountHome({ galaxy, primary }) {
  * The labelled sky (§11, #453): a viewer with no household stands at the
  * origin of the same fixed map, and every visible household appears at its
  * identity bearing — label and ring only, no planets, no flight. Clicking
- * asks; a pending request is written on the label. The placement is
- * renderGalaxy's own (clamp to the visible bands, relax overlaps, labels
- * always away from centre) without the camera or the dial keep-out.
+ * asks; a pending request is written on the label. The placement is the one
+ * fixed map (placement.js), read from the origin instead of from a camera and
+ * with no chart to keep clear.
  */
 export function mountEmptySky({ galaxy, onAsk }) {
   const hero = document.getElementById("hero");
@@ -560,51 +464,17 @@ export function mountEmptySky({ galaxy, onAsk }) {
   function render() {
     for (const old of hero.querySelectorAll(".minisys")) old.remove();
     const w = hero.clientWidth, h = hero.clientHeight;
-    const placed = Object.entries(galaxy).map(([id, hh]) => {
-      let [ox, oy] = hh.pos;
-      const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - (oy < 0 ? 215 : 155))));
-      return { id, hh, ox: ox * f, oy: oy * f };
-    });
-    /* Separation scales with the viewport (§14/#473) — same law as the
-       member sky's renderGalaxy. */
-    const minSep = Math.max(230, Math.min(340, w * 0.18));
-    for (let round = 0; round < 4; round++) {
-      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-        const a = placed[i], z = placed[j];
-        let dx = z.ox - a.ox, dy = z.oy - a.oy;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < minSep) {
-          const push = (minSep - d) / 2;
-          dx /= d; dy /= d;
-          a.ox -= dx * push; a.oy -= dy * push;
-          z.ox += dx * push; z.oy += dy * push;
-        }
-      }
-    }
-    /* Clamp to the bands first, then relax once more horizontally: the clamp
-       can fold separated bearings onto the same band edge (§14/#473). */
-    for (const point of placed) {
-      const lim = point.oy < 0 ? h / 2 - 215 : h / 2 - 155;
-      if (Math.abs(point.oy) > lim) {
-        const r = Math.hypot(point.ox, point.oy);
-        const side = Math.sign(point.ox) || 1;
-        point.oy = Math.sign(point.oy) * Math.max(lim, 0);
-        point.ox = side * Math.sqrt(Math.max(r * r - point.oy * point.oy, 0));
-      }
-    }
-    for (let round = 0; round < 4; round++) {
-      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-        const a = placed[i], z = placed[j];
-        const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
-        if (gap >= minSep) continue;
-        const push = (minSep - gap) / 2;
-        const left = a.ox <= z.ox ? a : z;
-        const right = left === a ? z : a;
-        left.ox = Math.max(-(w / 2) + 60, left.ox - push);
-        right.ox = Math.min(w / 2 - 60, right.ox + push);
-      }
-    }
-    for (const { id, hh, ox, oy } of placed) {
+    /*
+     * The same fixed map (#428), from the origin: a viewer with no household
+     * stands at the centre of the shared map rather than inside one of its
+     * systems, and there is no chart to keep clear. It used to carry its own
+     * copy of the placement — a vector clamp and a vector relax, both of
+     * which moved constellations OFF their true bearing, which is the very
+     * thing #428 forbade. One law now, or the newcomer and the member are
+     * looking at two different skies.
+     */
+    const placed = placeGalaxy({ galaxy, camera: null, width: w, height: h, keepOut: 0 });
+    for (const { id, household: hh, ox, oy } of placed) {
       const away = ox > 0;
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);

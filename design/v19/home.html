@@ -296,6 +296,43 @@
   .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
                   border:1px solid var(--line);background:none;color:var(--ink-mid)}
   .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+
+  /* THE ROW IS THE ITEM (#424, ratified 2026-08-16): a manifest row expands
+     IN PLACE to everything Orbit holds about it — no trip to another screen.
+     Closed it renders nothing, so the manifest at rest is exactly as drawn.
+     The open row keeps the accent border it already wears when a dial body
+     lights it and hands its bottom corners to the panel, so the two read as
+     one piece; inside, the vocabulary is the ratified read-only row (.kv,
+     from settings-mail.html), the drawer's quiet group label, and the
+     document row from .docview above. Nothing new. */
+  .corridor .item:not(.suggest){cursor:pointer}
+  .item.open{border-color:var(--accent);background:var(--panel-raised);
+             border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+  .itemview{border:1px solid var(--accent);border-top:0;background:var(--panel-raised);
+            backdrop-filter:blur(8px);border-radius:0 0 14px 14px;
+            padding:2px 18px 16px;margin-bottom:6px;
+            animation:ivopen .3s cubic-bezier(.2,.7,.2,1) 1}
+  @keyframes ivopen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){.itemview{animation:none}}
+  .itemview .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+                color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .itemview .kv:last-of-type{border-bottom:0}
+  .itemview .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .itemview .kv b.over{color:var(--overdue)}
+  .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--ink-faint);margin:18px 0 8px}
+  .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+  .itemview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .itemview .ivfoot{display:flex;align-items:center;gap:18px;margin-top:18px}
+  /* The copy-link affordance the owner allowed — the only place the address
+     is offered, and still never printed: the button says what it does. */
+  .itemview .ivcopy{font:11px var(--mono);color:var(--ink-faint);background:none;border:0;
+                    padding:0;cursor:pointer;letter-spacing:.04em}
+  .itemview .ivcopy:hover{color:var(--accent)}
+  .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
+                    margin-left:auto}
+  .itemview .ivfull:hover{color:var(--accent)}
   .inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
   .inbox-orb.waiting{color:var(--accent);border-color:var(--accent)}
   .inbox-orb.waiting svg{animation:breathe 3.2s ease-in-out infinite}
@@ -738,6 +775,16 @@
           <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150.00</span></div>
           <div class="t over">T+16d<small>28 Jul</small></div>
         </div>
+        <!-- the row, expanded: everything Orbit holds about this item -->
+        <div class="itemview" hidden>
+          <div class="kv"><span>due</span><b class="over">T+16d · 28 July 2026</b></div>
+          <div class="kv"><span>section</span><b>Home</b></div>
+          <div class="kv"><span>type</span><b>service</b></div>
+          <div class="kv"><span>orbital period</span><b>every year</b></div>
+          <div class="kv"><span>cost</span><b>~£150.00</b></div>
+          <div class="kv"><span>reminders</span><b>14d before · 3d before</b></div>
+          <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-gutter">manage this item →</a></div>
+        </div>
       </div>
       <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · WED 13 AUG</span><div class="rule"></div></div>
       <div class="item" id="i-mot">
@@ -745,11 +792,35 @@
         <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
         <div class="t soon">T−16d<small>29 Aug</small></div>
       </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−16d · 29 August 2026</b></div>
+        <div class="kv"><span>section</span><b>Vehicles</b></div>
+        <div class="kv"><span>type</span><b>inspection</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>£54.85</b></div>
+        <div class="kv"><span>reminders</span><b>21d before · 7d before</b></div>
+        <h4>documents</h4>
+        <div class="doc">◆<span>MOT certificate 2025<small>added 12 Jun · 240 KB</small></span></div>
+        <div class="doc">◆<span>Service history<small>added 12 Jun · 88 KB</small></span></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-mot">manage this item →</a></div>
+      </div>
       <div class="month"><span>SEP</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-boiler">
         <span class="planet" style="color:var(--warm)"><i></i></span>
         <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120.00</span></div>
         <div class="t soon">T−22d<small>04 Sep</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−22d · 4 September 2026</b></div>
+        <div class="kv"><span>section</span><b>Home</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£120.00</b></div>
+        <div class="kv"><span>provider</span><b>British Gas</b></div>
+        <div class="kv"><span>reminders</span><b>14d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-boiler">manage this item →</a></div>
       </div>
       <div class="month"><span>OCT</span><div class="rule"></div><small>2 approaching</small></div>
       <div class="item suggest" id="i-insurance">
@@ -762,17 +833,50 @@
         <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90.00</span></div>
         <div class="t up">T−61d<small>13 Oct</small></div>
       </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−61d · 13 October 2026</b></div>
+        <div class="kv"><span>section</span><b>Home</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£90.00</b></div>
+        <div class="kv"><span>reminders</span><b>14d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-chimney">manage this item →</a></div>
+      </div>
       <div class="month"><span>DEC</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-smoke">
         <span class="planet" style="color:var(--ok)"><i></i></span>
         <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12.00</span></div>
         <div class="t ok">T−122d<small>13 Dec</small></div>
       </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−122d · 13 December 2026</b></div>
+        <div class="kv"><span>section</span><b>Devices</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every 6 months</b></div>
+        <div class="kv"><span>cost</span><b>~£12.00</b></div>
+        <div class="kv"><span>reminders</span><b>7d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-smoke">manage this item →</a></div>
+      </div>
       <div class="month"><span>JAN</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-svc">
         <span class="planet" style="color:var(--ok)"><i></i></span>
         <div class="body"><b>Car full service</b><span>Vehicles · orbital period 1 year · ~£300.00</span></div>
         <div class="t ok">T−161d<small>21 Jan</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−161d · 21 January 2027</b></div>
+        <div class="kv"><span>section</span><b>Vehicles</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£300.00</b></div>
+        <div class="kv"><span>reminders</span><b>21d before</b></div>
+        <h4>documents</h4>
+        <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
+        <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-svc">manage this item →</a></div>
       </div>
     </div>
     <div class="horizon">— beyond the horizon: nothing scheduled past January —</div>
@@ -863,66 +967,136 @@ function pointSky(){
   document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
 }
 
+/* ---- THE FIXED MAP (#428, ratified 2026-08-16) ----------------------------
+   Verbatim from the app's web/src/routes/home/placement.js, which carries the
+   full reasoning. In short: the BEARING from the camera to a household's
+   absolute coordinate is sacred and no pass may change it; the RADIUS is
+   negotiable and every pass adjusts that alone; and the whole arrangement is
+   ONE PURE FUNCTION of (household set, camera, viewport) — walked in sorted
+   id order rather than the order the data arrived, relaxed by rounds that
+   measure every pair against the same snapshot (so no pair ordering can
+   change the answer), and memoised so a re-render cannot draw a different
+   sky. Fly A→B→A and every household is back on the pixel it left. */
+const placementMemo = new Map();
+function minSeparationFor(w){ return Math.max(230, Math.min(340, w * 0.18)); }
+function reachOn(angle, w, h){
+  // how far the visible sky extends on a bearing — the old vector clamp,
+  // expressed as a radius so it BOUNDS a placement instead of REDIRECTING it.
+  // The top is busier (create handle, account row), so it ends sooner.
+  const rx = w / 2 + 40;
+  const ry = Math.max(80, h / 2 - (Math.sin(angle) < 0 ? 215 : 155));
+  return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
+}
+function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
+  const ids = Object.keys(galaxy).sort();
+  const key = `${camera ?? ""}@${w}x${h}/${keepOut}#${ids.join(",")}`;
+  if (placementMemo.has(key)) return placementMemo.get(key);
+  const origin = camera && galaxy[camera] ? galaxy[camera].pos : [0, 0];
+  const minSep = minSeparationFor(w);
+  const reach = (a) => reachOn(a, w, h);
+  const points = [], self = [];
+  for (const id of ids) {
+    const hh = galaxy[id];
+    if (id === camera) { self.push({ id, hh, isCamera: true, banded: false, dist: 0, angle: 0, radius: 0, ox: 0, oy: 0, dim: .9 }); continue; }
+    const dx = hh.pos[0] - origin[0], dy = hh.pos[1] - origin[1];
+    const dist = Math.hypot(dx, dy);
+    points.push({ id, hh, isCamera: false, banded: false, dist, angle: Math.atan2(dy, dx), radius: 0,
+                  ox: 0, oy: 0, dim: Math.max(.45, Math.min(.9, 1.05 - dist / 2600)) });
+  }
+  // the sky's usable vertical half-extents: the top is busier, so it ends sooner
+  const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
+  // where a placement is DRAWN: polar about the camera, and then the ONE
+  // ratified case where the bearing yields (owner-found twice) — on a short
+  // hero no position on a steep bearing is both clear of the chart and inside
+  // the sky, so the constellation keeps its RADIUS and slides around its own
+  // circle to the band edge on its own side. Marked, so a true bearing and a
+  // bent one can be told apart; and because the radius survives the slide,
+  // #427's keep-out survives it too.
+  const resolve = (p) => {
+    let ox = Math.cos(p.angle) * p.radius, oy = Math.sin(p.angle) * p.radius;
+    const lim = oy < 0 ? safeTop : safeBottom;
+    p.banded = Math.abs(oy) > lim;
+    if (p.banded) {
+      oy = Math.sign(oy) * Math.max(lim, 0);
+      ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(p.radius * p.radius - oy * oy, 0));
+    }
+    p.ox = ox; p.oy = oy;
+  };
+  // nearer sits closer in, never inside the chart: the camera's own
+  // constellation IS the chart, so #427's keep-out is its separation halo,
+  // expressed — like every separation here — as a radius.
+  for (const p of points) { p.radius = Math.max(keepOut, Math.min(p.dist, reach(p.angle))); resolve(p); }
+  // two bearings can fold onto the same patch of sky: draw one in, push the
+  // other out, RADIUS ONLY, so both keep their true direction. For a banded
+  // constellation more radius slides it along the band, which is how this one
+  // pass also answers §14/#473. Determinism comes from the canonical ORDER —
+  // sorted ids, ties broken by id — not from the update scheme.
+  for (let round = 0; round < 8; round++) {
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / 2;
+      const aIn = a.radius < z.radius || (a.radius === z.radius && a.id < z.id);
+      const inner = aIn ? a : z, outer = aIn ? z : a;
+      const was = inner.radius;
+      inner.radius = Math.max(keepOut, inner.radius - shove);
+      // whatever the inner could not spend against the keep-out, the outer spends
+      const unspent = shove - (was - inner.radius);
+      // capped at the band's far corner on this bearing's own side: room the
+      // old code took by shifting ox off the bearing, taken here ON it
+      const ceiling = Math.max(reach(outer.angle) + 40,
+        Math.hypot(w / 2 - 60, outer.angle < 0 ? safeTop : safeBottom));
+      outer.radius = Math.min(outer.radius + shove + unspent, Math.max(outer.radius, ceiling));
+      resolve(inner); resolve(outer);
+    }
+    if (!crowded) break;
+  }
+  // last resort, for the BANDED ONLY: two bearings that both yielded to the
+  // same band corner with no radius left to spend slide along the band. A
+  // true bearing is never touched to make room for someone else — the
+  // difference between this and the pass it replaces. The keep-out is
+  // re-asserted, so #427 holds absolutely rather than up to the last pass.
+  const slide = (p, by) => {
+    let ox = p.ox + by;
+    const side = Math.sign(ox) || Math.sign(p.ox) || 1;
+    const clear = Math.sqrt(Math.max(keepOut * keepOut - p.oy * p.oy, 0));
+    if (Math.abs(ox) < clear) ox = side * clear;
+    p.ox = Math.max(-(w / 2) + 60, Math.min(w / 2 - 60, ox));
+  };
+  for (let round = 0; round < 6; round++) {
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      if (!a.banded && !z.banded) continue;
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / (a.banded && z.banded ? 2 : 1);
+      const aLeft = a.ox < z.ox || (a.ox === z.ox && a.id < z.id);
+      const left = aLeft ? a : z, right = aLeft ? z : a;
+      if (left.banded) slide(left, -shove);
+      if (right.banded) slide(right, shove);
+    }
+    if (!crowded) break;
+  }
+  const placed = [...points, ...self].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  placementMemo.set(key, placed);
+  return placed;
+}
+
 function renderGalaxy(settle){
   for (const old of hero.querySelectorAll(".minisys")) old.remove();
   const w = hero.clientWidth, h = hero.clientHeight;
-  const [cx, cy] = GALAXY[camera].pos;
-  const placed = [];
-  for (const [key, hh] of Object.entries(GALAXY)) {
-    if (key === camera) continue;   // you never see your own constellation — you're inside it
-    let ox = hh.pos[0] - cx, oy = hh.pos[1] - cy;
-    const dist = Math.hypot(ox, oy);
-    // clamp to the visible sky along the true bearing; dim with distance
-    const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - (oy < 0 ? 215 : 155))));
-    ox *= f; oy *= f;
-    placed.push({ key, hh, ox, oy, dist });
-  }
-  // narrow viewports can fold two bearings onto the same patch of sky —
-  // relax overlaps apart so every constellation stays individually clickable.
-  // Separation scales with the viewport (§14/#473): a wide desk has room to
-  // spare, so the sky breathes into it.
-  const minSep = Math.max(230, Math.min(340, w * 0.18));
-  for (let round = 0; round < 4; round++) {
-    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-      const a = placed[i], z = placed[j];
-      let dx = z.ox - a.ox, dy = z.oy - a.oy;
-      const d = Math.hypot(dx, dy) || 1;
-      if (d < minSep) {
-        const push = (minSep - d) / 2;
-        dx /= d; dy /= d;
-        a.ox -= dx * push; a.oy -= dy * push;
-        z.ox += dx * push; z.oy += dy * push;
-      }
-    }
-  }
-  // The one case the bearing yields (mirrors the app, owner 2026-08-15):
-  // no position on a steep bearing is both clear of the dial and inside the
-  // sky, so it slides around its circle to the band edge on its own side.
-  // Clamp first, then one horizontal relax: the clamp can fold separated
-  // bearings onto the same band edge (§14/#473).
-  for (const point of placed) {
-    const lim = point.oy < 0 ? h / 2 - 215 : h / 2 - 155;
-    if (Math.abs(point.oy) > lim) {
-      const r = Math.hypot(point.ox, point.oy);
-      const side = Math.sign(point.ox) || 1;
-      point.oy = Math.sign(point.oy) * Math.max(lim, 0);
-      point.ox = side * Math.sqrt(Math.max(r * r - point.oy * point.oy, 0));
-    }
-  }
-  for (let round = 0; round < 4; round++) {
-    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
-      const a = placed[i], z = placed[j];
-      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
-      if (gap >= minSep) continue;
-      const push = (minSep - gap) / 2;
-      const left = a.ox <= z.ox ? a : z;
-      const right = left === a ? z : a;
-      left.ox = Math.max(-(w / 2) + 60, left.ox - push);
-      right.ox = Math.min(w / 2 - 60, right.ox + push);
-    }
-  }
-  for (const { key, hh, ox, oy, dist } of placed) {
-    const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
+  // +88: the keep-out must clear the constellation's own ring (r 40 around
+  // the anchor), not just its centre point (owner, 2026-08-16).
+  const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
+  // you never see your own constellation — you're inside it
+  const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
+    .filter((p) => !p.isCamera);
+  for (const { id: key, hh, ox, oy, dim } of placed) {
     const div = document.createElement("div");
     div.className = "minisys" + (settle ? " settle" : "");
     div.setAttribute("role", "button");
@@ -1146,6 +1320,47 @@ addEventListener("scroll", () => {
   }
   lastY = scrollY;
 }, { passive: true });
+
+/* ---- THE ROW IS THE ITEM (#424, ratified 2026-08-16) ----------------------
+   A manifest row expands IN PLACE to everything Orbit holds about the item.
+   No page navigation: the row IS the destination, which is what CON-5 always
+   meant by the manifest entry being where a dial body carries you.
+
+   THE ADDRESS, which this file can only describe. In the app the browser's
+   address bar updates QUIETLY as a row opens — /home?item=<id>, pushed the
+   first time so BACK closes the row, replaced when you swap straight from one
+   open row to another so Back is never a tour of rows you already read — and
+   opening that address directly loads home scrolled to that row and expanded.
+   The URL is never printed in the interface; the only place it is offered is
+   the copy-link button below. A file:// mockup has no origin and cannot push
+   history meaningfully, so the address behaviour is stated here rather than
+   demonstrated; everything else on this screen is real.
+
+   THE SCROLL. §14 sends every DRAWER home on any scroll movement. This is not
+   a drawer — it is the row, grown — and a full record that vanished the moment
+   you scrolled to read the end of it would be maddening. The expanded row
+   survives scrolling and closes on Back, Escape, a click outside it, or a
+   second click on its own row. */
+function closeItemRow(){
+  for (const open of document.querySelectorAll(".corridor .item.open")) {
+    open.classList.remove("open");
+    open.nextElementSibling?.setAttribute("hidden", "");
+  }
+}
+for (const row of document.querySelectorAll(".corridor .item:not(.suggest)")) {
+  row.addEventListener("click", () => {
+    const view = row.nextElementSibling;
+    const open = row.classList.contains("open");
+    closeItemRow();
+    if (open) return;
+    row.classList.add("open");
+    view?.removeAttribute("hidden");
+  });
+}
+addEventListener("keydown", (event) => { if (event.key === "Escape") closeItemRow(); });
+addEventListener("click", (event) => {
+  if (!event.target.closest(".corridor .item, .itemview")) closeItemRow();
+});
 
 pointSky();
 renderGalaxy(false);

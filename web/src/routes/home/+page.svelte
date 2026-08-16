@@ -1,10 +1,11 @@
 <script>
   import { onMount, tick } from "svelte";
-  import { afterNavigate } from "$app/navigation";
+  import { afterNavigate, pushState, replaceState } from "$app/navigation";
+  import { page } from "$app/state";
   import { mountEmptySky, mountHome } from "./home.behaviour.js";
-  import { approveReceipt, dismissReceipt, readHome, requestToJoin } from "$lib/data/workspace.js";
+  import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { every, longDate, money, tminus } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import "./home.css";
@@ -74,6 +75,148 @@
       askBusy = false;
     }
   }
+  /* ---- THE ROW IS THE ITEM (#424, owner ruling 2026-08-16) ---------------
+   *
+   * A manifest row expands IN PLACE to everything Orbit holds about the item.
+   * No page navigation: the row IS the destination, which is what CON-5 meant
+   * by the manifest entry being where a dial body carries you.
+   *
+   * THE ADDRESS. The expanded row is directly addressable, and the browser
+   * bar updates QUIETLY as it opens — the URL is never printed in the
+   * interface, only offered by the copy-link button on the open row. The
+   * address is `/home?item=<id>`, and opening it directly loads home with
+   * that row scrolled to and expanded, which is the ruling's own test of the
+   * address. (`/item/<id>` remains the item's full-command surface, #455; the
+   * open row links to it quietly. Whether the two addresses should become one
+   * is the open question in the report — the row's read view is what the
+   * owner ratified, and the commands have never been designed into it.)
+   *
+   * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
+   * exactly where you were reading. Swapping straight from one open row to
+   * another REPLACES, so Back is never a tour of rows you have already read.
+   * Arriving on the address directly pushes nothing, so Back still leaves the
+   * way you came. SvelteKit's shallow routing carries the state, so a Back or
+   * Forward restores the right row with no reload and no arrival fanfare.
+   *
+   * THE SCROLL. §14 sends every DRAWER home on any scroll movement. This is
+   * not a drawer: it is the row, grown. A full record that vanished the
+   * moment you scrolled to read the end of it would be maddening, so the
+   * expanded row survives scrolling and closes only on Back, Escape, a click
+   * outside it, or a second click on its own row. Noted for ratification.
+   */
+  const addressOf = (id) => `/home?item=${encodeURIComponent(id)}`;
+  const expanded = $derived(page.state.orbitItem ?? null);
+  /* True only while the open row owns a history entry we pushed ourselves —
+     the difference between closing by going back and closing by rewriting the
+     address of a deep link. */
+  let pushedEntry = false;
+  let detail = $state(null);
+  let detailBusy = $state(false);
+  let detailProblem = $state(null);
+  let copied = $state(false);
+  let detailFor = null;
+  let revealTarget = null;
+
+  $effect(() => {
+    const id = expanded;
+    if (!id) {
+      pushedEntry = false;
+      detailFor = null;
+      detail = null;
+      detailProblem = null;
+      return;
+    }
+    if (detailFor === id) return;
+    /* Everything Orbit holds, read through the same seam the item view reads
+       (#446) — documents included, so "everything" is not a euphemism. */
+    detailFor = id;
+    detail = null;
+    detailProblem = null;
+    copied = false;
+    detailBusy = true;
+    readItem(id)
+      .then(async (found) => {
+        if (detailFor !== id) return;
+        if (!found) detailProblem = "Orbit no longer holds this item.";
+        detail = found;
+        /* A row opened FROM the address is put on screen twice: once as soon
+           as it opens, and again once the detail has given it its full height
+           — otherwise the record you asked for settles half off the bottom. */
+        if (revealTarget !== id) return;
+        revealTarget = null;
+        await tick();
+        document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
+      })
+      .catch((error) => {
+        if (detailFor === id) detailProblem = error?.message ?? String(error);
+      })
+      .finally(() => {
+        if (detailFor === id) detailBusy = false;
+      });
+  });
+
+  function onRowClick(event, id) {
+    /* A modified or middle click still means "somewhere else, please" — the
+       href is a real address and the browser may have it. */
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    if (expanded === id) return collapseRow();
+    if (expanded === null) {
+      pushedEntry = true;
+      pushState(addressOf(id), { orbitItem: id });
+    } else {
+      replaceState(addressOf(id), { orbitItem: id });
+    }
+  }
+
+  function collapseRow() {
+    if (expanded === null) return;
+    if (pushedEntry) {
+      pushedEntry = false;
+      history.back();
+    } else {
+      replaceState("/home", {});
+    }
+  }
+
+  async function copyAddress() {
+    try {
+      await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
+      copied = true;
+    } catch {
+      /* A refused clipboard is not an error worth a dialogue: the address is
+         already in the browser's own bar, which is where it lives. */
+      copied = false;
+    }
+  }
+
+  function onWindowKeydown(event) {
+    if (event.key === "Escape" && expanded) collapseRow();
+  }
+  function onWindowClick(event) {
+    if (!expanded) return;
+    const target = event.target instanceof Element ? event.target : null;
+    /* Inside the open row or its panel: stay. On another expandable row: that
+       row's own handler is switching to it. Anywhere else: close. */
+    if (target?.closest("a.item, .itemview")) return;
+    collapseRow();
+  }
+
+  /* Arriving on the address rather than clicking into it: put the row on
+     screen and open it, then hand the entry the state it would have had if
+     you had clicked, so Forward and Back agree with each other. */
+  async function openFromAddress() {
+    const id = page.url.searchParams.get("item");
+    if (!id || page.state.orbitItem === id) return;
+    revealTarget = id;
+    replaceState(addressOf(id), { orbitItem: id });
+    await tick();
+    document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
+  }
+
+  const detailDue = (one) =>
+    one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
+
   const operationIds = new Map();
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
@@ -250,6 +393,9 @@
       sync();
       resync = sync;
       query.addEventListener("change", sync);
+      /* #424: the address may already name a row. Do it before the scroll
+         restore below, which a history return owns and a deep link does not. */
+      openFromAddress();
       if (restoreScroll !== null) {
         const y = restoreScroll;
         restoreScroll = null;
@@ -267,6 +413,11 @@
 <svelte:head>
   <title>Orbit</title>
 </svelte:head>
+
+<!-- #424: Escape and a click outside close the expanded row. Scroll does
+     NOT — see the note on the law above; that is the one place this parts
+     company with §14's drawer rule, deliberately. -->
+<svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
 <Pocket {view} />
 
@@ -547,7 +698,12 @@
             {/if}
           </div>
         {:else}
-          <a class="item" id={row.id} href="/item/{row.id}">
+          <!-- #424: the row is the item. The href is the row's real address —
+               kept so a modified click can still open it in its own tab — and
+               a plain click expands the row here instead of leaving home. -->
+          <a class="item" class:open={expanded === row.id} id={row.id}
+             href={addressOf(row.id)} aria-expanded={expanded === row.id}
+             aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
             <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
                   style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
             <div class="body"><b>{row.title}</b><span>{[
@@ -562,7 +718,65 @@
               <div class="t ok">—</div>
             {/if}
           </a>
+          {#if expanded === row.id}{@render itemview(row)}{/if}
         {/if}
+      {/snippet}
+
+      <!-- #424: everything Orbit holds about the item, in the row. The field
+           set and its order are the item view's, so the two surfaces say the
+           same thing in the same words (web/src/routes/item/[id]). -->
+      {#snippet itemview(row)}
+        <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
+          {#if detailProblem}
+            <div class="ivproblem" role="alert">{detailProblem}</div>
+          {:else if !detail}
+            <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
+          {:else}
+            <div class="kv"><span>due</span>
+              <b class:over={detail.band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
+            {#if detail.snoozedUntil}
+              <div class="kv"><span>snoozed until</span><b>{longDate(detail.snoozedUntil)}</b></div>
+            {/if}
+            {#if detail.status !== "active"}
+              <div class="kv"><span>status</span><b>{detail.status}</b></div>
+            {/if}
+            {#if detail.section}
+              <div class="kv"><span>section</span><b>{detail.section}</b></div>
+            {/if}
+            {#if detail.subtype}
+              <div class="kv"><span>type</span><b>{detail.subtype}</b></div>
+            {/if}
+            {#if detail.recurrenceMonths}
+              <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
+            {/if}
+            <div class="kv"><span>cost</span>
+              <b>{money(detail.costMinor, detail.currency, detail.costIsEstimate)}</b></div>
+            {#if detail.provider}
+              <div class="kv"><span>provider</span><b>{detail.provider}</b></div>
+            {/if}
+            {#if detail.reference}
+              <div class="kv"><span>reference</span><b>{detail.reference}</b></div>
+            {/if}
+            {#if detail.reminderDays?.length}
+              <div class="kv"><span>reminders</span>
+                <b>{detail.reminderDays.map((d) => `${d}d before`).join(" · ")}</b></div>
+            {/if}
+            {#if detail.documents?.length}
+              <h4>documents</h4>
+              {#each detail.documents as document (document.name)}
+                <div class="doc">◆<span>{document.name}<small>{document.meta}</small></span></div>
+              {/each}
+            {/if}
+            {#if detail.notes}
+              <h4>notes</h4>
+              <p>{detail.notes}</p>
+            {/if}
+            <div class="ivfoot">
+              <button class="ivcopy" onclick={copyAddress}>{copied ? "link copied" : "copy link"}</button>
+              <a class="ivfull" href="/item/{row.id}">manage this item →</a>
+            </div>
+          {/if}
+        </div>
       {/snippet}
       <div class="corridor">
         {#if corridor.overdue.length}
