@@ -234,3 +234,32 @@ describe("corridorOf", () => {
     expect(empty.horizon).toBe(null);
   });
 });
+
+// §14 (#469): suggestions ride the corridor in date order — the manifest and
+// the corridor are ONE surface now.
+describe("corridorOf with suggestions", () => {
+  const corridor = corridorOf(
+    { households: WORKSPACE_FIXTURE.households.slice(0, 1), activeHouseholdId: "hh-lawson-1" },
+    TODAY,
+    { suggestions: [{ id: "r-insurance", receiptId: "r-insurance", title: "Home insurance renewal", renewsOn: "2026-10-03", costMinor: 40000, currency: "GBP", sourceDocument: "1 forwarded document" }] },
+  );
+
+  it("merges the suggestion at its renewal date, dashed and actionable", () => {
+    const october = corridor.months.find((month) => month.label === "OCT");
+    expect(october.rows.map((row) => row.id)).toEqual(["r-insurance", "i-chimney"]);
+    const suggestion = october.rows[0];
+    expect(suggestion.suggestion).toBe(true);
+    expect(suggestion.band).toBe("suggestion");
+    expect(suggestion.receiptId).toBe("r-insurance");
+  });
+
+  it("sits an undated catch at the very end rather than inventing a date", () => {
+    const undatedCorridor = corridorOf(
+      { households: [], activeHouseholdId: null },
+      TODAY,
+      { suggestions: [{ id: "r-x", receiptId: "r-x", title: "Forwarded email", renewsOn: null }] },
+    );
+    expect(undatedCorridor.undated.map((row) => row.id)).toEqual(["r-x"]);
+    expect(undatedCorridor.months).toEqual([]);
+  });
+});

@@ -173,6 +173,37 @@
   .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
   .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
   .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  /* §14 (#469): the corridor — the due-next spine of time, now the manifest */
+  .manifest .corridor{position:relative;margin-top:34px;padding-left:46px}
+  .manifest .corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
+                    background:var(--chart-line)}
+  .manifest .corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
+           background:linear-gradient(180deg,
+             color-mix(in srgb,var(--overdue) 7%, transparent),
+             color-mix(in srgb,var(--overdue) 2%, transparent))}
+  .manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
+                   background:var(--overdue);opacity:.55}
+  .manifest .corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
+  .manifest .corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
+  .manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
+                    filter:blur(4px);opacity:.8}
+  .manifest .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
+  .manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+  .manifest .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
+  .manifest .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
+  .manifest .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
+                 border:1px solid var(--chart-ink);background:var(--bg)}
+  .manifest .corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
+  .manifest .corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
+  .manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+  .manifest .corridor .item{position:relative}
+  .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
+  .manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
+                  box-shadow:0 0 0 2.5px var(--bg)}
+  .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
+  .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+  .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
+  .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
   .suggest{border-style:dashed}
   .suggest .body span{color:var(--accent)}
   .suggest .actions{display:flex;gap:8px}
@@ -421,8 +452,6 @@
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>Tom Lawson</b><span id="who-role">Lawson Home · owner</span></div>
   <nav>
-    <a href="due-next.html">Due next</a>
-    <a href="documents.html">Documents</a>
     <a href="inbox.html">Inbox</a>
     <a href="settings.html">Settings</a>
     <a href="administration.html">Administration</a>
@@ -590,51 +619,55 @@
     </div>
   </div>
 
+    <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — the
+         due-next screen's spine of time, transplanted; that screen retires.
+         Full scrollback, nearest at the top, suggestions in date order. -->
     <div class="manifest" id="manifest-top">
-    <div class="group">
-      <h3>Needs attention <span class="closest">· closest approach — Car MOT — Volvo V60 · T−16d</span></h3>
-      <div class="item" id="i-gutter">
-        <span class="dot" style="background:var(--overdue)"></span>
-        <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150</span></div>
-        <div class="t over">T+16d<small>28 Jul</small></div>
+    <div class="corridor">
+      <div class="redzone">
+        <div class="item" id="i-gutter">
+          <span class="planet" style="color:var(--overdue)"><i></i></span>
+          <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150.00</span></div>
+          <div class="t over">T+16d<small>28 Jul</small></div>
+        </div>
       </div>
+      <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · WED 13 AUG</span><div class="rule"></div></div>
       <div class="item" id="i-mot">
-        <span class="dot ter" style="color:var(--warm)"></span>
+        <span class="planet ter" style="color:var(--warm)"><i></i></span>
         <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
         <div class="t soon">T−16d<small>29 Aug</small></div>
       </div>
+      <div class="month"><span>SEP</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-boiler">
-        <span class="dot" style="background:var(--warm)"></span>
-        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120</span></div>
+        <span class="planet" style="color:var(--warm)"><i></i></span>
+        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120.00</span></div>
         <div class="t soon">T−22d<small>04 Sep</small></div>
       </div>
-    </div>
-    <div class="group">
-      <h3>Suggested from your documents</h3>
+      <div class="month"><span>OCT</span><div class="rule"></div><small>2 approaching</small></div>
       <div class="item suggest" id="i-insurance">
-        <span class="dot sug" style="color:var(--accent)"></span>
+        <span class="planet sug"><i></i></span>
         <div class="body"><b>Home insurance renewal</b><span>Found in 1 forwarded document · renews 03 Oct · ~£400.00</span></div>
         <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
       </div>
-    </div>
-    <div class="group">
-      <h3>Later this year</h3>
       <div class="item" id="i-chimney">
-        <span class="dot" style="background:var(--upcoming)"></span>
-        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90</span></div>
+        <span class="planet" style="color:var(--upcoming)"><i></i></span>
+        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90.00</span></div>
         <div class="t up">T−61d<small>13 Oct</small></div>
       </div>
+      <div class="month"><span>DEC</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-smoke">
-        <span class="dot" style="background:var(--ok)"></span>
-        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12</span></div>
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12.00</span></div>
         <div class="t ok">T−122d<small>13 Dec</small></div>
       </div>
+      <div class="month"><span>JAN</span><div class="rule"></div><small>1 approaching</small></div>
       <div class="item" id="i-svc">
-        <span class="dot" style="background:var(--ok)"></span>
-        <div class="body"><b>Car full service</b><span>Vehicles · orbital period 1 year · ~£300</span></div>
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Car full service</b><span>Vehicles · orbital period 1 year · ~£300.00</span></div>
         <div class="t ok">T−161d<small>21 Jan</small></div>
       </div>
     </div>
+    <div class="horizon">— beyond the horizon: nothing scheduled past January —</div>
   </div>
 </div>
 
@@ -737,31 +770,50 @@ function renderGalaxy(settle){
     placed.push({ key, hh, ox, oy, dist });
   }
   // narrow viewports can fold two bearings onto the same patch of sky —
-  // relax overlaps apart so every constellation stays individually clickable
+  // relax overlaps apart so every constellation stays individually clickable.
+  // Separation scales with the viewport (§14/#473): a wide desk has room to
+  // spare, so the sky breathes into it.
+  const minSep = Math.max(230, Math.min(340, w * 0.18));
   for (let round = 0; round < 4; round++) {
     for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
       const a = placed[i], z = placed[j];
       let dx = z.ox - a.ox, dy = z.oy - a.oy;
       const d = Math.hypot(dx, dy) || 1;
-      if (d < 230) {
-        const push = (230 - d) / 2;
+      if (d < minSep) {
+        const push = (minSep - d) / 2;
         dx /= d; dy /= d;
         a.ox -= dx * push; a.oy -= dy * push;
         z.ox += dx * push; z.oy += dy * push;
       }
     }
   }
-  for (let { key, hh, ox, oy, dist } of placed) {
-    // The one case the bearing yields (mirrors the app, owner 2026-08-15):
-    // no position on a steep bearing is both clear of the dial and inside the
-    // sky, so it slides around its circle to the band edge on its own side.
-    const lim = oy < 0 ? h / 2 - 215 : h / 2 - 155;
-    if (Math.abs(oy) > lim) {
-      const r = Math.hypot(ox, oy);
-      const side = Math.sign(ox) || 1;
-      oy = Math.sign(oy) * Math.max(lim, 0);
-      ox = side * Math.sqrt(Math.max(r * r - oy * oy, 0));
+  // The one case the bearing yields (mirrors the app, owner 2026-08-15):
+  // no position on a steep bearing is both clear of the dial and inside the
+  // sky, so it slides around its circle to the band edge on its own side.
+  // Clamp first, then one horizontal relax: the clamp can fold separated
+  // bearings onto the same band edge (§14/#473).
+  for (const point of placed) {
+    const lim = point.oy < 0 ? h / 2 - 215 : h / 2 - 155;
+    if (Math.abs(point.oy) > lim) {
+      const r = Math.hypot(point.ox, point.oy);
+      const side = Math.sign(point.ox) || 1;
+      point.oy = Math.sign(point.oy) * Math.max(lim, 0);
+      point.ox = side * Math.sqrt(Math.max(r * r - point.oy * point.oy, 0));
     }
+  }
+  for (let round = 0; round < 4; round++) {
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+      const a = placed[i], z = placed[j];
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      const push = (minSep - gap) / 2;
+      const left = a.ox <= z.ox ? a : z;
+      const right = left === a ? z : a;
+      left.ox = Math.max(-(w / 2) + 60, left.ox - push);
+      right.ox = Math.min(w / 2 - 60, right.ox + push);
+    }
+  }
+  for (const { key, hh, ox, oy, dist } of placed) {
     const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
     const div = document.createElement("div");
     div.className = "minisys" + (settle ? " settle" : "");
