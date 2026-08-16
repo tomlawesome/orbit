@@ -471,3 +471,40 @@ as ordinary fix-both changes rather than blocking the build.
   them every time. (Build note: the fidelity gate needs a seeded arrangement
   under fixtures so mockup and app can still be compared; live loads roll
   fresh.)
+
+## 15. The walkthrough batch (owner, 2026-08-16)
+
+The full open-questions list, walked in order and ruled:
+
+- **The living backdrops are ratified for build**: relay-satellites v2,
+  administration-iss, and create-v3's loudened backdrop — all approved as
+  drawn (admin's bolder atlas rendering included).
+- **Settings gets no verdict yet — three concepts instead**: the
+  observatory-slit proposal is set aside; the owner likes all three of the
+  new directions in text — *inside the observatory* (sky only through the
+  slit), *the cartographer's desk* (no sky at all; your chart being drawn),
+  *the gimbal room* (inside your own craft; stars only through portholes) —
+  and wants all three mocked for review.
+- **Relay lives in one place, wears two hats elsewhere**: settings keeps
+  the full relay card; the inbox shows its relay bar ONLY when the queue is
+  empty (the address is the call to action); administration's panel
+  retitles to mail machinery and sits with operations.
+- **The pack refresh is ordered**: atlas re-materialises as a printed
+  thing (opaque paper panels, engraving hatch, ink planets, gold-leaf sun,
+  paper grain); dawn gets a temperature story (cool-to-warm vertical
+  ground, hazy pastel planets, sunrise amber); retrograde earns its
+  structural signature (faint horizon grid low in the sky, restrained
+  bloom on accents only, brighter mid-ink).
+- **A manifest row expands in place** (#424): everything Orbit holds about
+  the item, in the row, at a real address — the browser bar quietly updates
+  as it opens; the URL itself is never printed in the interface (a small
+  copy-link affordance is fine).
+- **The sky is a fixed map** (#428): placements derive from absolute
+  coordinates, relaxation is deterministic, flights never reshuffle what
+  the sky already taught.
+- **Engineering calls**: #298 closed as delivered (plumbing may be large;
+  the brains are out and tested); #301 closed on the coverage map (the
+  20-run ceremony waived — real flakes recur and get fixed then); #303 and
+  #308 closed as overtaken/spent; #235 re-scoped to the server half; #365
+  scheduled (v1.3, Phase-4 family); #261 stays open until its live
+  break-and-repair drill runs — deferred, not v1.3 critical path.
