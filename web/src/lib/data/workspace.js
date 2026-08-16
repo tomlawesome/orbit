@@ -127,7 +127,7 @@ import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
 import { settingsFixture } from "./fixtures/settings.js";
 import { adminFixture } from "./fixtures/admin.js";
-import { galaxyOf } from "./chart.js";
+import { galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 
 /** A mutating fetch with the session's CSRF token, like applyCommand's. */
@@ -195,6 +195,28 @@ export async function dismissReceipt(receiptId) {
   await json(await csrfFetch(`/api/imap-inbox/${receiptId}`, { method: "DELETE" }));
 }
 
+/** "Request to join X system?" (§11, #453) — idempotent server-side, so a
+ * double-tap can never file twice. */
+export async function requestToJoin(householdId) {
+  return json(await csrfFetch(`/api/households/${householdId}/join-requests`, { body: {} }));
+}
+
+/** The pending join requests this user may decide (owners and admins). */
+export async function readJoinRequests() {
+  const body = await json(await fetch("/api/join-requests", { credentials: "same-origin" }));
+  return body.requests ?? [];
+}
+
+/** Approve or decline a join request (§11 authority, enforced server-side). */
+export async function decideJoinRequest(requestId, action) {
+  return json(await csrfFetch(`/api/join-requests/${requestId}`, { body: { action } }));
+}
+
+/** Owner/admin direct add: membership without a request (§11). */
+export async function addMember(householdId, userId) {
+  return json(await csrfFetch(`/api/households/${householdId}/members`, { body: { userId } }));
+}
+
 /**
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
  * designs were drawn against so the fidelity gate is deterministic; the real
@@ -218,6 +240,23 @@ export async function readHome() {
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const today = todayOf(workspace);
+  /* §11 (#453): no membership means the labelled sky — every visible
+     household as a bearing and a name, nothing else. The dial, manifest and
+     mail surfaces simply do not exist yet for this viewer. */
+  if (workspace.householdLanding === "choose" || !workspace.households.length) {
+    return {
+      emptySky: true,
+      galaxy: labelledSkyOf(workspace.visibleHouseholds),
+      primary: null,
+      household: null,
+      suggestions: [],
+      mailFailures: [],
+      mailReading: [],
+      user: session?.user ?? null,
+      today,
+      now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
+    };
+  }
   return {
     galaxy: galaxyOf(workspace, today),
     primary,
@@ -373,12 +412,14 @@ export async function readSettingsScreen() {
  * make them real. Live data omits what it cannot know.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users] = await Promise.all([
+  const [workspace, session, users, joinRequests] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then((body) => body.users ?? [])
       .catch(() => []),
+    /* Real since #453: pending requests the caller may decide. Additive. */
+    readJoinRequests().catch(() => []),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   return {
@@ -386,9 +427,11 @@ export async function readAdminScreen() {
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
     today: todayOf(workspace),
+    now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     users,
     households: workspace.households,
     ...adminFixture,
+    joinRequests,
   };
 }
 

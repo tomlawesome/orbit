@@ -114,3 +114,12 @@
                       color:var(--ink-mid);text-decoration:none;margin-top:12px}
 .pocket .sheet .amend:hover{color:var(--accent)}
 @media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }
+
+/* ---- #453: the pocket's labelled sky ----------------------------------- */
+.pocket .adrift{margin-top:18px}
+.pocket .askrow{cursor:pointer}
+.pocket .askrow span{color:var(--ink-faint)}
+.pocket .askrow[data-ask-requested="true"]{border-style:dashed;cursor:default}
+.pocket .askrow[data-ask-requested="true"] span{color:var(--accent)}
+.pocket .adrift .burnup a{color:var(--ink-mid);text-decoration:none}
+.pocket .adrift .burnup a:hover{color:var(--accent)}

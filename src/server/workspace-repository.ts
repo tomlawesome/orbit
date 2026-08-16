@@ -14,6 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
 import {
@@ -93,6 +94,9 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       activeHouseholdId: null,
       households: [],
       recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
+      /* §11 (#453): the labelled sky — id and name are the entire surface a
+         non-member sees, with their own pending-request flags. */
+      visibleHouseholds: await listVisibleHouseholds(userId),
     });
   }
 

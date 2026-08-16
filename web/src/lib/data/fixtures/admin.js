@@ -4,9 +4,9 @@
  *
  * ADMIN_USERS_FIXTURE is API-shaped (`GET /api/admin/users`). Everything in
  * `adminFixture` is NOT knowable from any route yet: per-user membership
- * counts, household ownership, join requests (the #453 epic's admin
- * surface), the instance relay's levers and the service rows. Live data
- * renders what exists and omits the rest.
+ * counts, household ownership, the instance relay's levers and the service
+ * rows. Live data renders what exists and omits the rest. (Join requests
+ * went real with #453 — GET /api/join-requests.)
  */
 export const ADMIN_USERS_FIXTURE = {
   users: [
@@ -34,9 +34,6 @@ export const adminFixture = {
     "hh-narrow-15033": "Rob Lawson",
     "hh-grans-1307": "Emma Lawson",
   },
-  joinRequests: [
-    { id: "jr-rob-seaside", initials: "RL", who: "Rob Lawson", system: "Seaside Cottage", when: "2d ago" },
-  ],
   relay: [
     ["collection domain", "in.lawson-home.orbit", null],
     ["ingest", "enabled · polling every 30s", "on"],

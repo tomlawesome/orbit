@@ -1,7 +1,8 @@
 <script>
   import { onMount } from "svelte";
-  import { readAdminScreen } from "$lib/data/workspace.js";
+  import { addMember, decideJoinRequest, readAdminScreen } from "$lib/data/workspace.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
+  import { ago } from "$lib/format.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./administration.css";
@@ -20,6 +21,37 @@
 
   const initialsOf = (name) =>
     name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
+
+  /* §11 (#453): decisions and direct placement — both land on the real
+     routes, both refresh the screen with the server's answer. */
+  let busy = $state(null);
+  let problem = $state(null);
+  let placing = $state(null); // user id whose system picker is open
+  async function decide(requestId, action) {
+    busy = requestId;
+    problem = null;
+    try {
+      await decideJoinRequest(requestId, action);
+      view = await readAdminScreen();
+    } catch (error) {
+      problem = error?.message ?? String(error);
+    } finally {
+      busy = null;
+    }
+  }
+  async function place(userId, householdId) {
+    busy = userId;
+    problem = null;
+    try {
+      await addMember(householdId, userId);
+      placing = null;
+      view = await readAdminScreen();
+    } catch (error) {
+      problem = error?.message ?? String(error);
+    } finally {
+      busy = null;
+    }
+  }
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   /* the minisys ring at r40 shrunk to the roster's r13 */
   const ringDots = (household) =>
@@ -72,10 +104,19 @@
             </div>
             <span class="role" class:admin={person.isInstanceAdmin}>{person.isInstanceAdmin ? "admin" : "user"}</span>
             {#if person.id !== view.user?.id}
-              <button class="place" title="Admins can add any user to any system">place in a system…</button>
+              <button class="place" title="Admins can add any user to any system"
+                      onclick={() => (placing = placing === person.id ? null : person.id)}>place in a system…</button>
             {/if}
           </div>
+          {#if placing === person.id}
+            <div class="placerow">
+              {#each view.households as household (household.id)}
+                <button disabled={busy === person.id} onclick={() => place(person.id, household.id)}>{household.name}</button>
+              {/each}
+            </div>
+          {/if}
         {/each}
+        {#if problem}<div class="adminproblem">{problem}</div>{/if}
       </div>
 
       <div class="card">
@@ -97,18 +138,18 @@
                 `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
               ].filter(Boolean).join(" · ")}</span>
             </div>
-            {#if view.joinRequests.some((request) => request.system === household.name)}
-              <span class="joinbadge">1 wants in</span>
+            {#if view.joinRequests.some((request) => request.householdId === household.id)}
+              <span class="joinbadge">{view.joinRequests.filter((request) => request.householdId === household.id).length} want{view.joinRequests.filter((request) => request.householdId === household.id).length === 1 ? "s" : ""} in</span>
             {/if}
           </div>
         {/each}
 
         {#each view.joinRequests as request (request.id)}
           <div class="joinreq">
-            <span class="avatar">{request.initials}</span>
-            <p><b>{request.who}</b> asks to join <b>{request.system}</b> · {request.when}</p>
-            <button class="yes">approve</button>
-            <button>decline</button>
+            <span class="avatar">{initialsOf(request.displayName)}</span>
+            <p><b>{request.displayName}</b> asks to join <b>{request.householdName}</b> · {ago(request.createdAt, view.now)}</p>
+            <button class="yes" disabled={busy === request.id} onclick={() => decide(request.id, "approve")}>approve</button>
+            <button disabled={busy === request.id} onclick={() => decide(request.id, "decline")}>decline</button>
           </div>
         {/each}
       </div>

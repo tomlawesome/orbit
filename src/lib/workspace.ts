@@ -100,6 +100,15 @@ export const recoverableHouseholdSchema = z.object({
   deleteAfter: z.iso.datetime(),
 });
 
+/** §11 (#453): the ENTIRE surface a non-member sees of a household — an id,
+ * a name, and whether they have already asked to join. Deliberately its own
+ * minimal shape, never the member household schema with empty arrays. */
+export const visibleHouseholdSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  requested: z.boolean().default(false),
+});
+
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
   /** The server decides whether the user may enter a household or must choose one. */
@@ -107,6 +116,8 @@ export const workspaceSchema = z.object({
   activeHouseholdId: z.string().min(1).nullable(),
   households: z.array(householdWorkspaceSchema).max(500),
   recoverableHouseholds: z.array(recoverableHouseholdSchema).max(500).default([]),
+  /** Populated only on the choose branch: the labelled sky (#453). */
+  visibleHouseholds: z.array(visibleHouseholdSchema).max(500).default([]),
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
