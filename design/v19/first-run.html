@@ -48,10 +48,12 @@
      3. THE DWELL COMES BEFORE THE INSTRUMENT. The arrival now settles on the
         BARE SKY: the planet symbols, the centre sun, the household's name,
         and nothing else — no rings, no ticks, no months, no inbox orb, no
-        menu orb, no search, no north star, no scroll cue. Three seconds
-        there. THEN the instrument arrives in the family's own arrive style
-        (home.html's `arrive`: scale .16 → 1), the chrome fades up behind it,
-        and only then does the tour placeholder pop.
+        menu orb, no search, no north star, no scroll cue. Two seconds
+        there (three, until the owner trimmed it: "at the moment it feels
+        like a slow load, not a deliberate wait"). THEN the instrument is
+        PLACED in the family's own arrive style (scale .16 → 1) over a
+        slowed 1.8s, the chrome fades up behind it, and only then does the
+        tour placeholder pop.
      4. THE NEWCOMER'S ARRIVAL. A non-admin who is not the first user flies
         the same launch and lands on the dial screen with NO DIAL: the #453
         labelled sky (web/src/routes/home/+page.svelte's emptySky branch,
@@ -498,19 +500,46 @@
      the centre sun, the household's name. `bare` takes away everything else:
      the rings, the ticks, the month letters, the now-marker, the trails, the
      constellation leg, the inbox orb, the account orb, the north star, the
-     search line, the scroll cue. Three seconds pass there. Then `bare` comes
+     search line, the scroll cue. TWO seconds pass there. Then `bare` comes
      off and `instrument` goes on, and the chart arrives in the family's own
-     arrive style — home.html's `arrive`, verbatim, scale .16 → 1. */
+     arrive style — home.html's `arrive`, scale .16 → 1.
+
+     THE DIAL IS PLACED, NOT POPPED (§15, "the landing dwell trims, the dial
+     slows"). The draw-in kept home.html's 1.3s / cubic-bezier(.2,.7,.2,1),
+     and that curve is violently front-loaded: 10% of the time bought 36% of
+     the growth and the chart was at 80% of full size after 426ms, then sat
+     there for most of a second. Against a wait, that reads as a slow load
+     ending in a POP. So: 1.3s → 1.8s on cubic-bezier(.2,.26,.35,1).
+
+     The curve matters more than the length, and it was tuned by looking at
+     the strip frame by frame. A much gentler ease (.36,.1,.2,1 at 1.9s) was
+     tried first and made it worse: at scale .16 the chart is smaller than
+     the sun's own glow, so a slow start is an INVISIBLE start — it spent its
+     first ~400ms showing nothing, which put a hesitation back into the very
+     wait the ruling is trimming, and then still did its growing in a burst
+     in the middle. (.2,.26,.35,1) opens at a little over linear speed (12%
+     of the time buys 20% of the growth, against the old curve's 36%), so the
+     rings clear the sun by ~300ms; carries the middle steadily (25%→46%,
+     42%→72%); and lands on a genuinely soft final approach — 92% at 1.2s,
+     the last 8% spread over the remaining .6s, which is still visible as
+     the outer ring easing out to its radius. Net: ~1.2s of continuously
+     perceptible growth where there used to be a ~430ms snap followed by
+     .9s of a static picture. The chrome behind it stretches to match:
+     .95s/.34s delay → 1.3s/.45s delay, so it settles just under the dial
+     rather than racing it, and the opacity stop moves 60% → 55% so the chart
+     is SOLID while it is still being placed rather than only finishing its
+     fade as it stops moving. (The newcomer's `.nf` chromein is NOT touched —
+     that landing is sealed.) */
   body.bare .hf .instrument,
   body.bare .hf .orb,
   body.bare .hf .nstar,
   body.bare .hf .hero-foot{opacity:0;pointer-events:none}
   .hf .instrument{transform-box:view-box;transform-origin:50% 50%}
-  body.instrument .hf .instrument{animation:arrive 1.3s cubic-bezier(.2,.7,.2,1) both}
+  body.instrument .hf .instrument{animation:arrive 1.8s cubic-bezier(.2,.26,.35,1) both}
   body.instrument .hf .orb,
   body.instrument .hf .nstar,
-  body.instrument .hf .hero-foot{animation:chromein .95s ease .34s both}
-  @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1);opacity:1}}
+  body.instrument .hf .hero-foot{animation:chromein 1.3s ease .45s both}
+  @keyframes arrive{from{transform:scale(.16);opacity:0}55%{opacity:1}to{transform:scale(1);opacity:1}}
   @keyframes chromein{from{opacity:0}to{opacity:1}}
   /* the bodies CONDENSE OUT OF THE LIGHT (ruling 2): they do not pop in at
      the end of a flash, they come out of the bloom already lit, oversized and
@@ -692,14 +721,15 @@
      down, so under prefers-reduced-motion it is NOT played at all: the
      canvas never runs, no starfield streaks, no camera. The flight becomes a
      plain crossfade — form/login out, home in (and home out, dusk in on the
-     way down) — over ~0.7s, and the 3s dwell and the tour pop still happen,
+     way down) — over ~0.7s, and the dwell and the tour pop still happen,
      so the sequence tells the same story without any motion. Everything else
      that drifts, breathes, pulses or rotates is stopped too.
 
      The staging survives it intact, because the staging is class-driven and
-     not motion-driven: the bare sky still lands bare, the three seconds still
-     pass, the instrument and the chrome still appear after them, the newcomer
-     still gets the labelled sky and then the question. Only the movement goes.
+     not motion-driven: the bare sky still lands bare, the dwell still passes
+     (2s here, the newcomer's ratified 3s there), the instrument and the
+     chrome still appear after it, the newcomer still gets the labelled sky
+     and then the question. Only the movement goes.
   */
   @media (prefers-reduced-motion: reduce){
     *{animation:none!important}
@@ -943,8 +973,9 @@
       </defs>
       <!-- §15 second pass, ruling 3: THE INSTRUMENT. Everything in this group
            is withheld from the landing — the rings, the ticks, the months, the
-           now-marker, the trails, the constellation leg. It arrives 3 seconds
-           after the bodies have, in the family's arrive style. -->
+           now-marker, the trails, the constellation leg. It arrives 2 seconds
+           after the bodies have, in the family's arrive style — slowed, so it
+           is placed rather than popped. -->
       <g class="instrument">
       <g class="rotor">
         <g stroke="var(--chart-line-soft)" stroke-width=".5">
@@ -989,7 +1020,7 @@
 
       <!-- THE BODIES. This is the whole of the arrival: the centre sun, the
            household's name under it, and the planet symbols. Nothing else is
-           on the screen for three seconds. -->
+           on the screen for two seconds. -->
       <g class="bodies">
       <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#hf-sun)" opacity=".8"/>
       <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
@@ -1128,7 +1159,7 @@
   <i aria-hidden="true"></i>
   <b>TOUR POPS HERE</b>
   <span>the welcome tour (#477) takes over from this point —<br>
-        after the bare sky, its 3 seconds, and the instrument drawing in</span>
+        after the bare sky, its 2 seconds, and the instrument drawing in</span>
 </div>
 
 <svg class="grain" width="100%" height="100%" aria-hidden="true"><filter id="gr">
@@ -1804,27 +1835,39 @@ function dropMark(){
        4800   handoff INSIDE the light — the canvas dissolves over 1.7s while
               the bodies condense out of it over 1.3s
        6400   the bare sky is readable: planets, sun, the household's name
-       9400   three seconds later the instrument arrives (1.3s, arrive style)
-      11150   the tour pops (first-run only)
+       8400   TWO seconds later the instrument arrives (1.8s, arrive style)
+      10650   the tour pops (first-run only)
 
-     THE NEWCOMER'S EXTRA BEAT (owner, §15 third pass), TRIMMED BY A SECOND
-     (owner, later): the waiting before the count was a second too long. The
-     whole tail moves one second earlier and its internal rhythm is untouched
-     — the same 2s hold, the same 0.9s handover to the question. The count now
-     opens WHILE the labelled sky is still arriving (500ms into the 1300ms
-     arrive) rather than 200ms after it has finished. Nothing above it moves:
-     the 3s dwell, the instrument and the tour are exactly where they were.
+     THE DWELL TRIMS AND THE DIAL SLOWS (owner, §15, "first run is excellent,
+     but—"): the wait on the bare sky was a second too long and the dial's
+     pop was slightly too fast, so together they read as a slow load rather
+     than a deliberate wait. The dwell goes 3s → 2s and everything after it
+     rides one second earlier; the draw-in goes 1.3s → 1.8s on a much softer
+     curve (see the CSS). The tour still pops 450ms after the chart settles,
+     so it lands at 10650 rather than a flat −1s — the chart is simply still
+     arriving where it used to be finished.
+
+     THE NEWCOMER KEEPS ITS OWN CLOCK. Its arrival was ratified verbatim WITH
+     the 3s bare dwell, and its tail was trimmed and sealed separately after
+     that ("the dwell before the count reduces by 1s, the beat's internal
+     rhythm unchanged"). This ruling is about the first-run / login landing,
+     so the shared `dwell` is SPLIT rather than lowered: `newDwell` holds the
+     newcomer at 3000 and every sealed number below is exactly where it was.
+       9400   the labelled sky's chrome arrives (unchanged)
        9900   the count fades IN on the settling sky, boxless (0.8s)
       11900   it fades OUT again (0.8s) — ~2.8s of screen time in all
       12800   and the question arrives in the space it left                    */
 const T = { warp:200, mark:260, release:430, markOut:1340,
             nameOn:1560, nameOff:2600,
-            land:4800, condensed:6400, dwell:3000, instrument:1300,
+            land:4800, condensed:6400, dwell:2000, newDwell:3000,
+            instrument:1800,
             tourGap:450, countGap:500, countHold:2000, countFade:900 };
-T.instrumentAt = T.condensed + T.dwell;                    /*  9400 */
-T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 11150 */
+T.instrumentAt = T.condensed + T.dwell;                    /*  8400 */
+T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10650 */
+/* the newcomer's landing is sealed at the old clock — see above */
+T.newInstrumentAt = T.condensed + T.newDwell;              /*  9400 */
 /* the count opens over the arriving sky, a second earlier than it did */
-T.countOn = T.instrumentAt + T.countGap;                   /*  9900 */
+T.countOn = T.newInstrumentAt + T.countGap;                /*  9900 */
 T.countOff = T.countOn + T.countHold;                      /* 11900 */
 T.belongAt = T.countOff + T.countFade;                     /* 12800 */
 
@@ -1834,6 +1877,10 @@ function ascend(withForm, landing){
                         "showdusk", "belong", "instrument", "counting");
   const newcomer = landing === "newcomer";
   const surface = newcomer ? "shownew" : "showhome";
+  /* the dwell is split: the first-run/login landing waits 2s (this ruling),
+     the newcomer still waits the 3s its arrival was ratified with */
+  const dwell = newcomer ? T.newDwell : T.dwell;
+  const instrumentAt = newcomer ? T.newInstrumentAt : T.instrumentAt;
 
   if (RM.matches) {                       /* reduced motion: a plain crossfade */
     body.classList.remove("showform", "showdawn");
@@ -1841,8 +1888,8 @@ function ascend(withForm, landing){
     /* the labelled sky has to be DRAWN, motion or no motion — without this the
        reduced-motion newcomer lands on an empty frame */
     if (newcomer) renderNewSky();
-    /* the staging survives: bare sky, three seconds, then the instrument */
-    after(700 + T.dwell, () => {
+    /* the staging survives: bare sky, the dwell, then the instrument */
+    after(700 + dwell, () => {
       body.classList.remove("bare");
       body.classList.add("instrument");
       /* the count still takes its turn under reduced motion — it appears,
@@ -1855,7 +1902,7 @@ function ascend(withForm, landing){
         });
       }
     });
-    if (withForm) after(700 + T.dwell + 700, () => body.classList.add("tour"));
+    if (withForm) after(700 + dwell + 700, () => body.classList.add("tour"));
     return;
   }
 
@@ -1894,8 +1941,9 @@ function ascend(withForm, landing){
     body.classList.add(surface, "bare");
     if (newcomer) renderNewSky();
   });
-  /* THE DWELL, then the instrument (ruling 3) */
-  after(T.instrumentAt, () => {
+  /* THE DWELL, then the instrument (ruling 3; 2s on the login landing, and
+     the newcomer's ratified 3s on theirs) */
+  after(instrumentAt, () => {
     body.classList.remove("bare");
     body.classList.add("instrument");
   });
