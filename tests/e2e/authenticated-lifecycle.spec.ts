@@ -4,7 +4,7 @@ const administrator = "Orbit Administrator";
 const member = "Orbit Member";
 
 async function signIn(page: Page, identity: string) {
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: identity }).click();
   await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
@@ -134,7 +134,7 @@ async function selectHouseholdByName(page: Page, name: string): Promise<DurableW
   const target = workspace.households.find((household) => household.name === name);
   if (!target) throw new Error(`Expected household "${name}" to be available for selection`);
 
-  if (new URL(page.url()).pathname === "/settings") await page.goto("/");
+  if (new URL(page.url()).pathname === "/settings") await page.goto("/workspace");
   await openMobileNavigationIfNeeded(page);
   const householdPicker = page.locator("button.household-picker");
   await expect(householdPicker, `Expected the household picker before selecting "${name}"`).toBeVisible({ timeout: 15_000 });
@@ -300,7 +300,7 @@ test.describe("authenticated household lifecycle", () => {
       await disabledMemberRow.getByRole("button", { name: "Enable account" }).click();
       await expect(page.getByText(`${member}'s account is now enabled.`, { exact: true })).toBeVisible();
 
-      await memberPage.goto("/");
+      await memberPage.goto("/workspace");
       await expect(memberPage.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
       await expect(memberPage.getByText("Acceptance household", { exact: true })).toHaveCount(0);
       await signIn(memberPage, member);
@@ -308,7 +308,7 @@ test.describe("authenticated household lifecycle", () => {
 
       // Administration is now a route, so the journey must return to the
       // workspace and reopen settings before using a settings section again.
-      await page.goto("/");
+      await page.goto("/workspace");
       await openDesktopSettings(page);
       await expect(page).toHaveURL(/\/settings$/);
       await page.getByRole("link", { name: "Household", exact: true }).click();

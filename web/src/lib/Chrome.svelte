@@ -1,4 +1,6 @@
 <script>
+  import { signOut } from "$lib/data/workspace.js";
+
   /**
    * The sub-screens' shared chrome (#461): the "← YOUR SKY" way back, the
    * account orb, and the account card with the journey nav and the five pack
@@ -58,6 +60,36 @@
     try { localStorage.setItem("orbit-theme", name); } catch {}
   }
 
+  /*
+   * Signing out from a sub-screen (#410, §15).
+   *
+   * Two taps, and the second one REVOKES before it navigates: this control
+   * used to walk to /logout without ending anything, which meant the goodbye
+   * screen was a picture of a sign-out rather than a sign-out. The session is
+   * gone before the reader leaves this page.
+   *
+   * The ratified DESCENT — instrument withdrawing, bodies dispersing, the
+   * bloom read backwards — belongs to home, because home is the surface that
+   * has an instrument and bodies to take away. From a sub-screen there is
+   * nothing to withdraw, so the reader is handed to the dusk directly.
+   * Carrying the full flight onto every sub-screen is a follow-up, not a
+   * silent invention.
+   */
+  let armedOut = $state(false);
+  let signOutProblem = $state(null);
+  async function tapSignOut() {
+    if (!armedOut) { armedOut = true; return; }
+    signOutProblem = null;
+    try {
+      await signOut();
+    } catch (error) {
+      armedOut = false;
+      signOutProblem = error?.message ?? "still signed in — try again";
+      return;
+    }
+    location.href = "/logout";
+  }
+
   const initials = $derived(
     (user?.displayName ?? "")
       .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
@@ -81,7 +113,8 @@
               aria-pressed={active === name} onclick={() => setSwatch(name)}></button>
     {/each}
   </div>
-  <button class="signout" onclick={() => (location.href = "/logout")}>sign out →</button>
+  <button class="signout" onclick={tapSignOut}>{armedOut ? "tap again to sign out" : "sign out →"}</button>
+  {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
 
 <style>
@@ -115,4 +148,5 @@
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue)}
+  .signout-problem{font:10.5px var(--mono);color:var(--overdue);margin-top:7px;line-height:1.7}
 </style>

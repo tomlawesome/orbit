@@ -40,10 +40,38 @@ const SCREENS = [
   {
     name: "login",
     path: "/login",
-    stage: "owned",
-    /* Owner iterated the lockup, button and ribbon on 2026-08-14 (CON-19
-       amended for the sign-in hero); design/family/login.html is now history. */
-    mockup: "/design/family/login.html",
+    /*
+     * Back to PORTING, and against a different sheet (#410, §15). The owner
+     * ratified the login/logout flight verbatim on 2026-08-16 — "nothing short
+     * of amazing... Ship these in that exact form" — and ruled in the same
+     * breath that they are not first-run dressing: "they ship as THE login and
+     * logout screens for every user, every time". So the sign-in is a fresh
+     * port of first-run.html's own login layer and has to earn its baseline
+     * against it. design/family/login.html, and the 2026-08-14 iteration of
+     * the hero lockup that lived here, are history from that ruling on.
+     */
+    stage: "porting",
+    mockup: "/design/v19/first-run.html",
+    /*
+     * The sheet's DEFAULT state is the first-run card standing on the login.
+     * The state this screen ships is the one UNDER it, and toLogin() is the
+     * sheet's own name for it — the demos toolbar's button calls exactly this.
+     * Asking for it here rather than clicking keeps the selection in the gate,
+     * where it is read alongside the budget.
+     *
+     * The same predicate settles the app, which has no such function and no
+     * card: `lit` is first light, in both.
+     */
+    settle: () => {
+      if (typeof window.toLogin === "function" && document.body.classList.contains("showform")) {
+        window.toLogin();
+      }
+      return document.body.classList.contains("lit")
+        && !document.body.classList.contains("showform");
+    },
+    /* The sheet's own scaffolding: the demos toolbar that replays the flight
+       and switches packs, and the footer line describing the proposal. */
+    mockupOnly: [".demos", ".sheet"],
   },
   {
     name: "logout",
