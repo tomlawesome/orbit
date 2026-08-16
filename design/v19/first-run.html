@@ -276,12 +276,10 @@
      enough that the dawn reads clean through it. */
   #formlayer{position:fixed;inset:0;z-index:4;display:flex;flex-direction:column;
              align-items:center;justify-content:center;gap:12px;
-             padding:11vh 24px 48vh;
+             padding:24px;
              overflow:auto;
              opacity:0;pointer-events:none;
              transition:opacity .6s ease,transform .7s cubic-bezier(.3,.7,.3,1)}
-  /* short viewports cannot spare half a frame to the sky; the card recentres */
-  @media (max-height:720px){ #formlayer{padding:8vh 20px 22vh} }
   body.showform #formlayer{opacity:1;pointer-events:auto}
   body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.3,1)}
   /* errors keep you grounded: the climb starts, catches, and sets back down */
