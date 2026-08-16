@@ -50,6 +50,24 @@ const run = async () => {
   const canvas = standaloneRequire("@napi-rs/canvas");
   if (typeof canvas.createCanvas !== "function") throw new Error("missing native canvas import");
 
+  // Page-one previews (#476) render text a document did not embed using the
+  // standard-14 substitutes shipped inside pdfjs-dist. Next.js traces only the
+  // files it sees imported, so their presence is asserted here rather than
+  // discovered as blank text in a shipped image. The assertion takes the same
+  // route the renderer does — resolve the traced entry point, then look beside
+  // it — because the standalone copy of `node_modules/pdfjs-dist` holds only
+  // traced files and so has no package.json to resolve through.
+  const standardFonts = resolve(
+    standaloneRequire.resolve("pdfjs-dist/legacy/build/pdf.mjs"),
+    "..",
+    "..",
+    "..",
+    "standard_fonts",
+  );
+  if (!existsSync(standardFonts) || !readdirSync(standardFonts).includes("LiberationSans-Regular.ttf")) {
+    throw new Error("missing PDF.js standard font data");
+  }
+
   const pdfjs = await import(pathToFileURL(pdfjsEntry).href);
   if (typeof pdfjs.getDocument !== "function") throw new Error("missing PDF.js getDocument export");
   const fixturePath = process.env.ORBIT_PDF_FIXTURE;
