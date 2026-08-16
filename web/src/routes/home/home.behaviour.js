@@ -473,10 +473,10 @@ export function mountHome({ galaxy, primary }) {
   addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeOverlays(null);
   });
-  /* v17: every drawer animates home when you scroll down */
+  /* v17, amended §14: any scroll movement sends every drawer home */
   let lastY = scrollY;
   addEventListener("scroll", () => {
-    if (scrollY > lastY + 4) {
+    if (Math.abs(scrollY - lastY) > 4) {
       for (const id of ["statusdrawer", "keydrawer"]) {
         const drawer = document.getElementById(id);
         if (drawer.classList.contains("open")) {
