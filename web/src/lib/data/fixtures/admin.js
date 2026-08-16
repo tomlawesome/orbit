@@ -5,8 +5,9 @@
  * ADMIN_USERS_FIXTURE is API-shaped (`GET /api/admin/users`). Everything in
  * `adminFixture` is NOT knowable from any route yet: per-user membership
  * counts, household ownership, the instance relay's levers and the service
- * rows. Live data renders what exists and omits the rest. (Join requests
- * went real with #453 — GET /api/join-requests.)
+ * rows. Live data renders what exists and omits the rest. (Join requests are
+ * not part of this screen at all — §15-2g put them in household management;
+ * GET /api/join-requests stays live for that screen to consume.)
  */
 export const ADMIN_USERS_FIXTURE = {
   users: [
