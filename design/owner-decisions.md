@@ -502,6 +502,10 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **Home's sub-identity: heliosphere and bridge go to mockup** (owner):
+  of the three directions pitched, the living heliosphere (the sun's
+  weather) and the bridge view (faint HUD furniture) are to be tried;
+  the master-plate margin treatment is not pursued.
 - **Two light-theme candidates, and dawn stays** (owner, on the atlas
   succession): Porcelain (cobalt underglaze on glazed white) and Solarium
   (light through frosted glass, etched lines, stained-glass bodies) are
