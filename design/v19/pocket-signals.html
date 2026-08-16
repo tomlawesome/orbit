@@ -1,0 +1,225 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — pocket: signals (proposal, issue #452 · #434 follow-up)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../family/family.css">
+<style>
+/* The pocket's suggestion surface (#434 follow-up): what the relay caught,
+   on a phone. The suggestion is on the DIAL too — the hollow accent ring at
+   its law position, the same body it is on the desk. The sheet is the
+   pocket's two-tap: the approve button arms, then fires. */
+body{overflow-y:auto;overflow-x:hidden}
+.sky g{animation:drift 180s linear infinite}
+@keyframes drift{to{transform:translateX(-40px)}}
+.mpage{position:relative;z-index:2;max-width:400px;margin:0 auto;padding:14px 12px 40px}
+.mtop{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 10px}
+.morb{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);
+      background:var(--panel);backdrop-filter:blur(8px);display:grid;place-items:center;
+      font:11px var(--mono);color:var(--ink-mid)}
+.mdial{width:100%;aspect-ratio:1;position:relative}
+.mdial svg{width:100%;height:100%}
+.mgroup h3{font:10px var(--mono);letter-spacing:.16em;color:var(--ink-faint);margin:14px 4px 8px}
+.mitem{display:flex;align-items:center;gap:11px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
+       padding:11px 13px;margin-bottom:6px}
+.mitem b{display:block;font-size:13.5px;font-weight:520}
+.mitem span{font-size:11px;color:var(--ink-mid)}
+.mitem .flex{flex:1;min-width:0}
+.mt{font:500 12px var(--mono);text-align:right}
+.mt small{display:block;font-size:9.5px;color:var(--ink-faint)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.sug{background:none;border:1.6px solid var(--accent)}
+.mitem.suggest{border-style:dashed;cursor:pointer}
+.mitem.suggest span{color:var(--accent)}
+.mitem.reading b{color:var(--ink-mid);font-weight:500}
+.mitem.reading .dot{background:var(--upcoming);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.4}}
+.mitem.failed .dot{background:var(--degraded, #fb8b24)}
+.mitem.failed span{color:var(--ink-mid)}
+.burnup{font:9.5px var(--mono);color:var(--ink-faint);text-align:center;margin:10px 0 0;letter-spacing:.06em}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:10;border-radius:18px 18px 0 0;
+       background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+       padding:18px 22px 26px;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,.7,.3,1)}
+.sheet.open{transform:none}
+.sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+.sheet b{font-size:15px;font-weight:600}
+.sheet .meta{font:12px var(--mono);color:var(--ink-mid);margin:4px 0 10px}
+.sheet .kv{display:flex;justify-content:space-between;font:11px var(--mono);
+           color:var(--ink-mid);padding:6px 2px;border-bottom:1px solid var(--line-soft)}
+.sheet .kv:last-of-type{border:0;margin-bottom:8px}
+.sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
+.sheet .kv b .conf{color:var(--ink-faint);font-size:8.5px;letter-spacing:.06em;margin-left:5px}
+.sheet .acts{display:flex;gap:9px}
+.sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
+      background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.sheet .acts .pri{color:var(--accent);border-color:var(--accent)}
+.sheet .amend{display:block;text-align:center;font:10.5px var(--mono);color:var(--ink-mid);
+              text-decoration:none;margin-top:12px}
+.sheet .amend:hover{color:var(--accent)}
+</style></head><body>
+<div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
+<g fill="#e9edf8"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
+      <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
+      <circle cx="292.6" cy="490.0" r="0.95" opacity="0.3"/>
+      <circle cx="335.7" cy="373.5" r="0.51" opacity="0.14"/>
+      <circle cx="289.3" cy="142.4" r="0.86" opacity="0.29"/>
+      <circle cx="23.8" cy="666.7" r="0.42" opacity="0.36"/>
+      <circle cx="336.4" cy="183.5" r="0.91" opacity="0.32"/>
+      <circle cx="50.0" cy="569.5" r="0.49" opacity="0.37"/>
+      <circle cx="275.5" cy="833.0" r="0.44" opacity="0.2"/>
+      <circle cx="248.0" cy="517.0" r="0.53" opacity="0.37"/>
+      <circle cx="338.6" cy="256.2" r="0.5" opacity="0.3"/>
+      <circle cx="162.9" cy="563.8" r="0.75" opacity="0.22"/>
+      <circle cx="8.7" cy="114.7" r="0.72" opacity="0.32"/>
+      <circle cx="170.3" cy="632.8" r="0.78" opacity="0.36"/>
+      <circle cx="262.0" cy="273.6" r="0.5" opacity="0.12"/>
+      <circle cx="15.8" cy="733.1" r="1.01" opacity="0.33"/>
+      <circle cx="43.7" cy="561.4" r="0.49" opacity="0.37"/>
+      <circle cx="262.2" cy="637.2" r="0.83" opacity="0.23"/>
+      <circle cx="339.4" cy="817.4" r="0.57" opacity="0.23"/>
+      <circle cx="293.4" cy="578.0" r="0.69" opacity="0.24"/>
+      <circle cx="387.1" cy="234.6" r="0.55" opacity="0.31"/>
+      <circle cx="110.8" cy="762.8" r="0.63" opacity="0.38"/>
+      <circle cx="151.9" cy="752.4" r="0.93" opacity="0.32"/>
+      <circle cx="85.7" cy="139.6" r="0.42" opacity="0.15"/>
+      <circle cx="266.6" cy="54.7" r="0.57" opacity="0.27"/>
+      <circle cx="62.1" cy="279.7" r="0.56" opacity="0.3"/>
+      <circle cx="47.4" cy="847.9" r="0.82" opacity="0.31"/>
+      <circle cx="221.0" cy="423.1" r="1.08" opacity="0.37"/>
+      <circle cx="328.8" cy="25.4" r="0.81" opacity="0.38"/>
+      <circle cx="255.3" cy="436.0" r="0.85" opacity="0.15"/>
+      <circle cx="291.1" cy="666.2" r="0.45" opacity="0.25"/>
+      <circle cx="238.1" cy="299.2" r="0.88" opacity="0.38"/>
+      <circle cx="362.5" cy="261.6" r="0.51" opacity="0.36"/>
+      <circle cx="244.8" cy="705.1" r="1.01" opacity="0.18"/>
+      <circle cx="235.0" cy="257.7" r="0.96" opacity="0.31"/>
+      <circle cx="95.6" cy="425.1" r="0.82" opacity="0.17"/>
+      <circle cx="73.0" cy="403.1" r="0.45" opacity="0.25"/>
+      <circle cx="376.0" cy="702.1" r="0.44" opacity="0.35"/>
+      <circle cx="286.6" cy="601.9" r="0.42" opacity="0.33"/>
+      <circle cx="78.2" cy="682.6" r="0.63" opacity="0.21"/>
+      <circle cx="68.9" cy="737.4" r="0.56" opacity="0.36"/>
+      <circle cx="205.5" cy="126.2" r="0.86" opacity="0.26"/>
+      <circle cx="10.8" cy="700.1" r="0.59" opacity="0.11"/>
+      <circle cx="306.5" cy="618.0" r="0.67" opacity="0.16"/>
+      <circle cx="210.8" cy="498.5" r="0.88" opacity="0.25"/>
+      <circle cx="227.1" cy="612.7" r="0.53" opacity="0.15"/>
+      <circle cx="193.8" cy="641.0" r="0.96" opacity="0.36"/>
+      <circle cx="175.6" cy="606.6" r="0.47" opacity="0.22"/>
+      <circle cx="26.7" cy="710.0" r="1.1" opacity="0.3"/>
+      <circle cx="301.0" cy="316.4" r="0.96" opacity="0.13"/>
+      <circle cx="148.2" cy="298.2" r="1.0" opacity="0.15"/>
+      <circle cx="63.7" cy="76.0" r="0.99" opacity="0.19"/>
+      <circle cx="361.2" cy="266.0" r="0.99" opacity="0.16"/>
+      <circle cx="361.0" cy="827.6" r="1.01" opacity="0.31"/>
+      <circle cx="358.5" cy="777.2" r="1.07" opacity="0.18"/>
+      <circle cx="340.0" cy="662.7" r="0.64" opacity="0.15"/>
+      <circle cx="359.9" cy="401.5" r="0.77" opacity="0.37"/>
+      <circle cx="193.5" cy="214.6" r="0.88" opacity="0.26"/>
+      <circle cx="109.0" cy="588.2" r="1.03" opacity="0.17"/>
+      <circle cx="325.1" cy="640.6" r="0.77" opacity="0.16"/></g></svg></div>
+<div class="mpage">
+  <div class="mtop">
+    <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
+    <div class="morb">TL</div>
+  </div>
+  <div class="mdial">
+    <svg viewBox="0 0 380 380">
+      <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
+              stroke-width="1" stroke-dasharray="3 5"/>
+      <g font-size="11" fill="var(--ink-faint)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+        <text x="190" y="26">AUG</text><text x="356" y="196">NOV</text>
+        <text x="190" y="364">FEB</text><text x="24" y="196">MAY</text></g>
+      <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
+      <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <!-- Bodies generated by the app's chart transform (#451/#414, fix-both):
+           law positions. The hollow accent ring is the SUGGESTION at its own
+           law position — the same body the desk shows, tappable here too. -->
+      <circle cx="175.7" cy="140" r="8" style="fill:var(--overdue)" onclick="openSheet('item')"/>
+      <circle cx="208.2" cy="126.7" r="7" style="fill:var(--warm)" onclick="openSheet('item')"/>
+      <circle cx="222.9" cy="285.5" r="7.5" style="fill:var(--ok)" onclick="openSheet('item')"/>
+      <ellipse cx="222.9" cy="285.5" rx="14" ry="5" transform="rotate(-24 222.9 285.5)"
+               fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+      <g onclick="openSheet('sugg')" style="cursor:pointer">
+        <circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
+        <circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="mgroup"><h3>NEEDS ATTENTION</h3>
+    <div class="mitem"><span class="dot" style="background:var(--overdue)"></span>
+      <div class="flex"><b>Gutter clearing</b><span>Home &middot; ~£150</span></div>
+      <div class="mt" style="color:var(--overdue)">T+16d<small>28 Jul</small></div></div>
+    <div class="mitem"><span class="dot" style="background:var(--warm)"></span>
+      <div class="flex"><b>Car MOT — Volvo V60</b><span>Vehicles &middot; £54.85</span></div>
+      <div class="mt" style="color:var(--warm)">T&#8722;16d<small>29 Aug</small></div></div>
+  </div>
+
+  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
+    <div class="mitem suggest" onclick="openSheet('sugg')">
+      <span class="dot sug"></span>
+      <div class="flex"><b>Home insurance renewal</b><span>from policy-schedule.pdf &middot; burns up in 43d</span></div>
+      <div class="mt" style="color:var(--accent)">~£400<small>renews 02 Oct</small></div>
+    </div>
+    <div class="mitem reading">
+      <span class="dot"></span>
+      <div class="flex"><b>A message arrived 4m ago</b><span>still reading its document</span></div>
+    </div>
+    <div class="mitem failed">
+      <span class="dot"></span>
+      <div class="flex"><b>A message from 09 Aug</b><span>picture-only scan — couldn&rsquo;t be read</span></div>
+      <div class="mt" style="color:var(--ink-faint);font-size:10px">remove</div>
+    </div>
+    <div class="burnup">unreviewed arrivals burn up after 45 days &middot; nothing is added without you</div>
+  </div>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
+  <div id="sh-fields"></div>
+  <div class="acts" id="sh-acts"></div>
+  <a class="amend" id="sh-amend" href="#" hidden>review &amp; amend →</a>
+</div>
+<script>
+const SHEETS = {
+  item: {
+    title: "Car full service", meta: "T−161d · 21 Jan · ~£300 · ◆ 2 documents", fields: [],
+    acts: [["open", "pri"], ["documents", ""], ["close", ""]], amend: false,
+  },
+  sugg: {
+    title: "Home insurance renewal",
+    meta: "caught by your relay 11 Aug · burns up in 43d",
+    fields: [
+      ["provider", "Harbour Mutual", "READ · SURE"],
+      ["renews", "02 Oct 2026", "READ · SURE"],
+      ["cost", "~£400", "READ · UNSURE"],
+      ["document", "◆ policy-schedule.pdf · scanned clean", ""],
+    ],
+    acts: [["Add to orbit", "pri arm"], ["Dismiss", "arm"], ["close", ""]], amend: true,
+  },
+};
+function openSheet(kind){
+  const s = SHEETS[kind];
+  document.getElementById("sh-title").textContent = s.title;
+  document.getElementById("sh-meta").textContent = s.meta;
+  document.getElementById("sh-fields").innerHTML = s.fields.map(([k, v, c]) =>
+    `<div class="kv"><span>${k}</span><b>${v}${c ? `<span class="conf">${c}</span>` : ""}</b></div>`).join("");
+  document.getElementById("sh-acts").innerHTML = s.acts.map(([label, cls]) =>
+    `<button class="${cls}" onclick="tap(this,'${label}')">${label}</button>`).join("");
+  const amend = document.getElementById("sh-amend");
+  amend.hidden = !s.amend;
+  document.getElementById("sheet").classList.add("open");
+}
+/* the pocket two-tap: an arming button asks again in its own words */
+function tap(btn, label){
+  if (label === "close") { document.getElementById("sheet").classList.remove("open"); return; }
+  if (!btn.classList.contains("arm")) return;
+  if (btn.dataset.armed) { document.getElementById("sheet").classList.remove("open"); return; }
+  btn.dataset.armed = "1";
+  btn.textContent = label === "Dismiss" ? "tap again to dismiss" : "tap again to approve";
+}
+</script>
+</body></html>
