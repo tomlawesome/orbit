@@ -127,7 +127,7 @@ import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
 import { settingsFixture } from "./fixtures/settings.js";
 import { adminFixture } from "./fixtures/admin.js";
-import { galaxyOf, labelledSkyOf } from "./chart.js";
+import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 
 /** A mutating fetch with the session's CSRF token, like applyCommand's. */
@@ -151,7 +151,7 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  */
 export async function readInbox() {
   const body = await json(await fetch("/api/imap-inbox", { credentials: "same-origin" }));
-  return { receipts: body.receipts ?? [], households: body.households ?? [] };
+  return { receipts: body.receipts ?? [], households: body.households ?? [], filed: body.filed ?? [] };
 }
 
 /**
@@ -314,11 +314,25 @@ export async function readInboxScreen() {
     .map((receipt) => receipt.receivedAt)
     .sort()
     .pop() ?? null;
+  /* The Filed lane (§14, #472): the server forgets the mail→item link once a
+     receipt burns up, so `filed` only exists in the fixture until #467 gives
+     it a route — live data degrades to the lane's honest empty words. The dot
+     tells today's truth: it takes the item's CURRENT urgency band, not the
+     band on the day it was filed. */
+  const today = todayOf(workspace);
+  const itemsById = new Map(
+    workspace.households.flatMap((household) => (household.items ?? []).map((item) => [item.id, item])),
+  );
+  const filed = (inbox.filed ?? []).map((entry) => {
+    const item = itemsById.get(entry.itemId);
+    return { ...entry, band: bandOf(item?.dueDate ? daysUntil(item.dueDate, today) : null) };
+  });
   return {
+    filed,
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
-    today: todayOf(workspace),
+    today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     relay,
     lastCaught: caught,

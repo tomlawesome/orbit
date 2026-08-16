@@ -8,11 +8,12 @@
   import "./inbox.css";
 
   /**
-   * Inbox — the relay queue (#463). Built from design/v19/inbox.html
-   * (ratified §13): what the dish has caught, what Orbit read in it, and what
-   * it could not read — in plain words. Nothing enters the orbit from here
-   * without two deliberate taps (#434's protocol, shared with home's rows),
-   * and unreviewed arrivals burn up after 45 days.
+   * Inbox — the relay queue (#463), three lanes since §14 (#472). Built from
+   * design/v19/inbox.html: Filed (what the mail became) → For your review →
+   * Still reading / Failed to process, stacking to one column on a phone.
+   * Nothing enters the orbit from here without two deliberate taps (#434's
+   * protocol, shared with home's rows), and unreviewed arrivals burn up
+   * after 45 days.
    */
   let view = $state(null);
   let armed = $state({ id: null, act: null });
@@ -53,6 +54,11 @@
     new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   const fullDate = (iso) =>
     new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+  /* Filed dates carry their year only once it stops being obvious. */
+  const filedDate = (iso) =>
+    iso.slice(0, 4) === view.today.slice(0, 4) ? short(iso) : fullDate(iso);
+  /* The filed dot follows the chart key — the item's urgency band, today. */
+  const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
   const burnsIn = (receipt) => daysUntil(receipt.expiresAt.slice(0, 10), view.today);
   /* READ · SURE / READ · UNSURE — the parser's own confidence, two words. */
   const mark = (receipt, field) => {
@@ -108,6 +114,27 @@
       <a href="/settings/mail">your relay →</a>
     </div>
 
+    {#if view.filed.length || !emptyQueue}
+    <div class="lanes">
+    <div class="lane filed">
+      <div class="group">
+        <h3>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h3>
+        {#each view.filed as entry (entry.itemId)}
+          <a class="item" href="/item/{entry.itemId}">
+            <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
+            <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(entry.filedAt)}</span></div>
+          </a>
+        {/each}
+        {#if view.filed.length}
+          <div class="note">every item the relay has ever fed into your orbit —<br>tap one to open it; its documents ride with it</div>
+        {:else}
+          <!-- No filed route yet (#467): the lane states its own law instead. -->
+          <div class="note">nothing filed yet — approve an arrival<br>and it lands here, its documents riding with it</div>
+        {/if}
+      </div>
+    </div>
+
+    <div class="lane">
     {#if view.review.length}
       <div class="group">
         <h3>For your review · {view.review.length}</h3>
@@ -149,7 +176,9 @@
         {/each}
       </div>
     {/if}
+    </div><!-- /middle lane -->
 
+    <div class="lane">
     {#if view.reading.length}
       <div class="group">
         <h3>Still reading</h3>
@@ -167,7 +196,7 @@
 
     {#if view.failed.length}
       <div class="group">
-        <h3>Arrived, but could not be read</h3>
+        <h3>Failed to process</h3>
         {#each view.failed as failure (failure.id)}
           <div class="failed">
             <i aria-hidden="true"></i>
@@ -183,6 +212,9 @@
           </div>
         {/each}
       </div>
+    {/if}
+    </div><!-- /third lane -->
+    </div><!-- /lanes -->
     {/if}
 
     {#if !emptyQueue}
