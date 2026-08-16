@@ -23,10 +23,23 @@ export const SESSION_FIXTURE = {
   user: { id: "u-fixture", displayName: "Tom Lawson", email: "tom@lawson.example" },
 };
 
+/**
+ * The primary household's sections, in the engine's own shape
+ * (workspaceSectionSchema: id, name, icon, accent, visible).
+ *
+ * Five, not three, and each wearing its icon and accent: household management
+ * (#410) draws the sections editor, and design/v19/household-manage.html's
+ * five rows — Home, Vehicles, Devices, Services, Dates & renewals — are the
+ * defaultSections five in src/lib/domain.ts. The two new ones hold nothing,
+ * which is what makes them the rows that may be removed at all: a section
+ * holding entries can be hidden, never removed.
+ */
 const LAWSON_SECTIONS = [
-  { id: "s-home", name: "Home" },
-  { id: "s-vehicles", name: "Vehicles" },
-  { id: "s-devices", name: "Devices" },
+  { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
+  { id: "s-vehicles", name: "Vehicles", icon: "vehicle", accent: "blue", visible: true },
+  { id: "s-devices", name: "Devices", icon: "device", accent: "sand", visible: true },
+  { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
+  { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
 ];
 
 /** The primary household's items — the manifest and dial of the design. */
@@ -109,7 +122,10 @@ export const WORKSPACE_FIXTURE = {
     {
       id: "hh-seaside-4551", name: "Seaside Cottage", timezone: "Europe/London",
       currency: "GBP", memberCount: 3, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }, { id: "s-outside", name: "Outside" }],
+      sections: [
+        { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
+        { id: "s-outside", name: "Outside", icon: "service", accent: "plum", visible: true },
+      ],
       items: distantItems("i-seaside", [
         ["Septic tank empty", "s-outside", "2026-08-20", 21000],
         ["Chimney sweep — Seaside", "s-home", "2027-03-01", 9000],
@@ -120,7 +136,10 @@ export const WORKSPACE_FIXTURE = {
     {
       id: "hh-mumdad-2480", name: "Mum & Dad’s", timezone: "Europe/London",
       currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }, { id: "s-devices", name: "Devices" }],
+      sections: [
+        { id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true },
+        { id: "s-devices", name: "Devices", icon: "device", accent: "sand", visible: true },
+      ],
       items: distantItems("i-mumdad", [
         ["Stairlift service", "s-devices", "2027-01-10", 14000],
         ["Boiler service — Mum & Dad’s", "s-home", "2027-04-20", 11000],
@@ -130,7 +149,10 @@ export const WORKSPACE_FIXTURE = {
     {
       id: "hh-narrow-15033", name: "The Narrowboat", timezone: "Europe/London",
       currency: "GBP", memberCount: 1, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-boat", name: "Boat" }, { id: "s-cert", name: "Certification" }],
+      sections: [
+        { id: "s-boat", name: "Boat", icon: "vehicle", accent: "blue", visible: true },
+        { id: "s-cert", name: "Certification", icon: "calendar", accent: "coral", visible: true },
+      ],
       items: distantItems("i-narrow", [
         ["Hull blacking", "s-boat", "2026-12-11", 55000],
         ["Boat Safety Scheme examination", "s-cert", "2026-09-27", 18000,
@@ -141,7 +163,7 @@ export const WORKSPACE_FIXTURE = {
     {
       id: "hh-grans-1307", name: "Gran’s Flat", timezone: "Europe/London",
       currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }],
+      sections: [{ id: "s-home", name: "Home", icon: "home", accent: "sage", visible: true }],
       items: distantItems("i-grans", [
         ["Boiler service — Gran’s", "s-home", "2026-08-23", 9500],
         ["Gas safety certificate", "s-home", "2027-05-30", 8500],

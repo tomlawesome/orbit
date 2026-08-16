@@ -19,6 +19,7 @@ describe("v19 path dispatch", () => {
     expect(isV19Path("/maintenance")).toBe(true);
     expect(isV19Path("/settings/mail")).toBe(true);
     expect(isV19Path("/item/i-mot")).toBe(true);
+    expect(isV19Path("/household/hh-lawson-1")).toBe(true);
   });
 
   it("routes the v19 asset roots to the v19 handler", () => {
@@ -49,6 +50,8 @@ describe("v19 path dispatch", () => {
     expect(isV19Path("/item")).toBe(false);
     expect(isV19Path("/settings/mailbox")).toBe(false);
     expect(isV19Path("/loginhelp")).toBe(false);
+    expect(isV19Path("/households")).toBe(false);
+    expect(isV19Path("/household")).toBe(false);
   });
 
   // trailingSlash is "never" on both sides, but a client can still send one;

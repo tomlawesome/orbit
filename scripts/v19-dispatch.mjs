@@ -21,6 +21,11 @@ const V19_PAGES = new Set([
 ]);
 
 const V19_PREFIXES = [
+  /* One system, from inside (#410, §15). A dynamic path like /item/, and the
+     door to it is the helm's memberships card — which is why bare /settings
+     staying on Next is a cutover line and not a contradiction: the v19 helm
+     at /settings is what links here, and both move together. */
+  "/household/",
   "/item/",
   "/_app/",
   "/licenses/",

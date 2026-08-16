@@ -128,6 +128,7 @@ import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
+import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
 
 /** A mutating fetch with the session's CSRF token, like applyCommand's. */
 async function csrfFetch(path, { method = "POST", body } = {}) {
@@ -669,4 +670,124 @@ const UNAVAILABLE_REMINDERS = {
 export async function signOutEverywhere() {
   const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
   return body?.revoked ?? 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * Household management (#410, §15) — ONE system, seen from inside.
+ *
+ * Every route below already exists in the engine; nothing here is new server
+ * work. The screen is reached from the helm's memberships card, and an
+ * instance admin needing owner powers over some household is handed this same
+ * screen for it (§15-2i) — there is no admin variant.
+ */
+
+/**
+ * Everything household management renders: the household and its sections
+ * from the workspace, who is in it and who could be added from the members
+ * route, and who is waiting from the join-requests route.
+ *
+ * The two extra reads are ADDITIVE in different ways, deliberately:
+ *
+ *  - the roster is the screen's subject, so a members route that cannot
+ *    answer costs the reader the roster (and the workspace's own
+ *    `memberCount` stands in for the header's count) rather than the screen;
+ *  - joiners are one block of one card, and §15-2g made this the only place
+ *    they are answered, so an unreachable list must not take the editor down
+ *    with it.
+ *
+ * `candidates` rides along on the members payload — that is where the engine
+ * serves listRegisteredUserCandidates from, and it answers an empty list to
+ * anyone who may not add people, so a member's screen degrades by contract
+ * rather than by a check invented here.
+ */
+export async function readHouseholdScreen(householdId) {
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [roster, joinRequests] = await Promise.all([
+    json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
+      .catch(() => ({ members: [], candidates: [] })),
+    /* Owners and instance admins only; anyone else gets a 403 the screen has
+       no use for, and the block simply has nothing to show. */
+    json(await fetch("/api/join-requests", { credentials: "same-origin" }))
+      .then((body) => body.requests ?? [])
+      .catch(() => []),
+  ]);
+  return householdScreenOf({
+    workspace,
+    householdId,
+    user: session?.user ?? null,
+    members: roster.members ?? [],
+    candidates: roster.candidates ?? [],
+    joinRequests,
+    today: todayOf(workspace),
+    /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
+       and stays live in production — readHome's rule. */
+    now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
+  });
+}
+
+/**
+ * Rename / re-zone / re-currency (2c). ONE bundled `household.update`, always:
+ * the route accepts nothing smaller, so a per-field save submits the whole
+ * bundle with the other two values as they stand.
+ */
+export async function writeHouseholdIdentity(householdId, identity) {
+  return applyCommand(householdUpdateCommandOf(householdId, identity));
+}
+
+/**
+ * The sections editor, saved whole — `sections.replace` replaces the list.
+ *
+ * The hidden-not-removed law is enforced HERE as well as in the interface,
+ * because it is a data law and not a style: dropping a section that still
+ * holds entries would have the engine re-file them under whichever section
+ * happens to be first, which is a silent edit nobody asked for.
+ */
+export async function writeSections(householdId, rows) {
+  const dropped = rows.filter((row) => row.count > 0 && row.removed);
+  if (dropped.length) {
+    throw new WorkspaceError("A section holding entries can be hidden, never removed", {
+      code: "section_in_use",
+    });
+  }
+  return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
+}
+
+/** Owner/admin removal, and — with the caller's own id — leaving (§11). */
+export async function removeMember(householdId, userId) {
+  return json(await csrfFetch(`/api/households/${householdId}/members`, {
+    method: "DELETE",
+    body: { userId },
+  }));
+}
+
+/**
+ * Hand the system over. An owner can never leave a system, so this is the way
+ * out — and the route swaps the two roles in one transaction, which is why
+ * there is no "demote yourself" call to make first.
+ */
+export async function transferOwnership(householdId, userId) {
+  return json(await csrfFetch(`/api/households/${householdId}/members`, {
+    method: "PATCH",
+    body: { userId },
+  }));
+}
+
+/** Approve or decline a joiner (§11, §15-2g — here and nowhere else). */
+export async function decideJoinRequest(requestId, action) {
+  return json(await csrfFetch(`/api/join-requests/${requestId}`, { body: { action } }));
+}
+
+/**
+ * Ask for the system to be deleted (2f).
+ *
+ * The typed name goes over as `confirmation` and the SERVER compares it
+ * against the stored name — the client's own check only decides when to wake
+ * the button. Asking is the whole of this screen's involvement: the countdown,
+ * the restore and the final hard delete are instance-admin acts drawn on the
+ * admin panel.
+ */
+export async function requestHouseholdDeletion(householdId, confirmation) {
+  return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
+    body: { action: "delete", confirmation },
+  }));
 }

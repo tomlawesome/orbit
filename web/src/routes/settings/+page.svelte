@@ -18,13 +18,20 @@
    */
   let view = $state(null);
 
+  /*
+   * The release roster (§15, owner): star-chart, after dark, dawn and
+   * retrograde. Atlas and hanami are retired from the RELEASE — the aged-paper
+   * concept never quite worked as a screen and the §15 refresh, though its
+   * best version, did not change that. The CODE stays: packs.css still defines
+   * atlas in full and forcing data-theme=atlas still renders the pack, so the
+   * record and the rescue attempt survive. What goes is the offer, and this
+   * card is the only place in the product that made one.
+   */
   const PACKS = [
     ["starchart", "star-chart", "the ratified night", "#060b1c",
       ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
     ["afterdark", "after dark", "lights out, ink up", "#05070d",
       ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
-    ["atlas", "atlas", "aged paper at dusk", "#c9bfa6",
-      ["radial-gradient(circle at 35% 30%,#1c2b4a,#8f6c00 45%,transparent 72%)", "#8f6c00", "#1e7a45", "#2b6cb0"]],
     ["dawn", "dawn", "first light", "#c3ccdb",
       ["radial-gradient(circle at 35% 30%,#1a2233,#8f6c00 45%,transparent 72%)", "#8f6c00", "#178a4c", "#1f7ac2"]],
     ["retrograde", "retrograde", "the eighties, classy", "#080a14",
@@ -174,11 +181,17 @@
 
     <div class="card">
       <h3>Your systems</h3>
+      <!-- §15-2k: this card is the door to household management. Each row is
+           the way into one system — /household/{id}, the owner's screen or the
+           member's depending on who is reading it. A link, not a button with a
+           handler: it is a place, so it wants an address the browser can open
+           in its own way. Drawn exactly as the ratified row, because a row
+           becoming reachable must not become a different row. -->
       {#each view.memberships as membership (membership.id)}
-        <div class="memb">
+        <a class="memb" href="/household/{membership.id}">
           <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var({membership.primary ? "--sun" : "--ink-mid"})"/></svg>
           <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
-        </div>
+        </a>
       {/each}
     </div>
 
