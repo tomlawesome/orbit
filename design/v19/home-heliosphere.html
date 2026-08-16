@@ -640,13 +640,21 @@
 
   /* the weather answers the workload, like the rest of the sky: it recedes
      while the camera leans into trouble, and deepens when nothing needs you */
-  body.storm .helio{opacity:.35}
+  body.storm .helio{opacity:.35;--weather-op:.35}
   body.quiet .helio{filter:brightness(1.4)}
   /* CON-18, clean flights: the light belongs to the sun you are parked at, so
      it goes down with the departing chart and swells back over the 2.4s the
      new dial takes to bloom — the corona never outstays its own star */
-  .hero.flying .helio{opacity:.1;transition:opacity .5s ease}
+  .hero.flying .helio{opacity:.1;transition:opacity .5s ease;--weather-op:.1}
   body.no-weather .helio,body.no-weather #comets{opacity:0}
+  body.no-weather .helio{--weather-op:0}
+  /* Every state above that DIMS the light keeps its own literal `opacity` —
+     the rest state is untouched — and ALSO publishes it as --weather-op,
+     which is read by nothing until the lift below takes the property over.
+     That way the lift MULTIPLIES the state instead of replacing it: a storm
+     sky that starts to rise dims from .35, it does not brighten to 1 on the
+     first flick. (Quiet does its work in `filter`, which the lift never
+     touches, so it composes on its own.) */
   /* demo only: the breath compressed so it can be watched, not waited out */
   body.helio-fast .helio .c1{animation-duration:6.8s}
   body.helio-fast .helio .c2{animation-duration:9.9s}
@@ -657,6 +665,83 @@
 
   @media (prefers-reduced-motion: reduce){
     .helio *{animation:none!important}
+  }
+
+  /* ======================================================================
+     THE LIFT (owner, §15: "every theme's backdrop changes as you scroll
+     away from the dial" — and for star-chart and after dark specifically,
+     "the heliosphere lifts up out of sight as you scroll down, leaving the
+     plain starfield behind the deep manifest").
+
+     So the weather is the dial screen's, not the page's. Scrolling down is
+     leaving the sun behind: the corona, the streamers and the zodiacal
+     light — the three CHART-ANCHORED layers, the sun's own light — rise
+     away and are spent well before half way down, and what the deep
+     manifest reads over is the plain drifting starfield this page has
+     always had. Nothing is swapped in underneath; something is taken away.
+
+     What moves and what does not follows §14's placement law exactly:
+       · the heliosphere is anchored to the SUN, a chart overlay, so it
+         leaves with the chart — it is already in flow inside .hero, so the
+         scrollbar carries it up on its own; the transform here is the
+         PARALLAX on top of that, the part that reads as lifting rather
+         than as scrolling past.
+       · the comet layer is FIELD scenery: it lives in the sky's own fixed
+         SVG and simply keeps its sky, the same as the stars and the
+         vignette it drifts under. It is not named below, and that is the
+         point — the field is what remains.
+
+     One position drives it, read straight off the scrollbar — no clock, so
+     nothing to loop and nothing to catch up with:
+       --lift   0 at the dial, 1 once the weather is clear of the window
+     It is the raw altimeter, linear in scroll. The DEPARTURE is its square:
+     the light holds by its star while the dial is still the subject and then
+     goes quickly once you have committed to the page, which is what leaving
+     looks like — and squaring keeps it monotonic and exact at both ends, so
+     the way back up retraces the way down.
+     --lift is 0 at scroll 0. More than that: at scroll 0 not one rule below is
+     in effect at all — the whole lift hangs off .descending, which the
+     scroll handler only puts on while the scrollbar is off the top. An
+     identity transform is not free (it hands the corona shells, the two
+     blurred ray families and the 2800px blurred zodiacal ellipse to the
+     compositor as their own layers, and the gradients re-dither in the
+     handover), so the dial screen is left literally alone rather than
+     merely left at zero: the first viewport is byte-for-byte the concept
+     as approved.
+
+     Only star-chart and after dark are addressed. The law gives each theme
+     its OWN vocabulary for the change, and the light packs' answer is
+     drawn in their own files (dawn descends onto a warm surface); wearing
+     the night packs' lift there would be shoehorning an answer this file
+     was never given.
+     ====================================================================== */
+  :root{--lift:0}
+  /* THE WEATHER LEAVES. All three layers ride the one container, so the
+     corona, the streamers and the zodiacal light can never come apart from
+     each other or from the sun they belong to — they go as one light. The
+     base translate(-50%,-50%) is kept ahead of the lift (the container is a
+     1px anchor point, and dropping it would shift the whole heliosphere
+     half a pixel off the sun). The fade is written straight from scroll
+     position, so the container must not carry its 2.2s state transition
+     while it happens. */
+  :is([data-theme=starchart],[data-theme=afterdark]).descending .helio{
+    /* the departure, eased out of the raw altimeter: same curve for the rise
+       and the fade, so the light dims exactly as fast as it climbs and can
+       never be caught hanging bright and displaced off its own sun */
+    --rise:calc(var(--lift) * var(--lift));
+    transform:translate(-50%,-50%) translate3d(0,calc(var(--rise) * -88vh),0);
+    /* 1.5625 = 1 / .8², so the last of the light is spent at --lift .8 —
+       inside the departure window, and inside the top third of the page */
+    opacity:calc(var(--weather-op,1) * max(0, 1 - var(--rise) * 1.5625));
+    transition:none}
+  /* Reduced motion. The fade still tracks the scrollbar — it is a POSITION,
+     not an animation, and freezing it would hold the deep manifest under a
+     corona the page has already left. What goes is the parallax flourish:
+     the light gives way where it stands, carried off by the scrollbar
+     alone, instead of being flown out of the top of the frame. */
+  @media (prefers-reduced-motion: reduce){
+    :is([data-theme=starchart],[data-theme=afterdark]).descending .helio{
+      transform:translate(-50%,-50%)}
   }
 </style>
 </head>
@@ -1401,6 +1486,54 @@ function summonComet(){
     next(150 + hrng() * 200);       // rare: one every 2½–6 minutes
   }, wait * 1000);
   next(40);
+})();
+
+/* ==========================================================================
+   HELIOSPHERE — the lift (owner, §15). The one thing on this page driven by
+   the scrollbar rather than by a clock: scrolling down leaves the sun, so
+   the sun's weather goes with it and the plain starfield is what the deep
+   manifest reads over.
+
+   --lift is a pure function of scroll position — monotonic by construction,
+   exact at both ends, and identical on the way back up. Nothing here lerps
+   or settles over time: a lag would read as the corona chasing the page
+   rather than the page climbing away from it. (The CSS does shape it into
+   the departure curve, but that is a curve in POSITION, not in time — the
+   scrollbar still names the frame exactly.) --lift is also the ONLY thing
+   written, and it is written on the document element, so a frame costs one
+   custom-property set and no layout read beyond what scrolling implies.
+
+   Reduced motion still gets this handler in full. The lift is a POSITION,
+   not an animation; it is the CSS that drops the parallax flourish there
+   and lets the scrollbar alone carry the light away.
+   ========================================================================== */
+(function heliosphereLift(){
+  const doc = document.documentElement;
+  function readLift(){
+    const max = Math.max(1, doc.scrollHeight - innerHeight);
+    const s   = Math.min(max, Math.max(0, scrollY));
+    /* the weather departs over one viewport of scrolling — or over 45% of
+       the page, whichever comes first, so that even a short manifest is
+       under plain sky by half way down. The CSS spends the fade by --lift
+       .8, so the last of the corona is gone inside the first viewport of a
+       long page and inside the top third of a short one. */
+    doc.style.setProperty("--lift",
+      Math.min(1, s / Math.min(innerHeight, max * .45)).toFixed(4));
+    /* parked at the top is not "lifting by zero" — it is the approved dial
+       screen, and nothing in the lift block may be in effect there at all */
+    doc.classList.toggle("descending", s > 0);
+  }
+  let queued = false;
+  const onScroll = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; readLift(); });
+  };
+  addEventListener("scroll", onScroll, { passive:true });
+  /* an altimeter has to stay true when the window changes height under it:
+     the departure window is measured in viewports */
+  addEventListener("resize", onScroll, { passive:true });
+  readLift();                       // in case the page is restored scrolled
 })();
 </script>
 </body>
