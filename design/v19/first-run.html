@@ -74,11 +74,20 @@
    changed on the household screen after the tour. The CON-19 mark whose
    centre fills as you type is carried forward unchanged.
 
-   AND WHAT IS ALREADY OUT THERE (§11 / #453, restyled in the same breath):
-   the adrift banner becomes a see-through card OFF TO THE LEFT led by the
-   count itself — "5 systems discovered in this universe already.." — and it
-   only exists once the first admin has been created. A fresh instance has
-   nothing to count and shows no card.
+   THIRD PASS (§15, owner, verbatim): "First run, fails at the card, seriously,
+   you need to look at how stuffed full this looks. Can barely see all the good
+   work you did on the sunrise." So the card is now the three fields, the
+   button, and air — no header band, no headline, no lede, no explainers, no
+   caption; ONE quiet mono line about the sections survives. It is narrow, it
+   is genuinely see-through, and it sits high so the limb and its glow own the
+   bottom half of the frame. The rejection is one warm line under the field.
+
+   AND WHAT IS ALREADY OUT THERE (§11 / #453): the count is NOT on this screen
+   at all. A first admin always signs in to zero households, so counting them
+   here was counting nothing. It moved to the NEWCOMER's arrival, where it is a
+   MOMENT rather than a panel: the labelled sky settles, "5 systems discovered
+   in this universe" fades in on the bare sky with no box around it, holds,
+   fades out — and only then does "where do you belong?" arrive in its place.
 
    COLOUR: the flight colour-matches the DEFAULT pack (star-chart) whatever
    pack the form is wearing — the owner's words say default theme, and the
@@ -241,150 +250,127 @@
   body.showform .lockup{transform:translateY(calc(-37vh + 14px)) scale(.44)}
   body.showform .gate-wrap{bottom:9vh}
   body.showform .below{bottom:3.4vh}
+  /* §15 third pass (owner: "can barely see all the good work you did on the
+     sunrise"): the scrim used to be a 70% wash across the middle of the frame,
+     which is exactly where the sun is. It now sits ONLY under the card, high
+     and small, and dies out long before the limb. */
   #recede{position:fixed;inset:0;z-index:2;opacity:0;transition:opacity .8s ease;
-          background:radial-gradient(ellipse 74% 58% at 50% 46%,
-                     rgba(3,5,12,.70) 0%, rgba(3,5,12,.5) 48%, rgba(3,5,12,.2) 100%)}
+          background:radial-gradient(ellipse 46% 38% at 50% 29%,
+                     rgba(3,5,12,.60) 0%, rgba(3,5,12,.28) 55%, rgba(3,5,12,0) 100%)}
   body.showform #recede{opacity:1}
 
   /* ══ 2 · THE FIRST-RUN CARD, over the login ══════════════════════════════
-     Everything the first draft asked for, re-housed. The mark moved INSIDE
-     the card head: on a dawn this dark, a light pack's ink lockup floating
-     free would vanish, and the card is now a single object standing on the
-     login rather than a page of its own. */
+     THIRD PASS (owner, §15, verbatim): "First run, fails at the card,
+     seriously, you need to look at how stuffed full this looks. Can barely
+     see all the good work you did on the sunrise."
+
+     So the card is stripped to almost nothing: three fields, a button, air.
+     Gone — the header band and its mark lockup, the "Name your first system"
+     headline, the lede, the two-line what-is-a-system explainer, the
+     time-zone/currency explainer, the button-side caption. One quiet mono
+     line survives (the sections that were made on your behalf), because it is
+     the only sentence that admits to something the user did not ask for.
+
+     And it sits HIGH. The sun's limb burns at 92% of the frame and its glow
+     reaches up to 40%; the card now lives above that, narrow, and see-through
+     enough that the dawn reads clean through it. */
   #formlayer{position:fixed;inset:0;z-index:4;display:flex;flex-direction:column;
-             align-items:center;justify-content:center;gap:12px;padding:24px;
+             align-items:center;justify-content:center;gap:12px;
+             padding:11vh 24px 48vh;
              overflow:auto;
              opacity:0;pointer-events:none;
              transition:opacity .6s ease,transform .7s cubic-bezier(.3,.7,.3,1)}
+  /* short viewports cannot spare half a frame to the sky; the card recentres */
+  @media (max-height:720px){ #formlayer{padding:8vh 20px 22vh} }
   body.showform #formlayer{opacity:1;pointer-events:auto}
   body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.3,1)}
   /* errors keep you grounded: the climb starts, catches, and sets back down */
   @keyframes settleback{0%{transform:translateY(0)}22%{transform:translateY(-13px)}
                         58%{transform:translateY(4px)}100%{transform:translateY(0)}}
 
-  .card{width:100%;max-width:566px;background:var(--panel);backdrop-filter:blur(16px);
-        border:1px solid var(--line);border-radius:20px;overflow:hidden;
-        box-shadow:0 34px 90px -30px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.03) inset;
+  /* Genuinely translucent: --panel already carries alpha, and this halves it
+     again, so on star-chart the card sits at ~0.32 opacity over the dawn. */
+  .card{width:100%;max-width:404px;
+        background:color-mix(in srgb,var(--panel) 58%,transparent);
+        backdrop-filter:blur(15px) saturate(1.05);
+        border:1px solid color-mix(in srgb,var(--line) 78%,transparent);
+        border-radius:18px;padding:26px 26px 24px;
+        box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.03) inset;
         transition:opacity .5s ease .1s,transform .8s cubic-bezier(.4,0,.2,1) .1s,
                    border-color .35s ease,box-shadow .5s ease}
   body.igniting .card{opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
   body.arming .card{border-color:var(--accent);
-        box-shadow:0 34px 90px -30px rgba(0,0,0,.75),0 0 0 1px var(--accent) inset,
+        box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                    0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
+  /* the two light packs paint an ink-on-paper card onto a night sky: thinning
+     their veil the way the dark packs' is thinned washes their faint ink out
+     altogether, so they keep the body they were designed with */
+  [data-theme=atlas] .card,[data-theme=dawn] .card{
+        background:color-mix(in srgb,var(--panel) 92%,transparent)}
 
-  .cardhead{display:flex;align-items:center;gap:16px;padding:16px 26px 15px;
-            background:var(--panel-raised);border-bottom:1px solid var(--line-soft)}
-  .markwrap{position:relative;flex:none;width:64px;height:64px}
-  /* CON-19 exactly: 200-unit box, ring r72 stroke 7, centre r7, planet r16 at
-     163/63.5, one drift per 40s, and nothing else. The centre simply fills
-     when the system is named — no glow, no gradient. */
-  .mark{width:64px;height:64px;display:block;transition:filter .5s ease}
+  /* The mark is all that is left of the header band: 28px, no plate, no
+     wordmark, no caption. It is still CON-19 exactly (200-unit box, ring r72
+     stroke 7, centre r7, planet r16 at 163/63.5, one drift per 40s), it is
+     still the thing that lifts out of the card and flies, and its centre
+     still lights when the system is named — which is what the caption used
+     to say in words. */
+  .markwrap{position:relative;width:28px;height:28px;margin-bottom:22px}
+  .mark{width:28px;height:28px;display:block;transition:filter .5s ease}
   .mark .planet{transform-origin:100px 100px;animation:spinback 40s linear infinite}
   @keyframes spinback{to{transform:rotate(360deg)}}
   .mark .core{fill:var(--line);transition:fill 1.1s ease}
   body.named .mark .core{fill:var(--sun)}
   body.arming .mark .core{fill:var(--sun-core);transition:fill .3s ease}
   body.arming .mark{filter:drop-shadow(0 0 16px color-mix(in srgb,var(--accent) 70%,transparent))}
-  .pulse{position:absolute;inset:6px;border-radius:50%;border:1px solid var(--accent);
+  .pulse{position:absolute;inset:-3px;border-radius:50%;border:1px solid var(--accent);
          opacity:0;pointer-events:none}
   body.arming .pulse{animation:pulse 1.1s cubic-bezier(.2,.7,.3,1) 2}
   @keyframes pulse{from{opacity:.75;transform:scale(.55)}to{opacity:0;transform:scale(2.6)}}
-  .headtext{min-width:0}
-  .headtext .hname{font:600 22px var(--display);letter-spacing:.01em;color:var(--ink-faint);
-                   transition:color .8s ease;white-space:nowrap;overflow:hidden;
-                   text-overflow:ellipsis;line-height:1.2}
-  body.named .headtext .hname{color:var(--ink)}
-  .headtext .cap{font:10.5px var(--mono);letter-spacing:.13em;color:var(--ink-faint);
-                 text-transform:uppercase;margin-top:3px}
 
-    .cardbody{padding:18px 26px 18px}
-  .card h1{font:600 19px var(--display);letter-spacing:.01em}
-  .card .lede{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:4px 0 14px}
-
-  .field{margin-bottom:13px}
+  .field{margin-bottom:18px}
   .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
-               text-transform:uppercase;margin:0 0 5px}
+               text-transform:uppercase;margin:0 0 6px}
   .field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
          border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
   .field input::placeholder{color:var(--ink-faint)}
   .field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
   .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
-  .hint{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:6px;line-height:1.65}
   #hhname{font:600 16.5px var(--display);padding:10px 13px}
-  body.rejected #hhname{border-color:var(--overdue)}
-  .row2{display:flex;gap:13px}
+  .row2{display:flex;gap:14px}
   .row2>.field{flex:1;min-width:0;margin-bottom:0}
   .selwrap{position:relative}
   .selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
                   border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
                   transform:translateY(-50%) rotate(45deg);pointer-events:none}
-  .pair{margin-bottom:13px}
+  .pair{margin-bottom:18px}
 
-  /* §15 (owner, "first-run asks three things only"): the section chips are
-     GONE. The first-ever user answers a name, a time zone and a currency, and
-     nothing else. The sections arrive from the defaults behind the scenes;
-     the only trace of them in the form is the quiet line below, which says so
-     and says where to change them. */
-  .quiet{display:flex;gap:9px;align-items:flex-start;margin-top:2px;
-         border-top:1px solid var(--line-soft);padding-top:12px}
-  .quiet .tick{flex:none;margin-top:2px}
-  .quiet p{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85;letter-spacing:.02em}
-  .quiet p b{color:var(--ink-mid);font-weight:400}
+  /* ── THE REJECTION, in one line ──────────────────────────────────────────
+     Third pass: the three-line banner (code · sentence · footnote) is gone.
+     The server's refusal is one plain warm line under the field it is about,
+     and the field wears the same warm outline. "Nothing was created" and
+     "your answers are still here" are not said, because the answers are
+     visibly still there. */
+  .err{display:none;font:11px var(--mono);color:var(--warm);letter-spacing:.02em;
+       line-height:1.7;margin-top:8px}
+  body.rejected .err{display:block;animation:errin .35s ease}
+  @keyframes errin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .err b{font-weight:400;color:var(--ink)}
+  .err a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+         text-decoration-thickness:1px;white-space:nowrap}
+  .err a:hover{color:var(--ink)}
+  body.rejected #hhname{border-color:var(--warm);
+       box-shadow:0 0 0 1px color-mix(in srgb,var(--warm) 40%,transparent)}
 
-  /* ── the server's bounded words. Nothing invented in the browser: the
-       command name, the rule it broke, and what it did NOT do. ───────────── */
-  .err{display:none;margin:0 0 12px;border:1px solid var(--overdue);border-radius:11px;
-       background:color-mix(in srgb,var(--overdue) 9%,transparent);padding:10px 13px}
-  body.rejected .err{display:block;animation:errin .4s ease}
-  @keyframes errin{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
-  .err .code{font:10.5px var(--mono);letter-spacing:.15em;color:var(--overdue);
-             text-transform:uppercase}
-  .err .said{font:12.5px var(--ui);color:var(--ink);margin-top:4px;line-height:1.45}
-  .err .kept{font:10.5px var(--mono);color:var(--ink-mid);margin-top:6px;line-height:1.8}
-  .err .kept a{color:var(--accent);text-decoration:none}
-  .err .kept a:hover{text-decoration:underline}
+  /* the one reassurance that survives: it admits to the four sections that
+     were made without being asked for, and says nothing else */
+  .note{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.05em;
+        margin:-4px 0 20px}
 
-  .go{display:flex;align-items:center;gap:16px;margin-top:16px;
-      padding-top:14px;border-top:1px solid var(--line-soft)}
-  .btn{font:600 14px var(--display);color:var(--bg);background:var(--accent);border:0;
-       border-radius:11px;padding:11px 24px;cursor:pointer}
+  .btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
+       border:0;border-radius:11px;padding:12px 24px;cursor:pointer;
+       transition:filter .3s ease,opacity .3s ease}
   .btn:hover{filter:brightness(1.06)}
   .btn:disabled{opacity:.34;cursor:not-allowed;filter:none}
-  .go .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.75}
-
-  /* ── WHAT IS ALREADY OUT THERE (§11 / #453, restyled by the owner) ───────
-     Was a banner under the card. It is now a SEE-THROUGH CARD OFF TO THE LEFT
-     led by a BIG NUMBER — the real household count. And it only exists once
-     the first admin has been created: a virgin instance has nothing to count,
-     so on a fresh install this card is not in the layout at all. */
-  .discovered{display:none;position:fixed;left:clamp(18px,5vw,74px);top:50%;
-      z-index:5;width:min(238px,26vw);transform:translateY(-50%);
-      background:color-mix(in srgb,var(--panel) 55%,transparent);
-      backdrop-filter:blur(11px);
-      border:1px solid var(--line-soft);border-radius:16px;padding:19px 20px 17px;
-      transition:opacity .5s ease,transform .6s cubic-bezier(.3,.7,.3,1)}
-  body.adrift.showform .discovered{display:block}
-  body.igniting .discovered{opacity:0;transform:translateY(-50%) translateX(-16px)}
-  .discovered .big{font:600 56px var(--display);line-height:.9;letter-spacing:-.025em;
-                   color:var(--accent)}
-  .discovered .said{font:11px var(--mono);color:var(--ink-mid);line-height:1.85;
-                    margin-top:11px;letter-spacing:.03em}
-  .discovered .said b{color:var(--ink);font-weight:400}
-  .discovered a{display:inline-block;margin-top:12px;font:10.5px var(--mono);
-                color:var(--accent);text-decoration:none;letter-spacing:.06em}
-  .discovered a:hover{text-decoration:underline}
-  /* narrower than this the left margin cannot hold a card without crowding
-     the form, so the count folds to a single compact line above it */
-  @media (max-width:1180px){
-    .discovered{position:relative;left:auto;top:auto;transform:none;order:-1;
-                width:100%;max-width:566px;padding:12px 18px;
-                display:flex;align-items:baseline;gap:14px}
-    body.adrift.showform .discovered{display:flex}
-    body.igniting .discovered{transform:translateX(-16px)}
-    .discovered .big{font-size:34px;line-height:1}
-    .discovered .said{margin-top:0;flex:1}
-    .discovered a{margin-top:0;white-space:nowrap}
-  }
 
   /* ══ 3 · THE FLIGHT ══════════════════════════════════════════════════════ */
   #warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
@@ -527,6 +513,24 @@
   body.shownew.bare .nf .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
   body.shownew.bare .nf .nstar{opacity:0}
   body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
+  /* ── THE COUNT IS A MOMENT, NOT A PANEL (owner, §15 third pass) ──────────
+     It used to be a see-through card beside the admin's create form, where it
+     was pointless: the first admin always arrives to zero households. It
+     belongs to the NEWCOMER, who arrives to a sky that already has systems in
+     it — and it is a BEAT, not a fixture. The labelled sky settles, the count
+     fades in on the bare sky with no box around it, holds, fades out, and
+     only then does the question arrive in the space it left. */
+  .nf .disc{position:absolute;left:50%;top:50%;z-index:4;text-align:center;
+            width:min(560px,86vw);opacity:0;pointer-events:none;
+            transform:translate(-50%,calc(-50% + 14px));
+            transition:opacity .8s ease,transform .8s cubic-bezier(.3,.7,.3,1)}
+  body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
+  .nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
+                 letter-spacing:-.035em;color:var(--accent)}
+  .nf .disc p{font:11.5px var(--mono);color:var(--ink-mid);letter-spacing:.2em;
+              text-transform:uppercase;margin-top:20px}
+  .nf .disc p b{color:var(--ink);font-weight:400}
+
   /* THE NEWCOMER'S CARD sits in the MIDDLE (owner, §15 "first-run asks three
      things only"): the question, the households they can ask to join, and the
      one other road — name their own system. Kept as thin as the admin's three
@@ -607,7 +611,8 @@
   .demos button.hot:hover{filter:brightness(1.08);color:#04060e}
   .demos .sw{width:15px;height:15px;border-radius:50%;padding:0;backdrop-filter:none}
   .demos .sw[aria-pressed=true]{outline:2px solid #d8b45a;outline-offset:2px}
-  .sheet{position:fixed;left:24px;top:56px;z-index:11;max-width:52vw;
+  /* the mockup's own caption, kept clear of the (now much narrower) card */
+  .sheet{position:fixed;left:24px;top:56px;z-index:11;max-width:min(52vw,396px);
          font:10px var(--mono);color:#3c4664;line-height:1.9;pointer-events:none}
 
   /* ══ REDUCED MOTION ══════════════════════════════════════════════════════
@@ -631,6 +636,9 @@
       transition-duration:.7s!important;transition-timing-function:ease!important}
     .hf,body.descending .hf{transform:none!important}
     .nf .belong{transform:translate(-50%,-50%)!important}
+    /* the count still takes its turn — it simply appears and yields, with no
+       fade and no drift, so the beat survives without the movement */
+    .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
   }
 </style>
 </head>
@@ -959,6 +967,12 @@
     </svg><span>create</span>
   </div>
   <div class="hero" id="newsky"></div>
+  <!-- the count: a beat between the settled sky and the question. No box, no
+       border, no panel — the number and the words on the sky itself. -->
+  <div class="disc" id="disc" aria-hidden="true">
+    <div class="big" id="disc-n">5</div>
+    <p><b id="disc-word">systems</b> discovered in this universe</p>
+  </div>
   <div class="belong" role="group" aria-label="Where do you belong?">
     <div class="top">
       <h2>where do you belong?</h2>
@@ -974,95 +988,58 @@
 
 <!-- ══════════ THE FIRST-RUN CARD ══════════ -->
 <div id="formlayer">
-  <form class="card" id="setup" onsubmit="attempt();return false">
-    <header class="cardhead">
-      <div class="markwrap">
-        <svg class="mark" viewBox="0 0 200 200" role="img" aria-labelledby="marktitle">
-          <title id="marktitle">The Orbit mark: a ring, a planet riding it, and the household at its centre</title>
-          <circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink)" stroke-width="7" opacity=".9"/>
-          <circle class="core" cx="100" cy="100" r="7"/>
-          <g class="planet"><circle cx="163" cy="63.5" r="16" fill="var(--accent)"/></g>
-        </svg>
-        <span class="pulse" aria-hidden="true"></span>
-      </div>
-      <div class="headtext">
-        <div class="hname" id="lockupname">unnamed</div>
-        <div class="cap" id="lockupcap">the centre lights when you name it</div>
-      </div>
-    </header>
+  <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
+       either gone or moved to a title/aria attribute — the household screen
+       and settings say all of it again, later, where it is actually needed. -->
+  <form class="card" id="setup" onsubmit="attempt();return false"
+        aria-label="Name your first system">
+    <div class="markwrap">
+      <svg class="mark" viewBox="0 0 200 200" role="img" aria-labelledby="marktitle">
+        <title id="marktitle">The Orbit mark: a ring, a planet riding it, and the household at its centre. The centre lights when you name your system.</title>
+        <circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink)" stroke-width="7" opacity=".9"/>
+        <circle class="core" cx="100" cy="100" r="7"/>
+        <g class="planet"><circle cx="163" cy="63.5" r="16" fill="var(--accent)"/></g>
+      </svg>
+      <span class="pulse" aria-hidden="true"></span>
+    </div>
 
-    <div class="cardbody">
-      <h1>Name your first system</h1>
-      <div class="lede">nothing is in orbit yet &middot; the only thing between you and your sky</div>
+    <div class="field">
+      <label for="hhname">what is it</label>
+      <input id="hhname" placeholder="Lawson Home" maxlength="60" autocomplete="off"
+             aria-label="System name" oninput="naming()"
+             title="A house, a flat, a boat, a parent’s place — whatever you keep in orbit. It is the name everyone in it sees.">
+      <!-- the server's refusal, in one line, in the warm tone -->
+      <p class="err" role="alert"><b id="errname">“Lawson Home”</b> already exists here —
+        <a href="#" onclick="newcomerArrival();return false">ask to join it →</a></p>
+    </div>
 
-      <!-- the server's own bounded words; nothing is invented in the browser -->
-      <div class="err" role="alert">
-        <div class="code">household.setup &middot; rejected</div>
-        <div class="said" id="errsaid">A system is already named “Lawson Home” in this sky — names are unique per instance.</div>
-        <div class="kept">nothing was created &middot; your answers are still here &middot;
-          <a href="#" onclick="setInstance('adrift');return false">or ask to join the one that exists →</a></div>
-      </div>
-
-      <div class="field">
-        <label>what is it</label>
-        <input id="hhname" placeholder="Lawson Home" maxlength="60" autocomplete="off"
-               aria-label="System name" oninput="naming()">
-        <span class="hint">a house, a flat, a boat, a parent’s place — whatever you keep in orbit.
-          it is the name everyone in it sees, and the word you type to delete it.</span>
-      </div>
-
-      <div class="pair">
-        <div class="row2">
-          <div class="field selwrap">
-            <label>time zone</label>
-            <select id="tz" aria-label="Time zone">
-              <option>Europe/London</option><option>Europe/Dublin</option>
-              <option>Europe/Paris</option><option>America/New York</option>
-              <option>Australia/Sydney</option><option>UTC</option>
-            </select>
-          </div>
-          <div class="field selwrap">
-            <label>currency</label>
-            <select id="cur" aria-label="Currency">
-              <option>GBP</option><option>EUR</option><option>USD</option>
-              <option>CAD</option><option>AUD</option><option>NZD</option>
-            </select>
-          </div>
+    <div class="pair">
+      <div class="row2">
+        <div class="field selwrap">
+          <label for="tz">time zone</label>
+          <select id="tz" aria-label="Time zone"
+                  title="Read off your browser. It moves to settings afterwards, and dates read by it.">
+            <option>Europe/London</option><option>Europe/Dublin</option>
+            <option>Europe/Paris</option><option>America/New York</option>
+            <option>Australia/Sydney</option><option>UTC</option>
+          </select>
         </div>
-        <span class="hint" style="display:block">read off your browser &middot; both move to settings
-          afterwards, and dates and costs read by them</span>
-      </div>
-
-      <!-- §15 (owner, "first-run asks three things only"): the chips are gone.
-           A name, a time zone, a currency — and the sections come from the
-           defaults on their own. The one line that survives is this one: it
-           admits what was done on your behalf, and says where to undo it. -->
-      <div class="quiet">
-        <svg class="tick" width="13" height="13" viewBox="0 0 13 13" aria-hidden="true">
-          <circle cx="6.5" cy="6.5" r="5.6" fill="none" stroke="currentColor" stroke-width="1"
-                  style="stroke:var(--line)"/>
-          <path d="M 4 6.7 L 5.9 8.6 L 9.2 4.6" fill="none" stroke-width="1.3"
-                stroke-linecap="round" stroke-linejoin="round" style="stroke:var(--accent)"/>
-        </svg>
-        <p><b>Home, Vehicles, Devices and Services</b> are set up for you —
-           change, rename or add sections on the household screen whenever you like.</p>
-      </div>
-
-      <div class="go">
-        <button class="btn" id="gobtn" type="submit" disabled>create this system →</button>
-        <span class="note" id="gonote">a name is all that’s missing</span>
+        <div class="field selwrap">
+          <label for="cur">currency</label>
+          <select id="cur" aria-label="Currency"
+                  title="Read off your browser. It moves to settings afterwards, and costs read by it.">
+            <option>GBP</option><option>EUR</option><option>USD</option>
+            <option>CAD</option><option>AUD</option><option>NZD</option>
+          </select>
+        </div>
       </div>
     </div>
-  </form>
 
-  <!-- §11 / #453, restyled: what is already out there. Off to the left, led
-       by the count itself. Present only when there is something to count. -->
-  <aside class="discovered" id="discovered">
-    <div class="big" id="disc-n">5</div>
-    <div class="said"><b id="disc-word">systems</b> discovered in this
-      universe already..</div>
-    <a href="home.html">ask to join one →</a>
-  </aside>
+    <!-- the ONE line that survives the strip -->
+    <p class="note">four sections to start &middot; change them later</p>
+
+    <button class="btn" id="gobtn" type="submit" disabled>create this system →</button>
+  </form>
 </div>
 
 <canvas id="warp" aria-hidden="true"></canvas>
@@ -1097,7 +1074,7 @@
   <button onclick="loginLaunch()">login launch</button>
   <button onclick="logoutDescent()">logout descent</button>
   <button onclick="newcomerArrival()">newcomer arrival</button>
-  <button id="d-adrift" aria-pressed="false" onclick="setInstance('toggle')">systems discovered</button>
+  <button id="d-count" aria-pressed="false" onclick="countBeat()">discovered count</button>
   <button onclick="replay()">replay</button>
   <span style="margin-left:4px">THEME</span>
   <button class="sw" data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
@@ -1110,7 +1087,9 @@
 <div class="sheet">
   orbit · first light · PROPOSAL for the #410 cutover family · §15: first-run is a launch, not a form<br>
   second pass · three questions only · logout is the login reversed · the reveal slows ·
-  the dwell comes before the instrument · the newcomer lands in the labelled sky
+  the dwell comes before the instrument · the newcomer lands in the labelled sky<br>
+  third pass · the card is the fields, the button and air · the rejection is one line ·
+  the sunrise gets its frame back · the count is a moment in the newcomer's arrival, not a panel
 </div>
 
 <script>
@@ -1749,29 +1728,50 @@ function dropMark(){
               the bodies condense out of it over 1.3s
        6400   the bare sky is readable: planets, sun, the household's name
        9400   three seconds later the instrument arrives (1.3s, arrive style)
-      11150   the tour pops (first-run only)                                  */
+      11150   the tour pops (first-run only)
+
+     THE NEWCOMER'S EXTRA BEAT (owner, §15 third pass). Nothing above moves;
+     the newcomer's branch simply grows a moment on the end of it:
+      10900   the count fades IN on the bare sky, boxless (0.8s)
+      12900   it fades OUT again (0.8s) — ~2.8s of screen time in all
+      13800   and the question arrives in the space it left                    */
 const T = { warp:200, mark:260, release:430, markOut:1340,
             nameOn:1560, nameOff:2600,
             land:4800, condensed:6400, dwell:3000, instrument:1300,
-            tourGap:450 };
+            tourGap:450, countGap:200, countHold:2000, countFade:900 };
 T.instrumentAt = T.condensed + T.dwell;                    /*  9400 */
 T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 11150 */
+/* the count starts once the labelled sky has finished arriving */
+T.countOn = T.instrumentAt + T.instrument + T.countGap;    /* 10900 */
+T.countOff = T.countOn + T.countHold;                      /* 12900 */
+T.belongAt = T.countOff + T.countFade;                     /* 13800 */
 
 function ascend(withForm, landing){
   clearAll();
   body.classList.remove("tour", "grounded", "rejected", "descending", "farewell",
-                        "showdusk", "belong", "instrument");
+                        "showdusk", "belong", "instrument", "counting");
   const newcomer = landing === "newcomer";
   const surface = newcomer ? "shownew" : "showhome";
 
   if (RM.matches) {                       /* reduced motion: a plain crossfade */
     body.classList.remove("showform", "showdawn");
     body.classList.add(surface, "bare");
+    /* the labelled sky has to be DRAWN, motion or no motion — without this the
+       reduced-motion newcomer lands on an empty frame */
+    if (newcomer) renderNewSky();
     /* the staging survives: bare sky, three seconds, then the instrument */
     after(700 + T.dwell, () => {
       body.classList.remove("bare");
       body.classList.add("instrument");
-      if (newcomer) body.classList.add("belong");
+      /* the count still takes its turn under reduced motion — it appears,
+         holds, and yields to the question. Only the fade is dropped. */
+      if (newcomer) {
+        body.classList.add("counting");
+        after(1900, () => {
+          body.classList.remove("counting");
+          body.classList.add("belong");
+        });
+      }
     });
     if (withForm) after(700 + T.dwell + 700, () => body.classList.add("tour"));
     return;
@@ -1785,7 +1785,11 @@ function ascend(withForm, landing){
   after(T.mark, () => {
     body.classList.remove("arming");
     if (withForm) body.classList.add("igniting");
-    liftMark(src, H * .5, withForm ? 2.3 : 2.6, 1080);
+    /* the mark in the card is 28px now, not 64 — the flight is unchanged, so
+       the growth is expressed as the SIZE it has always arrived at (147px)
+       rather than as a multiplier of whatever the card happens to show. */
+    const grow = withForm ? 147 / (src.getBoundingClientRect().width || 28) : 2.6;
+    liftMark(src, H * .5, grow, 1080);
     body.classList.remove("recede");
   });
   after(T.warp, () => { body.classList.add("showwarp"); startFlight(UP, 1); });
@@ -1806,8 +1810,13 @@ function ascend(withForm, landing){
   after(T.instrumentAt, () => {
     body.classList.remove("bare");
     body.classList.add("instrument");
-    if (newcomer) after(240, () => body.classList.add("belong"));
   });
+  /* THE COUNT (third pass): a moment on the settled sky, then the question */
+  if (newcomer) {
+    after(T.countOn, () => body.classList.add("counting"));
+    after(T.countOff, () => body.classList.remove("counting"));
+    after(T.belongAt, () => body.classList.add("belong"));
+  }
   if (withForm) after(T.tourAt, () => body.classList.add("tour"));
 }
 
@@ -1889,12 +1898,13 @@ function baseReset(){
   body.classList.remove("showform", "showdawn", "showhome", "shownew", "showdusk",
                         "showwarp", "igniting", "arming", "descending", "withdrawing",
                         "farewell", "tour", "grounded", "rejected",
-                        "bare", "instrument", "belong");
+                        "bare", "instrument", "belong", "counting");
   fmark.classList.remove("on", "collapse");
   lname.classList.remove("on");
   for (const el of document.querySelectorAll(".mark,#login-glyph svg,#dusk-glyph svg"))
     el.style.visibility = "";
   document.getElementById("gate").classList.remove("flash");
+  press("d-count", false);
 }
 function toForm(){
   baseReset();
@@ -1942,6 +1952,16 @@ function newcomerArrival(){
     ascend(false, "newcomer");
   });
 }
+/* a shortcut to the beat itself, so the moment can be reviewed without
+   sitting through eleven seconds of climb */
+function countBeat(){
+  lastRun = "newcomer";
+  baseReset();
+  body.classList.add("shownew", "instrument");
+  renderNewSky();
+  press("d-form", false); press("d-err", false); press("d-count", true);
+  requestAnimationFrame(() => body.classList.add("counting"));
+}
 let lastRun = "form";
 function replay(){
   if (lastRun === "login") loginLaunch();
@@ -1952,10 +1972,7 @@ function replay(){
 
 /* ══ the form ═════════════════════════════════════════════════════════════ */
 const nameField = document.getElementById("hhname");
-const lockup = document.getElementById("lockupname");
-const cap = document.getElementById("lockupcap");
 const goBtn = document.getElementById("gobtn");
-const goNote = document.getElementById("gonote");
 let armedError = false, rejectedName = "";
 
 /* §15, "first-run asks three things only": there is nothing to count and
@@ -1963,20 +1980,22 @@ let armedError = false, rejectedName = "";
    default sections are applied behind the scenes and are the household
    screen's business afterwards. */
 const DEFAULT_SECTIONS = ["Home", "Vehicles", "Devices", "Services"];
+/* the one surviving line reads the real default set rather than a typed
+   number, and names them where a mouse can find them but an eye need not */
+(function sectionNote(){
+  const el = document.querySelector(".card .note");
+  el.textContent = DEFAULT_SECTIONS.length + " sections to start · change them later";
+  el.title = DEFAULT_SECTIONS.join(", ") +
+    " are set up for you — rename, add or remove them on the household screen.";
+})();
 
 function refresh(){
   const name = nameField.value.trim();
   body.classList.toggle("named", name.length > 0);
-  lockup.textContent = name || "unnamed";
-  cap.textContent = name ? "your system, and its sun" : "the centre lights when you name it";
   goBtn.disabled = name.length === 0;
   goBtn.textContent = name ? "create " + name + " →" : "create this system →";
   document.getElementById("lnword").textContent = name || "Lawson Home";
   document.getElementById("dial-name").textContent = name || "Lawson Home";
-  if (!name) { goNote.textContent = "a name is all that’s missing"; return; }
-  goNote.textContent = document.getElementById("tz").value + " · " +
-    document.getElementById("cur").value + " · " +
-    DEFAULT_SECTIONS.length + " sections to start";
 }
 /* Typing disarms the rejection, because the rejection was about the NAME:
    a different word is a different answer, and the server has not seen it. */
@@ -1999,7 +2018,6 @@ function clearError(){
   armedError = false; rejectedName = "";
   press("d-err", false);
   body.classList.remove("rejected");
-  goNote.textContent = "";
   refresh();
 }
 function showError(){
@@ -2007,26 +2025,14 @@ function showError(){
   if (!body.classList.contains("showform")) toForm();
   if (!nameField.value.trim()) { nameField.value = "Lawson Home"; refresh(); }
   armedError = true; rejectedName = nameField.value.trim();
-  document.getElementById("errsaid").textContent =
-    "A system is already named \u201c" + rejectedName + "\u201d in this sky — names are unique per instance.";
+  /* ONE line (third pass). The only word the browser supplies is the name the
+     user typed. "Nothing was created" and "your answers are still here" are
+     not said any more — the answers, still sitting in the fields, say it. */
+  document.getElementById("errname").textContent = "\u201c" + rejectedName + "\u201d";
   press("d-err", true);
   body.classList.remove("named");            /* the centre goes back out */
-  after(30, () => {
-    body.classList.add("rejected", "grounded");
-    goNote.textContent = "nothing was written · try another name";
-  });
+  after(30, () => body.classList.add("rejected", "grounded"));
   after(950, () => { body.classList.remove("grounded"); refresh(); });
-}
-function setInstance(which){
-  const adrift = which === "toggle" ? !body.classList.contains("adrift") : which === "adrift";
-  body.classList.toggle("adrift", adrift);
-  press("d-adrift", adrift);
-  /* the number is the real count, and the card only exists because there is
-     something to count: a virgin instance never renders it (owner, §15). */
-  const n = Object.keys(GALAXY).length;
-  document.getElementById("disc-n").textContent = n;
-  document.getElementById("disc-word").textContent = n === 1 ? "system" : "systems";
-  if (!body.classList.contains("showform")) toForm();
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2226,8 +2232,9 @@ fillTile("hf-near", 46, .8, .7, .30, .40, false);
 fillTile("nf-far", 95, .4, .5, .12, .23, false);
 fillTile("nf-near", 46, .8, .7, .30, .40, false);
 
-/* the count on the left-hand card is read off the households, never written.
-   A virgin instance starts WITHOUT the card — there is nothing to count. */
+/* The count is read off the households, never written — and it belongs to the
+   NEWCOMER's arrival, not to the admin's create screen: the first admin always
+   signs in to zero households, so there was never anything to count there. */
 (function countHouseholds(){
   const n = Object.keys(GALAXY).length;
   document.getElementById("disc-n").textContent = n;
