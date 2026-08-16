@@ -78,7 +78,8 @@ async function seedEvent(
     completedAt?: Date | null;
     emailEnabled?: boolean;
     pushEnabled?: boolean;
-    daysBefore?: number;
+    /** `null` leaves the item with no reminder rule of its own (#479). */
+    daysBefore?: number | null;
   } = {},
 ) {
   const db = getDb();
@@ -89,18 +90,50 @@ async function seedEvent(
     dueDate: options.dueDate ?? "2026-03-29",
     completedAt: options.completedAt,
   }).returning({ id: dueEvents.id });
-  await db.insert(reminderRules).values({
-    itemId: fixture.item.id,
-    daysBefore: options.daysBefore ?? 0,
-    emailEnabled: options.emailEnabled ?? true,
-    pushEnabled: options.pushEnabled ?? true,
-  });
+  const daysBefore = options.daysBefore === undefined ? 0 : options.daysBefore;
+  if (daysBefore !== null) {
+    await db.insert(reminderRules).values({
+      itemId: fixture.item.id,
+      daysBefore,
+      emailEnabled: options.emailEnabled ?? true,
+      pushEnabled: options.pushEnabled ?? true,
+    });
+  }
   return event.id;
 }
 
 async function deliveryForEvent(eventId: string) {
   const [delivery] = await getDb().select().from(notificationDeliveries).where(eq(notificationDeliveries.eventId, eventId));
   return delivery;
+}
+
+/**
+ * Every delivery an event produced, oldest warning first — a recipient's pair
+ * raises two of them, so #479's cases cannot use the singular reader above.
+ */
+async function deliveriesForEvent(eventId: string) {
+  return getDb().select().from(notificationDeliveries)
+    .where(eq(notificationDeliveries.eventId, eventId))
+    .orderBy(notificationDeliveries.scheduledFor, notificationDeliveries.channel);
+}
+
+/**
+ * Sets one user's own reminder timing. Push is switched off by default so
+ * these cases assert on the email schedule alone: the fallback pair opens both
+ * channels, and a fixture user has no push subscription to send to.
+ */
+async function setWarningDays(
+  userId: string,
+  firstWarningDays: number,
+  finalWarningDays: number,
+  pushNotifications = false,
+) {
+  await getDb().update(userPreferences).set({
+    firstWarningDays,
+    finalWarningDays,
+    pushNotifications,
+    updatedAt: cycleTime,
+  }).where(eq(userPreferences.userId, userId));
 }
 
 function deterministicLeaseToken(sequence: number): string {
@@ -847,5 +880,188 @@ describe("notification worker PostgreSQL contracts", () => {
       status: "cancelled",
       lastError: "membership_removed",
     });
+  });
+
+  // #479. `cycleTime` is 09:00 Europe/London on 2026-03-29, so a warning of N
+  // days fires during that cycle exactly when the date is N days later:
+  // 2026-04-12 is the 14-day default first warning, 2026-04-09 the 3-day
+  // default final one, 2026-04-02 a 10-day warning.
+  const pairDueDate = "2026-04-12";
+  const defaultFinalWarningTime = new Date("2026-04-09T08:00:00.000Z");
+
+  it("#479: raises the recipient's own first and final warnings for an item that set no rules of its own", async () => {
+    const fixture = await ownerOnlyFixture("worker-pair-fallback");
+    const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: null });
+    await setWarningDays(fixture.users.owner.id, 14, 3);
+    const recipients: string[] = [];
+
+    // Before #479 this cycle produced nothing at all: an item without a
+    // reminder rule fell straight out of the worker's inner join.
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+      nextLeaseToken: () => deterministicLeaseToken(60),
+    });
+    const afterFirst = await deliveriesForEvent(eventId);
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]).toMatchObject({ channel: "email", status: "sent", userId: fixture.users.owner.id });
+    expect(afterFirst[0].scheduledFor.toISOString()).toBe(cycleTime.toISOString());
+    expect(recipients).toEqual([fixture.users.owner.email]);
+
+    // The final warning is a second, separately scheduled delivery, not a
+    // resend of the first: the once-only index keys on the instant too.
+    await runNotificationCycle(workerConfig(), {
+      now: () => defaultFinalWarningTime,
+      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+      nextLeaseToken: () => deterministicLeaseToken(61),
+    });
+    const afterFinal = await deliveriesForEvent(eventId);
+    expect(afterFinal).toHaveLength(2);
+    expect(afterFinal.map((delivery) => delivery.scheduledFor.toISOString())).toEqual([
+      cycleTime.toISOString(),
+      defaultFinalWarningTime.toISOString(),
+    ]);
+    expect(afterFinal.every((delivery) => delivery.status === "sent")).toBe(true);
+    expect(recipients).toHaveLength(2);
+  });
+
+  it("#479: uses the documented defaults for a recipient who has no stored preferences at all", async () => {
+    const fixture = await ownerOnlyFixture("worker-pair-unset");
+    const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: null });
+    await getDb().delete(userPreferences).where(eq(userPreferences.userId, fixture.users.owner.id));
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(),
+      nextLeaseToken: () => deterministicLeaseToken(62),
+    });
+
+    const deliveries = await deliveriesForEvent(eventId);
+    // 14 days is the default first warning even with no row to read it from,
+    // and with no row the push toggle also defaults on — the subscription-less
+    // push delivery is cancelled on its own terms, which is the pre-existing
+    // behaviour for any reminder, not something the pair introduces.
+    const email = deliveries.filter((delivery) => delivery.channel === "email");
+    expect(email).toHaveLength(1);
+    expect(email[0].scheduledFor.toISOString()).toBe(cycleTime.toISOString());
+    expect(email[0].status).toBe("sent");
+    expect(deliveries.filter((delivery) => delivery.channel === "web_push")).toMatchObject([
+      { status: "cancelled", lastError: "push_unsubscribed" },
+    ]);
+  });
+
+  it("#479: keeps an item's own reminder rules ahead of the recipient's pair", async () => {
+    const fixture = await ownerOnlyFixture("worker-pair-item-rule-wins");
+    // The item asks for a single warning five days out. The owner's pair
+    // would have fired today; the item's own choice is not overruled by it,
+    // nor added to.
+    const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: 5, pushEnabled: false });
+    await setWarningDays(fixture.users.owner.id, 14, 3);
+    let providerCalls = 0;
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(63),
+    });
+    expect(await deliveriesForEvent(eventId)).toHaveLength(0);
+    expect(providerCalls).toBe(0);
+
+    // Five days before the date, and only then, the item's own rule fires.
+    await runNotificationCycle(workerConfig(), {
+      now: () => new Date("2026-04-07T08:00:00.000Z"),
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(64),
+    });
+    const deliveries = await deliveriesForEvent(eventId);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0].scheduledFor.toISOString()).toBe("2026-04-07T08:00:00.000Z");
+    expect(providerCalls).toBe(1);
+  });
+
+  it("#479: gives each member of a household their own timing for the same item", async () => {
+    const fixture = await createIntegrationFixture("worker-pair-per-member");
+    const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: null });
+    await setWarningDays(fixture.users.owner.id, 14, 3);
+    await setWarningDays(fixture.users.member.id, 10, 3);
+    const recipients: string[] = [];
+
+    // One item, one date, two members: the owner's fortnight has arrived and
+    // the member's ten days have not, so only one of them hears about it.
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+      nextLeaseToken: () => deterministicLeaseToken(65),
+    });
+    expect(recipients).toEqual([fixture.users.owner.email]);
+    expect(await deliveriesForEvent(eventId)).toMatchObject([
+      { userId: fixture.users.owner.id, channel: "email", status: "sent" },
+    ]);
+
+    const memberWarningTime = new Date("2026-04-02T08:00:00.000Z");
+    await runNotificationCycle(workerConfig(), {
+      now: () => memberWarningTime,
+      providers: fakeProviders((notification) => { recipients.push(notification.to); }),
+      nextLeaseToken: () => deterministicLeaseToken(66),
+    });
+    expect(recipients).toEqual([fixture.users.owner.email, fixture.users.member.email]);
+    const deliveries = await deliveriesForEvent(eventId);
+    expect(deliveries).toHaveLength(2);
+    expect(deliveries[1]).toMatchObject({ userId: fixture.users.member.id, channel: "email", status: "sent" });
+    expect(deliveries[1].scheduledFor.toISOString()).toBe(memberWarningTime.toISOString());
+  });
+
+  it("#479: cancels a queued delivery the recipient's retimed pair no longer asks for", async () => {
+    const fixture = await ownerOnlyFixture("worker-pair-retimed");
+    const eventId = await seedEvent(fixture, { dueDate: pairDueDate, daysBefore: null });
+    await setWarningDays(fixture.users.owner.id, 14, 3);
+    await getDb().insert(notificationDeliveries).values({
+      householdId: fixture.household.id,
+      eventId,
+      userId: fixture.users.owner.id,
+      channel: "email",
+      scheduledFor: cycleTime,
+    });
+    // The reader moves their first warning out to three weeks. The fortnight
+    // mark is no longer a warning they ask for, so the delivery already
+    // sitting in the queue for it must not go out on the old schedule.
+    await setWarningDays(fixture.users.owner.id, 21, 3);
+    let providerCalls = 0;
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(() => { providerCalls += 1; }),
+      nextLeaseToken: () => deterministicLeaseToken(67),
+    });
+
+    expect(providerCalls).toBe(0);
+    expect(await deliveriesForEvent(eventId)).toMatchObject([{ status: "cancelled" }]);
+  });
+
+  it("#479: does not fire a warning longer than the reach of the open due event, and still lands the final one", async () => {
+    const fixture = await ownerOnlyFixture("worker-pair-overlong-warning");
+    // An item due in nine days against a first warning of ninety: that
+    // warning's moment passed long before the item existed, so it is not
+    // back-fired. The final warning is still ahead and still lands.
+    const eventId = await seedEvent(fixture, { dueDate: "2026-04-07", daysBefore: null });
+    await setWarningDays(fixture.users.owner.id, 90, 3);
+
+    await runNotificationCycle(workerConfig(), {
+      now: () => cycleTime,
+      providers: fakeProviders(),
+      nextLeaseToken: () => deterministicLeaseToken(68),
+    });
+    expect(await deliveriesForEvent(eventId)).toHaveLength(0);
+
+    const finalWarningTime = new Date("2026-04-04T08:00:00.000Z");
+    await runNotificationCycle(workerConfig(), {
+      now: () => finalWarningTime,
+      providers: fakeProviders(),
+      nextLeaseToken: () => deterministicLeaseToken(69),
+    });
+    const deliveries = await deliveriesForEvent(eventId);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0].scheduledFor.toISOString()).toBe(finalWarningTime.toISOString());
+    expect(deliveries[0].status).toBe("sent");
   });
 });
