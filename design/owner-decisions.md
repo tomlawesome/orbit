@@ -394,3 +394,10 @@ as ordinary fix-both changes rather than blocking the build.
   too narrow on a laptop/desktop — at least a third of the screen, ideally
   half. The helm widens to the administration screen's scale: the pack cards
   earn one full row, the remaining cards sit in two columns.
+- **Backdrop verdicts** (owner, mid-review): the inbox orb is approved as
+  drawn. The v1 settings/create backdrops are the right idea but overly
+  subtle and overly simple — "a good start but not enough". The starfield
+  overlay reads well but must not be overused: **create keeps the
+  starfield** (bolder chart-in-progress); **settings and admin try totally
+  new ideas** — a charting / tool / spaceship / observatory vibe, classy
+  and elegant, never tacky.
