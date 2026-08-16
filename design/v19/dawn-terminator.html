@@ -46,6 +46,18 @@
   The line creeps — night retreating, ~1.2% of the crossing a minute. It is
   monotonic, so there is nothing to loop. prefers-reduced-motion freezes the
   crossing where it landed and stops the stream.
+
+  AND THE SCROLL IS A DESCENT (owner, §15). The dial screen is the concept
+  exactly as approved — nothing below is in effect until the scrollbar
+  leaves the top. From there, scrolling down is losing altitude: the sky
+  (the crossing, its night, its stars) lifts and goes out of the top of the
+  window inside the first viewport of scrolling, and under it is the
+  SURFACE — a window-anchored vertical gradient that starts at the pale
+  amber the dial screen ended on and warms, very slowly and only over the
+  whole page, into a pinky-orange. Scroll position drives both, not a
+  clock, so it is monotonic and identical on the way back up. Reduced
+  motion keeps the gradient (a position is not an animation) and drops the
+  parallax lift: the sky gives way where it stands.
 -->
 <html lang="en" data-theme="dawn">
 <head>
@@ -680,6 +692,74 @@
   .tline{z-index:1}
   .demos .seedtag{color:var(--ink-faint);letter-spacing:.08em}
   .demos .seedtag b{color:var(--ink-mid);font-weight:400}
+
+  /* ======================================================================
+     THE DESCENT (owner, §15). Scrolling down this page is not a document
+     sliding under a fixed backdrop — it is losing altitude. The sky (the
+     crossing, its night side, its stars) rises and goes out of the top of
+     the window, and what is under it is the SURFACE: a vertical gradient,
+     anchored to the window like the ratified ground is, that warms very
+     slowly the further down you come. The deep manifest reads over warm
+     surface light, not over sky.
+
+     Two positions drive it, both read straight off the scrollbar — no
+     clock, so there is nothing to loop and nothing to catch up with:
+       --descent  the drop THROUGH the sky (0 at the dial, 1 once clear)
+       --depth    how far down the whole page you are (the warm shift)
+     Both are 0 at scroll 0. More than that: at scroll 0 not one rule below
+     is in effect at all — the whole descent hangs off .descending, which
+     the scroll handler only puts on while the scrollbar is off the top. An
+     identity transform is not free (it hands four full-window layers to
+     the compositor and the gradients re-dither underneath), so the dial
+     screen is left literally alone rather than merely left at zero: the
+     first viewport is byte-for-byte the concept as approved.
+     ====================================================================== */
+  :root{--descent:0;--depth:0}
+  /* 1. THE SKY LEAVES. The four layers the crossing is painted on move as
+     one — lifted and faded together — so the handover can never tear into
+     a night that is half gone. The lift is spent over the first viewport
+     of scrolling; the sky is out of the window well before half way.
+     The fade is written straight from scroll position, so these layers must
+     not carry the pack-switch transition while it happens. */
+  [data-theme=dawn].descending :is(.sky,.night,.nightsky,.tline){
+    transform:translate3d(0,calc(var(--descent) * -118vh),0);
+    opacity:calc(1 - var(--descent) * 1.18);
+    transition:none}
+  [data-theme=dawn].descending .sky{
+    opacity:calc(var(--stars) * (1 - var(--descent) * 1.18))}
+  /* 2. THE SURFACE. Two grounds cross-faded, never a swap: HIGH is the pale
+     amber that sat at the bottom of the dial screen, barely graded — the
+     light you drop into the moment the sky clears. DEEP puts that same pale
+     amber overhead and runs it all the way down to the pinky-orange. The
+     cross-fade is --depth, so the top of the field warms a shade while the
+     bottom of it warms a great deal: altitude lost, not a banner swapped.
+     Their shared colour (#f9dcb8, the dial screen's own bottom) is HIGH's
+     last stop and DEEP's first, so the two can never show a seam. */
+  .surface{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
+  [data-theme=dawn].descending .surface{display:block;
+    opacity:calc(var(--descent) * 1.3);
+    background:linear-gradient(180deg,#f6e6d0 0%,#f8e1c4 46%,#f9dcb8 100%)}
+  [data-theme=dawn].descending .surface::after{
+    content:"";position:absolute;inset:0;opacity:var(--depth);
+    background:linear-gradient(180deg,#f9dcb8 0%,#f7c8a2 34%,
+      #f2ab8b 66%,#ea8f80 88%,#e5827e 100%)}
+  /* 3. The faint ink follows the ground down. Everything that sits directly
+     ON the surface rather than on glass — the month headings, the horizon
+     line, the footer — was tuned for a pale sky; over the pinky-orange it
+     would go to nothing. So it deepens by exactly the same --depth that
+     warms the ground, which is the crossing's own law (a mark's material
+     may never disagree with what is behind it) applied to the descent.
+     Legibility goes UP: the faint ink ends the page with more contrast on
+     the warm surface than it began with on the pale one. */
+  [data-theme=dawn].descending body{
+    --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%))}
+  /* 4. Reduced motion. The gradient still tracks the scrollbar — it is a
+     POSITION, not an animation, and freezing it would simply hide the page
+     under a sky it has already left. What goes is the parallax flourish:
+     the sky gives way where it stands instead of being flown out of frame. */
+  @media (prefers-reduced-motion: reduce){
+    [data-theme=dawn].descending :is(.sky,.night,.nightsky,.tline){transform:none}
+  }
   /* /PACK REFRESH — dawn */
 </style>
 </head>
@@ -699,6 +779,9 @@
   </svg>
 </div>
 <div class="tline" id="tline" aria-hidden="true"></div>
+<!-- the ground under the sky: invisible at scroll 0, and the only thing
+     left once the crossing has gone out of the top of the window -->
+<div class="surface" id="surface" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
@@ -996,7 +1079,7 @@
   <button onclick="nudgeDawn()">advance dawn</button>
   <span class="seedtag">crossing #<b id="seedout">&mdash;</b></span>
 </div>
-<footer>orbit &middot; v19 proposal &middot; dawn / the terminator &middot; the ratified temperature story with one line across it: night hands the sky to day, the stars on the far side come back as starlight, and the household constellations out there are drawn in it. The tilt, the seat and the softness of the crossing are rolled fresh every load; the night stars are rolled a chunk at a time as they come into view and are never rolled again. Dawn creeps &mdash; the night retreats and never comes back, so there is no loop</footer>
+<footer>orbit &middot; v19 proposal &middot; dawn / the terminator &middot; the ratified temperature story with one line across it: night hands the sky to day, the stars on the far side come back as starlight, and the household constellations out there are drawn in it. The tilt, the seat and the softness of the crossing are rolled fresh every load; the night stars are rolled a chunk at a time as they come into view and are never rolled again. Dawn creeps &mdash; the night retreats and never comes back, so there is no loop. And the scroll is a descent: below the dial the sky lifts out of the window and you come down onto the surface, whose light warms the whole way from the pale amber the dial screen ended on to a pinky-orange &mdash; slowly enough that the last of it only arrives at the bottom of the page</footer>
 
 <script>
 /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
@@ -1448,7 +1531,9 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     /* the limb LIGHTENS the ground it crosses, and it crosses the near edge
        of the night. Netting it off is what stops a mark being redrawn in
        starlight while the sky behind it is still bright. */
-    return Math.max(0, readTable(NIGHT, d) - 1.15 * readTable(LIMB, d));
+    /* …and once you have dropped below the sky there is no night left to be
+       deep in, so the marks come back to ink as the crossing lifts away. */
+    return Math.max(0, (readTable(NIGHT, d) - 1.15 * readTable(LIMB, d)) * (1 - DESC));
   }
 
   /* ---- the constellations that lie in the night ----------------------- */
@@ -1527,6 +1612,46 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     t0 = performance.now();
   }
 
+  /* ---- the descent: scroll is altitude -------------------------------- */
+  /* The one thing on this page driven by the scrollbar rather than by a
+     clock. Scrolling down drops you below the sky and onto the surface, so
+     both quantities are pure functions of scroll position: monotonic by
+     construction, exact at both ends, and identical on the way back up.
+     Nothing here eases or lerps — a lag would read as the backdrop chasing
+     the page rather than the page moving through it. */
+  let DESC = 0;
+  function readScroll(){
+    const doc = document.documentElement;
+    const max = Math.max(1, doc.scrollHeight - innerHeight);
+    const s   = Math.min(max, Math.max(0, scrollY));
+    /* the sky departs over one viewport of scrolling — or over 45% of the
+       page, whichever comes first, so that even a short manifest is under
+       clear surface light by half way down */
+    DESC = Math.min(1, s / Math.min(innerHeight, max * .45));
+    /* the warm shift is the whole depth's work, not the first flick's: it
+       starts a little way in (under a sky that is still on its way out) and
+       only spends its last of the pinky-orange at the very bottom of the
+       page. The exponent keeps the top of the run slower still. */
+    const p = Math.min(1, Math.max(0, (s / max - .12) / .88));
+    doc.style.setProperty("--descent", DESC.toFixed(4));
+    doc.style.setProperty("--depth",   Math.pow(p, 1.35).toFixed(4));
+    /* parked at the top is not "descending by zero" — it is the approved
+       dial screen, and nothing above may be in effect there at all */
+    doc.classList.toggle("descending", s > 0);
+  }
+  let queued = false;
+  addEventListener("scroll", () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      const was = DESC; readScroll();
+      /* the constellations only need re-materialising while there is still
+         a night for them to be in */
+      if (was < 1 || DESC < 1) tintGalaxy();
+    });
+  }, { passive:true });
+
   /* ---- the frame: drift, camera, creep -------------------------------- */
   let lastSlow = 0;
   function step(now){
@@ -1548,7 +1673,7 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
   }
 
   function draw(){
-    rollCrossing(); resetStream(); paint(); tintGalaxy();
+    rollCrossing(); resetStream(); readScroll(); paint(); tintGalaxy();
     seedout.textContent = String(seed);
     if (!still.matches) requestAnimationFrame(step);
   }
@@ -1556,7 +1681,7 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
      correct after a flight or a resize without touching the original */
   const baseRender = window.renderGalaxy;
   window.renderGalaxy = function(settle){ baseRender(settle); tintGalaxy(); };
-  addEventListener("resize", () => { paint(); tintGalaxy(); });
+  addEventListener("resize", () => { readScroll(); paint(); tintGalaxy(); });
   still.addEventListener("change", draw);
 
   window.rerollCrossing = function(){
