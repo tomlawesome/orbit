@@ -35,17 +35,31 @@
   the sky to day. Above and to the left of the crossing the ground deepens to
   blue hour and the stars turn back into stars — light points, not the ink
   specks a daylit pack draws; below and to the right the pack's own warm
-  ground washes clean. The handover is a third of the screen wide, so the
-  dial sits INSIDE it and never inside the dark, and the household
-  constellations that lie in the night are redrawn in starlight instead of
-  ink — they survive the crossing, they are not dimmed by it.
+  ground washes clean. The handover is wide enough that the dial sits INSIDE
+  it and never inside the dark, and the household constellations that lie in
+  the night are redrawn in starlight instead of ink — they survive the
+  crossing, they are not dimmed by it.
 
-  Seeded: the crossing's tilt, where it sits, and how soft it is are rolled
-  per load (re-roll in the DEMOS bar), as is the stream of night stars, which
-  is rolled a chunk at a time as it comes into view and never rolled again.
-  The line creeps — night retreating, ~1.2% of the crossing a minute. It is
-  monotonic, so there is nothing to loop. prefers-reduced-motion freezes the
-  crossing where it landed and stops the stream.
+  THE CROSSING IS A FRACTION OF THE SKY, NOT A MEASUREMENT OFF THE DIAL
+  (owner, §15 — "the crossing must be seen"). It is seated as a diagonal of
+  the frame: it meets the left edge at a fraction of the window's height and
+  the top edge at a fraction of its width, so the night is a triangle whose
+  share of the first viewport is the same picture at 390×844 as at 2560×1440.
+  Between a fifth and a quarter of the sky is night, at every size, on every
+  roll. The chart is protected by a GUARD instead — the dial's own rendered
+  circle, which the genuinely dark part of the wash must keep out of; where a
+  window is too small for both, the handover widens over the instrument
+  before the night is allowed to give up any sky.
+
+  Seeded: how much of the sky the night takes, and the tilt that decides
+  where in that band the crossing sits, are rolled per load (re-roll in the
+  DEMOS bar), as is the stream of night stars, which is rolled a chunk at a
+  time as it comes into view and never rolled again. The roll moves the
+  crossing; it can never remove it. The line creeps — night retreating,
+  ~2.8% of its own depth a minute, and stopping at the floor share rather
+  than running off the screen. It is monotonic, so there is nothing to loop.
+  prefers-reduced-motion freezes the crossing where it landed and stops the
+  stream.
 
   AND THE SCROLL IS A DESCENT (owner, §15). The dial screen is the concept
   exactly as approved — nothing below is in effect until the scrollbar
@@ -678,8 +692,10 @@
   }
   .night,.nightsky,.tline{position:fixed;inset:0;pointer-events:none}
   /* 1. THE NIGHT. A wash, not a fill: it rides ABOVE the ratified ground so
-     the temperature story still shows through it, and it only reaches full
-     depth in the far corner — the ramp is wide on purpose. */
+     the temperature story still shows through it. The ramp is short and its
+     depth is real — the sky has to READ as night, not as haze (owner, §15) —
+     and how far out it starts is a fraction of the window, so the same wash
+     lands the same way on a phone and on a 32" desk. */
   .night{z-index:0}
   /* 2. THE STARS THAT SURVIVE. A separate field in starlight colours,
      masked to exactly the night side of the crossing, drifting with the
@@ -1077,9 +1093,9 @@
   <button onclick="cycleHealth()">health: cycle</button>
   <button onclick="rerollCrossing()">re-roll crossing</button>
   <button onclick="nudgeDawn()">advance dawn</button>
-  <span class="seedtag">crossing #<b id="seedout">&mdash;</b></span>
+  <span class="seedtag">crossing #<b id="seedout">&mdash;</b> &middot; night <b id="shareout">&mdash;</b></span>
 </div>
-<footer>orbit &middot; v19 proposal &middot; dawn / the terminator &middot; the ratified temperature story with one line across it: night hands the sky to day, the stars on the far side come back as starlight, and the household constellations out there are drawn in it. The tilt, the seat and the softness of the crossing are rolled fresh every load; the night stars are rolled a chunk at a time as they come into view and are never rolled again. Dawn creeps &mdash; the night retreats and never comes back, so there is no loop. And the scroll is a descent: below the dial the sky lifts out of the window and you come down onto the surface, whose light warms the whole way from the pale amber the dial screen ended on to a pinky-orange &mdash; slowly enough that the last of it only arrives at the bottom of the page</footer>
+<footer>orbit &middot; v19 proposal &middot; dawn / the terminator &middot; the ratified temperature story with one line across it: night hands the sky to day, the stars on the far side come back as starlight, and the household constellations out there are drawn in it. The crossing is seated as a diagonal of the frame rather than in pixels off the dial, so the night keeps the same fifth-to-a-quarter of the sky on a phone, a laptop and a 32&Prime; desk; the share and the tilt are rolled fresh every load, inside bounds that move the crossing but can never hide it, and the chart is held out of the dark by a guard on the dial itself. The night stars are rolled a chunk at a time as they come into view and are never rolled again. Dawn creeps &mdash; the night retreats, monotonically, and stops at its floor rather than leaving, so there is no loop. And the scroll is a descent: below the dial the sky lifts out of the window and you come down onto the surface, whose light warms the whole way from the pale amber the dial screen ended on to a pinky-orange &mdash; slowly enough that the last of it only arrives at the bottom of the page</footer>
 
 <script>
 /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
@@ -1429,6 +1445,7 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
   const sky    = document.getElementById("nightsky");
   const limb   = document.getElementById("tline");
   const seedout= document.getElementById("seedout");
+  const shareout = document.getElementById("shareout");
 
   /* ---- one seed, an endless stream ------------------------------------ */
   let seed = Math.floor(Math.random() * 2147483646) + 1;
@@ -1439,28 +1456,53 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     const r = mkRng(Math.abs(h) % 2147483646 + 1); r(); r(); r(); return r;
   }
 
-  /* ---- the crossing: rolled per load ---------------------------------- */
-  /* ANG is a CSS gradient angle: 315deg progresses toward the top-left, so
-     night is up-and-left and the pack's warm horizon keeps the day. SIT is
-     where the handover sits along that axis, SOFT how wide it is. SOFT is
-     never small: a hard edge would put half the dial in the dark. */
-  /* ANG is a CSS gradient angle. GAP is the one measurement that keeps this
-     honest: it is the distance, IN SCREEN PIXELS, from the dial's month ring
-     to where the night begins. Rolling a pixel gap rather than a percentage
-     means the crossing lands in the same relationship to the instrument at
-     any angle and any viewport — the chart is never in the dark by accident.
-     RING is the month ring's own radius (r=162 in the dial's 380 viewBox,
-     drawn at 640px). */
-  const RING = 162 / 380 * 640;
-  let ANG = 335, GAP = 40, creepFrom = 0;
+  /* ---- the crossing: rolled per load, bounded so it can never hide ----- */
+  /* THE ANCHORING (owner, §15 — "the crossing must be seen"). The crossing
+     used to be seated in SCREEN PIXELS out from the dial's month ring. That
+     protects the chart, but it ties the size of the night to the instrument
+     instead of to the window: the same 300-odd pixels that leave a proper
+     night on a 27" desk leave a corner sliver on a 14" laptop and nothing at
+     all on a phone. It is now seated as a DIAGONAL OF THE FRAME. Two numbers
+     describe it, both fractions of the viewport, never pixels:
+        LE   where the crossing meets the LEFT edge, as a fraction of height
+        TE   where it meets the TOP edge, as a fraction of width
+     The night is the triangle those two cut off, so its share of the first
+     viewport is exactly LE·TE/2 — the same picture at 390×844 as at
+     2560×1440. That identity is the whole fix: the signature is a fraction
+     of the sky, not a measurement off the dial.
+     What the seed rolls is that SHARE (inside a bounded band) and the TILT
+     (which of the two legs is the long one) — WHERE the crossing sits in the
+     band, never WHETHER it is there. The bands below cannot produce a roll
+     with less than SHARE_LO of the sky in night, at any viewport.
+     The chart is still protected, but by a GUARD rather than by the seat:
+     the dial's own rendered circle — centre and radius read off the element,
+     so a clipped or off-centre dial is guarded where it actually is, not
+     where a constant says it should be — must stay out of the genuinely dark
+     part of the wash. Where it does not, the answers are taken in this
+     order, and the last one is the only one that costs sky:
+        1. the HANDOVER WIDENS (the dial sits inside the crossing — which is
+           what the crossing was always for),
+        2. the crossing is pushed back, but never past the FLOOR share,
+        3. the handover widens the rest of the way, so a viewport too small
+           for both still reads as a crossing rather than as a dark chart. */
+  const SHARE_LO = .20, SHARE_HI = .26;  /* the rolled band: a fifth to a quarter */
+  const TILT_LO  = .68, TILT_HI  = .92;  /* LE/TE — where in the band it sits */
+  const FLOOR    = .185;  /* no guard push and no creep may take it below this */
+  const KDARK    = .42;   /* where along the fall the wash reads as real night */
+  /* the guarded radius, in the dial's own 380-unit viewBox: the month ring is
+     at 150 and its labels at 162, so 172 clears everything legible on it */
+  const GUARD_VB = 172 / 380;
+  let SHARE = .245, TILT = .75, creepFrom = 0;
   function rollCrossing(){
     const r = mkRng(seed); r(); r(); r();
-    ANG = 324 + r() * 22;        /* 324°–346° — the tilt of the crossing */
-    GAP = -18 + r() * 104;       /* how close the night comes to the ring */
+    SHARE = SHARE_LO + r() * (SHARE_HI - SHARE_LO);
+    TILT  = TILT_LO  + r() * (TILT_HI  - TILT_LO);
   }
-  /* dawn advances: the night retreats about 22px a minute. Monotonic — the
-     night goes and does not come back, so there is no cycle to catch. */
-  const CREEP = 22 / 60000;                       /* px per ms */
+  /* dawn advances: the night retreats, monotonically, about 2.8% of its own
+     depth a minute — proportional now, like everything else here, so it is
+     the same retreat on a phone as on a desk. It is capped at the floor: the
+     night may thin, it may never leave. Nothing comes back, so nothing loops. */
+  const CREEP = .028 / 60000;                     /* of the night's depth, per ms */
   let t0 = performance.now();
   const creep = () => still.matches ? creepFrom
                     : creepFrom + (performance.now() - t0) * CREEP;
@@ -1474,43 +1516,87 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
      sits in the muddy middle, because there is barely any middle. ONE stop
      table drives the wash, the star mask and the constellations' material,
      so the three can never drift apart. */
-  /* everything below is measured in pixels along the crossing's own axis,
-     from the dial's centre; the gradient line's length converts them */
-  const axis = () => {
-    const th = ANG * Math.PI / 180;
-    return { ux:Math.sin(th), uy:-Math.cos(th),
-             L:Math.abs(innerWidth * Math.sin(th)) + Math.abs(innerHeight * Math.cos(th)) };
-  };
-  const onset = () => RING + GAP + creep();       /* px past the ring */
-  /* [px past the onset, alpha] — one table, three consumers */
-  /* the fall is deliberately SHORT — about 190px. A long, gentle fade would
-     spread a wide band of sky that is neither lit nor dark, and nothing is
-     legible against that; keeping the handover tight means almost nothing
-     ever has to be. */
-  const NIGHT = [[-20, 0], [35, .19], [100, .52], [180, .73], [420, .82]];
-  const LIMB  = [[-330, 0], [-190, .08], [-96, .21], [-32, .12], [30, 0]];
+  /* Everything below is measured along the crossing's own normal, in units of
+     the FALL — the width of the handover — so one table describes the same
+     picture at every viewport. The frame converts those units to the
+     percentages a CSS gradient wants. */
+  /* [depth past the crossing, in FALLs → alpha] — one table, three consumers */
+  /* the fall is deliberately SHORT — about a quarter of the night's depth. A
+     long, gentle fade would spread a wide band of sky that is neither lit nor
+     dark, and nothing is legible against that; keeping the handover tight
+     means almost nothing ever has to be. */
+  const NIGHT = [[-.14, 0], [.16, .18], [.42, .50], [.78, .74], [1.20, .87], [3.2, .93]];
+  const LIMB  = [[-1.95, 0], [-1.10, .08], [-.52, .22], [-.16, .12], [.17, 0]];
   const NIGHT_RGB = "7,12,29", LIMB_RGB = "255,206,145";
 
-  function ramp(list, rgb){
-    const { L } = axis(), o = onset();
-    return list.map(([px, a]) =>
-      ` rgba(${rgb},${a}) ${(50 + (o + px) / L * 100).toFixed(2)}%`).join(",");
+  /* ---- the frame: the crossing resolved against this window ------------ */
+  /* the dial as it is actually drawn — not as a constant. During the arrival
+     the element is mid-scale and during a flight it is gone, so the nominal
+     640 is the floor and any larger drawn size (storm leans the camera in)
+     wins: the guard is never smaller than the chart it protects. */
+  function guard(){
+    const el = document.querySelector(".dial");
+    const b = el && el.getBoundingClientRect();
+    if (!b || !b.width) return { x:innerWidth / 2, y:innerHeight / 2, r:640 * GUARD_VB };
+    return { x:b.left + b.width / 2, y:b.top + b.height / 2,
+             r:Math.max(parseFloat(el.getAttribute("width")) || 640, b.width) * GUARD_VB };
   }
+  /* how far the crossing can be pushed back before the night reaches FLOOR:
+     the share is ½·LE·TE and a push of p takes a fixed bite out of each leg,
+     so the limit is one quadratic, solved rather than searched */
+  function pushCap(LE, TE, a, b){
+    const A = a * b, B = LE * b + TE * a, C = LE * TE - 2 * FLOOR;
+    if (C <= 0) return 0;
+    const disc = B * B - 4 * A * C;
+    if (disc <= 0 || A <= 0) return 0;
+    return Math.max(0, (B - Math.sqrt(disc)) / (2 * A));
+  }
+  let FR = null;
+  function frame(){
+    const W = innerWidth, H = innerHeight;
+    const LE = Math.sqrt(2 * SHARE * TILT), TE = Math.sqrt(2 * SHARE / TILT);
+    /* the crossing runs from (0, LE·H) to (TE·W, 0); its normal points into
+       the night, which is up and to the left, as it always has */
+    const ax = LE * H, ay = TE * W, N = Math.hypot(ax, ay) || 1;
+    const nx = -ax / N, ny = -ay / N;
+    const depth = ax * (ay / N);        /* the deepest the night gets: the corner */
+    const L   = W * -nx + H * -ny;      /* the CSS gradient line's own length */
+    const CEN = (W / 2) * nx + (H / 2 - ax) * ny;   /* window centre, relative to it */
+    const ANG = (Math.atan2(nx, -ny) * 180 / Math.PI + 360) % 360;
+
+    /* the guard, and the three answers to it, in order */
+    const g = guard();
+    const need = g.r + (g.x * nx + (g.y - ax) * ny);   /* how deep the dark must sit */
+    let fall = Math.min(Math.max(.26 * depth, 78), 240);
+    if (KDARK * fall < need) fall = Math.min(need / KDARK, .70 * depth);
+    const cap  = pushCap(LE, TE, 1 / (H * -ny), 1 / (W * -nx));
+    const push = Math.min(Math.max(0, need - KDARK * fall), cap);
+    if (KDARK * fall < need - push) fall = Math.min((need - push) / KDARK, 2.2 * depth);
+    /* the creep spends whatever the guard left of the floor, and no more */
+    const off = Math.min(push + creep() * depth, cap);
+
+    return (FR = { W, H, LE, TE, nx, ny, ax, depth, L, CEN, ANG, fall, off,
+                   share: .5 * (LE - off / (H * -ny)) * (TE - off / (W * -nx)) });
+  }
+
   function paint(){
-    const { L } = axis(), o = onset();
-    const at = (px) => (50 + (o + px) / L * 100).toFixed(2) + "%";
-    night.style.backgroundImage =
-      `linear-gradient(${ANG.toFixed(2)}deg,${ramp(NIGHT, NIGHT_RGB)})`;
+    const f = frame();
+    /* a depth in FALLs → the percentage along the gradient line */
+    const at = (t) => (50 + (f.off + t * f.fall - f.CEN) / f.L * 100).toFixed(2) + "%";
+    const ramp = (list, rgb) =>
+      list.map(([t, a]) => ` rgba(${rgb},${a}) ${at(t)}`).join(",");
+    const A = f.ANG.toFixed(2);
+    night.style.backgroundImage = `linear-gradient(${A}deg,${ramp(NIGHT, NIGHT_RGB)})`;
     /* the stars come back exactly where the light stops */
-    const m = `linear-gradient(${ANG.toFixed(2)}deg, transparent ${at(-10)},` +
-              ` rgba(0,0,0,.5) ${at(140)}, #000 ${at(320)})`;
+    const m = `linear-gradient(${A}deg, transparent ${at(-.05)},` +
+              ` rgba(0,0,0,.5) ${at(.74)}, #000 ${at(1.7)})`;
     sky.style.webkitMaskImage = m; sky.style.maskImage = m;
     /* the limb: the air the light reaches first. It sits on the DAY side of
        the fall, which is why the chart never has to be legible against mud —
        where the crossing passes over the instrument, it passes over it as
        light. This is the brightest thing in the sky after the sun. */
-    limb.style.backgroundImage =
-      `linear-gradient(${ANG.toFixed(2)}deg,${ramp(LIMB, LIMB_RGB)})`;
+    limb.style.backgroundImage = `linear-gradient(${A}deg,${ramp(LIMB, LIMB_RGB)})`;
+    if (shareout) shareout.textContent = Math.round(f.share * 100) + "%";
   }
 
   /* ---- how deep into the night a point of the screen sits ------------- */
@@ -1526,8 +1612,8 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     return list[list.length - 1][1];
   }
   function alphaAt(px, py){
-    const { ux, uy } = axis(), o = onset();
-    const d = (px - innerWidth / 2) * ux + (py - innerHeight / 2) * uy - o;
+    const f = FR || frame();
+    const d = (px * f.nx + (py - f.ax) * f.ny - f.off) / f.fall;
     /* the limb LIGHTENS the ground it crosses, and it crosses the near edge
        of the night. Netting it off is what stops a mark being redrawn in
        starlight while the sky behind it is still bright. */
@@ -1688,9 +1774,10 @@ addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
     seed = Math.floor(Math.random() * 2147483646) + 1; creepFrom = 0; draw();
   };
   /* the creep is deliberately below the threshold of noticing, so the bar
-     carries a way to SEE it: one nudge is about twenty minutes of dawn */
+     carries a way to SEE it: one nudge is about ten minutes of dawn. It runs
+     into the floor and stops there — the night thins, it never leaves. */
   window.nudgeDawn = function(){
-    creepFrom = Math.min(700, creep() + 130); t0 = performance.now();
+    creepFrom = Math.min(.6, creep() + .28); t0 = performance.now();
     paint(); tintGalaxy();
   };
   draw();
