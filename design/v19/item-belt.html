@@ -3,23 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — the document belt v2: the card rides in the belt (proposal, issue #458)</title>
+<title>Orbit — the document belt v3: the asteroids are documents (proposal, issue #458)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
   /*
-   * THE DOCUMENT BELT — v2, issue #458.
-   * design/owner-decisions.md §15, "Belt, second pass" (owner: "GREAT first
-   * pass. But...").
+   * THE DOCUMENT BELT — v3, issue #458.
+   * design/owner-decisions.md §15, "Belt, third pass" (owner: "Better... but
+   * what I meant as the asteroid belt should be made up of more document
+   * items, lots of them all over the place").
    *
-   * Four corrections, and what each one does here:
+   * THE v3 CORRECTION — THE ASTEROIDS ARE DOCUMENTS.
+   * v2's band was right in structure and wrong in substance: it was rock and
+   * dust, which is what an asteroid belt is made of, and this is not an
+   * asteroid belt. It is a DOCUMENT belt. So every law of v2's population
+   * survives — the scatter, the core and the fray, the strays, the depth, the
+   * Keplerian shear, the never-looping stream — and only the bodies change:
+   * the ~2400 things drifting in the band are now little DOCUMENTS. Sheets.
+   * Pages. Paper, tumbling. Each one is a rectangle with a turned corner,
+   * inclined out of its own plane and rotated to any angle, so the band is
+   * full of paper caught at every attitude: face-on pages, sheets seen nearly
+   * edge-on as slivers, and below about a pixel and a half, flecks of paper
+   * too far off to be more than a fleck. The nearer, larger ones carry ruled
+   * lines of text and a lit edge. Nothing in the band is a circle any more.
+   *
+   * They are drawn as SPRITES, not paths: sixteen silhouettes (ten plain,
+   * six lettered) × eighteen rotations are rasterised once per tone into two
+   * offscreen atlases at theme-change time, and the frame loop does nothing
+   * but blit — one drawImage per body, no path, no stroke, no per-body
+   * save/restore. Two thousand pages a frame costs about what two thousand
+   * circles cost, and the band glow stays rasterised-once as it was in v2.
+   *
+   * The MEMBERS changed with them. A member document is no longer a faceted
+   * rock: it is a full sheet at 25px with its corner turned, its ruled lines
+   * drawn, an accent edge and the same quarter-light as the item's planet —
+   * unmistakably the same KIND of thing as the band, and unmistakably a
+   * bigger, realer one.
+   *
+   * Four corrections carried in from v2, and what each one does here:
    *
    * 1. THE CARD RIDES IN THE BELT. No crown asteroid stands in for the
    *    centred thing any more. The centred entity's CARD is the body at the
-   *    apex: it sits IN the band, rubble streaming behind it (through it —
+   *    apex: it sits IN the band, paper streaming behind it (through it —
    *    the glass blurs what passes) and a few motes drifting in front. The
-   *    other members stay small asteroid bodies out on the flanks. Clicking
-   *    one rolls the belt; as it reaches the apex it stops being a rock and
+   *    other members stay small document bodies out on the flanks. Clicking
+   *    one rolls the belt; as it reaches the apex it stops being a sheet and
    *    is its card.
    * 2. THE APEX IS AT SCREEN CENTRE. The band's highest point is pinned to
    *    the horizontal centre of the viewport at every size, and the card is
@@ -32,26 +60,31 @@
    *    and turns toward you, the right flank falls ~240px and runs away
    *    foreshortened. Nothing here is a semicircle and nothing is symmetric.
    * 4. DENSER AND DISORDERLY. The band is a scattered population, not beads
-   *    on a wire: ~2100 seeded bodies at scattered radii (a peaked ±19% of
+   *    on a wire: ~2400 seeded bodies at scattered radii (a peaked ±19% of
    *    A, one in seven thrown 1.75× further out) and out-of-plane heights
-   *    (±6.6% of A), sized from dust to rubble, drawn at depth — nearer
-   *    bodies larger, brighter, faster, and the highest of them passing in
-   *    FRONT of the card. At 1600×1000 the band is ~440px thick at its
-   *    apex, which is deeper than the card is tall. They drift along the
-   *    ring for ever and NEVER loop: a body leaving the left edge is
-   *    respawned on the right out of the same running seeded stream with
-   *    fresh radius, height, size and shape, so revealed band is always new
-   *    band (§14, "the sky never loops"). Inner bodies drift faster than
-   *    outer ones — Keplerian shear, which is what keeps the band from ever
-   *    reading as one rigid object sliding past.
+   *    (±6.6% of A), sized from a fleck of paper to a whole sheet, drawn at
+   *    depth — nearer bodies larger, brighter, faster, and the highest of
+   *    them passing in FRONT of the card. At 1600×1000 the band is ~440px
+   *    thick at its apex, which is deeper than the card is tall. They drift
+   *    along the ring for ever and NEVER loop: a body leaving the left edge
+   *    is respawned on the right out of the same running seeded stream with
+   *    fresh radius, height, size, attitude and silhouette, so revealed band
+   *    is always new band (§14, "the sky never loops"). Inner bodies drift
+   *    faster than outer ones — Keplerian shear, which is what keeps the
+   *    band from ever reading as one rigid object sliding past.
    *
    * The three MEMBERS — the item and its two documents — must read instantly
-   * as the things that mean something. Four separations: they are 25px
-   * bodies against rubble that tops out near 9px; they are drawn (planet
-   * gradient / faceted rock) where the rubble is a flat tone; they carry
-   * labels and a focus ring; and each has SWEPT ITS NEIGHBOURHOOD — the
-   * rubble thins to nothing in a 74px disc around every member, the way a
-   * body big enough to be a body clears its own orbit.
+   * as the things that mean something. Now that the band is documents too,
+   * this separation has to be carried by scale and craft rather than by
+   * kind, and it is, five ways: they are 25px bodies against ambient paper
+   * that tops out near 9px; they are DRAWN — planet gradient, or a full
+   * sheet with a turned corner, ruled lines, an accent edge and a shaded
+   * face — where the ambient paper is one flat tone with a hole punched for
+   * its fold; they hold still at their seats while everything around them
+   * drifts; they carry labels, a hover rim and a focus ring; and each has
+   * SWEPT ITS NEIGHBOURHOOD — the band thins to nothing in a 74px disc
+   * around every member, the way a body big enough to be a body clears its
+   * own orbit.
    *
    * Everything drawn is fixture-true: web/src/lib/data/fixtures/workspace.js
    * (i-svc "Car full service" and its two documents; i-boiler for the empty
@@ -196,7 +229,7 @@
      highest point crosses it a third of the way down: the band's thickness
      (~370px at the apex) and the card's height are of an order, which is
      what makes it read as riding IN the belt rather than floating above it.
-     The 16px backdrop blur is doing real work here — the rubble streaming
+     The 16px backdrop blur is doing real work here — the paper streaming
      behind the card is visible through it, smeared. */
   .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
     max-height:calc(100vh - 150px);overflow:auto;
@@ -303,7 +336,7 @@
       <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
       <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
     </radialGradient>
-    <!-- The rock's shading, lit from the same quarter as the planets, so a
+    <!-- The sheet's shading, lit from the same quarter as the planets, so a
          document body and an item body share one light. -->
     <radialGradient id="rockshade" cx="32%" cy="26%" r="82%">
       <stop offset="0%" stop-color="#000" stop-opacity="0"/>
@@ -318,7 +351,7 @@
 <!-- the card, riding at the apex -->
 <div class="cardwrap" id="cardwrap"></div>
 
-<!-- the nearest few per cent of the band: rubble that passes in FRONT -->
+<!-- the nearest few per cent of the band: paper that passes in FRONT -->
 <canvas id="fore" aria-hidden="true"></canvas>
 
 <div class="demos" aria-label="Mockup state demos">
@@ -339,8 +372,9 @@
   <button class="sw" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
 </div>
 
-<footer>orbit · the document belt v2 · issue #458 · §15 "belt, second pass": the CARD rides in the belt, apex at screen centre, no semicircle, denser and disorderly ·
-a real ring at 40° inclination with a 12° node roll · ~2100 scattered bodies drifting for ever and never looping · the item and its documents are the only bodies that mean anything — they have swept their own neighbourhoods ·
+<footer>orbit · the document belt v3 · issue #458 · §15 "belt, third pass": the asteroids ARE documents — ~2400 sheets of paper, tumbling at every attitude, all over the band ·
+still a real ring at 40° inclination with a 12° node roll, apex pinned to screen centre, the CARD riding in the belt as the apex body, Keplerian shear, drifting for ever and never looping ·
+sixteen silhouettes × eighteen rotations, rasterised once per theme and blitted · the item and its documents are the only bodies that mean anything — bigger, lettered, labelled, and they have swept their own neighbourhoods ·
 click a body (or ← →) and the belt rolls it to the apex, where it becomes its card · a centred document shows what Orbit honestly holds; the page itself waits on #476</footer>
 
 <script>
@@ -484,31 +518,178 @@ const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* A Lehmer stream. Two of them: one fixed seed for the members' silhouettes
-   (so a rock is the same rock every load, fixture truth), and one that runs
+   (so a sheet is the same sheet every load, fixture truth), and one that runs
    for ever for the band — never rewound, which is exactly why the band can
    never repeat itself. */
 const rngFrom = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
 const bandRng = rngFrom(19170812);
 
 /* ==================================================================== *
- * The band's population.
+ * THE PAPER — the band's population, and the v3 correction.
+ *
+ * Every body in the band is a document. Not a rock, not a mote of dust: a
+ * sheet of paper, seen from wherever the belt happens to be holding it.
+ *
+ * A sheet is described by three things, and all three are baked into a
+ * sprite so the frame loop never has to draw one:
+ *   SILHOUETTE  a page — portrait or landscape, A-series-ish proportions,
+ *               with one corner turned over. The turned corner is the whole
+ *               tell: it is what stops a small pale rectangle from being a
+ *               window, a card, a chip, and makes it paper.
+ *   ATTITUDE    the sheet's own plane is inclined (its short axis squashed
+ *               to between 26% and 100%), so the population runs from pages
+ *               held flat to the eye all the way down to sheets nearly
+ *               edge-on, which read as bright slivers.
+ *   ROTATION    then spun to any of eighteen angles. Tumbling paper.
+ * The six largest silhouettes also carry ruled lines of text and a lit
+ * edge, because near enough to read is near enough to see writing on.
+ *
+ * Sixteen silhouettes × eighteen rotations = 288 cells, rasterised once
+ * per tone into an offscreen atlas whenever the theme changes. Per frame,
+ * a body is ONE drawImage out of that atlas — no path, no stroke, no
+ * save/restore. Below ~1.35px drawn, a sheet stops being resolvable at all
+ * and becomes what it would really look like at that distance: a fleck, a
+ * single fillRect one or two pixels across. That is cheaper still, and it
+ * is most of the population.
  *
  * Bodies are scattered in three dimensions of the ring, not along a line:
  *   phi   where round the belt
- *   rho   A · (1 ± .155), triangular — dense at the ring radius, frayed out
- *   h     ±.058·A out of the ring plane, triangular
- * and each carries its own size, tone and silhouette. Sizes are cubed so
- * the population is overwhelmingly dust with a scattering of real rubble:
- * that ratio, not the count, is what makes a belt look like a belt.
+ *   rho   A · (1 ± .19), triangular — dense at the ring radius, frayed out
+ *   h     ±.066·A out of the ring plane, triangular
+ * Sizes are cubed so the population is overwhelmingly far-off flecks with a
+ * scattering of readable pages: that ratio, not the count, is what makes a
+ * belt look like a belt rather than a pile of confetti.
  *
  * Drift: leftward along the ring for ever. Inner bodies run faster than
  * outer ones (Keplerian shear, softened to a ±15% spread so the band shears
  * rather than smears), and near bodies faster than far ones. A body that
  * leaves the left edge does not come back: it is REBUILT from the running
- * stream at the right edge with fresh radius, height, size and shape. The
- * band you are shown one minute is not the band you were shown before.
+ * stream at the right edge with fresh radius, height, size, attitude and
+ * silhouette. The band you are shown one minute is not the band you were
+ * shown before.
  * ==================================================================== */
-let rubble = [];
+const SPR_CELL = 40;        /* one sprite cell, CSS px                     */
+const SPR_ROT = 18;         /* attitudes round the page's own normal       */
+const SPR_VAR = 16;         /* silhouettes...                              */
+const SPR_PLAIN = 10;       /* ...of which the first ten are unlettered    */
+const SPR_FIT = 0.88;       /* how much of a cell the sheet may fill       */
+const DOC_SCALE = 3.18;     /* sheet drawn size per unit of body "size"    */
+const FLECK = 1.35;         /* below this, paper is only a fleck of paper  */
+
+/* The silhouettes themselves — seeded, so the same sixteen sheets exist on
+   every load and in every theme; only their colour is re-rasterised. */
+const SHEETS = (() => {
+  const r = rngFrom(20260816), out = [];
+  for (let i = 0; i < SPR_VAR; i++) {
+    const land = i % 5 === 3;                    /* one in five lies long   */
+    const nar = 0.60 + r() * 0.22;               /* A-series-ish, wandering */
+    out.push({
+      w: land ? 1 : nar, h: land ? nar : 1,
+      /* the sheet's plane, inclined: 1 is face-on, .26 is nearly edge-on */
+      tilt: 0.26 + ((i * 7) % SPR_VAR) / (SPR_VAR - 1) * 0.74,
+      fold: 0.20 + r() * 0.16,                   /* the turned corner       */
+      mirror: r() < 0.5 ? -1 : 1,                /* ...on which side        */
+      flip: r() < 0.45 ? -1 : 1,                 /* ...top or bottom        */
+      crease: r() < 0.35,                        /* a fold line across it   */
+      lines: i >= SPR_PLAIN ? 3 + Math.floor(r() * 4) : 0,
+    });
+  }
+  return out;
+})();
+
+/* Two atlases, one per tone (ink and accent-lit), each 18 × 16 cells. */
+let sprites = [null, null], SPR_PX = 40;
+
+function sheetPath(ctx, sh, K) {
+  const hw = (sh.w / 2) * K, hh = (sh.h / 2) * K, f = Math.min(hw, hh) * sh.fold * 2;
+  ctx.beginPath();
+  ctx.moveTo(-hw, -hh);
+  ctx.lineTo(hw - f, -hh);
+  ctx.lineTo(hw, -hh + f);          /* the corner, turned back             */
+  ctx.lineTo(hw, hh);
+  ctx.lineTo(-hw, hh);
+  ctx.closePath();
+  return { hw, hh, f };
+}
+
+function buildSprites() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  SPR_PX = Math.round(SPR_CELL * dpr);
+  for (let t = 0; t < 2; t++) {
+    const cv = sprites[t] || (sprites[t] = document.createElement("canvas"));
+    cv.width = SPR_PX * SPR_ROT; cv.height = SPR_PX * SPR_VAR;
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    const face = TONE[t], edge = TONE[t === 0 ? 1 : 0];
+    for (let v = 0; v < SPR_VAR; v++) {
+      const sh = SHEETS[v];
+      for (let a = 0; a < SPR_ROT; a++) {
+        ctx.save();
+        /* Each cell is clipped, so a spun sheet can never bleed into its
+           neighbour and the erase passes below stay inside their own page. */
+        ctx.beginPath();
+        ctx.rect(a * SPR_PX, v * SPR_PX, SPR_PX, SPR_PX);
+        ctx.clip();
+        ctx.translate((a + 0.5) * SPR_PX, (v + 0.5) * SPR_PX);
+        ctx.rotate((a / SPR_ROT) * Math.PI * 2);
+        ctx.scale(sh.mirror, sh.flip * sh.tilt);   /* mirrored, and inclined */
+        const K = (SPR_PX * SPR_FIT) / Math.hypot(sh.w, sh.h);
+        const { hw, hh, f } = sheetPath(ctx, sh, K);
+        ctx.fillStyle = face;
+        ctx.fill();
+        /* The flap of the turned corner: the same paper seen from behind,
+           so it is the same tone at half strength. Punched out first, so it
+           reads as a real corner however dark or pale the sky is. */
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.beginPath();
+        ctx.moveTo(hw - f, -hh); ctx.lineTo(hw, -hh + f); ctx.lineTo(hw - f, -hh + f);
+        ctx.closePath(); ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 0.42;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        /* Ruled lines, on the sheets big enough for anyone to see them. */
+        if (sh.lines) {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.lineWidth = Math.max(1, hh * 0.075);
+          ctx.strokeStyle = "#000";
+          ctx.globalAlpha = 0.62;
+          for (let i = 0; i < sh.lines; i++) {
+            const y = -hh + ((i + 1.35) / (sh.lines + 1.7)) * hh * 2;
+            const short = i === sh.lines - 1 ? 0.52 : 0.78;
+            ctx.beginPath();
+            ctx.moveTo(-hw * 0.74, y); ctx.lineTo(hw * short, y); ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "source-over";
+        }
+        /* A crease across the middle: paper that has been folded once. */
+        if (sh.crease) {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = Math.max(1, hh * 0.05);
+          ctx.beginPath(); ctx.moveTo(-hw, hh * 0.06); ctx.lineTo(hw, -hh * 0.1); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "source-over";
+        }
+        /* A lit edge, on the near sheets only: the same trick v2 played on
+           its biggest bodies, now baked in instead of stroked per frame. */
+        if (sh.lines) {
+          sheetPath(ctx, sh, K);
+          ctx.strokeStyle = edge;
+          ctx.globalAlpha = 0.5;
+          ctx.lineWidth = Math.max(1, SPR_PX * 0.022);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+      }
+    }
+  }
+}
+
+let paper = [];
 
 function spawn(rk, phiNow) {
   const r = bandRng;
@@ -520,20 +701,22 @@ function spawn(rk, phiNow) {
   rk.rho = A * (1 + ((r() + r() + r() - 1.5) / 1.5) * RADIAL * stray);
   rk.h = A * ((r() + r() + r() - 1.5) / 1.5) * HFRAC * stray;
   const g = r();
-  rk.size = 0.42 + g * g * g * 7.6;
+  rk.size = 0.44 + g * g * g * 8.2;
   rk.tone = r() < 0.17 ? 1 : 0;               /* 1 = accent-lit, 0 = ink   */
   rk.alpha = (0.2 + r() * 0.55) / (stray > 1 ? 1.5 : 1);
   rk.rate = Math.pow(A / rk.rho, 0.9) * (0.94 + (rk.h / (A * HFRAC)) * 0.12);
-  rk.poly = null;
-  if (rk.size > 2.3) {                        /* big enough to have a shape */
-    const n = 7, pts = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2 + r() * 0.5;
-      const rr = 0.72 + r() * 0.5;
-      pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.9]);
-    }
-    rk.poly = pts;
-  }
+  /* which sheet, and at what attitude. The lettered silhouettes are kept
+     for the sheets that will be drawn large enough to letter. */
+  rk.rot = Math.floor(r() * SPR_ROT);
+  const pick = r();
+  rk.variant = rk.size >= 3.4
+    ? SPR_PLAIN + Math.floor(pick * (SPR_VAR - SPR_PLAIN))
+    : Math.floor(pick * SPR_PLAIN);
+  /* and, for the ones that will only ever be a fleck, which way the fleck
+     lies — paper far enough away is a short bright dash, not a dot. */
+  rk.fw = 1.6 + r() * 1.6;
+  rk.fh = 0.5 + r() * 0.6;
+  if (r() < 0.4) { const t = rk.fw; rk.fw = rk.fh; rk.fh = t; }
   /* stored as the ring angle it was BORN at, so the running drift and the
      belt's roll both apply to it at its own rate for the rest of its life */
   rk.phi = phiNow - (drift + roll) * rk.rate;
@@ -541,10 +724,10 @@ function spawn(rk, phiNow) {
 }
 
 function buildBand() {
-  const n = ITEMS[key].docs.length ? 2100 : 880;
-  rubble = [];
+  const n = ITEMS[key].docs.length ? 2400 : 1000;
+  paper = [];
   for (let i = 0; i < n; i++)
-    rubble.push(spawn({}, PHI_R - 0.16 + bandRng() * (PHI_L - PHI_R + 0.32)));
+    paper.push(spawn({}, PHI_R - 0.16 + bandRng() * (PHI_L - PHI_R + 0.32)));
 }
 
 /* ==================================================================== *
@@ -572,13 +755,18 @@ function buildBodies() {
 const seatPhi = (i) => PHI_APEX - (i - mid) * STEP + roll;
 
 /* ==================================================================== *
- * The members' pen — unchanged from v1, at a size the rubble cannot reach.
+ * The members' pen, at a size the ambient paper cannot reach.
  * The item's body is home.html's to the pixel-ratio: gradient sphere, gloss
  * at (−0.2r, +0.25r) r 0.33r, status halo. It leaves behind only its dial
  * belt ellipse (CON-1's "documents attached"), because on THIS screen that
  * sentence is spoken at screen scale by the band the body is sitting in.
- * A document is a rock: faceted, shaded by shadow rather than tint, so it
- * reads as stone on paper and on night alike.
+ *
+ * A member document (v3) is a SHEET — the same kind of thing as everything
+ * drifting past it, drawn properly: a page at 25px with its corner turned
+ * back, a header rule and four lines of text, an accent edge, and the
+ * rockshade wash laid over it so it takes the same quarter-light as the
+ * planet beside it. Against 3-to-9px flat ambient paper it reads as the one
+ * document in the band anybody could actually pick up and read.
  * ==================================================================== */
 function drawItemBody(g, item) {
   const r = R_BODY;
@@ -589,26 +777,49 @@ function drawItemBody(g, item) {
     r: (0.33 * r).toFixed(2), fill: "rgba(255,255,255,.38)" }));
 }
 
-function drawRock(g, seed) {
+function drawDocBody(g, seed) {
   const rng = rngFrom(seed);
-  const r = R_BODY, facets = 11, pts = [];
-  for (let i = 0; i < facets; i++) {
-    const a = (i / facets) * Math.PI * 2 + rng() * 0.14;
-    const rr = r * (0.80 + rng() * 0.26);
-    pts.push(`${(Math.cos(a) * rr).toFixed(2)},${(Math.sin(a) * rr * 0.92).toFixed(2)}`);
-  }
-  const points = pts.join(" ");
-  g.appendChild(el("polygon", { points,
+  const r = R_BODY;
+  /* A real sheet, held at a slight angle to the band the way a body in a
+     belt is held at whatever angle it was left at. Its own tilt is gentle
+     — the ambient paper tumbles, but a member is presented, not tossed. */
+  const lean = (rng() - 0.5) * 24;
+  const hw = r * 0.74, hh = r * 0.99, f = r * 0.30;
+  const page = el("g", { transform: `rotate(${lean.toFixed(2)})` });
+  const body = [
+    `M${(-hw).toFixed(2)},${(-hh).toFixed(2)}`,
+    `L${(hw - f).toFixed(2)},${(-hh).toFixed(2)}`,
+    `L${hw.toFixed(2)},${(-hh + f).toFixed(2)}`,
+    `L${hw.toFixed(2)},${hh.toFixed(2)}`,
+    `L${(-hw).toFixed(2)},${hh.toFixed(2)}`, "Z",
+  ].join("");
+  page.appendChild(el("path", { d: body,
     fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
     stroke: "var(--accent)", "stroke-opacity": ".8", "stroke-width": "1.2",
     "stroke-linejoin": "round" }));
-  for (let i = 0; i < 3; i++) {
-    const a = rng() * Math.PI * 2, d = rng() * 0.5 * r;
-    g.appendChild(el("circle", { cx: (Math.cos(a) * d).toFixed(2),
-      cy: (Math.sin(a) * d * 0.9).toFixed(2), r: (1.6 + rng() * 2.4).toFixed(2),
-      fill: "#000", opacity: ".2" }));
+  /* the turned corner: the back of the same page, and the fold's own edge */
+  page.appendChild(el("path", {
+    d: `M${(hw - f).toFixed(2)},${(-hh).toFixed(2)} L${hw.toFixed(2)},${(-hh + f).toFixed(2)} ` +
+       `L${(hw - f).toFixed(2)},${(-hh + f).toFixed(2)} Z`,
+    fill: "var(--accent)", "fill-opacity": ".34",
+    stroke: "var(--accent)", "stroke-opacity": ".7", "stroke-width": "1" }));
+  /* what is written on it: a heavier header rule, then the text */
+  const x0 = -hw + r * 0.2, x1 = hw - r * 0.24;
+  page.appendChild(el("line", { x1: x0.toFixed(2), y1: (-hh + r * 0.42).toFixed(2),
+    x2: (x0 + (x1 - x0) * 0.56).toFixed(2), y2: (-hh + r * 0.42).toFixed(2),
+    stroke: "var(--accent)", "stroke-opacity": ".82", "stroke-width": "2.4",
+    "stroke-linecap": "round" }));
+  for (let i = 0; i < 4; i++) {
+    const y = -hh + r * 0.74 + i * r * 0.29;
+    const wend = x0 + (x1 - x0) * (i === 3 ? 0.55 : 0.82 + rng() * 0.18);
+    page.appendChild(el("line", { x1: x0.toFixed(2), y1: y.toFixed(2),
+      x2: Math.min(wend, x1).toFixed(2), y2: y.toFixed(2),
+      stroke: "var(--accent)", "stroke-opacity": ".5", "stroke-width": "1.4",
+      "stroke-linecap": "round" }));
   }
-  g.appendChild(el("polygon", { points, fill: "url(#rockshade)" }));
+  /* the same quarter-light the planet takes, so they are lit by one sun */
+  page.appendChild(el("path", { d: body, fill: "url(#rockshade)" }));
+  g.appendChild(page);
 }
 
 function buildSeats() {
@@ -626,7 +837,7 @@ function buildSeats() {
     hit.appendChild(el("circle", { class: "fring", r: R_BODY + 11, fill: "none",
       stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
     if (b.kind === "item") drawItemBody(hit, item);
-    else drawRock(hit, 7717 + i * 913);
+    else drawDocBody(hit, 7717 + i * 913);
     hit.appendChild(el("circle", { class: "rim", r: R_BODY + 8, fill: "none",
       stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
     hit.addEventListener("click", () => centre(i));
@@ -645,12 +856,12 @@ function buildSeats() {
 }
 
 /* Where each member is, and how solid it is at this instant of the roll.
-   The body at the apex is NOT drawn: it is the card. Its rock fades back in
+   The body at the apex is NOT drawn: it is the card. Its sheet fades back in
    as it leaves, and the arriving one fades out as the card blooms — which
    is the whole trick of "the card rides in the belt". */
 function bodyOpacity(i, p) {
-  /* The rock the card is collapsing back into is already there before the
-     card has finished leaving, and the rock the card blooms out of is still
+  /* The sheet the card is collapsing back into is already there before the
+     card has finished leaving, and the sheet the card blooms out of is still
      there as it starts to bloom: the two never both go missing, which is
      what would give the trick away. */
   if (i === selected) return 1 - clamp01((p - 0.32) / 0.34);
@@ -767,7 +978,7 @@ function paintBand() {
   const foreCut = hMax * 0.58;   /* above this, a body passes in FRONT */
   const fadeIn = 0.14 * W;   /* the belt leaves the sky, it does not stop */
 
-  for (const rk of rubble) {
+  for (const rk of paper) {
     const phi = rk.phi + (drift + roll) * rk.rate;
     if (phi > PHI_L + 0.16) { spawn(rk, PHI_R - 0.16); continue; }
     const p = project(phi, rk.rho, rk.h);
@@ -797,18 +1008,17 @@ function paintBand() {
         a *= 0.85;
     }
     ctx.globalAlpha = Math.min(a, 0.95);
-    ctx.fillStyle = TONE[rk.tone];
-    if (rk.poly) {
-      ctx.beginPath();
-      rk.poly.forEach(([px, py], i) =>
-        i ? ctx.lineTo(p.x + px * s, p.y + py * s) : ctx.moveTo(p.x + px * s, p.y + py * s));
-      ctx.closePath(); ctx.fill();
-      if (s > 4) {           /* a lit edge on the biggest rubble only */
-        ctx.globalAlpha = Math.min(a * 0.5, 0.4);
-        ctx.strokeStyle = TONE[1]; ctx.lineWidth = 0.7; ctx.stroke();
-      }
+    /* Here is the whole of v3's per-frame cost: either one blit of a
+       pre-rasterised sheet, or — for the far majority, the far-off ones —
+       one fillRect of a fleck of paper. No paths are built in this loop. */
+    if (s < FLECK) {
+      ctx.fillStyle = TONE[rk.tone];
+      const fw = rk.fw * s, fh = rk.fh * s;
+      ctx.fillRect(p.x - fw * 0.5, p.y - fh * 0.5, fw, fh);
     } else {
-      ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, 6.2832); ctx.fill();
+      const d = s * DOC_SCALE;
+      ctx.drawImage(sprites[rk.tone], rk.rot * SPR_PX, rk.variant * SPR_PX, SPR_PX, SPR_PX,
+                    p.x - d * 0.5, p.y - d * 0.5, d, d);
     }
   }
   bctx.globalAlpha = 1; fctx.globalAlpha = 1;
@@ -821,10 +1031,10 @@ function paintBand() {
  *   0ms    the belt starts turning. The card, which IS the apex body,
  *          leaves with it: it slides along the band in the direction of
  *          travel (dipping as the band dips away from the apex), shrinking
- *          toward body size and fading — collapsing back into its rock.
- *   ~190ms the rock it collapsed into has faded up at the seat the card
+ *          toward body size and fading — collapsing back into its sheet.
+ *   ~190ms the sheet it collapsed into has faded up at the seat the card
  *          slid toward; the card's content swaps out of sight.
- *   190ms  the arriving body's rock is gone and the new card blooms out of
+ *   190ms  the arriving body's sheet is gone and the new card blooms out of
  *          it, riding IN from the opposite side along the band.
  *   420ms  the belt settles; the card is seated at the apex.
  *
@@ -952,7 +1162,7 @@ function syncDemos() {
 }
 
 /* ==================================================================== *
- * The loop. The rubble drifts; the members do not — they are the
+ * The loop. The paper drifts; the members do not — they are the
  * instrument, held at their seats the way §14 holds the dial's
  * constellations still because there they mean something. Everything else
  * in this sky is scenery, and scenery moves.
@@ -979,7 +1189,7 @@ function frame(now) {
 
 function layout() {
   computeGeometry();
-  sizeCanvas(); readTones(); buildHaze(); buildBand();
+  sizeCanvas(); readTones(); buildSprites(); buildHaze(); buildBand();
   if (rollT0 < 0) roll = rollFrom = rollTo = (selected - mid) * STEP;
   document.getElementById("members").setAttribute("viewBox", `0 0 ${W} ${H}`);
   const wrap = document.getElementById("cardwrap");
@@ -1008,7 +1218,8 @@ function setSwatch(name, btn) {
   document.documentElement.setAttribute("data-theme", name);
   for (const b of btn.parentElement.querySelectorAll(".sw"))
     b.setAttribute("aria-pressed", String(b === btn));
-  requestAnimationFrame(() => { readTones(); buildHaze(); paintBand(); });
+  /* The paper is re-inked, not re-shaped: same sixteen sheets, new tone. */
+  requestAnimationFrame(() => { readTones(); buildSprites(); buildHaze(); paintBand(); });
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") { e.preventDefault(); centre(selected - 1); }
