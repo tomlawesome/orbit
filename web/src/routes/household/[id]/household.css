@@ -1,0 +1,320 @@
+/* Household management — one system, from inside (#410, §15).
+ *
+ * Ported from design/v19/household-manage.html, ratified by the owner at
+ * "90% there — the actual form, everything is great; the background is the
+ * only issue". The form is therefore reproduced rule for rule; the backdrop is
+ * the family's standard drifting star tiles until §15 picks its successor, at
+ * which point this screen adopts it unchanged in every other respect.
+ *
+ * Palette tokens come from packs.css. Two families of token the mockup
+ * declared for itself are NOT in packs.css because nothing else uses them —
+ * the section accents and the ink that reads on a solid danger button — so
+ * they are declared here, per pack, scoped to this screen rather than pushed
+ * into a shared file no other screen would read.
+ *
+ * Everything is scoped under .household-page: this route is a sibling of no
+ * one, but the family's law is that a screen's stylesheet cannot reach past
+ * its own stage.
+ */
+
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.household-page *{box-sizing:border-box;margin:0}
+.household-page{min-height:100vh}
+
+[data-theme=starchart] .household-page{
+  --on-danger:#060b1c;
+  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+  --sec-plum:#b79ae0; --sec-coral:#f0907a;
+}
+[data-theme=afterdark] .household-page{
+  --on-danger:#05070d;
+  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+}
+[data-theme=atlas] .household-page{
+  --on-danger:#f6f1e4;
+  --sec-sage:#3f6f4d; --sec-blue:#2b6cb0; --sec-sand:#a9761f;
+  --sec-plum:#6f4788; --sec-coral:#ab4a34;
+}
+[data-theme=dawn] .household-page{
+  --on-danger:#ffffff;
+  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+  --sec-plum:#71499a; --sec-coral:#bd4f36;
+}
+[data-theme=retrograde] .household-page{
+  --on-danger:#0a0410;
+  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+}
+
+.household-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.household-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.household-page .sky .far{animation:hh-drift 400s linear infinite}
+.household-page .sky .near{animation:hh-drift 195s linear infinite}
+@keyframes hh-drift{to{transform:translateX(-1600px)}}
+.household-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .household-page .vignette,
+[data-theme=dawn] .household-page .vignette{background:none}
+
+/* §14: the desk. Same scale as the helm and administration. */
+.household-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+.household-page header.screen{display:flex;align-items:center;gap:17px}
+.household-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.household-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
+.household-page header.screen .glyph{flex:none}
+
+.household-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
+.household-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+      border-radius:16px;padding:20px 22px}
+
+/* ── §15 v3, the column swap ────────────────────────────────────────────
+     OWNER     left  │ the system  →  sections (the long list, under it)
+               right │ members, running the FULL height of that column
+               foot  │ the danger line, across both
+
+     NON-OWNER left  │ the system (read-only)  →  leaving
+               right │ members, full height
+
+   Members is stretched, not floated: its box ends level with sections, so
+   both columns finish on the same rule and the closing line inside it is
+   pinned to its own foot rather than leaving a gap under the roster. */
+.household-page .card.c-system  {grid-column:1;grid-row:1}
+.household-page .card.c-sections{grid-column:1;grid-row:2}
+.household-page .card.c-leaving {grid-column:1;grid-row:2}
+.household-page .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
+                 display:flex;flex-direction:column}
+.household-page .card.c-danger  {grid-column:1 / -1;grid-row:3}
+/* the panel is taller than its content in a family this size, so the slack
+   is SHARED between the blocks instead of collecting in one hole at the
+   bottom: three auto margins, three even breaths, rules evenly spaced. */
+.household-page .c-members .block,
+.household-page .c-members .note.foot{margin-top:auto}
+.household-page .c-members .note.foot{padding-top:14px;border-top:1px solid var(--line-soft)}
+/* the member's screen has only three blocks in the whole desk, so the panel
+   takes its own height instead of stretching over air */
+.household-page.member .card.c-members{align-self:start}
+.household-page.member .c-members .note.foot{margin-top:14px}
+@media (max-width:880px){
+  .household-page .cards{grid-template-columns:1fr}
+  .household-page .card.c-system,.household-page .card.c-sections,
+  .household-page .card.c-leaving,.household-page .card.c-members,
+  .household-page .card.c-danger{grid-column:1;grid-row:auto;align-self:auto}
+  .household-page .c-members .block{margin-top:16px}
+  .household-page .c-members .note.foot{margin-top:13px;padding-top:0}
+}
+.household-page .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
+.household-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+.household-page .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+
+/* the create screen's field vocabulary, unchanged */
+.household-page .field{margin-bottom:13px}
+.household-page .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+             text-transform:uppercase;margin:0 0 6px}
+.household-page .field input,.household-page .field select{width:100%;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+.household-page .field input::placeholder{color:var(--ink-faint)}
+.household-page .field input:focus,.household-page .field select:focus{outline:none;border-color:var(--accent)}
+.household-page .field input:disabled,.household-page .field select:disabled{opacity:.62;cursor:default}
+.household-page .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+/* 2c: each field wears its own quiet save. It sits on the label line, in
+   pen-grey until the field is touched, then in accent; it answers with a
+   tick and goes quiet again. No save bar, no "remember to press this". */
+.household-page .lab{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
+.household-page .lab label{margin:0}
+.household-page .fsave{margin-left:auto;font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;
+       color:var(--ink-faint);background:none;border:0;padding:0 0 1px;cursor:pointer;
+       opacity:.5;transition:color .2s,opacity .2s}
+.household-page .fsave:hover{color:var(--accent);opacity:1}
+.household-page .field.dirty .fsave{color:var(--accent);opacity:1}
+.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok);opacity:1;cursor:default}
+.household-page .row2{display:flex;gap:13px}
+.household-page .row2>.field{flex:1;min-width:0}
+.household-page .selwrap{position:relative}
+.household-page .selwrap::after{content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;
+                border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
+                transform:translateY(-72%) rotate(45deg);pointer-events:none}
+
+.household-page .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
+.household-page .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
+     border-radius:10px;padding:9px 19px;cursor:pointer}
+.household-page .btn:hover{filter:brightness(1.06)}
+.household-page .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
+.household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
+       border-radius:9px;padding:7px 13px;cursor:pointer}
+.household-page .ghost:hover{border-color:var(--accent);color:var(--accent)}
+.household-page .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
+.household-page .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
+.household-page .note.top{margin-top:13px}
+.household-page .note b{color:var(--ink-mid);font-weight:400}
+.household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok);line-height:1.8}
+.household-page .said.show{display:block}
+/* What a control says when it could not do what it looked like it did — the
+   helm's .note in the warm ink, never on the happy path. */
+.household-page .problem{margin-top:12px;font:11px var(--mono);color:var(--warm);line-height:1.8}
+
+/* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
+   member never sees this card at all, not even read-only. */
+.household-page .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;
+     border-bottom:1px solid var(--line-soft)}
+
+/* 2b — the section mark: a chart-pen glyph (drawn in the same ink as every
+   rule and dial on the sky) with ONE small accent dot. The pen line carries
+   the meaning, the dot carries the colour. */
+.household-page .mark{position:relative;width:20px;height:20px;flex:none;display:grid;place-items:center}
+.household-page .mark svg{display:block;fill:none;stroke:var(--ink-mid);stroke-width:1.15;
+          stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+.household-page .mark i{position:absolute;right:-1px;bottom:0;width:5px;height:5px;border-radius:50%;
+        background:var(--sec);opacity:.92}
+.household-page .sec.off .mark{opacity:.6}
+.household-page .sec:last-of-type{border-bottom:0}
+.household-page .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
+           color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
+.household-page .sec input:focus{outline:none;border-bottom-color:var(--accent)}
+.household-page .sec input:disabled{color:var(--ink-mid)}
+.household-page .sec .used{font:10.5px var(--mono);color:var(--ink-faint);flex:none}
+.household-page .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
+            text-align:right;flex:none}
+.household-page .sec.off{opacity:.55}
+.household-page .sec.off .state{color:var(--ink-faint)}
+.household-page .sec .drop{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+           cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
+.household-page .sec.empty .drop{visibility:visible}
+.household-page .sec .drop:hover{color:var(--overdue)}
+/* the switch that tells the truth: filled when on, hollow when off */
+.household-page .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+        background:none;cursor:pointer;position:relative;flex:none}
+.household-page .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+          background:var(--ink-faint);transition:left .2s,background .2s}
+.household-page .toggle[aria-pressed=true]{border-color:var(--ok)}
+.household-page .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+.household-page .toggle:disabled{opacity:.5;cursor:default}
+.household-page .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+        border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
+.household-page .addsec:hover{border-color:var(--accent);color:var(--accent)}
+.household-page .addsec:disabled{opacity:.4;cursor:not-allowed}
+
+/* members */
+.household-page .memb{display:flex;align-items:center;gap:12px;padding:9px 2px;
+      border-bottom:1px solid var(--line-soft)}
+.household-page .memb:last-of-type{border-bottom:0}
+.household-page .avatar{width:32px;height:32px;border-radius:50%;flex:none;border:1px solid var(--line);
+        background:var(--panel-raised);display:grid;place-items:center;
+        font:11px var(--mono);color:var(--ink-mid)}
+.household-page .memb b{flex:1;min-width:0;font-size:13.5px;font-weight:530}
+.household-page .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
+.household-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+.household-page .role.owner{color:var(--accent);border-color:var(--accent)}
+.household-page .memb .ghost{padding:5px 11px}
+
+/* v3 — the panel's other blocks. Members runs the full height of the right
+   column now, so who is waiting and who you could add are simply BLOCKS of
+   the same panel, each under its own small rule, instead of drawers you had
+   to open. Registered accounts only — the route has no email invite (#481). */
+.household-page .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.household-page .block h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+          color:var(--ink-faint);margin-bottom:9px}
+.household-page .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
+      border-bottom:1px solid var(--line-soft)}
+.household-page .cand:last-of-type{border-bottom:0}
+.household-page .cand b{flex:1;font-size:13px;font-weight:520}
+
+/* the handover: two deliberate steps, and the second asks twice */
+.household-page .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
+          background:var(--panel-raised);padding:16px 18px}
+.household-page .handover.open{display:block}
+.household-page .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--accent);margin-bottom:12px}
+.household-page .step{margin-bottom:13px}
+.household-page .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+         margin-bottom:7px}
+.household-page .pick{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:5px 2px;cursor:pointer}
+.household-page .pick input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+.household-page .handover .row{display:flex;align-items:center;gap:12px}
+
+/* joiners (§11) — the same protocol administration used to draw */
+.household-page .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--warm);
+         border-radius:12px;padding:11px 14px}
+.household-page .joinreq .avatar{width:28px;height:28px;font-size:10px}
+.household-page .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
+.household-page .joinreq p b{color:var(--ink);font-weight:530}
+.household-page .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
+                cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
+.household-page .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+
+/* ── THE DANGER ZONE (§15) ──────────────────────────────────────────────
+   Unmistakable from across the room and still drawn with the family's chart
+   pen — no gradient, no gloss, no siren stripes. Just red: a red rule around
+   it, a flat red wash under it, hazard ticks along the top edge, the heading
+   in red, and a red-outlined button that FILLS red the moment it is armed.
+   The copy runs ACROSS the card in two short columns and the button sits UP
+   on the right of the heading line. Type the system's name exactly, then tap
+   twice. */
+.household-page .card.dangercard{position:relative;overflow:hidden;
+                 border:1.5px solid var(--overdue);padding:15px 22px 17px}
+/* the wash — one flat plane of the same red, laid under the panel */
+.household-page .dangercard::after{content:"";position:absolute;inset:0;border-radius:inherit;
+                   background:var(--overdue);opacity:.085;pointer-events:none}
+/* the light packs need more of it before the red is felt rather than seen */
+[data-theme=atlas] .household-page .dangercard::after,
+[data-theme=dawn] .household-page .dangercard::after{opacity:.12}
+/* the hazard rule — chart-pen ticks, hard edges only, along the top */
+.household-page .dangercard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;
+                    pointer-events:none;opacity:.9;
+                    background:repeating-linear-gradient(115deg,
+                      var(--overdue) 0 2px, transparent 2px 6px)}
+.household-page .dangercard>*{position:relative;z-index:1}
+
+.household-page .dangerhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+.household-page .dangercard h3{color:var(--overdue);letter-spacing:.2em;font-weight:600}
+.household-page .dangerhead svg{flex:none;fill:none;stroke:var(--overdue);stroke-width:1.5;
+                stroke-linecap:round;stroke-linejoin:round}
+.household-page .dangerhead .spacer{margin-left:auto}
+
+/* the copy, spread across the width: the act on the left, the small print
+   about who holds the clock on the right */
+.household-page .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
+.household-page .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
+.household-page .dangercard p b{color:var(--ink);font-weight:560}
+.household-page .dangercard p b.red{color:var(--overdue);font-weight:600}
+/* the card's prose is 13px; its mono asides are not — say so, or the prose
+   rule out-specifies .note and .said and swallows them */
+.household-page .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
+.household-page .dangercard .note b{color:var(--ink-mid);font-weight:400}
+.household-page .dangercard .said{font-size:11px;color:var(--ok);max-width:none}
+.household-page .dangercard .problem{font-size:11px;color:var(--warm);max-width:none}
+
+/* the button: red on the outside at rest, SOLID red once armed */
+.household-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+           color:var(--overdue);background:none;border:1.5px solid var(--overdue);
+           border-radius:9px;padding:9px 16px;cursor:pointer;white-space:nowrap;
+           transition:background .15s,color .15s,border-color .15s}
+.household-page .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
+.household-page .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
+.household-page .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none;
+                    color:var(--overdue);border-color:var(--overdue)}
+
+.household-page .confirm{display:grid;margin-top:13px;padding-top:13px;
+         grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end;
+         border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
+.household-page .confirm .field{margin-bottom:0;min-width:0}
+.household-page .confirm .field label{color:var(--overdue);opacity:.9}
+.household-page .confirm .field input{font-family:var(--mono);font-size:12.5px;
+                      border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
+.household-page .confirm .field input:focus{border-color:var(--overdue)}
+.household-page .confirm .note{align-self:end;padding-bottom:2px}
+@media (max-width:880px){
+  .household-page .dangerbody,.household-page .confirm{grid-template-columns:1fr;gap:10px}
+  .household-page .dangerhead{flex-wrap:wrap}
+}
+
+/* 2f — the scheduled-for-deletion banner and its restore button are NOT here:
+   the recovery window is an instance-admin affair, drawn on the admin panel.
+   What lives on this screen is the request itself. */
+
+@media (prefers-reduced-motion: reduce){
+  .household-page .sky .far,.household-page .sky .near{animation:none!important}
+}

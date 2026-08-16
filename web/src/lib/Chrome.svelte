@@ -6,7 +6,17 @@
    * keeps its inline copy for now because its card also closes sibling
    * overlays the sub-screens don't have.
    */
-  let { user = null, role = "", current = "" } = $props();
+  /* The way back defaults to the sky, because that is where every sub-screen
+     was reached from. Household management is the exception the design draws:
+     it hangs off the helm's memberships card, so its back link says SETTINGS
+     and goes there (§15-2k). */
+  let {
+    user = null,
+    role = "",
+    current = "",
+    back = "/home",
+    backLabel = "← YOUR SKY",
+  } = $props();
 
   /* §14: due-next and documents retired — the manifest is the corridor and
      the belt is the document surface. */
@@ -15,10 +25,16 @@
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
   ];
+  /*
+   * The release roster (§15, owner): star-chart, after dark, dawn and
+   * retrograde. Atlas and hanami are retired from the RELEASE — atlas's pack
+   * is still defined in packs.css and still renders if a theme is forced, but
+   * it is no longer offered anywhere a reader can choose, and this row is one
+   * of those places.
+   */
   const PACKS = [
     ["starchart", "star-chart", "#060b1c", ""],
     ["afterdark", "after dark", "#05070d", ""],
-    ["atlas", "atlas", "#c9bfa6", ""],
     ["dawn", "dawn", "#c3ccdb", ""],
     ["retrograde", "retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
   ];
@@ -48,7 +64,7 @@
   );
 </script>
 
-<a class="back" href="/home">← YOUR SKY</a>
+<a class="back" href={back}>{backLabel}</a>
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
         onclick={() => (open = !open)}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">

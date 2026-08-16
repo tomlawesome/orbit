@@ -5,6 +5,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // SvelteKit's own alias, so the v19 unit tests in tests/unit can import
+      // a web/ module that imports a sibling through $lib (#410). web/ test
+      // FILES stay excluded below; only their subjects are reachable.
+      $lib: fileURLToPath(new URL("./web/src/lib", import.meta.url)),
     },
   },
   test: {

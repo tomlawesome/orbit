@@ -77,8 +77,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .kv:has(+ .note){border:0}
 .helm-page .danger .note{margin-top:8px}
 
+/* §15-2k: the row is a link into household management now. It must LOOK
+   exactly as the ratified row did — the ink and the underline an anchor
+   brings by default are undone here rather than accepted — so the only thing
+   that changed is that it can be opened. */
 .helm-page .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
-      border-bottom:1px solid var(--line-soft);font-size:13.5px}
+      border-bottom:1px solid var(--line-soft);font-size:13.5px;
+      color:inherit;text-decoration:none}
+.helm-page a.memb:hover b{color:var(--accent)}
 .helm-page .memb:last-child{border:0}
 .helm-page .memb svg{flex:none}
 .helm-page .memb b{flex:1;font-weight:520}
