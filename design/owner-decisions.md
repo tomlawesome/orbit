@@ -573,6 +573,28 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Theme-morph is a YES — and the judder was always hated** (owner,
+  correcting the record): the accidental juddery blend seen when
+  switching themes was not liked, it was hated; the ask was always to
+  make the transition SMOOTH. A deliberate, smooth sky-morph on theme
+  switch is approved for development.
+- **Settings concepts ruled** (owner): the Projection Room is a NO.
+  Try THE MOVEMENT (clockwork behind the dial) and EVA (the spacewalk
+  along the hull) as mockups — the owner favours the spacewalk so far.
+- **Household backdrop: try H1 and H2** (owner): mock the berth (the
+  household as a craft in for service) and inside-this-system (the
+  household's own constellation huge and faint behind the cards). H3,
+  the registry annex, dies with the observatory it leaned on.
+- **Homescreen style roster ruled** (owner): aurora, deep field, orbit
+  trails and galactic plane go forward. METEORS ARE A NO for styles —
+  meteors are reserved for THE DANGER: the danger/storm mode will be
+  reworked at some point (quiet mode is good; the danger mode sucked),
+  and meteors belong to that vocabulary. Also try: colourful gas
+  clouds, and things of interest that GLINT.
+- **#484 demo data is ratified** (owner: "Yes, that was the idea I laid
+  out"): first-run populates the workspace with fake data for the
+  welcome tour, and it CLEANS ITSELF at the end of the tour — or the
+  moment the tour is skipped. Nothing demo survives past the tour.
 - **Dawn cloud sea is approved as a main lighter theme** (owner):
   clouds (the cloud-sea pack on the final roster) is not merely
   admitted — it is one of Orbit's MAIN LIGHTER THEMES. This supersedes
