@@ -1,0 +1,2251 @@
+<!doctype html>
+<!--
+  ORBIT · v19 · DESIGN PROPOSAL — AFTER DARK · THE GALACTIC PLANE
+  design proposal only · not wired · no commit
+
+  THE RULING (§15, owner): "After dark should adopt the happy accident
+  style." During the dawn backdrop work a warm band happened to fall
+  diagonally across the star-chart sky and read exactly like the MILKY WAY.
+  It is not a homescreen style candidate any more — it is AFTER DARK's own
+  sky, the pack's signature.
+
+  This file is LOCKED to after dark so it opens in the material being
+  proposed. The theme dots still work; every rule below is scoped to the
+  pack, so the other four packs read this file exactly as they read
+  design/v19/home.html. The base is home.html, copied — the dial's law,
+  geometry, content and the whole manifest are byte-identical. This file
+  adds backdrop material and nothing else.
+
+  AFTER DARK IS LIGHTS OUT, INK UP — the darkest pack — so this is the
+  MOONLESS-NIGHT Milky Way, not dawn's. The warmth of the accident survives
+  in the core and nowhere else, and it is held to a level a near-black sky
+  can carry.
+
+  HOW THE BAND IS BUILT (four materials, never a gradient stripe)
+    1. THE RIVER. A centreline in the sky's own coordinates: nodes every
+       1450 sky-units, alternating above and below the mid-line by a rolled
+       286–520, joined by straight runs with rounded corners. So the local
+       crossing is always a true diagonal (21°–36°), the band always meets
+       the middle of the frame, and — because the line oscillates instead of
+       running off — it can drift for hours and never leave the sky.
+    2. A DENSE FAINT POPULATION, in three tiers. Per 400-unit chunk: 380
+       GRAIN stars (sub-pixel, packed tight to the line — the granular
+       texture), 280 FIELD stars (the ones you can pick out, thinning into a
+       wide sparse halo so the band has no edge you could draw), and 14
+       RESOLVED ones. About 2,700 extra stars in a window against the base
+       sky's 141 — roughly nineteen times the density in the core. THIS is
+       what makes it read as the real thing: lean in and it is stars.
+       It is also, measurably, free: see the contrast note below.
+    3. THE DUST GLOW, in three sizes. Irregular soft lobes — cool broad
+       wings, a warm body, and small warm knots — each a radial gradient
+       ellipse laid along the local slope with its own rolled size, offset
+       and tilt. Three octaves of lobe is what makes the wash mottled at
+       every distance; a single scale of lobe produced a smooth ramp, which
+       is a gradient stripe by another name.
+    4. DUST LANES. Chains of dark, very flat ellipses threading the core at
+       a slight angle to it, painted OVER the stars, so they absorb the
+       river the way real dust does. Over bare sky they are all but nothing.
+
+  SEEDED, WINDOWED, NEVER LOOPING. One seed; chunk n of a layer is a pure
+  function of (seed, layer, n), rolled the instant before it is revealed and
+  destroyed for good once it has passed. No tile, no repeat, nothing comes
+  round again. No Math.random and no Date.now anywhere: the seed is a
+  constant and the DEMOS bar's re-roll steps it through a published LCG, so
+  every picture in this file is reproducible.
+  BUILD NOTE: in the app the seed rolls fresh per load (backdrops are alive,
+  never the same twice); under ORBIT_FIXTURES it must be pinned to the
+  workspace id and the drift clock pinned to zero, or the fidelity gate
+  cannot compare two screenshots.
+
+  IN THE FIELD, AND FURTHEST BACK. The plane is sky, so it drifts with the
+  sky (§14, the sky drifts as one) and rides the same camera on a flight.
+  Being the most distant thing there is, it takes the slowest parallax:
+  0.16 of the galaxy delta against the far field's 0.30, and 1600 units per
+  620s against the far field's 400s. The dial-view constellations stay
+  functional and still, exactly as the law requires.
+
+  THE CONTRAST LAW. The band's peak brightness is not an aesthetic choice,
+  it is a budget. A light ink LOSES contrast as the ground behind it rises,
+  so the glow is capped where --ink-mid still clears 4.5:1 over the very
+  brightest part of the band. Measured, not asserted. The measurement also
+  settled how the band is built: with the population hidden the brightest
+  11x11 median of the backdrop is 0.0120; with the GLOW hidden instead it is
+  0.00213 — the bare pack ground, exactly. Stars are points, and a point is
+  not the background of a letterform, so the population costs the reader
+  nothing at all. Hence the balance struck above: the presence is bought in
+  grain, and only the last of it in haze.
+
+  THE DESCENT (§15, universal). Scrolling away from the dial, the plane
+  rides up and out of the top of the window and fades as it goes, and the
+  DEEP DARK closes behind it: the manifest is read over emptier, blacker
+  sky than the dial ever sits on. The plain starfield stays — that is §15's
+  own answer for star-chart and after dark ("the heliosphere lifts up out of
+  sight as you scroll down, leaving the plain starfield behind the deep
+  manifest"), and the plane leaves the same way the heliosphere does.
+  Scroll position drives it, not a clock, so it is monotonic and identical
+  on the way back up; at scroll 0 not one descent rule is in effect at all.
+  Reduced motion keeps the drop (a position is not an animation) and drops
+  the flourish: the plane gives way where it stands instead of being flown
+  out of frame, and the stream holds its opening window.
+
+  SYMBOLS ARE SHARED, NOT INVENTED. After dark shares star-chart's symbol
+  vocabulary (owner, §15 — "they just both look great") and this file adds
+  no mark of any kind. It is purely the sky.
+-->
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — v19 proposal: after dark / the galactic plane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* v17: the galaxy is a coordinate system. Every household owns a fixed
+     place; "centre" is only where the camera is parked. Flying moves the
+     starfield, never the destination. Display font fetched in mockup only. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /*
+   * The five ratified packs, carried verbatim from the app's one definition
+   * (web/src/lib/packs.css). This mockup had drifted: it still held the
+   * pre-2026-08-14 daylight grounds for atlas and dawn, had no retrograde at
+   * all, and never gained the star colours — so picking a pack here and
+   * picking it in Orbit gave different screens. Values below are the app's,
+   * literally; star-chart is untouched because the fidelity gate measures
+   * against it.
+   */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    /* The bodies. Star-chart's are the values the gradients always carried as
+       literals, so naming them moves no pixel and lets the other packs reach
+       what is the largest coloured thing on the screen. */
+    --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
+    --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
+    --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
+    --p-sky-1:#cfe4ff; --p-sky-2:#6fa3ef; --p-sky-3:#2a4f8f;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    /* after dark defines no bodies of its own in the app, so it takes the
+       gradients' defaults — spelled out here for the same reason. */
+    --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
+    --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
+    --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
+    --p-sky-1:#cfe4ff; --p-sky-2:#6fa3ef; --p-sky-3:#2a4f8f;
+  }
+  /* Dialled back from the ratified #efe9db (owner, 2026-08-14): a sky this
+     bright fights the whole conceit, so atlas is aged paper at dusk rather
+     than fresh paper at noon. Only the ground and its surfaces moved. */
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    /* A daylit sky still drifts: the starfield inverts rather than switching
+       off — ink on paper, from the pack's own ink. */
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* The engraved atlas: printed charts do not glow, so the bodies are flat
+       ink discs and status survives as colour, not as gloss. The app spells
+       that as a flat fill per status; here the three stops of each gradient
+       take the same token, which paints the identical flat disc. */
+    --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
+    --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
+    --p-ruby-1:var(--overdue); --p-ruby-2:var(--overdue); --p-ruby-3:var(--overdue);
+    --p-sky-1:var(--upcoming); --p-sky-2:var(--upcoming); --p-sky-3:var(--upcoming);
+  }
+  /* Dialled back from the ratified #eef1f6 for the same reason as atlas:
+     dawn is first light rather than full morning. */
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
+    --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
+    --p-ruby-1:var(--overdue); --p-ruby-2:var(--overdue); --p-ruby-3:var(--overdue);
+    --p-sky-1:var(--upcoming); --p-sky-2:var(--upcoming); --p-sky-3:var(--upcoming);
+  }
+  /*
+   * retrograde — the fifth pack (owner, 2026-08-14), absent here until now,
+   * which is why picking it on this page rendered an unstyled screen. Neon
+   * and vivid but classy: a deep ground so the neons sit ON something, one
+   * job per colour, grid-on-black rather than a purple wash.
+   */
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    /* The §15 refresh, ratified in full (owner, 2026-08-16, #480): the mid-ink
+       family lifts together so secondary copy stops sinking into the teal
+       murk, and --bloom is the one dilution of the accent the pack may light
+       things with. Carried from web/src/lib/packs.css, literally. */
+    --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    /* The chart is the grid: cyan rules on black, the way the era drew it. */
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+    --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
+    /* The eighties go into the planets themselves: neon green, acid yellow,
+       hot coral, electric turquoise. The gloss stays — chrome and neon. */
+    --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+    --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+    --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+    --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html{scroll-behavior:smooth}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  /* the camera: each household has its own absolute starfield offset, so a
+     flight animates between two truths and never snaps back */
+  .cam{transition:transform 1.25s cubic-bezier(.5,.4,.15,1)}
+  /* the sky never sits still — constant seamless drift, perceptible within
+     a few seconds (owner rule), wrapping over a tiled field so it never
+     snaps or reverses */
+  .sky .far{animation:driftf 400s linear infinite}
+  .sky .near{animation:driftn 195s linear infinite}
+  @keyframes driftf{to{transform:translateX(-1600px)}}
+  @keyframes driftn{to{transform:translateX(-1600px)}}
+  /* POL-11 on a daylit sky. The generator's per-star alphas were tuned for
+     bright points on a night ground; inverted to dark specks on paper the
+     same alphas all but disappear, so the light packs lift both layers.
+     Size is lifted with a stroke rather than by setting r, so the generated
+     radius variation — and with it the sense of depth — survives. */
+  [data-theme=atlas] .sky .far circle,
+  [data-theme=dawn] .sky .far circle{opacity:.5;
+       stroke:var(--star-far);stroke-width:.7}
+  [data-theme=atlas] .sky .near circle,
+  [data-theme=dawn] .sky .near circle{opacity:.8;
+       stroke:var(--star-near);stroke-width:.7}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+  /* The engraved atlas, continued: the light packs' bodies are flat ink (see
+     their --p-* above), and paper has neither a specular highlight nor a
+     glowing sun. */
+  [data-theme=atlas] .dial circle[filter="url(#sun)"],
+  [data-theme=dawn] .dial circle[filter="url(#sun)"]{filter:none}
+  [data-theme=atlas] .dial [fill^="rgba(255,255,255"],
+  [data-theme=dawn] .dial [fill^="rgba(255,255,255"]{fill:transparent}
+
+  .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
+  .hero{display:grid;place-items:center;padding:0;min-height:100vh;position:relative}
+  .hero-foot{position:absolute;top:calc(75vh + 160px);left:50%;
+             transform:translate(-50%,-50%);
+             display:flex;flex-direction:column;align-items:center;gap:13px}
+  .scrollcue{font:11px var(--mono);color:var(--ink-faint);text-align:center;letter-spacing:.14em}
+  .splash-search input{background:none;border:0;outline:0;
+             border-bottom:1px solid var(--line);width:320px;text-align:center;
+             font:12.5px var(--mono);color:var(--ink);padding:6px 4px;
+             transition:border-color .25s}
+  .splash-search input::placeholder{color:var(--ink-faint)}
+  .splash-search input:focus{border-color:var(--accent)}
+
+  /* CON-7: the word IS the handle — attached to the drawer edge, riding the
+     slide. v17: key is quiet ink, degraded is unmistakably orange, and the
+     right handle keeps its type clear of overlay scrollbars. */
+  .handle{position:absolute;right:-31px;top:50%;transform:translateY(-50%);
+          display:none;align-items:center;gap:8px;cursor:pointer;
+          font:11px var(--mono);letter-spacing:.14em;writing-mode:vertical-rl;
+          color:var(--warm);background:var(--panel);border:1px solid var(--line);
+          border-left:0;border-radius:0 10px 10px 0;padding:14px 6px}
+  .handle i{width:7px;height:7px;border-radius:50%;background:var(--warm);
+            animation:breathe 3s ease-in-out infinite}
+  .drawer-left .handle{display:flex;color:var(--ok)}
+  .drawer-left .handle i{background:var(--ok)}
+  body.health-degraded .drawer-left .handle{color:var(--degraded)}
+  body.health-degraded .drawer-left .handle i{background:var(--degraded)}
+  body.health-offline .drawer-left .handle{color:var(--overdue)}
+  body.health-offline .drawer-left .handle i{background:var(--overdue)}
+  .drawer-right .handle{display:flex;right:auto;left:-46px;width:46px;
+      color:var(--ink);padding:14px 21px 14px 7px;
+      border:1px solid var(--line);border-right:0;border-radius:10px 0 0 10px}
+  .drawer-right .handle i{display:none}
+  /* healthy deployments render nothing on the left at all */
+
+  .body-link{cursor:pointer}
+  .body-link :is(circle,path){pointer-events:all}
+  .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
+  .body-link:hover circle{transform:scale(1.5)}
+  .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
+  .group.seen{opacity:1;transform:none}
+  .item{scroll-margin-top:130px}
+  .item:target{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .dialwrap{position:relative}
+  .dialwrap>svg{display:block} /* no baseline gap — the dial centre IS the hero centre */
+  .rotor{transform-origin:190px 190px;animation:rotor 160s linear infinite}
+  @keyframes rotor{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+  .breathe{animation:breathe 4.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1}50%{opacity:.55}}
+
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;
+           border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .manifest{max-width:820px;margin:34px auto 0}
+  .group{margin-bottom:30px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+  .group h3 .closest{color:var(--warm);text-transform:none;letter-spacing:.04em}
+  .item{display:flex;align-items:center;gap:15px;border-radius:14px;
+        padding:14px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
+        background:var(--panel);backdrop-filter:blur(8px)}
+  .item:hover{background:var(--panel-raised);border-color:var(--line)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
+           background-color:currentColor!important}
+  .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
+  .dot.sug{background:none!important;border:1.6px solid currentColor}
+  .item .body{flex:1;min-width:0}
+  .item .body b{display:block;font-size:14.5px;font-weight:520}
+  .item .body span{font-size:12.5px;color:var(--ink-mid)}
+  .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+  .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
+  .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
+  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  /* §14 (#469): the corridor — the due-next spine of time, now the manifest */
+  .manifest .corridor{position:relative;margin-top:34px;padding-left:46px}
+  .manifest .corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
+                    background:var(--chart-line)}
+  .manifest .corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
+           background:linear-gradient(180deg,
+             color-mix(in srgb,var(--overdue) 7%, transparent),
+             color-mix(in srgb,var(--overdue) 2%, transparent))}
+  .manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
+                   background:var(--overdue);opacity:.55}
+  .manifest .corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
+  .manifest .corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
+  .manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
+                    filter:blur(4px);opacity:.8}
+  .manifest .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
+  .manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+  .manifest .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
+  .manifest .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
+  .manifest .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
+                 border:1px solid var(--chart-ink);background:var(--bg)}
+  .manifest .corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
+  .manifest .corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
+  .manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+  .manifest .corridor .item{position:relative}
+  .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
+  .manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
+                  box-shadow:0 0 0 2.5px var(--bg)}
+  .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
+  .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+  .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
+  .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+  .suggest{border-style:dashed}
+  .suggest .body span{color:var(--accent)}
+  .suggest .actions{display:flex;gap:8px}
+  .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+
+  /* THE ROW IS THE ITEM (#424, ratified 2026-08-16): a manifest row expands
+     IN PLACE to everything Orbit holds about it — no trip to another screen.
+     Closed it renders nothing, so the manifest at rest is exactly as drawn.
+     The open row keeps the accent border it already wears when a dial body
+     lights it and hands its bottom corners to the panel, so the two read as
+     one piece; inside, the vocabulary is the ratified read-only row (.kv,
+     from settings-mail.html), the drawer's quiet group label, and the
+     document row from .docview above. Nothing new. */
+  .corridor .item:not(.suggest){cursor:pointer}
+  .item.open{border-color:var(--accent);background:var(--panel-raised);
+             border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+  .itemview{border:1px solid var(--accent);border-top:0;background:var(--panel-raised);
+            backdrop-filter:blur(8px);border-radius:0 0 14px 14px;
+            padding:2px 18px 16px;margin-bottom:6px;
+            animation:ivopen .3s cubic-bezier(.2,.7,.2,1) 1}
+  @keyframes ivopen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){.itemview{animation:none}}
+  .itemview .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+                color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .itemview .kv:last-of-type{border-bottom:0}
+  .itemview .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .itemview .kv b.over{color:var(--overdue)}
+  .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--ink-faint);margin:18px 0 8px}
+  .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+  .itemview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .itemview .ivfoot{display:flex;align-items:center;gap:18px;margin-top:18px}
+  /* The copy-link affordance the owner allowed — the only place the address
+     is offered, and still never printed: the button says what it does. */
+  .itemview .ivcopy{font:11px var(--mono);color:var(--ink-faint);background:none;border:0;
+                    padding:0;cursor:pointer;letter-spacing:.04em}
+  .itemview .ivcopy:hover{color:var(--accent)}
+  .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
+                    margin-left:auto}
+  .itemview .ivfull:hover{color:var(--accent)}
+  .inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
+  .inbox-orb.waiting{color:var(--accent);border-color:var(--accent)}
+  .inbox-orb.waiting svg{animation:breathe 3.2s ease-in-out infinite}
+  .inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
+    background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
+    display:grid;place-items:center}
+  .inbox-orb:not(.waiting) .count{display:none}
+  svg text{font-family:var(--mono)}
+
+  .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
+           max-height:76vh;overflow:auto;
+           width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
+           border:1px solid var(--line);border-radius:16px;padding:20px 22px;
+           opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+  .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%)}
+  .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
+          background:var(--panel-raised);backdrop-filter:blur(16px);
+          padding:26px;transition:transform .35s cubic-bezier(.3,.7,.3,1)}
+  .drawer h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--ink-faint);margin:18px 0 10px}
+  .drawer .close{position:absolute;top:12px;background:none;border:0;
+                 color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+  .drawer-left{left:0;border-right:1px solid var(--line);transform:translateX(-102%)}
+  .drawer-left.open{transform:none}
+  .drawer-left .close{right:14px}
+  .drawer-right{right:0;border-left:1px solid var(--line);transform:translateX(102%)}
+  .drawer-right.open{transform:none}
+  .drawer-right .close{left:14px}
+  .svc{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);padding:7px 2px}
+  .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+  .svc b{color:var(--ink);font-weight:500;flex:1}
+  .svc small{color:var(--ink-faint);font-size:10.5px}
+  .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
+  .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
+  .docview h4{font-size:14.5px;font-weight:600}
+  .docview .sub{font:11px var(--mono);color:var(--ink-faint);margin:2px 0 14px}
+  .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+                border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+  .docview .doc:hover{border-color:var(--accent)}
+  .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
+                  color:var(--ink-faint);font:14px var(--mono);cursor:pointer}
+
+  /* CON-12 (new): the north star — creation lives in the sky. The star is
+     the handle of a full-width top drawer; like every edge word, it rides
+     its drawer. */
+  .drawer-top{position:fixed;top:0;left:0;right:0;z-index:11;
+              background:var(--panel-raised);backdrop-filter:blur(16px);
+              border-bottom:1px solid var(--line);
+              transform:translateY(-102%);transition:transform .4s cubic-bezier(.3,.7,.3,1)}
+  .drawer-top.open{transform:none}
+  .drawer-top .inner{max-width:880px;margin:0 auto;padding:30px 24px 26px;
+                     display:flex;flex-direction:column;gap:18px;align-items:center}
+  .drawer-top .crow{align-self:stretch}
+  .drawer-top h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                 color:var(--ink-faint)}
+  .ctypes{display:flex;gap:10px;flex-wrap:wrap}
+  .ctype{display:flex;align-items:center;gap:9px;font:12.5px var(--mono);color:var(--ink-mid);
+         border:1px solid var(--line);border-radius:99px;padding:8px 16px;cursor:pointer;
+         background:var(--panel)}
+  .ctype:hover{border-color:var(--accent);color:var(--ink)}
+  .ctype .dot{color:var(--ink-mid);background:var(--ink-mid)}
+  .crow{display:flex;gap:14px;align-items:stretch}
+  .cdrop{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:16px 18px;
+         font:12.5px var(--mono);color:var(--ink-faint);text-align:center;cursor:pointer}
+  .cdrop:hover{border-color:var(--accent);color:var(--ink-mid)}
+  .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent);
+         text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:0 18px}
+  .cfull:hover{border-color:var(--accent)}
+  .nstar{position:absolute;top:100%;left:50%;transform:translateX(-50%);
+         display:flex;flex-direction:column;align-items:center;gap:3px;
+         background:none;border:0;cursor:pointer;padding:8px 16px}
+  .nstar svg{overflow:visible}
+  .nstar .glint{animation:northpulse 5.5s ease-in-out infinite}
+  @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
+  .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);
+              text-transform:uppercase;opacity:0;transition:opacity .3s}
+  .nstar:hover span,.drawer-top.open .nstar span{opacity:1;color:var(--accent)}
+  /* v18: while open, the star-handle earns a chip so the way back up is
+     unmistakable, and everything beneath dims behind a scrim */
+  .drawer-top.open .nstar{background:var(--panel-raised);border:1px solid var(--line);
+                          border-top:0;border-radius:0 0 14px 14px}
+  /* Named for the classic mark rather than for any glint: retrograde's beacon
+     is a wireframe, and filling its paths would solder it shut (§15/#480). */
+  .drawer-top.open .nstar .classic path{fill:var(--accent)}
+  .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
+         backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
+  body.create-open .scrim{opacity:1;pointer-events:auto}
+
+  /* POL-1: arrival — the mark expands into the dial once per load */
+  .dial{transform-origin:50% 50%;animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
+  @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
+  @media (prefers-reduced-motion: reduce){.dial{animation:none}}
+  /* /POL-1 */
+  /* POL-2: perihelion ping */
+  .ping{animation:ping 3.4s ease-out infinite;transform-origin:center;transform-box:fill-box}
+  @keyframes ping{0%{transform:scale(.6);stroke-opacity:.7}70%{transform:scale(3.2);stroke-opacity:0}100%{stroke-opacity:0}}
+  @media (prefers-reduced-motion: reduce){.ping{display:none}}
+  /* /POL-2 */
+  /* POL-3: the current month reads brighter */
+  .now-month{fill:var(--accent);font-weight:600}
+  /* POL-4: bidirectional highlight */
+  .body-link.lit :is(circle,path){transform:scale(1.6)}
+  .item.lit{border-color:var(--accent)}
+  /* POL-5: constellations light on section hover */
+  .celestial polyline{transition:stroke-opacity .3s}
+  .constellation-lit .celestial polyline{stroke-opacity:.85}
+  /* POL-6: chart callout — legible, quadrant-aware */
+  .callout{position:fixed;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
+           background:var(--panel-raised);backdrop-filter:blur(12px);
+           border:1px solid var(--line);border-radius:10px;padding:9px 13px;
+           font:13.5px var(--ui);color:var(--ink);white-space:nowrap}
+  .callout.show{opacity:1;pointer-events:auto}
+  .callout .line{position:absolute;top:50%;width:26px;height:1px;background:var(--accent);opacity:.85}
+  .callout.side-right .line{left:-27px}
+  .callout.side-left .line{right:-27px}
+  .callout b{display:block;font-weight:600;font-size:13.5px}
+  .callout small{font:11.5px var(--mono);color:var(--ink-mid)}
+  .callout .chip{display:none;margin-top:7px;font:11px var(--mono);color:var(--accent);
+                 border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:pointer;background:none}
+  .callout.has-docs .chip{display:inline-block}
+  .callout .chip:hover{border-color:var(--accent)}
+  /* POL-7: restored orbit */
+  #b-mot.restored{transition:transform 1.6s cubic-bezier(.3,.6,.2,1);
+                  transform:translate(28.2px,-99.7px);animation:none}
+  #b-mot.restored circle{fill:var(--ok)!important;transition:fill 1.6s}
+  .comet{stroke:var(--ok);stroke-width:2;stroke-linecap:round;opacity:0}
+  .comet.fly{animation:comet 1.6s ease-out 1}
+  @keyframes comet{0%{opacity:.7;stroke-dashoffset:110}100%{opacity:0;stroke-dashoffset:0}}
+  /* POL-8 v3: quiet is a reward — the CHART ITSELF fades away. Nothing needs
+     you, so there is nothing to read: just the sun, the far greens, and the
+     sky celebrating. No text, no instrument. */
+  body.quiet .breathe, body.quiet .ping, body.quiet [data-body="i-gutter"],
+  body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"]{display:none}
+  .chrome{transition:opacity 2.2s ease}
+  body.quiet .chrome{opacity:.06}
+  #dial-name{transition:opacity 2.2s ease}
+  body.quiet #dial-name{opacity:.3}
+  circle[fill="url(#danger4)"], .dial circle[stroke-dasharray="3 5"]{transition:opacity 1.2s}
+  body.quiet circle[fill="url(#danger4)"]{opacity:0}
+  body.quiet .sky{opacity:1}
+  body.quiet .sky .near{animation-duration:80s}
+  body.quiet .sky .near circle{animation:twinkle 3.6s ease-in-out infinite alternate}
+  @keyframes twinkle{from{opacity:.35}to{opacity:.95}}
+  .meteor{position:fixed;width:130px;height:1px;z-index:1;opacity:0;pointer-events:none;
+          background:linear-gradient(90deg,transparent,#f4f0ff);transform:rotate(-32deg)}
+  body.quiet .meteor{animation:meteor 7s linear infinite}
+  .meteor.m2{animation-delay:3.4s !important;top:22% !important;left:60% !important}
+  .meteor.m3{top:34% !important;left:30% !important}
+  @keyframes meteor{0%,74%{opacity:0;translate:0 0}76%{opacity:.9}86%{opacity:0;translate:210px 131px}100%{opacity:0}}
+  /* POL-10 v2: storm — the camera leans IN on the trouble. The dial zooms
+     toward the inner rings, the far greens are pushed out past the month
+     ring, and every angry colour pops. Meteors burn warm. */
+  body.storm .sky .far{animation-duration:60s}
+  body.storm .sky .near{animation-duration:34s;animation-name:driftjitter}
+  @keyframes driftjitter{0%{transform:translate(0,0)}25%{transform:translate(-18px,2px)}
+    50%{transform:translate(-32px,-2px)}75%{transform:translate(-46px,1px)}100%{transform:translate(-60px,0)}}
+  .dial{transition:transform 2s cubic-bezier(.3,.6,.2,1)}
+  body.storm .dial{transform:scale(1.26)}
+  .dial g[fill="url(#p-jade)"],
+  .dial [data-body="i-smoke"],.dial [data-body="i-svc"]{
+    transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
+  body.storm .dial g[fill="url(#p-jade)"],
+  body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"]{
+    transform:scale(1.17)}
+  .dial .belt{transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
+  body.storm .dial .belt{transform:scale(1.17)}
+  body.storm circle[fill="url(#danger4)"]{opacity:1.6;transform:scale(1.35);transform-origin:190px 190px}
+  body.storm .dial circle[stroke-dasharray="3 5"]{stroke:var(--overdue);stroke-opacity:.85;
+    stroke-width:1.6;filter:drop-shadow(0 0 5px var(--overdue));
+    animation:threshpulse 1.8s ease-in-out infinite}
+  @keyframes threshpulse{0%,100%{stroke-opacity:.35}50%{stroke-opacity:.9}}
+  body.storm [data-body="i-gutter"] circle{filter:saturate(1.5) brightness(1.12) drop-shadow(0 0 7px var(--overdue))}
+  body.storm [data-body="i-mot"] circle,body.storm [data-body="i-boiler"] circle{
+    filter:saturate(1.45) brightness(1.1) drop-shadow(0 0 6px var(--warm))}
+  body.storm circle[filter="url(#sun)"]{opacity:.5}
+  body.storm .meteor{animation:meteor 5.5s linear infinite;
+    background:linear-gradient(90deg,transparent,#ff8a4d)}
+  body.storm .meteor.m2{background:linear-gradient(90deg,transparent,#f87171)}
+  body.storm .meteor.m3{animation-delay:1.7s !important;
+    background:linear-gradient(90deg,transparent,#ffd166)}
+  /* POL-9: command palette on the explore field */
+  .palette{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:10px;
+           width:340px;background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:14px;padding:8px;display:none;text-align:left}
+  .palette.open{display:block}
+  .palette div{font:12.5px var(--mono);color:var(--ink-mid);padding:8px 10px;border-radius:8px}
+  .palette div b{color:var(--ink);font-weight:500}
+  .palette div:hover{background:var(--panel)}
+  .palette .act{color:var(--accent)}
+
+  /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
+     starfield streams past with parallax, the destination holds its place
+     and grows as we approach. Nothing ever swaps. */
+  .minisys{position:absolute;cursor:pointer;z-index:3;
+           transform-origin:118px 95px; /* the ring centre — flights pivot on it */
+           transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s}
+  .minisys:hover .msring{stroke-opacity:.9}
+  .msring{transition:stroke-opacity .3s}
+  .dialwrap{transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity .9s ease}
+  /* v18: the old chart leaves COMPLETELY with the flight — no low-opacity
+     remnant trailing the camera. The new dial then does its full fanfare
+     arrival at the destination. */
+  .hero.flying .dialwrap{transform:translate(calc(var(--flyx)*-1.7),calc(var(--flyy)*-1.7)) scale(.45);
+                         opacity:0}
+  .hero.flying .minisys{opacity:.08;
+    transform:translate(calc(var(--flyx)*-1),calc(var(--flyy)*-1))}
+  /* v18.1: the destination rides the same camera motion as the world, so it
+     arrives EXACTLY at centre screen, growing all the way — and the chart
+     blooms out of its ring while it is still settling: one motion, no dwell */
+  /* the target flies home by its OWN rendered offset (clamped/relaxed), not
+     the raw galaxy delta — so its ring centre lands exactly on the dial sun */
+  .hero.flying .minisys.target{opacity:1;
+    transform:translate(calc(var(--tox)*-1),calc(var(--toy)*-1)) scale(2.3)}
+  .minisys.dissolve{opacity:0!important;transition:opacity .55s ease!important}
+  .hero.flying.arriving .dialwrap{transform:none;opacity:1;transition:none}
+  /* v18.2: the dial GROWS out of the aligned centre — slow, deliberate */
+  @keyframes bloom{from{transform:scale(.28);opacity:0}28%{opacity:1}to{transform:scale(1);opacity:1}}
+  .minisys.settle{animation:settle 1s ease .2s backwards}
+  @keyframes settle{from{opacity:0}to{opacity:1}}
+
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         font:10.5px var(--mono);color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  @media (prefers-reduced-motion: reduce){
+    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+  }
+
+  /* ======================================================================
+     PACK REFRESH — RETROGRADE (§15, #480). The treatment the owner ratified
+     in full; design/v19/pack-retrograde-refresh.html is the spec it comes
+     from and stays as the reference. Three signatures plus the descent, and
+     every one of them scoped to the pack: the other four packs read this
+     file exactly as they did. Mirrored, line for line, in the app's
+     web/src/routes/home/home.css — this is one treatment in two places.
+     ====================================================================== */
+
+  /* 1. THE HORIZON GRID — the structural signature, low in the SKY layer and
+     nowhere else. Perspective rules receding to a horizon a little below the
+     dial: cyan, faint, the era's one honest piece of geometry. Painted by
+     .sky's own ::before, so it sits UNDER the starfield svg — the stars still
+     own the sky and the grid is the ground they end at. */
+  [data-theme=retrograde] .sky{overflow:hidden}
+  [data-theme=retrograde] .sky::before{
+    content:"";position:absolute;left:-60%;right:-60%;bottom:0;height:64vh;
+    background-image:
+      repeating-linear-gradient(90deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
+      repeating-linear-gradient(180deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
+    transform:perspective(520px) rotateX(68deg);transform-origin:50% 100%;
+    opacity:.38;
+    -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 20%);
+            mask-image:linear-gradient(180deg,transparent 0%,#000 20%)}
+  /* the air just above the horizon, so the grid arrives out of something */
+  [data-theme=retrograde] .sky::after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:34vh;
+    background:linear-gradient(0deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+
+  /* 2. THE MIRRORED CEILING — the same plane overhead, so the screen sits
+     inside a corridor rather than on a floor. Deliberately the quieter half:
+     the floor is the signature and the ceiling only answers it, so the
+     geometry is the exact mirror but the opacity is roughly two-thirds, the
+     far edge is masked out earlier, and the verticals are sparser while the
+     rungs are firmer (a ceiling seen only from its far half reads as stray
+     rays unless the rungs carry it).
+
+     UNGATED (owner, amending the same day): "we should add the top grid back
+     in." The min-height:800px gate is gone and the ceiling now renders on
+     every viewport, at the one depth the owner approved. What the gate was
+     protecting turns out not to need protecting, and this was measured rather
+     than argued. The mask ends the plane at 88% of a projection that is
+     already collapsing, so the ceiling's last ink lands 104px down at
+     1600x1000, 92px at 1280x800, 85px at 1280x700, 81px at 1280x640 — it
+     barely deepens as the window shortens. The DIAL is what moves: it climbs
+     to meet the ceiling. So the tail clears the dial's outermost graticule by
+     114px at 1600x1000 and by 24px at 1280x800, and only below about 810px
+     tall do the last rungs reach past it — 18px at 1280x700, 43px at
+     1280x640. What arrives there is haze, not rule: at the graticule the mask
+     is holding the grid to 7% of its own ink at 1280x700 and 12% at 1280x640,
+     and both were LOOKED at, where they read as the faint converging rays a
+     far ceiling should. Hence no proportional shrink: the ceiling arrives
+     whole everywhere, which is what was asked for. */
+  .ceiling{display:none}
+  [data-theme=retrograde] .ceiling{display:block;position:absolute;
+    left:0;right:0;top:0;height:30vh;
+    background:linear-gradient(180deg,rgba(45,226,230,.075) 0%,
+      rgba(255,79,216,.035) 46%,transparent 100%)}
+  [data-theme=retrograde] .ceiling::before{
+    content:"";position:absolute;left:-60%;right:-60%;top:0;height:62vh;
+    background-image:
+      repeating-linear-gradient(90deg,transparent 0 128px,rgba(45,226,230,.55) 128px 129px),
+      repeating-linear-gradient(180deg,transparent 0 52px,rgba(45,226,230,.78) 52px 53px);
+    transform:perspective(520px) rotateX(-68deg);transform-origin:50% 0;
+    opacity:.26;
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%);
+            mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%)}
+
+  /* 3. RESTRAINED BLOOM — on ACCENT elements only. Not on the greens, not on
+     the reds, not on the ink: one colour is allowed to be lit, which is what
+     keeps neon classy instead of a light show. Small radius, low alpha, no
+     animation, and every radius spends the one --bloom the pack defines. */
+  [data-theme=retrograde] :is(.manifest .corridor .today span,.suggest .body span,
+    .palette .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
+    text-shadow:0 0 9px var(--bloom)}
+  [data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
+  [data-theme=retrograde] .celestial polyline,
+  [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
+  [data-theme=retrograde] :is(.inbox-orb.waiting,.suggest button.yes){
+    box-shadow:0 0 12px -2px var(--bloom)}
+  [data-theme=retrograde] .inbox-orb.waiting .count{box-shadow:0 0 9px var(--bloom)}
+  [data-theme=retrograde] .manifest .corridor .today .rule{box-shadow:0 0 8px var(--bloom)}
+  [data-theme=retrograde] .manifest .corridor .planet.sug i{
+    box-shadow:0 0 8px -1px var(--bloom)}
+
+  /* 4. THE NORTH STAR, REDRAWN FOR THE ERA. Same place, same size territory,
+     same job — CON-12's create handle — but in this pack the soft four-point
+     glint becomes a neon wireframe diamond: pure linework, no fills and no 3D
+     gradient, one cyan-to-magenta edge running top to bottom so the downward
+     vertex is the create colour and the mark points at the drawer it pulls.
+     The two reticle ticks hold the horizontal width the old glint had, so the
+     silhouette still reads as a beacon at a glance. The classic glint stays up
+     in the other four packs — only one form is ever rendered. */
+  .nstar .tron{display:none}
+  [data-theme=retrograde] .nstar .classic{display:none}
+  [data-theme=retrograde] .nstar .tron{display:block;
+    filter:drop-shadow(0 0 3px var(--bloom))}
+  [data-theme=retrograde] .drawer-top.open .nstar .tron :is(path,line){
+    stroke:var(--accent)}
+
+  /* 5. THE CORRIDOR TURNS (owner, 2026-08-16) — retrograde's answer to the
+     universal scroll-descent law. The other packs drop THROUGH their sky;
+     this one is a room, so the room rotates around you instead. As you come
+     down off the dial the floor and the ceiling roll away to edge-on and two
+     vertical grid planes roll in from the sides to flank the manifest, fading
+     out at the inner edge nearest the reading column. It is a quarter turn
+     about the line of sight, spent over the same run of scroll the family
+     uses.
+
+     One position drives it, read straight off the scrollbar — no clock, so
+     there is nothing to loop and nothing to catch up with:
+       --descent  0 at the dial, 1 once the room has finished turning
+     And, exactly as the sibling descents do, at scroll 0 not one rule below is
+     in effect at all: they all hang off .descending, which the scroll handler
+     only puts on the document while the scrollbar is off the top. The first
+     viewport is left literally alone rather than merely left at zero.
+
+     The second quantity is the room's width. --corridor-gap is the horizontal
+     space between the screen edge and the manifest column, which is what the
+     owner measures the walls against: the manifest is max-width 820px and
+     centred, so the gap on each side is (100vw - 820px)/2, floored at the
+     page gutter for viewports too narrow to have one. Everything the wall
+     paints is expressed in it, which is the only way "two thirds of the gap"
+     can stay true at every window size — a wall sized in vh drifts against a
+     gap sized in vw the moment the window is not the shape it was tuned on.
+     vw and not a percentage because perspective() will not take one, and the
+     price of that is the scrollbar: on a platform that reserves 15px for it
+     the true gap is 15px narrower than 100vw says, which lands the wall at
+     0.68 of it instead of 0.667 — five pixels at 1600, and not worth a second
+     geometry. */
+  :root{--descent:0;--corridor-gap:max(24px,(100vw - 820px)/2)}
+  .wall{display:none}
+  [data-theme=retrograde].descending .sky::before{
+    transform:perspective(520px) rotateX(calc(68deg + var(--descent) * 22deg));
+    opacity:calc(.38 * (1 - var(--descent)))}
+  [data-theme=retrograde].descending .sky::after{opacity:calc(1 - var(--descent))}
+  [data-theme=retrograde].descending .ceiling::before{
+    transform:perspective(520px) rotateX(calc(-68deg - var(--descent) * 22deg));
+    opacity:calc(.26 * (1 - var(--descent)))}
+  [data-theme=retrograde].descending .ceiling{opacity:calc(1 - var(--descent))}
+  /* the side planes are the floor's own construction rotated a quarter turn:
+     the element carries the air, the ::before carries the grid, and the two
+     repeating gradients simply swap jobs — the 96px rules become the
+     converging rails and the 76px rules become the rungs. They start edge-on
+     (90deg, which is nothing at all) and open to the floor's own 68deg.
+
+     THE WALLS CLOSE IN (owner, amending the same day): "the walls are closer
+     to the manifest items. If they're 1/3 the gap now, they should be 2/3 the
+     gap." The plane's inner edge — the far end of the grid, where the mask
+     puts it out — must finish its roll two thirds of the way from the screen
+     edge to the manifest column, twice as far in as it stood.
+
+     Where the numbers come from. A plane of width W turned rotateY(68deg)
+     about its near edge under perspective(P) projects onto the screen at
+     W·cos68·P/(P + W·sin68); as W grows that runs into a vanishing point at
+     P/tan68, so the old geometry (W = 64vh, P = 520px) could never reach past
+     210px however deep the plane was made — it landed at 112px of a 390px
+     gap. Both terms therefore become multiples of the gap: P = 3.5 gaps and
+     W = 3.37 gaps put the inner edge at 0.667 of the gap exactly, at every
+     window size, while keeping the floor's own 68deg and a vanishing point
+     (1.41 gaps) that still sits comfortably beyond the wall's own far end so
+     the rails read as converging rather than as a flat parallelogram.
+
+     The air the element carries now spans the WHOLE gap rather than 34vh, and
+     the grid's inner mask starts at 68% of the plane instead of 80%. Both are
+     consequences of the same move: at the old depth the air reached three
+     times further in than the grid did and the fade had a shallow projection
+     to spend itself over, so 20% of the plane was a soft ending. At the new
+     depth 20% of the plane is 30px of screen — a cut, not a fade — and an air
+     that stopped with the grid drew a visible edge where none belongs. So the
+     grid dies at two thirds and its atmosphere carries on thinning to nothing
+     exactly where the manifest column begins. Nothing either one paints
+     reaches the text. */
+  [data-theme=retrograde].descending .wall{display:block;position:absolute;
+    top:0;bottom:0;width:var(--corridor-gap)}
+  [data-theme=retrograde].descending .wall.wl{left:0}
+  [data-theme=retrograde].descending .wall.wr{right:0}
+  [data-theme=retrograde].descending .wall::after{
+    content:"";position:absolute;inset:0;opacity:var(--descent)}
+  [data-theme=retrograde].descending .wall.wl::after{
+    background:linear-gradient(90deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+  [data-theme=retrograde].descending .wall.wr::after{
+    background:linear-gradient(270deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+  [data-theme=retrograde].descending .wall::before{
+    content:"";position:absolute;top:-60%;bottom:-60%;
+    width:calc(var(--corridor-gap) * 3.37);
+    background-image:
+      repeating-linear-gradient(180deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
+      repeating-linear-gradient(90deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
+    opacity:calc(.38 * var(--descent))}
+  [data-theme=retrograde].descending .wall.wl::before{left:0;
+    transform:perspective(calc(var(--corridor-gap) * 3.5))
+      rotateY(calc(90deg - var(--descent) * 22deg));
+    transform-origin:0 50%;
+    -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 68%,transparent 100%);
+            mask-image:linear-gradient(90deg,#000 0%,#000 68%,transparent 100%)}
+  [data-theme=retrograde].descending .wall.wr::before{right:0;
+    transform:perspective(calc(var(--corridor-gap) * 3.5))
+      rotateY(calc(-90deg + var(--descent) * 22deg));
+    transform-origin:100% 50%;
+    -webkit-mask-image:linear-gradient(270deg,#000 0%,#000 68%,transparent 100%);
+            mask-image:linear-gradient(270deg,#000 0%,#000 68%,transparent 100%)}
+  /* Reduced motion. The turn is a POSITION, not an animation — freezing it
+     would leave the reader under a corridor the page has already left — so
+     the cross-fade still tracks the scrollbar. What goes is the flourish: the
+     planes hold the angles they rest at instead of swinging through the
+     quarter turn. The side planes hold the rested angle under the gap's own
+     perspective, so the position they hold is the two-thirds one and not the
+     old geometry. */
+  @media (prefers-reduced-motion: reduce){
+    [data-theme=retrograde].descending .sky::before{
+      transform:perspective(520px) rotateX(68deg)}
+    [data-theme=retrograde].descending .ceiling::before{
+      transform:perspective(520px) rotateX(-68deg)}
+    [data-theme=retrograde].descending .wall.wl::before{
+      transform:perspective(calc(var(--corridor-gap) * 3.5)) rotateY(68deg)}
+    [data-theme=retrograde].descending .wall.wr::before{
+      transform:perspective(calc(var(--corridor-gap) * 3.5)) rotateY(-68deg)}
+  }
+  /* /PACK REFRESH — retrograde */
+
+  /* ======================================================================
+     AFTER DARK — THE GALACTIC PLANE (§15, "after dark adopts the happy
+     accident"). Everything below is scoped to the pack: switch the theme
+     dots to star chart, atlas, dawn or retrograde and not one rule here
+     applies, which is the proof that the plane belongs to after dark and
+     is not a homescreen style bolted on over the top.
+     ====================================================================== */
+  [data-theme=afterdark]{
+    /* The accident's warmth, brought down to a moonless night. --plane-warm
+       is the only warm light this pack allows anywhere in the sky, and it
+       is spent at an alpha in the low hundredths — see the contrast budget
+       at the foot of this block. */
+    --plane-warm:#ffcf94;
+    --plane-cool:#9fb0d6;
+    /* the extra population: the river's own stars, a shade under the base
+       field's --star-far so the plane reads as DEPTH behind the sky rather
+       than as a brighter patch of it */
+    --plane-star:#cfd9ee;
+    --plane-star-warm:#ffdca6;
+    --plane-dust:#01020a;
+  }
+  /* THE LAYER. Fixed, inert, and FIRST in the document — it paints under
+     the base starfield because it is behind it: the galaxy is the furthest
+     thing in the sky, and the pack's own stars stream in front of it. */
+  .plane{display:none;position:fixed;inset:0;pointer-events:none;z-index:0}
+  [data-theme=afterdark] .plane{display:block}
+  .plane svg{position:absolute;inset:0;width:100%;height:100%;
+             opacity:.88;transition:opacity 1.6s ease}
+  /* THE MOODS. POL-8 and POL-10 already move the sky; the plane answers
+     them from its own distance. Quiet clears the air and the river comes
+     fully up — the reward state is the night at its best. Storm closes the
+     weather in and the far sky is the first thing lost. It never jitters
+     with the near field: it is too far away to be shaken. */
+  body.quiet .plane svg{opacity:1}
+  body.storm .plane svg{opacity:.6}
+
+  /* ----------------------------------------------------------------------
+     THE CONTRAST BUDGET — why the band is the brightness it is.
+
+     Every ink in this pack is LIGHT ink, so raising the ground behind it
+     costs contrast rather than earning it. after dark's --ink-mid (#7c8699)
+     sits at 5.49:1 on the pack's bare ground (#05070d). Solving
+     (L_ink+.05)/(L_bg+.05) ≥ 4.5 gives a ceiling of L_bg ≤ .0136 — about
+     RGB 31 of neutral grey — and that number, not taste, is what sets the
+     lobe alphas in the script. Measured: the brightest diffuse ground the
+     band produces anywhere, in the quiet state where it comes fully up, is
+     L = .0120, which leaves --ink-mid at 4.62:1. Inside the budget, and
+     the budget was the design input rather than a check afterwards.
+
+     Swept per element as well — six seeds, two viewports, seven scroll
+     positions, worst case taken over all of them. Every ink that carries
+     CONTENT clears 4.5:1 with room: --ink 16.3:1, --ink-mid 5.5:1, --accent
+     10.6:1, and the four urgency colours 6.8:1 and better.
+
+     ONE THING THE OWNER SHOULD SEE, because it is not this file's to fix.
+     after dark's faint tier — --ink-faint and --chart-ink, both #4a5468 —
+     is 2.65:1 on the pack's OWN BARE GROUND, before any of this exists. It
+     has never met 4.5:1 in this pack, and it is what the dial's month
+     labels, the explore placeholder and the horizon line are drawn in. The
+     plane's marginal cost to that tier is small and was measured: at worst
+     0.28 of a ratio point (dial month labels, 2.65 → 2.37 at 1440x900),
+     and zero for most of them, because the descent has lifted the band
+     away before the manifest's faint ink is ever on screen. The answer is
+     a PACK decision — lift after dark's faint tier, which would help every
+     screen in the product — not a backdrop patch, and not one to take
+     without asking. Raised in the proposal report.
+
+     The band therefore needs no guard around the chart. dawn's terminator
+     had to hold the dial out of its dark side because that wash was deep
+     enough to swallow chart ink; this one is capped where the chart stays
+     legible everywhere, so the river is allowed to run behind the
+     instrument — which is exactly the picture the owner liked.
+     ---------------------------------------------------------------------- */
+
+  /* ======================================================================
+     THE DESCENT (§15, universal). Scroll is altitude. The plane rides up
+     and out of the top of the window and fades as it goes; the plain
+     starfield stays exactly where §15 leaves it ("leaving the plain
+     starfield behind the deep manifest"); and the DEEP closes in behind,
+     so the manifest is read over emptier, blacker sky than the dial screen
+     ever shows.
+
+     One position drives all of it — --descent, published by the base
+     file's own scroll handler, 0 at the dial and 1 once the drop is spent.
+     It is read off the scrollbar, so it is monotonic by construction,
+     exact at both ends and identical on the way back up; nothing eases,
+     because a lag would read as the backdrop chasing the page. And at
+     scroll 0 not one rule below is in effect at all: they hang off
+     .descending, which the handler only sets while the scrollbar is off
+     the top, so the first viewport is left literally alone rather than
+     merely left at zero.
+     ====================================================================== */
+  .deep{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
+  [data-theme=afterdark].descending .plane{
+    transform:translate3d(0,calc(var(--descent) * -122vh),0);
+    opacity:calc(1 - var(--descent) * 1.22);
+    transition:none}
+  /* the deep: not a curtain but a closing-in. It is strongest overhead —
+     where the plane just left — and thinnest low, so the starfield thins
+     from the top down and the manifest ends the page on the emptiest sky
+     in the product. */
+  [data-theme=afterdark].descending .deep{display:block;
+    opacity:var(--descent);
+    background:
+      linear-gradient(180deg,rgba(0,1,4,.72) 0%,rgba(1,2,6,.55) 46%,
+                             rgba(2,3,8,.34) 100%)}
+  /* the faint ink gains from the descent rather than paying for it: the
+     ground it sits on gets darker all the way down, so the horizon line,
+     the month headings and the footer all end the page with MORE contrast
+     than they started it with. Nothing to correct — stated so the next
+     reader knows it was checked. */
+
+  /* Reduced motion. The drop is a POSITION, not an animation — freezing it
+     would strand the reader under a sky the page has already left — so the
+     fade and the deep still track the scrollbar. What goes is the
+     flourish: the plane gives way where it stands instead of being flown
+     out of the top of the frame. (The stream is stilled in the script:
+     no rAF, no drift, and the opening window is held.) */
+  @media (prefers-reduced-motion: reduce){
+    [data-theme=afterdark].descending .plane{transform:none}
+  }
+
+  .demos .seedtag{color:var(--ink-faint);letter-spacing:.08em}
+  .demos .seedtag b{color:var(--ink-mid);font-weight:400}
+  /* /AFTER DARK — the galactic plane */
+</style>
+</head>
+<body>
+<!-- §15: after dark adopts the happy accident. The galactic plane is the
+     pack's own sky and the furthest thing in it, so it is FIRST in the
+     document and paints under the base starfield: the pack's stars stream
+     in front of the galaxy, never behind it. Three materials in one field —
+     the dust glow, the river's own dense population, and the dust lanes that
+     absorb it — all rolled a chunk at a time by the script at the foot of
+     the file. It rides the same camera as the sky and drifts with it. -->
+<div class="plane" id="plane" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- a lobe is not a circle of colour, it is a soft falloff: five stops
+           approximating a gaussian, so overlapping lobes build an irregular
+           river rather than a row of discs -->
+      <radialGradient id="pl-warm">
+        <stop offset="0" stop-color="var(--plane-warm)" stop-opacity=".95"/>
+        <stop offset=".32" stop-color="var(--plane-warm)" stop-opacity=".62"/>
+        <stop offset=".58" stop-color="var(--plane-warm)" stop-opacity=".30"/>
+        <stop offset=".80" stop-color="var(--plane-warm)" stop-opacity=".10"/>
+        <stop offset="1" stop-color="var(--plane-warm)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="pl-cool">
+        <stop offset="0" stop-color="var(--plane-cool)" stop-opacity=".9"/>
+        <stop offset=".38" stop-color="var(--plane-cool)" stop-opacity=".52"/>
+        <stop offset=".66" stop-color="var(--plane-cool)" stop-opacity=".22"/>
+        <stop offset=".85" stop-color="var(--plane-cool)" stop-opacity=".07"/>
+        <stop offset="1" stop-color="var(--plane-cool)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="pl-dust">
+        <stop offset="0" stop-color="var(--plane-dust)" stop-opacity=".92"/>
+        <stop offset=".45" stop-color="var(--plane-dust)" stop-opacity=".58"/>
+        <stop offset=".78" stop-color="var(--plane-dust)" stop-opacity=".18"/>
+        <stop offset="1" stop-color="var(--plane-dust)" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g id="pcam" class="cam">
+      <g id="pdrift">
+        <g id="p-glow"></g>
+        <g id="p-stars" fill="var(--plane-star)"></g>
+        <g id="p-dust"></g>
+      </g>
+    </g>
+  </svg>
+</div>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
+    <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
+  </svg>
+  <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
+       own ::before so it stays under the starfield; the ceiling answers it on
+       every viewport; and the two side planes are what the pair turns into as
+       the reader descends to the manifest. Inert in every other pack. -->
+  <div class="ceiling" aria-hidden="true"></div>
+  <div class="wall wl" aria-hidden="true"></div>
+  <div class="wall wr" aria-hidden="true"></div>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+<!-- the deep: nothing at all at the dial, and the only new thing in the sky
+     once the plane has gone out of the top of the window -->
+<div class="deep" id="deep" aria-hidden="true"></div>
+<div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
+<div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
+<div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
+
+<!-- §14/#472 (owner-approved): the inbox, one click from home — and the
+     colour change IS the notification. Quiet ink when nothing waits; the
+     dish breathes accent when something does; the count is real (§12). -->
+<a class="orb inbox-orb waiting" href="inbox.html" title="Inbox — 1 waiting" aria-label="Inbox — 1 waiting">
+  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <circle cx="9" cy="11" r="2.6" fill="currentColor"/>
+    <path d="M 3 11 A 6 6 0 0 1 15 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65"/>
+    <path d="M 5.4 11 A 3.6 3.6 0 0 1 12.6 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".85"/>
+  </svg>
+  <i class="count">1</i>
+</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu"
+        onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span id="who-role">Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#070d1f" title="star-chart" aria-pressed="false" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="true" onclick="setSwatch('afterdark',this)"></button>
+    <!-- atlas is retired from the release roster (§15, owner): its pack still
+         exists and still renders if forced, but it is no longer offered. -->
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<!-- CON-12: creation drawer — full width, from the top; the north star is its handle -->
+<aside class="drawer-top" id="createdrawer" role="region" aria-label="Add to your orbit">
+  <div class="inner">
+    <h4>Add to your orbit</h4>
+    <div class="ctypes">
+      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>service</button>
+      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
+    </div>
+    <div class="crow">
+      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <a class="cfull" href="../family/create.html">open the full form →</a>
+    </div>
+  </div>
+  <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit"
+          onclick="toggleCreate(this)">
+    <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
+      <defs>
+        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--upcoming)"/>
+          <stop offset=".55" stop-color="var(--upcoming)"/>
+          <stop offset="1" stop-color="var(--accent)"/>
+        </linearGradient>
+      </defs>
+      <!-- the mark has two forms and only one is ever up: the four-point glint
+           every pack has always had, and retrograde's neon wireframe beacon
+           (§15/#480). The pack chooses between them in CSS. -->
+      <g class="glint classic" style="transform-origin:0 0">
+        <circle r="9" fill="var(--ink)" opacity=".12"/>
+        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
+              fill="var(--ink)" opacity=".9"/>
+        <circle r="2" fill="var(--ink)"/>
+      </g>
+      <g class="glint tron" style="transform-origin:0 0">
+        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
+        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
+              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
+        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
+              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
+        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
+          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
+          <line x1="10" y1="0" x2="13.4" y2="0"/>
+        </g>
+      </g>
+    </svg>
+    <span>create</span>
+  </button>
+</aside>
+
+<div class="scrim" onclick="toggleCreate(document.getElementById('nstar'))" aria-hidden="true"></div>
+<div class="page">
+    <div class="hero" id="hero">
+    <!-- backdrop constellations are generated from the galaxy map -->
+    <div class="dialwrap">
+      <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="img"
+         aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
+      <defs>
+        <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="4"/>
+        </filter>
+        <filter id="sun" x="-200%" y="-200%" width="500%" height="500%">
+          <feGaussianBlur stdDeviation="9"/>
+        </filter>
+        <!-- The stops take variables whose fallbacks are the values they
+             always were, so star-chart is untouched and every pack can now
+             reach the bodies. -->
+        <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
+          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
+        </radialGradient>
+        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
+          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
+        </radialGradient>
+        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
+          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
+        </radialGradient>
+        <radialGradient id="p-sky" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
+          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
+        </radialGradient>
+        <radialGradient id="danger4" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
+          <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
+          <stop offset="85%" stop-color="#f87171" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <g class="chrome">
+      <g class="celestial rotor">
+        <g stroke="var(--chart-line-soft)" stroke-width=".5">
+          <line x1="190" y1="14" x2="190" y2="34"/><line x1="314.5" y1="65.5" x2="300" y2="80"/>
+          <line x1="366" y1="190" x2="346" y2="190"/><line x1="314.5" y1="314.5" x2="300" y2="300"/>
+          <line x1="190" y1="366" x2="190" y2="346"/><line x1="65.5" y1="314.5" x2="80" y2="300"/>
+          <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
+        </g>
+        <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
+      </g>
+      <g class="celestial">
+        <polyline points="175.7,140 215.2,127.6 257.1,152.8" fill="none"
+                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
+                  stroke-dasharray="1 5" stroke-linecap="round"/>
+      </g>
+
+      <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+      <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
+              stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+      <circle cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+      <circle cx="190" cy="190" r="150" fill="none" stroke="var(--chart-line)" stroke-width="1.5"/>
+
+      <g stroke="var(--chart-line)" stroke-width="1.5">
+        <line x1="190" y1="40" x2="190" y2="47"/><line x1="265" y1="60.1" x2="261.5" y2="66.2"/>
+        <line x1="319.9" y1="115" x2="313.8" y2="118.5"/><line x1="340" y1="190" x2="333" y2="190"/>
+        <line x1="319.9" y1="265" x2="313.8" y2="261.5"/><line x1="265" y1="319.9" x2="261.5" y2="313.8"/>
+        <line x1="190" y1="340" x2="190" y2="333"/><line x1="115" y1="319.9" x2="118.5" y2="313.8"/>
+        <line x1="60.1" y1="265" x2="66.2" y2="261.5"/><line x1="40" y1="190" x2="47" y2="190"/>
+        <line x1="60.1" y1="115" x2="66.2" y2="118.5"/><line x1="115" y1="60.1" x2="118.5" y2="66.2"/>
+      </g>
+      <g font-size="9" fill="var(--chart-ink)" text-anchor="middle">
+        <text x="190" y="31" class="now-month" data-polish="POL-3">AUG</text><text x="271" y="53">SEP</text>
+        <text x="330" y="112">OCT</text><text x="352" y="194">NOV</text>
+        <text x="330" y="274">DEC</text><text x="271" y="333">JAN</text>
+        <text x="190" y="355">FEB</text><text x="109" y="333">MAR</text>
+        <text x="50" y="274">APR</text><text x="28" y="194">MAY</text>
+        <text x="50" y="112">JUN</text><text x="109" y="53">JUL</text>
+      </g>
+
+      <path d="M190 38 l5.5 9 h-11 Z" style="fill:var(--accent)"/>
+
+      <!-- Trails, comet and bodies below are generated by the app's chart
+           transform (#451/#414, fix-both): the dial is an orbital calendar
+           (angle = days − 90, radius = 62 + 0.242·days) and every value here
+           is the law's own output for the sample workspace. -->
+      <g fill="none" stroke-linecap="round">
+        <path d="M 169.7 142.1 A 52 52 0 0 1 173.1 140.8" stroke="var(--overdue)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 200.3 124.9 A 65.872 65.872 0 0 1 204.8 125.8" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 207.4 125 A 67.324 67.324 0 0 1 211.9 126.3" stroke="var(--warm)" stroke-opacity=".5" stroke-width="2"/>
+        <path d="M 250.1 146.3 A 74.342 74.342 0 0 1 253 150.6" stroke="var(--upcoming)" stroke-opacity=".45" stroke-width="2"/>
+      </g>
+
+      <line data-polish="POL-7" id="comet" class="comet" x1="208.2" y1="126.7" x2="236.4" y2="27"
+            stroke-dasharray="110" stroke-dashoffset="110"/>
+      </g><!-- /chrome -->
+      <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
+      <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+
+      <circle data-polish="POL-2" class="ping" cx="175.7" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
+      <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><g class="breathe"><circle cx="175.7" cy="140" r="6.3" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/><circle cx="174.44" cy="141.575" r="2.079" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="208.2" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><path d="M 208.2 121.5 A 5.2 5.2 0 0 1 208.2 131.9 Z" fill="rgba(0,0,0,.42)"/><circle cx="207.16" cy="128" r="1.716" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-boiler" data-title="Boiler service" data-t="T−22d" data-cost="~£120" href="#i-boiler"><g class="breathe"><circle cx="215.2" cy="127.6" r="6" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="214" cy="129.1" r="1.98" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/></g></a>
+      <a class="body-link" data-body="i-chimney" data-title="Chimney sweep" data-t="T−61d" data-cost="~£90" href="#i-chimney"><g><circle cx="257.1" cy="152.8" r="5.7" style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/><circle cx="255.96" cy="154.225" r="1.881" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-smoke" data-title="Smoke alarm batteries" data-t="T−122d" data-cost="~£12" href="#i-smoke"><circle cx="267.6" cy="238.5" r="3.5" fill="url(#p-jade)"/></a>
+      <a class="body-link" data-body="i-svc" data-title="Car full service" data-t="T&#8722;161d" data-cost="~&pound;300" data-docs="2" href="#i-svc"><g><circle cx="222.9" cy="285.5" r="7" style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/><circle cx="221.5" cy="287.25" r="2.31" fill="rgba(255,255,255,.38)"/></g></a>
+      <g class="belt" aria-hidden="true">
+        <ellipse cx="222.9" cy="285.5" rx="13.5" ry="4.6" transform="rotate(-24 222.9 285.5)"
+                 fill="none" style="stroke:var(--accent)" stroke-width="1.3" opacity=".8"/>
+      </g>
+    </svg>
+    </div>
+    <div class="hero-foot">
+      <div class="splash-search" style="position:relative">
+        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
+               onfocus="openPalette(true)" onblur="setTimeout(()=>openPalette(false),150)">
+        <div class="palette" data-polish="POL-9" id="palette">
+          <div><b>Car MOT — Volvo V60</b> <small>· T−16d</small></div>
+          <div><b>Boiler service</b> <small>· T−22d</small></div>
+          <div class="act">→ complete "Car MOT — Volvo V60"</div>
+          <div class="act">→ add an item</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — the
+         due-next screen's spine of time, transplanted; that screen retires.
+         Full scrollback, nearest at the top, suggestions in date order. -->
+    <div class="manifest" id="manifest-top">
+    <div class="corridor">
+      <div class="redzone">
+        <div class="item" id="i-gutter">
+          <span class="planet" style="color:var(--overdue)"><i></i></span>
+          <div class="body"><b>Gutter clearing</b><span>Home · orbital period 1 year · ~£150.00</span></div>
+          <div class="t over">T+16d<small>28 Jul</small></div>
+        </div>
+        <!-- the row, expanded: everything Orbit holds about this item -->
+        <div class="itemview" hidden>
+          <div class="kv"><span>due</span><b class="over">T+16d · 28 July 2026</b></div>
+          <div class="kv"><span>section</span><b>Home</b></div>
+          <div class="kv"><span>type</span><b>service</b></div>
+          <div class="kv"><span>orbital period</span><b>every year</b></div>
+          <div class="kv"><span>cost</span><b>~£150.00</b></div>
+          <div class="kv"><span>reminders</span><b>14d before · 3d before</b></div>
+          <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-gutter">manage this item →</a></div>
+        </div>
+      </div>
+      <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · WED 13 AUG</span><div class="rule"></div></div>
+      <div class="item" id="i-mot">
+        <span class="planet ter" style="color:var(--warm)"><i></i></span>
+        <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
+        <div class="t soon">T−16d<small>29 Aug</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−16d · 29 August 2026</b></div>
+        <div class="kv"><span>section</span><b>Vehicles</b></div>
+        <div class="kv"><span>type</span><b>inspection</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>£54.85</b></div>
+        <div class="kv"><span>reminders</span><b>21d before · 7d before</b></div>
+        <h4>documents</h4>
+        <div class="doc">◆<span>MOT certificate 2025<small>added 12 Jun · 240 KB</small></span></div>
+        <div class="doc">◆<span>Service history<small>added 12 Jun · 88 KB</small></span></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-mot">manage this item →</a></div>
+      </div>
+      <div class="month"><span>SEP</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-boiler">
+        <span class="planet" style="color:var(--warm)"><i></i></span>
+        <div class="body"><b>Boiler service</b><span>Home · orbital period 1 year · British Gas · ~£120.00</span></div>
+        <div class="t soon">T−22d<small>04 Sep</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−22d · 4 September 2026</b></div>
+        <div class="kv"><span>section</span><b>Home</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£120.00</b></div>
+        <div class="kv"><span>provider</span><b>British Gas</b></div>
+        <div class="kv"><span>reminders</span><b>14d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-boiler">manage this item →</a></div>
+      </div>
+      <div class="month"><span>OCT</span><div class="rule"></div><small>2 approaching</small></div>
+      <div class="item suggest" id="i-insurance">
+        <span class="planet sug"><i></i></span>
+        <div class="body"><b>Home insurance renewal</b><span>Found in 1 forwarded document · renews 03 Oct · ~£400.00</span></div>
+        <div class="actions"><button class="yes">Add to orbit</button><button>Dismiss</button></div>
+      </div>
+      <div class="item" id="i-chimney">
+        <span class="planet" style="color:var(--upcoming)"><i></i></span>
+        <div class="body"><b>Chimney sweep</b><span>Home · orbital period 1 year · ~£90.00</span></div>
+        <div class="t up">T−61d<small>13 Oct</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−61d · 13 October 2026</b></div>
+        <div class="kv"><span>section</span><b>Home</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£90.00</b></div>
+        <div class="kv"><span>reminders</span><b>14d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-chimney">manage this item →</a></div>
+      </div>
+      <div class="month"><span>DEC</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-smoke">
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Smoke alarm batteries</b><span>Devices · orbital period 6 months · ~£12.00</span></div>
+        <div class="t ok">T−122d<small>13 Dec</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−122d · 13 December 2026</b></div>
+        <div class="kv"><span>section</span><b>Devices</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every 6 months</b></div>
+        <div class="kv"><span>cost</span><b>~£12.00</b></div>
+        <div class="kv"><span>reminders</span><b>7d before</b></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-smoke">manage this item →</a></div>
+      </div>
+      <div class="month"><span>JAN</span><div class="rule"></div><small>1 approaching</small></div>
+      <div class="item" id="i-svc">
+        <span class="planet" style="color:var(--ok)"><i></i></span>
+        <div class="body"><b>Car full service</b><span>Vehicles · orbital period 1 year · ~£300.00</span></div>
+        <div class="t ok">T−161d<small>21 Jan</small></div>
+      </div>
+      <!-- the row, expanded: everything Orbit holds about this item -->
+      <div class="itemview" hidden>
+        <div class="kv"><span>due</span><b>T−161d · 21 January 2027</b></div>
+        <div class="kv"><span>section</span><b>Vehicles</b></div>
+        <div class="kv"><span>type</span><b>service</b></div>
+        <div class="kv"><span>orbital period</span><b>every year</b></div>
+        <div class="kv"><span>cost</span><b>~£300.00</b></div>
+        <div class="kv"><span>reminders</span><b>21d before</b></div>
+        <h4>documents</h4>
+        <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
+        <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
+        <div class="ivfoot"><button class="ivcopy">copy link</button><a class="ivfull" href="#i-svc">manage this item →</a></div>
+      </div>
+    </div>
+    <div class="horizon">— beyond the horizon: nothing scheduled past January —</div>
+  </div>
+</div>
+
+<aside class="drawer drawer-left" id="statusdrawer" role="region" aria-label="System status">
+  <button class="handle" id="edge-health" aria-expanded="false"
+          onclick="const d=this.parentElement;const open=d.classList.toggle('open');this.setAttribute('aria-expanded',String(open))">
+    <i></i><span>degraded</span></button>
+  <h4>System status</h4>
+  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
+  <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
+  <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
+  <h4>Last health check</h4>
+  <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
+  <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
+  <h4>Full diagnostics</h4>
+  <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
+</aside>
+<aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
+  <button class="handle" aria-expanded="false"
+          onclick="const d=this.parentElement;const open=d.classList.toggle('open');this.setAttribute('aria-expanded',String(open))">
+    <i></i><span>key</span></button>
+  <h4>Urgency</h4>
+  <div class="keyrow"><span class="sw" style="background:var(--overdue)"></span>overdue &mdash; inside the ring</div>
+  <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
+  <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
+  <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
+  <h4>Types</h4>
+  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
+  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
+  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
+  <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
+  <h4>Physics</h4>
+  <div class="keyrow">closer = sooner</div>
+  <div class="keyrow">bigger = costlier</div>
+  <div class="keyrow">belt = documents attached</div>
+  <div class="keyrow">the sky&rsquo;s weather = your workload</div>
+</aside>
+<div class="docview" id="docview" role="dialog" aria-label="Documents">
+  <button class="close" onclick="document.getElementById('docview').classList.remove('open')">×</button>
+  <h4 id="docview-title">Car full service</h4>
+  <div class="sub">2 documents · encrypted · scanned clean</div>
+  <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
+  <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
+</div>
+<div class="demos" aria-label="Mockup animation demos">
+  <span>DEMOS</span>
+  <button onclick="replayArrival()">replay arrival</button>
+  <button onclick="restoreOrbit()">complete Car MOT</button>
+  <button onclick="document.body.classList.remove('storm');document.body.classList.toggle('quiet')">quiet state</button>
+  <button onclick="document.body.classList.remove('quiet');document.body.classList.toggle('storm')">storm state</button>
+  <button onclick="cycleHealth()">health: cycle</button>
+  <button onclick="rerollPlane()">re-roll the plane</button>
+  <button onclick="driftPlane()">drift +2 min</button>
+  <span class="seedtag">plane #<b id="pseed">&mdash;</b> &middot; crossing <b id="pangle">&mdash;</b></span>
+</div>
+<footer>orbit &middot; v19 proposal &middot; after dark / the galactic plane &middot; the happy accident, adopted: a luminous river lying diagonally across the darkest pack&rsquo;s sky, built from a dense extra population of tiny stars, irregular warm dust-glow at its core and dark lanes threading it &mdash; never a gradient stripe. It is the furthest thing in the sky, so it drifts slowest and rides the same camera; its centreline oscillates about the mid-line, so it can stream for hours without ever leaving the frame and without a single tile. Rolled a chunk at a time as it comes into view, thrown away for good once it has passed, and reproducible to the pixel from one published seed. The core is capped where after dark&rsquo;s own mid ink still clears 4.5:1 over the brightest part of it, which is why the river is allowed to run behind the chart. And the scroll is a descent: the plane rides up and out of the window, the plain starfield stays, and the deep closes in &mdash; the manifest is read over the emptiest sky in the product</footer>
+
+<script>
+/* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
+/* Values generated by the app's own chart transform (#451, fix-both): a
+   household's position derives from its identity (CON-13 — bearings can
+   never move) and its planet dots from its items' identities and due states.
+   The scatter matches the previously hand-placed layout to within a few px;
+   the sample workspace's ids were chosen so it does. */
+const GALAXY = {
+  lawson:  { name:"Lawson Home",     pos:[0,0],
+             planets:[[-9,21,2.4,"--warm"],[-25,8,2.4,"--warm"],[-13,-24,2.1,"--warm"]] },
+  seaside: { name:"Seaside Cottage", pos:[-617,-305],
+             planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  mumdad:  { name:"Mum & Dad’s", pos:[452,522],
+             planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]] },
+  narrow:  { name:"The Narrowboat",  pos:[-515,393],
+             planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  grans:   { name:"Gran’s Flat", pos:[722,-184],
+             planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+};
+let camera = "lawson";
+let flying = false;
+const hero = document.getElementById("hero");
+
+/* the starfield offset is a pure function of the camera position, so a
+   flight animates between two truths and there is nothing to snap back */
+function pointSky(){
+  const [cx, cy] = GALAXY[camera].pos;
+  document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
+  document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
+}
+
+/* ---- THE FIXED MAP (#428, ratified 2026-08-16) ----------------------------
+   Verbatim from the app's web/src/routes/home/placement.js, which carries the
+   full reasoning. In short: the BEARING from the camera to a household's
+   absolute coordinate is sacred and no pass may change it; the RADIUS is
+   negotiable and every pass adjusts that alone; and the whole arrangement is
+   ONE PURE FUNCTION of (household set, camera, viewport) — walked in sorted
+   id order rather than the order the data arrived, relaxed by rounds that
+   measure every pair against the same snapshot (so no pair ordering can
+   change the answer), and memoised so a re-render cannot draw a different
+   sky. Fly A→B→A and every household is back on the pixel it left. */
+const placementMemo = new Map();
+function minSeparationFor(w){ return Math.max(230, Math.min(340, w * 0.18)); }
+function reachOn(angle, w, h){
+  // how far the visible sky extends on a bearing — the old vector clamp,
+  // expressed as a radius so it BOUNDS a placement instead of REDIRECTING it.
+  // The top is busier (create handle, account row), so it ends sooner.
+  const rx = w / 2 + 40;
+  const ry = Math.max(80, h / 2 - (Math.sin(angle) < 0 ? 215 : 155));
+  return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
+}
+function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
+  const ids = Object.keys(galaxy).sort();
+  const key = `${camera ?? ""}@${w}x${h}/${keepOut}#${ids.join(",")}`;
+  if (placementMemo.has(key)) return placementMemo.get(key);
+  const origin = camera && galaxy[camera] ? galaxy[camera].pos : [0, 0];
+  const minSep = minSeparationFor(w);
+  const reach = (a) => reachOn(a, w, h);
+  const points = [], self = [];
+  for (const id of ids) {
+    const hh = galaxy[id];
+    if (id === camera) { self.push({ id, hh, isCamera: true, banded: false, dist: 0, angle: 0, radius: 0, ox: 0, oy: 0, dim: .9 }); continue; }
+    const dx = hh.pos[0] - origin[0], dy = hh.pos[1] - origin[1];
+    const dist = Math.hypot(dx, dy);
+    points.push({ id, hh, isCamera: false, banded: false, dist, angle: Math.atan2(dy, dx), radius: 0,
+                  ox: 0, oy: 0, dim: Math.max(.45, Math.min(.9, 1.05 - dist / 2600)) });
+  }
+  // the sky's usable vertical half-extents: the top is busier, so it ends sooner
+  const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
+  // where a placement is DRAWN: polar about the camera, and then the ONE
+  // ratified case where the bearing yields (owner-found twice) — on a short
+  // hero no position on a steep bearing is both clear of the chart and inside
+  // the sky, so the constellation keeps its RADIUS and slides around its own
+  // circle to the band edge on its own side. Marked, so a true bearing and a
+  // bent one can be told apart; and because the radius survives the slide,
+  // #427's keep-out survives it too.
+  const resolve = (p) => {
+    let ox = Math.cos(p.angle) * p.radius, oy = Math.sin(p.angle) * p.radius;
+    const lim = oy < 0 ? safeTop : safeBottom;
+    p.banded = Math.abs(oy) > lim;
+    if (p.banded) {
+      oy = Math.sign(oy) * Math.max(lim, 0);
+      ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(p.radius * p.radius - oy * oy, 0));
+    }
+    p.ox = ox; p.oy = oy;
+  };
+  // nearer sits closer in, never inside the chart: the camera's own
+  // constellation IS the chart, so #427's keep-out is its separation halo,
+  // expressed — like every separation here — as a radius.
+  for (const p of points) { p.radius = Math.max(keepOut, Math.min(p.dist, reach(p.angle))); resolve(p); }
+  // two bearings can fold onto the same patch of sky: draw one in, push the
+  // other out, RADIUS ONLY, so both keep their true direction. For a banded
+  // constellation more radius slides it along the band, which is how this one
+  // pass also answers §14/#473. Determinism comes from the canonical ORDER —
+  // sorted ids, ties broken by id — not from the update scheme.
+  for (let round = 0; round < 8; round++) {
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / 2;
+      const aIn = a.radius < z.radius || (a.radius === z.radius && a.id < z.id);
+      const inner = aIn ? a : z, outer = aIn ? z : a;
+      const was = inner.radius;
+      inner.radius = Math.max(keepOut, inner.radius - shove);
+      // whatever the inner could not spend against the keep-out, the outer spends
+      const unspent = shove - (was - inner.radius);
+      // capped at the band's far corner on this bearing's own side: room the
+      // old code took by shifting ox off the bearing, taken here ON it
+      const ceiling = Math.max(reach(outer.angle) + 40,
+        Math.hypot(w / 2 - 60, outer.angle < 0 ? safeTop : safeBottom));
+      outer.radius = Math.min(outer.radius + shove + unspent, Math.max(outer.radius, ceiling));
+      resolve(inner); resolve(outer);
+    }
+    if (!crowded) break;
+  }
+  // last resort, for the BANDED ONLY: two bearings that both yielded to the
+  // same band corner with no radius left to spend slide along the band. A
+  // true bearing is never touched to make room for someone else — the
+  // difference between this and the pass it replaces. The keep-out is
+  // re-asserted, so #427 holds absolutely rather than up to the last pass.
+  const slide = (p, by) => {
+    let ox = p.ox + by;
+    const side = Math.sign(ox) || Math.sign(p.ox) || 1;
+    const clear = Math.sqrt(Math.max(keepOut * keepOut - p.oy * p.oy, 0));
+    if (Math.abs(ox) < clear) ox = side * clear;
+    p.ox = Math.max(-(w / 2) + 60, Math.min(w / 2 - 60, ox));
+  };
+  for (let round = 0; round < 6; round++) {
+    let crowded = false;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      if (!a.banded && !z.banded) continue;
+      const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+      if (gap >= minSep) continue;
+      crowded = true;
+      const shove = (minSep - gap) / (a.banded && z.banded ? 2 : 1);
+      const aLeft = a.ox < z.ox || (a.ox === z.ox && a.id < z.id);
+      const left = aLeft ? a : z, right = aLeft ? z : a;
+      if (left.banded) slide(left, -shove);
+      if (right.banded) slide(right, shove);
+    }
+    if (!crowded) break;
+  }
+  const placed = [...points, ...self].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  placementMemo.set(key, placed);
+  return placed;
+}
+
+function renderGalaxy(settle){
+  for (const old of hero.querySelectorAll(".minisys")) old.remove();
+  const w = hero.clientWidth, h = hero.clientHeight;
+  // +88: the keep-out must clear the constellation's own ring (r 40 around
+  // the anchor), not just its centre point (owner, 2026-08-16).
+  const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
+  // you never see your own constellation — you're inside it
+  const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
+    .filter((p) => !p.isCamera);
+  for (const { id: key, hh, ox, oy, dim } of placed) {
+    const div = document.createElement("div");
+    div.className = "minisys" + (settle ? " settle" : "");
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-label", "Fly to " + hh.name);
+    // The label and its leader always extend AWAY from the dial (owner,
+    // 2026-08-16): left of centre reads leftward, right of centre is the
+    // horizontal mirror. Verbatim from the app (home.behaviour.js).
+    const away = ox > 0;
+    const mx = (x) => (away ? 210 - x : x);
+    const ringX = mx(118);
+    div.style.left = (w / 2 + ox - ringX) + "px";
+    div.style.top = (h / 2 + oy - 95) + "px";
+    div.style.setProperty("--tox", ox + "px");
+    div.style.setProperty("--toy", oy + "px");
+    div.style.opacity = dim;
+    const label = hh.name.toUpperCase();
+    const tw = Math.min(150, label.length * 6.6);
+    // the arrow extends underneath the text, then veers toward the ring
+    const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+    div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
+      <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent)" opacity=".85">${label}</text>
+      <path d="${veer}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+      <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+      <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
+      ${hh.planets.map(([px, py, pr, tok]) =>
+        `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
+    </svg>`;
+    div.addEventListener("click", () => flyTo(key, div));
+    hero.appendChild(div);
+  }
+}
+
+function flyTo(key, mini){
+  if (flying) return;
+  flying = true;
+  const [cx, cy] = GALAXY[camera].pos;
+  const dx = GALAXY[key].pos[0] - cx, dy = GALAXY[key].pos[1] - cy;
+  hero.style.setProperty("--flyx", dx + "px");
+  hero.style.setProperty("--flyy", dy + "px");
+  hero.classList.add("flying");
+  mini.classList.add("target");
+  camera = key;
+  pointSky();               // the starfield streams to the new truth
+  // one continuous motion in two beats that overlap by a breath: the flight
+  // lands the ring centre EXACTLY concentric with the dial's sun, and only
+  // then does the chart grow out of that shared centre — slow and deliberate
+  setTimeout(() => {
+    document.getElementById("dial-name").textContent = GALAXY[key].name;
+    document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
+      (key === "lawson" ? "owner" : "member");
+    hero.classList.add("arriving");   // dial pinned at centre, under the ring
+    mini.classList.add("dissolve");   // the ring hands the centre to the chart
+    const dial = document.querySelector(".dial");
+    dial.style.animation = "none"; void dial.offsetWidth;
+    dial.style.animation = "bloom 2.4s cubic-bezier(.22,.61,.21,1) 1";
+  }, 1120);
+  setTimeout(() => {
+    const wrap = hero.querySelector(".dialwrap");
+    wrap.style.transition = "none";
+    hero.classList.remove("flying");
+    hero.classList.remove("arriving");
+    void wrap.offsetWidth;
+    wrap.style.transition = "";
+    renderGalaxy(true);     // home appears on the reverse bearing of the flight
+    flying = false;
+  }, 1600);
+}
+
+/* ---- starfield: generated, two depth layers ---- */
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+
+function setTheme(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries)
+    if (entry.isIntersecting) entry.target.classList.add("seen");
+}, { threshold: 0.15 });
+for (const group of document.querySelectorAll(".group")) observer.observe(group);
+/* POL-6 + POL-4: callout tooltip and bidirectional highlight */
+const callout = document.createElement("div");
+callout.className = "callout";
+callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
+document.body.appendChild(callout);
+for (const link of document.querySelectorAll(".body-link")) {
+  link.addEventListener("mouseenter", () => {
+    const rect = link.getBoundingClientRect();
+    const dial = document.querySelector(".dial").getBoundingClientRect();
+    const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
+    callout.querySelector("b").textContent = link.dataset.title;
+    callout.querySelector("small").textContent = link.dataset.t + " · " + link.dataset.cost;
+    callout.classList.toggle("side-right", rightSide);
+    callout.classList.toggle("side-left", !rightSide);
+    callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
+    callout.style.right = rightSide ? "" : (innerWidth - rect.left + 34) + "px";
+    callout.style.top = (rect.top - 14) + "px";
+    const docs = link.dataset.docs;
+    callout.classList.toggle("has-docs", Boolean(docs));
+    if (docs) {
+      const chip = callout.querySelector(".chip");
+      chip.textContent = "◆ " + docs + " documents";
+      chip.onclick = () => openDocsByTitle(link.dataset.title);
+    }
+    callout.classList.add("show");
+    document.getElementById(link.dataset.body)?.classList.add("lit");
+    document.querySelector("#" + link.dataset.body)?.classList.add("lit");
+  });
+  link.addEventListener("mouseleave", () => {
+    setTimeout(() => { if (!callout.matches(":hover")) {
+      callout.classList.remove("show");
+      document.querySelector("#" + link.dataset.body)?.classList.remove("lit");
+    }}, 160);
+  });
+}
+for (const item of document.querySelectorAll(".item[id]")) {
+  item.addEventListener("mouseenter", () => {
+    document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.add("lit");
+  });
+  item.addEventListener("mouseleave", () => {
+    document.querySelector('.body-link[data-body="' + item.id + '"]')?.classList.remove("lit");
+  });
+}
+/* POL-5: constellations on section-header hover */
+const homeHeader = [...document.querySelectorAll(".group h3")]
+  .find((h) => h.textContent.includes("Needs attention"));
+if (homeHeader) {
+  homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
+  homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
+}
+function replayArrival(){
+  const dial = document.querySelector(".dial");
+  dial.style.animation = "none"; void dial.offsetWidth;
+  dial.style.animation = "";
+}
+function restoreOrbit(){
+  document.getElementById("b-mot").classList.add("restored");
+  const comet = document.getElementById("comet");
+  comet.classList.remove("fly"); void comet.getBBox; comet.classList.add("fly");
+}
+/* POL-9 */
+function openPalette(open){
+  document.getElementById("palette").classList.toggle("open", open);
+}
+addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+    event.preventDefault(); document.getElementById("explore").focus();
+  }
+});
+function openDocsByTitle(title){
+  callout.classList.remove("show");
+  document.getElementById("docview-title").textContent = title;
+  document.getElementById("docview").classList.add("open");
+}
+callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
+const healthStates = ["healthy","degraded","offline"];
+let healthIndex = 1;
+function applyHealth(){
+  document.body.classList.toggle("health-degraded", healthStates[healthIndex]==="degraded");
+  document.body.classList.toggle("health-offline", healthStates[healthIndex]==="offline");
+  const word = healthStates[healthIndex]==="healthy" ? "status" :
+    healthStates[healthIndex]==="offline" ? "offline" : "degraded";
+  document.querySelector("#edge-health span").textContent = word;
+  if (healthStates[healthIndex]==="healthy") document.getElementById("statusdrawer").classList.remove("open");
+}
+function cycleHealth(){ healthIndex = (healthIndex+1)%3; applyHealth(); }
+applyHealth();
+function toggleAccount(button){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, button){
+  document.documentElement.dataset.theme = name;
+  for (const other of button.parentElement.querySelectorAll("button"))
+    other.setAttribute("aria-pressed", String(other === button));
+}
+function toggleCreate(button){
+  const drawer = document.getElementById("createdrawer");
+  const open = drawer.classList.toggle("open");
+  button.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("create-open", open);
+  button.querySelector("span").textContent = open ? "close" : "create";
+}
+addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("create-open"))
+    toggleCreate(document.getElementById("nstar"));
+});
+/* v17, amended §14: any scroll movement sends every drawer home */
+let lastY = scrollY;
+addEventListener("scroll", () => {
+  if (Math.abs(scrollY - lastY) > 4) {
+    for (const id of ["statusdrawer", "keydrawer"]) {
+      const drawer = document.getElementById(id);
+      if (drawer.classList.contains("open")) {
+        drawer.classList.remove("open");
+        drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
+      }
+    }
+    if (document.body.classList.contains("create-open"))
+      toggleCreate(document.getElementById("nstar"));
+  }
+  lastY = scrollY;
+}, { passive: true });
+
+/* ---- §15/#480: the descent — scroll is altitude ---------------------------
+ * The universal scroll-descent law, read off the scrollbar rather than off a
+ * clock: monotonic by construction, exact at both ends, and identical on the
+ * way back up. Nothing here eases or lerps, because a lag would read as the
+ * backdrop chasing the page rather than the page moving through it.
+ *
+ * The quantity is the same one every sibling descent publishes — --descent, 0
+ * at the dial and 1 once the drop is spent — and what a pack DOES with it is
+ * the pack's own business (retrograde turns its corridor into side grids; see
+ * the pack refresh block in the stylesheet). Parked at the top is not
+ * "descending by zero" but the approved dial screen, so .descending is off
+ * entirely at scroll 0 and not one descent rule is in effect there.
+ */
+function readDescent(){
+  const doc = document.documentElement;
+  const max = Math.max(1, doc.scrollHeight - innerHeight);
+  const s = Math.min(max, Math.max(0, scrollY));
+  /* spent over one viewport of scrolling — or 45% of the page, whichever
+     comes first, so even a short manifest is read in the turned room */
+  const descent = Math.min(1, s / Math.min(innerHeight, max * .45));
+  doc.style.setProperty("--descent", descent.toFixed(4));
+  doc.classList.toggle("descending", s > 0);
+}
+let descentQueued = false;
+addEventListener("scroll", () => {
+  if (descentQueued) return;
+  descentQueued = true;
+  requestAnimationFrame(() => { descentQueued = false; readDescent(); });
+}, { passive: true });
+addEventListener("resize", readDescent);
+readDescent();
+
+/* ---- THE ROW IS THE ITEM (#424, ratified 2026-08-16) ----------------------
+   A manifest row expands IN PLACE to everything Orbit holds about the item.
+   No page navigation: the row IS the destination, which is what CON-5 always
+   meant by the manifest entry being where a dial body carries you.
+
+   THE ADDRESS, which this file can only describe. In the app the browser's
+   address bar updates QUIETLY as a row opens — /home?item=<id>, pushed the
+   first time so BACK closes the row, replaced when you swap straight from one
+   open row to another so Back is never a tour of rows you already read — and
+   opening that address directly loads home scrolled to that row and expanded.
+   The URL is never printed in the interface; the only place it is offered is
+   the copy-link button below. A file:// mockup has no origin and cannot push
+   history meaningfully, so the address behaviour is stated here rather than
+   demonstrated; everything else on this screen is real.
+
+   THE SCROLL. §14 sends every DRAWER home on any scroll movement. This is not
+   a drawer — it is the row, grown — and a full record that vanished the moment
+   you scrolled to read the end of it would be maddening. The expanded row
+   survives scrolling and closes on Back, Escape, a click outside it, or a
+   second click on its own row. */
+function closeItemRow(){
+  for (const open of document.querySelectorAll(".corridor .item.open")) {
+    open.classList.remove("open");
+    open.nextElementSibling?.setAttribute("hidden", "");
+  }
+}
+for (const row of document.querySelectorAll(".corridor .item:not(.suggest)")) {
+  row.addEventListener("click", () => {
+    const view = row.nextElementSibling;
+    const open = row.classList.contains("open");
+    closeItemRow();
+    if (open) return;
+    row.classList.add("open");
+    view?.removeAttribute("hidden");
+  });
+}
+addEventListener("keydown", (event) => { if (event.key === "Escape") closeItemRow(); });
+addEventListener("click", (event) => {
+  if (!event.target.closest(".corridor .item, .itemview")) closeItemRow();
+});
+
+pointSky();
+renderGalaxy(false);
+addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
+</script>
+<script>
+/* ======================================================================
+   THE GALACTIC PLANE — after dark's signature sky (§15, the happy accident)
+
+   Laws honoured (§14/§15):
+   · drift-with-field — the plane is sky, so it drifts with the sky and
+     rides the same camera on a flight. Being the furthest thing there is,
+     it takes the slowest of everything: 1600 units per 620s where the far
+     field takes 400s, and 0.16 of the galaxy delta where the far field
+     takes 0.30. Parallax IS the depth (§14's own words).
+   · dial-view constellations stay still — nothing here touches them.
+   · never-loop — there is no tile. Space along the drift axis is cut into
+     chunks; chunk n of a layer is a pure function of (seed, layer, n), so a
+     chunk is rolled the instant before it is revealed and destroyed for
+     good once it has passed. Nothing ever comes round again. And the
+     centreline OSCILLATES about the sky's mid-line rather than running on
+     a fixed slope, which is what lets an endless stream drift for hours
+     without the band ever wandering out of the frame.
+   · deterministic — no Math.random and no Date.now. The seed is a
+     constant; the DEMOS re-roll steps it through the LCG written below, so
+     every frame in this file can be reproduced exactly.
+   · reduced motion — no rAF, no drift, the opening window held.
+   ====================================================================== */
+(function(){
+  const NS = "http://www.w3.org/2000/svg";
+  const svgel = (n, a) => { const e = document.createElementNS(NS, n);
+                            for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const cam   = document.getElementById("pcam");
+  const drift = document.getElementById("pdrift");
+  const gGlow = document.getElementById("p-glow");
+  const gStar = document.getElementById("p-stars");
+  const gDust = document.getElementById("p-dust");
+  const seedout  = document.getElementById("pseed");
+  const angleout = document.getElementById("pangle");
+
+  /* ---- one seed, an endless stream ------------------------------------ */
+  /* Pinned, not rolled: a mockup that draws a different sky every reload
+     cannot be screenshotted, measured or compared. The app rolls fresh per
+     load (backdrops are alive) and the fixture run pins it — same code,
+     one constant. */
+  const SEED0 = 20260816;
+  let seed = SEED0;
+  const mkRng = (s) => { let x = s % 2147483647; if (x <= 0) x += 2147483646;
+                         return () => (x = (x * 48271) % 2147483647) / 2147483647; };
+  function streamFor(layer, idx){
+    const h = (seed ^ Math.imul(idx + 1, 2654435761) ^ Math.imul(layer + 1, 40503)) | 0;
+    const r = mkRng(Math.abs(h) % 2147483646 + 1); r(); r(); r(); return r;
+  }
+
+  /* ---- 1. THE RIVER: where the plane lies ------------------------------
+     A straight diagonal would be the honest picture of a great circle, and
+     it is unusable: slide an infinite sloped line sideways for long enough
+     and it leaves the sky, taking the pack's signature with it. So the
+     centreline is built from NODES that alternate above and below the sky's
+     mid-line — node k sits at 500 ∓ AMP·(0.55…1) — joined by straight runs
+     with rounded corners. Three things follow, and all three are wanted:
+       · every run is a true diagonal (21°–36° at these constants),
+       · the band crosses the middle of the frame once every NODE units, so
+         it is always THERE, at every offset, forever,
+       · the picture keeps changing — steeper, shallower, bending the other
+         way — without a single repeat.
+     Node y is a pure function of (seed, k), so the line can be evaluated at
+     any x without walking the stream from the beginning: chunks stay
+     independent, which is what makes the windowed discipline possible. */
+  const NODE = 1450, AMP = 520, ROUND = 340, MID = 500;
+  const L_LINE = 7;                       /* the centreline's own layer id */
+  const nodeMemo = new Map();
+  function nodeY(k){
+    if (nodeMemo.has(k)) return nodeMemo.get(k);
+    const r = streamFor(L_LINE, k);
+    const y = MID + ((k & 1) ? 1 : -1) * AMP * (.55 + r() * .45);
+    nodeMemo.set(k, y); return y;
+  }
+  const smooth = (t) => t * t * (3 - 2 * t);
+  /* segment j's straight line, evaluated anywhere (it is extrapolated a
+     little way past its own node so the corners have something to blend) */
+  const seg = (j, x) => { const y0 = nodeY(j), y1 = nodeY(j + 1);
+                          return y0 + (y1 - y0) * (x - j * NODE) / NODE; };
+  function centreY(x){
+    const k = Math.floor(x / NODE), d = x - k * NODE;
+    if (d < ROUND){
+      const w = smooth((d + ROUND) / (2 * ROUND));
+      return seg(k - 1, x) * (1 - w) + seg(k, x) * w;
+    }
+    if (d > NODE - ROUND){
+      const w = smooth((d - (NODE - ROUND)) / (2 * ROUND));
+      return seg(k, x) * (1 - w) + seg(k + 1, x) * w;
+    }
+    return seg(k, x);
+  }
+  /* the local slope, read off the line itself rather than off a constant —
+     every lobe and every dust lane is laid along it, which is what makes
+     the band bend as one piece instead of shearing at the corners */
+  const degAt = (x) => Math.atan((centreY(x + 8) - centreY(x - 8)) / 16) * 180 / Math.PI;
+
+  /* ---- the brightness budget, spelled out where it is spent ------------
+     after dark's --ink-mid is #7c8699 (relative luminance .2364) and the
+     pack's ground is #05070d (.00214), which is 5.49:1. The contrast law
+     wants 4.5:1 over the BRIGHTEST part of the band, and for light ink that
+     is a ceiling on the ground, not a floor: L ≤ (.2864/4.5) − .05 = .0136.
+     MEASURED, then set. With the population hidden the brightest 11x11
+     median of the whole backdrop is L = .0115; with the glow hidden instead
+     it is .00213, the bare ground exactly. That is the finding the whole
+     balance rests on: STARS COST THE GROUND NOTHING — a point source is not
+     the background of a letterform, and an 11x11 median ignores it — so
+     every bit of presence this band can afford is bought in grain and only
+     the last of it in haze. Hence a dense population and a deliberately
+     thin glow, which is also the truer picture of the thing. */
+  const CORE_A = .0320, MID_A = .0180, HALO_A = .0086;
+
+  /* ---- the chunk: one 400-unit slice of river -------------------------- */
+  const CW = 400, AHEAD = 560, BEHIND = 470;
+  const live = new Map();
+  function build(i){
+    const r = streamFor(0, i), x0 = i * CW;
+    const mk = () => svgel("g", { transform:`translate(${x0},0)` });
+    const gg = mk(), gs = mk(), gd = mk();
+
+    /* 2. THE DUST GLOW, in three sizes. The first attempt used a handful of
+       very large lobes and the honest read of it was: a smooth ramp, which
+       is a gradient stripe by another name. The fix is SCALE — the same
+       total light spent across three octaves of lobe, so the wash is
+       mottled at every distance you look at it from: wings you see from
+       across the room, clumps you see at arm's length, knots you only see
+       when you lean in. Rolled largest first so the warm core always lands
+       on top of the cool wings. */
+    const lobe = (n, opts) => {
+      for (let i = 0; i < n; i++){
+        const u = r() * CW, X = x0 + u, cy = centreY(X) + (r() * 2 - 1) * opts.off;
+        gg.appendChild(svgel("ellipse", {
+          cx:u.toFixed(1), cy:cy.toFixed(1),
+          rx:(opts.rx0 + r() * opts.rxd).toFixed(0),
+          ry:(opts.ry0 + r() * opts.ryd).toFixed(0),
+          transform:`rotate(${(degAt(X) + (r() * opts.tilt * 2 - opts.tilt)).toFixed(1)} ${u.toFixed(1)} ${cy.toFixed(1)})`,
+          fill:opts.paint, opacity:(opts.a * (.5 + r() * .9)).toFixed(4) }));
+      }
+    };
+    /* the wings: the diffuse light either side of the plane, cool because
+       the near dust has reddened out of it */
+    lobe(3, { rx0:210, rxd:200, ry0:135, ryd:100, off:126, tilt:5,
+              paint:"url(#pl-cool)", a:HALO_A });
+    /* the body: the river as you see it at a glance */
+    lobe(5, { rx0:120, rxd:150, ry0:42, ryd:48, off:72, tilt:9,
+              paint:"url(#pl-warm)", a:MID_A });
+    /* the knots: star clouds. Small, warm, uneven, and deliberately more of
+       them than the body has — this is what stops the core being one smooth
+       ridge of light down the middle, which is the single thing that gives a
+       painted band away. */
+    lobe(9, { rx0:48, rxd:96, ry0:16, ryd:26, off:46, tilt:16,
+              paint:"url(#pl-warm)", a:CORE_A });
+
+    /* 3. THE POPULATION. The proof that this is a galaxy and not a
+       gradient: ~150 extra stars in every 400 units, roughly 600 more in a
+       window than the base sky carries. Two sub-populations, because that
+       is how the real thing is built — a tight core (three uniforms summed,
+       so the distribution is bell-shaped about the line) and a wide sparse
+       halo that gives the band its soft, undefined edge. Tiny radii, low
+       alphas, dimming outward; a fifth of the core ones warm. */
+    /* 3a. THE GRAIN — the unresolved majority. Sub-pixel, barely there,
+       packed tight to the line: individually invisible, together they are
+       the granular texture that distinguishes a galaxy from a wash. This
+       tier is why the band survives being looked at closely. */
+    for (let k = 0; k < 380; k++){
+      const u = r() * CW, X = x0 + u;
+      const v = 175 * (r() + r() + r() - 1.5) / 1.5;
+      const warm = r() < .40;
+      const c = svgel("circle", {
+        cx:u.toFixed(1), cy:(centreY(X) + v).toFixed(1),
+        r:(.28 + r() * .20).toFixed(2),
+        opacity:(.09 + Math.pow(r(), 1.4) * .21).toFixed(3) });
+      if (warm) c.setAttribute("fill", "var(--plane-star-warm)");
+      gs.appendChild(c);
+    }
+    /* 3b. THE FIELD — the ones you can actually pick out, thinning outward
+       into a wide sparse halo so the band has no edge you could draw. */
+    for (let k = 0; k < 280; k++){
+      const u = r() * CW, X = x0 + u;
+      const core = r() < .74;
+      const v = core ? 210 * (r() + r() + r() - 1.5) / 1.5
+                     : 470 * (r() + r() - 1);
+      const out = Math.min(1, Math.abs(v) / 470);
+      const warm = core && r() < .34;
+      const c = svgel("circle", {
+        cx:u.toFixed(1), cy:(centreY(X) + v).toFixed(1),
+        /* a floor of .38 is not decoration: below about a third of a pixel
+           the antialiaser hands back a grey smudge and the grain is lost,
+           which is precisely how the first pass ended up looking like a
+           gradient. Tiny, yes — invisible, no. */
+        r:(.38 + r() * r() * .78).toFixed(2),
+        opacity:((.18 + Math.pow(r(), 1.25) * .56) * (1 - .35 * out)).toFixed(3) });
+      if (warm) c.setAttribute("fill", "var(--plane-star-warm)");
+      gs.appendChild(c);
+    }
+    /* the handful that resolve. Without these the river is a haze; with
+       them it has grain, and grain is what says "stars" at a glance. */
+    for (let k = 0; k < 14; k++){
+      const u = r() * CW, X = x0 + u;
+      gs.appendChild(svgel("circle", {
+        cx:u.toFixed(1), cy:(centreY(X) + 150 * (r() + r() + r() - 1.5) / 1.5).toFixed(1),
+        r:(.85 + r() * .75).toFixed(2), opacity:(.5 + r() * .36).toFixed(2) }));
+    }
+
+    /* 4. THE DUST LANES. Chains of very flat dark ellipses threading the
+       core at a few degrees to it — real lanes are never quite parallel to
+       the plane. Painted OVER the population, because dust in front of a
+       star field absorbs it; and because they are only a shade under the
+       pack's ground, where they stray off the glow they are all but
+       nothing, which is exactly how they behave in the sky. */
+    for (let n = 0; n < 2; n++){
+      if (r() > .72) continue;
+      const beads = 2 + Math.floor(r() * 3);
+      const v0 = (r() * 2 - 1) * 52, u0 = r() * CW, tilt = r() * 9 - 4.5;
+      for (let b = 0; b < beads; b++){
+        const u = u0 + b * (78 + r() * 96), X = x0 + u;
+        const cy = centreY(X) + v0 + (r() * 2 - 1) * 15;
+        gd.appendChild(svgel("ellipse", {
+          cx:u.toFixed(1), cy:cy.toFixed(1),
+          rx:(78 + r() * 150).toFixed(0), ry:(8 + r() * 15).toFixed(0),
+          transform:`rotate(${(degAt(X) + tilt).toFixed(1)} ${u.toFixed(1)} ${cy.toFixed(1)})`,
+          fill:"url(#pl-dust)", opacity:(.30 + r() * .34).toFixed(2) }));
+      }
+    }
+    return { gg, gs, gd };
+  }
+
+  /* ---- chunks in, chunks gone ------------------------------------------
+     Three parent groups rather than one per chunk, so the paint order is
+     all the glow, then all the stars, then all the lanes. Lobes are wider
+     than a chunk and deliberately overhang it; interleaving them per chunk
+     would draw a seam every 400 units. */
+  function fill(offset){
+    const first = Math.floor((offset - BEHIND) / CW);
+    const last  = Math.floor((offset + 1600 + AHEAD) / CW);
+    for (let i = first; i <= last; i++){
+      if (live.has(i)) continue;
+      const c = build(i); live.set(i, c);
+      gGlow.appendChild(c.gg); gStar.appendChild(c.gs); gDust.appendChild(c.gd);
+    }
+    for (const [i, c] of live)
+      if (i < first || i > last){
+        c.gg.remove(); c.gs.remove(); c.gd.remove();
+        live.delete(i);                                     /* gone for good */
+      }
+  }
+
+  /* ---- the camera: the plane is the furthest thing in the sky ----------
+     The base file points the two star layers at 0.30 and 0.65 of the galaxy
+     delta. The galaxy behind them takes 0.16 — read off the far layer's own
+     rendered transform rather than recomputed, so a flight can never leave
+     the plane pointing somewhere the sky is not. */
+  const PARALLAX = .16 / .30;
+  function planeCam(){
+    const t = document.getElementById("cam-far").style.transform;
+    const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(t);
+    cam.style.transform = m
+      ? `translate(${(+m[1] * PARALLAX).toFixed(1)}px, ${(+m[2] * PARALLAX).toFixed(1)}px)`
+      : "translate(0px, 0px)";
+  }
+  const basePoint = window.pointSky;
+  window.pointSky = function(){ basePoint(); planeCam(); };
+
+  /* ---- the drift: slowest thing on the screen -------------------------- */
+  const SPEED = 1600 / 620;             /* the far field does 1600 / 400 */
+  let t0 = performance.now(), extra = 0;
+  const offsetAt = (now) => still.matches
+    ? extra * SPEED
+    : ((now - t0) / 1000 + extra) * SPEED;
+  function render(off){
+    fill(off);
+    drift.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
+    planeCam();
+  }
+  /* THE PLANE DOES NOT NEED A FRAME CLOCK. It moves 2.58 units a second —
+     at 60Hz that is four hundredths of a pixel per frame, and paying a full
+     repaint of six thousand circles for four hundredths of a pixel is how a
+     backdrop makes a page stutter. Stepping it at ~10Hz moves it a quarter
+     of a pixel at a time, which is well under anything an eye can resolve
+     as a step, and hands five frames in six back to the rest of the screen.
+     The base starfield keeps its own CSS drift at full rate; this is the
+     far layer being far. */
+  const MOVE_MS = 96;
+  let lastSlow = 0, lastMove = -1e9;
+  function step(now){
+    if (now - lastMove >= MOVE_MS){ lastMove = now; render(offsetAt(now)); }
+    if (now - lastSlow > 500){
+      lastSlow = now;
+      /* what the crossing reads as, at the middle of this window */
+      angleout.textContent = Math.abs(degAt(offsetAt(now) + 800)).toFixed(0) + "°";
+    }
+    if (!still.matches) requestAnimationFrame(step);
+  }
+
+  function reset(){
+    for (const [, c] of live){ c.gg.remove(); c.gs.remove(); c.gd.remove(); }
+    live.clear(); nodeMemo.clear();
+    t0 = performance.now();
+    render(offsetAt(t0));
+    seedout.textContent = String(seed);
+    angleout.textContent = Math.abs(degAt(offsetAt(t0) + 800)).toFixed(0) + "°";
+    if (!still.matches) requestAnimationFrame(step);
+  }
+
+  /* the two demo chips. Both are deterministic: the re-roll steps the seed
+     through the LCG below (Numerical Recipes' constants) rather than asking
+     a clock or Math.random, so "plane #N" in the corner is a reproducible
+     address for a picture, and the drift chip simply moves the window on. */
+  window.rerollPlane = function(){
+    seed = ((Math.imul(seed, 1664525) + 1013904223) >>> 0) % 2147483646 + 1;
+    extra = 0; reset();
+  };
+  window.driftPlane = function(){
+    extra += 120;                       /* two minutes further down the stream */
+    if (still.matches) render(offsetAt(0));
+  };
+
+  addEventListener("resize", () => render(offsetAt(performance.now())));
+  still.addEventListener("change", reset);
+  reset();
+})();
+</script>
+</body>
+</html>
