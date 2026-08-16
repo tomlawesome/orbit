@@ -357,3 +357,12 @@ empty at zero entries; green planets exist only when entries are months away
 from needing attention. The mockups' hand-drawn "asteroid field" (and the
 pocket dial's decorative dots) are removed from the designs and the product
 alike — every body drawn is a real item placed by the law.
+
+## 13. The v1 batch is ratified for build (owner, 2026-08-16)
+
+**"Honestly, let's just build them for now. They look great and small front
+end tweaks will be easy to rectify later. We should continue."** The six #452
+proposals — due next, documents, inbox, settings, administration, and the
+pocket's signals surface — are ratified as-is at v1. They are built now, each
+through the fidelity gate like the original eight; visual tweaks arrive later
+as ordinary fix-both changes rather than blocking the build.
