@@ -408,3 +408,6 @@ as ordinary fix-both changes rather than blocking the build.
 - **The corridor spine fades out** (owner, mid-review): the manifest's
   time-spine is right, but its ends fade into the background rather than
   stopping hard; the red zone's edge-line fades in the same way.
+- **Any scroll closes the drawers** (owner, mid-review): the v17 retract only
+  fired scrolling down; scroll movement in either direction now sends every
+  open drawer home.
