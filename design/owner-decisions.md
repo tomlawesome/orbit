@@ -551,6 +551,9 @@ The full open-questions list, walked in order and ruled:
   border, words and number directly on the sky): starburst, the dwell
   over the households that exist, the count fades in then out over
   2–3s, and only then does the "Where do you belong?" card come in.
+  Trimmed and sealed (owner, after seeing it built): the dwell before
+  the count REDUCES BY 1s — everything after shifts earlier with it,
+  the beat's internal rhythm unchanged — "otherwise perfect."
 - **The observatory has failed** (owner, after the second pass): the
   slit/dome-doors concept is retired for settings — two passes could
   not make it earn the screen. Three fresh concepts commissioned in
