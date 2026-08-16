@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — inbox: the relay queue (proposal, issue #452)</title>
+<title>Orbit — inbox</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -112,7 +112,20 @@
   .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue)}
 
-  .page{position:relative;z-index:2;max-width:640px;margin:0 auto;padding:96px 24px 120px}
+  .page{position:relative;z-index:2;max-width:1400px;margin:0 auto;padding:96px 24px 120px}
+  /* §14: three lanes on a desk — Filed → For your review → Still reading /
+     Failed to process — stacking to one column on a narrow viewport. */
+  .lanes{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:26px;align-items:start;margin-top:26px}
+  @media (max-width:1080px){.lanes{grid-template-columns:1fr}}
+  .lanes .group{margin-top:0;margin-bottom:32px}
+  .filed .item{display:flex;align-items:center;gap:12px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);border-radius:12px;
+       padding:11px 13px;margin-bottom:6px;cursor:pointer}
+  .filed .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .filed .item b{display:block;font-size:13px;font-weight:520}
+  .filed .item span{font:10.5px var(--mono);color:var(--ink-mid)}
+  .filed .flex{flex:1;min-width:0}
+  .filed .note{font:10px var(--mono);color:var(--ink-faint);margin-top:10px;line-height:1.9;padding-left:4px}
   header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
   header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
@@ -249,6 +262,17 @@
     <a href="../family/settings-mail.html">your relay →</a>
   </div>
 
+  <div class="lanes">
+  <div class="lane filed">
+    <div class="group"><h3>Filed · 2</h3>
+    <div class="item"><span class="dot" style="background:var(--warm)"></span>
+      <div class="flex"><b>Car MOT — Volvo V60</b><span>from mot-reminder.pdf · added 30 Aug 2025</span></div></div>
+    <div class="item"><span class="dot" style="background:var(--ok)"></span>
+      <div class="flex"><b>Car full service</b><span>from service-invoice-2026.pdf · added 12 Jun</span></div></div>
+    <div class="note">every item the relay has ever fed into your orbit —<br>tap one to open it; its documents ride with it</div>
+    </div>
+  </div>
+  <div class="lane">
   <div class="group">
     <h3>For your review · 1</h3>
     <div class="receipt">
@@ -272,19 +296,21 @@
     </div>
   </div>
 
+  </div><!-- /middle lane -->
+  <div class="lane">
   <div class="group">
     <h3>Still reading</h3>
     <div class="reading">
       <i aria-hidden="true"></i>
       <div class="body">
         <b>A message arrived 4 minutes ago</b>
-        <span>Orbit is reading its document — it will appear above when it’s done</span>
+        <span>Orbit is reading its document — it will appear for review when it’s done</span>
       </div>
     </div>
   </div>
 
   <div class="group">
-    <h3>Arrived, but could not be read</h3>
+    <h3>Failed to process</h3>
     <div class="failed">
       <i aria-hidden="true"></i>
       <div class="body">
@@ -303,6 +329,8 @@
     </div>
   </div>
 
+  </div><!-- /third lane -->
+  </div><!-- /lanes -->
   <div class="retention">unreviewed arrivals burn up after 45 days · originals stay in your mailbox — Orbit only ever reads copies</div>
 
   <div class="quietnote">
@@ -315,7 +343,7 @@
   <span>DEMOS</span>
   <button onclick="document.body.classList.toggle('empty')">empty queue</button>
 </div>
-<footer>orbit · inbox · issue #452 · dashed = not yet in orbit · every failure in plain words · 45-day burn-up is the retention law (#434)</footer>
+<footer>orbit · inbox · three lanes (§14, #472): Filed → for your review → still reading / failed to process · one column on a phone · dashed = not yet in orbit · every failure in plain words · 45-day burn-up is the retention law (#434)</footer>
 
 <script>
 function toggleAccount(orb){

@@ -404,10 +404,35 @@ as ordinary fix-both changes rather than blocking the build.
 - **The inbox is three lanes** (owner, mid-review): "what your mail became"
   is titled **Filed**; on a large screen the inbox runs Filed → For your
   review → Failed to process as three lanes, stacking vertically on mobile.
-  Still reading sits below the for-your-review items.
+  Amended on seeing the v2 mockup: **Still reading lives in the right-hand
+  lane, above Failed to process** (superseding the earlier
+  below-the-review-items placement).
 - **The corridor spine fades out** (owner, mid-review): the manifest's
   time-spine is right, but its ends fade into the background rather than
   stopping hard; the red zone's edge-line fades in the same way.
 - **Any scroll closes the drawers** (owner, mid-review): the v17 retract only
   fired scrolling down; scroll movement in either direction now sends every
   open drawer home.
+- **Still reading lives in the right lane** (owner, on the v2 inbox mockup):
+  above Failed to process — superseding the earlier below-the-review-items
+  placement. Ratified with "inbox looking good in v2"; the three-lane build
+  proceeds from this.
+- **The create screen grows from its centre** (owner, mid-review, mockup
+  first): the create backdrop reads spartan — it should carry the instance's
+  ACTUAL household constellations, display-only, never clickable. The New
+  Entry card sits vertically centred until a document is added, then expands
+  symmetrically up and down as fields are required. Adding a document splits
+  the screen into two lanes: the form slides left, a new card fades in on the
+  right and "Focusing on the anomaly" quietly pulses until a real top-sheet
+  snapshot of the document — an image of its first page — lets the user
+  visually confirm it's the right one at a glance. (The snapshot needs a
+  server ask: no page-one thumbnail rendering exists yet.)
+- **Backdrops are alive, and never the same twice** (owner, mid-review,
+  mockups first): the relay backdrop gets 2–3 satellites — "we're conveying
+  messages after all" — not too big, not too small, placed at random. The
+  same concept applies to every screen: each keeps its own style, but is
+  somewhat random within that style on every load. The instance's own
+  households float in the distance of the backdrops — not necessarily all of
+  them every time. (Build note: the fidelity gate needs a seeded arrangement
+  under fixtures so mockup and app can still be compared; live loads roll
+  fresh.)
