@@ -128,16 +128,6 @@ const SCREENS = [
     settle: () => Boolean(document.querySelector(".item-card .acts button")),
   },
   {
-    name: "due-next",
-    path: "/due-next",
-    stage: "porting",
-    mockup: "/design/v19/due-next.html",
-    /* Settled once the corridor has its rows — the data arrives client-side. */
-    settle: () => document.querySelectorAll(".corridor .item").length > 0,
-    /* The mockup explains its own law to the reviewer; the product does not. */
-    mockupOnly: ["footer"],
-  },
-  {
     name: "administration",
     path: "/administration",
     stage: "porting",
@@ -153,15 +143,6 @@ const SCREENS = [
     mockup: "/design/v19/settings.html",
     /* Settled once the helm has its pack cards — the data arrives client-side. */
     settle: () => document.querySelectorAll(".pack").length > 0 && Boolean(document.querySelector(".memb")),
-    mockupOnly: ["footer"],
-  },
-  {
-    name: "documents",
-    path: "/documents",
-    stage: "porting",
-    mockup: "/design/v19/documents.html",
-    /* Settled once the archive has its rows — the data arrives client-side. */
-    settle: () => Boolean(document.querySelector(".doc .orbitchip")),
     mockupOnly: ["footer"],
   },
   {

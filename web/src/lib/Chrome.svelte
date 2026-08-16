@@ -8,9 +8,9 @@
    */
   let { user = null, role = "", current = "" } = $props();
 
+  /* §14: due-next and documents retired — the manifest is the corridor and
+     the belt is the document surface. */
   const NAV = [
-    ["due-next", "Due next", "/due-next"],
-    ["documents", "Documents", "/documents"],
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],

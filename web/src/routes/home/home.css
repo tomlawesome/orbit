@@ -505,3 +505,38 @@
                 background:none;border:1px solid var(--line);color:var(--ink-mid)}
 .askacts button.yes{color:var(--accent);border-color:var(--accent)}
 .minisys{cursor:pointer}
+
+/* ---- §14 (#469): the manifest IS the corridor ---------------------------
+ * The due-next screen's spine-of-time, transplanted (that screen retires).
+ * An ORDER, not a scale: months are rules, entries sit in date order. */
+.manifest .corridor{position:relative;margin-top:34px;padding-left:46px}
+.manifest .corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
+                  background:var(--chart-line)}
+.manifest .corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
+         background:linear-gradient(180deg,
+           color-mix(in srgb,var(--overdue) 7%, transparent),
+           color-mix(in srgb,var(--overdue) 2%, transparent))}
+.manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
+                 background:var(--overdue);opacity:.55}
+.manifest .corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
+.manifest .corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
+.manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
+                  filter:blur(4px);opacity:.8}
+.manifest .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
+.manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+.manifest .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
+.manifest .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
+.manifest .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
+               border:1px solid var(--chart-ink);background:var(--bg)}
+.manifest .corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
+.manifest .corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
+.manifest .corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+.manifest .corridor .item{position:relative}
+/* the entry's planet sits ON the spine — the same body it is on the dial */
+.manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
+.manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
+                box-shadow:0 0 0 2.5px var(--bg)}
+.manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
+.manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+.manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
+.manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}

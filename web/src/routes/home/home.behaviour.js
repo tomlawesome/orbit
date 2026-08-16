@@ -122,15 +122,18 @@ export function mountHome({ galaxy, primary }) {
 
     /* Two bearings can fold onto the same patch of sky. Separate them by
        pushing one further out and drawing the other closer in — radius only,
-       so both keep their true direction. */
+       so both keep their true direction. The minimum separation scales with
+       the viewport (§14/#473): a wide desk has room to spare, so the sky
+       breathes into it instead of huddling at mockup spacing. */
+    const minSep = Math.max(230, Math.min(340, w * 0.18));
     for (let round = 0; round < 6; round++) {
       for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
         const a = placed[i], z = placed[j];
         const ax = Math.cos(a.angle) * a.radius, ay = Math.sin(a.angle) * a.radius;
         const zx = Math.cos(z.angle) * z.radius, zy = Math.sin(z.angle) * z.radius;
         const gap = Math.hypot(zx - ax, zy - ay);
-        if (gap >= 230) continue;
-        const push = (230 - gap) / 2;
+        if (gap >= minSep) continue;
+        const push = (minSep - gap) / 2;
         const inner = a.radius <= z.radius ? a : z;
         const outer = inner === a ? z : a;
         inner.radius = Math.max(keepOut, inner.radius - push);
@@ -145,8 +148,8 @@ export function mountHome({ galaxy, primary }) {
        north-star create handle, the account row), so it ends sooner. */
     const safeTop = h / 2 - 215, safeBottom = h / 2 - 155;
 
-    for (const { key, hh, dist, angle, radius } of placed) {
-      let ox = Math.cos(angle) * radius, oy = Math.sin(angle) * radius;
+    for (const point of placed) {
+      let ox = Math.cos(point.angle) * point.radius, oy = Math.sin(point.angle) * point.radius;
       /*
        * The one case where the bearing yields (#428 amendment, owner-found
        * twice: a constellation trapped behind the create handle). On a short
@@ -160,8 +163,32 @@ export function mountHome({ galaxy, primary }) {
       const limit = oy < 0 ? safeTop : safeBottom;
       if (Math.abs(oy) > limit) {
         oy = Math.sign(oy) * Math.max(limit, 0);
-        ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(radius * radius - oy * oy, 0));
+        ox = (Math.sign(ox) || 1) * Math.sqrt(Math.max(point.radius * point.radius - oy * oy, 0));
       }
+      point.ox = ox;
+      point.oy = oy;
+    }
+    /*
+     * The clamp can undo the separation (§14/#473, owner screenshot: two
+     * rings interleaved at a band edge) — bearings that yielded to the same
+     * band land on the same patch. One horizontal relax AFTER the clamp:
+     * clamped neighbours slide apart along the band, deterministically,
+     * still on their own side of the sky.
+     */
+    for (let round = 0; round < 4; round++) {
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i], z = placed[j];
+        const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+        if (gap >= minSep) continue;
+        const push = (minSep - gap) / 2;
+        const left = a.ox <= z.ox ? a : z;
+        const right = left === a ? z : a;
+        left.ox = Math.max(-(w / 2) + 60, left.ox - push);
+        right.ox = Math.min(w / 2 - 60, right.ox + push);
+      }
+    }
+
+    for (const { key, hh, dist, ox, oy } of placed) {
       const dim = Math.max(.45, Math.min(.9, 1.05 - dist / 2600));
       const div = document.createElement("div");
       div.className = "minisys" + (settle ? " settle" : "");
@@ -538,27 +565,46 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - (oy < 0 ? 215 : 155))));
       return { id, hh, ox: ox * f, oy: oy * f };
     });
+    /* Separation scales with the viewport (§14/#473) — same law as the
+       member sky's renderGalaxy. */
+    const minSep = Math.max(230, Math.min(340, w * 0.18));
     for (let round = 0; round < 4; round++) {
       for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
         const a = placed[i], z = placed[j];
         let dx = z.ox - a.ox, dy = z.oy - a.oy;
         const d = Math.hypot(dx, dy) || 1;
-        if (d < 230) {
-          const push = (230 - d) / 2;
+        if (d < minSep) {
+          const push = (minSep - d) / 2;
           dx /= d; dy /= d;
           a.ox -= dx * push; a.oy -= dy * push;
           z.ox += dx * push; z.oy += dy * push;
         }
       }
     }
-    for (let { id, hh, ox, oy } of placed) {
-      const lim = oy < 0 ? h / 2 - 215 : h / 2 - 155;
-      if (Math.abs(oy) > lim) {
-        const r = Math.hypot(ox, oy);
-        const side = Math.sign(ox) || 1;
-        oy = Math.sign(oy) * Math.max(lim, 0);
-        ox = side * Math.sqrt(Math.max(r * r - oy * oy, 0));
+    /* Clamp to the bands first, then relax once more horizontally: the clamp
+       can fold separated bearings onto the same band edge (§14/#473). */
+    for (const point of placed) {
+      const lim = point.oy < 0 ? h / 2 - 215 : h / 2 - 155;
+      if (Math.abs(point.oy) > lim) {
+        const r = Math.hypot(point.ox, point.oy);
+        const side = Math.sign(point.ox) || 1;
+        point.oy = Math.sign(point.oy) * Math.max(lim, 0);
+        point.ox = side * Math.sqrt(Math.max(r * r - point.oy * point.oy, 0));
       }
+    }
+    for (let round = 0; round < 4; round++) {
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i], z = placed[j];
+        const gap = Math.hypot(z.ox - a.ox, z.oy - a.oy);
+        if (gap >= minSep) continue;
+        const push = (minSep - gap) / 2;
+        const left = a.ox <= z.ox ? a : z;
+        const right = left === a ? z : a;
+        left.ox = Math.max(-(w / 2) + 60, left.ox - push);
+        right.ox = Math.min(w / 2 - 60, right.ox + push);
+      }
+    }
+    for (const { id, hh, ox, oy } of placed) {
       const away = ox > 0;
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);

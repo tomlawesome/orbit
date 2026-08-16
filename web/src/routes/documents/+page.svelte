@@ -1,4 +1,10 @@
 <script>
+  /*
+   * MOTHBALLED (§14, 2026-08-16): retired from the nav, the dispatcher and
+   * the fidelity gate, kept per the owner's ruling in case a use returns.
+   * Due next lives on as home's manifest (the corridor); documents' job goes
+   * to the belt (#458).
+   */
   import { onMount } from "svelte";
   import { readDocumentsScreen } from "$lib/data/workspace.js";
   import { archiveOf } from "$lib/data/documents.js";
