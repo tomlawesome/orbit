@@ -132,6 +132,8 @@
           .replace(",", "").toUpperCase()
       : "",
   );
+  /* the inbox orb's truth: arrivals awaiting the two-tap */
+  const mailWaiting = $derived(view?.suggestions?.length ?? 0);
   const initials = $derived(
     (view?.user?.displayName ?? "")
       .split(/\s+/)
@@ -280,6 +282,18 @@
 <div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
 
+<!-- §14/#472 (owner-approved): the inbox one click from home — the colour
+     change IS the notification, and the count is real (§12). -->
+<a class="orb inbox-orb" class:waiting={mailWaiting > 0} href="/inbox"
+   title={mailWaiting > 0 ? `Inbox — ${mailWaiting} waiting` : "Inbox"}
+   aria-label={mailWaiting > 0 ? `Inbox — ${mailWaiting} waiting` : "Inbox"}>
+  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <circle cx="9" cy="11" r="2.6" fill="currentColor"/>
+    <path d="M 3 11 A 6 6 0 0 1 15 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65"/>
+    <path d="M 5.4 11 A 3.6 3.6 0 0 1 12.6 11" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".85"/>
+  </svg>
+  {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
+</a>
 <button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
