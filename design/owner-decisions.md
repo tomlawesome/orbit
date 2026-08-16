@@ -386,3 +386,7 @@ as ordinary fix-both changes rather than blocking the build.
 - **Considered, mockups first:** an inbox button next to the menu orb that
   changes colour when something waits; the inbox screen using its left
   section for mail-found items.
+- **Constellations spread out when space allows** (owner, mid-review): rings
+  were overlapping while a laptop/desktop sky had room to spare. Separation
+  scales with the viewport, the universe arrangement stays natural, and
+  bearings remain sacred.
