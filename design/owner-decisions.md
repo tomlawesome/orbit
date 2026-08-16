@@ -573,6 +573,13 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Retrograde: the top grid returns for everyone, and the walls close
+  in** (owner): the ceiling grid is IN on all viewports — the
+  tall-viewport gate goes. As you scroll down, the horizontal grids
+  rotate and align as walls (the corridor-turn, as shipped) — but the
+  walls must stand CLOSER to the manifest items: if they currently
+  come in 1/3 of the gap from the edges toward the manifest, they
+  should come in 2/3 of the gap, on both sides.
 - **Belt: the centred item's documents ride IN the band** (owner):
   when an item seats at the apex, its documents appear as bodies in
   the band beside it — not as a list on the card — made easily seen
