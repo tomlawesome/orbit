@@ -282,6 +282,50 @@ export async function readInboxScreen() {
   };
 }
 
+/**
+ * Everything the archive renders (#462): the workspace, every attached
+ * document (the API only speaks per-item, so the seam fans out over items
+ * that report documents), and the relay's approvable catches. Per-item
+ * failures are additive — a household that can't answer loses its rows, not
+ * the screen.
+ */
+export async function readDocumentsScreen() {
+  const [workspace, session, inbox] = await Promise.all([
+    readWorkspace(),
+    readSession(),
+    readInbox().catch(() => ({ receipts: [] })),
+  ]);
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  const documentsByItem = {};
+  await Promise.all(
+    workspace.households.flatMap((household) =>
+      (household.items ?? [])
+        .filter((item) => (item.documentCount ?? 0) > 0)
+        .map(async (item) => {
+          try {
+            const body = await json(
+              await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+                credentials: "same-origin",
+              }),
+            );
+            documentsByItem[item.id] = body.documents ?? [];
+          } catch {
+            documentsByItem[item.id] = [];
+          }
+        }),
+    ),
+  );
+  return {
+    workspace,
+    primary,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    user: session?.user ?? null,
+    today: todayOf(workspace),
+    receipts: inbox.receipts ?? [],
+    documentsByItem,
+  };
+}
+
 const shortDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 

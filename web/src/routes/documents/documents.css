@@ -1,0 +1,66 @@
+/* Documents — the belt, unrolled (#462), from design/v19/documents.html.
+ * Tokens come from packs.css; everything here is scoped under .archive-page. */
+
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.archive-page *{box-sizing:border-box;margin:0}
+.archive-page{min-height:100vh}
+
+.archive-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.archive-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.archive-page .sky .far{animation:archive-drift 400s linear infinite}
+.archive-page .sky .near{animation:archive-drift 195s linear infinite}
+@keyframes archive-drift{to{transform:translateX(-1600px)}}
+.archive-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .archive-page .vignette,[data-theme=dawn] .archive-page .vignette{background:none}
+
+.archive-page .page{position:relative;z-index:2;max-width:760px;margin:0 auto;padding:96px 24px 120px}
+.archive-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.archive-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+.archive-page .findrow{margin:24px 0 4px}
+.archive-page .findrow input{background:none;border:0;outline:0;width:100%;
+               border-bottom:1px solid var(--line);
+               font:12.5px var(--mono);color:var(--ink);padding:8px 4px;
+               transition:border-color .25s}
+.archive-page .findrow input::placeholder{color:var(--ink-faint)}
+.archive-page .findrow input:focus{border-color:var(--accent)}
+.archive-page .filters{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 8px}
+.archive-page .chip{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+      border:1px solid var(--line);border-radius:99px;padding:6px 14px;cursor:pointer}
+.archive-page .chip:hover{border-color:var(--accent);color:var(--ink)}
+.archive-page .chip[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+.archive-page .facts{display:flex;gap:18px;flex-wrap:wrap;font:11px var(--mono);color:var(--ink-faint);
+       letter-spacing:.06em;margin:18px 0 8px;padding:0 2px}
+.archive-page .facts b{color:var(--ok);font-weight:500}
+
+.archive-page .group{margin-top:28px}
+.archive-page .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+          color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+.archive-page .doc{display:flex;align-items:center;gap:15px;border-radius:14px;
+     padding:13px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
+     background:var(--panel);backdrop-filter:blur(8px);cursor:pointer;
+     color:inherit;text-decoration:none}
+.archive-page .doc:hover{background:var(--panel-raised);border-color:var(--line)}
+.archive-page .doc .thumb{flex:none;width:38px;height:46px;border-radius:6px;position:relative;
+            border:1px solid var(--line);background:var(--panel-raised);
+            display:grid;place-items:center;font:10px var(--mono);color:var(--ink-faint)}
+.archive-page .doc .thumb::before{content:"";position:absolute;left:7px;right:7px;top:9px;height:1px;
+                    background:var(--line);box-shadow:0 5px 0 var(--line),0 10px 0 var(--line-soft),0 15px 0 var(--line-soft)}
+.archive-page .doc .thumb small{position:absolute;bottom:3px;font-size:8px;letter-spacing:.08em}
+.archive-page .doc .body{flex:1;min-width:0}
+.archive-page .doc .body b{display:block;font-size:14px;font-weight:520;font-family:var(--mono)}
+.archive-page .doc .body span{font:11px var(--mono);color:var(--ink-mid)}
+.archive-page .doc .body .clean{color:var(--ok)}
+.archive-page .doc .via{color:var(--accent)}
+.archive-page .orbitchip{flex:none;display:flex;align-items:center;gap:7px;font:11px var(--mono);
+           color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;padding:5px 12px}
+.archive-page .orbitchip i{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.archive-page .orbitchip:hover{border-color:var(--accent);color:var(--ink)}
+.archive-page .orbitchip.loose{border-style:dashed;color:var(--accent)}
+.archive-page .sys{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+.archive-page .nothing{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+@media (prefers-reduced-motion: reduce){
+  .archive-page .sky .far,.archive-page .sky .near{animation:none!important}
+}

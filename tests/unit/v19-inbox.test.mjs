@@ -72,3 +72,52 @@ describe("approvalItemOf", () => {
     expect(item.recurrenceMonths).toBeUndefined();
   });
 });
+
+// #462: the archive — every attached document plus the relay's catches,
+// newest first, grouped by recency against the reckoning date.
+import { archiveOf } from "../../web/src/lib/data/documents.js";
+import { WORKSPACE_FIXTURE, DOCUMENTS_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
+import { INBOX_FIXTURE } from "../../web/src/lib/data/fixtures/inbox.js";
+
+describe("archiveOf", () => {
+  const archive = archiveOf({
+    workspace: WORKSPACE_FIXTURE,
+    receipts: INBOX_FIXTURE.receipts,
+    documentsByItem: DOCUMENTS_FIXTURE,
+    today: "2026-08-13",
+  });
+
+  it("counts the whole belt, loose catches included", () => {
+    expect(archive.total).toBe(5);
+    expect(archive.megabytes).toBe("1.4");
+    expect(archive.allClean).toBe(true);
+  });
+
+  it("groups by recency, newest first, the relay's catch on top", () => {
+    expect(archive.groups.map((group) => [group.label, group.rows.length])).toEqual([
+      ["This month", 1],
+      ["Earlier this year", 4],
+    ]);
+    const loose = archive.groups[0].rows[0];
+    expect(loose.loose).toBe(true);
+    expect(loose.name).toBe("policy-schedule.pdf");
+    expect(loose.suggestion).toBe("Home insurance renewal");
+    expect(loose.viaRelay).toBe(true);
+  });
+
+  it("dresses each attached row in its body's dial colour", () => {
+    const rows = archive.groups[1].rows;
+    expect(rows.map((row) => row.name)).toEqual([
+      "service-checklist.pdf", "service-invoice-2026.pdf", "Service history", "MOT certificate 2025",
+    ]);
+    expect(rows[0].item.band).toBe("ok"); // Car full service, T−161d
+    expect(rows[2].item.band).toBe("due-soon"); // Car MOT, T−16d
+    expect(rows[0].viaRelay).toBe(false); // provenance unknowable for stored docs (#467)
+  });
+
+  it("degrades to an empty archive rather than throwing", () => {
+    const empty = archiveOf({ workspace: null, today: "2026-08-13" });
+    expect(empty.total).toBe(0);
+    expect(empty.groups).toEqual([]);
+  });
+});

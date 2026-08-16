@@ -138,6 +138,15 @@ const SCREENS = [
     mockupOnly: ["footer"],
   },
   {
+    name: "documents",
+    path: "/documents",
+    stage: "porting",
+    mockup: "/design/v19/documents.html",
+    /* Settled once the archive has its rows — the data arrives client-side. */
+    settle: () => Boolean(document.querySelector(".doc .orbitchip")),
+    mockupOnly: ["footer"],
+  },
+  {
     name: "inbox",
     path: "/inbox",
     stage: "porting",
