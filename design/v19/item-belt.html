@@ -1140,10 +1140,16 @@ function buildHaze() {
    passes of falling width. The profile that builds up has no edge at all;
    the band simply stops being there. */
 function paintHaze(ctx) {
+  /* Still a gradient, and deliberately: the fade has come out of it (see THE
+     EDGE FADE below) but the paint path must not change. Skia carries a
+     gradient's premultiplied source at more precision than a flat colour, and
+     eighteen passes at globalAlpha 0.0135 are exactly where that shows —
+     handing the same colour over as a plain string thins the whole band from
+     54/255 to 37/255. So the stops stay; only their alphas go to one. */
   const grad = ctx.createLinearGradient(0, 0, W, 0);
-  for (const [o, a] of [[0, 0], [0.17, 1], [0.83, 1], [1, 0]])
-    grad.addColorStop(o, tint(TONE[2], a));
-  ctx.strokeStyle = grad; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const o of [0, 0.17, 0.83, 1]) grad.addColorStop(o, tint(TONE[2], 1));
+  ctx.strokeStyle = grad;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
   const thick = A * RADIAL * COS_I * 2 + A * HFRAC * SIN_I * 2;
   const passes = 18;
   for (let k = 0; k < passes; k++) {
@@ -1155,6 +1161,64 @@ function paintHaze(ctx) {
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  fadeEdges(ctx);
+}
+
+/* ---- THE EDGE FADE ---------------------------------------------------
+   Owner, 2026-08-16: "Why is there still this discoloured box in either
+   side? I asked for the discolouration to be removed. Though, you could try
+   instead fading the edge to nothing instead.. that might work well."
+
+   The fade to nothing was always meant to be there, but it lived INSIDE the
+   stroke, as an alpha ramp on the stroke's own gradient — and that is what
+   drew the box. Each of the eighteen passes goes down at globalAlpha
+   0.0135, so inside the ramp a pass carries 0.0135 x g, and an 8-bit canvas
+   cannot hold a number that small: below g = 0.145 every pass rounds to
+   nothing at all, and just above it every pass rounds to exactly 1/255. So
+   the wash switched on at a dead-straight vertical line and then sat at a
+   flat 18/255 for the next fifty-odd pixels before the next quantisation
+   step could land — a rectangular slab of even tone with a hard edge onto
+   pure sky. Measured on both flanks at every viewport: at 1280 wide, alpha
+   0 out to x=31, 8 at x=32, then 18 flat from x=34 to x=87.
+
+   So the fade comes out of the stroke and is applied ONCE, to the finished
+   wash, as a destination-out mask. The passes now accumulate at full weight
+   everywhere, which leaves the middle of the band bit-for-bit what it was,
+   and the mask then scales an alpha of ~50 instead of one of ~1: it has
+   fifty steps to spend on the ramp instead of two, so it reads as a fade
+   rather than a slab. It runs on a smoothstep, so even the first step is
+   sub-quantum, and it reaches solid a little INSIDE every bound of the
+   canvas — the glow is already nothing before there is any edge for it to
+   stop at. All four sides, because a short sky clips the wash top and
+   bottom exactly the way a narrow one clips it left and right.
+
+   The rubble is NOT masked. The bodies go on drifting out past the glow and
+   off the world on their own longer fade (fadeIn, below), which is what
+   makes the belt leave the sky instead of ending. */
+const EDGE_IN = 0.012;      /* the wash is already nothing this far in    */
+const EDGE_X = 0.17;        /* ...and at full weight by here. v2's figure */
+const EDGE_Y = 0.10;        /* the sky is shorter than it is wide         */
+const EDGE_STOPS = 24;      /* enough to read as a curve, not a polyline  */
+
+function fadeEdges(ctx) {
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  for (const [across, fade] of [[true, EDGE_X], [false, EDGE_Y]]) {
+    const g = across ? ctx.createLinearGradient(0, 0, W, 0)
+                     : ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "rgba(0,0,0,1)");
+    g.addColorStop(1, "rgba(0,0,0,1)");
+    for (let i = 0; i <= EDGE_STOPS; i++) {
+      const u = i / EDGE_STOPS;
+      const o = EDGE_IN + (fade - EDGE_IN) * u;
+      const e = (1 - u * u * (3 - 2 * u)).toFixed(4);   /* 1 - smoothstep */
+      g.addColorStop(o, `rgba(0,0,0,${e})`);
+      g.addColorStop(1 - o, `rgba(0,0,0,${e})`);
+    }
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
 }
 
 function tint(col, a) {
