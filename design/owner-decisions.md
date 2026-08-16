@@ -576,6 +576,11 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Retrograde trial: bare dial, walls only** (owner): try a version
+  with NO grid on the dial view — no floor, no ceiling at rest — where
+  the only grids are the side walls that rotate in as you scroll down.
+  A trial mockup beside the shipped treatment, not a replacement;
+  the shipped corridor-turn stays ratified until the owner compares.
 - **Belt v4 sealed, one criticism: no discoloured box** (owner: "Belt
   v4 is great, only one criticism left"): the band's glow/haze must
   not read as a discoloured rectangle at the screen edges — the
