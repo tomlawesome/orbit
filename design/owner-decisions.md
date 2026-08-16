@@ -527,6 +527,15 @@ The full open-questions list, walked in order and ruled:
   it's missing something that makes it unmistakably OBSERVATORY DOORS —
   research real observatories for the telling details, and subtly
   name-drop a real one in the background.
+- **The observatory has failed** (owner, after the second pass): the
+  slit/dome-doors concept is retired for settings — two passes could
+  not make it earn the screen. Three fresh concepts commissioned in
+  text; go mad with creativity.
+- **First-run fails at the card** (owner): the create-system card is
+  stuffed full — dense helper prose crowding three simple fields — and
+  it buries the sunrise behind it. Strip it to almost nothing: the
+  fields, the button, air. The launch sky must stay visible through
+  and around it.
 - **The #424/#428 ratifications** (owner): off-screen constellations are
   rejected — the shipped never-on-chart trade stands (crowding accepted
   as the lesser wrong, as long as it functionally works). The expanded
@@ -578,7 +587,18 @@ The full open-questions list, walked in order and ruled:
   ("the rainbow was just a description... I could think of at the
   time") — and real asteroid belts are denser and disorderly: make the
   belt WIDER, more items, a scattered band rather than beads on a line.
-- **Belt, third pass** (owner: "Better... but"): the asteroid belt
+- **The belt corrected: it is an ITEM belt** (owner, superseding the
+  third pass below): #458 was always meant as an alternative way to
+  view the MANIFEST — all the household's items together in the band,
+  with a search box, in chronological order by renewal/required date
+  (direction immaterial; each asteroid sits among its date-neighbours
+  from the linear list). But NOT an orderly line — the items are
+  jumbled around a little within the band, scattered members that
+  happen to run in date order. v2's rock aesthetic was better; the
+  v3 paper-document symbols are hated and dead. Documents belong to
+  the centred item's card, a click away.
+- **Belt, third pass** (owner: "Better... but" — SUPERSEDED above; the
+  "document items" here were a misreading of intent): the asteroid belt
   should be made up of document items — LOTS of them, all over the
   place. The band's ambient population reads as tumbling sheets of
   paper at every attitude, not anonymous rocks and dust; the item's
