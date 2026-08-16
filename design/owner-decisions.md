@@ -543,12 +543,14 @@ The full open-questions list, walked in order and ruled:
   on the labelled sky with every household as sub-systems, the 3s bare
   dwell, then the north star and the centred "where do you belong?"
   card (ask to join, or name your own system) — ships exactly as is,
-  with one amendment (owner, immediately after): the "5 systems
-  discovered in this universe already.." count belongs to the NEWCOMER
-  journey, not the first admin's create screen — a first admin always
-  joins with 0 households, so it would be pointless there. And it is
-  boxless: no card, no border — the words and the big number sit
-  directly on the sky.
+  with one amendment (owner, immediately after): the "N systems
+  discovered in this universe" count belongs to the NEWCOMER journey,
+  not the first admin's create screen — a first admin always joins
+  with 0 households, so it would be pointless there. And it is not a
+  fixture but a MOMENT in the choreography, boxless (no card, no
+  border, words and number directly on the sky): starburst, the dwell
+  over the households that exist, the count fades in then out over
+  2–3s, and only then does the "Where do you belong?" card come in.
 - **The observatory has failed** (owner, after the second pass): the
   slit/dome-doors concept is retired for settings — two passes could
   not make it earn the screen. Three fresh concepts commissioned in
