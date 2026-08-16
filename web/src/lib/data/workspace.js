@@ -247,6 +247,41 @@ export async function readDueNext() {
   };
 }
 
+/**
+ * Everything the inbox screen renders (#463): the raw receipts in their
+ * bounded groups, the approvable ones ALSO in suggestion shape (the approve
+ * protocol's input), the relay summary, and a pinned "now" so elapsed-time
+ * lines hold still under the gate (fixture noon) yet stay live in production.
+ */
+export async function readInboxScreen() {
+  const [workspace, session, inbox, relay] = await Promise.all([
+    readWorkspace(),
+    readSession(),
+    readInbox().catch(() => ({ receipts: [] })),
+    readRelay(),
+  ]);
+  const receipts = inbox.receipts ?? [];
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  const caught = receipts
+    .filter((receipt) => receipt.classification !== "waiting")
+    .map((receipt) => receipt.receivedAt)
+    .sort()
+    .pop() ?? null;
+  return {
+    user: session?.user ?? null,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    primary,
+    today: todayOf(workspace),
+    now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
+    relay,
+    lastCaught: caught,
+    review: receipts.filter((receipt) => receipt.canApprove),
+    reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
+    failed: receiptFailuresOf(receipts),
+    suggestions: receiptSuggestionsOf(receipts),
+  };
+}
+
 const shortDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
