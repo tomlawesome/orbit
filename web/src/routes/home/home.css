@@ -244,6 +244,57 @@
   .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
                   border:1px solid var(--line);background:none;color:var(--ink-mid)}
   .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+
+  /*
+   * THE ROW IS THE ITEM (#424, owner ruling 2026-08-16). The row expands IN
+   * PLACE to everything Orbit holds about the item — no trip to another
+   * screen — and the browser's address bar quietly follows it. Closed, this
+   * renders nothing: the manifest at rest is untouched, which is why the
+   * fidelity gate's first viewport cannot move.
+   *
+   * Nothing here is invented. The open row is the row's own card carried on:
+   * the accent border it already wears when a dial body lights it (POL-4),
+   * with its bottom corners handed to the panel beneath so the two read as
+   * one piece. Inside, the vocabulary is the item view's, which is itself
+   * composed from ratified sources:
+   *   .kv    settings-mail.html's read-only label/value row (via item.css)
+   *   h4     the drawer's quiet label above a group
+   *   .doc   home's own document row, from .docview above
+   *   the small print and the way onward: item.css's .note and .back
+   * Scoped under .itemview so home borrows the grammar without inheriting
+   * item.css, which also carries page-level rules this screen must not have.
+   */
+  .item.open{border-color:var(--accent);background:var(--panel-raised);
+             border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0}
+  .itemview{border:1px solid var(--accent);border-top:0;background:var(--panel-raised);
+            backdrop-filter:blur(8px);border-radius:0 0 14px 14px;
+            padding:2px 18px 16px;margin-bottom:6px;
+            animation:ivopen .3s cubic-bezier(.2,.7,.2,1) 1}
+  @keyframes ivopen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){.itemview{animation:none}}
+  .itemview .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+                color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .itemview .kv:last-of-type{border-bottom:0}
+  .itemview .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .itemview .kv b.over{color:var(--overdue)}
+  .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--ink-faint);margin:18px 0 8px}
+  .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+                 border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+  .itemview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  .itemview p{font-size:13px;color:var(--ink-mid);line-height:1.65}
+  .itemview .ivnote{font:10.5px var(--mono);color:var(--ink-faint);padding:12px 2px;line-height:1.8}
+  .itemview .ivproblem{font:10.5px var(--mono);color:var(--overdue);padding:12px 2px;line-height:1.6}
+  .itemview .ivfoot{display:flex;align-items:center;gap:18px;margin-top:18px}
+  /* The copy-link affordance the owner allowed. It is the ONLY place the
+     address is offered, and it is still never printed: the button says what
+     it does, the URL stays in the clipboard and the browser bar. */
+  .itemview .ivcopy{font:11px var(--mono);color:var(--ink-faint);background:none;border:0;
+                    padding:0;cursor:pointer;letter-spacing:.04em}
+  .itemview .ivcopy:hover{color:var(--accent)}
+  .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
+                    margin-left:auto}
+  .itemview .ivfull:hover{color:var(--accent)}
   svg text{font-family:var(--mono)}
 
   /* overscroll-behavior goes with the light-dismiss rule (owner, 2026-08-14):
