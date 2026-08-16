@@ -10,7 +10,10 @@
   /* The relay's queue in full: what the dish has caught, what Orbit read in
      it, and what it could not read — in plain words. Nothing enters your
      orbit from here without your say-so (#432/#434), and unreviewed arrivals
-     burn up after 45 days. Every state shown is a real bounded state. */
+     burn up after 45 days. Every state shown is a real bounded state.
+     §15: the relay lives in one place — the helm's card. Here it wears a hat,
+     and only when the queue is empty: with nothing to work through, the
+     address IS the call to action. A working queue never carries the bar. */
   :root{
     --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -129,8 +132,10 @@
   header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
   header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
 
-  /* the dish: the relay's live status, condensed from the relay screen */
-  .relaybar{display:flex;align-items:center;gap:16px;margin-top:26px;
+  /* the dish: the relay's live status, condensed from the relay screen.
+     §15 — the relay lives on the helm; here it appears ONLY when the queue is
+     empty, where the address is the call to action (see .quietnote). */
+  .relaybar{display:flex;align-items:center;gap:16px;
             background:var(--panel);backdrop-filter:blur(8px);
             border:1px solid var(--line-soft);border-radius:14px;padding:14px 18px}
   .dish{position:relative;width:34px;height:34px;flex:none}
@@ -214,6 +219,8 @@
   .quietnote{display:none;margin-top:60px;text-align:center}
   .quietnote .dish{margin:0 auto 14px}
   .quietnote p{font:12px var(--mono);color:var(--ink-mid);line-height:2}
+  .quietnote .relaybar{max-width:560px;margin:24px auto 0;text-align:left}
+  .quietnote .relaybar .dish{margin:0}
   body.empty .quietnote{display:block}
   @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>
@@ -252,15 +259,6 @@
     <h1>Inbox</h1>
     <div class="sub">what your relay has caught · nothing enters your orbit without your say-so</div>
   </header>
-
-  <div class="relaybar">
-    <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
-    <div class="alias">
-      <b>tom-k7f2m@in.lawson-home.orbit</b>
-      <span><span class="live">connected · listening</span> · last caught 2d ago</span>
-    </div>
-    <a href="../family/settings-mail.html">your relay →</a>
-  </div>
 
   <div class="lanes">
   <div class="lane filed">
@@ -336,6 +334,14 @@
   <div class="quietnote">
     <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
     <p>the dish is listening — nothing waiting<br>forward a document to your relay address and it lands here</p>
+    <div class="relaybar">
+      <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
+      <div class="alias">
+        <b>tom-k7f2m@in.lawson-home.orbit</b>
+        <span><span class="live">connected · listening</span> · last caught 2d ago</span>
+      </div>
+      <a href="../family/settings-mail.html">your relay →</a>
+    </div>
   </div>
 </div>
 
@@ -343,7 +349,7 @@
   <span>DEMOS</span>
   <button onclick="document.body.classList.toggle('empty')">empty queue</button>
 </div>
-<footer>orbit · inbox · three lanes (§14, #472): Filed → for your review → still reading / failed to process · one column on a phone · dashed = not yet in orbit · every failure in plain words · 45-day burn-up is the retention law (#434)</footer>
+<footer>orbit · inbox · three lanes (§14, #472): Filed → for your review → still reading / failed to process · one column on a phone · dashed = not yet in orbit · every failure in plain words · 45-day burn-up is the retention law (#434) · the relay bar rides with the empty queue only (§15)</footer>
 
 <script>
 function toggleAccount(orb){

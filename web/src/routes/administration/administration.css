@@ -79,6 +79,18 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
            border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
 .mission-page .kv button:hover{border-color:var(--accent);color:var(--accent)}
 
+/* §15: the machinery corner — the relay's instance levers are no longer a
+   panel of their own; they are MAIL MACHINERY, joined to operations in one
+   panel, split by a hairline. Each half keeps its own head and rows. */
+.mission-page .card.wide{grid-column:1 / -1}
+.mission-page .card.machinery{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+.mission-page .card.machinery .half:last-child{padding-left:26px;border-left:1px solid var(--line-soft)}
+@media (max-width:880px){
+  .mission-page .card.machinery{grid-template-columns:1fr;gap:0}
+  .mission-page .card.machinery .half:last-child{padding-left:0;padding-top:22px;margin-top:22px;
+                                   border-left:0;border-top:1px solid var(--line-soft)}
+}
+
 .mission-page .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
 .mission-page .svc i{width:7px;height:7px;border-radius:50%;flex:none}
 .mission-page .svc b{color:var(--ink);font-weight:500;flex:1}

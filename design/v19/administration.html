@@ -7,8 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
-  /* The instance from above: every person, every system, the relay's own
-     levers, and a porthole onto operations. Admins see everything by design
+  /* The instance from above: every person, every system, the mail machinery,
+     and a porthole onto operations. §15 — the relay lives in one place (the
+     helm's card); what stands here is the instance's mail MACHINERY, and it
+     sits with operations in one panel. Admins see everything by design
      (owner ruling §11); owners approve their own joiners, admins can place
      anyone anywhere. Each system's ring wears its REAL due-state dots — the
      same truths its constellation shows on home. */
@@ -177,6 +179,17 @@
              border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
   .kv button:hover{border-color:var(--accent);color:var(--accent)}
 
+  /* §15: the machinery corner — the relay's instance levers are no longer a
+     panel of their own; they are MAIL MACHINERY, joined to operations in one
+     panel, split by a hairline. Each half keeps its own head and rows. */
+  .card.machinery{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+  .card.machinery .half:last-child{padding-left:26px;border-left:1px solid var(--line-soft)}
+  @media (max-width:880px){
+    .card.machinery{grid-template-columns:1fr;gap:0}
+    .card.machinery .half:last-child{padding-left:0;padding-top:22px;margin-top:22px;
+                                     border-left:0;border-top:1px solid var(--line-soft)}
+  }
+
   .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .svc i{width:7px;height:7px;border-radius:50%;flex:none}
   .svc b{color:var(--ink);font-weight:500;flex:1}
@@ -318,22 +331,25 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="cardhead"><h3>The relay · instance</h3></div>
-      <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
-      <div class="kv"><span>ingest</span><b class="on">enabled · polling every 30s</b></div>
-      <div class="kv"><span>address generation</span><span><b>1</b> · current</span><button>rotate every address</button></div>
-      <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
-      <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
-    </div>
+    <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
+    <div class="card wide machinery">
+      <div class="half">
+        <div class="cardhead"><h3>Mail machinery</h3></div>
+        <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
+        <div class="kv"><span>ingest</span><b class="on">enabled · polling every 30s</b></div>
+        <div class="kv"><span>address generation</span><span><b>1</b> · current</span><button>rotate every address</button></div>
+        <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
+        <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
+      </div>
 
-    <div class="card">
-      <div class="cardhead"><h3>Operations</h3><a href="../family/admin.html">open operations →</a></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy · 40s ago</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy · 40s ago</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy · scanning required</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
-      <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running · 12s ago</small></div>
+      <div class="half">
+        <div class="cardhead"><h3>Operations</h3><a href="../family/admin.html">open operations →</a></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy · 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy · 40s ago</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy · scanning required</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
+        <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running · 12s ago</small></div>
+      </div>
     </div>
 
   </div>
@@ -341,7 +357,7 @@
   <div class="strip">ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6 · self-hosted — nothing leaves this machine</div>
 </div>
 
-<footer>orbit · administration · issue #452 · each ring wears its system’s real due-state dots · owners approve their joiners, admins can place anyone (§11)</footer>
+<footer>orbit · administration · issue #452 · each ring wears its system’s real due-state dots · owners approve their joiners, admins can place anyone (§11) · mail machinery sits with operations (§15)</footer>
 
 <script>
 function toggleAccount(orb){

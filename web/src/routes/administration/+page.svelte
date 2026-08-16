@@ -15,7 +15,9 @@
    * /api/admin/users route; ownership, membership counts and join requests
    * are the #453 epic's admin surface and render from the fixture until it
    * lands. Each system's ring wears its REAL due-state dots — the same
-   * truths its constellation shows on home (§12).
+   * truths its constellation shows on home (§12). §15: the relay lives in one
+   * place — the helm's card; what stands here is MAIL MACHINERY, joined to
+   * operations in a single panel.
    */
   let view = $state(null);
 
@@ -154,22 +156,25 @@
         {/each}
       </div>
 
-      <div class="card">
-        <div class="cardhead"><h3>The relay · instance</h3></div>
-        {#each view.relay as [label, value, extra] (label)}
-          <div class="kv"><span>{label}</span>
-            {#if extra === "on"}<b class="on">{value}</b>
-            {:else if extra}<span><b>{value.split(" · ")[0]}</b> · {value.split(" · ")[1]}</span><button>{extra}</button>
-            {:else}<b>{value}</b>{/if}
-          </div>
-        {/each}
-      </div>
+      <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
+      <div class="card wide machinery">
+        <div class="half">
+          <div class="cardhead"><h3>Mail machinery</h3></div>
+          {#each view.relay as [label, value, extra] (label)}
+            <div class="kv"><span>{label}</span>
+              {#if extra === "on"}<b class="on">{value}</b>
+              {:else if extra}<span><b>{value.split(" · ")[0]}</b> · {value.split(" · ")[1]}</span><button>{extra}</button>
+              {:else}<b>{value}</b>{/if}
+            </div>
+          {/each}
+        </div>
 
-      <div class="card">
-        <div class="cardhead"><h3>Operations</h3><a href="/admin">open operations →</a></div>
-        {#each view.services as [tone, name, detail] (name)}
-          <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
-        {/each}
+        <div class="half">
+          <div class="cardhead"><h3>Operations</h3><a href="/admin">open operations →</a></div>
+          {#each view.services as [tone, name, detail] (name)}
+            <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
+          {/each}
+        </div>
       </div>
 
     </div>
