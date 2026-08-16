@@ -10,7 +10,9 @@
 /* ════════════════════════════════════════════════════════════════════════
    ORBIT · v19 · FIRST RUN — "first-run is a launch, not a form" (§15)
 
-   THE RULING THIS FILE IMPLEMENTS (owner, 2026-08-16):
+   THE RULING THIS FILE IMPLEMENTS (owner, 2026-08-16) — note that its first
+   clause, the form sitting ON the login screen, was OVERTURNED in the fourth
+   pass below; everything else in it still stands:
      "the first-run screen was too plain and it doesn't get its own page — it
       sits ON TOP of the login screen, filled out over the login's dawn. No
       reveal until everything is ready: when the user hits enter and the
@@ -56,10 +58,35 @@
         design/v19/home.html's renderGalaxy), every household a sub-system
         with its label and leader, under the question "where do you belong?".
 
+   FOURTH PASS (§15, "the create screen is not 'form over login'", owner:
+   "this is a mess!"), verbatim: "Login button still there, but we must have
+   already logged in to see this screen, Orbit word (and logo maybe?) still up
+   top, after we've already logged in? This is supposed to just be the login
+   screen, no login button, no orbit word, no orbit logo, this little window
+   pops up, the user fills it in, the orbit logo and text reappear and we run
+   the login intro, the only tweak being this time there's no login button as
+   we already passed it, otherwise exactly the same."
+
+   So the "form over login" idea — the whole premise of the first three passes
+   — IS DEAD. The card is reached AFTER authenticating, so while it shows there
+   is no login screen behind it at all: no wordmark, no glyph, no
+   identity-provider button, no footer, and no scrim receding any of them. The
+   DAWN stays, because the dawn is the sky, not login chrome. On submit the
+   orbit logo and wordmark are RECLAIMED over a 620ms hand-over (the card
+   dissolves as they arrive, so the frame the flight lifts from is the ratified
+   login screen), and then the approved intro runs untouched — same T table,
+   same arming, same mark out of the card, same release, same everything — with
+   the identity-provider button, and only that, absent.
+
+   ALSO IN THIS PASS (owner): the newcomer's count beat comes a SECOND EARLIER
+   (9900 rather than 10900), its own rhythm unchanged. See T, below.
+
    SO THIS SHEET HOLDS FIVE SURFACES AND ONE ENGINE:
-     1. the LOGIN screen, reproduced (design/family/login.html) — the base
-        layer, its own dawn, its own lockup, its own gate;
-     2. the FIRST-RUN CARD floating over it, the login receded behind;
+     1. the LOGIN screen, reproduced (design/family/login.html) — its own dawn,
+        its own lockup, its own gate. It is the real screen for the login and
+        logout journeys, and the surface the create path's launch reclaims;
+     2. the CREATE-SYSTEM CARD, standing alone on the dawn with the login
+        screen taken off it entirely (fourth pass);
      3. the FLIGHT — one canvas engine, run UP (4.8s, dawn → dark → home) or
         DOWN (4.1s, the same flight mirrored, dark → dawn → dusk);
      4. the landings — a painted home frame (ascent), staged bare-then-
@@ -224,11 +251,13 @@
   .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
   @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 
-  /* the login's own chrome. When the first-run card is up it is pushed back
-     and out of the card's way — still plainly there, because the ruling is
-     that the form sits ON the login, not instead of it. */
+  /* the login's own chrome: the lockup (glyph + wordmark), the gate, the
+     footer. It is the LOGIN SCREEN, and — since §15's "the create screen is
+     not 'form over login'" — it is not on the screen at the same time as the
+     create card. See the reclaim rules below. */
   .loginchrome{position:absolute;inset:0;z-index:3;
-               transition:opacity .8s ease,transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
+               transition:opacity .8s ease,visibility .8s,
+                          transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
   .lockup{position:absolute;left:0;right:0;top:37vh;text-align:center;
           transform-origin:50% 0;
           transition:transform 1s cubic-bezier(.3,.7,.3,1)}
@@ -245,19 +274,54 @@
   .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
   .below{position:absolute;bottom:4.5vh;left:0;right:0;text-align:center;
          font:10.5px var(--mono);color:#4d5878;letter-spacing:.16em}
-  /* receded: the login is the base layer, dimmed and blurred behind the card */
-  body.showform .loginchrome{opacity:.4;filter:blur(1.5px)}
-  body.showform .lockup{transform:translateY(calc(-37vh + 14px)) scale(.44)}
-  body.showform .gate-wrap{bottom:9vh}
-  body.showform .below{bottom:3.4vh}
-  /* §15 third pass (owner: "can barely see all the good work you did on the
-     sunrise"): the scrim used to be a 70% wash across the middle of the frame,
-     which is exactly where the sun is. It now sits ONLY under the card, high
-     and small, and dies out long before the limb. */
+  /* ── THE RULING (§15, "the create screen is not 'form over login'") ──────
+     Owner, verbatim: "Login button still there, but we must have already
+     logged in to see this screen... This is supposed to just be the login
+     screen, no login button, no orbit word, no orbit logo, this little
+     window pops up, the user fills it in, the orbit logo and text reappear
+     and we run the login intro, the only tweak being this time there's no
+     login button as we already passed it, otherwise exactly the same."
+
+     So: WHILE THE CARD SHOWS, the login chrome is not receded — it is GONE.
+     No wordmark, no glyph, no identity-provider button, no footer. The DAWN
+     stays, because the dawn is the sky, not login chrome.
+
+     `visibility` rides the same transition on purpose. It stops the gate
+     being tabbed to or read out while it is not on the screen, and because
+     CSS resolves visibility to the visible end of a transition immediately,
+     the chrome comes back the instant the launch asks for it and only the
+     opacity takes the time. */
+  /* scoped to #dawn throughout: the dusk goodbye wears the same .loginchrome
+     housing and none of this is its business. */
+  body.showform:not(.reclaimed) #dawn .loginchrome{opacity:0;visibility:hidden;pointer-events:none}
+  /* THE RECLAIM. On submit the orbit logo and wordmark come back — the launch
+     takes the login screen back before it flies it — and from that moment the
+     ratified intro runs unchanged. The one and only difference: the identity
+     provider button NEVER returns. We are already through it.
+
+     It is taken out of the layout rather than faded out, for two reasons: it
+     must never be seen fading, and `display` leaves nothing behind to
+     transition BACK, so the login journey's own gate is instantly whole again
+     the moment a create run is reset. */
+  body.reclaimed #dawn .gate-wrap{display:none}
+  /* the reclaim comes in faster than the chrome's ordinary .8s so that the
+     lockup is fully up and the card is fully gone before the ascent starts:
+     the frame the flight lifts off is the login screen, not a dissolve of two
+     things at once. */
+  body.reclaimed #dawn .loginchrome{transition:opacity .5s ease,visibility .5s}
+  /* and the card hands over as the lockup arrives: it leaves on exactly the
+     styles the ignition already gives it (see body.igniting .card), so the
+     two cross-dissolve and the screen the flight lifts off from is the
+     ratified login screen with the button absent. */
+
+  /* #recede was the scrim that pushed the LOGIN back behind the card. With no
+     login behind the card there is nothing to push back, and a dark smudge on
+     an otherwise clean sky is precisely the chrome the ruling deletes — so it
+     never comes on any more. The element is left in place because the descent
+     and the home frame stack around its z-index. */
   #recede{position:fixed;inset:0;z-index:2;opacity:0;transition:opacity .8s ease;
           background:radial-gradient(ellipse 46% 38% at 50% 29%,
                      rgba(3,5,12,.60) 0%, rgba(3,5,12,.28) 55%, rgba(3,5,12,0) 100%)}
-  body.showform #recede{opacity:1}
 
   /* ══ 2 · THE FIRST-RUN CARD, over the login ══════════════════════════════
      THIRD PASS (owner, §15, verbatim): "First run, fails at the card,
@@ -296,7 +360,11 @@
         box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.03) inset;
         transition:opacity .5s ease .1s,transform .8s cubic-bezier(.4,0,.2,1) .1s,
                    border-color .35s ease,box-shadow .5s ease}
-  body.igniting .card{opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
+  /* `reclaimed` is the create path's hand-over beat and `igniting` is the
+     flight's own: the card leaves on the same curve for both, so the pre-beat
+     runs straight into the ascent with nothing to see at the joint. */
+  body.igniting .card,body.reclaimed .card{
+        opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
   body.arming .card{border-color:var(--accent);
         box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
                    0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
@@ -612,6 +680,12 @@
   /* the mockup's own caption, kept clear of the (now much narrower) card */
   .sheet{position:fixed;left:24px;top:56px;z-index:11;max-width:min(52vw,396px);
          font:10px var(--mono);color:#3c4664;line-height:1.9;pointer-events:none}
+  /* Review furniture, not design. In a narrow window (the owner reviews this
+     at ~610px) the running ledger wraps far enough down the frame to sit on
+     the card it is describing, which is exactly the crowding the fourth-pass
+     ruling is about. The demo chips are needed to drive the sheet; the prose
+     is not, so below the width where it would collide it steps aside. */
+  @media (max-width:900px){ .sheet{display:none} }
 
   /* ══ REDUCED MOTION ══════════════════════════════════════════════════════
      The launch is the one thing on this sheet that cannot simply be slowed
@@ -1066,7 +1140,10 @@
 
 <div class="demos" aria-label="Mockup state demos">
   <span>DEMOS</span>
-  <button id="d-form" aria-pressed="true" onclick="toForm()">form over login</button>
+  <!-- §15: it is not "form over login" any more and never was meant to be —
+       the login screen is gone while this shows. The chip is named for what
+       the state actually is. -->
+  <button id="d-create" aria-pressed="true" onclick="toForm()">create system</button>
   <button id="d-err" aria-pressed="false" onclick="showError()">error state</button>
   <button class="hot" onclick="attempt(true)">LAUNCH</button>
   <button onclick="loginLaunch()">login launch</button>
@@ -1087,7 +1164,9 @@
   second pass · three questions only · logout is the login reversed · the reveal slows ·
   the dwell comes before the instrument · the newcomer lands in the labelled sky<br>
   third pass · the card is the fields, the button and air · the rejection is one line ·
-  the sunrise gets its frame back · the count is a moment in the newcomer's arrival, not a panel
+  the sunrise gets its frame back · the count is a moment in the newcomer's arrival, not a panel<br>
+  fourth pass · <b>not "form over login"</b> — no wordmark, no logo, no button, no footer while the
+  card shows · on submit the logo and word reappear and the ratified intro runs, button alone left out
 </div>
 
 <script>
@@ -1728,21 +1807,26 @@ function dropMark(){
        9400   three seconds later the instrument arrives (1.3s, arrive style)
       11150   the tour pops (first-run only)
 
-     THE NEWCOMER'S EXTRA BEAT (owner, §15 third pass). Nothing above moves;
-     the newcomer's branch simply grows a moment on the end of it:
-      10900   the count fades IN on the bare sky, boxless (0.8s)
-      12900   it fades OUT again (0.8s) — ~2.8s of screen time in all
-      13800   and the question arrives in the space it left                    */
+     THE NEWCOMER'S EXTRA BEAT (owner, §15 third pass), TRIMMED BY A SECOND
+     (owner, later): the waiting before the count was a second too long. The
+     whole tail moves one second earlier and its internal rhythm is untouched
+     — the same 2s hold, the same 0.9s handover to the question. The count now
+     opens WHILE the labelled sky is still arriving (500ms into the 1300ms
+     arrive) rather than 200ms after it has finished. Nothing above it moves:
+     the 3s dwell, the instrument and the tour are exactly where they were.
+       9900   the count fades IN on the settling sky, boxless (0.8s)
+      11900   it fades OUT again (0.8s) — ~2.8s of screen time in all
+      12800   and the question arrives in the space it left                    */
 const T = { warp:200, mark:260, release:430, markOut:1340,
             nameOn:1560, nameOff:2600,
             land:4800, condensed:6400, dwell:3000, instrument:1300,
-            tourGap:450, countGap:200, countHold:2000, countFade:900 };
+            tourGap:450, countGap:500, countHold:2000, countFade:900 };
 T.instrumentAt = T.condensed + T.dwell;                    /*  9400 */
 T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 11150 */
-/* the count starts once the labelled sky has finished arriving */
-T.countOn = T.instrumentAt + T.instrument + T.countGap;    /* 10900 */
-T.countOff = T.countOn + T.countHold;                      /* 12900 */
-T.belongAt = T.countOff + T.countFade;                     /* 13800 */
+/* the count opens over the arriving sky, a second earlier than it did */
+T.countOn = T.instrumentAt + T.countGap;                   /*  9900 */
+T.countOff = T.countOn + T.countHold;                      /* 11900 */
+T.belongAt = T.countOff + T.countFade;                     /* 12800 */
 
 function ascend(withForm, landing){
   clearAll();
@@ -1788,6 +1872,12 @@ function ascend(withForm, landing){
        rather than as a multiplier of whatever the card happens to show. */
     const grow = withForm ? 147 / (src.getBoundingClientRect().width || 28) : 2.6;
     liftMark(src, H * .5, grow, 1080);
+    /* §15: on the create path the lockup has just been reclaimed, so its own
+       glyph goes out as the card's mark lifts — otherwise two marks are on
+       the screen at once. It is the same thing the login intro does to that
+       glyph at this same beat, and dropMark() puts it back either way. */
+    if (withForm && body.classList.contains("reclaimed"))
+      document.querySelector("#login-glyph svg").style.visibility = "hidden";
     body.classList.remove("recede");
   });
   after(T.warp, () => { body.classList.add("showwarp"); startFlight(UP, 1); });
@@ -1895,7 +1985,7 @@ function baseReset(){
   clearAll();
   body.classList.remove("showform", "showdawn", "showhome", "shownew", "showdusk",
                         "showwarp", "igniting", "arming", "descending", "withdrawing",
-                        "farewell", "tour", "grounded", "rejected",
+                        "farewell", "tour", "grounded", "rejected", "reclaimed",
                         "bare", "instrument", "belong", "counting");
   fmark.classList.remove("on", "collapse");
   lname.classList.remove("on");
@@ -1908,21 +1998,45 @@ function toForm(){
   baseReset();
   body.classList.add("showdawn", "showform");
   armedError = false; rejectedName = "";
-  press("d-form", true); press("d-err", false);
+  press("d-create", true); press("d-err", false);
   refresh();
 }
 function toLogin(){
   baseReset();
   body.classList.add("showdawn");
-  press("d-form", false); press("d-err", false);
+  press("d-create", false); press("d-err", false);
 }
 function toHome(instant){
   baseReset();
   body.classList.add("showhome");
-  press("d-form", false); press("d-err", false);
+  press("d-create", false); press("d-err", false);
   if (instant) { /* no arrival fanfare when we are only staging the descent */ }
 }
 function press(id, on){ const b = document.getElementById(id); if (b) b.setAttribute("aria-pressed", String(on)); }
+
+/* ── THE CREATE PATH'S LAUNCH (§15, "the create screen is not 'form over
+     login'"). Owner: "the orbit logo and text reappear and we run the login
+     intro, the only tweak being this time there's no login button as we
+     already passed it, otherwise exactly the same."
+
+     So this is loginLaunch's shape with the gate beat swapped out. The login
+     journey spends 480ms between the gate flashing and ascend() being called;
+     the create journey spends a comparable 620ms RECLAIMING THE LOCKUP — the
+     orbit logo and wordmark fade back onto the sky (0.5s) while the card
+     dissolves off it (0.6s), both finished before the ascent starts, so the
+     screen the flight lifts from IS the ratified login screen with the button
+     absent, which is exactly what the owner described.
+
+     Then ascend(true) is called, unchanged: same T table, same arming, same
+     mark out of the card at 260, same release at 430, same everything. The
+     ONLY difference from the login journey anywhere in the sequence is that
+     the identity-provider button is not on the screen — body.reclaimed keeps
+     it out (see the CSS), because we came through it to get here.           */
+function createLaunch(){
+  lastRun = "form";
+  body.classList.add("reclaimed");
+  after(RM.matches ? 200 : 620, () => ascend(true));
+}
 
 /* ══ the demos ════════════════════════════════════════════════════════════ */
 function loginLaunch(){
@@ -1957,7 +2071,7 @@ function countBeat(){
   baseReset();
   body.classList.add("shownew", "instrument");
   renderNewSky();
-  press("d-form", false); press("d-err", false); press("d-count", true);
+  press("d-create", false); press("d-err", false); press("d-count", true);
   requestAnimationFrame(() => body.classList.add("counting"));
 }
 let lastRun = "form";
@@ -2009,8 +2123,8 @@ function attempt(force){
   if (goBtn.disabled) return;
   body.classList.remove("rejected");
   if (armedError && !force) { after(520, showError); return; }
-  lastRun = "form";
-  ascend(true);
+  /* success, so the login screen comes back and takes us up (§15) */
+  createLaunch();
 }
 function clearError(){
   armedError = false; rejectedName = "";
