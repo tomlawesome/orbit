@@ -6,8 +6,9 @@
   Opaque paper panels with a plate line (no glass, no translucency, no
   blur on paper) · engraving-style hatching where the dark packs use a
   soft shadow · flat ink planets · a gold-leaf sun in a tooled ring ·
-  faint paper grain across the whole ground · the sky ruled as a
-  printed chart rather than dimmed as a night.
+  a milled sheet under all of it — laid grain, tooth, aged mottle and the
+  fall of light across the stock · the sky ruled as a printed chart
+  rather than dimmed as a night.
 
   This file is LOCKED to its pack so it opens in the material being
   proposed. The theme swatches still work, but the other four show
@@ -559,8 +560,13 @@
      ====================================================================== */
   [data-theme=atlas]{
     /* Opaque stock. The old panels were rgba over the ground; paper is not
-       a filter, so the surfaces take flat values and lose their blur. */
-    --panel:#d8d0be; --panel-raised:#e6dfd0;
+       a filter, so the surfaces take flat values and lose their blur.
+       These are PRE-PRESS values: the sheet layers in §6 multiply over
+       everything, so each surface is mixed lighter here by exactly what the
+       material takes back out. What lands on screen is the ratified tone —
+       #c9bfa6 ground, its panels — but arrived at through the paper instead
+       of painted flat. (Owner, 2026-08-16: depth wins; compensate the base.) */
+    --bg:#d3c9b0; --panel:#ded6c3; --panel-raised:#eae4d5;
     --line:#a2957a; --line-soft:#bcb29a;
     /* The engraver's two dilutions of the same ink. */
     --plate:rgba(28,43,74,.32);
@@ -580,15 +586,41 @@
   [data-theme=atlas] .scrim{background:rgba(180,169,142,.55)}
 
   /* 2. The plate line: the rule the copper plate leaves inside the edge of
-     every printed panel. One thin line, set in from the border. */
+     every printed panel. One thin line, set in from the border.
+     2b (2026-08-16): a plate does not just draw, it PRESSES. Each panel now
+     sits a hair below the sheet — the press's top edge caught in shadow, the
+     paper springing back into the light along the bottom — and the plate
+     line itself bleeds one soft band outward into the damp stock. Deboss and
+     bleed are listed first: box-shadow paints in order, so they land on top
+     of the panel fill that carries the line. */
   [data-theme=atlas] :is(.item,.callout,.palette){
-    box-shadow:inset 0 0 0 4px var(--panel),inset 0 0 0 4.7px var(--plate)}
+    box-shadow:
+      0 1px 0 rgba(255,253,244,.55),
+      inset 0 1.6px 1.4px -.8px rgba(28,43,74,.16),
+      inset 0 -1.2px .8px -.6px rgba(255,253,244,.55),
+      inset 0 0 0 4px var(--panel),
+      inset 0 0 0 4.7px var(--plate),
+      inset 0 0 0 5.5px rgba(28,43,74,.085)}
   [data-theme=atlas] .item:hover{
-    box-shadow:inset 0 0 0 4px var(--panel-raised),inset 0 0 0 4.7px var(--plate)}
+    box-shadow:
+      0 1px 0 rgba(255,253,244,.55),
+      inset 0 1.6px 1.4px -.8px rgba(28,43,74,.16),
+      inset 0 -1.2px .8px -.6px rgba(255,253,244,.55),
+      inset 0 0 0 4px var(--panel-raised),
+      inset 0 0 0 4.7px var(--plate),
+      inset 0 0 0 5.5px rgba(28,43,74,.085)}
   [data-theme=atlas] :is(.account,.docview,.drawer-top){
-    box-shadow:inset 0 0 0 7px var(--panel-raised),inset 0 0 0 7.7px var(--plate)}
+    box-shadow:
+      inset 0 1.8px 1.6px -.8px rgba(28,43,74,.16),
+      inset 0 -1.2px .8px -.6px rgba(255,253,244,.5),
+      inset 0 0 0 7px var(--panel-raised),
+      inset 0 0 0 7.7px var(--plate),
+      inset 0 0 0 8.5px rgba(28,43,74,.085)}
   [data-theme=atlas] .drawer{
-    box-shadow:inset 0 0 0 9px var(--panel-raised),inset 0 0 0 9.7px var(--plate)}
+    box-shadow:
+      inset 0 0 0 9px var(--panel-raised),
+      inset 0 0 0 9.7px var(--plate),
+      inset 0 0 0 10.5px rgba(28,43,74,.085)}
 
   /* 3. Hatching instead of soft shadows. Where the dark packs float a
      surface on a blur, the engraver lays parallel lines on the side away
@@ -627,23 +659,92 @@
     box-shadow:0 0 0 .5px rgba(28,43,74,.5)}
 
   /* 5. The sky is a printed chart, not a dimmed night: the plate's own
-     graticule, ruled in the same ink as the stars, holding the field. */
+     graticule, ruled in the same ink as the stars, holding the field.
+     The rules themselves are unchanged in every way that matters — same
+     ink, same 164px pitch, same mask — but they are now read THROUGH a
+     sheet with a tooth in it, so the two alphas are lifted a step (.07→.09,
+     .055→.072) purely to keep the graticule the strongest structure on the
+     ground. The gridlines were right; this is what it costs to keep them. */
   [data-theme=atlas] .sky::before{
     content:"";position:absolute;inset:0;
     background-image:
-      repeating-linear-gradient(90deg,rgba(28,43,74,.07) 0 1px,transparent 1px 164px),
-      repeating-linear-gradient(180deg,rgba(28,43,74,.055) 0 1px,transparent 1px 164px);
+      repeating-linear-gradient(90deg,rgba(28,43,74,.09) 0 1px,transparent 1px 164px),
+      repeating-linear-gradient(180deg,rgba(28,43,74,.072) 0 1px,transparent 1px 164px);
     -webkit-mask-image:radial-gradient(ellipse at 50% 40%,#000 26%,rgba(0,0,0,.4) 72%,transparent 100%);
             mask-image:radial-gradient(ellipse at 50% 40%,#000 26%,rgba(0,0,0,.4) 72%,transparent 100%)}
 
-  /* 6. Paper grain, across the whole ground and everything printed on it —
-     one sheet, one tooth. Multiplied so it darkens rather than fogs. */
-  [data-theme=atlas] body::after{
+  /* 6. THE SHEET (owner, 2026-08-16: "the paper has no grain or depth to it,
+     so it just reads as a block colour with a grid"). One tooth at one scale
+     is what a screen throws away first, so the stock is built the way a real
+     sheet is: four scales stacked, from the metre-wide fall of light down to
+     the tooth you only meet at arm's length. Every layer is FIXED and sits
+     ABOVE the content, because on a printed thing the material is in front of
+     what is printed on it — the ink lies IN the paper, not on a pane over it.
+     All four multiply or overlay; none of them can fog, and none of them can
+     lift the ink off the page. The pre-press tokens above pay the difference. */
+
+  /* 6a. The fall of light — the biggest scale, and the one that stops the
+     ground being a block colour. This is a sheet lit from the top left, NOT
+     a vignette: the light does not care where the viewport's centre is, it
+     just falls across the paper corner to corner, with two slow swells in it
+     the way a sheet that has been handled never lies perfectly flat. */
+  html[data-theme=atlas]::before{
+    content:"";position:fixed;inset:0;z-index:18;pointer-events:none;
+    mix-blend-mode:multiply;
+    background:
+      radial-gradient(78% 62% at 24% 76%, rgba(126,110,78,.075), rgba(126,110,78,0) 72%),
+      radial-gradient(66% 54% at 78% 16%, rgba(126,110,78,.055), rgba(126,110,78,0) 74%),
+      radial-gradient(140% 110% at 6% -14%, #fffdf7 0%, rgba(255,253,247,0) 58%),
+      linear-gradient(153deg, #fffdf7 0%, #f6f0e2 34%, #e7e0d0 72%, #ddd4c0 100%)}
+
+  /* 6b. Aged stock — the long, soft, uneven tone of a sheet that has been in
+     a drawer. Cloudy at 500-odd pixels, so it never registers as pattern:
+     you only notice that no two parts of the ground are quite the same tone.
+     Warmer in the shadows than in the lights (the blue channel gives up
+     first), which is what makes it read as paper rather than as dirt. */
+  html[data-theme=atlas]::after{
+    content:"";position:fixed;inset:0;z-index:19;pointer-events:none;
+    mix-blend-mode:multiply;opacity:.85;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='560'%3E%3Cfilter id='m' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.009' numOctaves='4' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='0.13' intercept='0.87'/%3E%3CfeFuncG type='linear' slope='0.135' intercept='0.865'/%3E%3CfeFuncB type='linear' slope='0.17' intercept='0.83'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='560' height='560' filter='url(%23m)'/%3E%3C/svg%3E");
+    background-size:560px 560px}
+
+  /* 6c. The laid structure — the mould the sheet was made on. Fine laid lines
+     every 3px running with the grain, the chain lines they were bound to
+     every 92px across it (a real mould's spacing; anything tighter reads as
+     woven cloth, which this is not), and between them a long vertical fibre
+     that keeps the ribbing from reading as a screen. This is the layer that says
+     "sheet" rather than "surface": it is only just visible at 1x and
+     unmistakable the moment anyone leans in. */
+  [data-theme=atlas] body::before{
     content:"";position:fixed;inset:0;z-index:20;pointer-events:none;
-    mix-blend-mode:multiply;opacity:.32;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.86' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.55'/%3E%3C/svg%3E");
-    background-size:180px 180px}
-  @media (prefers-reduced-motion:reduce){[data-theme=atlas] body::after{opacity:.26}}
+    mix-blend-mode:multiply;opacity:.85;
+    background-image:
+      repeating-linear-gradient(90deg,rgba(38,52,80,.028) 0 1px,rgba(38,52,80,0) 1px 3px),
+      repeating-linear-gradient(0deg,rgba(38,52,80,.035) 0 1px,rgba(38,52,80,0) 1px 92px),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='460' height='460'%3E%3Cfilter id='f' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.34 0.028' numOctaves='3' seed='23' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='0.17' intercept='0.83'/%3E%3CfeFuncG type='linear' slope='0.175' intercept='0.825'/%3E%3CfeFuncB type='linear' slope='0.19' intercept='0.81'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='460' height='460' filter='url(%23f)'/%3E%3C/svg%3E");
+    background-size:auto,auto,460px 460px}
+
+  /* 6d. The tooth. The old grain was a 1px dither multiplied at .32 — true to
+     paper and invisible on a screen, which is precisely the complaint. It is
+     now coarser (a tooth you can resolve), higher in contrast, and OVERLAID
+     rather than multiplied, so the high points of the sheet catch the light
+     as well as the pits taking ink. Overlay keeps the mean exactly where it
+     was, so this adds texture without adding a single step of darkening. */
+  [data-theme=atlas] body::after{
+    content:"";position:fixed;inset:0;z-index:21;pointer-events:none;
+    mix-blend-mode:overlay;opacity:.68;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='g' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.5' numOctaves='3' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='0.5' intercept='0.25'/%3E%3CfeFuncG type='linear' slope='0.5' intercept='0.25'/%3E%3CfeFuncB type='linear' slope='0.5' intercept='0.25'/%3E%3CfeFuncA type='linear' slope='0' intercept='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23g)'/%3E%3C/svg%3E");
+    background-size:300px 300px}
+
+  /* 7. Ink in the paper, not on it. Restraint: only the two heaviest rules on
+     the page get this, and only by a fraction of a pixel — the chart stays
+     crisp and the dial's law is untouched. What changes is the EDGE: the
+     heaviest strokes soak a whisper into the stock, the way a wet line does.
+     Everything finer than these stays a clean printed hairline. */
+  [data-theme=atlas] .dial [stroke-width="1.5"]{
+    filter:drop-shadow(0 0 .75px rgba(28,43,74,.34))}
+  [data-theme=atlas] .manifest .corridor::before{
+    box-shadow:0 0 1.4px rgba(28,43,74,.45)}
   /* /PACK REFRESH — atlas */
 </style>
 </head>
