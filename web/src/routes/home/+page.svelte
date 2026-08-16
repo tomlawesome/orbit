@@ -216,7 +216,7 @@
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
   <nav>
     <a href="/due-next">Due next</a>
-    <a href="#">Documents</a>
+    <a href="/documents">Documents</a>
     <a href="/inbox">Inbox</a>
     <a href="#">Settings</a>
     <a href="#">Administration</a>
