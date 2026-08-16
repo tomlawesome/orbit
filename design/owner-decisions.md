@@ -573,6 +573,16 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Solarium is a no, and the v1.3.0 roster is FINAL** (owner, "for
+  now, haha!"): the release theme list is star chart, after dark,
+  CLOUDS (cloud sea graduates from a dawn treatment to its own
+  selectable pack), dawn terminator, and retrograde. Solarium joins
+  the records shelf with the other retirees (code and file stay).
+  Consequences: the release ships without a true light pack — ruled
+  and accepted; "dawn" the pack means the terminator treatment (its
+  post-fix form is hereby confirmed in); clouds needs pack tokens, its
+  own custom symbols (every-theme-owns-symbols law) and its
+  through-the-deck descent ported app-side.
 - **Miami is ruled: day drops, dusk keeps on file** (owner): Miami day
   is dropped outright. Miami dusk stays on file as a record — "it's a
   no for now" — not in the release, not built, revisitable. Neither
