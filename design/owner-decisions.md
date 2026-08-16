@@ -509,6 +509,48 @@ The full open-questions list, walked in order and ruled:
   further: from the lighter colour at the top down to the pinky-orange
   that sits at the bottom of the dial screen. The deep manifest reads
   over warm surface light, not sky.
+- **The launch, second pass** (owner: "a great first pass! I love it"):
+  logout is a DIRECT REVERSAL of login — the same flight backwards, not
+  a bespoke quieter descent. The bloom at the end becomes a slower, more
+  careful reveal (extend the time as needed). The 3-second dwell comes
+  BEFORE the dial lines or any annotations: the arrival settles on just
+  the planet symbols and the centre sun — no dial rings, no inbox orb,
+  no menu, no search box — dwells there, and only then does the
+  instrument draw in. And the non-admin newcomer (not the first user)
+  gets the same login launch, settling on the dial screen with NO dial
+  and every household as sub-systems, under the question "Where do you
+  belong?"
+- **Hanami is dropped** (owner: "still sucks"): the washi-and-blossom
+  direction ends; the v2 file stays as the record. In its place, the
+  Miami Beach concept (#438) goes for a spin — a light form (sun-bleached
+  sand and stucco, turquoise structure, coral accent, engraved treatment
+  per #426) and a dusk form (deep ocean indigo, neon coral and aqua,
+  visibly its own thing rather than retrograde re-neoned). Ground first;
+  the §15 symbols and scroll-descent laws apply to both.
+- **First-run asks three things only** (owner): the first user ever — the
+  admin — gives the first system's name, the time zone and the currency.
+  Nothing else: sections auto-populate from the defaults, changeable on
+  the household screen after the tour. The "you are not the first here"
+  notice becomes a see-through card OFF TO THE LEFT with a BIG number —
+  "5 systems discovered in this universe already.." — the number real,
+  and shown only once the first admin exists. A non-admin newcomer gets
+  the card in the MIDDLE — "Where do you belong?" — choosing one of the
+  households to ask to join, or the option to name their own system;
+  options kept similarly thin, the rest changeable in settings later.
+- **The observatory becomes the slit itself** (owner, rejecting the
+  polished room as "clunky and clumsy — the basic premise feels like it
+  could have real impact but..."): the left and right sides of the
+  SCREEN are the shutters, their inner edges near the edges of the
+  settings cards; the backdrop behind the cards is the starfield — you
+  are looking out of the slit. ALL the linework goes: no instrument, no
+  setting circles, no ribs, no log.
+- **Belt, second pass** (owner: "GREAT first pass. But..."): the actual
+  CARD rides in the belt — no crown asteroid standing in for it; the
+  card moves up and sits in the belt itself, with the arc reaching its
+  apex at the centre of the screen. The arc is not a literal semicircle
+  ("the rainbow was just a description... I could think of at the
+  time") — and real asteroid belts are denser and disorderly: make the
+  belt WIDER, more items, a scattered band rather than beads on a line.
 - **The belt is a rainbow, and the card rides in it** (owner, correcting
   the #458 shape): the documents do NOT orbit the item card. The
   documents nestle in a rainbow-shaped belt — an arc of asteroids — and
