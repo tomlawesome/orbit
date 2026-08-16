@@ -12,6 +12,7 @@ const V19_PAGES = new Set([
   "/due-next",
   "/documents",
   "/inbox",
+  "/administration",
   "/create",
   "/login",
   "/logout",

@@ -138,6 +138,15 @@ const SCREENS = [
     mockupOnly: ["footer"],
   },
   {
+    name: "administration",
+    path: "/administration",
+    stage: "porting",
+    mockup: "/design/v19/administration.html",
+    /* Settled once mission control has people and systems — client-side data. */
+    settle: () => Boolean(document.querySelector(".person")) && Boolean(document.querySelector(".system svg")),
+    mockupOnly: ["footer"],
+  },
+  {
     name: "settings",
     path: "/settings",
     stage: "porting",
