@@ -520,6 +520,13 @@ The full open-questions list, walked in order and ruled:
   gets the same login launch, settling on the dial screen with NO dial
   and every household as sub-systems, under the question "Where do you
   belong?"
+- **The slit, second pass** (owner: "I like it! But—"): REVERSE the
+  scroll — start more open, CLOSE UP as you scroll down. The doors must
+  not be straight verticals: real observatory domes have curved,
+  spherical shutter forms — reflect that for intrigue and depth. And
+  it's missing something that makes it unmistakably OBSERVATORY DOORS —
+  research real observatories for the telling details, and subtly
+  name-drop a real one in the background.
 - **The #424/#428 ratifications** (owner): off-screen constellations are
   rejected — the shipped never-on-chart trade stands (crowding accepted
   as the lesser wrong, as long as it functionally works). The expanded
