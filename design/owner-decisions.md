@@ -401,3 +401,7 @@ as ordinary fix-both changes rather than blocking the build.
   starfield** (bolder chart-in-progress); **settings and admin try totally
   new ideas** — a charting / tool / spaceship / observatory vibe, classy
   and elegant, never tacky.
+- **The inbox is three lanes** (owner, mid-review): "what your mail became"
+  is titled **Filed**; on a large screen the inbox runs Filed → For your
+  review → Failed to process as three lanes, stacking vertically on mobile.
+  Still reading sits below the for-your-review items.
