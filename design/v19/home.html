@@ -105,13 +105,18 @@
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
     --line:#1d4a5a; --line-soft:#12303c;
-    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    /* The §15 refresh, ratified in full (owner, 2026-08-16, #480): the mid-ink
+       family lifts together so secondary copy stops sinking into the teal
+       murk, and --bloom is the one dilution of the accent the pack may light
+       things with. Carried from web/src/lib/packs.css, literally. */
+    --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
     --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
     --degraded:#ff9f1c;
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     /* The chart is the grid: cyan rules on black, the way the era drew it. */
-    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+    --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
     /* The eighties go into the planets themselves: neon green, acid yellow,
        hot coral, electric turquoise. The gloss stays — chrome and neon. */
     --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
@@ -415,7 +420,9 @@
      unmistakable, and everything beneath dims behind a scrim */
   .drawer-top.open .nstar{background:var(--panel-raised);border:1px solid var(--line);
                           border-top:0;border-radius:0 0 14px 14px}
-  .drawer-top.open .nstar .glint path{fill:var(--accent)}
+  /* Named for the classic mark rather than for any glint: retrograde's beacon
+     is a wireframe, and filling its paths would solder it shut (§15/#480). */
+  .drawer-top.open .nstar .classic path{fill:var(--accent)}
   .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
          backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
   body.create-open .scrim{opacity:1;pointer-events:auto}
@@ -563,6 +570,175 @@
   @media (prefers-reduced-motion: reduce){
     .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
   }
+
+  /* ======================================================================
+     PACK REFRESH — RETROGRADE (§15, #480). The treatment the owner ratified
+     in full; design/v19/pack-retrograde-refresh.html is the spec it comes
+     from and stays as the reference. Three signatures plus the descent, and
+     every one of them scoped to the pack: the other four packs read this
+     file exactly as they did. Mirrored, line for line, in the app's
+     web/src/routes/home/home.css — this is one treatment in two places.
+     ====================================================================== */
+
+  /* 1. THE HORIZON GRID — the structural signature, low in the SKY layer and
+     nowhere else. Perspective rules receding to a horizon a little below the
+     dial: cyan, faint, the era's one honest piece of geometry. Painted by
+     .sky's own ::before, so it sits UNDER the starfield svg — the stars still
+     own the sky and the grid is the ground they end at. */
+  [data-theme=retrograde] .sky{overflow:hidden}
+  [data-theme=retrograde] .sky::before{
+    content:"";position:absolute;left:-60%;right:-60%;bottom:0;height:64vh;
+    background-image:
+      repeating-linear-gradient(90deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
+      repeating-linear-gradient(180deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
+    transform:perspective(520px) rotateX(68deg);transform-origin:50% 100%;
+    opacity:.38;
+    -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 20%);
+            mask-image:linear-gradient(180deg,transparent 0%,#000 20%)}
+  /* the air just above the horizon, so the grid arrives out of something */
+  [data-theme=retrograde] .sky::after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:34vh;
+    background:linear-gradient(0deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+
+  /* 2. THE MIRRORED CEILING — the same plane overhead, so the screen sits
+     inside a corridor rather than on a floor. Deliberately the quieter half:
+     the floor is the signature and the ceiling only answers it, so the
+     geometry is the exact mirror but the opacity is roughly two-thirds, the
+     far edge is masked out earlier, and the verticals are sparser while the
+     rungs are firmer (a ceiling seen only from its far half reads as stray
+     rays unless the rungs carry it).
+
+     GATED, NOT SHRUNK (owner, 2026-08-16). The exploration self-scaled the
+     plane's depth to whatever sky the dial left clear, and the honest read of
+     that was: it sings on a tall viewport, reads as faint rays at 900px, and
+     earns nothing below 800. So the ruling is a gate rather than a dimmer —
+     short screens get the floor alone and the ceiling arrives whole, at the
+     depth the owner approved, only where there is room for it. */
+  .ceiling{display:none}
+  @media (min-height:800px){
+    [data-theme=retrograde] .ceiling{display:block;position:absolute;
+      left:0;right:0;top:0;height:30vh;
+      background:linear-gradient(180deg,rgba(45,226,230,.075) 0%,
+        rgba(255,79,216,.035) 46%,transparent 100%)}
+    [data-theme=retrograde] .ceiling::before{
+      content:"";position:absolute;left:-60%;right:-60%;top:0;height:62vh;
+      background-image:
+        repeating-linear-gradient(90deg,transparent 0 128px,rgba(45,226,230,.55) 128px 129px),
+        repeating-linear-gradient(180deg,transparent 0 52px,rgba(45,226,230,.78) 52px 53px);
+      transform:perspective(520px) rotateX(-68deg);transform-origin:50% 0;
+      opacity:.26;
+      -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%);
+              mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%)}
+  }
+
+  /* 3. RESTRAINED BLOOM — on ACCENT elements only. Not on the greens, not on
+     the reds, not on the ink: one colour is allowed to be lit, which is what
+     keeps neon classy instead of a light show. Small radius, low alpha, no
+     animation, and every radius spends the one --bloom the pack defines. */
+  [data-theme=retrograde] :is(.manifest .corridor .today span,.suggest .body span,
+    .palette .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
+    text-shadow:0 0 9px var(--bloom)}
+  [data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
+  [data-theme=retrograde] .celestial polyline,
+  [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
+  [data-theme=retrograde] :is(.inbox-orb.waiting,.suggest button.yes){
+    box-shadow:0 0 12px -2px var(--bloom)}
+  [data-theme=retrograde] .inbox-orb.waiting .count{box-shadow:0 0 9px var(--bloom)}
+  [data-theme=retrograde] .manifest .corridor .today .rule{box-shadow:0 0 8px var(--bloom)}
+  [data-theme=retrograde] .manifest .corridor .planet.sug i{
+    box-shadow:0 0 8px -1px var(--bloom)}
+
+  /* 4. THE NORTH STAR, REDRAWN FOR THE ERA. Same place, same size territory,
+     same job — CON-12's create handle — but in this pack the soft four-point
+     glint becomes a neon wireframe diamond: pure linework, no fills and no 3D
+     gradient, one cyan-to-magenta edge running top to bottom so the downward
+     vertex is the create colour and the mark points at the drawer it pulls.
+     The two reticle ticks hold the horizontal width the old glint had, so the
+     silhouette still reads as a beacon at a glance. The classic glint stays up
+     in the other four packs — only one form is ever rendered. */
+  .nstar .tron{display:none}
+  [data-theme=retrograde] .nstar .classic{display:none}
+  [data-theme=retrograde] .nstar .tron{display:block;
+    filter:drop-shadow(0 0 3px var(--bloom))}
+  [data-theme=retrograde] .drawer-top.open .nstar .tron :is(path,line){
+    stroke:var(--accent)}
+
+  /* 5. THE CORRIDOR TURNS (owner, 2026-08-16) — retrograde's answer to the
+     universal scroll-descent law. The other packs drop THROUGH their sky;
+     this one is a room, so the room rotates around you instead. As you come
+     down off the dial the floor and the ceiling roll away to edge-on and two
+     vertical grid planes roll in from the sides to flank the manifest, fading
+     out at the inner edge nearest the reading column. It is a quarter turn
+     about the line of sight, spent over the same run of scroll the family
+     uses.
+
+     One position drives it, read straight off the scrollbar — no clock, so
+     there is nothing to loop and nothing to catch up with:
+       --descent  0 at the dial, 1 once the room has finished turning
+     And, exactly as the sibling descents do, at scroll 0 not one rule below is
+     in effect at all: they all hang off .descending, which the scroll handler
+     only puts on the document while the scrollbar is off the top. The first
+     viewport is left literally alone rather than merely left at zero. */
+  :root{--descent:0}
+  .wall{display:none}
+  [data-theme=retrograde].descending .sky::before{
+    transform:perspective(520px) rotateX(calc(68deg + var(--descent) * 22deg));
+    opacity:calc(.38 * (1 - var(--descent)))}
+  [data-theme=retrograde].descending .sky::after{opacity:calc(1 - var(--descent))}
+  [data-theme=retrograde].descending .ceiling::before{
+    transform:perspective(520px) rotateX(calc(-68deg - var(--descent) * 22deg));
+    opacity:calc(.26 * (1 - var(--descent)))}
+  [data-theme=retrograde].descending .ceiling{opacity:calc(1 - var(--descent))}
+  /* the side planes are the floor's own construction rotated a quarter turn:
+     the element carries the air, the ::before carries the grid, and the two
+     repeating gradients simply swap jobs — the 96px rules become the
+     converging rails and the 76px rules become the rungs. They start edge-on
+     (90deg, which is nothing at all) and open to the floor's own 68deg. */
+  [data-theme=retrograde].descending .wall{display:block;position:absolute;
+    top:0;bottom:0;width:34vh}
+  [data-theme=retrograde].descending .wall.wl{left:0}
+  [data-theme=retrograde].descending .wall.wr{right:0}
+  [data-theme=retrograde].descending .wall::after{
+    content:"";position:absolute;inset:0;opacity:var(--descent)}
+  [data-theme=retrograde].descending .wall.wl::after{
+    background:linear-gradient(90deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+  [data-theme=retrograde].descending .wall.wr::after{
+    background:linear-gradient(270deg,rgba(45,226,230,.11) 0%,
+      rgba(255,79,216,.05) 44%,transparent 100%)}
+  [data-theme=retrograde].descending .wall::before{
+    content:"";position:absolute;top:-60%;bottom:-60%;width:64vh;
+    background-image:
+      repeating-linear-gradient(180deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
+      repeating-linear-gradient(90deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
+    opacity:calc(.38 * var(--descent))}
+  [data-theme=retrograde].descending .wall.wl::before{left:0;
+    transform:perspective(520px) rotateY(calc(90deg - var(--descent) * 22deg));
+    transform-origin:0 50%;
+    -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 80%,transparent 100%);
+            mask-image:linear-gradient(90deg,#000 0%,#000 80%,transparent 100%)}
+  [data-theme=retrograde].descending .wall.wr::before{right:0;
+    transform:perspective(520px) rotateY(calc(-90deg + var(--descent) * 22deg));
+    transform-origin:100% 50%;
+    -webkit-mask-image:linear-gradient(270deg,#000 0%,#000 80%,transparent 100%);
+            mask-image:linear-gradient(270deg,#000 0%,#000 80%,transparent 100%)}
+  /* Reduced motion. The turn is a POSITION, not an animation — freezing it
+     would leave the reader under a corridor the page has already left — so
+     the cross-fade still tracks the scrollbar. What goes is the flourish: the
+     planes hold the angles they rest at instead of swinging through the
+     quarter turn. */
+  @media (prefers-reduced-motion: reduce){
+    [data-theme=retrograde].descending .sky::before{
+      transform:perspective(520px) rotateX(68deg)}
+    [data-theme=retrograde].descending .ceiling::before{
+      transform:perspective(520px) rotateX(-68deg)}
+    [data-theme=retrograde].descending .wall.wl::before{
+      transform:perspective(520px) rotateY(68deg)}
+    [data-theme=retrograde].descending .wall.wr::before{
+      transform:perspective(520px) rotateY(-68deg)}
+  }
+  /* /PACK REFRESH — retrograde */
 </style>
 </head>
 <body>
@@ -571,6 +747,13 @@
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
+  <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
+       own ::before so it stays under the starfield; the ceiling answers it on
+       tall viewports; and the two side planes are what the pair turns into as
+       the reader descends to the manifest. Inert in every other pack. -->
+  <div class="ceiling" aria-hidden="true"></div>
+  <div class="wall wl" aria-hidden="true"></div>
+  <div class="wall wr" aria-hidden="true"></div>
 </div>
 <div class="vignette" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
@@ -601,7 +784,8 @@
     <span>THEME</span>
     <button style="background:#070d1f" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
-    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <!-- atlas is retired from the release roster (§15, owner): its pack still
+         exists and still renders if forced, but it is no longer offered. -->
     <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
     <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
   </div>
@@ -626,11 +810,32 @@
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit"
           onclick="toggleCreate(this)">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <g class="glint" style="transform-origin:0 0">
+      <defs>
+        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--upcoming)"/>
+          <stop offset=".55" stop-color="var(--upcoming)"/>
+          <stop offset="1" stop-color="var(--accent)"/>
+        </linearGradient>
+      </defs>
+      <!-- the mark has two forms and only one is ever up: the four-point glint
+           every pack has always had, and retrograde's neon wireframe beacon
+           (§15/#480). The pack chooses between them in CSS. -->
+      <g class="glint classic" style="transform-origin:0 0">
         <circle r="9" fill="var(--ink)" opacity=".12"/>
         <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
               fill="var(--ink)" opacity=".9"/>
         <circle r="2" fill="var(--ink)"/>
+      </g>
+      <g class="glint tron" style="transform-origin:0 0">
+        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
+        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
+              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
+        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
+              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
+        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
+          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
+          <line x1="10" y1="0" x2="13.4" y2="0"/>
+        </g>
       </g>
     </svg>
     <span>create</span>
@@ -1320,6 +1525,38 @@ addEventListener("scroll", () => {
   }
   lastY = scrollY;
 }, { passive: true });
+
+/* ---- §15/#480: the descent — scroll is altitude ---------------------------
+ * The universal scroll-descent law, read off the scrollbar rather than off a
+ * clock: monotonic by construction, exact at both ends, and identical on the
+ * way back up. Nothing here eases or lerps, because a lag would read as the
+ * backdrop chasing the page rather than the page moving through it.
+ *
+ * The quantity is the same one every sibling descent publishes — --descent, 0
+ * at the dial and 1 once the drop is spent — and what a pack DOES with it is
+ * the pack's own business (retrograde turns its corridor into side grids; see
+ * the pack refresh block in the stylesheet). Parked at the top is not
+ * "descending by zero" but the approved dial screen, so .descending is off
+ * entirely at scroll 0 and not one descent rule is in effect there.
+ */
+function readDescent(){
+  const doc = document.documentElement;
+  const max = Math.max(1, doc.scrollHeight - innerHeight);
+  const s = Math.min(max, Math.max(0, scrollY));
+  /* spent over one viewport of scrolling — or 45% of the page, whichever
+     comes first, so even a short manifest is read in the turned room */
+  const descent = Math.min(1, s / Math.min(innerHeight, max * .45));
+  doc.style.setProperty("--descent", descent.toFixed(4));
+  doc.classList.toggle("descending", s > 0);
+}
+let descentQueued = false;
+addEventListener("scroll", () => {
+  if (descentQueued) return;
+  descentQueued = true;
+  requestAnimationFrame(() => { descentQueued = false; readDescent(); });
+}, { passive: true });
+addEventListener("resize", readDescent);
+readDescent();
 
 /* ---- THE ROW IS THE ITEM (#424, ratified 2026-08-16) ----------------------
    A manifest row expands IN PLACE to everything Orbit holds about the item.

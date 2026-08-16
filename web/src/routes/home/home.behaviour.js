@@ -394,6 +394,38 @@ export function mountHome({ galaxy, primary }) {
     lastY = scrollY;
   }, { passive: true });
 
+  /* ---- §15/#480: the descent — scroll is altitude ------------------------
+   * The universal scroll-descent law, read off the scrollbar rather than off a
+   * clock: monotonic by construction, exact at both ends, and identical on the
+   * way back up. Nothing here eases or lerps, because a lag would read as the
+   * backdrop chasing the page rather than the page moving through it.
+   *
+   * The quantity is the same one every sibling descent publishes — --descent,
+   * 0 at the dial and 1 once the drop is spent — and what a pack DOES with it
+   * is the pack's own business (retrograde turns its corridor into side grids;
+   * see home.css). Parked at the top is not "descending by zero" but the
+   * approved dial screen, so .descending is off entirely at scroll 0 and not
+   * one descent rule is in effect there.
+   */
+  const doc = document.documentElement;
+  function readDescent(){
+    const max = Math.max(1, doc.scrollHeight - innerHeight);
+    const s = Math.min(max, Math.max(0, scrollY));
+    /* spent over one viewport of scrolling — or 45% of the page, whichever
+       comes first, so even a short manifest is read in the turned room */
+    const descent = Math.min(1, s / Math.min(innerHeight, max * 0.45));
+    doc.style.setProperty("--descent", descent.toFixed(4));
+    doc.classList.toggle("descending", s > 0);
+  }
+  let descentQueued = false;
+  addEventListener("scroll", () => {
+    if (descentQueued) return;
+    descentQueued = true;
+    requestAnimationFrame(() => { descentQueued = false; readDescent(); });
+  }, { passive: true });
+  addEventListener("resize", readDescent);
+  readDescent();
+
   pointSky();
   renderGalaxy(false);
   addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
@@ -446,6 +478,11 @@ export function mountHome({ galaxy, primary }) {
     document.body.classList.remove(
       "create-open", "constellation-lit", "health-degraded", "health-offline",
     );
+    /* The descent is written on <html>, which outlives the screen, so it is
+       handed back too — otherwise a reader who scrolls home and then leaves
+       carries a stale altitude to the next screen (#480). */
+    doc.classList.remove("descending");
+    doc.style.removeProperty("--descent");
   };
 }
 
