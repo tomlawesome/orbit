@@ -517,3 +517,91 @@ export function mountHome({ galaxy, primary }) {
     );
   };
 }
+
+/**
+ * The labelled sky (§11, #453): a viewer with no household stands at the
+ * origin of the same fixed map, and every visible household appears at its
+ * identity bearing — label and ring only, no planets, no flight. Clicking
+ * asks; a pending request is written on the label. The placement is
+ * renderGalaxy's own (clamp to the visible bands, relax overlaps, labels
+ * always away from centre) without the camera or the dial keep-out.
+ */
+export function mountEmptySky({ galaxy, onAsk }) {
+  const hero = document.getElementById("hero");
+  if (!hero) return () => {};
+
+  function render() {
+    for (const old of hero.querySelectorAll(".minisys")) old.remove();
+    const w = hero.clientWidth, h = hero.clientHeight;
+    const placed = Object.entries(galaxy).map(([id, hh]) => {
+      let [ox, oy] = hh.pos;
+      const f = 1 / Math.max(1, Math.hypot(ox / (w / 2 + 40), oy / (h / 2 - (oy < 0 ? 215 : 155))));
+      return { id, hh, ox: ox * f, oy: oy * f };
+    });
+    for (let round = 0; round < 4; round++) {
+      for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i], z = placed[j];
+        let dx = z.ox - a.ox, dy = z.oy - a.oy;
+        const d = Math.hypot(dx, dy) || 1;
+        if (d < 230) {
+          const push = (230 - d) / 2;
+          dx /= d; dy /= d;
+          a.ox -= dx * push; a.oy -= dy * push;
+          z.ox += dx * push; z.oy += dy * push;
+        }
+      }
+    }
+    for (let { id, hh, ox, oy } of placed) {
+      const lim = oy < 0 ? h / 2 - 215 : h / 2 - 155;
+      if (Math.abs(oy) > lim) {
+        const r = Math.hypot(ox, oy);
+        const side = Math.sign(ox) || 1;
+        oy = Math.sign(oy) * Math.max(lim, 0);
+        ox = side * Math.sqrt(Math.max(r * r - oy * oy, 0));
+      }
+      const away = ox > 0;
+      const mx = (x) => (away ? 210 - x : x);
+      const ringX = mx(118);
+      const div = document.createElement("div");
+      div.className = "minisys";
+      div.setAttribute("role", "button");
+      div.setAttribute("aria-label", `Request to join ${hh.name}`);
+      div.style.left = (w / 2 + ox - ringX) + "px";
+      div.style.top = (h / 2 + oy - 95) + "px";
+      const label = hh.name.toUpperCase();
+      const tw = Math.min(150, label.length * 6.6);
+      const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+      const svgNS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
+      svg.setAttribute("viewBox", "0 0 210 160");
+      const put = (tag, attrs, text) => {
+        const el = document.createElementNS(svgNS, tag);
+        for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+        if (text !== undefined) el.textContent = text;
+        svg.appendChild(el);
+        return el;
+      };
+      const name = put("text", { x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent)", opacity: ".85" }, label);
+      if (away) name.setAttribute("text-anchor", "end");
+      put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
+      put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
+      put("circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
+      if (hh.requested) {
+        const asked = put("text", { x: mx(6), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");
+        if (away) asked.setAttribute("text-anchor", "end");
+      }
+      div.appendChild(svg);
+      div.addEventListener("click", () => onAsk?.(id, hh.name, hh.requested));
+      hero.appendChild(div);
+    }
+  }
+
+  render();
+  const onResize = () => render();
+  addEventListener("resize", onResize);
+  return () => {
+    removeEventListener("resize", onResize);
+    for (const old of hero.querySelectorAll(".minisys")) old.remove();
+  };
+}

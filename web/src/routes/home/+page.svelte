@@ -1,8 +1,8 @@
 <script>
   import { onMount, tick } from "svelte";
   import { afterNavigate } from "$app/navigation";
-  import { mountHome } from "./home.behaviour.js";
-  import { approveReceipt, dismissReceipt, readHome } from "$lib/data/workspace.js";
+  import { mountEmptySky, mountHome } from "./home.behaviour.js";
+  import { approveReceipt, dismissReceipt, readHome, requestToJoin } from "$lib/data/workspace.js";
   import { dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
@@ -52,6 +52,28 @@
   let armed = $state({ id: null, act: null });
   let busyReceipt = $state(null);
   let mailProblem = $state(null);
+
+  /* §11 (#453): the ask prompt — the label is the whole surface, the
+     question is the whole dialogue. Idempotent server-side. */
+  let askTarget = $state(null);
+  let askBusy = $state(false);
+  let askProblem = $state(null);
+  let resync = () => {};
+  async function ask() {
+    askBusy = true;
+    askProblem = null;
+    try {
+      await requestToJoin(askTarget.id);
+      askTarget = null;
+      view = await readHome();
+      await tick();
+      resync();
+    } catch (error) {
+      askProblem = error?.message ?? String(error);
+    } finally {
+      askBusy = false;
+    }
+  }
   const operationIds = new Map();
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
@@ -161,6 +183,24 @@
     let disposed = false;
     const sync = () => {
       teardown?.();
+      /* §11 (#453): no household means the labelled sky in either dialect —
+         same bearings, label only, click to ask. */
+      if (view?.emptySky) {
+        if (query.matches) {
+          teardown = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
+        } else {
+          /* The pocket's labelled sky is a list; asking rides data attributes
+             because the hidden dialect must never bind listeners. */
+          const controller = new AbortController();
+          for (const row of document.querySelectorAll("[data-ask]")) {
+            row.addEventListener("click", () => {
+              if (row.dataset.askRequested !== "true") askTarget = { id: row.dataset.ask, name: row.dataset.askName };
+            }, { signal: controller.signal });
+          }
+          teardown = () => controller.abort();
+        }
+        return;
+      }
       /* Tear the old dialect down before standing the new one up. */
       teardown = query.matches
         ? mountHome({ galaxy: view.galaxy, primary: view.primary })
@@ -188,6 +228,7 @@
       await tick();
       if (disposed) return;
       sync();
+      resync = sync;
       query.addEventListener("change", sync);
       if (restoreScroll !== null) {
         const y = restoreScroll;
@@ -275,6 +316,16 @@
 <div class="scrim" aria-hidden="true"></div>
 <div class="page">
     <div class="hero" id="hero">
+    {#if view?.emptySky}
+    <!-- §11 (#453): the labelled sky — no dial, no manifest. The
+         constellations are placed by mountEmptySky; this is the hero's
+         quiet centre, and the north star above still creates. -->
+    <div class="adrift">
+      <h2>you’re adrift</h2>
+      <p>the systems around you are labels until someone lets you in —<br>
+         tap one to ask to join, or follow the north star to start your own</p>
+    </div>
+    {:else}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="img"
@@ -429,10 +480,11 @@
         </div>
       </div>
     </div>
+    {/if}
   </div>
 
     <div class="manifest" id="manifest-top">
-    {#if groups}
+    {#if groups && !view?.emptySky}
       {#snippet manifestRow(row)}
         <a class="item" id={row.id} href="/item/{row.id}">
           {#if row.kind === "inspection"}
@@ -516,6 +568,7 @@
   <h4>Full diagnostics</h4>
   <div class="svc" style="color:var(--ink-faint)">container logs &middot; or the launcher repair flow</div>
 </aside>
+{#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
   <button class="handle" aria-expanded="false">
     <i></i><span>key</span></button>
@@ -542,4 +595,19 @@
   <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
   <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
 </div>
+{/if}
+{#if askTarget}
+<!-- §11 (#453): the question IS the dialogue — one ask, two honest answers. -->
+<div class="askveil" role="dialog" aria-label="Request to join">
+  <div class="askcard">
+    <h3>Request to join {askTarget.name} system?</h3>
+    <p>its owners decide — you’ll see the whole system once someone lets you in</p>
+    {#if askProblem}<div class="askproblem">{askProblem}</div>{/if}
+    <div class="askacts">
+      <button class="yes" disabled={askBusy} onclick={ask}>request to join</button>
+      <button disabled={askBusy} onclick={() => (askTarget = null)}>not now</button>
+    </div>
+  </div>
+</div>
+{/if}
 </div>

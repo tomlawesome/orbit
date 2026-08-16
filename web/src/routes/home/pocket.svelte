@@ -150,6 +150,20 @@
     <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
     <div class="morb">{initials}</div>
   </div>
+  {#if view?.emptySky}
+  <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
+       and a name, nothing else. Tapping asks; asking rides data attributes
+       because the hidden dialect must never bind listeners. -->
+  <div class="mgroup adrift"><h3>SYSTEMS AROUND YOU</h3>
+    {#each Object.entries(view.galaxy) as [id, hh] (id)}
+      <div class="mitem askrow" data-ask={id} data-ask-name={hh.name} data-ask-requested={String(Boolean(hh.requested))}>
+        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+        <div class="flex"><b>{hh.name}</b><span>{hh.requested ? "asked to join · waiting" : "tap to ask to join"}</span></div>
+      </div>
+    {/each}
+    <div class="burnup">the systems around you are labels until someone lets you in<br><a href="/create">— or start your own system →</a></div>
+  </div>
+  {:else}
   <div class="mdial">
     <svg viewBox="0 0 380 380">
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
@@ -223,6 +237,7 @@
     {/each}
     <div class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</div>
   </div>
+  {/if}
   {/if}
 </div>
 <div class="sheet" id="sheet">
