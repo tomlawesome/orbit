@@ -573,6 +573,14 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The create screen is not "form over login"** (owner: "this is a
+  mess!"): the create-system card appears AFTER login, so the login
+  screen must be gone entirely while it shows — no identity-provider
+  button, no orbit wordmark, no orbit logo, no footer. Clean sky, the
+  small centred card, nothing else. When the user submits, the orbit
+  logo and word REAPPEAR and the ratified login intro runs exactly as
+  approved, with one tweak only: no login button this time (already
+  authenticated). Otherwise identical.
 - **Theme-morph is a YES — and the judder was always hated** (owner,
   correcting the record): the accidental juddery blend seen when
   switching themes was not liked, it was hated; the ask was always to
