@@ -13,7 +13,7 @@
     ["documents", "Documents", "/documents"],
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
-    ["administration", "Administration", "#"],
+    ["administration", "Administration", "/administration"],
   ];
   const PACKS = [
     ["starchart", "star-chart", "#060b1c", ""],

@@ -126,6 +126,7 @@ export async function activeHousehold() {
 import { operationsFixture } from "./fixtures/operations.js";
 import { relayFixture } from "./fixtures/relay.js";
 import { settingsFixture } from "./fixtures/settings.js";
+import { adminFixture } from "./fixtures/admin.js";
 import { galaxyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 
@@ -355,6 +356,33 @@ export async function readSettingsScreen() {
     relay,
     waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
     reminders: settingsFixture.reminders,
+  };
+}
+
+/**
+ * Everything mission control renders (#465): the instance's people (real
+ * route), its systems from the workspace (admins see everything, §11), and
+ * the parts no route can answer yet — ownership, membership counts, join
+ * requests, the relay's levers — from the admin fixture until #453/#432
+ * make them real. Live data omits what it cannot know.
+ */
+export async function readAdminScreen() {
+  const [workspace, session, users] = await Promise.all([
+    readWorkspace(),
+    readSession(),
+    json(await fetch("/api/admin/users", { credentials: "same-origin" }))
+      .then((body) => body.users ?? [])
+      .catch(() => []),
+  ]);
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  return {
+    user: session?.user ?? null,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    primary,
+    today: todayOf(workspace),
+    users,
+    households: workspace.households,
+    ...adminFixture,
   };
 }
 
