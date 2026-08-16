@@ -124,9 +124,9 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { operationsFixture } from "./fixtures/operations.js";
-import { relayFixture } from "./fixtures/relay.js";
 import { settingsFixture } from "./fixtures/settings.js";
 import { adminFixture } from "./fixtures/admin.js";
+import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 
@@ -305,7 +305,8 @@ export async function readInboxScreen() {
     readWorkspace(),
     readSession(),
     readInbox().catch(() => ({ receipts: [] })),
-    readRelay(),
+    /* Additive: the relaybar is a summary line, not the screen's subject. */
+    readRelay().catch(() => UNAVAILABLE_RELAY),
   ]);
   const receipts = inbox.receipts ?? [];
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
@@ -397,7 +398,8 @@ export async function readSettingsScreen() {
     readWorkspace(),
     readSession(),
     readInbox().catch(() => ({ receipts: [] })),
-    readRelay(),
+    /* Additive: the helm's relay card is a summary, not the screen's subject. */
+    readRelay().catch(() => UNAVAILABLE_RELAY),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   return {
@@ -527,7 +529,50 @@ export async function readOperations() {
   return operationsFixture;
 }
 
-/** The signed-in user's mail-in relay. Live source: the #432 endpoint. */
+/**
+ * The signed-in user's mail-in relay (#432), live from
+ * `GET /api/settings/mail-relay`.
+ *
+ * The server speaks in bounded words — a fixed `listening` phrase, a bare
+ * timestamp, an "enabled"/"paused" ingest flag — and never in hosts, ports,
+ * mailboxes or config values. This maps that to the three sentences the
+ * screens render, degrading honestly where the server cannot yet answer:
+ * an arrival has no document name until #467, so live data shows the elapsed
+ * time alone where the mockup showed "policy-schedule.pdf · 2d ago".
+ *
+ * The address is capability-bearing — anyone holding it can post into this
+ * user's review queue — so it is never cached here, only rendered.
+ */
 export async function readRelay() {
-  return relayFixture;
+  const body = await json(
+    await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
+  );
+  const relay = body.relay ?? {};
+  return {
+    /* No address is a real answer, not a gap: mail-in may be off, and an
+       instance admin has no private mailbox at all. */
+    address: relay.address ?? NO_ADDRESS,
+    status: relay.listening ?? UNAVAILABLE_RELAY.status,
+    lastReceived:
+      relay.lastReceivedLabel
+      ?? (relay.lastReceived ? ago(relay.lastReceived, new Date().toISOString()) : "nothing yet"),
+    ingest: relay.ingest ?? UNAVAILABLE_RELAY.ingest,
+  };
 }
+
+const NO_ADDRESS = "no address yet";
+
+/**
+ * What the relay's CHROME says when the endpoint cannot be reached. The relay
+ * screen itself lets the failure surface — its whole subject is the relay —
+ * but the inbox's relaybar and the helm's card are summaries, and an
+ * unreachable summary must not sink the screen around it (the readInbox
+ * precedent). It says it does not know, which is deliberately not the same
+ * word as "not listening".
+ */
+const UNAVAILABLE_RELAY = {
+  address: NO_ADDRESS,
+  status: "relay unavailable",
+  lastReceived: "unknown",
+  ingest: "unknown",
+};
