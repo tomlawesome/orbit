@@ -400,7 +400,10 @@
      unmistakable, and everything beneath dims behind a scrim */
   .drawer-top.open .nstar{background:var(--panel-raised);border:1px solid var(--line);
                           border-top:0;border-radius:0 0 14px 14px}
-  .drawer-top.open .nstar .glint path{fill:var(--accent)}
+  .drawer-top.open .nstar .classic path{fill:var(--accent)}
+  /* the mark has two forms: the four-point glint every pack has always had,
+     and retrograde's own (see the pack refresh below). Only one is ever up. */
+  .nstar .tron{display:none}
   .scrim{position:fixed;inset:0;z-index:10;background:rgba(4,7,16,.55);
          backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .4s}
   body.create-open .scrim{opacity:1;pointer-events:auto}
@@ -543,6 +546,7 @@
                 backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
                 padding:4px 10px;cursor:pointer}
   .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=false]{opacity:.5}
   footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
          color:var(--ink-faint);padding:10px 0 40px}
   @media (prefers-reduced-motion: reduce){
@@ -589,6 +593,38 @@
     background:linear-gradient(0deg,rgba(45,226,230,.11) 0%,
       rgba(255,79,216,.05) 44%,transparent 100%)}
 
+  /* 2b. EXPLORATORY (owner, 2026-08-16): the same plane overhead — a ceiling
+     receding UP and away to its own vanishing line, so the screen sits inside
+     a corridor rather than on a floor. Deliberately the quieter half: the
+     floor is the signature and the ceiling only answers it, so the geometry
+     is the exact mirror but the opacity is roughly two-thirds, the far edge
+     is masked out earlier, and the whole plane lands well clear of the dial's
+     top arc. Toggleable from the DEMOS bar — default ON. */
+  .ceiling{display:none}
+  [data-theme=retrograde] .ceiling{display:block;position:absolute;
+    left:0;right:0;top:0;height:30vh;
+    background:linear-gradient(180deg,rgba(45,226,230,.075) 0%,
+      rgba(255,79,216,.035) 46%,transparent 100%)}
+  [data-theme=retrograde] .ceiling::before{
+    content:"";position:absolute;left:-60%;right:-60%;top:0;
+    /* Depth is not a fixed slab: the plane is only ever allowed to be as deep
+       as the sky ABOVE the dial, so a short laptop screen gets a shallow
+       ceiling and the dial's top arc is never crowded. 640px is the dial's
+       rendered size; (100vh − 640px)/2 is the clear sky over it. */
+    height:clamp(0px,calc((100vh - 640px) * 2.2),62vh);
+    /* mirrored geometry, rebalanced weight: the floor is read through its
+       converging RULES, but a ceiling seen only from its far half reads as
+       stray rays unless the rungs carry it — so the verticals are sparser and
+       quieter here and the rungs a little firmer. Same cyan, same family. */
+    background-image:
+      repeating-linear-gradient(90deg,transparent 0 128px,rgba(45,226,230,.55) 128px 129px),
+      repeating-linear-gradient(180deg,transparent 0 52px,rgba(45,226,230,.78) 52px 53px);
+    transform:perspective(520px) rotateX(-68deg);transform-origin:50% 0;
+    opacity:.26;
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%);
+            mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%)}
+  body.no-ceiling .ceiling{display:none}
+
   /* 3. Restrained bloom — on ACCENT elements only. Not on the greens, not
      on the reds, not on the ink: one colour is allowed to be lit, which is
      what keeps neon classy instead of a light show. Small radius, low
@@ -605,6 +641,21 @@
   [data-theme=retrograde] .manifest .corridor .today .rule{box-shadow:0 0 8px var(--bloom)}
   [data-theme=retrograde] .manifest .corridor .planet.sug i{
     box-shadow:0 0 8px -1px var(--bloom)}
+
+  /* 4. EXPLORATORY (owner, 2026-08-16): the north star, redrawn for the era.
+     Same place, same size territory, same job — CON-12's create handle — but
+     the soft four-point glint becomes a wireframe octahedron: pure linework,
+     no fills and no 3D gradient, one cyan-to-magenta edge running top to
+     bottom so the downward vertex is the create colour and the mark points
+     at the drawer it pulls. The equator and axis are the wireframe's other
+     two edges; the two reticle ticks hold the horizontal width the old glint
+     had, so the silhouette still reads as a beacon at a glance. Bloom stays
+     inside the pack's law: one small radius on one accent element. */
+  [data-theme=retrograde] .nstar .classic{display:none}
+  [data-theme=retrograde] .nstar .tron{display:block;
+    filter:drop-shadow(0 0 3px var(--bloom))}
+  [data-theme=retrograde] .drawer-top.open .nstar .tron :is(path,line){
+    stroke:var(--accent)}
   /* /PACK REFRESH — retrograde */
 </style>
 </head>
@@ -614,6 +665,8 @@
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
+  <!-- the ceiling plane (exploratory) — the floor grid's answer overhead -->
+  <div class="ceiling" aria-hidden="true"></div>
 </div>
 <div class="vignette" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
@@ -669,11 +722,30 @@
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit"
           onclick="toggleCreate(this)">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <g class="glint" style="transform-origin:0 0">
+      <defs>
+        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--upcoming)"/>
+          <stop offset=".55" stop-color="var(--upcoming)"/>
+          <stop offset="1" stop-color="var(--accent)"/>
+        </linearGradient>
+      </defs>
+      <g class="glint classic" style="transform-origin:0 0">
         <circle r="9" fill="var(--ink)" opacity=".12"/>
         <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
               fill="var(--ink)" opacity=".9"/>
         <circle r="2" fill="var(--ink)"/>
+      </g>
+      <!-- retrograde only: the neon wireframe beacon -->
+      <g class="glint tron" style="transform-origin:0 0">
+        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
+        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
+              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
+        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
+              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
+        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
+          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
+          <line x1="10" y1="0" x2="13.4" y2="0"/>
+        </g>
       </g>
     </svg>
     <span>create</span>
@@ -909,6 +981,7 @@
   <button onclick="document.body.classList.remove('storm');document.body.classList.toggle('quiet')">quiet state</button>
   <button onclick="document.body.classList.remove('quiet');document.body.classList.toggle('storm')">storm state</button>
   <button onclick="cycleHealth()">health: cycle</button>
+  <button id="ceiling-toggle" aria-pressed="true" onclick="toggleCeiling(this)">ceiling grid</button>
 </div>
 <footer>orbit · v19 proposal · issue #307 · clean flights: the old chart leaves with the camera, the new one arrives with fanfare · scrim under the create drawer · the sky always drifts</footer>
 
@@ -1188,6 +1261,12 @@ function applyHealth(){
   if (healthStates[healthIndex]==="healthy") document.getElementById("statusdrawer").classList.remove("open");
 }
 function cycleHealth(){ healthIndex = (healthIndex+1)%3; applyHealth(); }
+/* exploratory (owner, 2026-08-16): the ceiling plane, on by default so it is
+   the first thing seen; this flips it off for a live A/B against the floor */
+function toggleCeiling(button){
+  const off = document.body.classList.toggle("no-ceiling");
+  button.setAttribute("aria-pressed", String(!off));
+}
 applyHealth();
 function toggleAccount(button){
   const card = document.getElementById("account");
