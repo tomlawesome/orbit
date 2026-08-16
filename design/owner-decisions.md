@@ -590,7 +590,10 @@ The full open-questions list, walked in order and ruled:
   meteors are reserved for THE DANGER: the danger/storm mode will be
   reworked at some point (quiet mode is good; the danger mode sucked),
   and meteors belong to that vocabulary. Also try: colourful gas
-  clouds, and things of interest that GLINT.
+  clouds, and things of interest that GLINT. Confirmed alongside:
+  galactic plane doubles as AFTER DARK'S DEFAULT sky (owner: "I am
+  happy with galactic plane belonging to after dark as its default")
+  while remaining a selectable style.
 - **#484 demo data is ratified** (owner: "Yes, that was the idea I laid
   out"): first-run populates the workspace with fake data for the
   welcome tour, and it CLEANS ITSELF at the end of the tour — or the
