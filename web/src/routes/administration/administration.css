@@ -55,19 +55,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .system .who{flex:1;min-width:0}
 .mission-page .system .who b{display:block;font-size:13.5px;font-weight:530}
 .mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
-.mission-page .joinbadge{font:10px var(--mono);letter-spacing:.08em;color:var(--warm);
-           border:1px dashed var(--warm);border-radius:99px;padding:3px 10px;flex:none}
-
-.mission-page .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--line);
-         border-radius:12px;padding:11px 14px;margin-top:12px}
-.mission-page .joinreq .avatar{width:28px;height:28px;border-radius:50%;flex:none;
-                 border:1px solid var(--line);display:grid;place-items:center;
-                 font:10px var(--mono);color:var(--ink-mid)}
-.mission-page .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
-.mission-page .joinreq p b{color:var(--ink);font-weight:530}
-.mission-page .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;cursor:pointer;
-                border:1px solid var(--line);background:none;color:var(--ink-mid)}
-.mission-page .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+/* §15-2g removed the joinbadge and the dashed join-request row from this
+   panel. Nothing replaces them and no spacing is patched in: the roster closes
+   on its last system (which loses its rule to :last-child), so the card ends on
+   a finished row rather than a cut edge — and the two columns now sit far closer
+   in height than they did with the decision row hanging below the roster. */
 
 .mission-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
     font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;

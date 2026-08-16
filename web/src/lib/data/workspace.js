@@ -201,16 +201,12 @@ export async function requestToJoin(householdId) {
   return json(await csrfFetch(`/api/households/${householdId}/join-requests`, { body: {} }));
 }
 
-/** The pending join requests this user may decide (owners and admins). */
-export async function readJoinRequests() {
-  const body = await json(await fetch("/api/join-requests", { credentials: "same-origin" }));
-  return body.requests ?? [];
-}
-
-/** Approve or decline a join request (§11 authority, enforced server-side). */
-export async function decideJoinRequest(requestId, action) {
-  return json(await csrfFetch(`/api/join-requests/${requestId}`, { body: { action } }));
-}
+/* §15-2g: join requests live in HOUSEHOLD MANAGEMENT only — administration
+   dropped its block, so this seam has no reader/decider today and the two
+   helpers that served it (readJoinRequests, decideJoinRequest) are gone with
+   it rather than left dangling. The server side is untouched and stays:
+   GET /api/join-requests and POST /api/join-requests/{id} are live routes,
+   and the household-management screen will call them when it is built. */
 
 /** Owner/admin direct add: membership without a request (§11). */
 export async function addMember(householdId, userId) {
@@ -423,19 +419,18 @@ export async function readSettingsScreen() {
 /**
  * Everything mission control renders (#465): the instance's people (real
  * route), its systems from the workspace (admins see everything, §11), and
- * the parts no route can answer yet — ownership, membership counts, join
- * requests, the relay's levers — from the admin fixture until #453/#432
- * make them real. Live data omits what it cannot know.
+ * the parts no route can answer yet — ownership, membership counts, the
+ * relay's levers — from the admin fixture until #453/#432 make them real.
+ * Live data omits what it cannot know. No join requests: §15-2g moved them
+ * to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, joinRequests] = await Promise.all([
+  const [workspace, session, users] = await Promise.all([
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then((body) => body.users ?? [])
       .catch(() => []),
-    /* Real since #453: pending requests the caller may decide. Additive. */
-    readJoinRequests().catch(() => []),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -457,12 +452,10 @@ export async function readAdminScreen() {
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
     today: todayOf(workspace),
-    now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     users,
     households: workspace.households,
     ...adminFixture,
     owners,
-    joinRequests,
   };
 }
 
