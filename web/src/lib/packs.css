@@ -95,7 +95,14 @@
      accenting on its own. */
   --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
   --line:#1d4a5a; --line-soft:#12303c;
-  --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+  /* Third revision — the §15 refresh, ratified in full (owner, 2026-08-16,
+     design/v19/pack-retrograde-refresh.html, #480). Secondary copy was sinking
+     into the teal murk: every "orbital period 1 year · ~£150.00" line, every
+     service row, every month label read as texture rather than as text. The
+     whole mid-ink family lifts together — --ink-mid, and with it --ink-faint
+     and --chart-ink, which carry the same class of copy — so the steps between
+     primary, secondary and faint survive the lift instead of collapsing. */
+  --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
   /* First pass read as synthwave — violet, magenta, cyan — and the owner
      found it short of "the typical bright 80s colours" (2026-08-14). The
      missing notes were acid yellow, hot coral and a true neon green, so the
@@ -108,7 +115,13 @@
   --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
   /* The chart is the grid: cyan rules on black, the way the era drew it. */
   --star-far:#9fd6e6; --star-near:#ffffff;
-  --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+  /* The one dilution of the accent that bloom is allowed to use (#480). Neon
+     stays classy by being disciplined, not by being bright: exactly one colour
+     may be lit, so this token exists to be spent on ACCENT elements and on
+     nothing else — never the greens, never the reds, never the ink. Screens
+     reach for it in their own rules; the pack only says what the light is. */
+  --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
   /* The bodies are the largest coloured things on the screen, and their
      gradients were hardcoded, so no pack could reach them - which is why the
      first retrograde still read as a violet version of star-chart. The stops
