@@ -573,6 +573,12 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Belt: the centred item's documents ride IN the band** (owner):
+  when an item seats at the apex, its documents appear as bodies in
+  the band beside it — not as a list on the card — made easily seen
+  by obvious highlighting: a different-coloured perimeter line around
+  them, some sort of glow/pulse, possibly both (owner offered the
+  treatments as candidates; try them and show).
 - **Solarium is a no, and the v1.3.0 roster is FINAL** (owner, "for
   now, haha!"): the release theme list is star chart, after dark,
   CLOUDS (cloud sea graduates from a dawn treatment to its own
