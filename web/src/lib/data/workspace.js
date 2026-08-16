@@ -124,7 +124,6 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { operationsFixture } from "./fixtures/operations.js";
-import { settingsFixture } from "./fixtures/settings.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
@@ -387,15 +386,18 @@ export async function readDocumentsScreen() {
 /**
  * Everything the helm renders (#464): who you are, your systems and roles,
  * the relay summary with how many arrivals wait, and the reminder timing —
- * the last from a fixture until #468 gives it a route.
+ * the last live from #468's route.
  */
 export async function readSettingsScreen() {
-  const [workspace, session, inbox, relay] = await Promise.all([
+  const [workspace, session, inbox, relay, reminders] = await Promise.all([
     readWorkspace(),
     readSession(),
     readInbox().catch(() => ({ receipts: [] })),
     /* Additive: the helm's relay card is a summary, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
+    /* Additive too: reminder timing is one card of five. An endpoint that
+       cannot answer costs the reader those four lines' values, not the helm. */
+    readReminders().catch(() => UNAVAILABLE_REMINDERS),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   return {
@@ -412,7 +414,7 @@ export async function readSettingsScreen() {
     })),
     relay,
     waiting: (inbox.receipts ?? []).filter((receipt) => receipt.canApprove).length,
-    reminders: settingsFixture.reminders,
+    reminders,
   };
 }
 
@@ -569,3 +571,102 @@ const UNAVAILABLE_RELAY = {
   lastReceived: "unknown",
   ingest: "unknown",
 };
+
+/**
+ * The signed-in user's own reminder timing (#468), live from
+ * `GET /api/settings/reminders`.
+ *
+ * The server already speaks the screen's language: it renders the pair of
+ * offsets into the two sentences the helm shows ("14 days before closest
+ * approach", "3 days before"), so the port needs no phrasing of its own and
+ * cannot drift from the numbers actually stored. It also carries the pair
+ * itself, which is not decoration — `PUT` takes the whole preference, so the
+ * toggle can only write by handing back the offsets it was given.
+ *
+ * `outboundMail` is the operator's state reported in bounded words
+ * ("configured"/"not configured"), never a host, a port or a credential —
+ * the same rule the relay follows.
+ */
+export async function readReminders() {
+  const body = await json(
+    await fetch("/api/settings/reminders", { credentials: "same-origin" }),
+  );
+  return remindersOf(body.reminders);
+}
+
+/**
+ * Saves the reader's own reminder timing and answers what is now stored.
+ *
+ * The whole preference goes over, not a patch: `reminderPreferenceSchema`
+ * requires both offsets alongside the flag so a half-sent pair can never
+ * cross over. A caller that never learned the pair — the degraded read below
+ * — therefore has nothing to write, and is refused HERE rather than being
+ * bounced by the schema with a message written for a form that does not
+ * exist on this screen.
+ */
+export async function writeReminders({ emailEnabled, firstWarningDays, finalWarningDays }) {
+  if (!Number.isInteger(firstWarningDays) || !Number.isInteger(finalWarningDays)) {
+    throw new WorkspaceError("Orbit does not know your reminder timing yet", {
+      code: "reminders_unknown",
+    });
+  }
+  const body = await json(
+    await csrfFetch("/api/settings/reminders", {
+      method: "PUT",
+      body: { emailEnabled, firstWarningDays, finalWarningDays },
+    }),
+  );
+  return remindersOf(body.reminders);
+}
+
+/** One mapping for both verbs: the route answers the same shape on each. */
+function remindersOf(reminders) {
+  return {
+    emailEnabled: reminders?.emailEnabled ?? UNAVAILABLE_REMINDERS.emailEnabled,
+    /* Null, not a guessed default: a number invented here would be written
+       back as the reader's own choice the first time the toggle is tapped. */
+    firstWarningDays: Number.isInteger(reminders?.firstWarningDays) ? reminders.firstWarningDays : null,
+    finalWarningDays: Number.isInteger(reminders?.finalWarningDays) ? reminders.finalWarningDays : null,
+    firstWarning: reminders?.firstWarning ?? UNAVAILABLE_REMINDERS.firstWarning,
+    finalWarning: reminders?.finalWarning ?? UNAVAILABLE_REMINDERS.finalWarning,
+    outboundMail: reminders?.outboundMail ?? UNAVAILABLE_REMINDERS.outboundMail,
+  };
+}
+
+/**
+ * What the Reminders card says when the endpoint cannot be reached — the
+ * UNAVAILABLE_RELAY precedent, and additive for the same reason: reminder
+ * timing is one card on a screen that is mostly about other things.
+ *
+ * "unknown" everywhere, deliberately: it is not "off", not "on the day" and
+ * not "not configured", each of which would be a claim about state this
+ * front end has not been told. The pair is null so the toggle refuses to
+ * write rather than saving a timing nobody chose, and `emailEnabled` is
+ * false only because the control has two positions — the null pair, not the
+ * flag, is what makes the card inert until the read succeeds.
+ */
+const UNAVAILABLE_REMINDERS = {
+  emailEnabled: false,
+  firstWarningDays: null,
+  finalWarningDays: null,
+  firstWarning: "unknown",
+  finalWarning: "unknown",
+  outboundMail: "unknown",
+};
+
+/**
+ * "Sign out of every device" (#468): ends every session this user holds and
+ * answers how many that was.
+ *
+ * The caller's own session goes with them — that is the point, not a side
+ * effect: a device the reader no longer trusts must lose access, and there is
+ * no way to say which device that was. The route clears this browser's cookie
+ * on the way out, so the only honest next page is the sign-in.
+ *
+ * CSRF-carrying, like every other mutation here: an action this destructive
+ * must not be reachable from another origin's form post.
+ */
+export async function signOutEverywhere() {
+  const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
+  return body?.revoked ?? 0;
+}

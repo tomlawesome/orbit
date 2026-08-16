@@ -509,6 +509,17 @@ The full open-questions list, walked in order and ruled:
   further: from the lighter colour at the top down to the pinky-orange
   that sits at the bottom of the dial screen. The deep manifest reads
   over warm surface light, not sky.
+- **The heliosphere is home's default — and home styles become a choice**
+  (owner): the sub-identity mockups were a happy misunderstanding (the
+  ask had been backdrops for the HOUSEHOLD screen), but the heliosphere
+  is kept as the home screen's DEFAULT dressing, and since the route is
+  now open, the homescreen style becomes selectable somewhere — a
+  second axis beside the theme pack (pack = palette, style = weather).
+  Bridge is a no — "not in its current form at least" — it doesn't join
+  the selectable styles as drawn (the file stays as the record). Meanwhile
+  household-manage is "90% there — the actual form, everything is
+  great; the background is the only issue" — its backdrop ideas are
+  still owed.
 - **Dawn-rays is dropped** (owner): the crepuscular-rays concept is out;
   the dawn decision now sits between terminator and cloud sea, both of
   which gain scroll-descents. The rays file stays as the record.
