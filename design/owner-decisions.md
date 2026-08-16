@@ -366,3 +366,23 @@ proposals — due next, documents, inbox, settings, administration, and the
 pocket's signals surface — are ratified as-is at v1. They are built now, each
 through the fidelity gate like the original eight; visual tweaks arrive later
 as ordinary fix-both changes rather than blocking the build.
+
+## 14. The walk-stack review batch (owner, 2026-08-16)
+
+- **One schedule surface.** The home manifest is displayed exactly like the
+  due-next corridor — a full scrollback through events, nearest at the top
+  down to the furthest away — with suggestions appearing in chronological
+  order within it. The due-next page therefore does not need to exist; it
+  retires (mothballed, not deleted).
+- **Documents retires too** (mothballed, not deleted): the coming asteroid
+  belt (#458) with a well-placed search box is the document surface. People
+  mostly want the item; the document is a click away from it.
+- **Forms dismiss on click-off.** Clicking off the create form returns to the
+  landing page; clicking off the relay card returns to the previous screen.
+- **Form-specific backdrops, mockups first.** Rather than patching missing
+  starfields, forms may earn their own backdrops (settings: star charts;
+  new items: charts in progress; and so on) — designed as mockups before
+  anything is built.
+- **Considered, mockups first:** an inbox button next to the menu orb that
+  changes colour when something waits; the inbox screen using its left
+  section for mail-found items.
