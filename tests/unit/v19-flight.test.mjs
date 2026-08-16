@@ -145,11 +145,12 @@ describe("the wall clock", () => {
     expect(T.nameOff).toBe(2600);
     expect(T.land).toBe(4800);
     expect(T.condensed).toBe(6400);
-    /* The owner's 2026-08-16 amendment (ledger 7f7d813): the dwell is 1s too
-       long and the dial's draw-in slightly too fast — "a DELIBERATE WAIT, not
-       a slow load". Everything either side of it is still the sheet's own. */
+    /* The owner's 2026-08-16 amendment (ledger 7f7d813) trimmed the dwell and
+       slowed the draw-in; v5 (design/v19/first-run.html at 9476480) landed
+       with different figures for the draw-in and wins, per the amendment's
+       own rule. Everything either side of it is still the sheet's own. */
     expect(T.dwell).toBe(2000);
-    expect(T.instrument).toBe(1700);
+    expect(T.instrument).toBe(1800);
     /* the dwell comes BEFORE the instrument (§15 second pass, ruling 3) */
     expect(T.instrumentAt).toBe(8400);
     expect(T.instrumentAt - T.condensed).toBe(T.dwell);

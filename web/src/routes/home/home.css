@@ -852,8 +852,12 @@
    ticks, the months, the now-marker, the trails, the constellation leg, the
    inbox orb, the account orb, the north star, the search line and the scroll
    cue. Two seconds pass there (the owner trimmed the dwell from three on
-   2026-08-16). Then the instrument arrives in the family's own arrive style,
-   slowed to 1.7s by the same ruling, and the chrome fades up behind it.
+   2026-08-16). Then the instrument arrives — v5 (design/v19/first-run.html at
+   9476480) stretched the draw-in again, 1.7s → 1.8s, and this time moved the
+   curve too, (.2,.7,.2,1) → (.2,.26,.35,1), with the opacity stop at 55%
+   rather than 60% so the chart is solid while it is still being placed. The
+   chrome behind it stretches to match, .95s/.34s delay → 1.3s/.45s delay, so
+   it settles just under the dial rather than racing it.
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* Home is not on the screen at all until the flight lands on it.
@@ -885,14 +889,27 @@ body.bare .desk .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both
   to{transform:scale(1);filter:blur(0)}}
 
 .desk .dial .chrome{transform-box:view-box;transform-origin:50% 50%}
-/* 1.7s, not the sheet's 1.3s: the owner's 2026-08-16 amendment (ledger
-   7f7d813) — "the dial's pop is slightly too fast... a DELIBERATE WAIT, not a
-   slow load". The curve is the family's own `arrive`, untouched. */
-body.instrument .desk .dial .chrome{animation:arrive 1.7s cubic-bezier(.2,.7,.2,1) both}
+/* v5 (design/v19/first-run.html at 9476480): 1.8s on cubic-bezier(.2,.26,.35,1),
+   not the owner's 2026-08-16 amendment's 1.7s/(.2,.7,.2,1) — that amendment
+   said plainly that if v5 chose different figures, v5 wins. The curve was
+   tuned frame by frame: it opens a little over linear (12% of the time buys
+   20% of the growth, against the old curve's 36%), so the rings clear the sun
+   by ~300ms rather than starting invisibly at scale .16, and lands on a
+   genuinely soft final approach — 92% at 1.2s, the rest spread over the last
+   .6s. A dedicated keyframe (`instrumentarrive`), not the shared `arrive`
+   elsewhere in this file (POL-1's per-navigation fanfare): v5 also moves
+   the opacity stop 60% → 55%, so the chart is solid while it is still being
+   placed, and that must not leak into POL-1's arrival, which v5 never
+   touched. */
+body.instrument .desk .dial .chrome{animation:instrumentarrive 1.8s cubic-bezier(.2,.26,.35,1) both}
+@keyframes instrumentarrive{from{transform:scale(.16);opacity:0}55%{opacity:1}to{transform:scale(1);opacity:1}}
+/* the chrome behind it: v5 stretched this to match the slower dial, .95s/.34s
+   delay → 1.3s/.45s delay, so it settles just under the dial rather than
+   racing it. */
 body.instrument .desk .orb,
 body.instrument .desk .nstar,
 body.instrument .desk .drawer,
-body.instrument .desk .hero-foot{animation:chromein .95s ease .34s both}
+body.instrument .desk .hero-foot{animation:chromein 1.3s ease .45s both}
 @keyframes chromein{from{opacity:0}to{opacity:1}}
 
 /* Leaving reverses the arrival exactly: the instrument goes first (it came
