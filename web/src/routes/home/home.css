@@ -511,13 +511,14 @@
  * An ORDER, not a scale: months are rules, entries sit in date order. */
 .manifest .corridor{position:relative;margin-top:34px;padding-left:46px}
 .manifest .corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
-                  background:var(--chart-line)}
+                  /* §14: the spine fades into the sky at both ends */
+                  background:linear-gradient(180deg,transparent,var(--chart-line) 70px,var(--chart-line) calc(100% - 70px),transparent)}
 .manifest .corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
          background:linear-gradient(180deg,
            color-mix(in srgb,var(--overdue) 7%, transparent),
            color-mix(in srgb,var(--overdue) 2%, transparent))}
-.manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
-                 background:var(--overdue);opacity:.55}
+.manifest .corridor .redzone::before{content:"";position:absolute;left:-31px;top:-24px;bottom:0;width:1.5px;
+                 background:linear-gradient(180deg,transparent,var(--overdue));opacity:.55}
 .manifest .corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
 .manifest .corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
 .manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
@@ -540,3 +541,11 @@
 .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
 .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
 .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+
+/* ---- §14/#472 (owner-approved): the inbox orb -------------------------- */
+.inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
+.inbox-orb.waiting{color:var(--accent);border-color:var(--accent)}
+.inbox-orb.waiting svg{animation:breathe 3.2s ease-in-out infinite}
+.inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
+  background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
+  display:grid;place-items:center}
