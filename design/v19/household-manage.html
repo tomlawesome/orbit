@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — your system: household management (proposal v2 — §15 rulings 2a–2m)</title>
+<title>Orbit — your system: household management (proposal v3 — §15 column swap + danger zone)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -50,6 +50,7 @@
     --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
     --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
     --degraded:#fb8b24;
+    --on-danger:#060b1c;
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
@@ -62,6 +63,7 @@
     --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
     --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
     --degraded:#fb8b24;
+    --on-danger:#05070d;
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
@@ -74,6 +76,7 @@
     --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
     --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
     --degraded:#c2570e;
+    --on-danger:#f6f1e4;
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
@@ -86,6 +89,7 @@
     --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
     --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
     --degraded:#c2570e;
+    --on-danger:#ffffff;
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
@@ -98,6 +102,7 @@
     --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
     --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
     --degraded:#ff9f1c;
+    --on-danger:#0a0410;
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
@@ -160,8 +165,47 @@
   .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
   .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
         border-radius:16px;padding:20px 22px}
-  .card.wide{grid-column:1 / -1}
-  @media (max-width:880px){.cards{grid-template-columns:1fr}}
+
+  /* ── §15 v3, the column swap ────────────────────────────────────────────
+     The owner read v2 and found the hole: sections stood alone on the right
+     and left a dead quarter under "the system". So the desk is re-laid.
+
+       OWNER     left  │ the system  →  sections (the long list, under it)
+                 right │ members, running the FULL height of that column
+                 foot  │ the danger line, across both
+
+       NON-OWNER left  │ the system (read-only)  →  leaving
+                 right │ members, full height
+
+     Members is stretched, not floated: its box ends level with sections, so
+     both columns finish on the same rule and the closing line inside it is
+     pinned to its own foot rather than leaving a gap under the roster. The
+     old lone wide card at the bottom of the member's screen is gone with the
+     same move — the member now reads two tidy columns like the owner does. */
+  .card.c-system  {grid-column:1;grid-row:1}
+  .card.c-sections{grid-column:1;grid-row:2}
+  .card.c-leaving {grid-column:1;grid-row:2}
+  .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
+                   display:flex;flex-direction:column}
+  .card.c-danger  {grid-column:1 / -1;grid-row:3}
+  /* the panel is taller than its content in a family this size, so the slack
+     is SHARED between the blocks instead of collecting in one hole at the
+     bottom: three auto margins, three even breaths, rules evenly spaced. */
+  .c-members .block,
+  .c-members .note.foot{margin-top:auto}
+  .c-members .note.foot{padding-top:14px;border-top:1px solid var(--line-soft)}
+  /* the member's screen has only three blocks in the whole desk, so the panel
+     takes its own height instead of stretching over air — nothing sits under
+     it to frame a hole, and the two columns simply finish where they finish */
+  body.member .card.c-members{align-self:start}
+  body.member .c-members .note.foot{margin-top:14px}
+  @media (max-width:880px){
+    .cards{grid-template-columns:1fr}
+    .card.c-system,.card.c-sections,.card.c-leaving,.card.c-members,.card.c-danger{
+      grid-column:1;grid-row:auto;align-self:auto}
+    .c-members .block{margin-top:16px}
+    .c-members .note.foot{margin-top:13px;padding-top:0}
+  }
   .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
   .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
   .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
@@ -205,7 +249,7 @@
   .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
          border-radius:9px;padding:7px 13px;cursor:pointer}
   .ghost:hover{border-color:var(--accent);color:var(--accent)}
-  .ghost.armed,.dangerbtn.armed{color:var(--overdue);border-color:var(--overdue)}
+  .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
   .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
   .note.top{margin-top:13px}
   .note b{color:var(--ink-mid);font-weight:400}
@@ -271,16 +315,21 @@
   .role.owner{color:var(--accent);border-color:var(--accent)}
   .memb .ghost{padding:5px 11px}
 
-  /* add someone: registered accounts only — the route has no email invite */
-  .drawer{display:none;margin-top:14px;border:1px dashed var(--line);border-radius:13px;
-          padding:15px 17px}
-  .drawer.open{display:block}
-  .drawer h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-             color:var(--ink-faint);margin-bottom:10px}
+  /* v3 — the panel's other blocks. Members runs the full height of the
+     right column now, so who is waiting and who you could add are simply
+     BLOCKS of the same panel, each under its own small rule, instead of
+     drawers you had to open. Registered accounts only — the route has no
+     email invite (#481). */
+  .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
+  .block h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:9px}
   .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
         border-bottom:1px solid var(--line-soft)}
   .cand:last-of-type{border-bottom:0}
   .cand b{flex:1;font-size:13px;font-weight:520}
+  /* the resting state of the joiners block: it says so, rather than vanishing */
+  .restline{display:block}
+  body.wants .restline{display:none}
 
   /* the handover: two deliberate steps, and the second asks twice */
   .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
@@ -297,7 +346,7 @@
 
   /* joiners (§11) — the same protocol administration draws */
   .joinreq{display:none;align-items:center;gap:12px;border:1px dashed var(--warm);
-           border-radius:12px;padding:11px 14px;margin-top:14px}
+           border-radius:12px;padding:11px 14px}
   body.wants .joinreq{display:flex}
   .joinreq .avatar{width:28px;height:28px;font-size:10px}
   .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
@@ -306,23 +355,77 @@
                   cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
   .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
 
-  /* the danger line */
-  .card.dangercard{border-color:var(--line-soft)}
-  .dangercard p{font-size:13.5px;color:var(--ink-mid);max-width:62ch}
-  .dangercard p b{color:var(--ink);font-weight:530}
-  /* the card's prose is 13.5px; its mono asides are not — say so, or the
+  /* ── THE DANGER ZONE (§15, owner on v2 + the refinement) ────────────────
+     v2 asked politely and the owner was right to reject it: a paragraph in
+     pen-grey with a grey button is not a danger line, it's a footnote. This
+     card is now unmistakable from across the room and still drawn with the
+     family's chart pen — no gradient, no gloss, no siren stripes. Just red:
+     a red rule around it, a flat red wash under it, hazard ticks along the
+     top edge, the heading in red, and a red-outlined button that FILLS red
+     the moment it is armed.
+
+     And it is SMALLER than v2: the copy runs ACROSS the card in two short
+     columns instead of stacking in a tall left-hand block, and the button
+     sits UP on the right of the heading line where it can be seen — never
+     buried at the bottom. The protocol underneath is untouched: type the
+     system's name exactly, then tap twice. */
+  .card.dangercard{position:relative;overflow:hidden;
+                   border:1.5px solid var(--overdue);padding:15px 22px 17px}
+  /* the wash — one flat plane of the same red, laid under the panel */
+  .dangercard::after{content:"";position:absolute;inset:0;border-radius:inherit;
+                     background:var(--overdue);opacity:.085;pointer-events:none}
+  /* the light packs need more of it before the red is felt rather than seen */
+  [data-theme=atlas] .dangercard::after,
+  [data-theme=dawn] .dangercard::after{opacity:.12}
+  /* the hazard rule — chart-pen ticks, hard edges only, along the top */
+  .dangercard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;
+                      pointer-events:none;opacity:.9;
+                      background:repeating-linear-gradient(115deg,
+                        var(--overdue) 0 2px, transparent 2px 6px)}
+  .dangercard>*{position:relative;z-index:1}
+
+  .dangerhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+  .dangercard h3{color:var(--overdue);letter-spacing:.2em;font-weight:600}
+  .dangerhead svg{flex:none;fill:none;stroke:var(--overdue);stroke-width:1.5;
+                  stroke-linecap:round;stroke-linejoin:round}
+  .dangerhead .spacer{margin-left:auto}
+
+  /* the copy, spread across the width: the act on the left, the small print
+     about who holds the clock on the right */
+  .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
+  .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
+  .dangercard p b{color:var(--ink);font-weight:560}
+  .dangercard p b.red{color:var(--overdue);font-weight:600}
+  /* the card's prose is 13px; its mono asides are not — say so, or the
      prose rule out-specifies .note and .said and swallows them */
-  .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none}
+  .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
   .dangercard .note b{color:var(--ink-mid);font-weight:400}
   .dangercard .said{font-size:11px;color:var(--ok);max-width:none}
-  .dangerbtn{margin-top:15px;font:11.5px var(--mono);color:var(--ink-faint);background:none;
-             border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
-  .dangerbtn:hover{color:var(--overdue);border-color:var(--overdue)}
-  .confirm{display:none;margin-top:15px;padding-top:15px;border-top:1px solid var(--line-soft)}
-  .confirm.open{display:block}
-  .confirm .row{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
-  .confirm .field{margin-bottom:0;flex:0 1 340px;min-width:220px}
-  .confirm .field input{font-family:var(--mono);font-size:12.5px}
+
+  /* the button: red on the outside at rest, SOLID red once armed */
+  .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+             color:var(--overdue);background:none;border:1.5px solid var(--overdue);
+             border-radius:9px;padding:9px 16px;cursor:pointer;white-space:nowrap;
+             transition:background .15s,color .15s,border-color .15s}
+  .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
+  .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
+  .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none;
+                      color:var(--overdue);border-color:var(--overdue)}
+  .dangerbtn[hidden]{display:none}
+
+  .confirm{display:none;margin-top:13px;padding-top:13px;
+           border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
+  .confirm.open{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end}
+  .confirm .field{margin-bottom:0;min-width:0}
+  .confirm .field label{color:var(--overdue);opacity:.9}
+  .confirm .field input{font-family:var(--mono);font-size:12.5px;
+                        border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
+  .confirm .field input:focus{border-color:var(--overdue)}
+  .confirm .note{align-self:end;padding-bottom:2px}
+  @media (max-width:880px){
+    .dangerbody,.confirm.open{grid-template-columns:1fr;gap:10px}
+    .dangerhead{flex-wrap:wrap}
+  }
 
   /* 2f — the scheduled-for-deletion banner and its restore button USED to
      live here; they are gone. The recovery window is an instance-admin
@@ -398,7 +501,7 @@
     <div>
       <h1><span class="own-only">Lawson Home</span><span class="mem-only">Seaside Cottage</span></h1>
       <div class="sub">
-        <span class="own-only">your system · you own it · 2 members · 6 entries in orbit</span>
+        <span class="own-only">your system · you own it · 4 members · 6 entries in orbit</span>
         <span class="mem-only">a system you’re in · Emma Lawson owns it · 3 members · 3 entries in orbit</span>
       </div>
     </div>
@@ -418,7 +521,7 @@
          per-field save simply submits that one command with the other two
          values unchanged. Nothing about the route changes — only who does
          the remembering, which is now the interface, not the person. -->
-    <div class="card">
+    <div class="card c-system">
       <div class="cardhead"><h3>The system</h3></div>
       <div class="field">
         <div class="lab">
@@ -470,7 +573,7 @@
 
          The marks (2b) are back: a chart-pen glyph and one accent dot per
          section. Toggle "section marks" in the demos to judge with/without. -->
-    <div class="card own-only">
+    <div class="card c-sections own-only">
       <div class="cardhead">
         <h3>Sections</h3><span class="count" id="seccount">5 of 12</span>
       </div>
@@ -548,22 +651,18 @@
       </div>
       <p class="said" id="said-sections">saved · the manifest prints the new names beside their entries</p>
       <p class="note top">
-        each entry wears one section, printed beside it in the manifest.<br>
-        a section holding entries can be <b>hidden</b>, never removed — its<br>
-        entries would have nowhere to sit.
-      </p>
-      <p class="note top">
-        the mark — glyph and accent — travels with the section wherever it is<br>
-        printed. <b>open question:</b> choosing a mark for a NEW section isn’t<br>
-        drawn yet; a new row here takes the neutral pen mark until it is ruled.
+        each entry wears one section, printed beside it in the manifest,<br>
+        and the mark travels with it. a section holding entries can be<br>
+        <b>hidden</b>, never removed — its entries would have nowhere to sit.<br>
+        <b>open question:</b> choosing a mark for a NEW section isn’t drawn yet.
       </p>
     </div>
 
-    <!-- ── members ── -->
-    <div class="card wide">
+    <!-- ── members: v3 moves this to the right-hand column, running its full
+         height, so nothing sits under "the system" but sections ── -->
+    <div class="card c-members">
       <div class="cardhead">
-        <h3>Members</h3><span class="count" id="membcount">2 in this system</span>
-        <button class="act own-only" id="addbtn" onclick="toggleDrawer('adddrawer', this)">add someone</button>
+        <h3>Members</h3><span class="count" id="membcount">4 in this system</span>
       </div>
 
       <div class="roster own-only" id="roster-own">
@@ -576,6 +675,18 @@
         <div class="memb">
           <span class="avatar" aria-hidden="true">EL</span>
           <b>Emma Lawson</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">RL</span>
+          <b>Rob Lawson</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">GL</span>
+          <b>Gran</b>
           <span class="role">member</span>
           <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
         </div>
@@ -605,27 +716,34 @@
       <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
            place the decision is offered. Administration's join-requests
            block is dropped — an instance admin who needs to answer one
-           opens the household from the dial and answers it here. -->
-      <div class="joinreq own-only">
-        <span class="avatar" aria-hidden="true">RL</span>
-        <p><b>Rob Lawson</b> asks to join <b>Lawson Home</b> · 2d ago</p>
-        <button class="yes" onclick="approveJoin(this)">approve</button>
-        <button onclick="declineJoin(this)">decline</button>
-      </div>
-      <p class="said" id="said-join">Rob Lawson is in · he sees this system’s entries from his next sign-in</p>
-      <p class="note top own-only">
-        <b>2g</b> — joiners are answered here and nowhere else; administration<br>
-        no longer carries them.
-      </p>
+           opens the household from the dial and answers it here.
 
-      <div class="drawer own-only" id="adddrawer">
+           v3: now that members owns the whole right-hand column, the two
+           other halves of "who is in this system" come out of their drawers
+           and stand as blocks of the same panel — who is waiting, and who
+           you could add. Nothing is hidden behind a button that had only
+           been there to save room the column no longer lacks. -->
+      <div class="block own-only">
+        <h4>Waiting to come in</h4>
+        <div class="joinreq">
+          <span class="avatar" aria-hidden="true">SL</span>
+          <p><b>Sue Lawson</b> asks to join <b>Lawson Home</b> · 2d ago</p>
+          <button class="yes" onclick="approveJoin(this)">approve</button>
+          <button onclick="declineJoin(this)">decline</button>
+        </div>
+        <p class="restline note">
+          nobody is asking just now — when someone picks this system out of<br>
+          their sky and asks, they appear here, and <b>only</b> here (2g).
+        </p>
+        <p class="said" id="said-join">Sue Lawson is in · she sees this system’s entries from her next sign-in</p>
+      </div>
+
+      <div class="block own-only" id="addpeople">
         <h4>Add someone who already has an account</h4>
-        <div class="cand"><span class="avatar" aria-hidden="true">RL</span><b>Rob Lawson</b>
-          <button class="ghost" onclick="addMember('Rob Lawson','RL')">add</button></div>
-        <div class="cand"><span class="avatar" aria-hidden="true">SL</span><b>Sue Lawson</b>
-          <button class="ghost" onclick="addMember('Sue Lawson','SL')">add</button></div>
-        <div class="cand"><span class="avatar" aria-hidden="true">GL</span><b>Gran</b>
-          <button class="ghost" onclick="addMember('Gran','GL')">add</button></div>
+        <div class="cand"><span class="avatar" aria-hidden="true">BL</span><b>Ben Lawson</b>
+          <button class="ghost" onclick="addMember('Ben Lawson','BL')">add</button></div>
+        <div class="cand"><span class="avatar" aria-hidden="true">AR</span><b>Ada Reid</b>
+          <button class="ghost" onclick="addMember('Ada Reid','AR')">add</button></div>
         <p class="note top">
           people sign in through your identity provider first, then an owner puts<br>
           them in a system. Nobody’s email address is shown here, only the name<br>
@@ -649,57 +767,76 @@
           </div>
         </div>
         <p class="note">
-          you stay a member and keep everything you added. only the new owner<br>
-          can hand it back — and an owner can never leave a system, so this is<br>
-          the way out.
+          you stay a member and keep everything you added.<br>
+          only the new owner can hand it back — and an owner<br>
+          can never leave a system, so this is the way out.
         </p>
         <p class="said" id="said-handover">Emma Lawson owns Lawson Home now · you’re a member</p>
       </div>
 
-      <p class="note top own-only">
+      <p class="note top foot own-only">
         an owner can’t be removed and can’t leave — hand the system over first.
+      </p>
+      <p class="note top foot mem-only">
+        <b>Emma Lawson</b> owns this system — she adds and removes people.<br>
+        you can leave whenever you like.
       </p>
     </div>
 
-    <!-- ── the danger line ── -->
-    <div class="card wide dangercard own-only">
-      <div class="cardhead"><h3>The danger line</h3></div>
-      <p>
-        <b>Request deletion.</b> Everything in Lawson Home — 6 entries, their documents,
-        their history and every reminder still queued — stops the moment you ask.
-        You have <b>30 days</b> to change your mind; after that it is gone for good,
-        and nothing on this machine can bring it back.
-      </p>
-      <p class="note top">
-        asking is all this screen does — the countdown, the restore and the<br>
-        final hard delete are instance-admin acts, drawn on the admin panel (2f).
-      </p>
-      <button class="dangerbtn" onclick="openConfirm(this)">request deletion →</button>
+    <!-- ── THE DANGER ZONE ──────────────────────────────────────────────────
+         Red rule, red wash, hazard ticks, red heading, and the button UP on
+         the heading line at the right. The opener steps aside for the armed
+         button so the card's one dangerous act always lives in the same
+         place — nothing about the protocol changes: the name must be typed
+         exactly before that button wakes, and then it asks twice. -->
+    <div class="card c-danger dangercard own-only">
+      <div class="dangerhead">
+        <svg width="17" height="17" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/>
+          <path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
+        </svg>
+        <h3>The danger line</h3>
+        <span class="spacer"></span>
+        <button class="dangerbtn" id="delopen" onclick="openConfirm(this)">request deletion →</button>
+        <button class="dangerbtn" id="delbtn" data-rest="request deletion" disabled hidden
+                onclick="twoTap(this,'tap again to schedule deletion',requested)">request deletion</button>
+      </div>
+      <div class="dangerbody">
+        <p>
+          <b class="red">Request deletion.</b> Everything in Lawson Home — 6 entries, their
+          documents, their history and every reminder still queued — stops the moment you
+          ask. You have <b class="red">30 days</b> to change your mind; after that it is
+          gone for good, and nothing on this machine can bring it back.
+        </p>
+        <p class="note">
+          asking is all this screen does — the countdown,<br>
+          the restore and the final hard delete are<br>
+          instance-admin acts, drawn on the admin panel (2f).
+        </p>
+      </div>
       <div class="confirm" id="delconfirm">
-        <div class="row">
-          <div class="field">
-            <label>type the system’s name exactly</label>
-            <input id="delname" placeholder="Lawson Home" autocomplete="off" oninput="checkName()"
-                   aria-label="Type the household name to confirm">
-          </div>
-          <button class="dangerbtn" id="delbtn" data-rest="request deletion" disabled
-                  style="margin-top:0" onclick="twoTap(this,'tap again to schedule deletion',requested)">request deletion</button>
+        <div class="field">
+          <label>type the system’s name exactly to wake the button above</label>
+          <input id="delname" placeholder="Lawson Home" autocomplete="off" oninput="checkName()"
+                 aria-label="Type the household name to confirm">
         </div>
-        <p class="note top">
-          the name is the first ask, the second tap is the second — both, because
-          this is the one act with a clock on it.
+        <p class="note">
+          the name is the first ask, the second tap is<br>
+          the second — this is the one act with a clock on it.
         </p>
       </div>
       <p class="said" id="said-doom">
-        requested · Lawson Home stops now, and is gone for good in 30 days<br>
-        changing your mind is an instance-admin act now — the admin<br>
-        panel carries the restore (2f)
+        requested · Lawson Home stops now, and is gone for good in 30 days ·
+        changing your mind is an instance-admin act now — the admin panel carries the restore (2f)
       </p>
     </div>
 
-    <div class="card wide mem-only">
+    <!-- ── leaving: the member's second card, and it sits UNDER the system in
+         the left column, exactly where sections sits for an owner — so the
+         member reads two tidy columns too, with no lone card across the foot -->
+    <div class="card c-leaving mem-only">
       <div class="cardhead"><h3>Leaving</h3></div>
-      <p style="font-size:13.5px;color:var(--ink-mid);max-width:62ch">
+      <p style="font-size:13.5px;color:var(--ink-mid)">
         You can leave Seaside Cottage whenever you like. Nothing you added goes with you —
         the entries belong to the system, not to you. It returns to your sky as a label,
         and you can ask to come back.
@@ -726,7 +863,7 @@
 </div>
 
 <footer>
-  orbit · your system · PROPOSAL v2 for the /settings cutover family (#410), revised to §15 rulings 2a–2m ·
+  orbit · your system · PROPOSAL v3 for the /settings cutover family (#410) — §15 rulings 2a–2m, then the owner’s v2 review: sections under the system, members down the right, and a danger line that looks like one ·
   reached from the helm’s memberships card · name, time zone and currency each save on their own to the eye
   while the client sends the one bundled household.update underneath; sections are still one list, replaced whole ·
   the sections editor belongs to owners alone · joiners are answered here and nowhere else ·
@@ -852,7 +989,7 @@ function toggleDrawer(id, btn){
   const panel = document.getElementById(id);
   if (!panel) return;
   const open = !panel.classList.contains("open");
-  for (const other of document.querySelectorAll(".drawer.open,.handover.open")) other.classList.remove("open");
+  for (const other of document.querySelectorAll(".handover.open")) other.classList.remove("open");
   panel.classList.toggle("open", open);
   if (btn) btn.setAttribute("aria-expanded", String(open));
 }
@@ -877,7 +1014,6 @@ function addMember(name, initials){
   const drop = row.querySelector("button");
   drop.addEventListener("click", () => twoTap(drop, "tap again to remove", () => dropMember(drop)));
   roster.appendChild(row);
-  closeDrawer("adddrawer");
   countMembers();
 }
 function armHeir(radio){
@@ -895,7 +1031,7 @@ function left(){
 }
 function approveJoin(btn){
   btn.closest(".joinreq").style.display = "none";
-  addMember("Rob Lawson", "RL");
+  addMember("Sue Lawson", "SL");
   say("join");
 }
 function declineJoin(btn){
@@ -903,10 +1039,14 @@ function declineJoin(btn){
 }
 
 /* ── the danger line ──────────────────────────────────────────────────────── */
+/* the opener steps aside and hands its place to the armed button, so the one
+   dangerous act stays put at the top-right of the card */
 function openConfirm(btn){
   const panel = document.getElementById("delconfirm");
   panel.classList.add("open");
-  btn.style.display = "none";
+  btn.hidden = true;
+  const fire = document.getElementById("delbtn");
+  if (fire) fire.hidden = false;
   const field = document.getElementById("delname");
   if (field) field.focus();
 }
@@ -932,7 +1072,7 @@ function setRole(role){
   document.getElementById("d-owner").setAttribute("aria-pressed", String(!member));
   document.getElementById("d-member").setAttribute("aria-pressed", String(member));
   if (member) {
-    for (const open of document.querySelectorAll(".drawer.open,.handover.open")) open.classList.remove("open");
+    for (const open of document.querySelectorAll(".handover.open")) open.classList.remove("open");
   }
   for (const control of document.querySelectorAll(".lock")) control.disabled = member;
   /* the read-only view is a DIFFERENT system — Seaside Cottage, which Tom is
