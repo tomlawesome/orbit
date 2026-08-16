@@ -509,6 +509,13 @@ The full open-questions list, walked in order and ruled:
   further: from the lighter colour at the top down to the pinky-orange
   that sits at the bottom of the dial screen. The deep manifest reads
   over warm surface light, not sky.
+- **The belt is a rainbow, and the card rides in it** (owner, correcting
+  the #458 shape): the documents do NOT orbit the item card. The
+  documents nestle in a rainbow-shaped belt — an arc of asteroids — and
+  the card itself is one of the asteroids. Clicking an asteroid moves
+  the belt so that one comes to the centre and displays. (Display shows
+  what Orbit honestly has: details and download until #476's page
+  render exists, then the page itself.)
 - **Cloud sea is approved too** (owner): both dawn skies are ratified —
   the terminator (with its visibility fix) and the cloud sea with its
   through-the-deck descent. Cloud sea survives as an approved treatment
