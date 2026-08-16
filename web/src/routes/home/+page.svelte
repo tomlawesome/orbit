@@ -215,7 +215,7 @@
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
   <nav>
-    <a href="#">Due next</a>
+    <a href="/due-next">Due next</a>
     <a href="#">Documents</a>
     <a href="#">Inbox</a>
     <a href="#">Settings</a>
