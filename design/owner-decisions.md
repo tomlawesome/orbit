@@ -520,6 +520,26 @@ The full open-questions list, walked in order and ruled:
   gets the same login launch, settling on the dial screen with NO dial
   and every household as sub-systems, under the question "Where do you
   belong?"
+- **The #424/#428 ratifications** (owner): off-screen constellations are
+  rejected — the shipped never-on-chart trade stands (crowding accepted
+  as the lesser wrong, as long as it functionally works). The expanded
+  row's scroll-survival is blessed "for now". And the item's command
+  surface (complete, reschedule, snooze, edit, retire) MOVES INTO the
+  expanded row form — the row becomes the whole item, /item's fate to be
+  settled once the commands have moved.
+- **Retrograde keeps the ceiling — and the corridor turns on scroll**
+  (owner: "I'm still undecided... I think it should.. probably"): the
+  top grid stays, and retrograde's scroll answer is the corridor
+  cleverly transitioning into grids at the SIDES, either side of the
+  manifest, fading at the edge closest to the manifest — the room
+  rotating around you as you descend from the dial to the list.
+- **Atlas and hanami are officially retired; solarium is reserved**
+  (owner): both retire from the RELEASE — their code and files stay, but
+  neither ships as a selectable pack in v1.3. Solarium's judgement is
+  deliberately reserved. The release roster stands at star-chart, after
+  dark, dawn and retrograde, plus whatever the owner later admits from
+  the candidates (solarium, Miami day/dusk). Removing atlas from the
+  live swatch rosters is a release-build task alongside #480.
 - **Hanami is dropped** (owner: "still sucks"): the washi-and-blossom
   direction ends; the v2 file stays as the record. In its place, the
   Miami Beach concept (#438) goes for a spin — a light form (sun-bleached
