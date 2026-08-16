@@ -59,7 +59,7 @@ export const INBOX_FIXTURE = {
       canApprove: false,
       canDiscard: false,
       cleanupOnly: false,
-      message: "Orbit is reading its document — it will appear above when it’s done",
+      message: "Orbit is reading its document — it will appear for review when it’s done",
       proposal: {},
       fieldEvidence: {},
     },
@@ -98,4 +98,18 @@ export const INBOX_FIXTURE = {
     },
   ],
   households: [],
+  /**
+   * The Filed lane (§14, #472): every item the relay has ever fed into the
+   * orbit. `filed` is NOT an API field yet — the server only lists receipts
+   * still in flight and forgets the mail→item link once a receipt burns up,
+   * which #467 asks it to change (provenance: source filename + filed date).
+   * Until then the design renders from this record of the mail event; the
+   * source document may since have been renamed or removed from the item —
+   * the filed row remembers the mail, the item carries today's documents.
+   * `itemId` points at real workspace-fixture items so a tap opens them.
+   */
+  filed: [
+    { itemId: "i-mot", title: "Car MOT — Volvo V60", sourceDocument: "mot-reminder.pdf", filedAt: "2025-08-30" },
+    { itemId: "i-svc", title: "Car full service", sourceDocument: "service-invoice-2026.pdf", filedAt: "2026-06-12" },
+  ],
 };
