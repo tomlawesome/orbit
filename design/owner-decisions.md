@@ -502,6 +502,27 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **The household-management rulings (2a–2m)** (owner, on the first
+  drafts): email invitations are deferred as a cleanly isolated later
+  package — v1.3 adds members from registered accounts only. Sections:
+  the editor is visible to owners (and admins wearing the owner screen),
+  never to plain members; their icons and accent marks return to the UI
+  (mock to judge). Fields save independently to the eye — "it's more
+  human" — while the client quietly sends the bundled command. Hard
+  delete is admin-only and appears in no household UI; the
+  restore-from-deletion banner lives on the admin panel only. Join
+  requests live in household management ONLY — the administration screen
+  drops its block; admin surfaces are for admin-only functions, and an
+  instance admin needing owner powers simply sees the owner's screen for
+  the household selected from the dial (no separate admin variant,
+  ever). First-run seeds a generous set of sections — four might not be
+  enough; onboarding must not feel bare. Member rows stay single-line
+  (instances are small; no joined-date route change). Settings' "Your
+  systems" rows become the door into household management. The
+  sign-out-everywhere audit stays; and BEFORE any sign-out-all, the user
+  should see where they're currently signed in, with the choice of
+  signing out just one place — a new server ask. Filed-lane provenance
+  keeps riding the inbox's single request.
 - **Retrograde is fully approved** (owner): the §15 refresh ships as the
   pack — horizon-grid floor, the mirrored ceiling (gated to tall viewports
   per the honest read, not shrunk), the neon wireframe Tron beacon as this
