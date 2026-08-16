@@ -75,14 +75,18 @@ const LAWSON_ITEMS = [
   },
 ];
 
-/** Distant constellations: only their most pressing items matter (mini planets). */
-function distantItems(prefix, leads) {
-  return leads.map((dueDate, index) => ({
-    id: `${prefix}-${index}`, title: `Item ${index}`, sectionId: "s-home",
+/** Distant constellations, named: the id scheme and the due dates are
+ * load-bearing (home's constellation dots hash the ids and band the dates),
+ * so #461 gave these items their words without moving either. */
+function distantItems(prefix, specs) {
+  return specs.map(([title, sectionId, dueDate, costMinor, extra], index) => ({
+    id: `${prefix}-${index}`, title, sectionId,
     status: "active", subtype: "service", scheduleKind: "service",
-    provider: null, reference: null, costMinor: null, currency: "GBP",
+    provider: null, reference: null, costMinor, currency: "GBP",
+    costIsEstimate: true,
     dueDate, recurrenceMonths: 12, reminderDays: [14], notes: null,
     snoozedUntil: null, version: 1, updatedAt: "2026-06-01T00:00:00.000Z",
+    ...(extra ?? {}),
   }));
 }
 
@@ -111,29 +115,43 @@ export const WORKSPACE_FIXTURE = {
     {
       id: "hh-seaside-4551", name: "Seaside Cottage", timezone: "Europe/London",
       currency: "GBP", memberCount: 3, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }],
-      items: distantItems("i-seaside", ["2026-08-20", "2027-03-01", "2027-06-15"]),
+      sections: [{ id: "s-home", name: "Home" }, { id: "s-outside", name: "Outside" }],
+      items: distantItems("i-seaside", [
+        ["Septic tank empty", "s-outside", "2026-08-20", 21000],
+        ["Chimney sweep — Seaside", "s-home", "2027-03-01", 9000],
+        ["Deck re-oiling", "s-outside", "2027-06-15", 13000],
+      ]),
       activities: [],
     },
     {
       id: "hh-mumdad-2480", name: "Mum & Dad’s", timezone: "Europe/London",
       currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }],
-      items: distantItems("i-mumdad", ["2027-01-10", "2027-04-20"]),
+      sections: [{ id: "s-home", name: "Home" }, { id: "s-devices", name: "Devices" }],
+      items: distantItems("i-mumdad", [
+        ["Stairlift service", "s-devices", "2027-01-10", 14000],
+        ["Boiler service — Mum & Dad’s", "s-home", "2027-04-20", 11000],
+      ]),
       activities: [],
     },
     {
       id: "hh-narrow-15033", name: "The Narrowboat", timezone: "Europe/London",
       currency: "GBP", memberCount: 1, canManage: false, onboardingComplete: true,
-      sections: [{ id: "s-home", name: "Home" }],
-      items: distantItems("i-narrow", ["2026-12-11", "2026-09-27"]),
+      sections: [{ id: "s-boat", name: "Boat" }, { id: "s-cert", name: "Certification" }],
+      items: distantItems("i-narrow", [
+        ["Hull blacking", "s-boat", "2026-12-11", 55000],
+        ["Boat Safety Scheme examination", "s-cert", "2026-09-27", 18000,
+          { subtype: "inspection", scheduleKind: "inspection", costIsEstimate: false }],
+      ]),
       activities: [],
     },
     {
       id: "hh-grans-1307", name: "Gran’s Flat", timezone: "Europe/London",
       currency: "GBP", memberCount: 2, canManage: false, onboardingComplete: true,
       sections: [{ id: "s-home", name: "Home" }],
-      items: distantItems("i-grans", ["2026-08-23", "2027-05-30"]),
+      items: distantItems("i-grans", [
+        ["Boiler service — Gran’s", "s-home", "2026-08-23", 9500],
+        ["Gas safety certificate", "s-home", "2027-05-30", 8500],
+      ]),
       activities: [],
     },
   ],
