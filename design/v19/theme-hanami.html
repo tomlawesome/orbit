@@ -47,7 +47,8 @@
     1. NOTHING ABOUT THE SKY'S FORM CHANGES. Same generator, same seed,
        same 95 + 46 points per tile, same radii, same two-layer parallax,
        same horizontal drift at the same speeds. Not one petal shape, not
-       one rotation, not one falling path. The file adds no script.
+       one rotation, not one falling path. (v2 lifts the WEIGHT of the
+       points — see THE SYMBOLS — but never their form.)
     2. THE COLOUR IS THE DEPTH. The far layer is washed mauve, dusty
        rose and grey-violet — blossom seen through air, barely above the
        paper. The near layer is the fruit end of the palette: plum-ink,
@@ -105,16 +106,103 @@
   than porcelain's 16.6 and far better than star-chart's 9.2 — and the
   critical §6 pair, on-track vs due soon under deuteranopia, is ΔE 52.
 
-  NOTHING DECORATIVE (§12). No drawn branches, no petals on the
-  interface, no motifs over the chart, no seal, no brush flourish. Every
-  mark on the screen is either a real item, a real rule, or a star.
+  RE-MEASURED FOR V2, because the symbols changed the ground the type
+  sits on. The method is stricter this time: every mark that sits on the
+  OPEN GROUND (no panel behind it) was found in the DOM, its box sampled
+  against the rendered backdrop, and its own colour scored against the
+  darkest pixel it covers. Twenty marks; the worst is 4.53:1 and the
+  next-worst 4.73:1. The one that sets the bar is the create handle's
+  word — accent type at the very top of the window, the only thing on
+  the whole screen that sits on the deep end of the bokashi — and the
+  band's charge was cut until it cleared: at the first cut it measured
+  4.08:1, so the top stop came down from 34% to 24%, and the printed sky
+  is exactly as deep as legibility allows and no deeper. Everything
+  else on the open ground reads 5.2:1 or better (the constellation
+  labels 5.7–5.9, the month ring 6.7–7.5, the household's own name 7.5).
+  The kasumi can only ever help — it is paper-white, so it LIFTS the
+  ground under anything it drifts behind. And below the fold there is
+  nothing to measure: the sheet has lifted and the deep manifest is on
+  the plain paper of the paragraph above. The kintsugi seam is a graphic
+  (3:1): it reads 3.4:1 on the paper, better than the 3.0:1 hairline it
+  replaces.
 
-  Content, layout and the dial's law are home.html's, byte for byte; the
-  only structural addition is one SVG paint server (the red zone's wash,
-  re-pigmented from a dark-sky pink that is invisible on cream) and the
-  sixth theme swatch so the candidate is reachable. No JavaScript is
-  added or changed: the blossom mix is pure CSS over the untouched
-  generated field.
+  ======================================================================
+  V2 — THE SYMBOLS (owner, §15, on the v1 review). The verdict on the
+  base was blunt and correct: "just has zero personality to it really…
+  it feels like basic colour changes only." The palette discipline was
+  right; the restraint went too far, and §15's law — "every theme earns
+  its own symbols… real character the way retrograde did" — is the fix.
+  Retrograde earned its character with STRUCTURE (a horizon grid in the
+  sky, a wireframe beacon), not with more paint, so hanami answers with
+  Japanese GRAPHIC CONVENTIONS DOING REAL JOBS. Six machines, and the
+  tacky line is exactly where it was: no petals raining, no pagodas, no
+  motif pasted over data.
+
+    KASUMI (霞) — the stylised mist bar of the prints: flat top, flat
+      bottom, stepped ends, never a taper and never a fluffy cloud.
+      Three bands, seeded and baked, riding the far camera in the SKY
+      LAYER at their own slow speed over a tiled field, so they drift
+      with the world and never loop. This is hanami's horizon-grid: a
+      structure in the sky that could only be this theme, and it does
+      the same job the grid does — it gives the field DEPTH BANDS. The
+      bands sit above the far blossom and below the near, so the sky
+      finally has three planes instead of two. Placed in the sky the
+      chart does not use: above the dial's top arc and below its foot.
+    BOKASHI (ぼかし) — the printed sky. Ukiyo-e signed their skies with
+      a deeper charge of pigment at the top edge of the sheet, wiped
+      down to nothing; that is the whole of it — one gradient band, the
+      blossom family's own violet-plum (never the vermilion: vermilion
+      is the marker's and nothing else's), fixed to the top of the
+      window and gone by a third of the way down.
+    ENSŌ (円相) — the not-yet vocabulary, redrawn. The dashed
+      "suggestion / not in orbit" ring becomes a brush circle with its
+      characteristic gap: an incomplete circle is a thing not yet
+      closed, which is precisely what a suggestion is. §12 passes it
+      because it is not a decoration of the ring, it IS the ring — one
+      drawn path standing in for one CSS border, everywhere that
+      language appears (the dial body, the corridor planet, the key
+      swatch, the create drawer's open type).
+    KINTSUGI (金継ぎ) — the corridor's spine. The manifest's time-axis
+      is already a real rule; here it is a repair seam in gold — the
+      year mended rather than ruled. It wanders and it is metal (a dark
+      under-crack, the gold, a light chase), and it is the ONE gold line
+      on the screen. REJECTED with it: gold on the perihelion threshold.
+      That ring is overdue's, and status colour may not be borrowed for
+      a material effect.
+    THE SEAL (印鑑) — the household signed like a print. A small
+      vermilion inkan beside the dial's name, carved-square rather than
+      geometric, carrying the household's own initial reversed out in
+      paper. It is data (whose sky this is), it re-stamps on every
+      flight, and it is the only new mark that is purely an identity.
+      REJECTED: the same seal beside every distant constellation label —
+      four more red marks competing with the labels and their leaders,
+      and an artist stamps the sheet in his hand, not other people's.
+    THE NORTH STAR — hanami's own, per §15 (only star-chart and after
+      dark share the classic glint). Two long sumi strokes crossed by
+      two short ones — real brush geometry, bellied and drawn to a point
+      at every tip — with a vermilion heart at the crossing. Same place,
+      same size, same job: CON-12's create handle.
+
+  AND THE SCROLL (§15's universal law: "every theme's backdrop changes
+  as you scroll away from the dial"). Hanami's answer is the print
+  lifting off the paper: the bokashi band, the kasumi and the whole
+  blossom field rise and fade as one sheet over the first four-fifths of
+  a viewport, and the deep manifest reads on plain warm paper — which is
+  the ground this pack was measured on in the first place, so nothing
+  below the fold changes contrast at all. Written straight from the
+  scrollbar (a position, never a clock), gated so that at scroll 0 not
+  one rule is in effect, and reduced motion keeps the sheet where it is
+  and simply lets it go.
+  ======================================================================
+
+  Content, layout and the dial's law are still home.html's; the
+  structural additions are all pack-scoped and inert in every other
+  theme — one SVG paint server (the red zone's wash, re-pigmented from a
+  dark-sky pink that is invisible on cream), the kasumi group in the sky,
+  the ensō path on the suggestion body, the seal, the sumi north star,
+  and the sixth theme swatch so the candidate is reachable. Two small
+  scripts join the file: the seal's placement (it follows the rendered
+  width of a name that changes) and the scroll position the lift reads.
 
   ON RATIFICATION the [data-theme=hanami] block drops into
   web/src/lib/packs.css unchanged; the rules under it become the pack's
@@ -316,6 +404,10 @@
   .drawer-right .handle i{display:none}
   /* healthy deployments render nothing on the left at all */
 
+  /* pack-scoped symbols are inert everywhere else: the kasumi bands, the
+     ensō and the seal do not exist outside hanami, and every other pack
+     keeps the classic glint (§15: only star-chart and after dark share). */
+  .sky .kasumi,.enso,.seal,.nstar .sumi{display:none}
   .body-link{cursor:pointer}
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
@@ -645,7 +737,7 @@
   footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
          color:var(--ink-faint);padding:10px 0 40px}
   @media (prefers-reduced-motion: reduce){
-    .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
+    .sky .far,.sky .near,.sky .kasumi,.nstar .glint,.rotor{animation:none!important}
   }
 
   /* ======================================================================
@@ -719,19 +811,31 @@
     --p-sky-1:#3a5194;   --p-sky-2:#2a3f80;   --p-sky-3:#203063;
     /* THE BLOSSOM SKY, mixed from eight tones in two depth bands.
        FAR = blossom seen through air: mauve, dusty rose, grey-violet,
-       warm ash. Washed nearly to the paper (2.2–2.7:1 as rendered),
+       warm ash. Washed nearly to the paper (2.5–3.4:1 as rendered),
        because that is what distance does and it is what makes the layer
        read as far rather than as a second near layer.
        NEAR = the fruit end: plum-ink first and most common, then dusty
-       rose, then plum, and cherry last and fewest (4.1–8.2:1).
+       rose, then plum, and cherry last and fewest (4.8–10.2:1).
        The saturated ones are rationed — that ration is the whole
        difference between an elegant sky and a tacky one. The first pass
        mixed these too grey and the sky read as neutral specks with no
-       blossom in it at all; chroma came up, lightness did not. */
-    --sakura-far-a:#9a7a91; --sakura-far-b:#ae7f89;
-    --sakura-far-c:#8a739b; --sakura-far-d:#b0857a;
+       blossom in it at all; chroma came up, lightness did not.
+       v2 spends some of the headroom the builder left: a little chroma
+       on three of the far tones and on the cherry, and — below — weight,
+       which is where the real gain was. Nothing moved in lightness, so
+       the far layer is still air and the ration is still the ration. */
+    --sakura-far-a:#9d7392; --sakura-far-b:#b4798a;
+    --sakura-far-c:#856d9e; --sakura-far-d:#b8837a;
     --sakura-near-a:#6d3a5c; --sakura-near-b:#96556a;
-    --sakura-near-c:#4a2f44; --sakura-near-d:#973340;
+    --sakura-near-c:#4a2f44; --sakura-near-d:#a32d43;
+    /* THE SYMBOLS' three materials (v2). None of them is a new colour
+       FAMILY: the mist is the paper's own white, the printed sky is the
+       blossom's violet-plum, and the gold is the single exception the
+       kintsugi conceit is built on — one line, one job, nowhere else. */
+    --bokashi:#7a4f6d;
+    --kasumi-fill:rgba(255,253,249,.88); --kasumi-mid:rgba(255,252,246,.4);
+    --kasumi-tail:rgba(255,250,242,0);
+    --kintsugi:#a67820;
   }
 
   /* --- the paper, and the light on it -----------------------------------
@@ -743,7 +847,11 @@
      you scroll. */
   [data-theme=hanami] body{
     background:
-      radial-gradient(128% 74% at 50% 2%, #fdf9f2 0%, rgba(253,249,242,0) 62%),
+      /* v2: the paper's own light no longer gathers AT the top edge — the
+         printed bokashi band lives there now, and the two were cancelling
+         each other out. It re-gathers just below the band, which is also
+         where a wiped sky puts its light. */
+      radial-gradient(122% 62% at 50% 30%, #fdf9f2 0%, rgba(253,249,242,0) 64%),
       radial-gradient(150% 92% at 50% 112%, rgba(230,163,170,.18) 0%,
                       rgba(230,163,170,0) 60%),
       var(--bg);
@@ -771,9 +879,17 @@
      generator's per-point alphas (tuned for bright specks on night)
      vanish, so both layers are lifted and given a hairline stroke of
      their own tone. Size is lifted by the stroke, never by r, so the
-     generator's radius variation — the sense of depth — survives. */
+     generator's radius variation — the sense of depth — survives.
+
+     v2 spends the headroom the first pass deliberately left (§15: the
+     blossom "may come up a notch"). It is spent on the STROKE, not on r
+     and not on lightness: far .86 → 1.1 and near .92 → 1.32, with the far
+     layer's alpha lifted from .8 to .92. The points get their weight back
+     without a single one of them getting bigger or brighter, so the mix,
+     the ration and the depth read are all exactly as measured — the sky
+     simply stops disappearing on a large screen. */
   [data-theme=hanami] .sky .far circle{
-    opacity:.8;stroke-width:.86;
+    opacity:.92;stroke-width:1.1;
     fill:var(--sakura-far-a);stroke:var(--sakura-far-a)}
   [data-theme=hanami] .sky .far circle:nth-child(3n+2){
     fill:var(--sakura-far-b);stroke:var(--sakura-far-b)}
@@ -782,7 +898,7 @@
   [data-theme=hanami] .sky .far circle:nth-child(7n+5){
     fill:var(--sakura-far-d);stroke:var(--sakura-far-d)}
   [data-theme=hanami] .sky .near circle{
-    opacity:.92;stroke-width:.92;
+    opacity:1;stroke-width:1.32;
     fill:var(--sakura-near-a);stroke:var(--sakura-near-a)}
   [data-theme=hanami] .sky .near circle:nth-child(3n+2){
     fill:var(--sakura-near-b);stroke:var(--sakura-near-b)}
@@ -908,13 +1024,174 @@
   [data-theme=hanami] body.quiet .sky .near circle{
     animation:blossombreathe 5.4s ease-in-out infinite alternate}
   @keyframes blossombreathe{from{opacity:.62}to{opacity:.95}}
+
+  /* ======================================================================
+     THE SYMBOLS (§15). Six machines. Every one of them is doing a job the
+     screen already had — a depth cue, a printed ground, the not-yet ring,
+     the time axis, the household's name, the create handle — in this
+     theme's own graphic language. Nothing here is laid over data.
+     ====================================================================== */
+
+  /* --- 1. KASUMI: the mist bands ----------------------------------------
+     The stylised mist of the prints: flat edges and stepped ends, cut from
+     the paper's own white with a hairline of plum at the fold. They live
+     inside the far camera, so a flight moves them with the world, and they
+     run on their own slow drift over a tiled field (the field is duplicated
+     at +1600, so the wrap is seamless — there is no loop to see). Above the
+     far blossom, below the near: the sky gains a third plane, which is the
+     entire structural point of them. */
+  [data-theme=hanami] .sky .kasumi{display:block;
+    animation:driftk 320s linear infinite}
+  [data-theme=hanami] .sky .kasumi path{fill:url(#kasumi-fade)}
+  @keyframes driftk{to{transform:translateX(-1600px)}}
+
+  /* --- 2. BOKASHI: the printed sky --------------------------------------
+     The one thing a woodblock sky always has: a deeper charge of pigment
+     along the top edge of the sheet, wiped downward to nothing. It rides
+     BELOW the starfield (a ::before on a positioned svg paints under it),
+     it is the sky's own violet-plum rather than the marker's vermilion,
+     and it is spent by 30vh so that nothing that carries type on the open
+     ground ever sits on its deep end. */
+  [data-theme=hanami] .sky::before{content:"";position:absolute;
+    left:0;right:0;top:0;height:34vh;
+    /* The depth of the charge is not a taste call: it is set by the ONE mark
+       that sits on open ground up here — the create handle's word, accent on
+       cream. At the first cut (34% at the very top) that word measured
+       4.08:1 against the band and nothing else on the screen failed; the
+       stops below are the deepest wipe that keeps it over 4.5. */
+    background:linear-gradient(180deg,
+      color-mix(in srgb,var(--bokashi) 24%, transparent) 0%,
+      color-mix(in srgb,var(--bokashi) 20%, transparent) 9%,
+      color-mix(in srgb,var(--bokashi) 13%, transparent) 27%,
+      color-mix(in srgb,var(--bokashi)  5%, transparent) 55%,
+      transparent 100%)}
+
+  /* --- 3. ENSŌ: the not-yet ring ----------------------------------------
+     One brush circle, drawn once, used everywhere the "suggestion / not in
+     orbit" language appears. The gap is the meaning: the circle is not
+     closed because the thing is not accepted. At dial size it is an inline
+     path (so it still scales with POL-4's highlight); at dot size it is the
+     same geometry used as a MASK, which is what lets one asset take the
+     colour of whatever it stands in for. */
+  [data-theme=hanami]{--enso:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='-12,-12,24,24'%3E%3Cpath%20d='M2.8,-9.76L3.72,-9.57L4.59,-9.23L5.43,-8.8L6.22,-8.29L6.96,-7.71L7.64,-7.05L8.26,-6.33L8.81,-5.56L9.28,-4.74L9.68,-3.87L10,-2.98L10.23,-2.06L10.38,-1.12L10.44,-0.17L10.42,0.78L10.32,1.73L10.13,2.66L9.85,3.57L9.5,4.46L9.06,5.31L8.55,6.12L7.97,6.88L7.32,7.59L6.61,8.23L5.83,8.8L5.01,9.3L4.15,9.72L3.25,10.06L2.32,10.31L1.37,10.47L0.41,10.54L-0.55,10.52L-1.5,10.41L-2.44,10.21L-3.35,9.91L-4.22,9.54L-5.06,9.09L-5.84,8.56L-6.57,7.96L-7.24,7.3L-7.84,6.58L-8.37,5.82L-8.83,5.01L-9.21,4.17L-9.51,3.3L-9.74,2.42L-9.85,1.51L-9.89,0.6L-9.84,-0.3L-9.73,-1.18L-9.53,-2.05L-9.27,-2.9L-8.93,-3.72L-8.53,-4.5L-8.07,-5.25L-7.54,-5.95L-6.96,-6.59L-6.33,-7.2L-5.66,-7.76L-4.94,-8.26L-4.17,-8.69L-3.37,-9.05L-2.54,-9.34L-1.68,-9.55L-1.61,-9.14L-2.42,-8.91L-3.21,-8.61L-3.96,-8.25L-4.67,-7.82L-5.34,-7.32L-5.96,-6.78L-6.51,-6.17L-6.98,-5.51L-7.4,-4.81L-7.75,-4.09L-8.04,-3.35L-8.26,-2.58L-8.41,-1.81L-8.49,-1.03L-8.51,-0.26L-8.46,0.52L-8.34,1.28L-8.16,2.03L-7.95,2.76L-7.67,3.48L-7.34,4.17L-6.94,4.83L-6.49,5.45L-5.98,6.03L-5.42,6.57L-4.81,7.05L-4.16,7.48L-3.47,7.85L-2.75,8.15L-2,8.38L-1.23,8.54L-0.45,8.63L0.34,8.65L1.12,8.59L1.9,8.46L2.66,8.25L3.4,7.98L4.11,7.64L4.79,7.23L5.43,6.76L6.02,6.24L6.56,5.67L7.05,5.05L7.48,4.38L7.85,3.69L8.16,2.96L8.4,2.21L8.58,1.44L8.69,0.65L8.73,-0.14L8.71,-0.94L8.61,-1.73L8.44,-2.52L8.21,-3.28L7.9,-4.03L7.53,-4.75L7.1,-5.44L6.6,-6.09L6.05,-6.7L5.44,-7.25L4.78,-7.75L4.07,-8.19L3.33,-8.58L2.57,-8.95Z'/%3E%3C/svg%3E")}
+  [data-theme=hanami] .enso{display:block}
+  [data-theme=hanami] .enso path{fill:var(--accent)}
+  /* the ring it replaces goes; nothing else on this body changes */
+  [data-theme=hanami] .body-link[data-body=i-insurance] circle{display:none}
+  [data-theme=hanami] .body-link:hover .enso path{transform:scale(1.5)}
+  /* the dots: the border becomes the brush. The paper disc that keeps the
+     corridor's spine from running through the marker moves out to the
+     planet, because a mask clips everything the element paints. */
+  [data-theme=hanami] :is(.manifest .corridor .planet.sug i,
+    .keyrow .sw[style*="--accent"],.ctype .dot[style*="currentColor"],
+    .dot.sug){
+    border:0!important;
+    -webkit-mask:var(--enso) center/contain no-repeat;
+            mask:var(--enso) center/contain no-repeat}
+  [data-theme=hanami] .manifest .corridor .planet.sug i,
+  [data-theme=hanami] .keyrow .sw[style*="--accent"]{
+    background:var(--accent)!important}
+  [data-theme=hanami] .ctype .dot[style*="currentColor"],
+  [data-theme=hanami] .dot.sug{background:currentColor!important}
+  [data-theme=hanami] .manifest .corridor .planet.sug{
+    background:radial-gradient(circle,var(--bg) 56%,transparent 60%)}
+  /* a ring always reads lighter than the disc beside it, so the brush marks
+     are given back the weight the outline costs them */
+  [data-theme=hanami] .manifest .corridor .planet.sug i{width:11px;height:11px}
+  [data-theme=hanami] .ctype .dot[style*="currentColor"]{width:10px;height:10px}
+
+  /* --- 4. KINTSUGI: the spine -------------------------------------------
+     The corridor's time-axis is a real rule and it stays exactly where it
+     was; what changes is its material. A repair seam in gold: a dark crack
+     under it, the gold in it, a light chase along one side, wandering the
+     way a break does and tiling seamlessly (the wander is periodic, with a
+     vertical tangent at both ends of the tile). The year, mended. The one
+     gold line in the theme — the perihelion threshold was tried in gold and
+     rejected, because that ring belongs to overdue and status colour is not
+     available for materials. */
+  [data-theme=hanami] .manifest .corridor::before{
+    left:11.25px;width:9px;
+    background:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0,0,9,240'%3E%3Cpath%20d='M4.5,0,Q5.73,10,5.68,20,Q5.43,30,5.33,40,Q5.6,50,6.17,60,Q6.75,70,6.96,80,Q6.58,90,5.68,100,Q4.57,110,3.68,120,Q3.27,130,3.32,140,Q3.57,150,3.67,160,Q3.4,170,2.83,180,Q2.25,190,2.04,200,Q2.42,210,3.32,220,Q4.43,230,5.32,240'%20fill='none'%20stroke='rgba(43,32,41,.20)'%20stroke-width='2.8'/%3E%3Cpath%20d='M4.5,0,Q5.73,10,5.68,20,Q5.43,30,5.33,40,Q5.6,50,6.17,60,Q6.75,70,6.96,80,Q6.58,90,5.68,100,Q4.57,110,3.68,120,Q3.27,130,3.32,140,Q3.57,150,3.67,160,Q3.4,170,2.83,180,Q2.25,190,2.04,200,Q2.42,210,3.32,220,Q4.43,230,5.32,240'%20fill='none'%20stroke='%23a67820'%20stroke-width='1.5'/%3E%3Cpath%20d='M4.5,0,Q5.73,10,5.68,20,Q5.43,30,5.33,40,Q5.6,50,6.17,60,Q6.75,70,6.96,80,Q6.58,90,5.68,100,Q4.57,110,3.68,120,Q3.27,130,3.32,140,Q3.57,150,3.67,160,Q3.4,170,2.83,180,Q2.25,190,2.04,200,Q2.42,210,3.32,220,Q4.43,230,5.32,240'%20fill='none'%20stroke='%23e3c67f'%20stroke-width='.55'%20transform='translate(-0.55,0)'%20opacity='.9'/%3E%3C/svg%3E") 0 0/9px 240px repeat-y}
+  /* the month knots are the seam's own beads: paper, ringed in ink */
+  [data-theme=hanami] .manifest .corridor .month::before{
+    background:var(--bg);border-color:var(--kintsugi)}
+
+  /* --- 5. THE SEAL ------------------------------------------------------
+     Carved, not drawn: the outline is a wonky square (a seal is cut into
+     stone by hand and stamped by a hand), the ink is bengara at the density
+     a stamp leaves, and the household's initial is reversed out in paper.
+     Small and dignified — it is a signature, not a badge. */
+  [data-theme=hanami] .seal{display:block}
+  [data-theme=hanami] .seal path{fill:var(--accent);opacity:.9}
+  [data-theme=hanami] .seal .nick{fill:var(--bg);opacity:.55}
+  [data-theme=hanami] .seal text{fill:#f7f1e8;letter-spacing:0}
+  /* it belongs to the sheet, so it leaves with the chart on a flight and
+     goes quiet with everything else when there is nothing to do */
+  [data-theme=hanami] body.quiet .seal{opacity:.45}
+
+  /* --- 6. THE NORTH STAR ------------------------------------------------
+     Four sumi strokes and a vermilion heart. Real brush geometry: each
+     stroke is a filled outline that starts at a point, bellies a little
+     before its middle and is drawn off to a point again, with the slight
+     bow a loaded brush leaves. The silhouette keeps the classic glint's
+     width and height exactly, so the handle is still read as a star at a
+     glance — and the drawer-open rule that paints the glint's paths accent
+     needs no change: the strokes simply turn vermilion. */
+  [data-theme=hanami] .nstar .classic{display:none}
+  [data-theme=hanami] .nstar .sumi{display:block}
+
+  /* --- THE SCROLL ANSWER (§15's universal law) ---------------------------
+     The print lifts off the paper. Bokashi, kasumi and blossom are one
+     sheet — they are all inside .sky — so one transform takes all three up
+     and out while the ground they were printed on stays exactly where it
+     is. The deep manifest therefore reads on the plain warm paper this
+     pack's contrast was measured against: the descent cannot cost a single
+     ratio, because below the fold there is nothing left but the paper.
+
+     Read straight off the scrollbar, so it is a POSITION and not an
+     animation: monotonic, exact at both ends, identical coming back up.
+     And gated — at scroll 0 not one rule here is in effect, because an
+     identity transform on a full-window layer is not free and the dial
+     screen is meant to be the approved screen, untouched. */
+  :root{--lift:0}
+  [data-theme=hanami].lifting .sky{
+    transform:translate3d(0,calc(var(--lift) * -104vh),0);
+    opacity:calc(var(--stars) * (1 - var(--lift) * 1.1));
+    transition:none}
+  /* the shade at the edges is part of the sky's dressing, so it goes too */
+  [data-theme=hanami].lifting .vignette{
+    opacity:calc(1 - var(--lift));transition:none}
+  /* Reduced motion keeps the sheet where it is: the print gives way where
+     it stands rather than being flown out of the window. The fade is a
+     position, not a flourish, so it stays. */
+  @media (prefers-reduced-motion: reduce){
+    [data-theme=hanami].lifting .sky{transform:none}
+  }
   /* /HANAMI */
 </style>
 </head>
 <body>
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
+    <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+      <!-- HANAMI (§15): the kasumi bands. Seeded once and baked, so the
+           arrangement is the same every load; tiled at +1600 like the
+           starfield so the drift wraps instead of looping. Rendered only
+           under [data-theme=hanami]; inert markup in every other pack. -->
+      <defs>
+        <!-- the mist is charged at its top edge and wiped away downward: the
+             flat printed edge stays crisp, the body dissolves into the sky -->
+        <linearGradient id="kasumi-fade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="var(--kasumi-fill)"/>
+          <stop offset=".55" stop-color="var(--kasumi-mid)"/>
+          <stop offset="1" stop-color="var(--kasumi-tail)"/>
+        </linearGradient>
+      </defs>
+      <g class="kasumi"><g id="kasumitile">
+        <path d="M 60 170.45 L 141.22 170.45 L 141.22 163.64 L 193.19 163.64 L 193.19 156.82 L 222.43 156.82 L 222.43 150 L 620.19 150 L 620.19 156.82 L 664.33 156.82 L 664.33 163.64 L 703.27 163.64 L 703.27 170.45 L 750 170.45 L 750 180 L 655.32 180 L 655.32 175.91 L 169.83 175.91 L 169.83 180 L 60 180 Z"/>
+        <path d="M 1150 84.91 L 1195.43 84.91 L 1195.43 81.27 L 1224.51 81.27 L 1224.51 77.64 L 1240.86 77.64 L 1240.86 74 L 1492.82 74 L 1492.82 77.64 L 1525.86 77.64 L 1525.86 81.27 L 1555.02 81.27 L 1555.02 84.91 L 1590 84.91 L 1590 90 L 1511.51 90 L 1511.51 87.82 L 1197.11 87.82 L 1197.11 90 L 1150 90 Z"/>
+        <path d="M 360 872.36 L 435.8 872.36 L 435.8 866.91 L 484.31 866.91 L 484.31 861.45 L 511.59 861.45 L 511.59 856 L 890.52 856 L 890.52 861.45 L 934.54 861.45 L 934.54 866.91 L 973.39 866.91 L 973.39 872.36 L 1020 872.36 L 1020 880 L 910.11 880 L 910.11 876.73 L 436.89 876.73 L 436.89 880 L 360 880 Z"/>
+      </g><use href="#kasumitile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
 </div>
@@ -975,11 +1252,21 @@
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit"
           onclick="toggleCreate(this)">
     <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <g class="glint" style="transform-origin:0 0">
+      <g class="glint classic" style="transform-origin:0 0">
         <circle r="9" fill="var(--ink)" opacity=".12"/>
         <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
               fill="var(--ink)" opacity=".9"/>
         <circle r="2" fill="var(--ink)"/>
+      </g>
+      <!-- hanami only (§15): the same star, brushed. Two long strokes, two
+           short, a bleed of ink where they cross and a vermilion heart. -->
+      <g class="glint sumi" style="transform-origin:0 0">
+        <circle r="9.5" fill="var(--ink)" opacity=".07"/>
+        <path d="M 0.35 -12.6 L -0.1 -11.66 L -0.44 -10.71 L -0.73 -9.77 L -0.99 -8.82 L -1.23 -7.87 L -1.43 -6.92 L -1.61 -5.97 L -1.75 -5.02 L -1.87 -4.07 L -1.95 -3.12 L -2 -2.17 L -2.02 -1.21 L -2.03 -0.26 L -2.02 0.7 L -1.99 1.65 L -1.94 2.61 L -1.87 3.57 L -1.78 4.52 L -1.67 5.48 L -1.55 6.44 L -1.41 7.4 L -1.25 8.36 L -1.07 9.32 L -0.88 10.28 L -0.66 11.24 L -0.35 12.2 L -0.35 12.2 L -0.14 11.25 L -0.01 10.3 L 0.09 9.35 L 0.19 8.4 L 0.27 7.44 L 0.35 6.49 L 0.42 5.54 L 0.49 4.59 L 0.55 3.63 L 0.62 2.68 L 0.68 1.73 L 0.74 0.78 L 0.79 -0.18 L 0.85 -1.13 L 0.9 -2.08 L 0.95 -3.04 L 0.98 -3.99 L 1 -4.94 L 1 -5.9 L 0.99 -6.85 L 0.96 -7.81 L 0.9 -8.77 L 0.83 -9.72 L 0.73 -10.68 L 0.6 -11.64 L 0.35 -12.6 Z" fill="var(--ink)" opacity=".92"/>
+        <path d="M -12.1 0.3 L -11.15 0.48 L -10.2 0.57 L -9.25 0.63 L -8.3 0.68 L -7.36 0.72 L -6.41 0.74 L -5.46 0.76 L -4.51 0.77 L -3.57 0.76 L -2.62 0.75 L -1.68 0.73 L -0.73 0.71 L 0.22 0.67 L 1.16 0.64 L 2.11 0.6 L 3.05 0.55 L 4 0.5 L 4.94 0.45 L 5.89 0.4 L 6.84 0.33 L 7.78 0.27 L 8.73 0.19 L 9.67 0.11 L 10.61 0.01 L 11.56 -0.11 L 12.5 -0.3 L 12.5 -0.3 L 11.55 -0.57 L 10.6 -0.77 L 9.64 -0.94 L 8.69 -1.09 L 7.74 -1.23 L 6.79 -1.35 L 5.84 -1.45 L 4.9 -1.54 L 3.95 -1.61 L 3 -1.66 L 2.05 -1.7 L 1.1 -1.72 L 0.16 -1.71 L -0.79 -1.69 L -1.73 -1.65 L -2.68 -1.59 L -3.62 -1.5 L -4.57 -1.39 L -5.51 -1.26 L -6.45 -1.11 L -7.4 -0.94 L -8.34 -0.75 L -9.28 -0.54 L -10.22 -0.31 L -11.16 -0.05 L -12.1 0.3 Z" fill="var(--ink)" opacity=".92"/>
+        <path d="M -4.4 -4.6 L -4.16 -4.15 L -3.9 -3.72 L -3.62 -3.3 L -3.34 -2.89 L -3.05 -2.49 L -2.75 -2.09 L -2.45 -1.71 L -2.14 -1.33 L -1.82 -0.95 L -1.49 -0.59 L -1.15 -0.23 L -0.81 0.12 L -0.46 0.46 L -0.1 0.8 L 0.26 1.13 L 0.62 1.45 L 1 1.77 L 1.37 2.09 L 1.76 2.4 L 2.15 2.7 L 2.54 3 L 2.94 3.29 L 3.34 3.58 L 3.75 3.87 L 4.16 4.14 L 4.6 4.4 L 4.6 4.4 L 4.29 4.01 L 3.97 3.65 L 3.63 3.29 L 3.3 2.93 L 2.96 2.58 L 2.62 2.23 L 2.28 1.87 L 1.94 1.52 L 1.6 1.17 L 1.26 0.82 L 0.92 0.47 L 0.58 0.12 L 0.24 -0.24 L -0.1 -0.59 L -0.44 -0.94 L -0.79 -1.29 L -1.13 -1.64 L -1.48 -1.99 L -1.82 -2.33 L -2.18 -2.67 L -2.53 -3.01 L -2.89 -3.34 L -3.25 -3.67 L -3.62 -3.99 L -4 -4.31 L -4.4 -4.6 Z" fill="var(--ink)" opacity=".7"/>
+        <path d="M 4.6 -4.4 L 4.2 -4.11 L 3.82 -3.79 L 3.45 -3.47 L 3.09 -3.14 L 2.73 -2.81 L 2.38 -2.47 L 2.02 -2.13 L 1.68 -1.79 L 1.33 -1.44 L 0.99 -1.09 L 0.64 -0.74 L 0.3 -0.39 L -0.04 -0.04 L -0.38 0.32 L -0.72 0.67 L -1.06 1.02 L -1.4 1.37 L -1.74 1.72 L -2.08 2.07 L -2.42 2.43 L -2.76 2.78 L -3.1 3.13 L -3.43 3.49 L -3.77 3.85 L -4.09 4.21 L -4.4 4.6 L -4.4 4.6 L -3.96 4.34 L -3.55 4.07 L -3.14 3.78 L -2.74 3.49 L -2.34 3.2 L -1.95 2.9 L -1.56 2.6 L -1.17 2.29 L -0.8 1.97 L -0.42 1.65 L -0.06 1.33 L 0.3 1 L 0.66 0.66 L 1.01 0.32 L 1.35 -0.03 L 1.69 -0.39 L 2.02 -0.75 L 2.34 -1.13 L 2.65 -1.51 L 2.95 -1.89 L 3.25 -2.29 L 3.54 -2.69 L 3.82 -3.1 L 4.1 -3.52 L 4.36 -3.95 L 4.6 -4.4 Z" fill="var(--ink)" opacity=".7"/>
+        <circle r="1.75" fill="var(--accent)"/>
       </g>
     </svg>
     <span>create</span>
@@ -1093,12 +1380,25 @@
       <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
       <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
       <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+      <!-- hanami only (§15): the household, signed. Placed off the rendered
+           width of the name (it is centred, and its width changes with the
+           household), re-stamped on arrival. -->
+      <g id="seal" class="seal" aria-hidden="true" transform="translate(228 205)">
+        <g transform="rotate(-2.5 4.6 4.6)">
+          <path d="M .5 .4 L 4.6 .1 L 8.9 .6 L 9.2 4.6 L 8.8 8.7 L 4.5 9.1 L .3 8.6 L .1 4.5 Z"/>
+          <!-- a stamp never lands evenly: two flecks of paper left in the ink -->
+          <path class="nick" d="M 1.1 6.4 L 2.4 6.1 L 2.2 7.2 L 1 7.4 Z"/>
+          <path class="nick" d="M 6.9 .9 L 8.4 1.1 L 8.3 1.9 L 7 1.7 Z"/>
+          <text id="seal-mark" x="4.65" y="7" font-size="6.6" text-anchor="middle"
+                style="font-family:var(--mono);font-weight:500">L</text>
+        </g>
+      </g>
 
       <circle data-polish="POL-2" class="ping" cx="175.7" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
       <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><g class="breathe"><circle cx="175.7" cy="140" r="6.3" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/><circle cx="174.44" cy="141.575" r="2.079" fill="rgba(255,255,255,.38)"/></g></a>
       <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="208.2" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><path d="M 208.2 121.5 A 5.2 5.2 0 0 1 208.2 131.9 Z" fill="rgba(0,0,0,.42)"/><circle cx="207.16" cy="128" r="1.716" fill="rgba(255,255,255,.38)"/></g></a>
       <a class="body-link" data-body="i-boiler" data-title="Boiler service" data-t="T−22d" data-cost="~£120" href="#i-boiler"><g class="breathe"><circle cx="215.2" cy="127.6" r="6" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="214" cy="129.1" r="1.98" fill="rgba(255,255,255,.38)"/></g></a>
-      <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/></g></a>
+      <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/><g class="enso" transform="translate(247.8 143.2) scale(.92)"><path d="M 2.8 -9.76 L 3.72 -9.57 L 4.59 -9.23 L 5.43 -8.8 L 6.22 -8.29 L 6.96 -7.71 L 7.64 -7.05 L 8.26 -6.33 L 8.81 -5.56 L 9.28 -4.74 L 9.68 -3.87 L 10 -2.98 L 10.23 -2.06 L 10.38 -1.12 L 10.44 -0.17 L 10.42 0.78 L 10.32 1.73 L 10.13 2.66 L 9.85 3.57 L 9.5 4.46 L 9.06 5.31 L 8.55 6.12 L 7.97 6.88 L 7.32 7.59 L 6.61 8.23 L 5.83 8.8 L 5.01 9.3 L 4.15 9.72 L 3.25 10.06 L 2.32 10.31 L 1.37 10.47 L 0.41 10.54 L -0.55 10.52 L -1.5 10.41 L -2.44 10.21 L -3.35 9.91 L -4.22 9.54 L -5.06 9.09 L -5.84 8.56 L -6.57 7.96 L -7.24 7.3 L -7.84 6.58 L -8.37 5.82 L -8.83 5.01 L -9.21 4.17 L -9.51 3.3 L -9.74 2.42 L -9.85 1.51 L -9.89 0.6 L -9.84 -0.3 L -9.73 -1.18 L -9.53 -2.05 L -9.27 -2.9 L -8.93 -3.72 L -8.53 -4.5 L -8.07 -5.25 L -7.54 -5.95 L -6.96 -6.59 L -6.33 -7.2 L -5.66 -7.76 L -4.94 -8.26 L -4.17 -8.69 L -3.37 -9.05 L -2.54 -9.34 L -1.68 -9.55 L -1.61 -9.14 L -2.42 -8.91 L -3.21 -8.61 L -3.96 -8.25 L -4.67 -7.82 L -5.34 -7.32 L -5.96 -6.78 L -6.51 -6.17 L -6.98 -5.51 L -7.4 -4.81 L -7.75 -4.09 L -8.04 -3.35 L -8.26 -2.58 L -8.41 -1.81 L -8.49 -1.03 L -8.51 -0.26 L -8.46 0.52 L -8.34 1.28 L -8.16 2.03 L -7.95 2.76 L -7.67 3.48 L -7.34 4.17 L -6.94 4.83 L -6.49 5.45 L -5.98 6.03 L -5.42 6.57 L -4.81 7.05 L -4.16 7.48 L -3.47 7.85 L -2.75 8.15 L -2 8.38 L -1.23 8.54 L -0.45 8.63 L 0.34 8.65 L 1.12 8.59 L 1.9 8.46 L 2.66 8.25 L 3.4 7.98 L 4.11 7.64 L 4.79 7.23 L 5.43 6.76 L 6.02 6.24 L 6.56 5.67 L 7.05 5.05 L 7.48 4.38 L 7.85 3.69 L 8.16 2.96 L 8.4 2.21 L 8.58 1.44 L 8.69 0.65 L 8.73 -0.14 L 8.71 -0.94 L 8.61 -1.73 L 8.44 -2.52 L 8.21 -3.28 L 7.9 -4.03 L 7.53 -4.75 L 7.1 -5.44 L 6.6 -6.09 L 6.05 -6.7 L 5.44 -7.25 L 4.78 -7.75 L 4.07 -8.19 L 3.33 -8.58 L 2.57 -8.95 Z"/></g></g></a>
       <a class="body-link" data-body="i-chimney" data-title="Chimney sweep" data-t="T−61d" data-cost="~£90" href="#i-chimney"><g><circle cx="257.1" cy="152.8" r="5.7" style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/><circle cx="255.96" cy="154.225" r="1.881" fill="rgba(255,255,255,.38)"/></g></a>
       <a class="body-link" data-body="i-smoke" data-title="Smoke alarm batteries" data-t="T−122d" data-cost="~£12" href="#i-smoke"><circle cx="267.6" cy="238.5" r="3.5" fill="url(#p-jade)"/></a>
       <a class="body-link" data-body="i-svc" data-title="Car full service" data-t="T&#8722;161d" data-cost="~&pound;300" data-docs="2" href="#i-svc"><g><circle cx="222.9" cy="285.5" r="7" style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/><circle cx="221.5" cy="287.25" r="2.31" fill="rgba(255,255,255,.38)"/></g></a>
@@ -1225,7 +1525,7 @@
   <button onclick="document.body.classList.remove('quiet');document.body.classList.toggle('storm')">storm state</button>
   <button onclick="cycleHealth()">health: cycle</button>
 </div>
-<footer>orbit · v19 light-theme candidate · hanami: sumi ink and a blossom sky on warm paper · no surface pattern — the sky is the material · sumi is structure, vermilion is the marker, the dye pigments are status and nothing else</footer>
+<footer>orbit · v19 light-theme candidate · hanami v2: sumi ink and a blossom sky on warm paper, and now the theme’s own symbols — kasumi mist banding the sky, a bokashi band printed along its top edge, the not-yet ring redrawn as an ensō, the corridor’s year mended in kintsugi gold, the household signed with its seal, and a north star of four sumi strokes with a vermilion heart · scroll, and the print lifts off the paper</footer>
 
 <script>
 /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
@@ -1366,6 +1666,7 @@ function flyTo(key, mini){
   // then does the chart grow out of that shared centre — slow and deliberate
   setTimeout(() => {
     document.getElementById("dial-name").textContent = GALAXY[key].name;
+    stampSeal();                      // the sheet is signed by its household
     document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
       (key === "lawson" ? "owner" : "member");
     hero.classList.add("arriving");   // dial pinned at centre, under the ring
@@ -1542,8 +1843,49 @@ addEventListener("scroll", () => {
   lastY = scrollY;
 }, { passive: true });
 
+/* §15 — THE SEAL. An artist's seal is not a decoration, it is the mark of
+   whose sheet this is, so it carries the household's own initial and is
+   re-stamped whenever the camera lands somewhere else. It has to be placed
+   from the RENDERED width of the name: the name is centred and every
+   household's is a different length. Inert in the other packs (the group is
+   display:none outside hanami) but harmless to run. */
+function stampSeal(){
+  const seal = document.getElementById("seal");
+  const label = document.getElementById("dial-name");
+  if (!seal || !label) return;
+  document.getElementById("seal-mark").textContent =
+    (label.textContent.trim()[0] || "").toUpperCase();
+  const box = label.getBBox();
+  seal.setAttribute("transform", "translate(" +
+    (box.x + box.width + 5.5).toFixed(1) + " " +
+    (box.y + box.height / 2 - 5.2).toFixed(1) + ")");
+}
+
+/* §15's universal scroll law, in hanami's vocabulary: the print lifts off
+   the paper. One number, read straight off the scrollbar — a position, not
+   an animation — and the class that gates it, so the dial screen at scroll
+   0 is left literally alone. */
+function readLift(){
+  const doc = document.documentElement;
+  const max = Math.max(1, doc.scrollHeight - innerHeight);
+  const s = Math.min(max, Math.max(0, scrollY));
+  /* the sheet is away over four-fifths of a viewport — or 45% of a short
+     page, whichever comes first, so the manifest is always on plain paper */
+  doc.style.setProperty("--lift",
+    Math.min(1, s / Math.min(innerHeight * .82, max * .45)).toFixed(4));
+  doc.classList.toggle("lifting", s > 0);
+}
+let liftQueued = false;
+addEventListener("scroll", () => {
+  if (liftQueued) return;
+  liftQueued = true;
+  requestAnimationFrame(() => { liftQueued = false; readLift(); });
+}, { passive: true });
+readLift();
+
 pointSky();
 renderGalaxy(false);
+stampSeal();
 addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
 </script>
 </body>
