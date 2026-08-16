@@ -576,6 +576,12 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Belt v4 sealed, one criticism: no discoloured box** (owner: "Belt
+  v4 is great, only one criticism left"): the band's glow/haze must
+  not read as a discoloured rectangle at the screen edges — the
+  discolouration was already asked to go. Fix: fade the band's edges
+  to nothing (owner's own suggestion) so the glow dies smoothly before
+  any hard bound can show.
 - **The create screen is not "form over login"** (owner: "this is a
   mess!"): the create-system card appears AFTER login, so the login
   screen must be gone entirely while it shows — no identity-provider
