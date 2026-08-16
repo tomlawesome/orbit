@@ -138,6 +138,15 @@ const SCREENS = [
     mockupOnly: ["footer"],
   },
   {
+    name: "settings",
+    path: "/settings",
+    stage: "porting",
+    mockup: "/design/v19/settings.html",
+    /* Settled once the helm has its pack cards — the data arrives client-side. */
+    settle: () => document.querySelectorAll(".pack").length > 0 && Boolean(document.querySelector(".memb")),
+    mockupOnly: ["footer"],
+  },
+  {
     name: "documents",
     path: "/documents",
     stage: "porting",

@@ -20,7 +20,7 @@
 export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
-  user: { id: "u-fixture", displayName: "Tom Lawson" },
+  user: { id: "u-fixture", displayName: "Tom Lawson", email: "tom@lawson.example" },
 };
 
 const LAWSON_SECTIONS = [
