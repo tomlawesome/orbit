@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — inbox: the relay queue (proposal, issue #452)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* The relay's queue in full: what the dish has caught, what Orbit read in
+     it, and what it could not read — in plain words. Nothing enters your
+     orbit from here without your say-so (#432/#434), and unreviewed arrivals
+     burn up after 45 days. Every state shown is a real bounded state. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:640px;margin:0 auto;padding:96px 24px 120px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  /* the dish: the relay's live status, condensed from the relay screen */
+  .relaybar{display:flex;align-items:center;gap:16px;margin-top:26px;
+            background:var(--panel);backdrop-filter:blur(8px);
+            border:1px solid var(--line-soft);border-radius:14px;padding:14px 18px}
+  .dish{position:relative;width:34px;height:34px;flex:none}
+  .dish i{position:absolute;inset:14px;border-radius:50%;background:var(--ok)}
+  .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+             animation:signal 3s ease-out infinite;opacity:0}
+  .dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
+  @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+  .relaybar .alias{flex:1;min-width:0}
+  .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent);
+                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .relaybar .alias span{font:10.5px var(--mono);color:var(--ink-mid)}
+  .relaybar .alias .live{color:var(--ok)}
+  .relaybar a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;
+              border:1px solid var(--line);border-radius:9px;padding:7px 13px;flex:none}
+  .relaybar a:hover{border-color:var(--accent);color:var(--accent)}
+
+  .group{margin-top:32px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+
+  /* a receipt awaiting review: the dashed vocabulary of "not yet in orbit" */
+  .receipt{border:1px dashed var(--line);border-radius:14px;background:var(--panel);
+           backdrop-filter:blur(8px);padding:16px 18px;margin-bottom:10px}
+  .receipt .head{display:flex;align-items:baseline;gap:12px}
+  .receipt .head .dot{width:8px;height:8px;border-radius:50%;flex:none;align-self:center;
+                      background:none;border:1.6px solid var(--accent)}
+  .receipt .head b{flex:1;font-size:14.5px;font-weight:560}
+  .receipt .head small{font:10.5px var(--mono);color:var(--ink-faint)}
+  .receipt .head small .exp{color:var(--warm)}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:4px 22px;margin:12px 0 4px}
+  .fields .kv{display:flex;justify-content:space-between;gap:10px;
+              font:11.5px var(--mono);color:var(--ink-mid);
+              padding:6px 2px;border-bottom:1px solid var(--line-soft)}
+  .fields .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .fields .kv b .conf{color:var(--ink-faint);font-size:9.5px;letter-spacing:.06em;margin-left:6px}
+  .attach{display:inline-flex;align-items:center;gap:8px;font:11px var(--mono);
+          color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
+          padding:6px 11px;margin-top:10px}
+  .attach .clean{color:var(--ok)}
+  .receipt .actions{display:flex;gap:8px;margin-top:14px;align-items:center}
+  .receipt .actions button{font-size:12.5px;border-radius:9px;padding:7px 15px;cursor:pointer;
+                           border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .receipt .actions button.yes{border-color:var(--accent);color:var(--accent)}
+  .receipt .actions a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
+  .receipt .actions a:hover{color:var(--accent)}
+  .twotap{font:10.5px var(--mono);color:var(--ink-faint)}
+
+  /* still reading: the only honest thing to show is that we are reading */
+  .reading{display:flex;align-items:center;gap:13px;border:1px dashed var(--line-soft);
+           border-radius:14px;background:var(--panel);padding:14px 18px;margin-bottom:10px}
+  .reading i{width:8px;height:8px;border-radius:50%;background:var(--upcoming);flex:none;
+             animation:breathe 2.4s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1}50%{opacity:.4}}
+  .reading .body{flex:1}
+  .reading .body b{display:block;font-size:13.5px;font-weight:520;color:var(--ink-mid)}
+  .reading .body span{font:10.5px var(--mono);color:var(--ink-faint)}
+
+  /* arrived, but could not be read: plain words, bounded states (#434) */
+  .failed{display:flex;align-items:flex-start;gap:13px;border:1px solid var(--line-soft);
+          border-radius:14px;background:var(--panel);padding:14px 18px;margin-bottom:10px}
+  .failed i{width:8px;height:8px;border-radius:50%;background:var(--degraded);flex:none;margin-top:6px}
+  .failed .body{flex:1}
+  .failed .body b{display:block;font-size:13.5px;font-weight:520}
+  .failed .body span{font:11px var(--mono);color:var(--ink-mid);line-height:1.7}
+  .failed button{font:11px var(--mono);border:0;background:none;color:var(--ink-faint);
+                 cursor:pointer;padding:4px 0;flex:none}
+  .failed button:hover{color:var(--overdue)}
+
+  .retention{margin-top:26px;text-align:center;font:10.5px var(--mono);
+             color:var(--ink-faint);letter-spacing:.06em;line-height:1.9}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         font:10.5px var(--mono);color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  body.empty .group,body.empty .retention{display:none}
+  .quietnote{display:none;margin-top:60px;text-align:center}
+  .quietnote .dish{margin:0 auto 14px}
+  .quietnote p{font:12px var(--mono);color:var(--ink-mid);line-height:2}
+  body.empty .quietnote{display:block}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
+  <nav>
+    <a href="due-next.html">Due next</a>
+    <a href="documents.html">Documents</a>
+    <a href="inbox.html" aria-current="page">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Inbox</h1>
+    <div class="sub">what your relay has caught · nothing enters your orbit without your say-so</div>
+  </header>
+
+  <div class="relaybar">
+    <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
+    <div class="alias">
+      <b>tom-k7f2m@in.lawson-home.orbit</b>
+      <span><span class="live">connected · listening</span> · last caught 2d ago</span>
+    </div>
+    <a href="../family/settings-mail.html">your relay →</a>
+  </div>
+
+  <div class="group">
+    <h3>For your review · 1</h3>
+    <div class="receipt">
+      <div class="head">
+        <span class="dot" aria-hidden="true"></span>
+        <b>Home insurance renewal</b>
+        <small>caught 11 Aug · <span class="exp">burns up in 43d</span></small>
+      </div>
+      <div class="fields">
+        <div class="kv"><span>provider</span><b>Harbour Mutual<span class="conf">READ · SURE</span></b></div>
+        <div class="kv"><span>renews</span><b>02 Oct 2026<span class="conf">READ · SURE</span></b></div>
+        <div class="kv"><span>cost</span><b>~£400<span class="conf">READ · UNSURE</span></b></div>
+      </div>
+      <span class="attach">◆ policy-schedule.pdf · 812 KB · <span class="clean">scanned clean</span></span>
+      <div class="actions">
+        <button class="yes">Add to orbit</button>
+        <button>Dismiss</button>
+        <span class="twotap">— both ask twice</span>
+        <a href="#">review &amp; amend →</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Still reading</h3>
+    <div class="reading">
+      <i aria-hidden="true"></i>
+      <div class="body">
+        <b>A message arrived 4 minutes ago</b>
+        <span>Orbit is reading its document — it will appear above when it’s done</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Arrived, but could not be read</h3>
+    <div class="failed">
+      <i aria-hidden="true"></i>
+      <div class="body">
+        <b>A message from 09 Aug</b>
+        <span>Its attachment is a picture-only scan, and Orbit couldn’t read any text from it. You can add the item yourself and attach the file from Documents.</span>
+      </div>
+      <button>remove</button>
+    </div>
+    <div class="failed">
+      <i aria-hidden="true"></i>
+      <div class="body">
+        <b>A message from 06 Aug</b>
+        <span>It carried no document Orbit can read (PDFs work best). Nothing was kept.</span>
+      </div>
+      <button>remove</button>
+    </div>
+  </div>
+
+  <div class="retention">unreviewed arrivals burn up after 45 days · originals stay in your mailbox — Orbit only ever reads copies</div>
+
+  <div class="quietnote">
+    <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
+    <p>the dish is listening — nothing waiting<br>forward a document to your relay address and it lands here</p>
+  </div>
+</div>
+
+<div class="demos" aria-label="Mockup state demos">
+  <span>DEMOS</span>
+  <button onclick="document.body.classList.toggle('empty')">empty queue</button>
+</div>
+<footer>orbit · inbox · issue #452 · dashed = not yet in orbit · every failure in plain words · 45-day burn-up is the retention law (#434)</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+}
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+</script>
+</body></html>
