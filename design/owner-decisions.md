@@ -427,6 +427,35 @@ as ordinary fix-both changes rather than blocking the build.
   snapshot of the document — an image of its first page — lets the user
   visually confirm it's the right one at a glance. (The snapshot needs a
   server ask: no page-one thumbnail rendering exists yet.)
+- **Create v3 is nailed; both backdrops are still too quiet** (owner, on the
+  #474/#475 proposals): the create-v3 flow is ratified as drawn ("that agent
+  NAILED the create-v3") but its backdrop — and the relay's — need more
+  presence. The satellites must vary in size, shape and position, and the
+  roster grows to famous craft: the James Webb telescope, the famous probes
+  of the years of space exploration. And the administration backdrop could
+  be based around the International Space Station ("YES I love this train
+  of thought") — superseding the plotting-sheet chartroom proposal as the
+  admin direction to explore.
+- **The sky drifts as one** (owner, on the living-backdrop proposals): the
+  satellites — and the constellations — are part of the sky behind, so they
+  drift with the starfield. "We can't have a drifting starfield with fixed
+  objects, it doesn't make sense." Nothing in the sky sits static while the
+  stars stream past; near objects may drift faster than far ones (parallax),
+  and the test is WHERE an object exists: anything that lives in the space
+  field lives with the space field in motion; anything that's an overlay —
+  chart marks, cards, forms and their furniture — can stay static with the
+  forms. The one screen where the constellations don't move is the dial
+  view: there they're functional — flyable, law-positioned — and we need
+  them still. Everywhere else they're scenery and they drift.
+- **The sky never loops** (owner, same batch): the drift is a constantly
+  changing backdrop, not a carousel — the current seamless-tile repeat is
+  out. As the sky drifts, newly revealed regions roll fresh from the seed
+  stream and what scrolls away doesn't come back. And the constellation
+  population grows: the real instance households are obviously limited, so
+  the sky mixes in random non-real constellations bearing actual
+  galaxy/constellation names (genuine astronomy — Lyra, Vela, Cassiopeia,
+  Andromeda — never invented words), so the universe reads bigger than the
+  instance while the household marks stay the only ones that mean anything.
 - **Backdrops are alive, and never the same twice** (owner, mid-review,
   mockups first): the relay backdrop gets 2–3 satellites — "we're conveying
   messages after all" — not too big, not too small, placed at random. The
