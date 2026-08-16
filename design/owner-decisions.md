@@ -502,6 +502,36 @@ The full open-questions list, walked in order and ruled:
 - **The sky is a fixed map** (#428): placements derive from absolute
   coordinates, relaxation is deterministic, flights never reshuffle what
   the sky already taught.
+- **Retrograde is fully approved** (owner): the §15 refresh ships as the
+  pack — horizon-grid floor, the mirrored ceiling (gated to tall viewports
+  per the honest read, not shrunk), the neon wireframe Tron beacon as this
+  pack's north star (classic glint stays elsewhere), the brighter mid-ink
+  family, bloom on accents only. pack-retrograde-refresh.html graduates
+  from proposal to spec; the treatment migrates into packs.css and the
+  home screen fix-both.
+- **Atlas is retired** (owner, after the materiality rescue): "we've tried
+  to save it" — the aged-paper concept never quite worked as a screen and
+  the §15 refresh, though its best version, didn't change that. The pack
+  leaves the roster once a replacement is ratified (no interim removal —
+  the five swatches stay functional until the successor lands). In its
+  place: 1–2 totally different light-theme concepts, to be explored fresh
+  — not paper. pack-atlas-refresh.html stays in the tree as the record of
+  the rescue attempt.
+- **First-run is a launch, not a form** (owner, on the first draft): the
+  first-run screen was too plain and it doesn't get its own page — it sits
+  ON TOP of the login screen, filled out over the login's dawn. No reveal
+  until everything is ready: when the user hits enter and the server
+  succeeds (no errors), the screen ACCELERATES UP — away from the dawn of
+  the login screen and into the dark of space, colour-matching the default
+  theme, a cool trip through impressive visuals, the whole thing lasting
+  3–4 seconds — landing on the populated home page. Dwell 3 seconds so the
+  demo data can be seen, then the welcome tour (#477) pops up to guide.
+  Errors keep you on the form; the launch only fires on success.
+  Amended in the same breath: the launch belongs to EVERY successful
+  login, not just first-run (first-run simply adds the form stage), and
+  logout plays the reverse — it is already the reverse in the family's
+  own palette: dawn to log in, dusk to log out. Ascend into your sky on
+  arrival; descend into dusk on leaving.
 - **Engineering calls**: #298 closed as delivered (plumbing may be large;
   the brains are out and tested); #301 closed on the coverage map (the
   20-run ceremony waived — real flakes recur and get fixed then); #303 and
