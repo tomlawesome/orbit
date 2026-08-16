@@ -94,16 +94,10 @@ export const WORKSPACE_FIXTURE = {
   /* Not an API field: pins chart arithmetic to the mockups' own date so the
      fidelity gate is deterministic. The seam ignores it on live data. */
   fixtureToday: "2026-08-13",
-  /* Not an API field either: no route serves document suggestions yet (#454
-     will) — the design's "Suggested from your documents" group renders from
-     this until it exists, and renders empty on live data. */
-  suggestions: [
-    {
-      id: "sug-insurance", title: "Home insurance renewal",
-      sourceDocument: "policy-schedule.pdf", renewsOn: "2026-10-03",
-      costMinor: 40000, currency: "GBP",
-    },
-  ],
+  /* #454 closed: the suggestion row and its dial ring now derive from the
+     review inbox's own receipts (fixtures/inbox.js via /api/imap-inbox) —
+     one truth for home and the inbox screen alike. */
+  suggestions: [],
   activeHouseholdId: "hh-lawson-1",
   householdLanding: "active",
   households: [

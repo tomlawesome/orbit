@@ -34,4 +34,5 @@
 .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
 .failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
   color:var(--ink-faint);margin:0 0 8px}
+.failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
 .failures .kv span:last-child{color:var(--overdue);text-align:right}

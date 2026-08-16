@@ -138,6 +138,16 @@ const SCREENS = [
     mockupOnly: ["footer"],
   },
   {
+    name: "inbox",
+    path: "/inbox",
+    stage: "porting",
+    mockup: "/design/v19/inbox.html",
+    /* Settled once the queue has its review card — the data arrives client-side. */
+    settle: () => Boolean(document.querySelector(".receipt .actions")),
+    /* The mockup's empty-queue demo toolbar and self-description. */
+    mockupOnly: [".demos", "footer"],
+  },
+  {
     name: "home",
     path: "/home",
     stage: "porting",
