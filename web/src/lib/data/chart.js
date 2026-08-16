@@ -228,6 +228,28 @@ export function galaxyOf(workspace, today) {
   return galaxy;
 }
 
+/**
+ * The labelled sky (§11, #453): what a user with no household sees — every
+ * visible household at its identity bearing, label only. No planets, no
+ * role, no contents: the label IS the entire surface.
+ */
+export function labelledSkyOf(visibleHouseholds) {
+  /* No five-constellation cap here: that is the member sky's product cap.
+     A newcomer must see every system there is — the overlap relaxation
+     keeps a crowded sky clickable. */
+  const galaxy = {};
+  for (const household of visibleHouseholds ?? []) {
+    galaxy[household.id] = {
+      name: household.name,
+      role: null,
+      pos: constellationPosOf(household.id),
+      planets: [],
+      requested: Boolean(household.requested),
+    };
+  }
+  return galaxy;
+}
+
 const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**

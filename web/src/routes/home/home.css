@@ -488,3 +488,20 @@
   @media (prefers-reduced-motion: reduce){
     .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
   }
+
+/* ---- #453: the labelled sky's quiet centre and the one question -------- */
+.adrift{text-align:center;max-width:420px}
+.adrift h2{font:600 22px var(--display);letter-spacing:.01em}
+.adrift p{font:11.5px var(--mono);color:var(--ink-mid);margin-top:12px;line-height:2;letter-spacing:.04em}
+.askveil{position:fixed;inset:0;z-index:12;display:grid;place-items:center;
+         background:rgba(4,7,16,.55);backdrop-filter:blur(3px)}
+.askcard{width:min(380px,calc(100vw - 48px));background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:16px;padding:24px 26px;text-align:center}
+.askcard h3{font:600 17px var(--display)}
+.askcard p{font:11px var(--mono);color:var(--ink-mid);margin-top:10px;line-height:1.9}
+.askproblem{font:11px var(--mono);color:var(--warm);margin-top:10px}
+.askacts{display:flex;gap:10px;margin-top:18px}
+.askacts button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+                background:none;border:1px solid var(--line);color:var(--ink-mid)}
+.askacts button.yes{color:var(--accent);border-color:var(--accent)}
+.minisys{cursor:pointer}

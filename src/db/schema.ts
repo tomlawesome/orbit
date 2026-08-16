@@ -128,6 +128,25 @@ export const memberships = pgTable("memberships", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.householdId, table.userId] }), index("membership_user_idx").on(table.userId)]);
 
+export const joinRequestStatus = pgEnum("join_request_status", ["pending", "approved", "declined"]);
+
+/** §11 (#453): a no-household user's signal to a household's owners. One
+ * pending request per (household, user) — enforced by a partial unique index
+ * — makes creation idempotent; decisions keep the row as an audit trail. */
+export const householdJoinRequests = pgTable("household_join_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: joinRequestStatus("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decidedByUserId: uuid("decided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("join_request_pending_once").on(table.householdId, table.userId).where(sql`${table.status} = 'pending'`),
+  index("join_request_household_idx").on(table.householdId, table.status),
+  index("join_request_user_idx").on(table.userId, table.status),
+]);
+
 export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
