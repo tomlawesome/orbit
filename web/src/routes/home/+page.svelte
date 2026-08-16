@@ -3,7 +3,7 @@
   import { afterNavigate } from "$app/navigation";
   import { mountEmptySky, mountHome } from "./home.behaviour.js";
   import { approveReceipt, dismissReceipt, readHome, requestToJoin } from "$lib/data/workspace.js";
-  import { dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
+  import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
@@ -113,6 +113,24 @@
   );
   const groups = $derived(
     view ? manifestGroupsOf(view.household, { suggestions: view.suggestions, today: view.today }) : null,
+  );
+  /* §14 (#469): the manifest rendered as the corridor — this household's
+     full scrollback, suggestions merged in date order. */
+  const corridor = $derived(
+    view?.household
+      ? corridorOf(
+          { households: [view.household], activeHouseholdId: view.primary },
+          view.today,
+          { suggestions: view.suggestions },
+        )
+      : null,
+  );
+  const todayLine = $derived(
+    view
+      ? new Date(view.today + "T00:00:00Z")
+          .toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" })
+          .replace(",", "").toUpperCase()
+      : "",
   );
   const initials = $derived(
     (view?.user?.displayName ?? "")
@@ -267,8 +285,6 @@
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
   <nav>
-    <a href="/due-next">Due next</a>
-    <a href="/documents">Documents</a>
     <a href="/inbox">Inbox</a>
     <a href="/settings">Settings</a>
     <a href="/administration">Administration</a>
@@ -483,71 +499,75 @@
     {/if}
   </div>
 
+    <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — a
+         full scrollback through events, nearest at the top down to the
+         furthest away, suggestions riding the same line in date order. -->
     <div class="manifest" id="manifest-top">
-    {#if groups && !view?.emptySky}
-      {#snippet manifestRow(row)}
-        <a class="item" id={row.id} href="/item/{row.id}">
-          {#if row.kind === "inspection"}
-            <span class="dot ter" style="color:var({BAND_VAR[row.band]})"></span>
-          {:else}
-            <span class="dot" style="background:var({BAND_VAR[row.band]})"></span>
-          {/if}
-          <div class="body"><b>{row.title}</b><span>{[
-            row.section,
-            row.recurrenceMonths ? `orbital period ${period(row.recurrenceMonths)}` : null,
-            row.provider,
-            row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
-          ].filter(Boolean).join(" · ")}</span></div>
-          {#if row.dueDate}
-            <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
-          {:else}
-            <div class="t ok">—</div>
-          {/if}
-        </a>
-      {/snippet}
-      {#if groups.attention.length}
-        <div class="group">
-          <h3>Needs attention {#if groups.closest}<span class="closest">· closest approach — {groups.closest.title} · {tlabel(groups.closest)}</span>{/if}</h3>
-          {#each groups.attention as row (row.id)}{@render manifestRow(row)}{/each}
-        </div>
-      {/if}
-      {#if groups.suggestions.length}
-        <div class="group">
-          <h3>Suggested from your documents</h3>
-          {#each groups.suggestions as s (s.id)}
-            <div class="item suggest" id={s.id}>
-              <span class="dot sug" style="color:var(--accent)"></span>
-              <div class="body"><b>{s.title}</b><span>{[
-                `Found in ${s.sourceDocument}`,
-                s.renewsOn ? `renews ${short(s.renewsOn)}` : null,
-                s.costMinor ? money(s.costMinor, s.currency, true) : null,
-              ].filter(Boolean).join(" · ")}</span></div>
-              <!-- #434: approval is the boundary between untrusted mail and
-                   the household, so it takes two deliberate taps — the first
-                   arms, the second fires. One operation id per receipt makes
-                   the write idempotent under any retry. -->
-              <div class="actions">
-                <button class="yes" disabled={busyReceipt === s.id}
-                  onclick={() => tapReceipt(s, "approve")}>
-                  {armed.id === s.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
-                </button>
-                <button disabled={busyReceipt === s.id}
-                  onclick={() => tapReceipt(s, "dismiss")}>
-                  {armed.id === s.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
-                </button>
-              </div>
-              {#if mailProblem && armed.id === s.id}
-                <div class="mail-problem">{mailProblem}</div>
-              {/if}
+    {#if corridor && !view?.emptySky}
+      {#snippet corridorRow(row)}
+        {#if row.suggestion}
+          {@const s = view.suggestions.find((one) => one.id === row.id)}
+          <div class="item suggest" id={row.id}>
+            <span class="planet sug" aria-hidden="true"><i></i></span>
+            <div class="body"><b>{row.title}</b><span>{[
+              `Found in ${row.sourceDocument}`,
+              row.dueDate ? `renews ${short(row.dueDate)}` : null,
+              row.costMinor ? money(row.costMinor, row.currency, true) : null,
+            ].filter(Boolean).join(" · ")}</span></div>
+            <!-- #434: approval is the boundary between untrusted mail and
+                 the household, so it takes two deliberate taps — the first
+                 arms, the second fires. One operation id per receipt makes
+                 the write idempotent under any retry. -->
+            <div class="actions">
+              <button class="yes" disabled={busyReceipt === row.id}
+                onclick={() => tapReceipt(s, "approve")}>
+                {armed.id === row.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
+              </button>
+              <button disabled={busyReceipt === row.id}
+                onclick={() => tapReceipt(s, "dismiss")}>
+                {armed.id === row.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
+              </button>
             </div>
-          {/each}
-        </div>
-      {/if}
-      {#if groups.later.length}
-        <div class="group">
-          <h3>Later this year</h3>
-          {#each groups.later as row (row.id)}{@render manifestRow(row)}{/each}
-        </div>
+            {#if mailProblem && armed.id === row.id}
+              <div class="mail-problem">{mailProblem}</div>
+            {/if}
+          </div>
+        {:else}
+          <a class="item" id={row.id} href="/item/{row.id}">
+            <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
+                  style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
+            <div class="body"><b>{row.title}</b><span>{[
+              row.section,
+              row.recurrenceMonths ? `orbital period ${period(row.recurrenceMonths)}` : null,
+              row.provider,
+              row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
+            ].filter(Boolean).join(" · ")}</span></div>
+            {#if row.dueDate}
+              <div class="t {T_CLASS[row.band]}">{tlabel(row)}<small>{short(row.dueDate)}</small></div>
+            {:else}
+              <div class="t ok">—</div>
+            {/if}
+          </a>
+        {/if}
+      {/snippet}
+      <div class="corridor">
+        {#if corridor.overdue.length}
+          <div class="redzone">
+            {#each corridor.overdue as row (row.id)}{@render corridorRow(row)}{/each}
+          </div>
+        {/if}
+        <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
+        {#each corridor.current as row (row.id)}{@render corridorRow(row)}{/each}
+        {#each corridor.months as month (month.key)}
+          <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
+          {#each month.rows as row (row.id)}{@render corridorRow(row)}{/each}
+        {/each}
+        {#each corridor.undated as row (row.id)}{@render corridorRow(row)}{/each}
+      </div>
+      {#if corridor.total === 0}
+        <div class="horizon">— nothing scheduled: your sky is quiet —</div>
+      {:else if corridor.horizon}
+        <div class="horizon">— beyond the horizon: nothing scheduled past {corridor.horizon} —</div>
       {/if}
     {/if}
   </div>

@@ -9,8 +9,8 @@
 
 const V19_PAGES = new Set([
   "/home",
-  "/due-next",
-  "/documents",
+  /* /due-next and /documents are mothballed (§14): the manifest IS the
+     corridor now, and the belt (#458) is the document surface. */
   "/inbox",
   "/administration",
   "/create",

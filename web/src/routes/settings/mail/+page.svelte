@@ -18,6 +18,11 @@
   const failures = $derived(data.failures ?? []);
   const shortDate = (value) =>
     new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /* §14 (#471): back to the opener; a deep link with no history goes home. */
+  const dismissRelay = () => {
+    if (history.length > 1) history.back();
+    else location.href = "/home";
+  };
 </script>
 
 <svelte:head>
@@ -116,7 +121,9 @@
       <circle cx="313.5" cy="951.1" r="0.41" opacity="0.2"/>
       <circle cx="1453.3" cy="675.7" r="0.41" opacity="0.23"/>
       <circle cx="494.9" cy="221.4" r="0.48" opacity="0.12"/></g></svg></div>
-<div class="stage"><div class="glass relay-card">
+<!-- §14 (#471): clicking off the card returns to wherever the reader came
+     from — the inbox, settings, or home as the deep-link fallback. -->
+<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
   <div class="dish"><span></span><span></span><span></span><i></i></div>
   <h2 style="text-align:center">Your relay</h2>
   <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
