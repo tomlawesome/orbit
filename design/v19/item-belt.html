@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — the document belt: a rainbow, and the card rides in it (proposal, issue #458)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /*
+   * THE DOCUMENT BELT — issue #458, in the owner's corrected shape
+   * (design/owner-decisions.md §15, "The belt is a rainbow, and the card
+   * rides in it", 2026-08-16).
+   *
+   *   "The documents do NOT orbit the item card. The documents nestle in a
+   *    rainbow-shaped belt — an arc of asteroids — and the card itself is one
+   *    of the asteroids. Clicking an asteroid moves the belt so that one
+   *    comes to the centre and displays."
+   *
+   * So: one rainbow arc across the sky. Riding it, small bodies — the item's
+   * own planet (drawn exactly as the dial draws it, #458's asteroid-belt pun
+   * made literal) and one rock per attached document. The crown of the arc is
+   * the held position: whatever sits there is what displays, large, beneath.
+   *
+   * The vocabulary is native, not new. CON-1: a belt around a body already
+   * MEANS documents attached, so drawing the documents themselves as belt
+   * bodies is the chart's own pen at screen scale. The hairline arc is the
+   * dial's belt ellipse; the planet is home.html's i-svc body, gradient,
+   * gloss, status halo and belt ellipse unchanged; the dust is the belt's
+   * substance. Owner, #458: the belt floats on the sky — no panel behind it,
+   * the starfield shows through the gaps.
+   *
+   * Belt v1 displays what Orbit HONESTLY has for a centred document: what it
+   * is, when it arrived, that it scanned clean, and the original in your
+   * hands. The page itself — a render of page one, filling the view — is belt
+   * v2 and waits on #476. Nothing here fakes a preview.
+   *
+   * Everything drawn is fixture-true: web/src/lib/data/fixtures/workspace.js
+   * (i-svc "Car full service" and its two documents; i-boiler for the empty
+   * belt) rendered through web/src/lib/format.js, exactly as the built item
+   * screen (web/src/routes/item/[id]/+page.svelte + item.css) renders it.
+   *
+   * Backdrop: the item screen's own — the shared tiled starfield (#445, seed
+   * 17170812, 95 far + 46 near) drifting per POL-11, fixed, with the family
+   * vignette. The item screen has no heliosphere to lift away, so §15's
+   * universal descent has nothing to do here; its sky is not re-invented.
+   */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /* The five packs, verbatim from web/src/lib/packs.css plus the body
+     gradient stops home.html names, so the belt is judged in each. */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
+    --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
+    --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
+    --p-sky-1:#cfe4ff; --p-sky-2:#6fa3ef; --p-sky-3:#2a4f8f;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --p-jade-1:#b8f5cf; --p-jade-2:#2fae6a; --p-jade-3:#12603a;
+    --p-amber-1:#ffe1a0; --p-amber-2:#f0a52b; --p-amber-3:#8a5a10;
+    --p-ruby-1:#ffb3ab; --p-ruby-2:#e0453e; --p-ruby-3:#7e1a1f;
+    --p-sky-1:#cfe4ff; --p-sky-2:#6fa3ef; --p-sky-3:#2a4f8f;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* Printed charts do not glow: flat ink discs, status surviving as colour. */
+    --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
+    --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
+    --p-ruby-1:var(--overdue); --p-ruby-2:var(--overdue); --p-ruby-3:var(--overdue);
+    --p-sky-1:var(--upcoming); --p-sky-2:var(--upcoming); --p-sky-3:var(--upcoming);
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:var(--ok); --p-jade-2:var(--ok); --p-jade-3:var(--ok);
+    --p-amber-1:var(--warm); --p-amber-2:var(--warm); --p-amber-3:var(--warm);
+    --p-ruby-1:var(--overdue); --p-ruby-2:var(--overdue); --p-ruby-3:var(--overdue);
+    --p-sky-1:var(--upcoming); --p-sky-2:var(--upcoming); --p-sky-3:var(--upcoming);
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+    --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+    --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+    --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  /* item.css's own override: a detail view has to be able to grow past the
+     fold, so this screen scrolls where the family stage does not. */
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+       transition:background .4s,color .4s;overflow-x:hidden;overflow-y:auto}
+
+  /* family.css / item.css: the sky is fixed and drifts (POL-11); the item
+     screen has no descent of its own and none is invented here. */
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .page{position:relative;z-index:2;padding:26px 0 40px}
+
+  /* ---- the belt ------------------------------------------------------
+     The arc is authored against a 1600-wide plate, centred, so the rainbow's
+     geometry is exact at the design width and simply runs off the edges on a
+     narrower one — which is what a rainbow does. The crown block reserves
+     only the height the held body needs; the arc's flanks overflow past it,
+     well outside the display panel's column. */
+  .belt{position:relative;height:342px}
+  .belt svg{position:absolute;top:0;left:50%;margin-left:-800px;
+            width:1600px;height:700px;overflow:visible;pointer-events:none}
+
+  /* One motion for the whole belt: seats, their captions and the dust all
+     ride the same rotation, so it reads as the belt moving rather than the
+     bodies sliding along a fixed track. 420ms — long enough to be seen as a
+     movement, short enough never to be waited on. */
+  .seat,.capseat,.dust{transition:transform .42s cubic-bezier(.32,.72,.26,1)}
+  .seat,.capseat,.dust{transform-box:view-box;transform-origin:800px 1083px}
+  .hit{pointer-events:auto;cursor:pointer}
+  .hit .fring{opacity:0}
+  .hit:focus-visible{outline:none}
+  .hit:focus-visible .fring{opacity:1}
+  .body{transition:opacity .42s ease}
+  .seat .held{opacity:0;transition:opacity .42s ease}
+  .seat.on .held{opacity:1}
+  .hit:hover .rim{opacity:.85}
+  .rim{transition:opacity .25s ease}
+  .cap-name{font:11px var(--mono);fill:var(--ink-mid);text-anchor:middle;
+            transition:fill .3s ease,font-size .3s ease}
+  .cap-sub{font:9.5px var(--mono);letter-spacing:.14em;fill:var(--ink-faint);
+           text-anchor:middle;text-transform:uppercase}
+  .capseat.on .cap-name{fill:var(--ink);font-size:12.5px}
+  .capseat.on .cap-sub{fill:var(--accent)}
+
+  /* ---- the held display ---------------------------------------------
+     item.css, unchanged: the family glass card at the item view's own width,
+     its h2/.sub, the settings-mail .kv rows, the drawer's h4, create.html's
+     action pills and its way back. */
+  .display{position:relative;z-index:3;width:100%;max-width:520px;margin:0 auto;
+           transition:opacity .17s ease,transform .17s ease}
+  .display.swap{opacity:0;transform:translateY(7px)}
+  .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .item-card{padding:30px 34px}
+  .item-card h2{font:600 22px var(--display);line-height:1.25}
+  .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                  margin:6px 0 22px}
+  .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .kv:last-of-type{border:0}
+  .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .kv b.clean{color:var(--ok)}
+  .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                color:var(--ink-faint);margin:22px 0 8px}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:18px;line-height:1.8}
+  .acts{display:flex;flex-wrap:wrap;gap:8px}
+  .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+    border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+    border-radius:999px;padding:7px 14px;cursor:pointer}
+  .acts button:hover{border-color:var(--act,var(--ink))}
+  .btn-primary{padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
+    font:600 13px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  .btn-primary:hover{filter:brightness(1.05)}
+  .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
+        color:var(--ink-mid);text-decoration:none;background:none;border:0;
+        cursor:pointer;padding:0}
+  .back:hover{color:var(--accent)}
+
+  /* The document's honest display. No fabricated page image: the plate says
+     what the file is, the rows say what Orbit knows, the button hands over
+     the original. #476's page-one render turns this half into the page
+     itself — belt v2. */
+  .docview{display:flex;gap:24px;align-items:flex-start}
+  .plate{flex:none;width:118px;height:150px;border-radius:8px;position:relative;
+         border:1px solid var(--line);background:var(--panel);
+         display:grid;place-items:end center;padding-bottom:9px;
+         font:9.5px var(--mono);letter-spacing:.1em;color:var(--ink-faint)}
+  .plate::before{content:"";position:absolute;left:16px;right:16px;top:22px;height:1px;
+     background:var(--line);
+     box-shadow:0 11px 0 var(--line),0 22px 0 var(--line-soft),0 33px 0 var(--line-soft),
+                0 44px 0 var(--line-soft),0 55px 0 var(--line-soft)}
+  .docbody{flex:1;min-width:0}
+  .docbody h3{font:520 15px var(--mono);line-height:1.35;word-break:break-all}
+  .docbody .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                margin:5px 0 16px}
+  .getrow{display:flex;align-items:center;gap:18px;margin-top:18px}
+
+  /* ---- chrome --------------------------------------------------------- */
+  .demos{position:fixed;left:22px;bottom:18px;z-index:7;display:flex;gap:7px;
+         align-items:center;flex-wrap:wrap;max-width:calc(100% - 44px)}
+  .demos span{font:9.5px var(--mono);letter-spacing:.16em;color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+    border:1px solid var(--line);border-radius:99px;padding:6px 12px;cursor:pointer;
+    backdrop-filter:blur(8px)}
+  .demos button:hover{border-color:var(--accent);color:var(--ink)}
+  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos .sw{width:18px;height:18px;border-radius:50%;padding:0}
+  .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .demos i{width:1px;height:16px;background:var(--line);display:inline-block;margin:0 3px}
+
+  footer{position:relative;z-index:2;text-align:center;font:10.5px var(--mono);
+         color:var(--ink-faint);padding:0 26px 60px;line-height:1.9;max-width:1420px;
+         margin:0 auto}
+
+  @media (prefers-reduced-motion: reduce){
+    /* The swap is instant rather than animated — the belt still moves the
+       clicked body to the crown, it simply arrives there. */
+    *{animation:none!important}
+    .seat,.capseat,.dust,.display,.body,.held{transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="page">
+  <div class="belt">
+    <svg id="beltsvg" viewBox="0 0 1600 700" aria-label="The document belt: the item and its documents ride one arc; the body at the crown is the one on display">
+      <defs>
+        <radialGradient id="p-jade" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
+          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
+        </radialGradient>
+        <radialGradient id="p-amber" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
+          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
+        </radialGradient>
+        <!-- The rock's shading, lit from the same quarter as the planets, so
+             a document body and an item body share one light. Shadow rather
+             than tint, so stone reads as stone on paper and on night alike. -->
+        <radialGradient id="rockshade" cx="32%" cy="26%" r="82%">
+          <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+          <stop offset="55%" stop-color="#000" stop-opacity=".16"/>
+          <stop offset="100%" stop-color="#000" stop-opacity=".46"/>
+        </radialGradient>
+        <linearGradient id="fadegrad" x1="0" y1="0" x2="1600" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#000"/><stop offset=".08" stop-color="#fff"/>
+          <stop offset=".92" stop-color="#fff"/><stop offset="1" stop-color="#000"/>
+        </linearGradient>
+        <mask id="edgefade" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="700">
+          <rect x="0" y="0" width="1600" height="700" fill="url(#fadegrad)"/>
+        </mask>
+      </defs>
+
+      <!-- The track and its dust fade out at the edges of the sky rather than
+           stopping: the belt goes on, the window does not. -->
+      <g mask="url(#edgefade)">
+        <path id="track" fill="none" stroke="var(--chart-line)" stroke-width="1.1" opacity=".85"/>
+        <g class="dust" id="dust"></g>
+      </g>
+      <!-- The crown: the seat that displays. Marked the way the chart marks
+           anything — a brighter run of the same line, not a new symbol. It
+           does not rotate: the belt moves, the crown stays. -->
+      <path id="crown" fill="none" stroke="var(--accent)" stroke-width="1.7"
+            stroke-linecap="round" opacity=".5"/>
+      <g id="seats"></g>
+      <g id="caps"></g>
+    </svg>
+  </div>
+
+  <div class="display" id="display"></div>
+</div>
+
+<div class="demos" aria-label="Mockup state demos">
+  <span>CENTRE</span>
+  <button id="d0" onclick="centreById('d-svc-invoice')">service-invoice-2026.pdf</button>
+  <button id="d1" onclick="centreById('i-svc')">the item</button>
+  <button id="d2" onclick="centreById('d-svc-checklist')">service-checklist.pdf</button>
+  <i></i>
+  <span>BELT</span>
+  <button id="two" onclick="setItem('svc')" aria-pressed="true">two documents</button>
+  <button id="none" onclick="setItem('boiler')" aria-pressed="false">empty (Boiler service)</button>
+  <i></i>
+  <span>THEME</span>
+  <button class="sw" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+  <button class="sw" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+  <button class="sw" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+  <button class="sw" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+  <button class="sw" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+</div>
+
+<footer>orbit · the document belt · issue #458 · §15: the belt is a rainbow and the card rides in it — the item is one asteroid, its documents are the others ·
+click any body (or ← →) and the belt rolls it to the crown, where it displays · no panel behind the belt: the sky shows through the gaps ·
+the card no longer lists its documents — the belt is that list · a centred document shows what Orbit honestly holds; the page itself is belt v2, waiting on #476</footer>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * The geometry.
+ *
+ * One circle, centred well below the fold, drawn only across its crown:
+ * a rainbow. R = 873 and C = (800, 1083) put the apex at y = 210 and carry
+ * the arc down to y = 620 at the edges of a 1600-wide sky — 1480 across and
+ * 410 tall, which is the proportion of a rainbow rather than of a shallow
+ * bow. Bodies are seated every 26° along it; two steps out (the furthest a
+ * three-body belt ever rolls) is x = 1488, still comfortably in the sky.
+ * ------------------------------------------------------------------ */
+const C = { x: 800, y: 1083 }, R = 873, APEX_Y = C.y - R, STEP = 26;
+const R_BODY = 20;      /* a body on the flank */
+const HELD_SCALE = 1.7; /* the crown holds it larger: 34 */
+
+/* ------------------------------------------------------------------ *
+ * The data — fixture-true, from web/src/lib/data/fixtures/workspace.js,
+ * rendered through web/src/lib/format.js against DESIGN_TODAY 2026-08-13.
+ * ------------------------------------------------------------------ */
+const ITEMS = {
+  svc: {
+    id: "i-svc", title: "Car full service", sub: "Vehicles · service",
+    kv: [
+      ["due", "T−161d · 21 January 2027"],
+      ["orbital period", "every year"],
+      ["cost", "£300.00"],
+      ["reminders", "21d before"],
+    ],
+    planet: "p-jade", halo: "var(--ok)", haloOpacity: ".25", haloWidth: 3 / 7,
+    docs: [
+      { id: "d-svc-invoice", name: "service-invoice-2026.pdf",
+        added: "12 June 2026", size: "240 KB", type: "PDF (application/pdf)" },
+      { id: "d-svc-checklist", name: "service-checklist.pdf",
+        added: "12 June 2026", size: "88 KB", type: "PDF (application/pdf)" },
+    ],
+  },
+  /* The empty belt: a real item that has no documents. Its body is amber and
+     wears the dial's plain separator stroke rather than a status halo,
+     because that is how home.html draws i-boiler. */
+  boiler: {
+    id: "i-boiler", title: "Boiler service", sub: "Home · service",
+    kv: [
+      ["due", "T−22d · 4 September 2026"],
+      ["orbital period", "every year"],
+      ["cost", "£120.00"],
+      ["provider", "British Gas"],
+      ["reminders", "14d before"],
+    ],
+    planet: "p-amber", halo: "var(--bg)", haloOpacity: "1", haloWidth: 2 / 6,
+    docs: [],
+  },
+};
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs = {}) => {
+  const node = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+};
+const rngFrom = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ------------------------------------------------------------------ *
+ * The belt's order: the item takes the middle seat and its documents fan
+ * out either side of it. Position on a belt is spatial, not chronological,
+ * and an item opening with its own card at the crown — flanked, balanced —
+ * is the view #424 already promises.
+ * ------------------------------------------------------------------ */
+let key = "svc", bodies = [], selected = 0, swapTimer = null;
+
+function buildBodies() {
+  const item = ITEMS[key];
+  const left = item.docs.slice(0, Math.ceil(item.docs.length / 2));
+  const right = item.docs.slice(Math.ceil(item.docs.length / 2));
+  bodies = [
+    ...left.map((d) => ({ kind: "doc", doc: d, id: d.id })),
+    { kind: "item", id: item.id },
+    ...right.map((d) => ({ kind: "doc", doc: d, id: d.id })),
+  ];
+  selected = bodies.findIndex((b) => b.kind === "item");
+}
+
+/* ---- the pen ------------------------------------------------------ *
+ * The item's body is home.html's, to the pixel-ratio: gradient sphere,
+ * gloss at (-0.2r, +0.25r) r 0.33r, and its status halo. The one thing it
+ * leaves behind is its dial belt ellipse — CON-1's mark for "documents
+ * attached" — because on THIS screen that sentence is already spoken, at
+ * screen scale, by the rainbow the body is sitting on. Drawing it twice
+ * would only compete with the thing that has to read first.
+ * A document is a rock: a faceted silhouette in the belt's own ink, shaded
+ * by shadow rather than by tint and cratered out of the ground, so it reads
+ * as stone on paper and on night alike.
+ * ------------------------------------------------------------------ */
+function drawItemBody(g, item) {
+  const r = R_BODY;
+  g.appendChild(el("circle", { r, fill: "none", stroke: item.halo,
+    "stroke-opacity": item.haloOpacity, "stroke-width": (item.haloWidth * r).toFixed(2) }));
+  g.appendChild(el("circle", { r, fill: `url(#${item.planet})` }));
+  g.appendChild(el("circle", { cx: (-0.2 * r).toFixed(2), cy: (0.25 * r).toFixed(2),
+    r: (0.33 * r).toFixed(2), fill: "rgba(255,255,255,.38)" }));
+}
+
+function drawRock(g, seed) {
+  const rng = rngFrom(seed);
+  const r = R_BODY, facets = 11, pts = [];
+  for (let i = 0; i < facets; i++) {
+    const a = (i / facets) * Math.PI * 2 + rng() * 0.14;
+    const rr = r * (0.80 + rng() * 0.26);
+    pts.push(`${(Math.cos(a) * rr).toFixed(2)},${(Math.sin(a) * rr * 0.92).toFixed(2)}`);
+  }
+  const points = pts.join(" ");
+  g.appendChild(el("polygon", { points,
+    fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
+    stroke: "var(--accent)", "stroke-opacity": ".75", "stroke-width": "1.1",
+    "stroke-linejoin": "round" }));
+  for (let i = 0; i < 3; i++) {
+    const a = rng() * Math.PI * 2, d = rng() * 0.5 * r;
+    g.appendChild(el("circle", { cx: (Math.cos(a) * d).toFixed(2),
+      cy: (Math.sin(a) * d * 0.9).toFixed(2), r: (1.6 + rng() * 2.4).toFixed(2),
+      fill: "#000", opacity: ".2" }));
+  }
+  g.appendChild(el("polygon", { points, fill: "url(#rockshade)" }));
+}
+
+/* ---- the belt's substance ------------------------------------------ *
+ * Dust, seeded, over ±150° so the belt is never seen to end however far it
+ * rolls; it rides the same rotation as the bodies, which is what makes the
+ * motion read as a belt moving rather than bodies sliding on a rail.
+ * ------------------------------------------------------------------ */
+function drawDust() {
+  const dust = document.getElementById("dust");
+  dust.textContent = "";
+  const rng = rngFrom(19170812);
+  for (let i = 0; i < 520; i++) {
+    const a = (-150 + rng() * 300) * Math.PI / 180;
+    /* Densest on the line, thinning outward — a belt has an edge that
+       frays, not a wall. */
+    const spread = (rng() + rng() + rng() - 1.5) * 15;
+    const rr = R + spread;
+    dust.appendChild(el("circle", {
+      cx: (C.x + Math.sin(a) * rr).toFixed(1),
+      cy: (C.y - Math.cos(a) * rr).toFixed(1),
+      r: (0.55 + rng() * 1.5).toFixed(2),
+      fill: rng() < 0.4 ? "var(--accent)" : "var(--chart-ink)",
+      opacity: (0.28 + rng() * 0.42).toFixed(2),
+    }));
+  }
+}
+
+/* Both arcs come off the same circle: the track across the whole sky, and
+   the crown — the ±13° of it that is the seat on display. */
+const arcPath = (deg) => {
+  const t = (deg * Math.PI) / 180;
+  const dx = Math.sin(t) * R, y = (C.y - Math.cos(t) * R).toFixed(1);
+  return `M ${(C.x - dx).toFixed(1)} ${y} A ${R} ${R} 0 0 1 ${(C.x + dx).toFixed(1)} ${y}`;
+};
+function drawTrack() {
+  document.getElementById("track").setAttribute("d", arcPath(58));
+  document.getElementById("crown").setAttribute("d", arcPath(13));
+}
+
+/* ---- the seats ------------------------------------------------------ *
+ * A seat is a direct child of the plate with one CSS transform:
+ *   rotate(A) translate(0,-873) scale(k)   about the arc's centre
+ * so a body authored at the origin lands on the arc, tangent to it, at the
+ * size its position earns. Its caption is a twin seat carrying
+ *   rotate(A) translate(0,-873) rotate(-A) translate(0,D)
+ * — the rotations cancel exactly, at every instant of the transition, so
+ * the label travels the arc with its body and never tilts.
+ * ------------------------------------------------------------------ */
+function buildSeats() {
+  const seats = document.getElementById("seats"), caps = document.getElementById("caps");
+  seats.textContent = ""; caps.textContent = "";
+  const item = ITEMS[key];
+
+  bodies.forEach((b, i) => {
+    const seat = el("g", { class: "seat" });
+    const inner = el("g", { transform: `translate(${C.x} ${C.y})` });
+    const hit = el("g", { class: "hit", role: "button", tabindex: "0" });
+    hit.setAttribute("aria-label", b.kind === "item"
+      ? `${item.title} — the item itself`
+      : `${b.doc.name}, ${b.doc.size}`);
+    /* A comfortable target regardless of the silhouette. */
+    hit.appendChild(el("circle", { r: R_BODY * 1.7, fill: "transparent" }));
+    hit.appendChild(el("circle", { class: "fring", r: R_BODY + 10, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
+    if (b.kind === "item") drawItemBody(hit, item);
+    else drawRock(hit, 7717 + i * 913);
+    /* Hover rim and the held ring: the same circle, two reasons. */
+    hit.appendChild(el("circle", { class: "rim", r: R_BODY + 7, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
+    const held = el("circle", { class: "held", r: R_BODY + 7, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1", opacity: "0" });
+    hit.appendChild(held);
+    hit.addEventListener("click", () => centre(i));
+    hit.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); centre(i); }
+    });
+    inner.appendChild(hit); seat.appendChild(inner); seats.appendChild(seat);
+
+    const capseat = el("g", { class: "capseat" });
+    const capInner = el("g", { transform: `translate(${C.x} ${C.y})` });
+    const name = el("text", { class: "cap-name", y: "38" });
+    name.textContent = b.kind === "item" ? item.title : b.doc.name;
+    const sub = el("text", { class: "cap-sub", y: "53.5" });
+    sub.textContent = b.kind === "item" ? "the item" : b.doc.size;
+    capInner.append(name, sub); capseat.appendChild(capInner); caps.appendChild(capseat);
+  });
+}
+
+function layout() {
+  const seats = [...document.getElementById("seats").children];
+  const caps = [...document.getElementById("caps").children];
+  const mid = (bodies.length - 1) / 2;
+  bodies.forEach((b, i) => {
+    const slot = (i - mid) * STEP;                 /* where it sits on the belt */
+    const A = slot - (selected - mid) * STEP;      /* after the belt has rolled */
+    const on = i === selected;
+    const k = on ? HELD_SCALE : 1;
+    seats[i].style.transform = `rotate(${A}deg) translate(0,${-R}px) scale(${k})`;
+    seats[i].classList.toggle("on", on);
+    caps[i].style.transform =
+      `rotate(${A}deg) translate(0,${-R}px) rotate(${-A}deg) translate(0,${on ? 24 : 0}px)`;
+    caps[i].classList.toggle("on", on);
+    /* Depth: the further from the crown, the further into the sky. */
+    seats[i].querySelector(".hit").style.opacity = on ? 1 : Math.max(0.55, 0.92 - Math.abs(A) / 260);
+  });
+  document.getElementById("dust").style.transform = `rotate(${-(selected - mid) * STEP}deg)`;
+  for (const [n, id] of [[0, "d-svc-invoice"], [1, "i-svc"], [2, "d-svc-checklist"]]) {
+    const btn = document.getElementById("d" + n);
+    btn.setAttribute("aria-pressed", String(bodies[selected]?.id === id));
+    btn.disabled = !bodies.some((b) => b.id === id);
+    btn.style.opacity = btn.disabled ? ".38" : "1";
+  }
+}
+
+/* ---- what the crown displays ---------------------------------------- */
+function renderDisplay() {
+  const item = ITEMS[key], b = bodies[selected];
+  const display = document.getElementById("display");
+  if (b.kind === "item") {
+    /* The item view (#424) exactly as web/src/routes/item/[id] renders it —
+       with one change the belt earns: the card no longer repeats a list of
+       documents, because the belt directly above IS that list. */
+    display.innerHTML = `
+      <article class="glass item-card">
+        <h2>${item.title}</h2>
+        <div class="sub">${item.sub}</div>
+        ${item.kv.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join("")}
+        <h4>actions</h4>
+        <div class="acts" role="group" aria-label="Item actions">
+          <button style="--act:var(--ok)">complete</button>
+          <button style="--act:var(--upcoming)">reschedule</button>
+          <button style="--act:var(--warm)">snooze</button>
+          <button style="--act:var(--accent)">edit</button>
+          <button style="--act:var(--overdue)">retire</button>
+        </div>
+        ${item.docs.length ? "" : `<div class="note">no documents yet — anything you
+          attach, or mail in to your relay, takes a seat on this belt beside the item.</div>`}
+        <a class="back" href="home.html">← back to your orbit</a>
+      </article>`;
+  } else {
+    const d = b.doc;
+    display.innerHTML = `
+      <article class="glass item-card">
+        <div class="docview">
+          <div class="plate" aria-hidden="true">PDF</div>
+          <div class="docbody">
+            <h3>${d.name}</h3>
+            <div class="sub">document · attached to ${item.title}</div>
+            <div class="kv"><span>added</span><b>${d.added}</b></div>
+            <div class="kv"><span>size</span><b>${d.size}</b></div>
+            <div class="kv"><span>kind</span><b>${d.type}</b></div>
+            <div class="kv"><span>scan</span><b class="clean">scanned clean</b></div>
+            <div class="getrow">
+              <button class="btn-primary">download the original</button>
+            </div>
+          </div>
+        </div>
+        <!-- Belt v2 (#476): when Orbit can render page one, that render fills
+             this half of the card and the plate retires. Until it can, the
+             screen says what it holds and hands over the file — it does not
+             draw a page it has never seen. -->
+        <div class="note">the page itself is not something Orbit holds yet — until it does,
+          this is the honest read, and the original is one click away.</div>
+        <button class="back" onclick="centreById('${item.id}')">← back to ${item.title}</button>
+      </article>`;
+  }
+}
+
+function centre(i) {
+  if (i === selected || i < 0 || i >= bodies.length) return;
+  selected = i;
+  layout();
+  const display = document.getElementById("display");
+  clearTimeout(swapTimer);
+  if (reduced()) { renderDisplay(); return; }
+  /* The card leaves while the belt is still moving and the new one arrives
+     as it settles: one motion, not two. */
+  display.classList.add("swap");
+  swapTimer = setTimeout(() => { renderDisplay(); display.classList.remove("swap"); }, 170);
+}
+function centreById(id) {
+  const i = bodies.findIndex((b) => b.id === id);
+  if (i >= 0) centre(i);
+}
+function setItem(which) {
+  key = which;
+  document.getElementById("two").setAttribute("aria-pressed", String(which === "svc"));
+  document.getElementById("none").setAttribute("aria-pressed", String(which === "boiler"));
+  buildBodies(); buildSeats(); layout(); renderDisplay();
+}
+function setSwatch(name, btn) {
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll(".sw"))
+    b.setAttribute("aria-pressed", String(b === btn));
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") { e.preventDefault(); centre(selected - 1); }
+  if (e.key === "ArrowRight") { e.preventDefault(); centre(selected + 1); }
+});
+
+/* The item screen's own sky: the shared generator's seed and layers. */
+(function stars() {
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const rng = rngFrom(17170812);
+  for (const [tile, n, rMin, rSpan, oMin, oSpan] of
+       [[far, 95, 0.4, 0.5, 0.12, 0.23], [near, 46, 0.8, 0.7, 0.3, 0.4]]) {
+    for (let i = 0; i < n; i++) {
+      tile.appendChild(el("circle", {
+        cx: (rng() * 1600).toFixed(1), cy: (rng() * 1000).toFixed(1),
+        r: (rMin + rng() * rSpan).toFixed(2),
+        opacity: (oMin + rng() * oSpan).toFixed(2),
+      }));
+    }
+  }
+})();
+
+drawTrack();
+drawDust();
+buildBodies();
+buildSeats();
+layout();
+renderDisplay();
+</script>
+</body></html>
