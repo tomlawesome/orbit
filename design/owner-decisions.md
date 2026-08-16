@@ -390,3 +390,7 @@ as ordinary fix-both changes rather than blocking the build.
   were overlapping while a laptop/desktop sky had room to spare. Separation
   scales with the viewport, the universe arrangement stays natural, and
   bearings remain sacred.
+- **Settings uses the desk** (owner, mid-review): the single 640px column is
+  too narrow on a laptop/desktop — at least a third of the screen, ideally
+  half. The helm widens to the administration screen's scale: the pack cards
+  earn one full row, the remaining cards sit in two columns.
