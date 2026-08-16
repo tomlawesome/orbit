@@ -227,3 +227,66 @@ export function galaxyOf(workspace, today) {
   }
   return galaxy;
 }
+
+const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/**
+ * The approach corridor (#461): every active scheduled item across every
+ * household, unrolled onto a line of time. Overdue sits in the red zone above
+ * today; the rest of the current month follows headerless; each later month
+ * with anything approaching gets its rule. An order, not a scale.
+ */
+export function corridorOf(workspace, today) {
+  const primary = workspace?.activeHouseholdId ?? workspace?.households?.[0]?.id ?? null;
+  const rows = [];
+  for (const household of workspace?.households ?? []) {
+    const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
+    for (const item of household.items ?? []) {
+      if (item.status !== "active" || !item.dueDate) continue;
+      const days = daysUntil(item.dueDate, today);
+      rows.push({
+        id: item.id,
+        title: item.title,
+        household: household.name,
+        away: household.id !== primary,
+        section: sections.get(item.sectionId) ?? null,
+        days,
+        dueDate: item.dueDate,
+        band: bandOf(days),
+        provider: item.provider ?? null,
+        costMinor: item.costMinor ?? null,
+        costIsEstimate: Boolean(item.costIsEstimate),
+        currency: item.currency ?? "GBP",
+        kind: item.subtype === "inspection" ? "inspection" : item.scheduleKind === "renewal" ? "renewal" : "service",
+      });
+    }
+  }
+  rows.sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
+  const overdue = rows.filter((row) => row.days < 0);
+  const ahead = rows.filter((row) => row.days >= 0);
+  const currentKey = today.slice(0, 7);
+  const current = ahead.filter((row) => row.dueDate.slice(0, 7) === currentKey);
+  const months = [];
+  for (const row of ahead) {
+    const key = row.dueDate.slice(0, 7);
+    if (key === currentKey) continue;
+    const last = months[months.length - 1];
+    if (last?.key === key) last.rows.push(row);
+    else months.push({ key, label: MONTH_LABELS[Number(key.slice(5)) - 1], rows: [row] });
+  }
+  const lastKey = ahead[ahead.length - 1]?.dueDate.slice(0, 7) ?? currentKey;
+  const monthsSpanned =
+    (Number(lastKey.slice(0, 4)) - Number(today.slice(0, 4))) * 12 +
+    (Number(lastKey.slice(5)) - Number(today.slice(5, 7))) + 1;
+  return {
+    overdue, current, months,
+    total: rows.length,
+    systems: new Set(rows.map((row) => row.household)).size,
+    monthsSpanned,
+    /* the long name of the horizon month, for the closing line */
+    horizon: ahead.length
+      ? new Date(ahead[ahead.length - 1].dueDate + "T00:00:00Z")
+          .toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" })
+      : null,
+  };
+}

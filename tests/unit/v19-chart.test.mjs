@@ -10,9 +10,11 @@ import {
   daysUntil,
   dialBodiesOf,
   dialPlacement,
+  corridorOf,
   galaxyOf,
   manifestGroupsOf,
 } from "../../web/src/lib/data/chart.js";
+import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
 
@@ -184,5 +186,51 @@ describe("daysUntil", () => {
     expect(daysUntil("2026-08-29", TODAY)).toBe(16);
     expect(daysUntil("2026-07-28", TODAY)).toBe(-16);
     expect(daysUntil(undefined, TODAY)).toBe(null);
+  });
+});
+
+// #461: the approach corridor — every household's schedule unrolled onto one
+// line of time. An order, not a scale: overdue above today, the current month
+// headerless, then a rule per month with anything approaching.
+describe("corridorOf", () => {
+  const corridor = corridorOf(WORKSPACE_FIXTURE, TODAY);
+
+  it("spans every system and counts honestly", () => {
+    expect(corridor.total).toBe(15);
+    expect(corridor.systems).toBe(5);
+    expect(corridor.monthsSpanned).toBe(11);
+    expect(corridor.horizon).toBe("June");
+  });
+
+  it("puts only the overdue in the red zone, and today's month headerless", () => {
+    expect(corridor.overdue.map((row) => row.id)).toEqual(["i-gutter"]);
+    expect(corridor.current.map((row) => row.id)).toEqual(["i-seaside-0", "i-grans-0", "i-mot"]);
+  });
+
+  it("rules exactly the months with something approaching, in date order", () => {
+    expect(corridor.months.map((month) => [month.label, month.rows.length])).toEqual([
+      ["SEP", 2], ["OCT", 1], ["DEC", 2], ["JAN", 2], ["MAR", 1], ["APR", 1], ["MAY", 1], ["JUN", 1],
+    ]);
+    expect(corridor.months[0].rows.map((row) => row.id)).toEqual(["i-boiler", "i-narrow-1"]);
+  });
+
+  it("marks whose sky each entry belongs to, and keeps the dial's vocabulary", () => {
+    const bss = corridor.months[0].rows[1];
+    expect(bss.title).toBe("Boat Safety Scheme examination");
+    expect(bss.away).toBe(true);
+    expect(bss.kind).toBe("inspection");
+    expect(bss.band).toBe("upcoming");
+    expect(bss.costIsEstimate).toBe(false);
+    const mot = corridor.current[2];
+    expect(mot.away).toBe(false);
+    expect(mot.band).toBe("due-soon");
+  });
+
+  it("degrades to an empty corridor rather than throwing", () => {
+    const empty = corridorOf(null, TODAY);
+    expect(empty.total).toBe(0);
+    expect(empty.overdue).toEqual([]);
+    expect(empty.months).toEqual([]);
+    expect(empty.horizon).toBe(null);
   });
 });

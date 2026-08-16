@@ -230,6 +230,23 @@ export async function readHome() {
   };
 }
 
+/**
+ * Everything the corridor renders (#461): the whole workspace (the corridor
+ * spans every system), the signed-in user for the chrome, and the reckoning
+ * date. The transform itself (corridorOf) is pure and lives in chart.js.
+ */
+export async function readDueNext() {
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  return {
+    workspace,
+    primary,
+    household: workspace.households.find((one) => one.id === primary) ?? null,
+    user: session?.user ?? null,
+    today: todayOf(workspace),
+  };
+}
+
 const shortDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
