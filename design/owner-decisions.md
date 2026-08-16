@@ -573,6 +573,17 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Dawn cloud sea is approved as a main lighter theme** (owner):
+  clouds (the cloud-sea pack on the final roster) is not merely
+  admitted — it is one of Orbit's MAIN LIGHTER THEMES. This supersedes
+  the "no light pack" consequence noted under the roster ruling:
+  clouds carries the lighter end of the range.
+- **After dark adopts the happy accident** (owner): the galactic-plane
+  style — the warm band lying diagonally across the sky, reading as
+  the Milky Way, born as an accident during the dawn work — becomes
+  part of AFTER DARK's own identity, not merely a homescreen style
+  candidate. Mockup first, as always; the universal scroll-descent law
+  applies to how the plane leaves as you scroll from the dial.
 - **Retrograde: the top grid returns for everyone, and the walls close
   in** (owner): the ceiling grid is IN on all viewports — the
   tall-viewport gate goes. As you scroll down, the horizontal grids
