@@ -219,7 +219,7 @@
     <a href="/documents">Documents</a>
     <a href="/inbox">Inbox</a>
     <a href="/settings">Settings</a>
-    <a href="#">Administration</a>
+    <a href="/administration">Administration</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
