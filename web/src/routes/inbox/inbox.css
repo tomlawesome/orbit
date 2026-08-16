@@ -36,8 +36,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .filed .flex{flex:1;min-width:0}
 .inbox-page .filed .note{font:10px var(--mono);color:var(--ink-faint);margin-top:10px;line-height:1.9;padding-left:4px}
 
-/* the dish: the relay's live status, condensed from the relay screen */
-.inbox-page .relaybar{display:flex;align-items:center;gap:16px;margin-top:26px;
+/* the dish: the relay's live status, condensed from the relay screen.
+   §15 — the relay lives on the helm; the inbox shows this bar ONLY when the
+   queue is empty, where the address is the call to action (.quietnote). */
+.inbox-page .relaybar{display:flex;align-items:center;gap:16px;
           background:var(--panel);backdrop-filter:blur(8px);
           border:1px solid var(--line-soft);border-radius:14px;padding:14px 18px}
 .inbox-page .dish{position:relative;width:34px;height:34px;flex:none}
@@ -113,6 +115,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .quietnote{margin-top:60px;text-align:center}
 .inbox-page .quietnote .dish{margin:0 auto 14px}
 .inbox-page .quietnote p{font:12px var(--mono);color:var(--ink-mid);line-height:2}
+.inbox-page .quietnote .relaybar{max-width:560px;margin:24px auto 0;text-align:left}
+.inbox-page .quietnote .relaybar .dish{margin:0}
 @media (prefers-reduced-motion: reduce){
   .inbox-page .sky .far,.inbox-page .sky .near,.inbox-page .dish span,.inbox-page .reading i{animation:none!important}
 }

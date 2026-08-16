@@ -13,7 +13,9 @@
    * Still reading / Failed to process, stacking to one column on a phone.
    * Nothing enters the orbit from here without two deliberate taps (#434's
    * protocol, shared with home's rows), and unreviewed arrivals burn up
-   * after 45 days.
+   * after 45 days. §15: the relay lives on the helm — its bar appears here
+   * only when the QUEUE is empty (review + reading + failed), where the
+   * address is the call to action; Filed may still hold items.
    */
   let view = $state(null);
   let armed = $state({ id: null, act: null });
@@ -105,15 +107,6 @@
   </header>
 
   {#if view}
-    <div class="relaybar">
-      <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
-      <div class="alias">
-        <b>{view.relay.address}</b>
-        <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
-      </div>
-      <a href="/settings/mail">your relay →</a>
-    </div>
-
     {#if view.filed.length || !emptyQueue}
     <div class="lanes">
     <div class="lane filed">
@@ -223,6 +216,17 @@
       <div class="quietnote">
         <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
         <p>the dish is listening — nothing waiting<br>forward a document to your relay address and it lands here</p>
+        <!-- §15: the relay wears its hat here only — with nothing in the
+             queue, the address is the call to action. Filed may still hold
+             items; what governs this is the QUEUE being empty. -->
+        <div class="relaybar">
+          <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>
+          <div class="alias">
+            <b>{view.relay.address}</b>
+            <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
+          </div>
+          <a href="/settings/mail">your relay →</a>
+        </div>
       </div>
     {/if}
   {/if}
