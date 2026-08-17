@@ -4,6 +4,7 @@ import { dirname, join, sep } from "node:path";
 import { createCanvas, loadImage, DOMMatrix, Path2D, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
 import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { AppError } from "@/lib/app-error";
+import { log, type OperationalReason } from "@/lib/logger";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
@@ -59,7 +60,32 @@ const PDF_PREVIEW_PARSER_OPTIONS = Object.freeze({
   verbosity: VerbosityLevel.ERRORS,
 }) as Readonly<PdfPreviewParserOptions>;
 
-function unsupportedPreview(): AppError {
+/**
+ * Records a preview refusal or failure (#494).
+ *
+ * Before this, a preview 422 wrote nothing to the log: the render error was
+ * swallowed here and `docker logs` carried zero preview records across a
+ * full reproduction of #476's container bug. Only ids-shaped, bounded values
+ * are ever recorded — no filename, no document bytes, no parser or Skia
+ * error text — so this stays inside the closed vocabulary's contract and
+ * never becomes a second place content can leak. `document.preview` reuses
+ * existing reasons/actions rather than inventing preview-specific ones: the
+ * refusal categories here (unsupported structure, prohibited content, parser
+ * output invalid, processing interrupted) are exactly the categories
+ * `document.inspection` and `document.parse` already log at upload time.
+ */
+function logPreviewRefusal(level: "info" | "warn", reason: OperationalReason): void {
+  log[level]({
+    event: "document.preview",
+    state: "blocked",
+    reason,
+    action: reason === "processing_interrupted" ? "none" : "check_parser",
+    impact: "none",
+  });
+}
+
+function unsupportedPreview(reason: OperationalReason = "unsupported_structure"): AppError {
+  logPreviewRefusal("info", reason);
   return new AppError(
     "document_preview_unsupported",
     "Orbit cannot show a picture of this document",
@@ -67,7 +93,8 @@ function unsupportedPreview(): AppError {
   );
 }
 
-function failedPreview(): AppError {
+function failedPreview(reason: OperationalReason = "parser_output_invalid"): AppError {
+  logPreviewRefusal("warn", reason);
   return new AppError(
     "document_preview_failed",
     "Orbit could not draw a picture of this document",
@@ -185,11 +212,21 @@ function boundedCanvasSize(width: number, height: number, allowUpscale: boolean)
   };
 }
 
+let renderBudgetMsOverride: number | undefined;
+
+/** Lets a test force the render budget to expire deterministically, rather than racing 10 real seconds against a real render. */
+export function setDocumentPreviewRenderBudgetForTests(ms: number | undefined): void {
+  renderBudgetMsOverride = ms;
+}
+
 async function withRenderBudget<T>(work: () => Promise<T>): Promise<T> {
   let budgetTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     const budget = new Promise<never>((_, reject) => {
-      budgetTimer = setTimeout(() => reject(failedPreview()), DOCUMENT_PREVIEW_RENDER_BUDGET_MS);
+      budgetTimer = setTimeout(
+        () => reject(failedPreview("processing_interrupted")),
+        renderBudgetMsOverride ?? DOCUMENT_PREVIEW_RENDER_BUDGET_MS,
+      );
     });
     return await Promise.race([work(), budget]);
   } finally {
@@ -268,7 +305,8 @@ export async function renderDocumentPagePreview(
     throw unsupportedPreview();
   }
   if (detected !== storedMediaType) throw unsupportedPreview();
-  if (await classifyDocumentStructure(bytes, detected) !== "supported_structure") throw unsupportedPreview();
+  const structureReason = await classifyDocumentStructure(bytes, detected);
+  if (structureReason !== "supported_structure") throw unsupportedPreview(structureReason);
 
   return withRenderBudget(async () => {
     try {
