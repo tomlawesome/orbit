@@ -522,9 +522,15 @@ async function capture(
    * would show a real visitor. The mockups' own inline grain SVG carries no
    * such attribute — it never left the live-filter path this fixes — so the
    * selector matches nothing there and the wait resolves immediately.
+   *
+   * #501: Dawn.svelte and Dusk.svelte's ".world" now rasterise their seven
+   * feGaussianBlur glows the same way, and mark the SAME `data-rasterised`
+   * attribute on their own host (the ".world" div) rather than invent a
+   * second protocol — so the wait below only had to grow a second selector,
+   * not a second wait.
    */
   await page.waitForFunction(() =>
-    [...document.querySelectorAll(".grain[data-rasterised]")].every(
+    [...document.querySelectorAll(".grain[data-rasterised], .world[data-rasterised]")].every(
       (el) => el.dataset.rasterised === "ready",
     ),
   );

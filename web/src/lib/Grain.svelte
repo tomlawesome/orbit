@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { rasteriseSvg } from "$lib/raster.js";
 
   /**
    * POL-13's film grain, once (#445) — and now rasterised once too (#499).
@@ -44,15 +45,15 @@
    * that exact size. That is why the fidelity gate still reads the same 0 px
    * it always has: this is not an approximation of the grain, it is the same
    * grain, computed once instead of every frame.
+   *
+   * The decode/draw/cache mechanics live in $lib/raster.js (#501): this file
+   * only builds the filter-graph SVG and the cache key, since #501 needed
+   * the identical mechanism for the dawn/dusk glows and a second copy of the
+   * canvas dance would have drifted from this one the way the grain drifted
+   * across screens before #445.
    */
   let { slope = 0.08 } = $props();
   let host;
-
-  /* Shared across every Grain instance in the tab. A screen only ever mounts
-     one, but the cache means a second mount at the same (freq, slope, size,
-     dpr) — or a resize back to a size already built — blits instead of
-     re-rasterising. */
-  const cache = new Map();
 
   /** The exact filter graph, verbatim, wrapped in an SVG sized so its own
       user-space matches the live element's CSS box (w × h) while its
@@ -72,30 +73,10 @@
   }
 
   async function rasterise(freq, slope, w, h, dpr) {
-    const key = `${freq}|${slope}|${w}|${h}|${dpr}`;
-    const hit = cache.get(key);
-    if (hit) return hit;
-
-    const svg = svgFor(freq, slope, w, h, dpr);
-    const img = new Image();
-    const decoded = new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-    });
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-    await decoded;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(w * dpr));
-    canvas.height = Math.max(1, Math.round(h * dpr));
-    const ctx = canvas.getContext("2d");
-    /* 1:1 — the image's own intrinsic size already matches the canvas, so
-       this is a straight blit with no resampling to introduce drift. */
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    const url = canvas.toDataURL("image/png");
-    cache.set(key, url);
-    return url;
+    const rw = Math.max(1, Math.round(w * dpr));
+    const rh = Math.max(1, Math.round(h * dpr));
+    const key = `grain|${freq}|${slope}|${rw}|${rh}`;
+    return rasteriseSvg(key, svgFor(freq, slope, w, h, dpr), rw, rh);
   }
 
   onMount(() => {
