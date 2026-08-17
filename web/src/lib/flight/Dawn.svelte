@@ -3,10 +3,17 @@
 
   /**
    * THE DAWN — the sky the launch leaves from, and the sign-in's own surface.
-   * Markup verbatim from design/v19/first-run.html at 159ec9f (which carries
+   * Markup verbatim from design/v19/first-run.html (which carries
    * design/family/login.html's world across): the skywash, the zodiacal cone,
    * the two swaying fans of crepuscular rays, the scattering rings hugging the
    * limb, the point of first light, and the night side below it.
+   *
+   * THE SKY is that sheet's, unchanged. THE CHROME on top of it is the
+   * 2026-08-14 login, not the sheet's — the sheet reproduced
+   * design/family/login.html's older v18 lockup, pill and ribbon, and the
+   * owner struck that on 2026-08-17: "the flight's login screen uses THE MOST
+   * RECENT APPROVED LOGIN... there shouldnt be a footer". Both sheet and app
+   * were fixed together; see flight.css for the ruling in full.
    *
    * The canvas flight is drawn to this exact geometry at atm = 0 — limb top on
    * y = 920 of a 1600×1000 slice, radius 3000, sunrise at (800, 920) — so the
@@ -133,14 +140,21 @@
             stroke="#fff6e6" stroke-width="3.4" stroke-linecap="round"/>
   </svg></div>
 
+  <!-- The 08-14 hero (§15, owner 2026-08-17): the ring at 420px, the word set
+       plain inside it with no filled centre, the ratified pill inside the ring
+       beneath the word. No ribbon, no footer. Drawn for THIS size rather than
+       scaled up from the favicon geometry — at 420px the mark's own 9-unit
+       stroke renders ~19px and its 20-unit planet an 84px disc, which reads as
+       a heavy badge instead of a slim ring with a small body riding it. 2
+       units = ~4px of line, 7 units = a ~29px planet; the planet still sits on
+       the ring at radius 72. -->
   <div class="loginchrome">
     <div class="lockup">
-      <div class="glyph" id="login-glyph"><svg width="64" height="64" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="9"/>
-        <circle cx="163" cy="63.5" r="20" fill="#d8b45a"/></svg></div>
+      <div class="glyph" id="login-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
+        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
       <div class="name">orbit</div>
+      <div class="gate-wrap">{@render children?.()}</div>
     </div>
-    <div class="gate-wrap">{@render children?.()}</div>
-    <div class="below">PRIVATE &middot; SELF-HOSTED &middot; YOURS</div>
   </div>
 </div>
