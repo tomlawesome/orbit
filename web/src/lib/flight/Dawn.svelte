@@ -40,25 +40,48 @@
    * uses, so the technique is shared, not duplicated a third time.
    *
    * Checked first, per the owner's own condition on this fix: what actually
-   * ANIMATES here. `.rays` rotates (sway1/sway2, a transform) and keeps its
-   * own live "rayrough" filter — genuine shape motion, untouched. Everything
-   * else that moves — .zodiacal, .scatter, .sunpt-breathe, .rim's fade-in —
-   * animates opacity only, via CSS on an ancestor or the element itself, and
-   * opacity composites over a static raster exactly as it would over a live
-   * filter: nothing here needed to stay live to keep breathing.
+   * ANIMATES here. `.rays` rotates (sway1/sway2, a transform) and — until
+   * #502 — kept its own live "rayrough" filter on the theory that genuine
+   * shape motion needed a live filter to ride. Measured instead of assumed
+   * (#498's parked plan, owner ruling 2026-08-17): profiling the login on
+   * WebKit with animations running and toggling suspects one at a time found
+   * that filter alone responsible for ~47% of the screenshot-forced paint
+   * cost — by far the largest remaining lever, because a CSS `transform`
+   * does not require the filter under it to be recomputed. Rotation is
+   * rigid: every pixel of the swaying fan keeps the same relationship to
+   * every other pixel, so a raster of the filtered shape rotated by CSS is
+   * the identical picture a live filter recomputing the turbulence and
+   * displacement on the rotated geometry would have produced, and the
+   * rotation itself is then a GPU compositing operation instead of a
+   * software re-rasterisation. So sway1 and sway2 are rasterised once each
+   * (kept separate, not merged, so each keeps its own rotation period) and
+   * the `sway1`/`sway2` classes move from the live filtered <g> onto the
+   * resulting <image> — same transform-origin, same keyframes, same
+   * rotation, now riding a picture instead of recomputing one.
    *
-   * Five raster targets, one per contiguous group of filtered elements (kept
-   * separate, not merged, precisely so each keeps its own opacity animation
-   * and its own place in paint order): the zodiacal cone (b20l), the five
-   * limb scattering rings (b20l/b12l/b6l/b2l), the sun's soft white core
-   * (b6l), the scattering arc over the limb (b2l), and the blurred half of
-   * the rim (b6l). Each raster is built at the FULL 1600×1000 viewBox frame
-   * (not cropped to the filter's own region) at devicePixelRatio-native
-   * resolution, exactly as Grain.svelte rasterises its own full-surface
-   * frame — so it drops into the SAME <svg viewBox="0 0 1600 1000"> that
-   * already carries the live shapes, at the same x/y/width/height (0,0,1600,
-   * 1000) as an <image>, and the outer svg's own slice transform scales it
-   * exactly once, the same as it always scaled the vector shapes it replaces.
+   * Everything else that moves — .zodiacal, .scatter, .sunpt-breathe, .rim's
+   * fade-in — animates opacity only, via CSS on an ancestor or the element
+   * itself, and opacity composites over a static raster exactly as it would
+   * over a live filter: nothing here needed to stay live to keep breathing.
+   * The profile agrees: toggling the starfield's drift/twinkle or these
+   * breathing layers moved the paint cost by ~2% or less, inside the run's
+   * own noise floor, because none of them sit under a filter or a blend that
+   * their motion would force to re-evaluate.
+   *
+   * Seven raster targets, one per contiguous group of filtered elements (kept
+   * separate, not merged, precisely so each keeps its own opacity animation,
+   * its own rotation and its own place in paint order): the zodiacal cone
+   * (b20l), the five limb scattering rings (b20l/b12l/b6l/b2l), the sun's
+   * soft white core (b6l), the scattering arc over the limb (b2l), the
+   * blurred half of the rim (b6l), and — since #502 — the two swaying fans of
+   * crepuscular rays (rayrough). Each raster is built at the FULL 1600×1000
+   * viewBox frame (not cropped to the filter's own region) at
+   * devicePixelRatio-native resolution, exactly as Grain.svelte rasterises
+   * its own full-surface frame — so it drops into the SAME
+   * <svg viewBox="0 0 1600 1000"> that already carries the live shapes, at
+   * the same x/y/width/height (0,0,1600,1000) as an <image>, and the outer
+   * svg's own slice transform scales it exactly once, the same as it always
+   * scaled the vector shapes it replaces.
    *
    * Unlike Grain (which starts blank until its raster lands), there is no
    * kept live fallback here: the decode of a same-document data URI resolves
@@ -71,7 +94,7 @@
    */
   let { children = undefined, shown = false } = $props();
   let world;
-  let imgZod, imgScatter, imgSunpt, imgSunarc, imgRim;
+  let imgZod, imgScatter, imgSunpt, imgSunarc, imgRim, imgSway1, imgSway2;
 
   const F_B2L =
     '<filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>';
@@ -85,6 +108,15 @@
     '<radialGradient id="zod" cx="50%" cy="88%" r="75%"><stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/><stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/><stop offset="100%" stop-opacity="0"/></radialGradient>';
   const G_RIMG =
     '<linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/></linearGradient>';
+  /* #502: entropy — rays are light through air, not vector wedges. Verbatim
+     copy of the live filter this replaces (same id-worthy graph, no
+     userSpaceOnUse pin needed: its default objectBoundingBox region already
+     resolves against the SAME path geometry inside this raster body that it
+     resolved against live, so the region is identical either way). */
+  const F_RAYROUGH =
+    '<filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%"><feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="22"/><feGaussianBlur stdDeviation="17"/></filter>';
+  const G_RAYG =
+    '<linearGradient id="rayg" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#ffe4a8" stop-opacity=".26"/><stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/><stop offset="100%" stop-opacity="0"/></linearGradient>';
 
   /* Each group's verbatim shape markup — same coordinates, same fills, same
      filter references — plus only the defs that group needs. class= is
@@ -119,6 +151,32 @@
       body:
         '<circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"' +
         ' stroke-width="6" stroke-opacity=".35" filter="url(#b6l)"/>',
+    },
+    /* #502: the two swaying fans of crepuscular rays, rasterised separately
+       so each keeps ITS OWN rotation (sway1/sway2 run different periods and
+       ranges) — the class moves onto the <image> below unchanged, the same
+       way .zodiacal's and .rim's classes ride their own <image> already. */
+    sway1: {
+      defs: F_RAYROUGH + G_RAYG,
+      body:
+        '<g fill="url(#rayg)" filter="url(#rayrough)">' +
+        '<path d="M 800 924 L 736 356 L 772 362 Z"/>' +
+        '<path d="M 800 924 L 852 528 L 892 548 Z"/>' +
+        '<path d="M 800 924 L 508 620 L 556 588 Z"/>' +
+        '<path d="M 800 924 L 1096 448 L 1052 428 Z"/>' +
+        '<path d="M 800 924 L 320 690 L 360 646 Z" opacity=".8"/>' +
+        '<path d="M 800 924 L 1290 670 L 1244 630 Z" opacity=".8"/>' +
+        '</g>',
+    },
+    sway2: {
+      defs: F_RAYROUGH + G_RAYG,
+      body:
+        '<g fill="url(#rayg)" filter="url(#rayrough)" opacity=".7">' +
+        '<path d="M 800 924 L 646 404 L 680 390 Z"/>' +
+        '<path d="M 800 924 L 962 560 L 928 544 Z"/>' +
+        '<path d="M 800 924 L 404 610 L 448 574 Z"/>' +
+        '<path d="M 800 924 L 1200 596 L 1156 562 Z"/>' +
+        '</g>',
     },
   };
 
@@ -162,7 +220,10 @@
 
       /* Imperative, same as Grain.svelte: every href lands in the same tick
          as the readiness flag below, with nothing async between them. */
-      const targets = { zod: imgZod, scatter: imgScatter, sunpt: imgSunpt, sunarc: imgSunarc, rim: imgRim };
+      const targets = {
+        zod: imgZod, scatter: imgScatter, sunpt: imgSunpt, sunarc: imgSunarc, rim: imgRim,
+        sway1: imgSway1, sway2: imgSway2,
+      };
       for (const [name, url] of built) targets[name]?.setAttribute("href", url);
       world.dataset.rasterised = "ready";
     }
@@ -226,13 +287,9 @@
         <stop offset="55%" stop-color="#c2571f" stop-opacity=".12"/>
         <stop offset="100%" stop-opacity="0"/>
       </radialGradient>
-      <linearGradient id="rayg" x1="0" y1="1" x2="0" y2="0">
-        <stop offset="0%" stop-color="#ffe4a8" stop-opacity=".26"/>
-        <stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/>
-        <stop offset="100%" stop-opacity="0"/>
-      </linearGradient>
-      <!-- "zod" no longer lives here: its only user, .zodiacal, is
-           rasterised (#501) and carries its own copy (GROUPS.zod). -->
+      <!-- "zod" and "rayg" no longer live here: their only users (.zodiacal,
+           #502's sway1/sway2) are rasterised and each carries its own copy
+           (GROUPS.zod, GROUPS.sway1, GROUPS.sway2). -->
       <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-opacity="0"/>
         <stop offset="62%" stop-color="#3d2a4d" stop-opacity=".12"/>
@@ -245,34 +302,23 @@
            blurred half of .rim) and removes the live defs entirely: each
            raster carries its own copy of whichever of these four it needs
            (GROUPS above). Nothing here still points at "b2l"/"b6l"/"b12l"/
-           "b20l" live. -->
-      <!-- entropy: rays are light through air, not vector wedges -->
-      <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>
-        <feDisplacementMap in="SourceGraphic" in2="n" scale="22"/>
-        <feGaussianBlur stdDeviation="17"/>
-      </filter>
+           "b20l" live. "rayrough" is gone the same way (#502, GROUPS.sway1/
+           GROUPS.sway2) — the profile that led to it is in Dawn.svelte's own
+           top-of-file note. -->
     </defs>
     <g class="dawnlayer">
       <rect x="0" y="0" width="1600" height="1000" fill="url(#skywash)"/>
       <!-- #501: rasterised (GROUPS.zod); class stays here since blend/opacity
            are display-time CSS, not baked into the raster. -->
       <image class="zodiacal" bind:this={imgZod} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+      <!-- #502: the two swaying fans, rasterised (GROUPS.sway1/GROUPS.sway2)
+           — sway1/sway2 move from the live filtered <g> onto these <image>s
+           unchanged, so the CSS rotation (flight.css's sway1/sway2 keyframes,
+           same transform-origin) rides the picture instead of recomputing
+           the turbulence/displacement/blur filter underneath it every frame. -->
       <g class="rays">
-        <g class="sway1" fill="url(#rayg)" filter="url(#rayrough)">
-          <path d="M 800 924 L 736 356 L 772 362 Z"/>
-          <path d="M 800 924 L 852 528 L 892 548 Z"/>
-          <path d="M 800 924 L 508 620 L 556 588 Z"/>
-          <path d="M 800 924 L 1096 448 L 1052 428 Z"/>
-          <path d="M 800 924 L 320 690 L 360 646 Z" opacity=".8"/>
-          <path d="M 800 924 L 1290 670 L 1244 630 Z" opacity=".8"/>
-        </g>
-        <g class="sway2" fill="url(#rayg)" filter="url(#rayrough)" opacity=".7">
-          <path d="M 800 924 L 646 404 L 680 390 Z"/>
-          <path d="M 800 924 L 962 560 L 928 544 Z"/>
-          <path d="M 800 924 L 404 610 L 448 574 Z"/>
-          <path d="M 800 924 L 1200 596 L 1156 562 Z"/>
-        </g>
+        <image class="sway1" bind:this={imgSway1} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+        <image class="sway2" bind:this={imgSway2} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       </g>
       <!-- #501: the five limb scattering rings, rasterised as one image
            (GROUPS.scatter) so .scatter's own breathe-band opacity animation
