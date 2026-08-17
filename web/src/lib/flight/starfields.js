@@ -33,3 +33,16 @@ export const DAWN_FAR = tile(100, 0.4, 0.5, 0.10, 0.25, true);
 export const DAWN_NEAR = tile(44, 0.8, 0.8, 0.35, 0.35, false);
 export const DUSK_FAR = tile(100, 0.4, 0.55, 0.14, 0.28, true);
 export const DUSK_NEAR = tile(48, 0.8, 0.85, 0.40, 0.38, false);
+
+/*
+ * THE NEWCOMER'S FIELD (§15 second pass, ruling 4). The sheet draws two more
+ * tiles off this same stream before it — the home frame's pair — and the
+ * stream's ORDER is the contract, so they are drawn here and dropped rather
+ * than skipped: the newcomer's sky is then the stars the sheet gives it and
+ * not a different sky with the same parameters. The home frame in the product
+ * paints its own field from $lib/sky.js and has no use for these two.
+ */
+tile(95, 0.4, 0.5, 0.12, 0.23, false);
+tile(46, 0.8, 0.7, 0.30, 0.40, false);
+export const NEWCOMER_FAR = tile(95, 0.4, 0.5, 0.12, 0.23, false);
+export const NEWCOMER_NEAR = tile(46, 0.8, 0.7, 0.30, 0.40, false);
