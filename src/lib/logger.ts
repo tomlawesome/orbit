@@ -183,6 +183,7 @@ export const operationalEvents = {
   "document.scanner": "scanner",
   "document.scan": "scanner",
   "document.inspection": "document",
+  "document.preview": "document",
   "document.parse": "parser",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
