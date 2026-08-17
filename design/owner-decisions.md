@@ -576,6 +576,13 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The card loses its mark; the logo was there all along** (owner,
+  ruling 6b): the ring-mark is removed from the create-system card
+  entirely. On submit the card just fades out, revealing the login
+  screen's bigger logo hidden behind it, which melts into the flight
+  at its own size — from there everything is exactly the login
+  journey's departure. The create path and login path converge on one
+  ignition.
 - **The batch of seals and rulings, 2026-08-17 morning** (owner):
   retrograde walls-only CONFIRMED with the haze kept gone. Belt: the
   sooner-end ambient sowing fix is authorized; the documents mark is
