@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createCanvas } from "@napi-rs/canvas";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { log } from "@/lib/logger";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
   renderDocumentPagePreview,
+  setDocumentPreviewRenderBudgetForTests,
 } from "./preview";
 
 /**
@@ -143,5 +145,82 @@ describe("renderDocumentPagePreview", () => {
     await expect(renderDocumentPagePreview(Buffer.alloc(64), "application/pdf")).rejects.toThrow();
 
     expect(scratch.entries()).toEqual([]);
+  });
+
+  describe("document.preview logging (#494)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("records a bounded refusal, never the document's bytes or a parser message, for an unsupported type", async () => {
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+
+      await expect(renderDocumentPagePreview(Buffer.from("PK not a document"), "application/pdf")).rejects.toThrow();
+
+      expect(info).toHaveBeenCalledExactlyOnceWith({
+        event: "document.preview",
+        state: "blocked",
+        reason: "unsupported_structure",
+        action: "check_parser",
+        impact: "none",
+      });
+    });
+
+    it("records the mismatch reason when sniffed bytes disagree with the stored media type", async () => {
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+
+      await expect(renderDocumentPagePreview(rasterFixture("image/png", 40, 40), "application/pdf")).rejects.toThrow();
+
+      expect(info).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        event: "document.preview",
+        reason: "unsupported_structure",
+      }));
+    });
+
+    it("records the structure check's own reason rather than a generic one", async () => {
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+      const truncated = syntheticPdf("Preview fixture").subarray(0, 120);
+
+      await expect(renderDocumentPagePreview(truncated, "application/pdf")).rejects.toThrow();
+
+      expect(info).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        event: "document.preview",
+        reason: "unsupported_structure",
+      }));
+    });
+
+    it("records a warn-level refusal, distinct from the 415 info-level one, when the render budget is exceeded", async () => {
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+      setDocumentPreviewRenderBudgetForTests(0);
+
+      try {
+        await expect(renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf")).rejects.toMatchObject({
+          code: "document_preview_failed",
+          status: 422,
+        });
+      } finally {
+        setDocumentPreviewRenderBudgetForTests(undefined);
+      }
+
+      expect(info).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledExactlyOnceWith({
+        event: "document.preview",
+        state: "blocked",
+        reason: "processing_interrupted",
+        action: "none",
+        impact: "none",
+      });
+    });
+
+    it("never logs a bounded document.preview event for a preview that succeeds", async () => {
+      const info = vi.spyOn(log, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+
+      await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
+
+      expect(info).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 });
