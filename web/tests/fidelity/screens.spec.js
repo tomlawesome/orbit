@@ -142,6 +142,91 @@ const SCREENS = [
     mockupOnly: [".demos", ".sheet"],
   },
   {
+    /*
+     * THE CREATE-SYSTEM CARD (#410, §15). The sheet's own DEFAULT state — the
+     * card standing alone on the dawn, three fields, a button and air, with the
+     * login screen taken off it entirely (fourth pass) — so this ports against
+     * the sheet exactly as the login and the goodbye do, and reads 0.
+     *
+     * The arrival's stages are named through the fixture harness (see the front
+     * door's +page.server.js): the fixture workspace has households, and this
+     * surface belongs to a reader who has none, which is a state the workspace
+     * fixture cannot be in. The fixture pins the two answers the card reads off
+     * the browser — the time zone and the currency — to the sheet's own first
+     * options, because a select shows what the machine running the gate
+     * happens to be set to otherwise.
+     */
+    name: "first-run",
+    path: "/?arrival=create",
+    stage: "porting",
+    mockup: "/design/v19/first-run.html",
+    /*
+     * One predicate, both sides. The sheet opens ON this state (its own
+     * `toForm()` runs at load), and the app reaches it once the card is drawn:
+     * first light, the card showing, and the card in the document.
+     */
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector(".card")),
+    /* The sheet's own scaffolding: the demos toolbar that replays the flight
+       and switches packs, and the footer line describing the proposal. */
+    mockupOnly: [".demos", ".sheet"],
+  },
+  {
+    /*
+     * THE SEALED REJECTION, in one warm line (§15 third pass: "the rejection is
+     * one line"). Its own entry because it is a ruling in its own right and
+     * because it is genuinely at rest: the settle-back has finished, the field
+     * wears the warm outline, and the line under it names the system that holds
+     * the name and offers the road to it.
+     */
+    name: "first-run-error",
+    path: "/?arrival=create&reject=Lawson%20Home",
+    stage: "porting",
+    mockup: "/design/v19/first-run.html",
+    /*
+     * The sheet reaches this state through its own demo (`showError()`, which
+     * is what its ERROR STATE chip calls); the app reaches it through the
+     * fixture's `reject` name. Both then settle the same way: rejected, and no
+     * longer grounded — the climb has started, caught, and set back down.
+     */
+    settle: () => {
+      if (typeof window.showError === "function" && !document.body.classList.contains("rejected")) {
+        window.showError();
+      }
+      return document.body.classList.contains("lit")
+        && document.body.classList.contains("rejected")
+        && !document.body.classList.contains("grounded");
+    },
+    mockupOnly: [".demos", ".sheet"],
+  },
+  {
+    /*
+     * THE NEWCOMER'S QUESTION (§15 second pass, ruling 4), arrived at: the
+     * labelled sky, the north star, and the centred "where do you belong?" with
+     * its rows and its other road. The state a reader is left in at the end of
+     * the climb, and the state a refresh of it serves directly — which is why
+     * it can be photographed at all.
+     *
+     * BASELINE ONLY, deliberately, and this is the justification. The sheet
+     * hand-places its five systems at literal coordinates; the app places every
+     * constellation at its own identity-derived bearing (#428's law, one pure
+     * function of (households, camera, viewport)), so no fixture can put the
+     * app's sky where the sheet's is drawn without faking the ids that produce
+     * it. And §11's labelled sky carries NO planets — "id and name are the
+     * entire surface a non-member sees" — where the sheet's constellations
+     * carry theirs. Both differences are ratified product, so a porting
+     * comparison here would measure the ratification rather than drift. What
+     * this entry guards is the app against itself from here on.
+     */
+    name: "newcomer",
+    path: "/?arrival=newcomer",
+    /* Settled once the sky is placed and the question has arrived in the space
+       the count left. */
+    settle: () => document.querySelectorAll(".minisys").length > 0
+      && document.body.classList.contains("belong"),
+  },
+  {
     name: "notfound",
     /* Reached the way a user reaches it: by asking for something that isn't there. */
     path: "/this-page-does-not-exist",

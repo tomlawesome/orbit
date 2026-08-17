@@ -18,6 +18,16 @@ const users = new Map([
   ["administrator", { sub: "oidc-test-administrator", email: "administrator@example.test", name: "Orbit Administrator" }],
   ["member", { sub: "oidc-test-member", email: "member@example.test", name: "Orbit Member" }],
   ["outsider", { sub: "oidc-test-outsider", email: "outsider@example.test", name: "Orbit Outsider" }],
+  /*
+   * THE ARRIVAL'S OWN READER (#410, §15). The three identities above all end up
+   * owning or joining something during an acceptance run — the administrator
+   * creates proving grounds, the member owns a household, the outsider is
+   * approved into one — and the arrival journeys need a reader who belongs to
+   * NOTHING, which is the whole precondition of the surface they exercise. A
+   * fourth identity that no other spec signs in as is the only way to have one
+   * on a database that is not reset between specs.
+   */
+  ["newcomer", { sub: "oidc-test-newcomer", email: "newcomer@example.test", name: "Orbit Newcomer" }],
 ]);
 const codes = new Map();
 

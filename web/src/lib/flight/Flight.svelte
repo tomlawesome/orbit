@@ -3,6 +3,7 @@
   import { createFlight, UP, DOWN } from "./engine.js";
   import {
     ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced,
+    newcomerAscentBeats, newcomerAscentBeatsReduced,
     runTimeline, MARK_ARRIVE, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
   } from "./timeline.js";
   import "./flight.css";
@@ -32,6 +33,14 @@
     name = "",
     /* what the void says underneath it */
     subtitle = "welcome back",
+    /*
+     * WHERE THE CLIMB SETS DOWN (§15 second pass, ruling 4): "home" is the
+     * landing every member gets, and "newcomer" is the one a reader who
+     * belongs to nothing yet gets — the same flight to the millisecond, the
+     * ratified 3s dwell instead of the trimmed 2s, and the count's own three
+     * beats after it. The host draws both; this only says when.
+     */
+    landing = "home",
     /* the landing: the host reveals its own surface here (bare sky) */
     onland = () => {},
     /* the instrument has arrived and the journey is over */
@@ -148,6 +157,11 @@
           b.classList.add("instrument");
           onsettled();
           break;
+        /* THE COUNT (the newcomer's landing only): a moment on the settled
+           sky, boxless, and then the question in the space it left. */
+        case "countOn": b.classList.add("counting"); break;
+        case "countOff": b.classList.remove("counting"); break;
+        case "belong": b.classList.add("belong"); break;
       }
     };
   }
@@ -195,7 +209,7 @@
     engine?.clear();
     body().classList.remove("arming", "showdawn", "showwarp", "launching", "bare",
                             "instrument", "withdrawing", "dispersing", "showdusk",
-                            "farewell", "pinned");
+                            "farewell", "pinned", "counting", "belong");
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
     for (const el of document.querySelectorAll("#login-glyph svg,#dusk-glyph svg"))
@@ -211,13 +225,16 @@
     subtitleText = subtitle;
     const pinned = typeof at === "number";
     if (pinned) body().classList.add("pinned");
+    const newcomer = landing === "newcomer";
     if (reduced()) {
-      cancelTimeline = runTimeline(ascentBeatsReduced(), ascentStep(pinned ? at : undefined),
-                                   pinned ? { at } : {});
+      cancelTimeline = runTimeline(
+        newcomer ? newcomerAscentBeatsReduced() : ascentBeatsReduced(),
+        ascentStep(pinned ? at : undefined), pinned ? { at } : {});
       return;
     }
-    cancelTimeline = runTimeline(ascentBeats(), ascentStep(pinned ? at : undefined),
-                                 pinned ? { at } : {});
+    cancelTimeline = runTimeline(
+      newcomer ? newcomerAscentBeats() : ascentBeats(),
+      ascentStep(pinned ? at : undefined), pinned ? { at } : {});
   }
 
   /** THE DESCENT — the launch played backwards, in the DOM as on the canvas. */

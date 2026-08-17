@@ -31,10 +31,33 @@
    * arrival.js for why that is honest and why it cannot replay.
    */
   let {
-    /* "/" hands a signed-in reader onward rather than showing them a door
-       they are already through; /login is the door itself and always draws. */
-    handOnWhenSignedIn = false,
-    returnTo = "/home",
+    /*
+     * WHERE THE JOURNEY LANDS. The front door is the arrival's switchboard
+     * (#410, §15: "first-run sits ON TOP of the login screen, not its own
+     * page"), so a reader coming back from the identity provider comes back
+     * to "/" and it decides what they are looking at: home, the create card,
+     * or the newcomer's climb. /login hands the same decision on by returning
+     * to the same address.
+     */
+    returnTo = "/",
+    /*
+     * THE ONE DIFFERENCE THE CREATE PATH HAS (§15, fourth pass, verbatim):
+     * "the orbit logo and text reappear and we run the login intro, the only
+     * tweak being this time there's no login button as we already passed it."
+     * So the identity-provider button — and only that — can be left off,
+     * while the dawn, the lockup and the first light stay exactly as ratified.
+     */
+    gate = true,
+    /*
+     * The dawn holds itself up on this screen, because this screen IS the
+     * dawn. When a flight is about to lift off it, the body class takes the
+     * visibility over instead, so the ascent's `release` beat at 430ms has
+     * something to release.
+     */
+    dawnShown = true,
+    /* One <title> per document: the arrival's stages stand on this surface, so
+       they name it rather than adding a second one. */
+    title = "Orbit — sign in",
   } = $props();
 
   let leaving = false;
@@ -47,15 +70,6 @@
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
     /* first light: the dawn breaks once on load (CON-9, POL-13) */
     const frame = requestAnimationFrame(() => after(180, () => document.body.classList.add("lit")));
-
-    if (handOnWhenSignedIn) {
-      /* Deliberately a bare fetch and not the workspace seam: the seam turns
-         a 401 into a journey to the identity provider, and on the sign-in a
-         401 is simply the answer to the question. */
-      fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })
-        .then((response) => { if (response.ok) location.replace("/home"); })
-        .catch(() => {});
-    }
 
     return () => {
       cancelAnimationFrame(frame);
@@ -81,22 +95,25 @@
 </script>
 
 <svelte:head>
-  <title>Orbit — sign in</title>
+  <title>{title}</title>
 </svelte:head>
 
 <!-- The mockup's own page ground (#04060e), carried as a layer rather than as
      a rule on <body>: a stylesheet that reached the document would follow the
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
-<Dawn shown>
+<Dawn shown={dawnShown}>
   {#snippet children()}
     <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
          pill was reworded to match. The sheet's longer
          "Continue with your identity provider" belonged to the v18 chrome
          struck on 2026-08-17 — and would not fit inside the ring in any case.
          What it said is still true and is still said, out loud, one screen
-         later: pressing this leaves for the identity provider. -->
-    <button class="gate" id="gate" onclick={press}>Sign in</button>
+         later: pressing this leaves for the identity provider.
+
+         Left off entirely on the create path, where the reader is already
+         through it (§15, fourth pass). -->
+    {#if gate}<button class="gate" id="gate" onclick={press}>Sign in</button>{/if}
   {/snippet}
 </Dawn>
 <Grain slope={0.08} />
