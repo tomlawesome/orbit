@@ -402,8 +402,9 @@ export function mountHome({ galaxy, primary }) {
    *
    * The quantity is the same one every sibling descent publishes — --descent,
    * 0 at the dial and 1 once the drop is spent — and what a pack DOES with it
-   * is the pack's own business (retrograde turns its corridor into side grids;
-   * see home.css). Parked at the top is not "descending by zero" but the
+   * is the pack's own business (retrograde has no corridor to turn, so it
+   * spends --descent bringing its two side grids in from nothing; see
+   * home.css). Parked at the top is not "descending by zero" but the
    * approved dial screen, so .descending is off entirely at scroll 0 and not
    * one descent rule is in effect there.
    */

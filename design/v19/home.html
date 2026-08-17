@@ -572,73 +572,51 @@
   }
 
   /* ======================================================================
-     PACK REFRESH — RETROGRADE (§15, #480). The treatment the owner ratified
-     in full; design/v19/pack-retrograde-refresh.html is the spec it comes
-     from and stays as the reference. Three signatures plus the descent, and
-     every one of them scoped to the pack: the other four packs read this
-     file exactly as they did. Mirrored, line for line, in the app's
-     web/src/routes/home/home.css — this is one treatment in two places.
+     PACK REFRESH — RETROGRADE (§15, #480), WALLS ONLY. The treatment the
+     owner ratified in full; design/v19/pack-retrograde-refresh.html is the
+     spec it comes from and stays as the reference.
+
+     THE DIAL GOES BARE (owner, §15 ledger: "Yeah I like the walls only
+     version, it's the same concept just more elegant"). The horizon floor,
+     its air and the mirrored ceiling are gone — deleted, not dimmed — and
+     the descent is the two side walls arriving alone. The trial that won,
+     design/v19/retrograde-nogrids.html, stays on disk untouched as the
+     record of what was compared; this file is now what it proved.
+
+     What is left is two signatures plus the descent, and every one of them
+     scoped to the pack: the other four packs read this file exactly as they
+     did. Mirrored, line for line, in the app's web/src/routes/home/home.css
+     — this is one treatment in two places.
      ====================================================================== */
 
-  /* 1. THE HORIZON GRID — the structural signature, low in the SKY layer and
-     nowhere else. Perspective rules receding to a horizon a little below the
-     dial: cyan, faint, the era's one honest piece of geometry. Painted by
-     .sky's own ::before, so it sits UNDER the starfield svg — the stars still
-     own the sky and the grid is the ground they end at. */
+  /* 1 + 2. THE HORIZON GRID AND THE MIRRORED CEILING — GONE, which is the
+     whole of this change. This is where the pack's structural signature used
+     to live: .sky's own ::before painted a perspective floor receding to a
+     horizon below the dial, .sky's ::after painted the air just above that
+     horizon so the grid arrived out of something, and .ceiling mirrored the
+     pair overhead so the screen sat inside a room. All four rules are
+     deleted rather than zeroed, so there is no chance of a stray fraction of
+     an opacity surviving: the retrograde dial view now paints literally no
+     grid ink at all, and that is measurable — isolate the backdrop and it
+     holds one colour.
+
+     The two ATMOSPHERES went with the grids, and that was a judgement, not a
+     literal reading of the ruling — the owner said grid, and an air gradient
+     is not a rule. But the floor's ::after existed to be the haze the
+     horizon stood in, and the ceiling element's own gradient was the same
+     thing overhead. Keep either one with nothing to motivate it and the bare
+     sky gains a cyan-to-magenta band glowing along an edge where no horizon
+     is drawn — a light leak, not a treatment. Both were LOOKED at before
+     they were cut. The atmosphere is not lost from the pack, only from the
+     dial: it comes back on the descent as the walls' own ::after, where it
+     has a plane to belong to.
+
+     .sky keeps overflow:hidden — the side planes are its children and their
+     projections still need clipping to the viewport.
+
+     The .ceiling div goes with the rules, in the markup below and in the
+     app's, since nothing else in any pack ever used it. */
   [data-theme=retrograde] .sky{overflow:hidden}
-  [data-theme=retrograde] .sky::before{
-    content:"";position:absolute;left:-60%;right:-60%;bottom:0;height:64vh;
-    background-image:
-      repeating-linear-gradient(90deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
-      repeating-linear-gradient(180deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
-    transform:perspective(520px) rotateX(68deg);transform-origin:50% 100%;
-    opacity:.38;
-    -webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 20%);
-            mask-image:linear-gradient(180deg,transparent 0%,#000 20%)}
-  /* the air just above the horizon, so the grid arrives out of something */
-  [data-theme=retrograde] .sky::after{
-    content:"";position:absolute;left:0;right:0;bottom:0;height:34vh;
-    background:linear-gradient(0deg,rgba(45,226,230,.11) 0%,
-      rgba(255,79,216,.05) 44%,transparent 100%)}
-
-  /* 2. THE MIRRORED CEILING — the same plane overhead, so the screen sits
-     inside a corridor rather than on a floor. Deliberately the quieter half:
-     the floor is the signature and the ceiling only answers it, so the
-     geometry is the exact mirror but the opacity is roughly two-thirds, the
-     far edge is masked out earlier, and the verticals are sparser while the
-     rungs are firmer (a ceiling seen only from its far half reads as stray
-     rays unless the rungs carry it).
-
-     UNGATED (owner, amending the same day): "we should add the top grid back
-     in." The min-height:800px gate is gone and the ceiling now renders on
-     every viewport, at the one depth the owner approved. What the gate was
-     protecting turns out not to need protecting, and this was measured rather
-     than argued. The mask ends the plane at 88% of a projection that is
-     already collapsing, so the ceiling's last ink lands 104px down at
-     1600x1000, 92px at 1280x800, 85px at 1280x700, 81px at 1280x640 — it
-     barely deepens as the window shortens. The DIAL is what moves: it climbs
-     to meet the ceiling. So the tail clears the dial's outermost graticule by
-     114px at 1600x1000 and by 24px at 1280x800, and only below about 810px
-     tall do the last rungs reach past it — 18px at 1280x700, 43px at
-     1280x640. What arrives there is haze, not rule: at the graticule the mask
-     is holding the grid to 7% of its own ink at 1280x700 and 12% at 1280x640,
-     and both were LOOKED at, where they read as the faint converging rays a
-     far ceiling should. Hence no proportional shrink: the ceiling arrives
-     whole everywhere, which is what was asked for. */
-  .ceiling{display:none}
-  [data-theme=retrograde] .ceiling{display:block;position:absolute;
-    left:0;right:0;top:0;height:30vh;
-    background:linear-gradient(180deg,rgba(45,226,230,.075) 0%,
-      rgba(255,79,216,.035) 46%,transparent 100%)}
-  [data-theme=retrograde] .ceiling::before{
-    content:"";position:absolute;left:-60%;right:-60%;top:0;height:62vh;
-    background-image:
-      repeating-linear-gradient(90deg,transparent 0 128px,rgba(45,226,230,.55) 128px 129px),
-      repeating-linear-gradient(180deg,transparent 0 52px,rgba(45,226,230,.78) 52px 53px);
-    transform:perspective(520px) rotateX(-68deg);transform-origin:50% 0;
-    opacity:.26;
-    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%);
-            mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.35) 60%,transparent 88%)}
 
   /* 3. RESTRAINED BLOOM — on ACCENT elements only. Not on the greens, not on
      the reds, not on the ink: one colour is allowed to be lit, which is what
@@ -672,22 +650,25 @@
   [data-theme=retrograde] .drawer-top.open .nstar .tron :is(path,line){
     stroke:var(--accent)}
 
-  /* 5. THE CORRIDOR TURNS (owner, 2026-08-16) — retrograde's answer to the
-     universal scroll-descent law. The other packs drop THROUGH their sky;
-     this one is a room, so the room rotates around you instead. As you come
-     down off the dial the floor and the ceiling roll away to edge-on and two
-     vertical grid planes roll in from the sides to flank the manifest, fading
-     out at the inner edge nearest the reading column. It is a quarter turn
-     about the line of sight, spent over the same run of scroll the family
-     uses.
+  /* 5. THE WALLS ARRIVE (owner, 2026-08-16; walls-only, §15) — retrograde's
+     answer to the universal scroll-descent law. The other packs drop THROUGH
+     their sky; this one has two surfaces, and they come in from the sides to
+     flank the manifest, fading out at the inner edge nearest the reading
+     column, over the same run of scroll the family uses.
+
+     This was a quarter turn before the dial went bare: the floor and the
+     ceiling rolled away to edge-on while the sides rolled in to take their
+     place. With no horizontals left there is nothing to roll away, so the
+     descent is not a turn at all. It is an arrival.
 
      One position drives it, read straight off the scrollbar — no clock, so
      there is nothing to loop and nothing to catch up with:
-       --descent  0 at the dial, 1 once the room has finished turning
+       --descent  0 at the dial, 1 once the walls have finished arriving
      And, exactly as the sibling descents do, at scroll 0 not one rule below is
      in effect at all: they all hang off .descending, which the scroll handler
      only puts on the document while the scrollbar is off the top. The first
-     viewport is left literally alone rather than merely left at zero.
+     viewport is left literally alone rather than merely left at zero — which
+     matters twice as much now, because the bare dial IS the treatment.
 
      The second quantity is the room's width. --corridor-gap is the horizontal
      space between the screen edge and the manifest column, which is what the
@@ -704,19 +685,52 @@
      geometry. */
   :root{--descent:0;--corridor-gap:max(24px,(100vw - 820px)/2)}
   .wall{display:none}
-  [data-theme=retrograde].descending .sky::before{
-    transform:perspective(520px) rotateX(calc(68deg + var(--descent) * 22deg));
-    opacity:calc(.38 * (1 - var(--descent)))}
-  [data-theme=retrograde].descending .sky::after{opacity:calc(1 - var(--descent))}
-  [data-theme=retrograde].descending .ceiling::before{
-    transform:perspective(520px) rotateX(calc(-68deg - var(--descent) * 22deg));
-    opacity:calc(.26 * (1 - var(--descent)))}
-  [data-theme=retrograde].descending .ceiling{opacity:calc(1 - var(--descent))}
-  /* the side planes are the floor's own construction rotated a quarter turn:
-     the element carries the air, the ::before carries the grid, and the two
-     repeating gradients simply swap jobs — the 96px rules become the
-     converging rails and the 76px rules become the rungs. They start edge-on
-     (90deg, which is nothing at all) and open to the floor's own 68deg.
+  /* THE ENTRANCE CURVE — the one thing the walls-only treatment changes about
+     the walls themselves. Everything downstream of --wall-arrive is the
+     geometry ratified at cff21ea, unmoved: 90deg to 68deg, the inner edge
+     landing at 0.667 of --corridor-gap, the same masks, the same air.
+
+     Why it had to change. While the horizontals existed the walls could start
+     on the first pixel of scroll, because they were the back half of a
+     handoff — the floor and the ceiling were visibly rolling away at that
+     moment, so the eye read the sides as the same motion continuing and had
+     something to attribute the new ink to. Strip the horizontals and that
+     cover is gone: a linear ramp off --descent puts faint cyan rule on a sky
+     that was clean a scroll-wheel notch ago, and it reads as ink switching
+     on. Twice wrong for a treatment whose entire claim is that the dial view
+     has no grid — the first thing you would see is the grid coming back the
+     instant you touched the wheel.
+
+     So the arrival gets a threshold and a shape. --wall-arrive is --descent
+     with its first 15% spent on nothing and the remainder restretched to a
+     full 0-to-1, so the walls land at exactly the same place at the same
+     descent=1 as the turning pair did — the landing is not negotiable, only
+     the approach. Both the roll and the opacity ride it, so the planes are
+     genuinely absent (not merely faint) for the first sixth of the descent,
+     and the reader is already committed to leaving the dial before anything
+     appears.
+
+     On top of that the grid's opacity is eased in rather than linear:
+     a·(.45 + .55·a) is a mild quadratic that starts at roughly half the
+     linear rate and catches up by the end. A hard linear fade is fine when
+     something else is fading out to trade against it; alone, it reads as a
+     dimmer being turned. The ease lets the planes gather. The AIR stays
+     linear on --wall-arrive, deliberately — it leads the grid slightly, so
+     the haze arrives first and the rules resolve out of it, which is the same
+     order the old floor established (air above the horizon, grid out of the
+     air) and the one piece of that idea worth keeping.
+
+     Reduced motion is unchanged in kind: position kept, travel dropped. */
+  [data-theme=retrograde].descending{
+    --wall-arrive:clamp(0,calc((var(--descent) - .15) / .85),1)}
+  /* the side planes are the old floor's own construction rotated a quarter
+     turn — kept verbatim now that the floor is gone, because the walls the
+     owner picked are these walls and a wall rebuilt from scratch would not be
+     the thing that was approved. The element carries the air, the ::before
+     carries the grid, and the two repeating gradients simply swap jobs — the
+     96px rules become the converging rails and the 76px rules become the
+     rungs. They start edge-on (90deg, which is nothing at all) and open to
+     the 68deg the floor used to stand at.
 
      THE WALLS CLOSE IN (owner, amending the same day): "the walls are closer
      to the manifest items. If they're 1/3 the gap now, they should be 2/3 the
@@ -750,7 +764,7 @@
   [data-theme=retrograde].descending .wall.wl{left:0}
   [data-theme=retrograde].descending .wall.wr{right:0}
   [data-theme=retrograde].descending .wall::after{
-    content:"";position:absolute;inset:0;opacity:var(--descent)}
+    content:"";position:absolute;inset:0;opacity:var(--wall-arrive)}
   [data-theme=retrograde].descending .wall.wl::after{
     background:linear-gradient(90deg,rgba(45,226,230,.11) 0%,
       rgba(255,79,216,.05) 44%,transparent 100%)}
@@ -763,37 +777,37 @@
     background-image:
       repeating-linear-gradient(180deg,transparent 0 96px,rgba(45,226,230,.62) 96px 97px),
       repeating-linear-gradient(90deg,transparent 0 76px,rgba(45,226,230,.45) 76px 77px);
-    opacity:calc(.38 * var(--descent))}
+    opacity:calc(.38 * var(--wall-arrive) * (.45 + .55 * var(--wall-arrive)))}
   [data-theme=retrograde].descending .wall.wl::before{left:0;
     transform:perspective(calc(var(--corridor-gap) * 3.5))
-      rotateY(calc(90deg - var(--descent) * 22deg));
+      rotateY(calc(90deg - var(--wall-arrive) * 22deg));
     transform-origin:0 50%;
     -webkit-mask-image:linear-gradient(90deg,#000 0%,#000 68%,transparent 100%);
             mask-image:linear-gradient(90deg,#000 0%,#000 68%,transparent 100%)}
   [data-theme=retrograde].descending .wall.wr::before{right:0;
     transform:perspective(calc(var(--corridor-gap) * 3.5))
-      rotateY(calc(-90deg + var(--descent) * 22deg));
+      rotateY(calc(-90deg + var(--wall-arrive) * 22deg));
     transform-origin:100% 50%;
     -webkit-mask-image:linear-gradient(270deg,#000 0%,#000 68%,transparent 100%);
             mask-image:linear-gradient(270deg,#000 0%,#000 68%,transparent 100%)}
-  /* Reduced motion. The turn is a POSITION, not an animation — freezing it
-     would leave the reader under a corridor the page has already left — so
-     the cross-fade still tracks the scrollbar. What goes is the flourish: the
-     planes hold the angles they rest at instead of swinging through the
-     quarter turn. The side planes hold the rested angle under the gap's own
-     perspective, so the position they hold is the two-thirds one and not the
-     old geometry. */
+  /* Reduced motion — the same law as before, with two fewer planes to apply
+     it to. The arrival is a POSITION, not an animation: freezing it would
+     leave the reader beside walls the page has already left, so the fade
+     still tracks the scrollbar (and still on the delayed, eased curve — the
+     entrance shape is not the flourish, it is the timing, and the reader who
+     asked for less motion still gets the bare dial they scrolled away from
+     before any ink appears). What goes is the swing: the planes hold the
+     rested 68deg under the gap's own perspective instead of travelling
+     through the quarter turn, so the position they hold is the two-thirds
+     one. The floor and ceiling pins are gone with the floor and the
+     ceiling. */
   @media (prefers-reduced-motion: reduce){
-    [data-theme=retrograde].descending .sky::before{
-      transform:perspective(520px) rotateX(68deg)}
-    [data-theme=retrograde].descending .ceiling::before{
-      transform:perspective(520px) rotateX(-68deg)}
     [data-theme=retrograde].descending .wall.wl::before{
       transform:perspective(calc(var(--corridor-gap) * 3.5)) rotateY(68deg)}
     [data-theme=retrograde].descending .wall.wr::before{
       transform:perspective(calc(var(--corridor-gap) * 3.5)) rotateY(-68deg)}
   }
-  /* /PACK REFRESH — retrograde */
+  /* /PACK REFRESH — retrograde, walls only */
 </style>
 </head>
 <body>
@@ -802,11 +816,11 @@
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
-  <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
-       own ::before so it stays under the starfield; the ceiling answers it on
-       every viewport; and the two side planes are what the pair turns into as
-       the reader descends to the manifest. Inert in every other pack. -->
-  <div class="ceiling" aria-hidden="true"></div>
+  <!-- §15/#480, retrograde only: the walls. The dial view carries no grid at
+       all — no floor, no ceiling, no horizon air — and these two side planes
+       are the whole of the room, arriving from the sides only once the reader
+       descends to the manifest. The .ceiling div that used to sit here left
+       with its rules. Inert in every other pack. -->
   <div class="wall wl" aria-hidden="true"></div>
   <div class="wall wr" aria-hidden="true"></div>
 </div>
@@ -1589,8 +1603,9 @@ addEventListener("scroll", () => {
  *
  * The quantity is the same one every sibling descent publishes — --descent, 0
  * at the dial and 1 once the drop is spent — and what a pack DOES with it is
- * the pack's own business (retrograde turns its corridor into side grids; see
- * the pack refresh block in the stylesheet). Parked at the top is not
+ * the pack's own business (retrograde has no corridor to turn, so it spends
+ * --descent bringing its two side grids in from nothing; see the pack refresh
+ * block in the stylesheet). Parked at the top is not
  * "descending by zero" but the approved dial screen, so .descending is off
  * entirely at scroll 0 and not one descent rule is in effect there.
  */

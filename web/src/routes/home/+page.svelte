@@ -553,11 +553,11 @@
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
     <g id="cam-near" class="cam"><g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g></g>
   </svg>
-  <!-- §15/#480, retrograde only: the corridor. The floor is painted by .sky's
-       own ::before so it stays under the starfield; the ceiling answers it on
-       every viewport; and the two side planes are what the pair turns into as
-       the reader descends to the manifest. Inert in every other pack. -->
-  <div class="ceiling" aria-hidden="true"></div>
+  <!-- §15/#480, retrograde only: the walls. The dial view carries no grid at
+       all — no floor, no ceiling, no horizon air — and these two side planes
+       are the whole of the room, arriving from the sides only once the reader
+       descends to the manifest. The .ceiling div that used to sit here left
+       with its rules. Inert in every other pack. -->
   <div class="wall wl" aria-hidden="true"></div>
   <div class="wall wr" aria-hidden="true"></div>
 </div>
