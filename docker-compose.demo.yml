@@ -1,0 +1,17 @@
+# Demo overlay: makes the disposable acceptance OIDC provider reachable from
+# a browser on the owner's LAN (the base acceptance overlay binds it to
+# loopback and names it by container, which only other containers can
+# resolve). Compose with: base + mail + acceptance + THIS, last.
+# The provider's certificate is self-signed and regenerated per start — the
+# browser will warn once at https://192.168.11.30:4443 and must be told to
+# proceed, after which the login round-trip works from any LAN device.
+services:
+  orbit-app:
+    environment:
+      OIDC_ISSUER: https://192.168.11.30:4443/
+      OIDC_CALLBACK_URL: http://192.168.11.30:3000/api/auth/callback
+  orbit-oidc:
+    environment:
+      TEST_OIDC_ISSUER: https://192.168.11.30:4443/
+    ports: !override
+      - "0.0.0.0:4443:4443"
