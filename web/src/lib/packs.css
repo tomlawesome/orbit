@@ -17,6 +17,49 @@
   --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
   --display:'Space Grotesk',var(--ui);
 }
+/*
+ * THE TEXT-GRADE COMPANIONS (#491, one pack decision instead of five local
+ * fixes). The audit that raised it found the same failure in three unrelated
+ * places: --ink-faint used as TEXT fails 4.5:1 on every pack, and --accent and
+ * --ok used as TEXT fail on the daylight packs. Three concept files each
+ * invented their own patch — an --ink-quiet in EVA, promoted inks in the
+ * Movement, a proposed --accent-text/--ok-text pair — which is exactly the
+ * drift a token system exists to prevent.
+ *
+ * So three companions join every pack, and their contract is narrow and
+ * literal: they are for INK THAT CARRIES WORDS. The originals keep their jobs
+ * — --ink-faint is still the hairline, the rule, the tick and the swatch;
+ * --accent and --ok are still the fill of a body, the stroke of a ring, the
+ * ground of a chip — because a mark is not a letterform and the law that
+ * applies to one does not apply to the other.
+ *
+ * Measured, not asserted. Each value clears 4.5:1 against the WORST ground the
+ * pack actually paints text on, which on the daylight packs is the raw sky at
+ * the cool top of the gradient (#b0bed6) rather than the comfortable panel:
+ *
+ *   --ink-quiet    starchart  #8b95b6  6.59:1 on #060b1c
+ *                  after dark #717c8e  4.77:1 on #05070d  (= its lifted faint)
+ *                  atlas      #434f60  4.55:1 on #c9bfa6
+ *                  dawn       #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  clouds     #414d62  4.55:1 on #b0bed6  (= its lifted faint)
+ *                  retrograde #74a4b4  7.25:1 on #080a14
+ *   --accent-text  dark packs = --accent, which already passes as text:
+ *                  9.88 / 12.08 / 6.92:1 (star-chart, after dark, retrograde)
+ *                  atlas      #684808  4.56:1   (--accent itself: 1.83:1)
+ *                  dawn       #134a72  4.86:1   (--accent itself: 2.42:1)
+ *                  clouds     #134a72  4.86:1
+ *                  — set against the ground the on-sky labels MEASURE on,
+ *                    rgb(174,188,211), not against the token #b0bed6, where
+ *                    they read 4.97:1
+ *   --ok-text      dark packs = --ok: 11.24 / 11.56 / 13.55:1
+ *                  atlas      #115531  4.85:1   (--ok itself: 2.93:1)
+ *                  dawn       #0d4e30  5.09:1   (--ok itself: 2.34:1)
+ *                  clouds     #0d4e30  5.09:1
+ *
+ * On the three dark packs the companions ARE the originals, so a sweep of text
+ * usages cannot move a single pixel there — which is the whole reason the
+ * companions are tokens rather than a hunt through the stylesheets.
+ */
 [data-theme=starchart]{
   --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
   --line:#243259; --line-soft:#17203f;
@@ -29,16 +72,73 @@
      were literals (#e9edf8 is exactly --ink here). */
   --star-far:#e9edf8; --star-near:#f4f0ff;
   --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  /* #491: the text-grade trio. The accent and the green already clear the law
+     as words on this ground, so they are the same colour by definition. */
+  --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
   --line:#1c2434; --line-soft:#151b28;
-  --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+  /*
+   * THE FAINT TIER, LIFTED (#490). Measured on the pack's own bare ground
+   * before any backdrop exists: --ink-faint and --chart-ink were both #4a5468,
+   * which is 2.65:1 on #05070d — the worst faint tier in the product, and what
+   * the dial's month labels, the explore placeholder and the horizon line are
+   * drawn in. It had never met 4.5:1 in this pack.
+   *
+   * THE WHOLE FAMILY LIFTS, which is the shape #480 already established for
+   * exactly this problem in retrograde ("the whole mid-ink family lifts
+   * together... so the steps between primary, secondary and faint survive the
+   * lift instead of collapsing"). Lifting the faint tier ALONE cannot work
+   * here: to clear 4.5:1 on a near-black ground an ink needs L ≥ .1846, and
+   * --ink-mid sat at L .2364 — the faint tier would have arrived within a
+   * hundredth of the secondary one and the two would have read as one.
+   *
+   * Measured, before and after, all on #05070d:
+   *   --ink        #e7e9ee  16.58:1 → 16.58:1   unchanged
+   *   --ink-mid    #7c8699   5.49:1 → #9fa6b2  8.22:1
+   *   --ink-faint  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   *   --chart-ink  #4a5468   2.65:1 → #717c8e  4.77:1   PASSES
+   * The ladder is 4.77 / 8.22 / 16.58 — three real steps, each roughly a
+   * doubling, and every one of them over the law.
+   *
+   * And it is the pack being more itself rather than less: after dark's own
+   * strapline is "lights out, ink up". What makes this the darkest pack is its
+   * GROUND, which has not moved by a value; the ink is the half of that phrase
+   * that had never been honoured. --line and --line-soft are untouched — they
+   * are structure, not words, and the law that governs a letterform does not
+   * govern a hairline.
+   */
+  --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-faint:#717c8e;
   --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
   --degraded:#fb8b24;
   --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
   --star-far:#e9edf8; --star-near:#f4f0ff;
-  --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
+  /* #491: the faint tier now clears the law on its own, so this pack's quiet
+     ink IS its faint ink — stated rather than left to be inferred. */
+  --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  /*
+   * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
+   * happy accident"; approved with the bottom glow in the deep). The pack owns
+   * the river's materials; the geometry that spends them is home's, and the
+   * stream that builds it is sky-plane.js. Carried from
+   * design/v19/afterdark-plane.html, literally.
+   *
+   * --plane-warm is the only warm light this pack allows anywhere in the sky,
+   * and it is spent at alphas in the low hundredths because the band's peak
+   * brightness is a CONTRAST BUDGET rather than a taste: light ink loses
+   * contrast as its ground rises, so the ceiling is on the ground. See the
+   * budget in home.css, where the alphas are.
+   */
+  --plane-warm:#ffcf94;
+  --plane-cool:#9fb0d6;
+  /* the extra population: the river's own stars, a shade under the base
+     field's --star-far so the plane reads as DEPTH behind the sky rather than
+     as a brighter patch of it */
+  --plane-star:#cfd9ee;
+  --plane-star-warm:#ffdca6;
+  --plane-dust:#01020a;
 }
 /* Dialled back from the ratified #efe9db (owner, 2026-08-14): a sky this
    bright fights the whole conceit, so atlas is now aged paper at dusk rather
@@ -58,18 +158,148 @@
      opacity than the dark packs because dark-on-light reads heavier. */
   --star-far:var(--ink); --star-near:var(--ink);
   --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  /* #491: atlas is a daylight pack, so the gold accent and the green both fail
+     as words on it — 1.83:1 and 2.93:1 on its own ground. The companions are
+     the same hues taken down to where a letterform can live: 4.56:1 and
+     4.85:1. Retired from the roster, still measured, because a stored
+     preference still renders this pack. */
+  --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
 }
-/* Dialled back from the ratified #eef1f6 (owner, 2026-08-14) for the same
-   reason as atlas: dawn is now first light rather than full morning. */
+/*
+ * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
+ * terminator treatment (its post-fix form is hereby confirmed in)").
+ *
+ * Two ratified moves land together here, because the second is drawn on top of
+ * the first and the sheet that carries them carries both:
+ *
+ *   1. THE TEMPERATURE STORY (§15, "the pack refresh is ordered ... dawn gets
+ *      a temperature story"). Dawn was a flat cool grey that happened to be
+ *      light. It is now the one pack with a DIRECTION: cool overhead, warming
+ *      down to a pale amber horizon, hazy pastel bodies, sunrise amber, an
+ *      ember sun that is allowed to bloom because it is the reason the sky is
+ *      warming at all. The gradient itself is a rule rather than a token (see
+ *      home.css); what lives here are the five stops it spends and the
+ *      surfaces that sit on them.
+ *   2. THE TERMINATOR (§15, approved with the visibility fix): a line across
+ *      the sky where night hands it to day. The night's own starlight set is
+ *      the one thing the base cannot own — dawn inverts its starfield to ink
+ *      because its sky is lit, and on the far side of the crossing it is not.
+ *
+ * Carried literally from design/v19/dawn-terminator.html, which is the record.
+ * --bg moves from #c3ccdb to the gradient's own midpoint, so the small
+ * knockouts it backs (star strokes, corridor dots) disappear into the ground
+ * instead of sitting on a colour that no longer exists anywhere on screen.
+ */
 [data-theme=dawn]{
-  --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
-  --line:#9daabf; --line-soft:#b2bccd;
-  --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
-  --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+  /* the temperature axis, top of the window to the horizon */
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  /* cool, slightly-frosted morning glass — still translucent, because the
+     ground behind it is the story */
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /*
+   * THE INK FAMILY, MEASURED AGAINST THIS PACK'S OWN SKY (#491). The
+   * temperature story set --ink and --ink-mid and let the faint tier fall
+   * through from the old flat-grey dawn, and the honest read of that on the
+   * built screen was that the two dimmer tiers do not survive their own
+   * ground. Measured on the coolest (darkest) stop of the gradient, #b0bed6,
+   * which is what the top of the dial screen actually paints:
+   *     --ink       #18202f   8.69:1   fine, unchanged
+   *     --ink-mid   #46536d   4.11:1   UNDER, on sky (6.9:1 on glass)
+   *     --ink-faint #78849b   2.01:1   UNDER by a mile — and this is what the
+   *                                    create label and the scroll cue, both
+   *                                    drawn straight on the sky, are made of
+   * So the family lifts together — third time in this wave, and the same shape
+   * #480 used for retrograde and #490 for after dark: moving the faint tier
+   * alone would put it darker than the secondary one and collapse the ladder.
+   * After, same ground:
+   *     --ink       #18202f   8.69:1
+   *     --ink-mid   #343d51   5.79:1
+   *     --ink-faint #414d62   4.55:1   PASSES
+   * Three real steps, every one over the law, and the pack reads as MORE of a
+   * temperature story rather than less: on a brightening sky the ink belongs at
+   * the dark end, and it was sitting in the middle.
+   */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  /* the warm token is sunrise amber, not the old olive gold */
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
   --degraded:#c2570e;
-  --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+  /* the sun's core stops being pack-ink: a black disc inside a warm halo reads
+     as an eclipse, so the centre is a low ember — dark enough to hold the
+     household mark against a pale ground, warm enough to be the sun */
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
   --star-far:var(--ink); --star-near:var(--ink);
   --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  /* hazy pastel bodies: the same status colours seen through morning air, with
+     the middle and outer stops still saturated enough that an overdue body
+     still looks overdue. These replace the flat-ink fill overrides the
+     engraved treatment used to impose on this pack (see home.css). */
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE CROSSING's own materials. A star seen against night, and ink as the
+     night draws it — the constellations out there are redrawn in starlight
+     rather than dimmed, which is the only way a mark in the dark stays
+     readable. sky-terminator.js mixes toward these by how deep into the night
+     a mark actually sits. */
+  --night-far:#dbe3f6; --night-near:#f4f7ff;
+  --n-accent:#a9cdf2; --n-ink:#eef2fb; --n-line:#96a9c9;
+  /* #491, measured against the coolest (darkest) stop of this pack's own sky,
+     #b0bed6, not against the comfortable panel: --accent as words is 2.42:1
+     there and --ok is 2.34:1. The companions clear the law at 4.54:1 and
+     4.59:1, and 5.13 / 5.18:1 on the ground the constellation labels actually
+     sit on. The faint tier now clears the law on its own (above), so this
+     pack's quiet ink IS its faint ink — stated rather than inferred. */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+}
+/*
+ * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
+ * "clouds (the cloud-sea pack on the final roster) is not merely admitted — it
+ * is one of Orbit's MAIN LIGHTER THEMES ... clouds carries the lighter end of
+ * the range", and the roster ruling: "CLOUDS (cloud sea graduates from a dawn
+ * treatment to its own selectable pack)").
+ *
+ * Derived from design/v19/dawn-cloudsea.html's approved treatment, which is the
+ * record. The GROUND is deliberately the same temperature story dawn stands
+ * on, because that is what the sheet draws and what the owner approved: the
+ * two packs were the two skies of one light, and what separates them is the
+ * sky, exactly as it separated them when he chose between them. Everything
+ * below that is different IS different — the star wash ends far higher (the
+ * palest stars are gone well before the crest, because there is cloud where
+ * the horizon would be), the descent goes DOWN THROUGH THE DECK into
+ * under-cloud blue rather than onto warm surface light, and the pack carries
+ * its own symbols. Those live in home.css and in sky-cloudsea.js.
+ */
+[data-theme=clouds]{
+  --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+  --bg:#d2d3d4;
+  --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+  --line:#a6b2c5; --line-soft:#c0c8d6;
+  /* the same measured ink family dawn carries, and for the same reason: the two
+     packs stand on one light, so they answer its ground the same way (#491). */
+  --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+  --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+  --degraded:#c2570e;
+  --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+  --star-far:var(--ink); --star-near:var(--ink);
+  --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+  --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+  --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+  --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+  /* THE SEA ITSELF is not tokens, and that is the sheet's own decision rather
+     than a shortcut: dawn-cloudsea.html builds the strata out of four-stop
+     gradients in the SVG's own defs — cool-white at the crest into the
+     rose-amber the rising light puts on the underside sixty pixels below it —
+     and a stop table is not a colour a component could reference. So the
+     material lives with the geometry that spends it, in home.css and in the
+     .weather markup, carried literally from the sheet. It is the same division
+     retrograde shipped under #480: the pack says what the light IS (--bloom,
+     the planet stops), the screen says where it falls. */
+  /* #491, measured on this pack's own coolest sky stop, as dawn's are */
+  --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -133,5 +363,11 @@
   --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
   --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
   --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+  /* #491: the §15 refresh already lifted this pack's mid-ink family, so the
+     accent and the green clear the law as words (6.92:1 and 13.55:1) and the
+     companions are the originals. The quiet ink is the one addition: the faint
+     tier at #6f9fb1 is 6.83:1, comfortably over, so #74a4b4 exists only to
+     give this pack the same three-name vocabulary as the rest. */
+  --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
 }
 

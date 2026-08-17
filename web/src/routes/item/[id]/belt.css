@@ -264,9 +264,9 @@
       color:var(--ink-mid);padding:6.5px 2px;border-bottom:1px solid var(--line-soft)}
   .belt-page .kv:last-of-type{border:0}
   .belt-page .kv b{color:var(--ink);font-weight:500;text-align:right}
-  .belt-page .kv b.clean{color:var(--ok)}
+  .belt-page .kv b.clean{color:var(--ok-text)}
   .belt-page .kv b.over{color:var(--overdue)} .belt-page .kv b.soon{color:var(--warm)}
-  .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok)}
+  .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
   .belt-page .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                 color:var(--ink-faint);margin:16px 0 8px}
   .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
@@ -282,7 +282,7 @@
   .belt-page .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
         color:var(--ink-mid);text-decoration:none;background:none;border:0;
         cursor:pointer;padding:0}
-  .belt-page .back:hover{color:var(--accent)}
+  .belt-page .back:hover{color:var(--accent-text)}
 
   /* The document's honest display, v2's, unchanged. No fabricated page image:
      the plate says what the file is, the rows say what Orbit knows, the

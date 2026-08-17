@@ -478,7 +478,12 @@
       }
       /* Tear the old dialect down before standing the new one up. */
       teardown = query.matches
-        ? mountHome({ galaxy: view.galaxy, primary: view.primary })
+        /* §15, the sky wave: the pack skies are seeded streams, so the fixture
+           switch travels with the mount — alive per load in the product, pinned
+           to the workspace under ORBIT_FIXTURES, which is what lets the gate
+           photograph the same sky twice. */
+        ? mountHome({ galaxy: view.galaxy, primary: view.primary,
+                      fixtures: Boolean(data?.fixtures), workspace: view.primary ?? "" })
         : mountPocket({
             /* #466: the sheet's two-tap lands on the same idempotent approve
                protocol the desk rows use — one operation id per receipt. */
@@ -548,6 +553,55 @@
 {/if}
 
 <div class="desk" class:arrive>
+<!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
+     Three packs gained their own sky in the same batch, and every layer below
+     belongs to exactly one of them. All of them live INSIDE .desk, which is
+     display:contents on a desk and display:none on a phone — so the pocket's
+     own ratified starfield is clean by construction rather than by a selector
+     somebody has to remember, and the rules in home.css are scoped `.desk`
+     for the same reason the walls are (see the note there).
+
+     AFTER DARK — THE GALACTIC PLANE. First in the document because it is the
+     furthest thing in the sky: the pack's own stars stream in FRONT of the
+     galaxy, never behind it. Three materials in one field — the dust glow, the
+     river's dense population, the lanes that absorb it — rolled a chunk at a
+     time by sky-plane.js and thrown away for good once they have passed. -->
+<div class="plane" id="plane" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- a lobe is not a circle of colour, it is a soft falloff: five stops
+           approximating a gaussian, so overlapping lobes build an irregular
+           river rather than a row of discs -->
+      <radialGradient id="pl-warm">
+        <stop offset="0" stop-color="var(--plane-warm)" stop-opacity=".95"/>
+        <stop offset=".32" stop-color="var(--plane-warm)" stop-opacity=".62"/>
+        <stop offset=".58" stop-color="var(--plane-warm)" stop-opacity=".30"/>
+        <stop offset=".80" stop-color="var(--plane-warm)" stop-opacity=".10"/>
+        <stop offset="1" stop-color="var(--plane-warm)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="pl-cool">
+        <stop offset="0" stop-color="var(--plane-cool)" stop-opacity=".9"/>
+        <stop offset=".38" stop-color="var(--plane-cool)" stop-opacity=".52"/>
+        <stop offset=".66" stop-color="var(--plane-cool)" stop-opacity=".22"/>
+        <stop offset=".85" stop-color="var(--plane-cool)" stop-opacity=".07"/>
+        <stop offset="1" stop-color="var(--plane-cool)" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="pl-dust">
+        <stop offset="0" stop-color="var(--plane-dust)" stop-opacity=".92"/>
+        <stop offset=".45" stop-color="var(--plane-dust)" stop-opacity=".58"/>
+        <stop offset=".78" stop-color="var(--plane-dust)" stop-opacity=".18"/>
+        <stop offset="1" stop-color="var(--plane-dust)" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g id="pcam" class="cam">
+      <g id="pdrift">
+        <g id="p-glow"></g>
+        <g id="p-stars" fill="var(--plane-star)"></g>
+        <g id="p-dust"></g>
+      </g>
+    </g>
+  </svg>
+</div>
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <g id="cam-far" class="cam"><g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g></g>
@@ -562,6 +616,83 @@
   <div class="wall wr" aria-hidden="true"></div>
 </div>
 <div class="vignette" aria-hidden="true"></div>
+<!-- DAWN — THE TERMINATOR. Three layers the crossing is painted on, all of
+     them written by sky-terminator.js against this window: the night wash, the
+     starlight field masked to exactly the night side of the handover, and the
+     limb — the thin warm air the light reaches first, which is what keeps the
+     dial's own chart ink lifted where the crossing passes through it. -->
+<div class="night" id="night" aria-hidden="true"></div>
+<div class="nightsky" id="nightsky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g id="tcam-far" class="cam"><g id="t-far" fill="var(--night-far)"></g></g>
+    <g id="tcam-near" class="cam"><g id="t-near" fill="var(--night-near)"></g></g>
+  </svg>
+</div>
+<div class="tline" id="tline" aria-hidden="true"></div>
+<!-- CLOUDS — THE CLOUD SEA. First light seen from altitude: three strata of
+     cloud low across the screen, cool at the crest and rose-amber underneath
+     where the light is arriving, one or two distant peaks standing out of it.
+     The peaks stand out of the MID bank with the far bank behind them — the
+     only stacking in which a distant summit is legible, and also the true one,
+     because cloud lies both sides of a hill. Streamed by sky-cloudsea.js. -->
+<div class="weather" id="weather" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- one softness per depth: the far bank has more air in front of it -->
+      <filter id="cs-b0" x="-8%" y="-60%" width="116%" height="260%">
+        <feGaussianBlur stdDeviation="5.5"/></filter>
+      <filter id="cs-b1" x="-8%" y="-60%" width="116%" height="260%">
+        <feGaussianBlur stdDeviation="4"/></filter>
+      <filter id="cs-b2" x="-8%" y="-60%" width="116%" height="260%">
+        <feGaussianBlur stdDeviation="2.8"/></filter>
+      <filter id="cs-peak" x="-30%" y="-40%" width="160%" height="200%">
+        <feGaussianBlur stdDeviation="1.9"/></filter>
+      <!-- the light is under the cloud, so every stratum runs cool-white at
+           the crest into rose-amber in the sixty pixels below it, then into
+           the shadow that separates it from the stratum in front -->
+      <linearGradient id="cs-g0" gradientUnits="userSpaceOnUse" x1="0" y1="662" x2="0" y2="900">
+        <stop offset="0"   stop-color="#eef2f9"/><stop offset=".22" stop-color="#f6e5d5"/>
+        <stop offset=".56" stop-color="#eccdb4"/><stop offset="1" stop-color="#e3c0a6"/>
+      </linearGradient>
+      <linearGradient id="cs-g1" gradientUnits="userSpaceOnUse" x1="0" y1="746" x2="0" y2="1000">
+        <stop offset="0"   stop-color="#f4f7fd"/><stop offset=".20" stop-color="#fadec5"/>
+        <stop offset=".52" stop-color="#eebd9d"/><stop offset="1" stop-color="#dbab88"/>
+      </linearGradient>
+      <!-- a distant peak is not a silhouette all the way down: the air
+           between you and it thickens toward the cloud it stands in -->
+      <linearGradient id="cs-rock" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="805">
+        <stop offset="0" stop-color="#5b6889" stop-opacity="1"/>
+        <stop offset=".52" stop-color="#6e7b9e" stop-opacity=".50"/>
+        <stop offset="1" stop-color="#8f9cbe" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="cs-rim" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="790">
+        <stop offset="0" stop-color="#ffcd96" stop-opacity=".95"/>
+        <stop offset=".58" stop-color="#ffb96f" stop-opacity=".42"/>
+        <stop offset="1" stop-color="#ffb96f" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="cs-g2" gradientUnits="userSpaceOnUse" x1="0" y1="826" x2="0" y2="1090">
+        <stop offset="0"   stop-color="#faf7f5"/><stop offset=".18" stop-color="#fbd5ab"/>
+        <stop offset=".50" stop-color="#e9aa83"/><stop offset="1" stop-color="#cf9370"/>
+      </linearGradient>
+    </defs>
+    <g id="cs-s0" filter="url(#cs-b0)" fill="url(#cs-g0)" opacity=".70"></g>
+    <g id="cs-peaks"></g>
+    <g id="cs-s1" filter="url(#cs-b1)" fill="url(#cs-g1)" opacity=".90"></g>
+    <g id="cs-s2" filter="url(#cs-b2)" fill="url(#cs-g2)" opacity="1"></g>
+  </svg>
+</div>
+<!-- THE THREE DESCENTS' OWN GROUNDS. Each is display:none until its pack is up
+     AND the scrollbar is off the top, so at the dial none of them merely
+     measures zero — none of them exists. dawn drops onto warm SURFACE light;
+     clouds goes through the deck (the MIST of being inside it, then the flat
+     blue light that got UNDER it, then the slow loss of height); after dark's
+     DEEP closes in behind the departing river, its foot carrying the glow the
+     owner asked for, coming back from below the frame. -->
+<div class="surface" id="surface" aria-hidden="true"></div>
+<div class="mist" aria-hidden="true"></div>
+<div class="underlight" aria-hidden="true"></div>
+<div class="underdeep" aria-hidden="true"></div>
+<div class="deep" aria-hidden="true"></div>
 <div class="meteor" style="top:12%;left:18%" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m2" aria-hidden="true" data-polish="POL-8"></div>
 <div class="meteor m3" aria-hidden="true" data-polish="POL-10"></div>
@@ -591,10 +722,14 @@
     <span>THEME</span>
     <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <!-- atlas is retired from the release roster (§15, owner): its pack still
-         exists in packs.css and still renders if forced, but it is no longer
-         offered. -->
-    <button style="background:#c3ccdb" title="dawn" aria-pressed="false"></button>
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
+         CLOUDS joins as its own selectable pack, carrying the lighter end of
+         the range; dawn's dot follows its ground onto the temperature story.
+         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
+         their packs still exist in packs.css and still render if forced, but
+         they are no longer offered. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+    <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
     <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
             aria-pressed="false"></button>
   </div>
@@ -631,9 +766,11 @@
           <stop offset="1" stop-color="var(--accent)"/>
         </linearGradient>
       </defs>
-      <!-- the mark has two forms and only one is ever up: the four-point glint
-           every pack has always had, and retrograde's neon wireframe beacon
-           (§15/#480). The pack chooses between them in CSS. -->
+      <!-- the mark has THREE forms and only one is ever up: the four-point
+           glint every pack has always had, retrograde's neon wireframe beacon
+           (§15/#480), and clouds' sounding balloon (§15, the roster ruling:
+           "clouds needs ... its own custom symbols"). The pack chooses between
+           them in CSS. -->
       <g class="glint classic" style="transform-origin:0 0">
         <circle r="9" fill="var(--ink)" opacity=".12"/>
         <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
@@ -647,6 +784,71 @@
         <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
               stroke="var(--accent)" stroke-width="1" opacity=".9"/>
         <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
+          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
+          <line x1="10" y1="0" x2="13.4" y2="0"/>
+        </g>
+      </g>
+      <!-- CLOUDS' OWN MARK — THE SOUNDING BALLOON (§15: every theme earns its
+           own symbols; only star-chart and after dark share theirs).
+
+           WHY IT CANNOT BE A STAR. This pack's sky is DAYLIGHT above a cloud
+           deck. There is no north star up there to steer by, and drawing one
+           anyway is the exact failure §12 forbids — a mark on the screen that
+           is not true of what the screen is showing. So the question the mark
+           has to answer is the honest one: at altitude, in daylight, what do
+           you send UP to put something new into the sky? A sounding. A pilot
+           balloon carrying an instrument, released to add one real reading to
+           the record — which is what this handle does when it opens the create
+           drawer, said in the vocabulary the pack already speaks.
+
+           WHAT IT KEEPS FROM THE GLINT, and why. Retrograde's beacon held the
+           old mark's silhouette on purpose ("still reads as a beacon at a
+           glance"), and the reasoning travels: this is the same 30px box, the
+           same vertical axis, and the two reticle ticks sit at exactly the same
+           ±13.4 the glint's horizontal arms did, so the mark's footprint in the
+           chrome is unchanged and the eye finds it in the same place. What
+           moves is only what it is made of.
+
+           WHAT IT IS MADE OF, and why that is not decoration. Light packs do
+           not glow — that law is older than this pack (#426: weight instead of
+           luminosity, flat ink instead of gloss) — so the balloon is drawn,
+           not lit: the envelope a thin engraved outline with a single pale
+           highlight where the low sun catches its shoulder, the rigging two
+           hairlines, and the instrument a small SOLID box in the accent at the
+           bottom of the axis. The solid box is the one loud element and it is
+           load-bearing twice over: it is the only filled shape, so it is what
+           the eye lands on, and it sits at the low end of the axis, pointing
+           at the drawer the handle pulls — the same job the tron diamond's
+           downward vertex does in retrograde. Nothing here is added for
+           prettiness; take any one part away and the mark stops reading as an
+           instrument going up. -->
+      <g class="glint sonde" style="transform-origin:0 0">
+        <!-- the envelope: a real pilot balloon is a slightly pear-shaped
+             sphere, wider than it is tall at the shoulder and drawn in by the
+             neck, which is what stops this reading as a lollipop -->
+        <path d="M 0 -12.6 C 5.2 -12.6 7.4 -8.6 7.4 -5.4
+                 C 7.4 -2.1 4.4 .1 1.5 1.6 L -1.5 1.6
+                 C -4.4 .1 -7.4 -2.1 -7.4 -5.4
+                 C -7.4 -8.6 -5.2 -12.6 0 -12.6 Z"
+              fill="none" stroke="var(--ink)" stroke-width="1.3"
+              stroke-linejoin="round" opacity=".9"/>
+        <!-- the shoulder the low sun catches. One stroke, on the sunward side
+             only, because there is one light source in this sky and it is the
+             reason the pack exists -->
+        <path d="M -4.6 -9.4 C -3.2 -11.2 -1.6 -11.8 -.2 -11.9"
+              fill="none" stroke="var(--sun)" stroke-width="1.1"
+              stroke-linecap="round" opacity=".85"/>
+        <!-- the rigging: two hairlines from the neck to the instrument -->
+        <g stroke="var(--ink)" stroke-width=".9" opacity=".78">
+          <line x1="-1.5" y1="1.9" x2="-1.1" y2="7.2"/>
+          <line x1="1.5" y1="1.9" x2="1.1" y2="7.2"/>
+        </g>
+        <!-- the instrument: the one solid shape, in the create colour, at the
+             low end of the axis, pointing at the drawer -->
+        <rect x="-3.1" y="7.2" width="6.2" height="5" rx="1.1"
+              fill="var(--accent-text)"/>
+        <!-- and the reticle ticks, at the glint's own ±13.4 -->
+        <g stroke="var(--ink)" stroke-width="1.2" stroke-linecap="round" opacity=".78">
           <line x1="-13.4" y1="0" x2="-10" y2="0"/>
           <line x1="10" y1="0" x2="13.4" y2="0"/>
         </g>

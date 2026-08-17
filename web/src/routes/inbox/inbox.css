@@ -49,13 +49,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .dish span:nth-child(2){animation-delay:1s}.inbox-page .dish span:nth-child(3){animation-delay:2s}
 @keyframes inbox-signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
 .inbox-page .relaybar .alias{flex:1;min-width:0}
-.inbox-page .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent);
+.inbox-page .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent-text);
                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inbox-page .relaybar .alias span{font:10.5px var(--mono);color:var(--ink-mid)}
-.inbox-page .relaybar .alias .live{color:var(--ok)}
+.inbox-page .relaybar .alias .live{color:var(--ok-text)}
 .inbox-page .relaybar a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;
             border:1px solid var(--line);border-radius:9px;padding:7px 13px;flex:none}
-.inbox-page .relaybar a:hover{border-color:var(--accent);color:var(--accent)}
+.inbox-page .relaybar a:hover{border-color:var(--accent);color:var(--accent-text)}
 
 .inbox-page .group{margin-top:32px}
 .inbox-page .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
@@ -79,13 +79,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .attach{display:inline-flex;align-items:center;gap:8px;font:11px var(--mono);
         color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
         padding:6px 11px;margin-top:10px}
-.inbox-page .attach .clean{color:var(--ok)}
+.inbox-page .attach .clean{color:var(--ok-text)}
 .inbox-page .receipt .actions{display:flex;gap:8px;margin-top:14px;align-items:center}
 .inbox-page .receipt .actions button{font-size:12.5px;border-radius:9px;padding:7px 15px;cursor:pointer;
                          border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
-.inbox-page .receipt .actions button.yes{border-color:var(--accent);color:var(--accent)}
+.inbox-page .receipt .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
 .inbox-page .receipt .actions a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
-.inbox-page .receipt .actions a:hover{color:var(--accent)}
+.inbox-page .receipt .actions a:hover{color:var(--accent-text)}
 .inbox-page .twotap{font:10.5px var(--mono);color:var(--ink-faint)}
 .inbox-page .mail-problem{margin-top:10px;font:11px var(--mono);color:var(--warm)}
 

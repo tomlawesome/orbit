@@ -16,17 +16,17 @@
            animation:signal 3s ease-out infinite;opacity:0}
 .dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
 @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
-.alias{font:13px var(--mono);color:var(--accent);background:var(--panel);
+.alias{font:13px var(--mono);color:var(--accent-text);background:var(--panel);
        border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
 .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
 .kv:last-of-type{border:0}
-.kv b{color:var(--ok);font-weight:500}
+.kv b{color:var(--ok-text);font-weight:500}
 .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:16px;line-height:1.8}
 .btns{display:flex;gap:10px;margin-top:16px}
 .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
-.btns button.pri{color:var(--accent);border-color:var(--accent)}
+.btns button.pri{color:var(--accent-text);border-color:var(--accent)}
 
 /* #434: mail that arrived but could not become a suggestion — the relay is
    where the user looks for "did my forward make it", so its failures live

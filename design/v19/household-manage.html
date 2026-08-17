@@ -56,6 +56,10 @@
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
     --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
     --sec-plum:#b79ae0; --sec-coral:#f0907a;
+    /* #491: the text-grade companions — ink that carries WORDS. Measured against
+       the worst ground each pack actually paints text on. Carried from
+       web/src/lib/packs.css. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -69,6 +73,7 @@
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
     --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
     --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -82,6 +87,7 @@
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
     --sec-sage:#3f6f4d; --sec-blue:#2b6cb0; --sec-sand:#a9761f;
     --sec-plum:#6f4788; --sec-coral:#ab4a34;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -95,6 +101,7 @@
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
     --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
     --sec-plum:#71499a; --sec-coral:#bd4f36;
+    --ink-quiet:#404c64; --accent-text:#134a72; --ok-text:#0d4e30;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -108,6 +115,7 @@
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
     --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
     --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -124,9 +132,19 @@
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
 
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
-        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -146,7 +164,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
@@ -211,7 +229,7 @@
   .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
   .cardhead .act{margin-left:auto;font:11px var(--mono);color:var(--ink-mid);background:none;
                  border:1px solid var(--line);border-radius:9px;padding:6px 12px;cursor:pointer}
-  .cardhead .act:hover{border-color:var(--accent);color:var(--accent)}
+  .cardhead .act:hover{border-color:var(--accent);color:var(--accent-text)}
 
   /* the create screen's field vocabulary, unchanged */
   .field{margin-bottom:13px}
@@ -231,9 +249,9 @@
   .fsave{margin-left:auto;font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;
          color:var(--ink-faint);background:none;border:0;padding:0 0 1px;cursor:pointer;
          opacity:.5;transition:color .2s,opacity .2s}
-  .fsave:hover{color:var(--accent);opacity:1}
-  .field.dirty .fsave{color:var(--accent);opacity:1}
-  .fsave.done,.field.dirty .fsave.done{color:var(--ok);opacity:1;cursor:default}
+  .fsave:hover{color:var(--accent-text);opacity:1}
+  .field.dirty .fsave{color:var(--accent-text);opacity:1}
+  .fsave.done,.field.dirty .fsave.done{color:var(--ok-text);opacity:1;cursor:default}
   .row2{display:flex;gap:13px}
   .row2>.field{flex:1;min-width:0}
   .selwrap{position:relative}
@@ -248,12 +266,12 @@
   .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
   .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
          border-radius:9px;padding:7px 13px;cursor:pointer}
-  .ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .ghost:hover{border-color:var(--accent);color:var(--accent-text)}
   .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
   .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
   .note.top{margin-top:13px}
   .note b{color:var(--ink-mid);font-weight:400}
-  .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok);line-height:1.8}
+  .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
   .said.show{display:block}
 
   /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
@@ -297,7 +315,7 @@
   .toggle:disabled{opacity:.5;cursor:default}
   .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
           border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
-  .addsec:hover{border-color:var(--accent);color:var(--accent)}
+  .addsec:hover{border-color:var(--accent);color:var(--accent-text)}
   .addsec:disabled{opacity:.4;cursor:not-allowed}
 
   /* members */
@@ -312,7 +330,7 @@
   .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
   .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
         border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
-  .role.owner{color:var(--accent);border-color:var(--accent)}
+  .role.owner{color:var(--accent-text);border-color:var(--accent)}
   .memb .ghost{padding:5px 11px}
 
   /* v3 — the panel's other blocks. Members runs the full height of the
@@ -336,7 +354,7 @@
             background:var(--panel-raised);padding:16px 18px}
   .handover.open{display:block}
   .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-               color:var(--accent);margin-bottom:12px}
+               color:var(--accent-text);margin-bottom:12px}
   .step{margin-bottom:13px}
   .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
            margin-bottom:7px}
@@ -353,7 +371,7 @@
   .joinreq p b{color:var(--ink);font-weight:530}
   .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
                   cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+  .joinreq button.yes{border-color:var(--ok);color:var(--ok-text)}
 
   /* ── THE DANGER ZONE (§15, owner on v2 + the refinement) ────────────────
      v2 asked politely and the owner was right to reject it: a paragraph in
@@ -400,7 +418,7 @@
      prose rule out-specifies .note and .said and swallows them */
   .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
   .dangercard .note b{color:var(--ink-mid);font-weight:400}
-  .dangercard .said{font-size:11px;color:var(--ok);max-width:none}
+  .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
 
   /* the button: red on the outside at rest, SOLID red once armed */
   .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
@@ -445,7 +463,7 @@
                 backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
                 padding:4px 10px;cursor:pointer}
   .demos button:hover{border-color:var(--accent)}
-  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
   .demos .sw{width:15px;height:15px;border-radius:50%;padding:0;backdrop-filter:none}
   .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion: reduce){*{animation:none!important}}

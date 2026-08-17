@@ -103,7 +103,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 /* create.html's cancel link, which is its established way back. */
 .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
       color:var(--ink-mid);text-decoration:none}
-.back:hover{color:var(--accent)}
+.back:hover{color:var(--accent-text)}
 
 /* POL-11, the owner rule that every page's starfield drifts: perceptible
    within a few seconds, one direction, seamless over a tiled field. The same

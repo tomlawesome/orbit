@@ -28,6 +28,10 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    /* #491: the text-grade companions — ink that carries WORDS. Measured against
+       the worst ground each pack actually paints text on. Carried from
+       web/src/lib/packs.css. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -38,6 +42,7 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -48,6 +53,7 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -58,6 +64,7 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --ink-quiet:#404c64; --accent-text:#134a72; --ok-text:#0d4e30;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -68,6 +75,7 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -84,9 +92,19 @@
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
 
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
-        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -106,7 +124,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
@@ -145,13 +163,13 @@
   .dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
   @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
   .relaybar .alias{flex:1;min-width:0}
-  .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent);
+  .relaybar .alias b{display:block;font:12.5px var(--mono);color:var(--accent-text);
                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .relaybar .alias span{font:10.5px var(--mono);color:var(--ink-mid)}
-  .relaybar .alias .live{color:var(--ok)}
+  .relaybar .alias .live{color:var(--ok-text)}
   .relaybar a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;
               border:1px solid var(--line);border-radius:9px;padding:7px 13px;flex:none}
-  .relaybar a:hover{border-color:var(--accent);color:var(--accent)}
+  .relaybar a:hover{border-color:var(--accent);color:var(--accent-text)}
 
   .group{margin-top:32px}
   .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
@@ -175,13 +193,13 @@
   .attach{display:inline-flex;align-items:center;gap:8px;font:11px var(--mono);
           color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
           padding:6px 11px;margin-top:10px}
-  .attach .clean{color:var(--ok)}
+  .attach .clean{color:var(--ok-text)}
   .receipt .actions{display:flex;gap:8px;margin-top:14px;align-items:center}
   .receipt .actions button{font-size:12.5px;font-family:var(--ui);border-radius:9px;padding:7px 15px;
                            cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .receipt .actions button.yes{border-color:var(--accent);color:var(--accent)}
+  .receipt .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
   .receipt .actions a{font:11px var(--mono);color:var(--ink-mid);text-decoration:none;margin-left:auto}
-  .receipt .actions a:hover{color:var(--accent)}
+  .receipt .actions a:hover{color:var(--accent-text)}
   .twotap{font:10.5px var(--mono);color:var(--ink-faint)}
 
   /* still reading: the only honest thing to show is that we are reading */
@@ -247,9 +265,14 @@
     <span>THEME</span>
     <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
-    <!-- atlas is retired from the release roster (§15, owner): its pack still
-         exists and still renders if forced, but it is no longer offered. -->
-    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
+         CLOUDS joins as its own selectable pack, carrying the lighter end of
+         the range; dawn's dot follows its ground onto the temperature story.
+         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
+         their packs still exist and still render if forced, but they are no
+         longer offered. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false" onclick="setSwatch('clouds',this)"></button>
+    <button style="background:#d2d3d4" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
     <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
   </div>
   <button class="signout">sign out →</button>

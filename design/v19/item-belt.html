@@ -166,6 +166,9 @@
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
     --rubble:#7d88ab; --rubble-gain:1;
     --paper:#8fb8ff;      /* the documents' own line — see THE DOCUMENTS */
+    /* #491: the text-grade companions — ink that carries WORDS. Carried from
+       web/src/lib/packs.css, where the measurements are. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -178,6 +181,7 @@
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
     --rubble:#78849b; --rubble-gain:1;
     --paper:#c4b5fd;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -190,6 +194,7 @@
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
     --rubble:#3d4a70; --rubble-gain:1.55;
     --paper:#2b6cb0;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -202,6 +207,7 @@
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
     --rubble:#3a4966; --rubble-gain:1.5;
     --paper:#6d28d9;
+    --ink-quiet:var(--ink-faint); --accent-text:#14507b; --ok-text:#0f5735;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -214,6 +220,7 @@
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
     --rubble:#6ea6b8; --rubble-gain:1;
     --paper:#2de2e6;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -316,9 +323,9 @@
       color:var(--ink-mid);padding:6.5px 2px;border-bottom:1px solid var(--line-soft)}
   .kv:last-of-type{border:0}
   .kv b{color:var(--ink);font-weight:500;text-align:right}
-  .kv b.clean{color:var(--ok)}
+  .kv b.clean{color:var(--ok-text)}
   .kv b.over{color:var(--overdue)} .kv b.soon{color:var(--warm)}
-  .kv b.up{color:var(--upcoming)} .kv b.ok{color:var(--ok)}
+  .kv b.up{color:var(--upcoming)} .kv b.ok{color:var(--ok-text)}
   .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                 color:var(--ink-faint);margin:16px 0 8px}
   .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
@@ -334,7 +341,7 @@
   .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
         color:var(--ink-mid);text-decoration:none;background:none;border:0;
         cursor:pointer;padding:0}
-  .back:hover{color:var(--accent)}
+  .back:hover{color:var(--accent-text)}
 
   /* The document's honest display, v2's, unchanged. No fabricated page image:
      the plate says what the file is, the rows say what Orbit knows, the
@@ -398,7 +405,7 @@
     border:1px solid var(--line);border-radius:99px;padding:6px 12px;cursor:pointer;
     backdrop-filter:blur(8px)}
   .demos button:hover{border-color:var(--accent);color:var(--ink)}
-  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
   .demos .sw{width:18px;height:18px;border-radius:50%;padding:0}
   .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .demos i{width:1px;height:16px;background:var(--line);display:inline-block;margin:0 3px}
