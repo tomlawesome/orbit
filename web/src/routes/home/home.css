@@ -169,6 +169,19 @@
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
   .body-link:hover circle{transform:scale(1.5)}
+  /* §15 (08-17): the sun is the way into this household's own screen. The
+     affordance is the pointer and the ink the sun ALREADY has, brightened —
+     the same acknowledgement a constellation gives (.minisys:hover .msring
+     lifts its ring's opacity). Nothing new is drawn, at rest or on hover, so
+     the first viewport is the approved one to the pixel. The name lifts with
+     it because the name is inside the same target. */
+  .sun-link{cursor:pointer}
+  .sun-link circle[filter="url(#sun)"]{transition:opacity .3s}
+  .sun-link:is(:hover,:focus-visible) circle[filter="url(#sun)"]{opacity:1}
+  .sun-link:is(:hover,:focus-visible) #dial-name{fill:var(--ink)}
+  /* Keyboard only, and in the app's own focus ink (the accent, as everywhere
+     a field or a swatch says "you are here"). */
+  .sun-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
   .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
   .group.seen{opacity:1;transform:none}
   .item{scroll-margin-top:130px}
@@ -432,7 +445,8 @@
   body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"]{display:none}
   .chrome{transition:opacity 2.2s ease}
   body.quiet .chrome{opacity:.06}
-  #dial-name{transition:opacity 2.2s ease}
+  /* the fill joins the transition for the sun's hover (§15, 08-17) */
+  #dial-name{transition:opacity 2.2s ease,fill .3s}
   body.quiet #dial-name{opacity:.3}
   circle[fill="url(#danger4)"], .dial circle[stroke-dasharray="3 5"]{transition:opacity 1.2s}
   body.quiet circle[fill="url(#danger4)"]{opacity:0}

@@ -3,7 +3,7 @@
   import { browser } from "$app/environment";
   import { afterNavigate, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
-  import { mountEmptySky, mountHome } from "./home.behaviour.js";
+  import { mountEmptySky, mountHome, sunHref } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
@@ -756,9 +756,29 @@
               stroke-dasharray="110" stroke-dashoffset="110"/>
       {/if}
       </g><!-- /chrome -->
-      <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
-      <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
-      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
+      <!-- §15, the 08-17 morning batch (owner): "we should be able to click the
+           sun in the centre of the dial and go to the given household's view."
+           The sun and the name written under it are ONE identity — the sun IS
+           this household — so they are one hit target, not two.
+
+           A link, not a handler, for the reason the helm's memberships card
+           states (§15-2k): it is a place, so it wants an address the browser
+           can open in its own way — focusable and Enter-activated for free, a
+           new tab on a modified click, and on touch a single tap. CON-5's
+           two-tap belongs to the bodies because a finger cannot hover a
+           callout out of them; the sun has no callout to summon — it wears its
+           name permanently, which is everything a callout would have said — so
+           there is no first beat to spend and the first tap approaches.
+
+           No id, no link: before the household arrives (and on the labelled
+           sky's dial-less hero) there is nothing to point at, and an <a>
+           without an href is honestly inert rather than a dead target. -->
+      <a class="sun-link" href={view?.primary ? sunHref(view.primary) : undefined}
+         aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
+        <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
+        <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+        <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
+      </a>
 
       {#if firstOverdue}
         <circle data-polish="POL-2" class="ping" cx={firstOverdue.placement.x} cy={firstOverdue.placement.y}

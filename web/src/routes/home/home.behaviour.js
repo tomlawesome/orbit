@@ -17,6 +17,18 @@
 import { fillStarTiles } from "$lib/sky.js";
 import { placeGalaxy } from "./placement.js";
 
+/**
+ * The sun's address (§15, the 08-17 morning batch): the centre body of the
+ * dial is the household it belongs to, and clicking it goes to that
+ * household's own screen — the built /household/<id>.
+ *
+ * A function rather than a literal in two places because the sun is written
+ * twice: once by the markup, from the workspace's active household, and once
+ * by a flight, which lands the camera on a different household and must
+ * re-point the sun as it re-letters the name.
+ */
+export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
+
 export function mountHome({ galaxy, primary }) {
   /*
    * Shadows the global so every bare addEventListener() below — the mockup's
@@ -166,6 +178,10 @@ export function mountHome({ galaxy, primary }) {
     // then does the chart grow out of that shared centre — slow and deliberate
     later(() => {
       document.getElementById("dial-name").textContent = GALAXY[key].name;
+      /* The sun wears the name, and the pair is one identity (§15, 08-17), so
+         the way in changes in the same beat the name does — a dial reading
+         one household while its sun opened another would be a lie. */
+      document.querySelector(".sun-link")?.setAttribute("href", sunHref(key));
       document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
         (GALAXY[key].role ?? "member");
       hero.classList.add("arriving");   // dial pinned at centre, under the ring
