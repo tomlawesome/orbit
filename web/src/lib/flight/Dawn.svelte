@@ -1,5 +1,7 @@
 <script>
+  import { onMount } from "svelte";
   import { DAWN_FAR, DAWN_NEAR } from "./starfields.js";
+  import { rasteriseSvg } from "$lib/raster.js";
 
   /**
    * THE DAWN — the sky the launch leaves from, and the sign-in's own surface.
@@ -27,8 +29,157 @@
    * `children` is the ask: the sign-in renders its gate into it, and the
    * launch overlay on the landing renders nothing at all — the same dawn,
    * with no button on it, because by then the button has been pressed.
+   *
+   * #501: the seven feGaussianBlur glows #498 pinned to a userSpaceOnUse
+   * region were still LIVE filters — Safari software-rasterises them on
+   * every repaint even though every one of these shapes is static (never
+   * changes) frame to frame. Per the GPU law and the grain precedent
+   * (Grain.svelte, #499), each is rasterised once, offscreen, at load, using
+   * the identical filter graph, and composited back as a plain <image> —
+   * $lib/raster.js does the decode/draw/cache mechanics Grain.svelte also
+   * uses, so the technique is shared, not duplicated a third time.
+   *
+   * Checked first, per the owner's own condition on this fix: what actually
+   * ANIMATES here. `.rays` rotates (sway1/sway2, a transform) and keeps its
+   * own live "rayrough" filter — genuine shape motion, untouched. Everything
+   * else that moves — .zodiacal, .scatter, .sunpt-breathe, .rim's fade-in —
+   * animates opacity only, via CSS on an ancestor or the element itself, and
+   * opacity composites over a static raster exactly as it would over a live
+   * filter: nothing here needed to stay live to keep breathing.
+   *
+   * Five raster targets, one per contiguous group of filtered elements (kept
+   * separate, not merged, precisely so each keeps its own opacity animation
+   * and its own place in paint order): the zodiacal cone (b20l), the five
+   * limb scattering rings (b20l/b12l/b6l/b2l), the sun's soft white core
+   * (b6l), the scattering arc over the limb (b2l), and the blurred half of
+   * the rim (b6l). Each raster is built at the FULL 1600×1000 viewBox frame
+   * (not cropped to the filter's own region) at devicePixelRatio-native
+   * resolution, exactly as Grain.svelte rasterises its own full-surface
+   * frame — so it drops into the SAME <svg viewBox="0 0 1600 1000"> that
+   * already carries the live shapes, at the same x/y/width/height (0,0,1600,
+   * 1000) as an <image>, and the outer svg's own slice transform scales it
+   * exactly once, the same as it always scaled the vector shapes it replaces.
+   *
+   * Unlike Grain (which starts blank until its raster lands), there is no
+   * kept live fallback here: the decode of a same-document data URI resolves
+   * in the same frame in practice, and the fidelity gate's data-rasterised
+   * wait (screens.spec.js) means a capture can never race the async build
+   * regardless. That is the "replace synchronously" call #501 leaves to the
+   * implementer, taken because a live-filter fallback would have reproduced
+   * the exact cost this fix exists to remove, for however briefly it hung
+   * around.
    */
   let { children = undefined, shown = false } = $props();
+  let world;
+  let imgZod, imgScatter, imgSunpt, imgSunarc, imgRim;
+
+  const F_B2L =
+    '<filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>';
+  const F_B6L =
+    '<filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>';
+  const F_B12L =
+    '<filter id="b12l" filterUnits="userSpaceOnUse" x="-60" y="-60" width="1720" height="1120"><feGaussianBlur stdDeviation="12"/></filter>';
+  const F_B20L =
+    '<filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>';
+  const G_ZOD =
+    '<radialGradient id="zod" cx="50%" cy="88%" r="75%"><stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/><stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/><stop offset="100%" stop-opacity="0"/></radialGradient>';
+  const G_RIMG =
+    '<linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/></linearGradient>';
+
+  /* Each group's verbatim shape markup — same coordinates, same fills, same
+     filter references — plus only the defs that group needs. class= is
+     deliberately absent from the raster body: opacity/blend/animation are
+     display-time CSS, applied to the live <image> below, not baked in. */
+  const GROUPS = {
+    zod: {
+      defs: F_B20L + G_ZOD,
+      body: '<ellipse cx="800" cy="640" rx="300" ry="480" fill="url(#zod)" filter="url(#b20l)"/>',
+    },
+    scatter: {
+      defs: F_B2L + F_B6L + F_B12L + F_B20L,
+      body:
+        '<circle cx="800" cy="3920" r="3122" fill="none" stroke="#7a2c18" stroke-opacity=".1" stroke-width="150" filter="url(#b20l)"/>' +
+        '<circle cx="800" cy="3920" r="3060" fill="none" stroke="#e2772b" stroke-opacity=".16" stroke-width="84" filter="url(#b20l)"/>' +
+        '<circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".28" stroke-width="34" filter="url(#b12l)"/>' +
+        '<circle cx="800" cy="3920" r="3010" fill="none" stroke="#ffd989" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>' +
+        '<circle cx="800" cy="3920" r="3003" fill="none" stroke="#fff3d6" stroke-opacity=".65" stroke-width="4" filter="url(#b2l)"/>',
+    },
+    sunpt: {
+      defs: F_B6L,
+      body: '<circle cx="800" cy="919" r="20" fill="#fffdf6" filter="url(#b6l)"/>',
+    },
+    sunarc: {
+      defs: F_B2L,
+      body:
+        '<path d="M 560 934 A 3000 3000 0 0 1 1040 934" fill="none" stroke="#ffedc2"' +
+        ' stroke-width="3" stroke-linecap="round" opacity=".7" filter="url(#b2l)"/>',
+    },
+    rim: {
+      defs: F_B6L + G_RIMG,
+      body:
+        '<circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"' +
+        ' stroke-width="6" stroke-opacity=".35" filter="url(#b6l)"/>',
+    },
+  };
+
+  function frame(defs, body, w, h) {
+    return (
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
+      `<defs>${defs}</defs>${body}</svg>`
+    );
+  }
+
+  onMount(() => {
+    let cancelled = false;
+    let timer;
+
+    async function build() {
+      const rect = world.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      /* Capped at 2, as Grain.svelte caps it: retina stays crisp without a
+         3x+ display doubling the raster for no visible gain. The scale is
+         the SAME one the outer svg's own xMidYMid-slice transform will
+         apply — max(width, height) against the 1600×1000 viewBox — so the
+         raster lands at the exact device-pixel resolution it will be shown
+         at, and compositing it back is a 1:1 blit, not a resample. */
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const scale = Math.max(rect.width / 1600, rect.height / 1000) * dpr;
+      const w = Math.max(1, Math.round(1600 * scale));
+      const h = Math.max(1, Math.round(1000 * scale));
+
+      /* Marks this surface for the fidelity gate (screens.spec.js), which
+         waits for it before screenshotting so the async decode below can
+         never race a capture. */
+      world.dataset.rasterised = "pending";
+      const built = await Promise.all(
+        Object.entries(GROUPS).map(async ([name, { defs, body }]) => {
+          const key = `dawn-${name}|${w}|${h}`;
+          const url = await rasteriseSvg(key, frame(defs, body, w, h), w, h);
+          return [name, url];
+        }),
+      );
+      if (cancelled) return;
+
+      /* Imperative, same as Grain.svelte: every href lands in the same tick
+         as the readiness flag below, with nothing async between them. */
+      const targets = { zod: imgZod, scatter: imgScatter, sunpt: imgSunpt, sunarc: imgSunarc, rim: imgRim };
+      for (const [name, url] of built) targets[name]?.setAttribute("href", url);
+      world.dataset.rasterised = "ready";
+    }
+
+    function onResize() {
+      clearTimeout(timer);
+      timer = setTimeout(build, 120);
+    }
+
+    build();
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+    };
+  });
 </script>
 
 <div id="dawn" class:shown>
@@ -51,8 +202,11 @@
       {/each}
     </g><use href="#lg-near" x="1600"/></g>
   </svg></div>
-  <div class="world" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <div class="world" aria-hidden="true" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <defs>
+      <!-- rimg stays live: the CRISP rim circle below (no filter) still
+           reads it. Its blurred sibling is rasterised (#501) and carries its
+           own copy of this gradient inside the offscreen SVG (GROUPS.rim). -->
       <linearGradient id="rimg" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#ffd989"/><stop offset="100%" stop-color="#e2772b"/>
       </linearGradient>
@@ -77,38 +231,21 @@
         <stop offset="55%" stop-color="#f4c05a" stop-opacity=".07"/>
         <stop offset="100%" stop-opacity="0"/>
       </linearGradient>
-      <radialGradient id="zod" cx="50%" cy="88%" r="75%">
-        <stop offset="0%" stop-color="#f6d489" stop-opacity=".13"/>
-        <stop offset="55%" stop-color="#e8b25e" stop-opacity=".045"/>
-        <stop offset="100%" stop-opacity="0"/>
-      </radialGradient>
+      <!-- "zod" no longer lives here: its only user, .zodiacal, is
+           rasterised (#501) and carries its own copy (GROUPS.zod). -->
       <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-opacity="0"/>
         <stop offset="62%" stop-color="#3d2a4d" stop-opacity=".12"/>
         <stop offset="86%" stop-color="#a2492a" stop-opacity=".2"/>
         <stop offset="100%" stop-color="#e2772b" stop-opacity=".26"/>
       </linearGradient>
-      <!--
-        #498: filterUnits="userSpaceOnUse" with an absolute region pinned to
-        the 1600×1000 viewBox (plus a margin a few multiples of stdDeviation,
-        wide enough that the blur's own falloff never shows a cut edge).
-        Without it these four filters default to a region sized off the
-        FILTERED ELEMENT'S bounding box — and every circle they are hung on
-        below (.scatter, .rim, the sun point) is a limb drawn at cy=3920
-        r≈3000+ so its top edge lands on y=920: correct geometry for the
-        planet, but a bounding box thousands of units on a side, so a "180%"
-        or "220%" region is thousands of units too. WebKit rasterises that
-        region in software; measured cost of a single /login paint dropped
-        from ~7–12s to ~0.8s in this sandbox once the four filters below were
-        capped to the viewBox instead (Chromium GPU-composites either way and
-        did not regress). Nothing visible moves: everything painted by these
-        filters already lives inside the viewBox, so the smaller region loses
-        no pixel that was ever on screen.
-      -->
-      <filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>
-      <filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>
-      <filter id="b12l" filterUnits="userSpaceOnUse" x="-60" y="-60" width="1720" height="1120"><feGaussianBlur stdDeviation="12"/></filter>
-      <filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>
+      <!-- #498 pinned b2l/b6l/b12l/b20l to a userSpaceOnUse region matching
+           the viewBox — #501 rasterises every element that referenced them
+           (.zodiacal, .scatter, the sun's core dot, the scattering arc, the
+           blurred half of .rim) and removes the live defs entirely: each
+           raster carries its own copy of whichever of these four it needs
+           (GROUPS above). Nothing here still points at "b2l"/"b6l"/"b12l"/
+           "b20l" live. -->
       <!-- entropy: rays are light through air, not vector wedges -->
       <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
         <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>
@@ -118,7 +255,9 @@
     </defs>
     <g class="dawnlayer">
       <rect x="0" y="0" width="1600" height="1000" fill="url(#skywash)"/>
-      <ellipse class="zodiacal" cx="800" cy="640" rx="300" ry="480" fill="url(#zod)" filter="url(#b20l)"/>
+      <!-- #501: rasterised (GROUPS.zod); class stays here since blend/opacity
+           are display-time CSS, not baked into the raster. -->
+      <image class="zodiacal" bind:this={imgZod} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       <g class="rays">
         <g class="sway1" fill="url(#rayg)" filter="url(#rayrough)">
           <path d="M 800 924 L 736 356 L 772 362 Z"/>
@@ -135,28 +274,30 @@
           <path d="M 800 924 L 1200 596 L 1156 562 Z"/>
         </g>
       </g>
+      <!-- #501: the five limb scattering rings, rasterised as one image
+           (GROUPS.scatter) so .scatter's own breathe-band opacity animation
+           still applies to the whole ring stack via this <g>. -->
       <g class="scatter">
-        <circle cx="800" cy="3920" r="3122" fill="none" stroke="#7a2c18" stroke-opacity=".1" stroke-width="150" filter="url(#b20l)"/>
-        <circle cx="800" cy="3920" r="3060" fill="none" stroke="#e2772b" stroke-opacity=".16" stroke-width="84" filter="url(#b20l)"/>
-        <circle cx="800" cy="3920" r="3026" fill="none" stroke="#f0b429" stroke-opacity=".28" stroke-width="34" filter="url(#b12l)"/>
-        <circle cx="800" cy="3920" r="3010" fill="none" stroke="#ffd989" stroke-opacity=".4" stroke-width="12" filter="url(#b6l)"/>
-        <circle cx="800" cy="3920" r="3003" fill="none" stroke="#fff3d6" stroke-opacity=".65" stroke-width="4" filter="url(#b2l)"/>
+        <image bind:this={imgScatter} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       </g>
       <g class="sunpt">
         <g class="sunpt-breathe">
           <circle cx="800" cy="922" r="520" fill="url(#sun-wide)"/>
           <circle cx="800" cy="922" r="240" fill="url(#sun-mid)"/>
           <circle cx="800" cy="920" r="86" fill="url(#sun-core)"/>
-          <circle cx="800" cy="919" r="20" fill="#fffdf6" filter="url(#b6l)"/>
+          <!-- #501: rasterised (GROUPS.sunpt) — the only one of these four
+               that carried a filter; the other three stay live vectors. -->
+          <image bind:this={imgSunpt} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
         </g>
-        <path d="M 560 934 A 3000 3000 0 0 1 1040 934" fill="none" stroke="#ffedc2"
-              stroke-width="3" stroke-linecap="round" opacity=".7" filter="url(#b2l)"/>
+        <!-- #501: rasterised (GROUPS.sunarc). -->
+        <image bind:this={imgSunarc} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       </g>
     </g>
     <!-- the planet: everything below the limb is night -->
     <circle cx="800" cy="3920" r="3000" fill="#04060e"/>
-    <circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
-            stroke-width="6" stroke-opacity=".35" filter="url(#b6l)" class="rim"/>
+    <!-- #501: rasterised (GROUPS.rim) — the blurred half of the rim; class
+         stays here since .rim's fade-in transition is display-time CSS. -->
+    <image class="rim" bind:this={imgRim} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
     <circle class="rim" cx="800" cy="3920" r="3000" fill="none" stroke="url(#rimg)"
             stroke-width="2.4" stroke-opacity=".85"/>
     <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
