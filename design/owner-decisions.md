@@ -597,9 +597,9 @@ The full open-questions list, walked in order and ruled:
   /logout sunset retires. NEW: clicking the SUN at the centre of the
   dial navigates to that household's view.
 - **Settings: EVA wins, the Movement dies** (owner): the Movement is
-  a no (file stays as the record). EVA is the settings concept "for
-  now but it needs work" — specifics to be gathered before a second
-  pass is built.
+  a no (file stays as the record). EVA is the settings concept — and
+  (owner, later): EVA SHIPS AS IT IS for now; the "needs work" second
+  pass is deferred to some future time, not a v1.3 gate.
 - **Household backdrop: inside this system** (owner): the berth is a
   no (record kept); H2 — the household's own constellation at room
   scale, fully data-true — is the household screen's backdrop.
