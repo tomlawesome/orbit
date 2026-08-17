@@ -72,14 +72,14 @@ test.describe("reminder timing settings", () => {
     const writeResponse = await page.request.put("/api/settings/reminders", { headers, data: pair });
     expect(writeResponse.ok()).toBeTruthy();
     const written = (await writeResponse.json()) as { reminders: ReminderPair };
-    expect(written.reminders).toMatchObject(pair);
+    expect(written.reminders).toMatchObject({ ...pair });
 
     // The round trip: a fresh GET, not the write's own echo, reads back the
     // same pair — proof that it is stored, not only accepted.
     const readResponse = await page.request.get("/api/settings/reminders");
     expect(readResponse.ok()).toBeTruthy();
     const read = (await readResponse.json()) as { reminders: ReminderPair };
-    expect(read.reminders).toMatchObject(pair);
+    expect(read.reminders).toMatchObject({ ...pair });
 
     // One workspace assertion: the authenticated-identity read the workspace
     // shell makes on every load agrees with the half of the pair a reader
