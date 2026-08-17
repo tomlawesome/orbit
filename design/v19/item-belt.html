@@ -45,15 +45,17 @@
    * When an item is at the apex, its documents are bodies in the belt beside
    * it — not a list on the card — and they must be unmistakable against
    * everything else. He asked for a different-coloured perimeter line, or a
-   * glow or gentle pulse, and floated "Both?": so a document body wears a
-   * distinct accent PERIMETER RING and a soft GLOW, always, and a slow PULSE
-   * on the ring is offered as the second variant (the DOCS toggle in the demo
-   * rail) for him to pick between. The pulse dies under reduced motion.
+   * glow or gentle pulse, and floated "Both?" — then, shown the two variants
+   * side by side, RULED for all of it: a document body wears a distinct
+   * accent PERIMETER RING, a soft GLOW, and a slow 2.6s PULSE, one treatment,
+   * no toggle. Under reduced motion the breath stops and the ring and glow
+   * stay: the mark is obvious with no motion at all.
    * Clicking a document body rolls it to the apex and it becomes the document
    * card — what it is, when it arrived, that it scanned clean, and the
    * original in your hands (the page render itself still waits on #476).
-   * When a document is centred the same ring and glow appear on ITS ITEM,
-   * sitting one short step away, so the way back is never in doubt.
+   * When a document is centred the same mark — ring, glow and breath —
+   * appears on ITS ITEM, one short step away, so the way back is never in
+   * doubt.
    *
    * WHAT THE BELT IS, THEN. Every item in the household is a body in one
    * band, and the band is TIME:
@@ -95,13 +97,21 @@
    *    to the line of sight, node line rolled 12°, projected to screen. The
    *    left flank falls ~300px and turns toward you, the right falls ~240px
    *    and runs away foreshortened. Nothing is symmetric.
-   * 4. DENSER AND DISORDERLY. ~2100 seeded ambient bodies at scattered radii
-   *    (peaked ±19% of A, one in seven thrown 1.75× further out) and heights
-   *    (±6.6% of A), dust to rubble, drawn at depth — nearer bodies larger,
-   *    brighter, faster, the highest passing in FRONT of the card. They drift
-   *    for ever and NEVER loop: a body leaving the left edge is respawned on
-   *    the right out of the same running seeded stream (§14, "the sky never
-   *    loops"), and inner bodies drift faster than outer — Keplerian shear.
+   * 4. DENSER AND DISORDERLY, AND SOWN THE WHOLE WAY ROUND. Seeded ambient
+   *    bodies at scattered radii (peaked ±19% of A, one in seven thrown 1.75×
+   *    further out) and heights (±6.6% of A), dust to rubble, drawn at depth
+   *    — nearer bodies larger, brighter, faster, the highest passing in FRONT
+   *    of the card. ~2100 of them fill one skyful, and the bed is sown across
+   *    every skyful the roll can reach: the screen window (2.01 rad at
+   *    1280×800, 2.45 at 1600×1000) plus the manifest's own roll span
+   *    (3.10 rad, Window cleaning to Gas safety), so 5341 bodies at 1280×800
+   *    and 4756 at 1600×1000 — the same density per radian, over 2.5× the
+   *    ground. Centring an end item now looks out on rock, not on the bare
+   *    ring the fixed-window sowing used to leave behind it.
+   *    They drift for ever and NEVER loop: a body that leaves the arc for
+   *    good is rebuilt at its far end out of the same running seeded stream
+   *    (§14, "the sky never loops"), and inner bodies drift faster than
+   *    outer — Keplerian shear.
    *    That ambient bed is scenery. It is also the answer to a thin
    *    household: when there are not enough real items to fill the band, the
    *    band is still a belt (owner, confirmed).
@@ -255,23 +265,27 @@
 
   /* ---- THE DOCUMENTS' MARK -------------------------------------------
      The owner: "a different coloured perimeter line around them, and/or
-     some kind of glow, or gentle pulse... Both?"
-     Both, then. A document body is a small rock inside a hard PERIMETER
-     RING in --paper (a line no item ever wears: items wear their urgency
-     tone, dust wears none) with a soft GLOW behind it, over a faint disc so
-     the ring reads even where the band is thick with rubble. The PULSE is
-     the second variant, off by default and switched on from the demo rail,
-     so the owner can judge them side by side; it is a 2.6s breath on the
-     ring's own opacity and the halo's radius, nothing travels, and reduced
-     motion kills it outright with everything else. */
+     some kind of glow, or gentle pulse... Both?" — and, shown the two
+     variants side by side, he took all three. RULED: ring + glow + pulse is
+     the one and only treatment; there is no variant left to switch, so the
+     demo rail's DOCS chip is gone with it.
+     A document body is a small rock inside a hard PERIMETER RING in --paper
+     (a line no item ever wears: items wear their urgency tone, dust wears
+     none) with a soft GLOW behind it, over a faint disc so the ring reads
+     even where the band is thick with rubble — and the whole mark BREATHES,
+     a 2.6s cycle on the ring's own opacity and the halo's radius. Nothing
+     travels; it is a light coming up and going down.
+     Reduced motion kills the breath with every other animation, and the
+     ring and the glow stay exactly where they are — the mark still has to
+     be the loudest thing in the band without a single moving pixel. */
   .doclabel{fill:var(--paper);font-size:10.5px}
-  .halo{fill:var(--paper);opacity:.10}
-  .ring{fill:none;stroke:var(--paper);stroke-width:1.7;opacity:.95}
+  .halo{fill:var(--paper);opacity:.10;
+        animation:halobreath 2.6s ease-in-out infinite alternate;
+        transform-box:fill-box;transform-origin:center}
+  .ring{fill:none;stroke:var(--paper);stroke-width:1.7;opacity:.95;
+        animation:ringbreath 2.6s ease-in-out infinite alternate}
   .ringsoft{fill:none;stroke:var(--paper);stroke-width:3.2;opacity:.5;
             filter:url(#docglow)}
-  body.pulse .ring{animation:ringbreath 2.6s ease-in-out infinite alternate}
-  body.pulse .halo{animation:halobreath 2.6s ease-in-out infinite alternate;
-                   transform-box:fill-box;transform-origin:center}
   @keyframes ringbreath{from{opacity:.42}to{opacity:1}}
   @keyframes halobreath{from{opacity:.05;transform:scale(.9)}
                         to{opacity:.17;transform:scale(1.14)}}
@@ -396,8 +410,8 @@
   @media (prefers-reduced-motion: reduce){
     /* The swap is instant rather than animated — the belt still puts the
        clicked body at the apex, it simply arrives there, the documents are
-       simply already out, the pulse never breathes, and the band's drift
-       holds still. */
+       simply already out, the mark's breath never runs (its ring and glow
+       stay put, at rest), and the band's drift holds still. */
     *{animation:none!important}
     .cardwrap{transition:none!important}
   }
@@ -460,10 +474,6 @@
   <button id="c-last" onclick="centreById('i-gas')">later end</button>
   <button onclick="arriveAt('i-boiler')" title="as a click on the manifest row would: the belt IS the item screen">arrive from home</button>
   <i></i>
-  <span>DOCS</span>
-  <button id="hl-a" onclick="setPulse(false)" aria-pressed="true">ring + glow</button>
-  <button id="hl-b" onclick="setPulse(true)" aria-pressed="false">+ pulse</button>
-  <i></i>
   <span>BELT</span>
   <button id="b-full" onclick="setHousehold('lawson')" aria-pressed="true">14 items</button>
   <button id="b-empty" onclick="setHousehold('empty')" aria-pressed="false">empty</button>
@@ -479,7 +489,7 @@
 <footer>orbit · the item belt v4 · issue #458 · the owner's correction: <b>an ITEM belt — the whole manifest laid out in time</b>, not one item's documents ·
 every item is a body in one band, in strict order of when it comes due, sooner left to later right — jumbled through the band's thickness, never out of order, so an item's neighbours here are its neighbours in the list ·
 this surface IS the item screen: arriving at an item from anywhere lands you here with it seated at the apex as its card ·
-the centred item's documents ride in the belt beside it, ringed and glowing so they cannot be missed; click one and it rolls in and becomes its own card ·
+the centred item's documents ride in the belt beside it — ringed, glowing and slowly breathing so they cannot be missed; click one and it rolls in and becomes its own card ·
 the search box lights the matches and dims the rest — the belt keeps its shape — and enter rolls the nearest hit to the apex</footer>
 
 <script>
@@ -747,8 +757,25 @@ const bandRng = rngFrom(19170812);
  * outer ones (Keplerian shear, softened to a ±15% spread so the band shears
  * rather than smears), and near bodies faster than far ones. A body that
  * leaves the left edge does not come back: it is REBUILT from the running
- * stream at the right edge with fresh radius, height, size and shape. The
+ * stream at the far end with fresh radius, height, size and shape. The
  * band you are shown one minute is not the band you were shown before.
+ *
+ * WHERE IT IS SOWN — the correction. The bed used to be sown across the
+ * screen window and nothing else: [PHI_R − M, PHI_L + M], the arc the sky
+ * shows AT REST. But the ambient bodies ride the roll like everything else
+ * in the field, so centring the sooner end carried the whole populated
+ * stretch off to the left and left bare ring behind it — a belt that ran
+ * out. The bed is now sown across THE WHOLE ARC THE CAMERA CAN EVER REACH:
+ * the screen window, plus the roll span the seats themselves produce
+ * (sooner-most seat to later-most seat, measured off the built manifest, not
+ * guessed at), so every roll looks out on ground that was already sown.
+ *
+ * A body is held in BAND COORDINATES — where it sits when the belt is rolled
+ * to its sooner end — because that is the one frame the roll cannot move.
+ * Its own arc is [PHI_R − M − REACH·rate, PHI_L + M]: a fast body has to
+ * start further out to still be in the sky at the later end, and because
+ * every rate class is sown uniformly across its own arc, the density the
+ * screen sees is the same at every roll.
  *
  * These are inert decor and nothing else. They are also the reason a
  * household with three items still has a belt (owner, confirmed): the real
@@ -756,7 +783,25 @@ const bandRng = rngFrom(19170812);
  * ==================================================================== */
 let rubble = [];
 
-function spawn(rk, phiNow) {
+/* The screen window's own overhang, either side, in radians of ring: a body
+   is alive a little past the edge so nothing is seen to pop. */
+const BAND_MARGIN = 0.16;
+/* The roll's reach, off the seats. ROLL_BASE is the sooner-most seat (the
+   roll at the sooner end); ROLL_REACH is the angle from there to the
+   later-most, documents included, since a paper can be centred too. */
+let ROLL_BASE = 0, ROLL_REACH = 0;
+
+function rollRange() {
+  ROLL_BASE = 0; ROLL_REACH = 0;
+  if (!bodies.length) return;
+  let lo = bodies[0].off, hi = bodies[0].off;
+  for (const b of bodies) { if (b.off < lo) lo = b.off; if (b.off > hi) hi = b.off; }
+  ROLL_BASE = lo; ROLL_REACH = hi - lo;
+}
+
+/* u is where along this body's OWN sown arc it lands, 0 at the far end the
+   band feeds from and 1 at the edge it retires over. Respawn passes 0. */
+function spawn(rk, u) {
   const r = bandRng;
   /* A belt has a core and a fray, not an even slab: radius and height come
      off a peaked distribution, and one body in seven is a stray thrown well
@@ -780,17 +825,24 @@ function spawn(rk, phiNow) {
     }
     rk.poly = pts;
   }
-  /* stored as the ring angle it was BORN at, so the running drift and the
-     belt's roll both apply to it at its own rate for the rest of its life */
-  rk.phi = phiNow - (drift + roll) * rk.rate;
+  /* Sown across the arc THIS body can ever be seen on, then stored as the
+     ring angle it was BORN at, so the running drift and the belt's roll both
+     apply to it at its own rate for the rest of its life. */
+  const lo = PHI_R - BAND_MARGIN - ROLL_REACH * rk.rate;
+  const hi = PHI_L + BAND_MARGIN;
+  rk.phi = lo + u * (hi - lo) - (drift + ROLL_BASE) * rk.rate;
   return rk;
 }
 
 function buildBand() {
-  const n = bodies.length ? 2100 : 880;
+  rollRange();
+  /* Density per arc-length is the constant, not the count: the sky's own
+     window keeps exactly the population it had, and the ground the roll adds
+     is sown at the same rate. */
+  const win = PHI_L - PHI_R + BAND_MARGIN * 2;
+  const n = Math.round(((bodies.length ? 2100 : 880) / win) * (win + ROLL_REACH));
   rubble = [];
-  for (let i = 0; i < n; i++)
-    rubble.push(spawn({}, PHI_R - 0.16 + bandRng() * (PHI_L - PHI_R + 0.32)));
+  for (let i = 0; i < n; i++) rubble.push(spawn({}, bandRng()));
 }
 
 /* ==================================================================== *
@@ -1251,8 +1303,17 @@ function paintBand() {
   const fadeIn = 0.14 * W;   /* the belt leaves the sky, it does not stop */
 
   for (const rk of rubble) {
-    const phi = rk.phi + (drift + roll) * rk.rate;
-    if (phi > PHI_L + 0.16) { spawn(rk, PHI_R - 0.16); continue; }
+    /* Retirement is judged in BAND coordinates — at the sooner end of the
+       roll, the one frame the belt cannot move — so a body is only ever
+       rebuilt when it has left the arc for good, not merely when the current
+       roll has carried it off this particular screen. It re-enters at the
+       far end of the widened arc, freshly made: never a loop. */
+    const band = rk.phi + (drift + ROLL_BASE) * rk.rate;
+    if (band > PHI_L + BAND_MARGIN) { spawn(rk, 0); continue; }
+    const phi = band + (roll - ROLL_BASE) * rk.rate;
+    /* Sown far wider than one sky, so most of the bed is over the horizon at
+       any one roll: cost it out before projecting it. */
+    if (phi < PHI_R - BAND_MARGIN || phi > PHI_L + BAND_MARGIN) continue;
     const p = project(phi, rk.rho, rk.h);
     if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
 
@@ -1665,13 +1726,6 @@ function setSwatch(name, btn) {
     b.setAttribute("aria-pressed", String(b === btn));
   requestAnimationFrame(() => { readTones(); buildHaze(); paintBand(); });
 }
-/* The owner's two variants of the documents' mark, side by side. */
-function setPulse(on) {
-  document.body.classList.toggle("pulse", on);
-  document.getElementById("hl-a").setAttribute("aria-pressed", String(!on));
-  document.getElementById("hl-b").setAttribute("aria-pressed", String(on));
-}
-
 /* ---- keyboard --------------------------------------------------------
    ← and → step through the belt in date order, which is its whole grammar —
    over the papers too, when they are out, because they are then bodies in
