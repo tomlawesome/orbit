@@ -33,13 +33,19 @@
 
 <div id="dawn" class:shown>
   <div class="sky" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="#e9edf8"><g id="lg-far">
+    <!-- #444: the star fills follow the packs. cfa8388 made every screen's
+         starfield read --star-far/--star-near, login's included, and the
+         refactor that lifted this sky out of login/+page.svelte into a shared
+         component brought the literals back with it. Restored here: on the dark
+         packs the tokens ARE these values, so nothing moves; on a daylight pack
+         the stars invert to ink instead of vanishing. -->
+    <g class="far" fill="var(--star-far, #e9edf8)"><g id="lg-far">
       {#each DAWN_FAR as s, i (i)}
         {#if s.delay}<circle class="tw" style="animation-delay:{s.delay}s" cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
         {:else}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>{/if}
       {/each}
     </g><use href="#lg-far" x="1600"/></g>
-    <g class="near" fill="#f4f0ff"><g id="lg-near">
+    <g class="near" fill="var(--star-near, #f4f0ff)"><g id="lg-near">
       {#each DAWN_NEAR as s, i (i)}
         <circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
       {/each}
@@ -82,10 +88,27 @@
         <stop offset="86%" stop-color="#a2492a" stop-opacity=".2"/>
         <stop offset="100%" stop-color="#e2772b" stop-opacity=".26"/>
       </linearGradient>
-      <filter id="b2l"><feGaussianBlur stdDeviation="2"/></filter>
-      <filter id="b6l"><feGaussianBlur stdDeviation="6"/></filter>
-      <filter id="b12l" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="12"/></filter>
-      <filter id="b20l" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="20"/></filter>
+      <!--
+        #498: filterUnits="userSpaceOnUse" with an absolute region pinned to
+        the 1600×1000 viewBox (plus a margin a few multiples of stdDeviation,
+        wide enough that the blur's own falloff never shows a cut edge).
+        Without it these four filters default to a region sized off the
+        FILTERED ELEMENT'S bounding box — and every circle they are hung on
+        below (.scatter, .rim, the sun point) is a limb drawn at cy=3920
+        r≈3000+ so its top edge lands on y=920: correct geometry for the
+        planet, but a bounding box thousands of units on a side, so a "180%"
+        or "220%" region is thousands of units too. WebKit rasterises that
+        region in software; measured cost of a single /login paint dropped
+        from ~7–12s to ~0.8s in this sandbox once the four filters below were
+        capped to the viewBox instead (Chromium GPU-composites either way and
+        did not regress). Nothing visible moves: everything painted by these
+        filters already lives inside the viewBox, so the smaller region loses
+        no pixel that was ever on screen.
+      -->
+      <filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>
+      <filter id="b6l" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="b12l" filterUnits="userSpaceOnUse" x="-60" y="-60" width="1720" height="1120"><feGaussianBlur stdDeviation="12"/></filter>
+      <filter id="b20l" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="20"/></filter>
       <!-- entropy: rays are light through air, not vector wedges -->
       <filter id="rayrough" x="-30%" y="-30%" width="160%" height="160%">
         <feTurbulence type="fractalNoise" baseFrequency="0.004 0.03" numOctaves="2" seed="9" result="n"/>

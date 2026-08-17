@@ -29,13 +29,18 @@
 
 <div id="dusk">
   <div class="sky" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="#e9edf8"><g id="dk-far">
+    <!-- #444: the star fills follow the packs, as cfa8388 made them everywhere
+         else. The literals came back when this sky moved out of
+         logout/+page.svelte into a shared component; the tokens equal these
+         values on the dark packs, so nothing moves, and a daylight pack finally
+         gets stars it can see. -->
+    <g class="far" fill="var(--star-far, #e9edf8)"><g id="dk-far">
       {#each DUSK_FAR as s, i (i)}
         {#if s.delay}<circle class="tw" style="animation-delay:{s.delay}s" cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
         {:else}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>{/if}
       {/each}
     </g><use href="#dk-far" x="1600"/></g>
-    <g class="near" fill="#f4f0ff"><g id="dk-near">
+    <g class="near" fill="var(--star-near, #f4f0ff)"><g id="dk-near">
       {#each DUSK_NEAR as s, i (i)}
         <circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
       {/each}
@@ -64,9 +69,17 @@
         <stop offset="0%" stop-color="#d98fae" stop-opacity=".2"/>
         <stop offset="100%" stop-opacity="0"/>
       </radialGradient>
-      <filter id="d-b6"><feGaussianBlur stdDeviation="6"/></filter>
-      <filter id="d-b14" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>
-      <filter id="d-b24" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="24"/></filter>
+      <!-- #498: the same fix as Dawn.svelte's b2l/b6l/b12l/b20l, for the same
+           reason — d-glow, .belt and .afterglow all hang these three filters
+           on shapes whose own bounding box runs thousands of units past the
+           1600×1000 viewBox (the limb's cy=3920 r≈3000+ again, plus the belt
+           and glow ellipses' own oversized rx). Pinning the filter region to
+           the viewBox instead of a percentage of that bounding box is what
+           made the measured single-paint cost fall in Dawn; nothing visible
+           moves, since nothing these filters paint was ever outside it. -->
+      <filter id="d-b6" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="d-b14" filterUnits="userSpaceOnUse" x="-70" y="-70" width="1740" height="1140"><feGaussianBlur stdDeviation="14"/></filter>
+      <filter id="d-b24" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="24"/></filter>
     </defs>
     <rect x="0" y="0" width="1600" height="1000" fill="url(#d-wash)"/>
     <ellipse cx="800" cy="960" rx="900" ry="300" fill="url(#d-glow)" filter="url(#d-b24)"/>
