@@ -576,6 +576,14 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Accessibility wins, originals banked** (owner, 2026-08-17): the
+  accessibility-friendly option is adopted IN ALL CASES — star-chart's
+  faint tier lifts to #737e9e, the clouds/dawn deep marks gain the
+  knockout halo. The original values are recorded in a dedicated
+  issue whose closing gate is the owner's acceptance; anything that
+  ruins the aesthetic gets reverted surgically from the bank, one by
+  one. The a11y-options-menu idea remains the mitigation of last
+  resort.
 - **The GPU law** (owner, 2026-08-17): visuals are produced in ways
   every engine hardware-accelerates. Live SVG filter math is the known
   slow lane (WebKit rasterises it on CPU regardless of device GPU);
