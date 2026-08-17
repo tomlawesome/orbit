@@ -3,7 +3,7 @@
   import { createFlight, UP, DOWN } from "./engine.js";
   import {
     ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced,
-    runTimeline, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
+    runTimeline, MARK_ARRIVE, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
   } from "./timeline.js";
   import "./flight.css";
 
@@ -67,8 +67,10 @@
   });
 
   /* the mark leaves the lockup and rides to the centre of the screen — and the
-     dial's sun, 2s later, blooms out of exactly that point */
-  function liftMark(srcSvg, toY, grow, ms, instant) {
+     dial's sun, 2s later, blooms out of exactly that point. `size` is where it
+     ARRIVES, not a multiplier: the lockup's ring is the 420px hero now, so the
+     ride contracts rather than grows (see MARK_ARRIVE). */
+  function liftMark(srcSvg, toY, size, ms, instant) {
     if (!srcSvg) return;
     const r = srcSvg.getBoundingClientRect();
     markEl.style.transition = "none";
@@ -77,7 +79,6 @@
     markEl.classList.remove("collapse");
     markEl.classList.add("on");
     srcSvg.style.visibility = "hidden";
-    const size = r.width * grow;
     const settle = () => {
       markEl.style.transition = instant ? "none" : rideTransition(ms);
       markEl.style.left = (innerWidth / 2 - size / 2) + "px";
@@ -130,8 +131,8 @@
           break;
         case "mark":
           b.classList.remove("arming");
-          liftMark(document.querySelector("#login-glyph svg"), innerHeight * 0.5, 2.6,
-                   MARK_RIDE_UP, pinned !== undefined);
+          liftMark(document.querySelector("#login-glyph svg"), innerHeight * 0.5,
+                   MARK_ARRIVE, MARK_RIDE_UP, pinned !== undefined);
           break;
         case "release": b.classList.remove("showdawn"); break;
         case "markOut": dropMark(); break;
@@ -237,10 +238,15 @@
 
 <canvas id="warp" aria-hidden="true" bind:this={canvas}></canvas>
 <div id="flightmark" aria-hidden="true" bind:this={markEl}>
+  <!-- Drawn to the HERO's proportions (ring stroke 2, planet r7 of the
+       200-unit box), because that is the mark it takes over from: the swap at
+       260ms happens at the hero's own 420px rect, and anything heavier would
+       pop. The white core is the one thing the hero does not have — it is the
+       heart lighting as the ring leaves, and the point the sun blooms from. -->
   <svg viewBox="0 0 200 200">
-    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="6" opacity=".85"/>
+    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="2" opacity=".85"/>
     <circle class="core" cx="100" cy="100" r="7"/>
-    <circle cx="163" cy="63.5" r="15" fill="#d8b45a"/>
+    <circle cx="163" cy="63.5" r="7" fill="#d8b45a"/>
   </svg>
 </div>
 <div id="launchname" aria-hidden="true" bind:this={nameEl}>{name}<i>{subtitleText}</i></div>

@@ -5,7 +5,8 @@ import {
   bloomAt, hexa, mirror,
 } from "$lib/flight/engine.js";
 import {
-  D, T, ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced, runTimeline,
+  D, MARK_ARRIVE, MARK_RIDE_DOWN, MARK_RIDE_UP, T,
+  ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced, runTimeline,
 } from "$lib/flight/timeline.js";
 import { LAUNCH_KEY, clearLaunch, consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
 import { DAWN_FAR, DAWN_NEAR, DUSK_FAR, DUSK_NEAR } from "$lib/flight/starfields.js";
@@ -164,6 +165,19 @@ describe("the wall clock", () => {
     /* the instrument leaves first, because it arrived last */
     expect(D.withdraw).toBeLessThan(D.disperse);
     expect(D.disperse).toBeLessThan(D.warp);
+  });
+
+  it("keeps the mark's ride and its arrival size", () => {
+    /* The ride windows are the sheet's: 260 -> 1340 up, mirrored to 923 down. */
+    expect(MARK_RIDE_UP).toBe(1080);
+    expect(MARK_RIDE_DOWN).toBe(923);
+    /*
+     * And where it arrives is now stated as a SIZE, because the lockup it
+     * leaves is the 08-14 hero (420px ring) rather than the sheet's old 64px
+     * badge — so the ride contracts instead of growing (§15, owner
+     * 2026-08-17). The landing size itself is untouched: the ratified 2.6x64.
+     */
+    expect(MARK_ARRIVE).toBeCloseTo(2.6 * 64, 12);
   });
 
   it("orders every beat", () => {

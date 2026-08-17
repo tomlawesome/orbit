@@ -13,8 +13,11 @@
    * the same breath that they are NOT first-run dressing: they ship as THE
    * login and logout screens for every user, every time; first-run just
    * happens to use them. So this screen is design/v19/first-run.html's login
-   * layer at 159ec9f, drawn as it draws it: the dawn limb, the lockup at
-   * 37vh, the gold pill low on the frame, the ribbon under it.
+   * layer, drawn as it draws it: the dawn limb, and — since the owner's
+   * 2026-08-17 correction, applied to sheet and app together — the 2026-08-14
+   * lockup on top of it: the ring large and centred, `orbit` inside it, the
+   * small gold pill inside the ring beneath the word, and no ribbon and no
+   * footer anywhere on the screen.
    *
    * THE HONEST DEVIATION, stated where it happens. The mockup's flight runs
    * unbroken from this button. Pressing it in the product leaves Orbit for the
@@ -87,7 +90,13 @@
 <div class="signin-stage" aria-hidden="true"></div>
 <Dawn shown>
   {#snippet children()}
-    <button class="gate" id="gate" onclick={press}>Continue with your identity provider</button>
+    <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
+         pill was reworded to match. The sheet's longer
+         "Continue with your identity provider" belonged to the v18 chrome
+         struck on 2026-08-17 — and would not fit inside the ring in any case.
+         What it said is still true and is still said, out loud, one screen
+         later: pressing this leaves for the identity provider. -->
+    <button class="gate" id="gate" onclick={press}>Sign in</button>
   {/snippet}
 </Dawn>
 <Grain slope={0.08} />

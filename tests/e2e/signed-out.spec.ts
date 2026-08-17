@@ -22,8 +22,14 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
   // #410/§15: "/" is the ratified v19 sign-in now — the door every reader
   // meets. The retiring engine's own boundary is unchanged behind it.
   await page.goto("/");
-  await expect(page.getByRole("button", { name: "Continue with your identity provider" })).toBeVisible();
+  // The gate reads "Sign in" since the 2026-08-17 reconciliation: the flight's
+  // login screen went back to the ratified 2026-08-14 one, whose pill sits
+  // inside the ring and carries that word (§15).
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   await expect(page.locator("#dawn .lockup .name")).toHaveText("orbit");
+  // No ribbon and no footer on the login — owner, verbatim: "there shouldnt be
+  // a footer" (§15, 2026-08-17). This is the assertion that keeps it gone.
+  await expect(page.locator("#dawn .below")).toHaveCount(0);
   await expect(page.locator("button.topbar-profile")).toHaveCount(0);
   await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
 

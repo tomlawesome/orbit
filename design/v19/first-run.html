@@ -135,11 +135,14 @@
      POST /api/households/{id}/join-requests   (§11, #453) — which is what
    every row of the newcomer's card, and every constellation behind it, does.
 
-   NOT YET RATIFIED, FLAGGED: there is no logout/goodbye screen anywhere in
-   design/v19 or design/family. The dusk surface at the end of the descent is
-   a first sketch built to the family's own rule (dawn in, dusk out) and
-   should get its own issue and its own review rather than being adopted by
-   the back door.
+   RATIFIED SINCE (owner, 2026-08-17): the flag that used to stand here — "no
+   logout/goodbye screen exists anywhere; the dusk is a first sketch and
+   should not be adopted by the back door" — is answered. The owner
+   re-confirmed that THE DESCENT IS THE DEFAULT LOGOUT, retired the old
+   /logout sunset in its favour, and ruled that the goodbye must carry the
+   login's own reversed motion and the login's own sign-in button. So the dusk
+   below is the logout screen, not a sketch of one, and the app's /logout now
+   serves it.
    ════════════════════════════════════════════════════════════════════════ */
 
   :root{
@@ -209,11 +212,15 @@
        overflow:hidden}
 
   /* ══ 1 · THE LOGIN, REPRODUCED ═══════════════════════════════════════════
-     design/family/login.html, carried across so the first-run card has the
-     real thing under it: the same drifting tiles, the same dawn world (its
-     defs, its rays, its scattering rings, its point of first light), the
-     same lockup, gate and strapline, the same one-time "first light" reveal.
-     Only the housing is new. */
+     The real login under the first-run card: the same drifting tiles, the
+     same dawn world (its defs, its rays, its scattering rings, its point of
+     first light), the same one-time "first light" reveal. Only the housing is
+     new.
+
+     The SKY here is design/family/login.html's, carried across. The CHROME on
+     top of it is NOT — that sheet is v18 and predates the 2026-08-14 rulings,
+     and reproducing its lockup, its wide pill and its ribbon was the mistake
+     the owner corrected on 2026-08-17. See the login-chrome block below. */
   #dawn,#dusk{position:fixed;inset:0;z-index:1;opacity:0;
               transition:opacity .7s ease}
   body.showdawn #dawn{opacity:1}
@@ -253,29 +260,69 @@
   .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
   @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 
-  /* the login's own chrome: the lockup (glyph + wordmark), the gate, the
-     footer. It is the LOGIN SCREEN, and — since §15's "the create screen is
-     not 'form over login'" — it is not on the screen at the same time as the
-     create card. See the reclaim rules below. */
-  .loginchrome{position:absolute;inset:0;z-index:3;
+  /* ── THE LOGIN SCREEN, RECONCILED TO THE 08-14 RULINGS ───────────────────
+     §15, owner 2026-08-17: "The flight's login screen uses THE MOST RECENT
+     APPROVED LOGIN (the 08-14 rulings: no ribbon, the current lockup) — the
+     sheet's accidental resurrection of the older styling loses; and THERE
+     SHOULD BE NO FOOTER on the login."
+
+     What this sheet used to draw here was design/family/login.html's v18
+     chrome: a 64px badge with a 58px word under it, a wide gold pill low on
+     the frame, and the PRIVATE · SELF-HOSTED · YOURS ribbon at the foot. That
+     is the older styling, and it loses. What stands instead is §10's own
+     list, as built and baselined on 2026-08-14 (web/src/routes/login at
+     0ff28da/cfa8388, and the sunset baseline that was matched to it):
+
+       · the lockup is CENTRED in the viewport;
+       · the mark is much larger — the ring at 420px with the word `orbit` set
+         plain INSIDE it and no filled centre, because the word occupies that
+         space (CON-19's sign-in exception, amended 2026-08-14);
+       · the ask sits inside the ring directly beneath the word. §10 records
+         an intermediate of that same day — `Authenticate` in a thin white
+         outline pill — which lost before the day was out: white-on-accent
+         fails contrast in every pack (worst case 1.66:1), so the pill was
+         "restored and sized down" in dark ink on the accent and the word
+         settled at `Sign in`, which is then the word the ratified sunset's
+         own pill was reworded to match;
+       · the ribbon is removed ENTIRELY — and the 2.6:1 contrast it carried
+         (#4d5878 on #04060e) goes with it. There is no footer.
+
+     The dusk goodbye wears this same lockup (see 4b): both ends of a session
+     show one face, and the descent's mark sets down on the shape it left. */
+  .loginchrome{position:absolute;inset:0;z-index:3;display:grid;place-items:center;
                transition:opacity .8s ease,visibility .8s,
                           transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
-  .lockup{position:absolute;left:0;right:0;top:37vh;text-align:center;
-          transform-origin:50% 0;
+  /* Glyph, word and ask share ONE grid cell, so the word is centred on the
+     ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+  .lockup{position:relative;display:inline-grid;place-items:center;text-align:center;
           transition:transform 1s cubic-bezier(.3,.7,.3,1)}
-  .lockup .glyph{margin-bottom:18px}
-  .lockup .name{font:600 58px var(--display);letter-spacing:.015em;line-height:1;color:#e9edf8}
-  .gate-wrap{position:absolute;left:0;right:0;bottom:23vh;text-align:center;
-             opacity:0;transform:translateY(10px);
-             transition:opacity 1.6s ease 1.6s,transform 1.6s ease 1.6s,bottom 1s cubic-bezier(.3,.7,.3,1)}
-  body.lit .gate-wrap{opacity:1;transform:none}
-  .gate{font:600 14.5px var(--display);color:#04060e;background:#d8b45a;
-        border:0;border-radius:99px;padding:14px 34px;cursor:pointer;
-        box-shadow:0 0 34px rgba(216,180,90,.25);transition:box-shadow .3s,filter .3s}
+  .lockup .glyph{grid-area:1/1;line-height:0}
+  /* The one motion CON-19 permits the mark anywhere: the planet drifts the
+     ring, once per 40s. The dusk unwinds it — see 4b. */
+  .lockup .glyph .tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
+  @keyframes spinback{to{transform:rotate(360deg)}}
+  .lockup .name{grid-area:1/1;font:600 72px var(--display);letter-spacing:.015em;
+                line-height:1;color:#e9edf8}
+  /* Dropped clear of the word inside the ring: 36px is half the name's line
+     box, 20px the gap, 18px half the button. The offset lives on the wrapper
+     and the entrance on .gate, so two transforms never fight over one
+     element. */
+  .gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+             transform:translateY(74px)}
+  /* THE RATIFIED GATE (08-14), and the only pill in the family: the dusk's
+     "Sign back in" is this same rule with one word changed (§15, 2026-08-17:
+     "the sign-in button must be IDENTICAL on both surfaces"). The delayed
+     entrance is the ratified one — the mark holds the screen alone first. */
+  .gate{font:600 12px var(--display);color:#04060e;background:#d8b45a;
+        border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+        letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
+        box-shadow:0 0 28px rgba(216,180,90,.22);
+        opacity:0;transform:translateY(10px);
+        transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+                   filter .35s ease,box-shadow .3s ease}
+  body.lit .gate{opacity:1;transform:none}
   .gate:hover{filter:brightness(1.08)}
   .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
-  .below{position:absolute;bottom:4.5vh;left:0;right:0;text-align:center;
-         font:10.5px var(--mono);color:#4d5878;letter-spacing:.16em}
   /* ── THE RULING (§15, "the create screen is not 'form over login'") ──────
      Owner, verbatim: "Login button still there, but we must have already
      logged in to see this screen... This is supposed to just be the login
@@ -376,24 +423,25 @@
   [data-theme=atlas] .card,[data-theme=dawn] .card{
         background:color-mix(in srgb,var(--panel) 92%,transparent)}
 
-  /* The mark is all that is left of the header band: 28px, no plate, no
-     wordmark, no caption. It is still CON-19 exactly (200-unit box, ring r72
-     stroke 7, centre r7, planet r16 at 163/63.5, one drift per 40s), it is
-     still the thing that lifts out of the card and flies, and its centre
-     still lights when the system is named — which is what the caption used
-     to say in words. */
-  .markwrap{position:relative;width:28px;height:28px;margin-bottom:22px}
-  .mark{width:28px;height:28px;display:block;transition:filter .5s ease}
-  .mark .planet{transform-origin:100px 100px;animation:spinback 40s linear infinite}
-  @keyframes spinback{to{transform:rotate(360deg)}}
-  .mark .core{fill:var(--line);transition:fill 1.1s ease}
-  body.named .mark .core{fill:var(--sun)}
-  body.arming .mark .core{fill:var(--sun-core);transition:fill .3s ease}
-  body.arming .mark{filter:drop-shadow(0 0 16px color-mix(in srgb,var(--accent) 70%,transparent))}
-  .pulse{position:absolute;inset:-3px;border-radius:50%;border:1px solid var(--accent);
-         opacity:0;pointer-events:none}
-  body.arming .pulse{animation:pulse 1.1s cubic-bezier(.2,.7,.3,1) 2}
-  @keyframes pulse{from{opacity:.75;transform:scale(.55)}to{opacity:0;transform:scale(2.6)}}
+  /* ── THE CARD HAS NO MARK (owner, 2026-08-17) ────────────────────────────
+     Verbatim: "I actually want the ring logo removed from the card. Just fade
+     the card out and have the bigger logo from the login screen hidden behind
+     the card, which then just melts into the rest of the flight same size etc
+     once flying as it currently is."
+
+     So the 28px ring, its lit centre and its arming pulse are gone from the
+     card entirely — and with them the caption-in-a-title-attribute and the
+     `named` state that lit the centre when the system was named. The card is
+     three fields, a button and air, standing over a login screen whose 420px
+     hero ring is ALREADY THERE behind it. On submit the card simply dissolves
+     and the big ring is revealed (the reclaim, below, brings the lockup up
+     0.1s AHEAD of the card leaving, so the reveal reads as "it was there all
+     along"), and that ring is what melts into the flight.
+
+     The create path therefore departs from exactly the mark the login path
+     departs from, at exactly the size — the two launches have converged, and
+     the create path's bespoke grow factor (147px out of a 28px badge) is
+     gone with the badge. */
 
   .field{margin-bottom:18px}
   .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
@@ -671,21 +719,57 @@
           background:linear-gradient(to top,var(--accent),transparent);opacity:.6}
 
   /* ══ 4b · THE DUSK GOODBYE (descent landing) ═════════════════════════════
-     NOT a ratified screen — see the header note. Built to the family's rule:
-     dawn to log in, dusk to log out. The sun has gone under the limb, so
-     there is no white point of first light; what is left is the afterglow,
-     the earth-shadow band and the Belt of Venus above it, and the stars
-     winning. Palette taken from family/maintenance.html's dusk band. */
-  #dusk .lockup .name{color:#e4e2ee}
+     RATIFIED, and now the whole of what logging out means. §15, owner
+     2026-08-16 shipped the flight verbatim; owner 2026-08-17 re-confirmed
+     "the descent is the default logout" and retired the old /logout sunset
+     in its favour. Built to the family's rule: dawn to log in, dusk to log
+     out. The sun has gone under the limb, so there is no white point of first
+     light; what is left is the afterglow, the earth-shadow band and the Belt
+     of Venus above it, and the stars winning.
+
+     It wears the LOGIN'S OWN LOCKUP — the 420px ring, the word inside it, the
+     ratified pill beneath the word — so both ends of a session show one face
+     and the descent's mark sets down on the shape the climb lifted off. */
+  /* the login's ink exactly — the approved goodbye wore the same lockup as
+     the approved sign-in, and the descent's mark sets down on it (2026-08-17) */
+  #dusk .lockup .name{color:#e9edf8}
+  /* THE SAME BUTTON, not a lookalike (§15, 2026-08-17: "the SIGN-IN BUTTON
+     must be IDENTICAL on both surfaces"). It is the .gate rule above, one
+     word changed. Only the ENTRANCE differs: on the login the pill arrives
+     with first light, here it arrives with the farewell. */
+  #dusk .gate-wrap>*{opacity:0;transform:translateY(10px);
+        transition:opacity .9s ease,transform .9s ease,filter .35s ease,box-shadow .3s ease}
+  body.farewell #dusk .gate-wrap>*{opacity:1;transform:none}
   #dusk .farewell{position:absolute;left:0;right:0;bottom:26vh;text-align:center;
         opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
   body.farewell #dusk .farewell{opacity:1;transform:none}
   #dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
   #dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
-  #dusk .farewell .again{margin-top:22px;font:600 13.5px var(--display);color:#0a0812;
-        background:#e0b06a;border:0;border-radius:99px;padding:12px 30px;cursor:pointer;
-        box-shadow:0 0 34px rgba(224,176,106,.2)}
-  #dusk .farewell .again:hover{filter:brightness(1.08)}
+
+  /* ── THE GOODBYE'S SKY LIVES, AND IT LIVES IN REVERSE ────────────────────
+     §15, owner 2026-08-17: the dusk "must carry the same REVERSED PLANET
+     MOTION the login's climb has". The canvas flight was already the climb
+     mirrored — but the LANDING it set down on was a still frame while the
+     login surface breathed, swayed, drifted and swept. Every motion the dawn
+     carries is answered here, running the other way:
+
+       the stars drift back the way they came (recede, the dawn's own periods)
+       the mark's planet unwinds the ring (spinforth — the day winds one way
+         and the evening unwinds it, owner 2026-08-14)
+       the afterglow band breathes, slower and cooler than the dawn's scatter
+       the Belt of Venus breathes on the zodiacal cone's own period
+       an ember shimmer travels the limb the other way round                */
+  #dusk .sky .far{animation:recede 360s linear infinite}
+  #dusk .sky .near{animation:recede 180s linear infinite}
+  @keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
+  #dusk .lockup .glyph .tr{animation:spinforth 40s linear infinite}
+  @keyframes spinforth{to{transform:rotate(-360deg)}}
+  #dusk .afterglow{animation:breathe-ember 12s ease-in-out infinite alternate}
+  @keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
+  #dusk .belt{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+  #dusk .shimmer{stroke-dasharray:3 97;animation:sweepback 34s linear infinite;
+        opacity:.7;transition:none}
+  @keyframes sweepback{to{stroke-dashoffset:100}}
 
   /* film grain over the dawn/dusk surfaces, as the login has it */
   .grain{position:fixed;inset:0;z-index:8;pointer-events:none;opacity:.5;
@@ -734,8 +818,12 @@
   @media (prefers-reduced-motion: reduce){
     *{animation:none!important}
     #flightmark,#launchname{display:none!important}
-    .card,#formlayer,.hf,.nf,#dawn,#dusk,#recede,.loginchrome,.lockup,.gate-wrap{
+    .card,#formlayer,.hf,.nf,#dawn,#dusk,#recede,.loginchrome,.lockup{
       transition-duration:.7s!important;transition-timing-function:ease!important}
+    /* .gate, not .gate-wrap: the wrapper's transform is the layout that drops
+       the pill clear of the word inside the ring, not motion, and clearing it
+       would land the button on top of the name (08-14's own note). */
+    .gate{opacity:1!important;transform:none!important;transition:none!important}
     .hf,body.descending .hf{transform:none!important}
     .nf .belong{transform:translate(-50%,-50%)!important}
     /* the count still takes its turn — it simply appears and yields, with no
@@ -847,15 +935,17 @@
             stroke="#fff6e6" stroke-width="3.4" stroke-linecap="round"/>
   </svg></div>
 
+  <!-- The 08-14 hero: the ring at 420px, the word set plain inside it with no
+       filled centre, the ratified pill inside the ring beneath the word. No
+       ribbon, no footer (§15, 2026-08-17). -->
   <div class="loginchrome">
     <div class="lockup">
-      <div class="glyph" id="login-glyph"><svg width="64" height="64" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="9"/>
-        <circle cx="163" cy="63.5" r="20" fill="#d8b45a"/></svg></div>
+      <div class="glyph" id="login-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
+        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
       <div class="name">orbit</div>
+      <div class="gate-wrap"><button class="gate" id="gate" onclick="loginLaunch()">Sign in</button></div>
     </div>
-    <div class="gate-wrap"><button class="gate" id="gate" onclick="loginLaunch()">Continue with your identity provider</button></div>
-    <div class="below">PRIVATE &middot; SELF-HOSTED &middot; YOURS</div>
   </div>
 </div>
 
@@ -894,9 +984,10 @@
     </defs>
     <rect x="0" y="0" width="1600" height="1000" fill="url(#d-wash)"/>
     <ellipse cx="800" cy="960" rx="900" ry="300" fill="url(#d-glow)" filter="url(#d-b24)"/>
-    <ellipse cx="800" cy="700" rx="1000" ry="180" fill="url(#d-belt)" filter="url(#d-b24)"/>
-    <!-- afterglow hugging the limb: no white core, the sun is already under -->
-    <g>
+    <ellipse class="belt" cx="800" cy="700" rx="1000" ry="180" fill="url(#d-belt)" filter="url(#d-b24)"/>
+    <!-- afterglow hugging the limb: no white core, the sun is already under.
+         It breathes, as the dawn's scattering does — slower and cooler. -->
+    <g class="afterglow">
       <circle cx="800" cy="3920" r="3086" fill="none" stroke="#5e2418" stroke-opacity=".12" stroke-width="130" filter="url(#d-b24)"/>
       <circle cx="800" cy="3920" r="3038" fill="none" stroke="#c2571f" stroke-opacity=".2" stroke-width="60" filter="url(#d-b24)"/>
       <circle cx="800" cy="3920" r="3014" fill="none" stroke="#e08a3c" stroke-opacity=".26" stroke-width="20" filter="url(#d-b14)"/>
@@ -907,20 +998,26 @@
             stroke-width="5" stroke-opacity=".28" filter="url(#d-b6)"/>
     <circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
             stroke-width="1.8" stroke-opacity=".6"/>
+    <!-- the dawn's travelling shimmer, cooled to an ember and running the
+         other way round the limb -->
+    <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
+            stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>
   </svg></div>
+  <!-- the login's own lockup, so both ends of a session show one face -->
   <div class="loginchrome">
-    <div class="lockup" style="top:31vh">
-      <div class="glyph" id="dusk-glyph"><svg width="64" height="64" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#6b7292" stroke-width="9"/>
-        <circle cx="163" cy="63.5" r="20" fill="#e0b06a"/></svg></div>
+    <div class="lockup">
+      <div class="glyph" id="dusk-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
+        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
       <div class="name">orbit</div>
+      <!-- an <a>, as the product's is: the way back in is a link to the
+           login, and the gate rule is written to sit on either element -->
+      <div class="gate-wrap"><a class="gate" href="#" onclick="toForm();return false">Sign back in</a></div>
     </div>
     <div class="farewell">
       <div class="said">You are signed out.</div>
       <div class="sub">the sky keeps turning &middot; your systems keep their orbits</div>
-      <button class="again" onclick="toForm()">Sign back in</button>
     </div>
-    <div class="below">PRIVATE &middot; SELF-HOSTED &middot; YOURS</div>
   </div>
 </div>
 
@@ -1096,16 +1193,8 @@
        and settings say all of it again, later, where it is actually needed. -->
   <form class="card" id="setup" onsubmit="attempt();return false"
         aria-label="Name your first system">
-    <div class="markwrap">
-      <svg class="mark" viewBox="0 0 200 200" role="img" aria-labelledby="marktitle">
-        <title id="marktitle">The Orbit mark: a ring, a planet riding it, and the household at its centre. The centre lights when you name your system.</title>
-        <circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink)" stroke-width="7" opacity=".9"/>
-        <circle class="core" cx="100" cy="100" r="7"/>
-        <g class="planet"><circle cx="163" cy="63.5" r="16" fill="var(--accent)"/></g>
-      </svg>
-      <span class="pulse" aria-hidden="true"></span>
-    </div>
-
+    <!-- No mark here (owner, 2026-08-17). The ring the flight leaves on is the
+         login's own 420px hero, standing behind this card the whole time. -->
     <div class="field">
       <label for="hhname">what is it</label>
       <input id="hhname" placeholder="Lawson Home" maxlength="60" autocomplete="off"
@@ -1146,11 +1235,16 @@
 </div>
 
 <canvas id="warp" aria-hidden="true"></canvas>
+<!-- Drawn to the HERO's proportions (ring stroke 2, planet r7 of the 200-unit
+     box), because that is the mark it now takes over from: the swap at 260ms
+     happens at the hero's own 420px rect, so anything heavier would pop. The
+     white core is the one thing the hero does not have — it is the heart
+     lighting as the ring leaves, and the point the sun later blooms from. -->
 <div id="flightmark" aria-hidden="true">
   <svg viewBox="0 0 200 200">
-    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="6" opacity=".85"/>
+    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="2" opacity=".85"/>
     <circle class="core" cx="100" cy="100" r="7"/>
-    <circle cx="163" cy="63.5" r="15" fill="#d8b45a"/>
+    <circle cx="163" cy="63.5" r="7" fill="#d8b45a"/>
   </svg>
 </div>
 <div id="launchname" aria-hidden="true"><span id="lnword">Lawson Home</span><i id="lnsub">first light</i></div>
@@ -1813,7 +1907,7 @@ function liftMark(srcSvg, toY, grow, ms){
 function dropMark(){
   fmark.classList.remove("on");
   fmark.classList.add("collapse");
-  for (const el of document.querySelectorAll(".mark,#login-glyph svg,#dusk-glyph svg"))
+  for (const el of document.querySelectorAll("#login-glyph svg,#dusk-glyph svg"))
     el.style.visibility = "";
 }
 
@@ -1862,6 +1956,9 @@ const T = { warp:200, mark:260, release:430, markOut:1340,
             land:4800, condensed:6400, dwell:2000, newDwell:3000,
             instrument:1800,
             tourGap:450, countGap:500, countHold:2000, countFade:900 };
+/* where the mark arrives at the centre of the screen: the ratified 2.6 × 64px
+   badge, kept as an absolute size now that it departs from a 420px hero */
+const MARK_ARRIVE = 166.4;
 T.instrumentAt = T.condensed + T.dwell;                    /*  8400 */
 T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10650 */
 /* the newcomer's landing is sealed at the old clock — see above */
@@ -1908,23 +2005,21 @@ function ascend(withForm, landing){
 
   document.getElementById("lnsub").textContent =
     newcomer ? "you are new here" : withForm ? "first light" : "welcome back";
-  const src = withForm ? document.querySelector("#setup .mark")
-                       : document.querySelector("#login-glyph svg");
+  /* ONE mark, both journeys (owner, 2026-08-17: the card has no ring any
+     more). The login path and the create path lift the same hero glyph off
+     the same login screen — the create path simply had a card in front of it
+     a moment ago. */
+  const src = document.querySelector("#login-glyph svg");
   body.classList.add("arming");
   after(T.mark, () => {
     body.classList.remove("arming");
     if (withForm) body.classList.add("igniting");
-    /* the mark in the card is 28px now, not 64 — the flight is unchanged, so
-       the growth is expressed as the SIZE it has always arrived at (147px)
-       rather than as a multiplier of whatever the card happens to show. */
-    const grow = withForm ? 147 / (src.getBoundingClientRect().width || 28) : 2.6;
-    liftMark(src, H * .5, grow, 1080);
-    /* §15: on the create path the lockup has just been reclaimed, so its own
-       glyph goes out as the card's mark lifts — otherwise two marks are on
-       the screen at once. It is the same thing the login intro does to that
-       glyph at this same beat, and dropMark() puts it back either way. */
-    if (withForm && body.classList.contains("reclaimed"))
-      document.querySelector("#login-glyph svg").style.visibility = "hidden";
+    /* The ARRIVAL SIZE, not a multiplier. The mark has always reached 166px at
+       the centre of the screen (the ratified 2.6 × the 64px badge this sheet
+       used to draw). The hero ring is 420px, so the ride is now a contraction
+       rather than a growth — same beat, same window, same landing size, and
+       the sun still blooms two seconds later from exactly that point. */
+    liftMark(src, H * .5, MARK_ARRIVE / (src.getBoundingClientRect().width || 420), 1080);
     body.classList.remove("recede");
   });
   after(T.warp, () => { body.classList.add("showwarp"); startFlight(UP, 1); });
@@ -2037,7 +2132,7 @@ function baseReset(){
                         "bare", "instrument", "belong", "counting");
   fmark.classList.remove("on", "collapse");
   lname.classList.remove("on");
-  for (const el of document.querySelectorAll(".mark,#login-glyph svg,#dusk-glyph svg"))
+  for (const el of document.querySelectorAll("#login-glyph svg,#dusk-glyph svg"))
     el.style.visibility = "";
   document.getElementById("gate").classList.remove("flash");
   press("d-count", false);
@@ -2059,6 +2154,16 @@ function toHome(instant){
   body.classList.add("showhome");
   press("d-create", false); press("d-err", false);
   if (instant) { /* no arrival fanfare when we are only staging the descent */ }
+}
+/* The goodbye, arrived at and standing still — the state the descent leaves
+   the reader in, and the state a direct visit to /logout must show. It is
+   exactly what the reduced-motion descent does, which is why it is one line:
+   the staging is class-driven, so the end of the journey is a pair of
+   classes. The fidelity gate asks for it by name (as it does toLogin). */
+function toDusk(){
+  baseReset();
+  body.classList.add("showdusk", "farewell");
+  press("d-create", false); press("d-err", false);
 }
 function press(id, on){ const b = document.getElementById(id); if (b) b.setAttribute("aria-pressed", String(on)); }
 
@@ -2151,7 +2256,8 @@ const DEFAULT_SECTIONS = ["Home", "Vehicles", "Devices", "Services"];
 
 function refresh(){
   const name = nameField.value.trim();
-  body.classList.toggle("named", name.length > 0);
+  /* the `named` state went with the card's mark (owner, 2026-08-17): there is
+     no centre left to light, and the button already says what is armed */
   goBtn.disabled = name.length === 0;
   goBtn.textContent = name ? "create " + name + " →" : "create this system →";
   document.getElementById("lnword").textContent = name || "Lawson Home";
@@ -2190,7 +2296,6 @@ function showError(){
      not said any more — the answers, still sitting in the fields, say it. */
   document.getElementById("errname").textContent = "\u201c" + rejectedName + "\u201d";
   press("d-err", true);
-  body.classList.remove("named");            /* the centre goes back out */
   after(30, () => body.classList.add("rejected", "grounded"));
   after(950, () => { body.classList.remove("grounded"); refresh(); });
 }
