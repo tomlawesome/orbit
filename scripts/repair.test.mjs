@@ -1250,6 +1250,32 @@ describe("scripts/repair.sh --plan", () => {
       dockerOptions: { db: { present: false } },
       withConfigure: true,
     },
+    {
+      name: "database-schema-mismatch",
+      resolves: "database-schema-mismatch",
+      setup: () => {},
+      dockerOptions: {
+        app: {
+          present: true,
+          health: "unhealthy",
+          log: "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
+        },
+      },
+      withConfigure: true,
+    },
+    {
+      name: "database-below-floor",
+      resolves: "database-below-floor",
+      setup: () => {},
+      dockerOptions: {
+        app: {
+          present: true,
+          health: "unhealthy",
+          log: "ERROR orbit migrations startup.migration state=exhausted reason=database_below_floor action=upgrade_from_supported_version impact=migration_blocked",
+        },
+      },
+      withConfigure: true,
+    },
     // Note: unrelated-resource-present and docker-unavailable are
     // deliberately NOT in this table — both are always info-severity
     // findings under --check, and the severity gate (see the "Severity

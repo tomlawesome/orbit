@@ -482,7 +482,9 @@ Orbit already includes:
   favicon, and version-controlled migrations.
 - bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
-  retention purge, and storage reconciliation.
+  retention purge, and storage reconciliation — see
+  [Encryption at rest](docs/encryption-at-rest.md) for the full picture,
+  including what this does not protect and why.
 
 Orbit does not retain authenticated workspace snapshots or queued changes in
 app-controlled browser storage. It purges the legacy preview-build IndexedDB
@@ -718,6 +720,9 @@ the protected branch, test, manual-validation, and digest-promotion workflow.
 3. Run the browser and accessibility checks against the production build.
 4. Schedule `scripts/backup.sh`, retain copies outside the Docker host, and
    perform a test restore.
+5. Read [Encryption at rest](docs/encryption-at-rest.md) and decide whether
+   the host disk needs encryption before going live — Orbit does not decide
+   this for you.
 
 ---
 

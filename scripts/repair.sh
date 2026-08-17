@@ -1256,6 +1256,12 @@ readonly -A manual_guidance=(
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
   [database-unreachable]="verify the database container/service is running and reachable, then re-run diagnosis; repair never starts a service to investigate"
+  # Neither side of a schema disagreement moves on its own (#437): point this
+  # build at the database it expects, or point this database at a build that
+  # still recognises its migration history. repair never merges or migrates
+  # a database on the operator's behalf.
+  [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
+  [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
 )
 
 declare -a findings=()
