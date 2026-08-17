@@ -158,12 +158,12 @@
   [data-theme=starchart]{
     --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
     --line:#243259; --line-soft:#17203f;
-    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
     --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
     --degraded:#fb8b24;
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
-    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
     --rubble:#7d88ab; --rubble-gain:1;
     --paper:#8fb8ff;      /* the documents' own line — see THE DOCUMENTS */
     /* #491: the text-grade companions — ink that carries WORDS. Carried from
@@ -1157,7 +1157,7 @@ function paintMembers(p) {
 const bandC = document.getElementById("band"), foreC = document.getElementById("fore");
 const bctx = bandC.getContext("2d"), fctx = foreC.getContext("2d");
 const hazeCanvas = document.createElement("canvas"), hctx = hazeCanvas.getContext("2d");
-let TONE = ["#4d5878", "#d8b45a", "#243259"], hazePts = [], cardRect = null;
+let TONE = ["#737e9e", "#d8b45a", "#243259"], hazePts = [], cardRect = null;
 
 let GAIN = 1;
 function readTones() {

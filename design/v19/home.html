@@ -27,12 +27,12 @@
   [data-theme=starchart]{
     --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
     --line:#243259; --line-soft:#17203f;
-    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
     --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
     --degraded:#fb8b24;
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
-    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
     /* The bodies. Star-chart's are the values the gradients always carried as
        literals, so naming them moves no pixel and lets the other packs reach
        what is the largest coloured thing on the screen. */
@@ -1140,7 +1140,8 @@
      it) applied to the descent. Legibility goes UP: the faint ink ends the page
      with more contrast on the warm surface than it began with on the pale one. */
   [data-theme=dawn].descending body{
-    --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%))}
+    --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%));
+    --deep-knockout:#e4ecf5}
   /* Reduced motion. The gradient still tracks the scrollbar — it is a POSITION,
      not an animation, and freezing it would hide the page under a sky it has
      already left. What goes is the parallax flourish: the sky gives way where it
@@ -1222,7 +1223,21 @@
     --ink-faint:color-mix(in srgb,#2f3f5e calc(var(--deep) * 100%),
          color-mix(in srgb,#5c6c8e calc(var(--below) * 100%),#78849b));
     --chart-ink:color-mix(in srgb,#22314f calc(var(--deep) * 100%),#40506e);
-    --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d)}
+    --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d);
+    --deep-knockout:#e4ecf5}
+  /*
+   * THE DEEP MARKS, KNOCKED OUT (#500, fix-both with home.css). Same
+   * construction as the '← SETTINGS on sky' hazard (#491): the sky and the
+   * three marks' own inks are untouched, and a three-radius soft halo of one
+   * knockout colour stands in for the plate a panel would have given them.
+   * Measured at full descent: clouds 2.81/1.80/2.68:1 before, 10.87/7.83/4.63
+   * after; dawn 5.43/6.62/4.32:1 before, 6.80/7.83/4.63 after (month / TODAY /
+   * overdue, against the knockout itself).
+   */
+  :is([data-theme=clouds],[data-theme=dawn]).descending
+    :is(.manifest .corridor .month span,.manifest .corridor .today span,.t.over){
+    text-shadow:0 0 2px var(--deep-knockout),0 0 5px var(--deep-knockout),
+                0 0 11px var(--deep-knockout)}
   @media (prefers-reduced-motion: reduce){
     /* position kept, flourish dropped: the deck still rises and still goes, but
        it does not swell at you and you are not put inside it. */
