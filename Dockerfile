@@ -57,10 +57,20 @@ ARG ORBIT_CHANNEL
 # Release metadata is validated here, immediately after the ARGs, rather than
 # beside the files it writes 50 steps later (#435). Nothing between depends on
 # these values, so validating late meant a malformed version failed only after
-# the whole application build had been done and thrown away.
-RUN printf '%s\n' "${ORBIT_VERSION}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq '^[0-9a-f]{40}$' \
-  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq '^(ci|preview|dev)$'
+# the whole application build had been done and thrown away. Only this one
+# small file is copied to check it — the rest of the source tree (COPY . .,
+# below in the other build stages) is untouched until this passes.
+#
+# The three patterns are the same ones scripts/build-container.sh checks
+# before invoking Docker at all; both source scripts/release-metadata-
+# patterns.sh rather than each holding its own copy, so a builder that
+# bypasses the script still gets an identical guarantee, and the two checks
+# cannot drift apart (#435).
+COPY scripts/release-metadata-patterns.sh /opt/orbit/scripts/release-metadata-patterns.sh
+RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
+  && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
+  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
+  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN"
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
@@ -128,16 +138,22 @@ COPY --from=builder --chown=root:root /opt/orbit/scripts/v19-dispatch.mjs ./scri
 # engine-events.md's "In-container engine invocation" contract), so it
 # gets a data-file mode (0444) rather than an executable one.
 COPY --from=cli-builder --chown=root:root /opt/orbit/dist/cli/orbit.js ./cli/orbit.js
-RUN printf '%s\n' "${ORBIT_VERSION}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq '^[0-9a-f]{40}$' \
-  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq '^(ci|preview|dev)$' \
+# Re-validated here (belt-and-suspenders) immediately before the values are
+# written to disk, using the same shared patterns sourced above (#435) — not
+# a second hardcoded copy, so this cannot silently diverge from the early
+# check's idea of what counts as valid.
+RUN . /opt/orbit/scripts/release-metadata-patterns.sh \
+  && printf '%s\n' "${ORBIT_VERSION}" | grep -Eq "$ORBIT_VERSION_PATTERN" \
+  && printf '%s\n' "${ORBIT_REVISION}" | grep -Eq "$ORBIT_REVISION_PATTERN" \
+  && printf '%s\n' "${ORBIT_CHANNEL}" | grep -Eq "$ORBIT_CHANNEL_PATTERN" \
   && printf '%s\n' "${ORBIT_VERSION}" > /opt/orbit/VERSION \
   && printf '%s\n' "${ORBIT_REVISION}" > /opt/orbit/REVISION \
   && printf '%s\n' "${ORBIT_CHANNEL}" > /opt/orbit/CHANNEL \
   && chown root:root /opt/orbit/VERSION /opt/orbit/REVISION /opt/orbit/CHANNEL \
   && chmod 0444 /opt/orbit/VERSION /opt/orbit/REVISION /opt/orbit/CHANNEL \
   && chmod 0755 ./scripts/container-entrypoint.sh \
-  && chmod 0444 ./cli/orbit.js
+  && chmod 0444 ./cli/orbit.js \
+  && rm -f /opt/orbit/scripts/release-metadata-patterns.sh
 USER root
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=10 CMD su-exec orbit:orbit node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch((error) => { console.error(error); process.exit(1); })"
