@@ -63,7 +63,23 @@
 [data-theme=starchart]{
   --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
   --line:#243259; --line-soft:#17203f;
-  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+  /*
+   * THE FAINT TIER, LIFTED (#500, owner ruling 2026-08-17: the
+   * accessibility-friendly option wins IN ALL CASES, originals banked for
+   * revert in the issue). --ink-faint and --chart-ink were both #4d5878,
+   * 2.70-2.78:1 on this pack's own ground and on the panels it actually
+   * sits on — real text, real fail, and the one sweep #491 cut from that
+   * wave because it moves the primary pack's every first viewport. It is
+   * cut no longer.
+   *
+   * Lifted alone, not the whole family: --ink-mid (#8791b3, 6.28:1) already
+   * clears the law and sits far enough from --ink that lifting it too would
+   * crowd the ladder rather than open it, unlike the after-dark and dawn
+   * cases where the mid tier had to move to make room. Measured on home,
+   * settings and inbox's own grounds: #737e9e reads 4.71-4.86:1, over the
+   * law on all three, with --ink-mid untouched above it at 6.28:1.
+   */
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
   --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
   --degraded:#fb8b24;
   --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
@@ -71,7 +87,7 @@
      background - the relationship the design already used when both fills
      were literals (#e9edf8 is exactly --ink here). */
   --star-far:#e9edf8; --star-near:#f4f0ff;
-  --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+  --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
   /* #491: the text-grade trio. The accent and the green already clear the law
      as words on this ground, so they are the same colour by definition. */
   --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);

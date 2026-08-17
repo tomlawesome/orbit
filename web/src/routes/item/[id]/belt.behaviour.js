@@ -165,7 +165,7 @@ export function mountBelt(root, options) {
   let bloom = [], bloomFrom = [], bloomTo = [];
   let query = "", matches = new Set();
   let base = 0, reach = 0;
-  let TONE = ["#4d5878", "#d8b45a", "#243259"], GAIN = 1;
+  let TONE = ["#737e9e", "#d8b45a", "#243259"], GAIN = 1;
   let raf = 0, last = 0, lastPaint = 0, alive = true;
 
   /* Built before anything is laid out, and handed to every callback as its
