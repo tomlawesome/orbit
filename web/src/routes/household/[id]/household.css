@@ -48,6 +48,71 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
   --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
 }
 
+/* ══ H2 — THE HOUSEHOLD'S OWN CHART, AT ROOM SCALE (§15) ═══════════════════
+   From design/v19/household-inside.html, whose cards are this screen's cards
+   untouched: "the owner read v3 as '90% there — the actual form, everything is
+   great; the background is the only issue', so the only thing this file changes
+   is what is behind the glass."
+
+   Behind the dust, not in front of it: your system is the structure you are
+   standing in, and the dust of the wider sky streams past nearer to the eye. It
+   sits at the same z as the sky so the vignette still closes the corners over
+   it, which is a good part of the restraint.
+
+   THE DESCENT. One rigid transform driven by --lift (a pure function of
+   scrollTop — room.js liftOf, written by the same handler shape as the ratified
+   heliosphere lift): the figure travels up and out, growing very slightly about
+   the sun because you are moving toward it. transform-origin IS the sun, set
+   per household in CSS pixels by the renderer, so the descent is a fall INTO
+   the system rather than a pan across it. No fade: a system does not dissolve
+   when you scroll past it, it goes over your head. -138vh clears the whole
+   drawing, scale included, at --lift 1.
+
+   THE DEPARTURE CURVE. Straight-line lift spent almost all of its travel in the
+   first few scrolled pixels and the ring was simply gone before you had read
+   anything — so the position is shaped, lift·(.35+.65·lift), a blend of linear
+   and quadratic. It starts moving the instant you do and then accelerates away,
+   which is also what falling toward something does. Note WHAT is shaped: this is
+   a curve in POSITION, not in time. Nothing lerps, nothing settles, nothing
+   chases the page — the scrollbar still names the frame exactly, and the way
+   back up is the way down reversed to the pixel.
+
+   And no `will-change`: promoting this to its own compositor layer changes how
+   the cards' backdrop-filter samples what is under them, and the scroll-0 frame
+   has to come back byte-identical. */
+.household-page .consty{position:fixed;inset:0;pointer-events:none;z-index:0;
+        opacity:var(--con-op,1);
+        transform:translate3d(0,calc(var(--lift,0) * (.35 + .65 * var(--lift,0)) * -138vh),0)
+                  scale(calc(1 + var(--lift,0) * var(--lift,0) * .13))}
+.household-page .consty svg{position:absolute;inset:0;width:100%;height:100%}
+/* the packs: the light three need the ink pulled right back before a whisper
+   stops being a whisper — dark lines on pale ground read far louder than pale
+   lines on dark, at the same alpha */
+[data-theme=afterdark]  .household-page .consty{--con-op:.92}
+[data-theme=retrograde] .household-page .consty{--con-op:.82}
+[data-theme=atlas]      .household-page .consty{--con-op:.46}
+[data-theme=dawn]       .household-page .consty{--con-op:.46}
+/* clouds arrived after the mockup was drawn (#486/§15) and carries the lighter
+   end of the roster with dawn, so it takes dawn's restraint. */
+[data-theme=clouds]     .household-page .consty{--con-op:.46}
+
+/* THE SKY DRIFTS AS ONE (§14). Three depths, one direction, none of them still:
+   near dust 8.2px/s, far dust 4.0px/s (both the ratified rates, above) and the
+   system's own architecture at 1.2px/s. It moves LEAST because you are standing
+   in the middle of it — you travel with your own system; what streams past is
+   everything outside it.
+
+   ONE DEPARTURE FROM THE MOCKUP, DELIBERATE AND RAISED. The mockup drifts the
+   system left for ever, off a rAF clock: correct for a sheet somebody judges
+   for a minute, wrong for a screen a person leaves open, because at 1.2px/s
+   your own system has left the room inside ten minutes — the opposite of what
+   this layer is here to say. So the drift is BOUNDED: the same 1.2px/s (96
+   field units in 80 seconds), turning back at the end of it, for ever, with no
+   jump anywhere. At rest — the frame the gate photographs and the owner
+   ratified — the two are identical to the pixel. */
+.household-page .consty .drift{animation:hh-system 160s linear infinite alternate}
+@keyframes hh-system{to{transform:translateX(-96px)}}
+
 .household-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
      transition:opacity .4s;z-index:0}
 .household-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
@@ -316,5 +381,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    What lives on this screen is the request itself. */
 
 @media (prefers-reduced-motion: reduce){
-  .household-page .sky .far,.household-page .sky .near{animation:none!important}
+  .household-page .sky .far,.household-page .sky .near,
+  .household-page .consty .drift{animation:none!important}
+  /* the descent is NOT among these: --lift is a position, not an animation, so
+     reduced motion keeps every bit of it. */
 }

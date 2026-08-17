@@ -1,10 +1,12 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import { fillStarTiles } from "$lib/sky.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
+  import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
+  import { consumeDoor } from "./door.js";
   import {
     addMember,
     decideJoinRequest,
@@ -42,6 +44,18 @@
    */
   let { data } = $props();
   const v = $derived(data.household);
+
+  /**
+   * THE WAY BACK IS THE WAY YOU CAME (§15, owner ruling 2026-08-17).
+   *
+   * Read ONCE, here, while the screen is being created — not in onMount, or the
+   * way back would be lettered "← SETTINGS" for a frame and then change its
+   * mind in front of the reader. This route is client-rendered (ssr = false),
+   * so component setup is already the browser. A save re-runs `load` and
+   * replaces `data`; it does not re-create the component, so the door survives
+   * everything that happens ON this screen and nothing that happens off it.
+   */
+  const door = consumeDoor();
 
   /* The identity fields (2c): three saves TO THE EYE over one bundled
      command. Local copies so a field can be edited, saved and left alone
@@ -247,8 +261,208 @@
     })),
   );
 
+  /* ══════════════════════════════════════════════════════════════════════════
+     H2 — INSIDE THIS SYSTEM (§15). The backdrop, and nothing but the backdrop:
+     not one line below this point touches the desk above it.
+
+     home.html carries one line in its galaxy renderer — "you never see your own
+     constellation — you're inside it" — and this is that line, drawn.
+     Everywhere else this household is a 40px ring with three dots on it, out in
+     someone's sky; the little ring in this screen's own header IS that view.
+     What is behind these cards is the SAME FIGURE at room scale, seen from the
+     middle of it: the household's real entries, placed by the dial law
+     (chart.js, through constellationOf), composed into the room by room.js.
+
+     Where the mockup hand-placed the composition per fixture household, the
+     rule solves it — see room.js. Everything measured here is measured for
+     that rule: the runs of unprotected small type it must keep clear, and the
+     panels a whisper label may not sit on.
+     ══════════════════════════════════════════════════════════════════════════ */
+
+  /* The chart key's four paints as FIELDS rather than filled planets: at room
+     scale a body is a region of sky you are standing near, not a disc. The
+     alphas keep the key's own order — ruby loudest, jade quietest — because
+     that order is the information. */
+  const PAINT = {
+    overdue: ["--overdue", "hh-ruby"],
+    "due-soon": ["--warm", "hh-amber"],
+    upcoming: ["--upcoming", "hh-sky"],
+    ok: ["--ok", "hh-jade"],
+    unscheduled: ["--ok", "hh-jade"],
+  };
+
+  let stage = $state(null);
+  let room = $state(null);
+  let words = $state([]);
+  /* Whether the type has landed — see the note on onMount. Nothing of this
+     layer touches the DOM before it has. */
+  let lettered = $state(false);
+  /* The promise itself, kept for as long as the screen lives: see onMount. */
+  let typeLanded = null;
+  /* The descent's origin IS the sun, so scrolling is a fall INTO the system
+     rather than a pan across it. In CSS pixels, because the sky's field is
+     sliced about the centre and only the mapping knows where that puts it. */
+  let origin = $state("43.1% 34%");
+
+  /* The section figures: a section's entries joined in date order in that
+     section's own accent (§15-2b — the mark travels with the entry). */
+  const figures = $derived(
+    (room?.stars?.length ? v.constellation.figures : []).map((figure) => ({
+      id: figure.id,
+      accent: figure.accent,
+      points: figure.members
+        .map((id) => room.stars.find((star) => star.id === id))
+        .filter(Boolean)
+        .map((star) => `${star.cx},${star.cy}`)
+        .join(" "),
+    })),
+  );
+
+  const rectsOf = (selector) =>
+    [...(stage?.querySelectorAll(selector) ?? [])]
+      .map((node) => node.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+
+  /**
+   * The composition, measured and solved.
+   *
+   * KEEP-OUT is the type with no panel under it — the header's ring and its two
+   * lines (the row itself is full-width but its ink is not, so the row's own
+   * children are the guards), the way back and the account orb. Nothing of the
+   * sky may be drawn on those.
+   *
+   * PANELS are the cards. They are NOT keep-out: glass with a backdrop-filter
+   * over it is exactly what the figure is meant to compose behind. They are
+   * guards for WORDS only, because a word under glass is unreadable ink that
+   * costs the panel's own small type contrast for nothing — the mockup measured
+   * that mistake at 2.70:1 → 2.43:1 and took it out.
+   */
+  function compose(constellation = v.constellation) {
+    if (!stage) return;
+    const map = skyMap(window.innerWidth, window.innerHeight);
+    const keepOut = rectsOf("header.screen > *, .back, .orb").map((rect) => toField(rect, map));
+    const panels = rectsOf(".card").map((rect) => toField(rect, map));
+    room = roomOf({ marks: constellation.marks, ...FIELD, keepOut });
+    words = berthsOf({ stars: room.stars, sun: room.sun, guards: [...keepOut, ...panels], ...FIELD });
+    origin = `${(map.ox + room.sun[0] * map.k).toFixed(1)}px ${(map.oy + room.sun[1] * map.k).toFixed(1)}px`;
+    /* The words are drawn from an estimate of their own width; only the browser
+       knows what the font actually did, so the drawing is measured once it
+       exists — after the DOM has caught up, and never before the type has
+       landed (see onMount, which is the only thing that starts this). */
+    tick().then(legible);
+  }
+
+  /**
+   * A WORD IS DRAWN ONLY WHERE IT CAN BE READ.
+   *
+   * Every word in the backdrop — the entry names and the month names alike — is
+   * tested against the real rectangles of the cards, the header, the chrome and
+   * the edges of the frame, and any word that touches one is not drawn at all.
+   * No word is ever cut in half by a card edge (which reads as a rendering
+   * fault, not a backdrop), no word is ever laid unreadable under a panel, and
+   * the answer stays right at widths nobody screenshotted.
+   *
+   * Measured at rest and on resize, never during a scroll: the composition
+   * being judged is the one at scroll 0, and words winking out as you descend
+   * would be its own kind of lie.
+   */
+  function legible() {
+    if (!stage) return;
+    const guards = rectsOf("header.screen > *, .back, .orb, .card");
+    for (const word of stage.querySelectorAll(".consty text")) {
+      word.style.display = "";
+      const rect = word.getBoundingClientRect();
+      const blocked =
+        rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight ||
+        guards.some((guard) =>
+          rect.left < guard.right && rect.right > guard.left && rect.top < guard.bottom && rect.bottom > guard.top);
+      word.style.display = blocked ? "none" : "";
+      const leader = word.previousElementSibling;
+      if (leader?.dataset?.leader) leader.style.display = blocked ? "none" : "";
+    }
+  }
+
+  /**
+   * THE DESCENT (§15, universal). You are already inside; scrolling takes you
+   * DEEPER. The whole figure travels up and out as one rigid drawing — the sun
+   * leaves early and the +1 year ring is the last thing over your head — because
+   * a system does not stop existing when you stop looking at it. --lift is a
+   * pure function of scrollTop (room.js), so scroll 0 is scroll 0 for ever, the
+   * way back up is the way down reversed to the pixel, and reduced motion keeps
+   * every bit of it: this is a POSITION, not an animation.
+   */
+  function descend() {
+    if (!stage) return;
+    const lift = liftOf(window.scrollY, window.innerHeight, document.documentElement.scrollHeight);
+    stage.style.setProperty("--lift", lift.toFixed(4));
+  }
+
+  /**
+   * THE SKY FOLLOWS THE SYSTEM. Walking from one household to another is a
+   * client navigation on the same route: `load` runs again and the data is
+   * replaced, but this component is not re-created — so the room is re-solved
+   * from the household that is now on the desk. A backdrop still drawing the
+   * system you just left would be the loudest possible lie on a screen whose
+   * whole claim is that every mark is true.
+   *
+   * Keyed on the SKY ITSELF, in one string, and guarded by what was last drawn.
+   * Composing writes state that this screen re-renders from, and a re-render is
+   * a chance to run again: keyed on an object it would run for ever (measured —
+   * Svelte's own effect_update_depth_exceeded), and keyed on the household's id
+   * alone it would miss an entry whose date had moved. The signature is the
+   * only thing the geometry can be a function of.
+   */
+  let drawn = null;
+  $effect(() => {
+    const marks = v.constellation.marks;
+    const signature = `${v.id}#${marks.map((mark) => `${mark.id}:${mark.days}:${mark.halo}`).join("|")}`;
+    if (!lettered || signature === drawn) return;
+    drawn = signature;
+    compose(v.constellation);
+  });
+
   onMount(() => {
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
+    descend();
+    /*
+     * THE BACKDROP WAITS FOR THE FONTS, AND THEN FOR A FRAME.
+     *
+     * It waits for the fonts because the composition is solved against MEASURED
+     * rectangles — where the header's two lines actually end — and those move
+     * when the real faces arrive. This route is entirely client-rendered
+     * (ssr = false), so its font loads only START at hydration: a room composed
+     * before them would be composed against fallback metrics and would have to
+     * jump once when they landed.
+     *
+     * It then waits for a FRAME, and that one is measured. Composing allocates
+     * — a few thousand small objects between the room and the berths — and doing
+     * that INSIDE document.fonts.ready's own callback runs it at the exact
+     * moment the browser is settling that promise. Blink's pending `ready`
+     * promise does not survive it: anything else awaiting the same signal is
+     * handed "Resulting promise was garbage collected" instead of an answer,
+     * which is how the fidelity gate met this — dependably broken from the
+     * callback (4 runs in 4), dependably fine one frame later (10 in 10).
+     * Measuring layout belongs in a frame anyway.
+     */
+    typeLanded = document.fonts?.ready ?? Promise.resolve();
+    typeLanded.then(() => requestAnimationFrame(() => (lettered = true)));
+
+    let queued = false;
+    const onScroll = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; descend(); });
+    };
+    /* A resize re-measures the desk, so the room is re-solved for it: the desk
+       keeps its 1060px column while the sky rescales around it, and which
+       patches of sky are clear changes with the width. */
+    const onResize = () => { compose(); descend(); };
+    addEventListener("scroll", onScroll, { passive: true });
+    addEventListener("resize", onResize, { passive: true });
+    return () => {
+      removeEventListener("scroll", onScroll);
+      removeEventListener("resize", onResize);
+    };
   });
 </script>
 
@@ -290,7 +504,92 @@
   </span>
 {/snippet}
 
-<div class="household-page" class:member={!v.canManage}>
+<div class="household-page" class:member={!v.canManage} bind:this={stage}>
+<!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
+     front of it: your system is the structure you are standing in, and the dust
+     of the wider sky streams past nearer to the eye. Nothing in here is
+     authored — every coordinate comes out of the household's own entries. -->
+<div class="consty" style="transform-origin:{origin}" aria-hidden="true">
+  <svg viewBox="0 0 {FIELD.width} {FIELD.height}" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <radialGradient id="hh-ruby"><stop offset="0" style="stop-color:var(--overdue)" stop-opacity=".24"/><stop offset=".55" style="stop-color:var(--overdue)" stop-opacity=".08"/><stop offset="1" style="stop-color:var(--overdue)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
+    </defs>
+    {#if room}
+      <g class="drift">
+        <g class="rings">
+          <!-- the sun: the dial's own disc and its core, at room scale. Held
+               RIGHT down — a sun seen from inside its own system is a light,
+               not a lamp. -->
+          <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.sun} fill="url(#hh-sun)"/>
+          <circle cx={room.sun[0]} cy={room.sun[1]} r={(2.2 * room.scale).toFixed(1)}
+                  style="fill:var(--sun-core)" opacity=".26"/>
+          <!-- r=62 — the chart key's own words, "overdue: inside the ring", in
+               the same dashed red the dial draws it in. A household with an
+               overdue entry has a body in there; one without has an empty
+               ring, which is also the truth. -->
+          <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.overdue} fill="none"
+                  style="stroke:var(--overdue)" stroke-opacity=".17" stroke-width="1.4"
+                  stroke-dasharray="{(3 * room.scale).toFixed(1)} {(5 * room.scale).toFixed(1)}"/>
+          <!-- THE GIANT ONE, and it is not one ring: it is the dial's calendar
+               band. r=150 is exactly +1 YEAR by the law, so the thing sweeping
+               your room is a year, and you only ever see an arc of it. The
+               months you are standing under are in the room with you; the rest
+               are behind you. You cannot see all of your own system at once. -->
+          <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.year} fill="none"
+                  style="stroke:var(--chart-line)" stroke-opacity=".72" stroke-width="2.4"/>
+          <circle cx={room.sun[0]} cy={room.sun[1]} r={room.rings.rim} fill="none"
+                  style="stroke:var(--chart-line-soft)" stroke-opacity=".8" stroke-width="1.2"/>
+          {#each room.months as month (month.label)}
+            <line x1={month.x1} y1={month.y1} x2={month.x2} y2={month.y2}
+                  style="stroke:var(--chart-line)" stroke-opacity=".72" stroke-width="2.4"/>
+          {/each}
+          {#each room.months as month (month.label)}
+            <text x={month.tx} y={month.ty} text-anchor="middle" font-size="31" letter-spacing="6"
+                  style="fill:var(--chart-ink);font-family:var(--mono)" opacity=".2">{month.label}</text>
+          {/each}
+        </g>
+        <g class="figures">
+          {#each figures as figure (figure.id)}
+            <polyline points={figure.points} fill="none"
+                      style="stroke:var({figure.accent ? `--sec-${figure.accent}` : "--ink-faint"})"
+                      stroke-opacity=".30" stroke-width="1.3" stroke-linecap="round"
+                      stroke-dasharray="{room.scale.toFixed(1)} {(5 * room.scale).toFixed(1)}"/>
+          {/each}
+        </g>
+        <g class="bodies">
+          {#each room.stars as star (star.id)}
+            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[star.band][1]})"/>
+            {#if star.band === "overdue"}
+              <!-- the chart key's overdue ping, on any body that has earned it -->
+              <circle cx={star.cx} cy={star.cy} r={(star.r * 1.27).toFixed(1)} fill="none"
+                      style="stroke:var(--overdue)" stroke-opacity=".20" stroke-width="1.3"/>
+            {/if}
+            <circle cx={star.cx} cy={star.cy} r={Math.max(2.1, star.r * 0.115).toFixed(2)}
+                    style="fill:var({PAINT[star.band][0]})" opacity=".55"/>
+          {/each}
+        </g>
+        <!-- the whisper labels: what each star is and how far off it is, in the
+             strings every other screen prints on the same bodies. Each one asks
+             for a berth that is wholly readable and takes none if there isn't
+             one (room.js berthsOf). -->
+        <g class="labels">
+          {#each words as word (word.id)}
+            <line data-leader="1" x1={word.leader.x1} y1={word.leader.y1} x2={word.leader.x2} y2={word.leader.y2}
+                  style="stroke:var(--chart-ink)" stroke-opacity=".38" stroke-width="1"/>
+            <text x={word.x} y={word.y} text-anchor={word.anchor} font-size="11.5" letter-spacing="2.1"
+                  style="fill:var(--chart-ink);font-family:var(--mono)" opacity=".72"
+            >{word.text}<tspan opacity=".62">{word.tag}</tspan></text>
+          {/each}
+        </g>
+      </g>
+    {/if}
+  </svg>
+</div>
+
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
@@ -299,9 +598,11 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<!-- §15-2k: this screen hangs off the helm's memberships card, so the way
-     back is to SETTINGS rather than the sky. -->
-<Chrome user={v.user} current="settings" back="/settings" backLabel="← SETTINGS"
+<!-- §15-2k: this screen hangs off the helm's memberships card, so the way back
+     is to SETTINGS — unless you came in by the sun at the centre of the dial
+     (ce86c7e), in which case it is your sky. door.js decides; absence of a
+     marker is the helm, which is every deep link and every bookmark. -->
+<Chrome user={v.user} current="settings" back={door.href} backLabel={door.label}
         role={`${v.name} · ${v.canManage ? "owner" : "member"}`} />
 
 <div class="page">

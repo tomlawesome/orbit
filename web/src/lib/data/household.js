@@ -11,7 +11,8 @@
  * filling the hole with a plausible value.
  */
 
-import { ago } from "$lib/format.js";
+import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
+import { ago, tminus } from "$lib/format.js";
 
 /** Two letters from a chosen display name — never from an email address, which
  * this screen's routes deliberately never disclose. */
@@ -115,6 +116,72 @@ export function deletionNameMatches(typed, householdName) {
 }
 
 /**
+ * THE SYSTEM YOU ARE STANDING IN (§15 H2 — "inside this system").
+ *
+ * Everywhere else in Orbit this household is a distant mark: a 40px ring with
+ * three dots on it, out in someone's sky. On its own management screen you are
+ * INSIDE that mark, so the backdrop is the same figure at room scale — and
+ * every star in it is one of the household's entries, placed by the dial law
+ * out of chart.js: the same pure functions the home screen's chart is drawn
+ * with, never a copy of them.
+ *
+ *   angle° = daysUntilDue − 90,  radius = 62 + 0.242·days
+ *   (overdue falls inward at 0.625/day),  halo = bodySize(costMinor),
+ *   tone = the chart key's urgency band.
+ *
+ * What travels is the OFFSET from the dial's own centre, in dial units, rather
+ * than a screen coordinate: where the household is drawn is the room's business
+ * (room.js), and how far each entry sits from its sun is the law's.
+ *
+ * The figures joining the stars are the SECTIONS (§15-2b): a section's entries
+ * joined in date order in that section's own accent. A section holding one
+ * entry is a lone star with no line to anyone; a section holding none is not in
+ * the sky at all. Count the stars on a figure and you have read the sections
+ * card beside you.
+ */
+export function constellationOf(household, today) {
+  /* No today, no sky: an undated room is better than one drawn from NaN. */
+  if (!today) return { marks: [], figures: [] };
+  const accents = new Map((household?.sections ?? []).map((section) => [section.id, section]));
+  const marks = [];
+  for (const item of household?.items ?? []) {
+    if (item.status !== "active" || !item.dueDate) continue;
+    const days = daysUntil(item.dueDate, today);
+    if (days === null) continue;
+    const { angle, radius } = dialPlacement(days);
+    marks.push({
+      id: item.id,
+      title: item.title,
+      sectionId: item.sectionId ?? null,
+      accent: accents.get(item.sectionId)?.accent ?? null,
+      days,
+      /* The same string every other screen prints on the same body. */
+      tag: tminus(item.dueDate, today),
+      band: bandOf(days),
+      dx: Math.cos(angle) * radius,
+      dy: Math.sin(angle) * radius,
+      halo: bodySize(item.costMinor),
+    });
+  }
+  /* Lead time, then id: the sky cannot depend on the order the API answered
+     in, and the closest thing is drawn — and lettered — first. */
+  marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  const figures = [];
+  for (const section of household?.sections ?? []) {
+    const members = marks.filter((mark) => mark.sectionId === section.id);
+    if (members.length < 2) continue;
+    figures.push({
+      id: section.id,
+      name: section.name,
+      accent: section.accent ?? null,
+      members: members.map((mark) => mark.id),
+    });
+  }
+  return { marks, figures };
+}
+
+/**
  * Everything the screen renders, from the payloads their routes answer.
  *
  * `members` is the truth about who is in the system — the workspace's
@@ -168,6 +235,9 @@ export function householdScreenOf({
     /* The ring's dots are the household's REAL due states (§12: nothing on it
        is decoration), so the items travel to the renderer unchanged. */
     items: household.items ?? [],
+    /* The backdrop: this household's own constellation, at room scale, behind
+       the cards (§15 H2). Placed by the dial law here; composed by room.js. */
+    constellation: constellationOf(household, today),
     entries,
     memberCount,
     owner,
