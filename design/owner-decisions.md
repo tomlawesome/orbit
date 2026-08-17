@@ -576,6 +576,19 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The batch of seals and rulings, 2026-08-17 morning** (owner):
+  retrograde walls-only CONFIRMED with the haze kept gone. Belt: the
+  sooner-end ambient sowing fix is authorized; the documents mark is
+  ring + glow + PULSE; the thinner right flank is fine as is. The
+  first-run landing PASSES the deliberate-wait test. The flight's
+  login screen uses THE MOST RECENT APPROVED LOGIN (the 08-14 rulings:
+  no ribbon, the current lockup) — the sheet's accidental resurrection
+  of the older styling loses; and THERE SHOULD BE NO FOOTER on the
+  login. The descent is the default logout (re-confirmed) and must
+  carry the same reversed planet motion the login's climb has, with
+  the sign-in button IDENTICAL on login and logout surfaces; the old
+  /logout sunset retires. NEW: clicking the SUN at the centre of the
+  dial navigates to that household's view.
 - **Settings: EVA wins, the Movement dies** (owner): the Movement is
   a no (file stays as the record). EVA is the settings concept "for
   now but it needs work" — specifics to be gathered before a second
