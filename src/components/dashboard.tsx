@@ -23,7 +23,7 @@ import {
   type SectionAccent,
   type SectionIcon,
 } from "@/lib/domain";
-import { householdNotifications, type HouseholdNotification } from "@/lib/notifications";
+import { householdNotifications, type HouseholdNotification, type NotificationReader } from "@/lib/notifications";
 import {
   textSizes,
   themePackInfo,
@@ -230,6 +230,26 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const textSize = themePreference.textSize;
   const emailNotifications = themePreference.emailNotifications;
   const pushNotifications = themePreference.pushNotifications;
+  // #487: the in-app notification list must warn this reader on THEIR OWN
+  // first/final pair, exactly like dispatch does (#479) — not a fixed window.
+  // Starts with no stored pair (falls back to the documented defaults inside
+  // householdNotifications) until the fetch below resolves, so the list never
+  // blocks on this request; an item with its own reminder rules is unaffected
+  // either way, since a rule always wins outright.
+  const [reminderReader, setReminderReader] = useState<NotificationReader>({
+    id: session.user.id, firstWarningDays: null, finalWarningDays: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/settings/reminders", { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() as Promise<{ reminders?: { firstWarningDays: number; finalWarningDays: number } }> : null))
+      .then((body) => {
+        if (cancelled || !body?.reminders) return;
+        setReminderReader({ id: session.user.id, firstWarningDays: body.reminders.firstWarningDays, finalWarningDays: body.reminders.finalWarningDays });
+      })
+      .catch(() => { /* Keeps the documented defaults; the bell degrades gracefully rather than blocking. */ });
+    return () => { cancelled = true; };
+  }, [session.user.id]);
   // Memoized (issue #383): household.items keeps a stable reference across
   // renders that don't touch the workspace (menu toggles, notices, etc.), so
   // these only need to recompute when the underlying data actually changes.
@@ -246,7 +266,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   // Memoized (issue #383): householdNotifications does O(items x id-array)
   // work; without this it reran on every render, including every keystroke
   // in the unrelated topbar search input.
-  const notifications = useMemo(() => householdNotifications(household, today), [household, today]);
+  const notifications = useMemo(() => householdNotifications(household, today, reminderReader), [household, today, reminderReader]);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
   const detailItem = household.items.find((item) => item.id === detailItemId);
 

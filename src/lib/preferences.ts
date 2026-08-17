@@ -98,6 +98,69 @@ export const reminderPreferenceSchema = z.object({
 
 export type ReminderPreference = z.infer<typeof reminderPreferenceSchema>;
 
+/** One warning: how many days before the date it fires, and which channels it may use. */
+export interface ReminderOffset {
+  daysBefore: number;
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+}
+
+/** The recipient's own stored pair, as read from `user_preferences` (#468). */
+export interface RecipientWarningDays {
+  firstWarningDays: number | null;
+  finalWarningDays: number | null;
+}
+
+/**
+ * A stored offset that is missing, fractional, or outside the range the
+ * settings screen and the CHECK constraints allow falls back to the
+ * documented default for its own slot rather than scheduling a date nobody
+ * asked for. Unreachable through the route or the database today; this is the
+ * behaviour if a row ever arrives by another path.
+ */
+export function warningDaysOrDefault(stored: number | null, fallback: number, floor: number): number {
+  if (stored === null || !Number.isInteger(stored) || stored < floor || stored > 365) return fallback;
+  return stored;
+}
+
+/**
+ * The offsets a single recipient's reminders for one item actually fire at
+ * (#479). Pure and dependency-free by design (#487): it is the one truth
+ * both the dispatch worker (src/server/notification-worker.ts, which
+ * re-exports this exact function) and the in-app notification list
+ * (src/lib/notifications.ts) compute reminder timing from, so it lives
+ * somewhere a browser bundle can import safely.
+ *
+ * Precedence, as scoped in #479: an item that carries its own reminder
+ * rules keeps them exactly: the reader set those per item, and the settings
+ * screen never claimed to overrule them. The user-level pair is the default
+ * for every item that says nothing.
+ *
+ * The pair is per recipient, not per household: two people in one household
+ * therefore each hear about (or see) the same item on their own schedule.
+ * Nothing here reads another user's row.
+ *
+ * The two warnings are returned as a set of offsets, not an ordered pair: the
+ * first/final ordering is a promise the *labels* make ("14 days before closest
+ * approach", then "3 days before"), and each offset is scheduled
+ * independently, so a pair that somehow crossed over still raises two warnings
+ * rather than none. A pair whose halves are equal is one warning, not a
+ * duplicate. Both channels are open at this level because the item said
+ * nothing about channels; the recipient's own toggles still gate them in
+ * `enabledDeliveryChannels`.
+ */
+export function effectiveReminderOffsets(
+  itemRules: readonly ReminderOffset[],
+  recipient: RecipientWarningDays,
+): ReminderOffset[] {
+  if (itemRules.length) return [...itemRules];
+  const first = warningDaysOrDefault(recipient.firstWarningDays, DEFAULT_FIRST_WARNING_DAYS, 1);
+  const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
+  return [...new Set([first, final])]
+    .sort((left, right) => right - left)
+    .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
+}
+
 export const sectionPreferenceSchema = z.array(z.object({
   id: z.string().min(1).max(80),
   name: z.string().max(30),
