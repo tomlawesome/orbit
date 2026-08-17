@@ -576,6 +576,15 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The contrast trilogy, ruled in part** (owner, 2026-08-17): the
+  household back link FOLLOWS WHERE YOU CAME FROM ("← YOUR SKY" via
+  the sun, "← SETTINGS" via the helm). Star-chart's faint-ink lift and
+  the clouds/dawn deep-descent fixes are HELD FOR COMPARISON
+  SCREENSHOTS — the owner judges by eye; if the fix ruins the
+  aesthetic, the accessibility failure is accepted rather than the
+  experience spent. Recorded idea, not yet ruled: an accessibility
+  options menu behind a small top-right button, present from the very
+  first login, as the mitigation for accepted failures.
 - **The card loses its mark; the logo was there all along** (owner,
   ruling 6b): the ring-mark is removed from the create-system card
   entirely. On submit the card just fades out, revealing the login
