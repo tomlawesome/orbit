@@ -576,6 +576,24 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **Settings: EVA wins, the Movement dies** (owner): the Movement is
+  a no (file stays as the record). EVA is the settings concept "for
+  now but it needs work" — specifics to be gathered before a second
+  pass is built.
+- **Household backdrop: inside this system** (owner): the berth is a
+  no (record kept); H2 — the household's own constellation at room
+  scale, fully data-true — is the household screen's backdrop.
+- **The galactic plane is approved — with a bottom glow in the deep**
+  (owner: "excellent... Very good though"): after dark's plane ships
+  as its default sky, with one amendment — after scrolling down, the
+  bottom edge of the frame gains a slight gradient glow, so the deep
+  manifest's foot carries a glow similar to the plane's own.
+- **Retrograde goes walls-only** (owner: "the same concept just more
+  elegant"): the bare-dial trial WINS — no floor, no ceiling, no
+  horizon haze at rest; only the side walls arrive on descent, with
+  the trial's delayed, eased entrance. Supersedes the shipped
+  floor+ceiling corridor from #480/cff21ea; fix-both into the app and
+  home.html. The trial file stays as the record.
 - **The landing dwell trims, the dial slows** (owner: "First run is
   excellent, but—"): the dwell on the bare sky before the instrument
   arrives is 1s too long (3s → 2s), and the dial's pop is slightly too
