@@ -8,6 +8,9 @@
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
+  /* The sun is one of the household screen's two doors, and that screen owns
+     the marker both doors speak through (§15, owner 2026-08-17). */
+  import { markDoor } from "../household/[id]/door.js";
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
@@ -975,7 +978,12 @@
            No id, no link: before the household arrives (and on the labelled
            sky's dial-less hero) there is nothing to point at, and an <a>
            without an href is honestly inert rather than a dead target. -->
+      <!-- §15, owner 2026-08-17: the household screen's way back is the way you
+           came, so the sun says which door it is as the reader steps through.
+           A one-shot marker, read and deleted on arrival (door.js) — an <a>
+           keeps every behaviour it has, because this only writes. -->
       <a class="sun-link" href={view?.primary ? sunHref(view.primary) : undefined}
+         onclick={() => markDoor("sky")}
          aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
         <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
         <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>

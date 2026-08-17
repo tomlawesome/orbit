@@ -128,6 +128,49 @@
   .sky .far{animation:drift 400s linear infinite}
   .sky .near{animation:drift 195s linear infinite}
   @keyframes drift{to{transform:translateX(-1600px)}}
+
+  /* ══ H2 — THE HOUSEHOLD'S OWN CHART, AT ROOM SCALE (§15) ═══════════════════
+     THE BACKDROP RULING. The cards below are the ratified v3 drawing, untouched
+     — "90% there — the actual form, everything is great; the background is the
+     only issue" — and H2 is what answers the background: the household's own
+     constellation, at room scale, behind the glass. household-inside.html is
+     the record of the concept and the argument for every mark in it; this file
+     carries the same treatment because it is the sheet the built screen is
+     gated against, and the two must be one drawing.
+
+     WHAT CHANGED SINCE THE CONCEPT WAS DRAWN. household-inside.html HAND-PLACED
+     where you stand — sun [690,340] scale 4.95 for Lawson Home, [1034,448] and
+     4.6 for Seaside Cottage — and said so. A real instance has arbitrary
+     households, so the composition is now SOLVED by a rule: the room.js block
+     at the foot of this file, which is the app's own module copied verbatim so
+     a reader can diff it. Two households, two skies, one rule, no authored
+     coordinates anywhere.
+
+     Behind the dust, not in front of it: your system is the structure you are
+     standing in, and the dust of the wider sky streams past nearer to the eye.
+     It sits at the same z as the sky so the vignette still closes the corners
+     over it, which is a good part of the restraint. */
+  .consty{position:fixed;inset:0;pointer-events:none;z-index:0;
+          opacity:var(--con-op,1);
+          transform:translate3d(0,calc(var(--lift,0) * (.35 + .65 * var(--lift,0)) * -138vh),0)
+                    scale(calc(1 + var(--lift,0) * var(--lift,0) * .13))}
+  .consty svg{position:absolute;inset:0;width:100%;height:100%}
+  /* the light packs need the ink pulled right back before a whisper stops being
+     a whisper — dark lines on pale ground read far louder than pale lines on
+     dark, at the same alpha */
+  [data-theme=afterdark]  .consty{--con-op:.92}
+  [data-theme=retrograde] .consty{--con-op:.82}
+  [data-theme=atlas]      .consty{--con-op:.46}
+  [data-theme=dawn]       .consty{--con-op:.46}
+  /* THE SKY DRIFTS AS ONE (§14): near dust 8.2px/s, far dust 4.0px/s (the two
+     rates above) and the system's own architecture at 1.2px/s. It moves LEAST
+     because you are standing in the middle of it — you travel with your own
+     system; what streams past is everything outside it. Bounded rather than
+     endless (96 units out, 96 back, for ever, at exactly 1.2px/s): a screen
+     somebody leaves open outlives a sheet somebody judges, and a system that
+     drifts away for ever leaves the room it is here to describe. */
+  .consty .drift{animation:hh-system 160s linear infinite alternate}
+  @keyframes hh-system{to{transform:translateX(-96px)}}
   .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
@@ -470,6 +513,31 @@
 </style>
 </head>
 <body>
+<!-- your own system, drawn from the inside (§15 H2). Everything in here is
+     generated at load from the fixture, the dial law and the placement rule —
+     there is not one authored coordinate in the markup. -->
+<div class="consty" id="consty" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- the chart key's four paints as FIELDS rather than filled planets: at
+           room scale a body is a region of sky you are standing near, not a
+           disc. The alphas keep the key's own order — ruby loudest, jade
+           quietest — because that order is the information. -->
+      <radialGradient id="hh-ruby"><stop offset="0" style="stop-color:var(--overdue)" stop-opacity=".24"/><stop offset=".55" style="stop-color:var(--overdue)" stop-opacity=".08"/><stop offset="1" style="stop-color:var(--overdue)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
+    </defs>
+    <g class="drift" id="con-drift">
+      <g class="rings" id="con-rings"></g>
+      <g class="figures" id="con-figures"></g>
+      <g class="bodies" id="con-bodies"></g>
+      <g class="labels" id="con-labels"></g>
+    </g>
+  </svg>
+</div>
+
 <div class="sky" aria-hidden="true">
   <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
     <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
@@ -478,7 +546,20 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<a class="back" href="settings.html">← SETTINGS</a>
+<!-- THE WAY BACK IS THE WAY YOU CAME (§15, owner ruling 2026-08-17). This
+     screen has two doors: the helm's memberships card ("Your systems" → a row →
+     manage), and the SUN at the centre of the dial. Arriving by the helm the way
+     back reads "← SETTINGS", as drawn here; arriving by the sun it reads
+     "← YOUR SKY" and returns to the sky, because sending a reader back to a
+     settings page they were never on is the kind of small lie that makes an
+     interface feel like software rather than a place.
+
+     The signal is a one-shot session marker written by the sun and read once on
+     arrival (web/src/routes/household/[id]/door.js): a query string would be
+     bookmarked and shared, so a link somebody sent you would claim a door you
+     never touched. ABSENCE IS THE HELM — every deep link, every bookmark, and
+     the state this sheet draws. The demos rail flips it. -->
+<a class="back" id="back" href="settings.html">← SETTINGS</a>
 <button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
@@ -871,6 +952,7 @@
   <button id="d-member" aria-pressed="false" onclick="setRole('member')">non-owner</button>
   <button id="d-wants" aria-pressed="false" onclick="toggleWants()">someone wants in</button>
   <button id="d-marks" aria-pressed="true" onclick="toggleMarks()">section marks on</button>
+  <button id="d-door" aria-pressed="false" onclick="toggleDoor()">came in by the helm</button>
   <button onclick="location.reload()">reset</button>
   <span style="margin-left:6px">THEME</span>
   <button class="sw" data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
@@ -885,6 +967,8 @@
   reached from the helm’s memberships card · name, time zone and currency each save on their own to the eye
   while the client sends the one bundled household.update underneath; sections are still one list, replaced whole ·
   the sections editor belongs to owners alone · joiners are answered here and nowhere else ·
+  <b style="color:var(--ink-mid);font-weight:400">the way back is the way you came</b>: the helm's memberships card
+  leaves it reading ← SETTINGS, and the sun at the centre of the dial leaves it reading ← YOUR SKY (demos) ·
   deletion is requested here and recovered only from the admin panel ·
   every destructive act asks twice (§14) and deletion also asks for the name ·
   members are shown by the name they chose, never by email, because the route never discloses one ·
@@ -1106,6 +1190,22 @@ function toggleWants(){
   const on = document.body.classList.toggle("wants");
   document.getElementById("d-wants").setAttribute("aria-pressed", String(on));
 }
+/* THE TWO DOORS (§15, owner 2026-08-17): the way back is the way you came, so
+   both states are here to be read. The sheet's own state is the DEFAULT one —
+   the helm — because that is what an absent marker means. */
+function toggleDoor(){
+  const sky = document.body.classList.toggle("bysky");
+  const btn = document.getElementById("d-door");
+  btn.setAttribute("aria-pressed", String(sky));
+  btn.textContent = sky ? "came in by the sun" : "came in by the helm";
+  const back = document.getElementById("back");
+  back.textContent = sky ? "← YOUR SKY" : "← SETTINGS";
+  back.setAttribute("href", sky ? "home.html" : "settings.html");
+  /* the way back is one of the runs of small type the backdrop keeps clear, and
+     it just changed width, so the room is composed again against it */
+  drawSystem(system);
+}
+
 /* 2b: the marks are here to be JUDGED — pull them off and put them back
    without leaving the screen. */
 function toggleMarks(){
@@ -1137,5 +1237,559 @@ const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
     near.appendChild(c);
   }
 })();
+/* ══════════════════════════════════════════════════════════════════════════
+   H2 — INSIDE THIS SYSTEM
+   The backdrop, and nothing but the backdrop. Not one line below this point
+   touches the desk above it.
+
+   home.html carries one line in its galaxy renderer:
+
+       // you never see your own constellation — you're inside it
+
+   This is that line, drawn. Everywhere else in Orbit your household is a
+   distant mark: a 40px ring with three dots on it, out in someone's sky. The
+   little ring in the page header, top left of this very screen, is what Lawson
+   Home looks like from OUTSIDE. What is behind these cards is the SAME FIGURE
+   at room scale, seen from the middle of it — and every mark in it is true:
+
+     · the stars ARE the entries, placed by the dial law;
+     · the joined figures are the SECTIONS, in their own accents — count the
+       stars on a figure and you have read the sections card beside you;
+     · the dashed red circle is the chart key's "overdue — inside the ring";
+     · the giant arc is the dial's calendar band, its +1 year ring, so the
+       thing sweeping your room is a year and you only ever see an arc of it;
+     · flip the demos to NON-OWNER and the sky changes with the desk, because
+       that state is a different household.
+
+   The full argument, and the concept's own report, is household-inside.html.
+   ══════════════════════════════════════════════════════════════════════════ */
+const NS = "http://www.w3.org/2000/svg";
+
+/* ── THE LAW ───────────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/chart.js. Copied rather than paraphrased so a
+   reader can diff it: the backdrop is drawn by the SAME arithmetic the home
+   dial is drawn by, which is the only reason it may claim to be this
+   household's own constellation. */
+function daysUntil(dueDate, today){
+  return dueDate ? Math.round((Date.parse(dueDate) - Date.parse(today)) / 86400000) : null;
+}
+function bandOf(days){
+  if (days === null || days === undefined) return "unscheduled";
+  if (days < 0)   return "overdue";
+  if (days <= 30) return "due-soon";
+  if (days <= 90) return "upcoming";
+  return "ok";
+}
+function dialPlacement(days){
+  const angle = (Math.max(-90, Math.min(days, 430)) - 90) * (Math.PI / 180);
+  const radius = days >= 0 ? Math.min(62 + 0.242 * days, 166)
+                           : Math.max(24, 62 - 0.625 * -days);
+  return { angle, radius };
+}
+function bodySize(costMinor){
+  if (!costMinor) return 4;
+  const pounds = Math.max(costMinor / 100, 1);
+  return Math.min(8.5, Math.max(3.5, Math.round((0.8 + 1.09 * Math.log(pounds)) * 10) / 10));
+}
+/* web/src/lib/format.js: T+ is behind you, T− is ahead. */
+const tminus = (due, today) => {
+  const days = daysUntil(due, today);
+  return days < 0 ? "T+" + -days + "d" : "T−" + days + "d";
+};
+
+/* ── THE FIXTURE ───────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/fixtures/workspace.js. BOTH households the
+   demos can put on this desk are here, because the backdrop has to tell the
+   truth in both states: the owner sees Lawson Home, and flipping to
+   "non-owner" puts you inside SEASIDE COTTAGE — Emma's system, which Tom is
+   only a member of — so the sky behind the cards changes to that system's
+   geometry. Two different households, two different skies, one law and one
+   rule. Real ids, real due dates, real costs: change a date and the star
+   moves, because the star IS the date. */
+const FIXTURE_TODAY = "2026-08-13";
+const SYSTEMS = {
+  lawson: {
+    sections: [
+      { id:"s-home",     name:"Home",             accent:"sage"  },
+      { id:"s-vehicles", name:"Vehicles",         accent:"blue"  },
+      { id:"s-devices",  name:"Devices",          accent:"sand"  },
+      { id:"s-services", name:"Services",         accent:"plum"  },
+      { id:"s-dates",    name:"Dates & renewals", accent:"coral" },
+    ],
+    items: [
+      { id:"i-gutter",  title:"Gutter clearing",       sectionId:"s-home",     dueDate:"2026-07-28", costMinor:15000 },
+      { id:"i-mot",     title:"Car MOT — Volvo V60",   sectionId:"s-vehicles", dueDate:"2026-08-29", costMinor:5485  },
+      { id:"i-boiler",  title:"Boiler service",        sectionId:"s-home",     dueDate:"2026-09-04", costMinor:12000 },
+      { id:"i-chimney", title:"Chimney sweep",         sectionId:"s-home",     dueDate:"2026-10-13", costMinor:9000  },
+      { id:"i-smoke",   title:"Smoke alarm batteries", sectionId:"s-devices",  dueDate:"2026-12-13", costMinor:1200  },
+      { id:"i-svc",     title:"Car full service",      sectionId:"s-vehicles", dueDate:"2027-01-21", costMinor:30000 },
+    ],
+  },
+  seaside: {
+    sections: [
+      { id:"s-home",    name:"Home",    accent:"sage" },
+      { id:"s-outside", name:"Outside", accent:"plum" },
+    ],
+    items: [
+      { id:"i-seaside-0", title:"Septic tank empty",       sectionId:"s-outside", dueDate:"2026-08-20", costMinor:21000 },
+      { id:"i-seaside-1", title:"Chimney sweep — Seaside", sectionId:"s-home",    dueDate:"2027-03-01", costMinor:9000  },
+      { id:"i-seaside-2", title:"Deck re-oiling",          sectionId:"s-outside", dueDate:"2027-06-15", costMinor:13000 },
+    ],
+  },
+};
+
+/* ── THE MARKS ─────────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/household.js constellationOf: the household's
+   entries as dial-space marks. What travels is the OFFSET from the dial's own
+   centre, in dial units — where the household is DRAWN is the room's business,
+   and how far each entry sits from its sun is the law's. */
+function constellationOf(system, today){
+  const accents = new Map(system.sections.map((section) => [section.id, section]));
+  const marks = system.items.map((item) => {
+    const days = daysUntil(item.dueDate, today);
+    const p = dialPlacement(days);
+    return {
+      id: item.id, title: item.title, sectionId: item.sectionId,
+      accent: accents.get(item.sectionId) ? accents.get(item.sectionId).accent : null,
+      days, tag: tminus(item.dueDate, today), band: bandOf(days),
+      dx: Math.cos(p.angle) * p.radius, dy: Math.sin(p.angle) * p.radius,
+      halo: bodySize(item.costMinor),
+    };
+  });
+  marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const figures = [];
+  for (const section of system.sections) {
+    const members = marks.filter((mark) => mark.sectionId === section.id);
+    if (members.length < 2) continue;
+    figures.push({ id: section.id, accent: section.accent, members: members.map((m) => m.id) });
+  }
+  return { marks, figures };
+}
+
+/* ══ THE RULE — WHERE YOU STAND ═════════════════════════════════════════════
+   Verbatim from web/src/routes/household/[id]/room.js, which is the module the
+   built screen composes with; the argument for every constant is written out
+   there, at length, and this is a copy so the sheet and the screen cannot
+   drift. In brief, in order of authority:
+
+     1. THE ROOM IS A ROOM — a guarantee. The year band always leaves the
+        frame, so the giant figure can only ever be an ARC: a ring drawn whole
+        inside the frame is a logo, and a household is not a logo. Bought with
+        a scale FLOOR nothing below may cross.
+     2. THE UNPROTECTED TYPE IS SACRED — a law. No halo and no word on the page
+        header, the way back or the account orb: the runs of small type with no
+        panel under them. The CARDS are not protected — glass with a
+        backdrop-filter over it is exactly what the figure composes behind.
+     3. THE COMPOSITION IS A DESIRE. Fitting every entry into the room, centred
+        behind the two columns, is what YIELDS when the first two cannot both
+        be had — which is the concept rather than a shortfall of it: you cannot
+        see all of your own system at once.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const FIELD = { width: 1600, height: 1000 };
+const OVERDUE_RING = dialPlacement(0).radius;
+const YEAR_RING = dialPlacement(364).radius;
+const BAND_RIM = YEAR_RING + 18;
+const BAND_TICK = YEAR_RING - 7;
+const MONTH_TEXT = YEAR_RING + 10;
+const SUN_FIELD = 16;
+const FIT_MARGIN = 90;
+const DEFAULT_SCALE = 4.95;
+const DEFAULT_SUN = [690 / FIELD.width, 340 / FIELD.height];
+const ESCAPE_GAP = 1;
+const SCALE_STEPS = [1, 0.92, 0.84, 0.76];
+const CANDIDATE_CAP = 72;
+const ORDER = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const round = (n) => Math.round(n * 10) / 10;
+
+const scaleFloorFor = (width, height) => (Math.min(width, height) / 2 + 10) / YEAR_RING;
+const scaleCeilingFor = (width, height) => (0.9 * Math.hypot(width / 2, height / 2)) / YEAR_RING;
+
+function cloudOf(marks, seen){
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+  for (const mark of marks) {
+    const halo = seen === false ? 0 : mark.halo;
+    left = Math.min(left, mark.dx - halo);
+    right = Math.max(right, mark.dx + halo);
+    top = Math.min(top, mark.dy - halo);
+    bottom = Math.max(bottom, mark.dy + halo);
+  }
+  return { left, right, top, bottom };
+}
+function fitScale(marks, width, height){
+  if (!marks.length) return Infinity;
+  const seen = cloudOf(marks, true), centres = cloudOf(marks, false);
+  const byWidth = centres.right > centres.left ? (width - 2 * FIT_MARGIN) / (seen.right - seen.left) : Infinity;
+  const byHeight = centres.bottom > centres.top ? (height - 2 * FIT_MARGIN) / (seen.bottom - seen.top) : Infinity;
+  return Math.min(byWidth, byHeight);
+}
+function idealSun(marks, scale, width, height){
+  if (!marks.length) return [DEFAULT_SUN[0] * width, DEFAULT_SUN[1] * height];
+  const box = cloudOf(marks, true);
+  return [width / 2 - ((box.left + box.right) / 2) * scale,
+          height / 2 - ((box.top + box.bottom) / 2) * scale];
+}
+function forbidden(marks, scale, keepOut){
+  const rects = [];
+  const ordered = marks.slice().sort((a, b) => ORDER(a.id, b.id));
+  const add = (guard, radius, dx, dy) => rects.push({
+    left: guard.left - radius - dx, right: guard.right + radius - dx,
+    top: guard.top - radius - dy, bottom: guard.bottom + radius - dy });
+  for (const guard of keepOut) add(guard, SUN_FIELD * scale, 0, 0);
+  for (const mark of ordered) {
+    for (const guard of keepOut) add(guard, mark.halo * scale, mark.dx * scale, mark.dy * scale);
+  }
+  return rects;
+}
+const inside = (rect, x, y) => x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+function exposureAt(rects, x, y){
+  let cost = 0;
+  for (const rect of rects) {
+    if (!inside(rect, x, y)) continue;
+    cost += Math.min(x - rect.left, rect.right - x) * Math.min(y - rect.top, rect.bottom - y);
+  }
+  return cost;
+}
+function axisCandidates(ideal, pairs, low, high){
+  const seen = new Set([ideal]);
+  for (const pair of pairs) {
+    if (pair[0] >= low && pair[0] <= high) seen.add(pair[0]);
+    if (pair[1] >= low && pair[1] <= high) seen.add(pair[1]);
+  }
+  return [...seen]
+    .sort((p, q) => Math.abs(p - ideal) - Math.abs(q - ideal) || p - q)
+    .slice(0, CANDIDATE_CAP);
+}
+function clearest(marks, scale, ideal, keepOut, width, height){
+  const rects = forbidden(marks, scale, keepOut);
+  if (!rects.length || !rects.some((rect) => inside(rect, ideal[0], ideal[1]))) {
+    return { sun: [round(ideal[0]), round(ideal[1])], exposure: 0 };
+  }
+  const xs = axisCandidates(ideal[0], rects.map((r) => [r.left - ESCAPE_GAP, r.right + ESCAPE_GAP]), 0, width);
+  const ys = axisCandidates(ideal[1], rects.map((r) => [r.top - ESCAPE_GAP, r.bottom + ESCAPE_GAP]), 0, height);
+  const candidates = [];
+  for (const x of xs) for (const y of ys) candidates.push([x, y, Math.hypot(x - ideal[0], y - ideal[1])]);
+  candidates.sort((a, b) => a[2] - b[2] || a[0] - b[0] || a[1] - b[1]);
+  let best = null;
+  for (const candidate of candidates) {
+    const exposure = exposureAt(rects, candidate[0], candidate[1]);
+    if (exposure === 0) return { sun: [round(candidate[0]), round(candidate[1])], exposure: 0 };
+    if (!best || exposure < best.exposure) best = { sun: [round(candidate[0]), round(candidate[1])], exposure };
+  }
+  return best;
+}
+const MONTHS = ["AUG","SEP","OCT","NOV","DEC","JAN","FEB","MAR","APR","MAY","JUN","JUL"];
+function monthsOf(sun, scale){
+  return MONTHS.map((label, index) => {
+    const angle = ((index * 30 - 90) * Math.PI) / 180;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    return { label,
+      x1: round(sun[0] + ca * YEAR_RING * scale), y1: round(sun[1] + sa * YEAR_RING * scale),
+      x2: round(sun[0] + ca * BAND_TICK * scale), y2: round(sun[1] + sa * BAND_TICK * scale),
+      tx: round(sun[0] + ca * MONTH_TEXT * scale), ty: round(sun[1] + sa * MONTH_TEXT * scale + 11) };
+  });
+}
+function roomOf(options){
+  const marks = options.marks || [];
+  const width = options.width, height = options.height, keepOut = options.keepOut || [];
+  const floor = scaleFloorFor(width, height), ceiling = scaleCeilingFor(width, height);
+  const fit = fitScale(marks, width, height);
+  const fitted = Number.isFinite(fit);
+  const base = fitted ? Math.min(Math.max(fit, floor), ceiling) : DEFAULT_SCALE;
+  let best = null;
+  for (const step of SCALE_STEPS) {
+    const scale = Math.max(floor, base * step);
+    const chosen = clearest(marks, scale, idealSun(marks, scale, width, height), keepOut, width, height);
+    if (!best || chosen.exposure < best.exposure) best = Object.assign({}, chosen, { scale });
+    if (chosen.exposure === 0) break;
+    if (scale === floor) break;
+  }
+  if (!best) {
+    const scale = Math.max(floor, Math.min(DEFAULT_SCALE, ceiling));
+    best = Object.assign({}, clearest([], scale, [DEFAULT_SUN[0] * width, DEFAULT_SUN[1] * height], keepOut, width, height), { scale });
+  }
+  const sun = best.sun, scale = best.scale;
+  return {
+    sun, scale, clear: best.exposure === 0, crowded: best.exposure > 0, fitted,
+    arc: YEAR_RING * scale > Math.min(sun[0], width - sun[0], sun[1], height - sun[1]),
+    stars: marks.map((mark) => Object.assign({}, mark, {
+      cx: round(sun[0] + mark.dx * scale),
+      cy: round(sun[1] + mark.dy * scale),
+      r: round(mark.halo * scale) })),
+    rings: { sun: round(SUN_FIELD * scale), overdue: round(OVERDUE_RING * scale),
+             year: round(YEAR_RING * scale), rim: round(BAND_RIM * scale) },
+    months: monthsOf(sun, scale),
+  };
+}
+
+/* ── THE WORDS ─────────────────────────────────────────────────────────────
+   Also verbatim from room.js, and this part was already solved by the concept:
+   each star asks for a berth reading AWAY from the centre of the figure first,
+   then back toward it, stepping further out each time, and takes the first one
+   wholly inside the frame, wholly clear of every panel and of every word
+   already placed. A star that can find no berth is simply not lettered — the
+   sky says it is there, the desk beside you says what it is. Urgent entries
+   choose first, because if only some names fit they should be the ones you
+   needed to see. */
+const LADDER = [-11, 21, -34, 44, -57, 67, -80, 90, -103, 113];
+const BERTH_REACH = 38, WORD_HEIGHT = 15, WORD_TOP = 11;
+const ADVANCE = 11.5 * 0.6 + 2.1;
+const FRAME_MARGIN = 16, GUARD_PAD = 6, WORD_PAD = 8;
+const wordOf = (mark) => ({ text: (mark.title || "").toUpperCase(), tag: "  ·  " + (mark.tag || "") });
+function wordBox(star, dx, dy, anchor){
+  const word = wordOf(star);
+  const width = (word.text.length + word.tag.length) * ADVANCE;
+  const x = star.cx + dx;
+  const left = anchor === "start" ? x : x - width;
+  return { left, right: left + width,
+           top: star.cy + dy - WORD_TOP, bottom: star.cy + dy - WORD_TOP + WORD_HEIGHT };
+}
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+const pad = (r, n) => ({ left:r.left-n, right:r.right+n, top:r.top-n, bottom:r.bottom+n });
+function berthsOf(options){
+  const stars = options.stars || [], sun = options.sun, guards = options.guards || [];
+  const width = options.width, height = options.height;
+  const taken = [], words = [];
+  const order = stars.slice().sort((a, b) => a.days - b.days || ORDER(a.id, b.id));
+  for (const star of order) {
+    const away = star.cx >= sun[0] ? 1 : -1;
+    let berth = null;
+    for (const dy of LADDER) {
+      for (const dir of [away, -away]) {
+        const anchor = dir > 0 ? "start" : "end";
+        const box = wordBox(star, dir * BERTH_REACH, dy, anchor);
+        if (box.left < FRAME_MARGIN || box.top < FRAME_MARGIN) continue;
+        if (box.right > width - FRAME_MARGIN || box.bottom > height - FRAME_MARGIN) continue;
+        if (guards.some((guard) => overlaps(box, pad(guard, GUARD_PAD)))) continue;
+        if (taken.some((word) => overlaps(box, pad(word, WORD_PAD)))) continue;
+        berth = { dx: dir * BERTH_REACH, dy, anchor };
+        break;
+      }
+      if (berth) break;
+    }
+    if (!berth) continue;
+    taken.push(wordBox(star, berth.dx, berth.dy, berth.anchor));
+    const length = Math.hypot(berth.dx, berth.dy) || 1;
+    const word = wordOf(star);
+    words.push({ id: star.id, x: round(star.cx + berth.dx), y: round(star.cy + berth.dy),
+      anchor: berth.anchor, text: word.text, tag: word.tag,
+      leader: { x1: round(star.cx + (berth.dx / length) * (star.r + 5)),
+                y1: round(star.cy + (berth.dy / length) * (star.r + 5)),
+                x2: round(star.cx + berth.dx * 0.9),
+                y2: round(star.cy + berth.dy * 0.9) } });
+  }
+  return words;
+}
+/* room.js liftOf: the descent is a pure function of scrollTop. */
+function liftOf(scrollTop, innerHeight, scrollHeight){
+  const max = Math.max(1, scrollHeight - innerHeight);
+  const travelled = Math.min(max, Math.max(0, scrollTop));
+  return Math.min(1, travelled / Math.min(innerHeight, max * 0.72));
+}
+/* room.js skyMap / toField: preserveAspectRatio "slice" is a uniform scale
+   about the centre, so a rectangle measured in CSS pixels reaches the rule in
+   the field's own units by one multiply rather than a guess. */
+function skyMap(innerWidth, innerHeight){
+  const k = Math.max(innerWidth / FIELD.width, innerHeight / FIELD.height);
+  return { k, ox: (innerWidth - FIELD.width * k) / 2, oy: (innerHeight - FIELD.height * k) / 2 };
+}
+const toField = (rect, map) => ({
+  left: (rect.left - map.ox) / map.k, right: (rect.right - map.ox) / map.k,
+  top: (rect.top - map.oy) / map.k, bottom: (rect.bottom - map.oy) / map.k });
+
+/* ── THE DRAWING ─────────────────────────────────────────────────────────── */
+const PAINT = { overdue:["--overdue","hh-ruby"], "due-soon":["--warm","hh-amber"],
+                upcoming:["--upcoming","hh-sky"], ok:["--ok","hh-jade"],
+                unscheduled:["--ok","hh-jade"] };
+const el = (tag, attrs) => {
+  const node = document.createElementNS(NS, tag);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  return node;
+};
+const rectsOf = (selector) => [...document.querySelectorAll(selector)]
+  .map((node) => node.getBoundingClientRect())
+  .filter((rect) => rect.width > 0 && rect.height > 0);
+
+function drawSystem(key){
+  const system = SYSTEMS[key];
+  const chart = constellationOf(system, FIXTURE_TODAY);
+  /* KEEP-OUT is the type with no panel under it — the header's ring and its two
+     lines (the row is full-width but its ink is not, so the row's own children
+     are the guards), the way back and the account orb. PANELS are the cards:
+     not keep-out, because composing behind glass is the whole idea, but guards
+     for WORDS, because a word under glass is unreadable ink that costs that
+     panel's own small type contrast for nothing. */
+  const map = skyMap(innerWidth, innerHeight);
+  const keepOut = rectsOf("header.screen > *, .back, .orb").map((rect) => toField(rect, map));
+  const panels = rectsOf(".card").map((rect) => toField(rect, map));
+  const room = roomOf({ marks: chart.marks, width: FIELD.width, height: FIELD.height, keepOut });
+  const words = berthsOf({ stars: room.stars, sun: room.sun, guards: keepOut.concat(panels),
+                           width: FIELD.width, height: FIELD.height });
+
+  const consty = document.getElementById("consty");
+  /* transform-origin IS the sun, in CSS pixels, so the descent is a fall INTO
+     the system rather than a pan across it. */
+  consty.style.transformOrigin =
+    (map.ox + room.sun[0] * map.k).toFixed(1) + "px " + (map.oy + room.sun[1] * map.k).toFixed(1) + "px";
+
+  const rings = document.getElementById("con-rings");
+  const figures = document.getElementById("con-figures");
+  const bodies = document.getElementById("con-bodies");
+  const labels = document.getElementById("con-labels");
+  for (const g of [rings, figures, bodies, labels]) g.textContent = "";
+
+  /* the sun: the dial's own disc and its core, at room scale. Held RIGHT down —
+     the concept's first pass gave it a wide corona and it was the single worst
+     thing on the screen for contrast, a soft bright field lying under the whole
+     left column (10px mono at 2.07:1). A sun seen from inside its own system is
+     a light, not a lamp. */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.sun, fill:"url(#hh-sun)" }));
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:(2.2 * room.scale).toFixed(1),
+    style:"fill:var(--sun-core)", opacity:".26" }));
+  /* r=62 — the chart key's own words, "overdue: inside the ring". */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.overdue, fill:"none",
+    style:"stroke:var(--overdue)", "stroke-opacity":".17", "stroke-width":"1.4",
+    "stroke-dasharray": (3 * room.scale).toFixed(1) + " " + (5 * room.scale).toFixed(1) }));
+  /* THE GIANT ONE: the dial's calendar band, whose r=150 is exactly +1 YEAR by
+     the law, so the thing sweeping your room is a year. */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.year, fill:"none",
+    style:"stroke:var(--chart-line)", "stroke-opacity":".72", "stroke-width":"2.4" }));
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.rim, fill:"none",
+    style:"stroke:var(--chart-line-soft)", "stroke-opacity":".8", "stroke-width":"1.2" }));
+  for (const month of room.months) {
+    rings.appendChild(el("line", { x1:month.x1, y1:month.y1, x2:month.x2, y2:month.y2,
+      style:"stroke:var(--chart-line)", "stroke-opacity":".72", "stroke-width":"2.4" }));
+  }
+  for (const month of room.months) {
+    const t = el("text", { x:month.tx, y:month.ty, "text-anchor":"middle", "font-size":"31",
+      "letter-spacing":"6", style:"fill:var(--chart-ink);font-family:var(--mono)", opacity:".2" });
+    t.textContent = month.label;
+    rings.appendChild(t);
+  }
+
+  /* THE FIGURES: a section's entries joined in date order, in that section's own
+     accent (2b — the mark travels with the entry). */
+  const byId = new Map(room.stars.map((star) => [star.id, star]));
+  for (const figure of chart.figures) {
+    figures.appendChild(el("polyline", {
+      points: figure.members.map((id) => byId.get(id).cx + "," + byId.get(id).cy).join(" "),
+      fill:"none", style:"stroke:var(" + (figure.accent ? "--sec-" + figure.accent : "--ink-faint") + ")",
+      "stroke-opacity":".30", "stroke-width":"1.3", "stroke-linecap":"round",
+      "stroke-dasharray": room.scale.toFixed(1) + " " + (5 * room.scale).toFixed(1) }));
+  }
+
+  /* THE STARS */
+  for (const star of room.stars) {
+    const paint = PAINT[star.band];
+    bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy, r:star.r, fill:"url(#" + paint[1] + ")" }));
+    if (star.band === "overdue") {
+      /* the chart key's overdue ping, on any body that has earned it */
+      bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy, r:(star.r * 1.27).toFixed(1), fill:"none",
+        style:"stroke:var(--overdue)", "stroke-opacity":".20", "stroke-width":"1.3" }));
+    }
+    bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy,
+      r:Math.max(2.1, star.r * 0.115).toFixed(2), style:"fill:var(" + paint[0] + ")", opacity:".55" }));
+  }
+
+  /* THE WHISPER LABELS */
+  for (const word of words) {
+    const leader = el("line", { x1:word.leader.x1, y1:word.leader.y1, x2:word.leader.x2, y2:word.leader.y2,
+      style:"stroke:var(--chart-ink)", "stroke-opacity":".38", "stroke-width":"1" });
+    leader.dataset.leader = "1";
+    labels.appendChild(leader);
+    const t = el("text", { x:word.x, y:word.y, "text-anchor":word.anchor, "font-size":"11.5",
+      "letter-spacing":"2.1", style:"fill:var(--chart-ink);font-family:var(--mono)", opacity:".72" });
+    t.textContent = word.text;
+    const tag = el("tspan", { opacity:".62" });
+    tag.textContent = word.tag;
+    t.appendChild(tag);
+    labels.appendChild(t);
+  }
+  legible();
+}
+
+/* ── A WORD IS DRAWN ONLY WHERE IT CAN BE READ ─────────────────────────────
+   The words are placed from an ESTIMATE of their own width; only the browser
+   knows what the font actually did, so the drawing is measured once it exists —
+   and the month names, which take no berth, are measured with it. Any word
+   touching a panel, the header, the chrome or the edge of the frame is not
+   drawn at all: no word is ever cut in half by a card edge (which reads as a
+   rendering fault, not a backdrop), and no word is ever laid unreadable under
+   a panel where its only measurable effect is to cost that panel's small type
+   contrast — which is exactly what the concept's first pass did, at 2.70:1 →
+   2.43:1, for nothing.
+
+   Measured at rest and on resize, never during a scroll: the composition being
+   judged is the one at scroll 0, and words winking out as you descend would be
+   its own kind of lie. */
+function legible(){
+  const guards = rectsOf("header.screen > *, .back, .orb, .card");
+  for (const word of document.querySelectorAll("#consty text")) {
+    word.style.display = "";
+    const r = word.getBoundingClientRect();
+    const blocked =
+      r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight ||
+      guards.some((g) => r.left < g.right && r.right > g.left && r.top < g.bottom && r.bottom > g.top);
+    word.style.display = blocked ? "none" : "";
+    const leader = word.previousElementSibling;
+    if (leader && leader.dataset && leader.dataset.leader) leader.style.display = blocked ? "none" : "";
+  }
+}
+
+let system = "lawson";
+/* THE BACKDROP WAITS FOR THE FONTS, AND THEN FOR A FRAME.
+
+   It waits for the fonts because the composition is solved against MEASURED
+   rectangles — where the header's two lines actually end — and those move when
+   the real faces arrive, so a room composed before them would be composed
+   against fallback metrics and would jump once when they landed.
+
+   It then waits for a FRAME, and that one is measured on the built screen:
+   composing allocates a few thousand small objects, and doing that INSIDE
+   document.fonts.ready's own callback runs it at the exact moment the browser is
+   settling that promise. Blink's pending `ready` promise does not survive it —
+   anything else awaiting the same signal is handed "Resulting promise was
+   garbage collected" instead of an answer, which is how the fidelity gate met
+   it. Measuring layout belongs in a frame anyway. The sheet keeps the built
+   screen's shape, so there is one drawing and one reasoning. */
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => requestAnimationFrame(() => drawSystem(system)));
+} else {
+  drawSystem(system);
+}
+addEventListener("resize", () => drawSystem(system), { passive:true });
+
+/* the demos' role switch changes WHICH SYSTEM you are standing in — the
+   non-owner state is Seaside Cottage, Emma's — so the sky has to follow it.
+   The ratified handler is untouched; it is wrapped. */
+const ratifiedSetRole = setRole;
+setRole = function(role){
+  ratifiedSetRole(role);
+  system = role === "member" ? "seaside" : "lawson";
+  drawSystem(system);
+};
+
+/* ── THE DESCENT (§15, universal) ──────────────────────────────────────────
+   You are already inside; scrolling takes you DEEPER. The whole figure travels
+   up and out as one rigid drawing — the sun leaves early and the +1 year ring
+   is the last thing over your head — because a system does not stop existing
+   when you stop looking at it. --lift is a pure function of scrollTop, so
+   scroll 0 is scroll 0 for ever, the way back up is the way down reversed to
+   the pixel, and reduced motion keeps every bit of it: a position is not an
+   animation. */
+(function descent(){
+  const doc = document.documentElement;
+  const read = () => doc.style.setProperty("--lift",
+    liftOf(scrollY, innerHeight, doc.scrollHeight).toFixed(4));
+  let queued = false;
+  const onScroll = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; read(); });
+  };
+  addEventListener("scroll", onScroll, { passive:true });
+  addEventListener("resize", onScroll, { passive:true });
+  read();
+})();
+
 </script>
 </body></html>
