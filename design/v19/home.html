@@ -204,6 +204,19 @@
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
   .body-link:hover circle{transform:scale(1.5)}
+  /* §15 (08-17): the sun is the way into this household's own screen. The
+     affordance is the pointer and the ink the sun ALREADY has, brightened —
+     the same acknowledgement a constellation gives (.minisys:hover .msring
+     lifts its ring's opacity). Nothing new is drawn, at rest or on hover, so
+     the first viewport is the approved one to the pixel. The name lifts with
+     it because the name is inside the same target. */
+  .sun-link{cursor:pointer}
+  .sun-link circle[filter="url(#sun)"]{transition:opacity .3s}
+  .sun-link:is(:hover,:focus-visible) circle[filter="url(#sun)"]{opacity:1}
+  .sun-link:is(:hover,:focus-visible) #dial-name{fill:var(--ink)}
+  /* Keyboard only, and in the app's own focus ink (the accent, as everywhere
+     a field or a swatch says "you are here"). */
+  .sun-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
   .group{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s ease}
   .group.seen{opacity:1;transform:none}
   .item{scroll-margin-top:130px}
@@ -474,7 +487,8 @@
   body.quiet [data-body="i-mot"], body.quiet [data-body="i-boiler"]{display:none}
   .chrome{transition:opacity 2.2s ease}
   body.quiet .chrome{opacity:.06}
-  #dial-name{transition:opacity 2.2s ease}
+  /* the fill joins the transition for the sun's hover (§15, 08-17) */
+  #dial-name{transition:opacity 2.2s ease,fill .3s}
   body.quiet #dial-name{opacity:.3}
   circle[fill="url(#danger4)"], .dial circle[stroke-dasharray="3 5"]{transition:opacity 1.2s}
   body.quiet circle[fill="url(#danger4)"]{opacity:0}
@@ -1006,9 +1020,20 @@
       <line data-polish="POL-7" id="comet" class="comet" x1="208.2" y1="126.7" x2="236.4" y2="27"
             stroke-dasharray="110" stroke-dashoffset="110"/>
       </g><!-- /chrome -->
-      <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
-      <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
-      <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+      <!-- §15, the 08-17 morning batch (owner): "we should be able to click the
+           sun in the centre of the dial and go to the given household's view."
+           The sun and the name under it are ONE identity and therefore one hit
+           target. A link, not a handler: it is a place, so it takes an address
+           the browser can open in its own way — focus and Enter for free, and a
+           single tap on touch (CON-5's first tap buys a callout, and the sun
+           has none: it wears its name already). The sheet has one management
+           drawing, so it points there; the app carries the real household id
+           and re-points the sun when a flight re-letters the name. -->
+      <a class="sun-link" href="household-manage.html" aria-label="Open Lawson Home">
+        <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
+        <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+        <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">Lawson Home</text>
+      </a>
 
       <circle data-polish="POL-2" class="ping" cx="175.7" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
       <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><g class="breathe"><circle cx="175.7" cy="140" r="6.3" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/><circle cx="174.44" cy="141.575" r="2.079" fill="rgba(255,255,255,.38)"/></g></a>
