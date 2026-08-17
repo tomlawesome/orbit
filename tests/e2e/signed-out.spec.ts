@@ -35,7 +35,10 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
 
   await page.goto("/workspace");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Sign in securely/ })).toHaveAttribute("href", "/api/auth/login");
+  // "/" is v19's own front door now (#410, §15), so this engine's own sign-in
+  // link carries its way back to the address it was mounted on rather than
+  // defaulting there (see AuthenticationGate in src/components/dashboard.tsx).
+  await expect(page.getByRole("link", { name: /Sign in securely/ })).toHaveAttribute("href", "/api/auth/login?returnTo=%2Fworkspace");
   await expect(page.locator("button.topbar-profile")).toHaveCount(0);
   await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /icon\.svg/);
