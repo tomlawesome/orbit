@@ -819,3 +819,72 @@ export async function requestHouseholdDeletion(householdId, confirmation) {
     body: { action: "delete", confirmation },
   }));
 }
+
+/* ---------------------------------------------------------------------------
+ * The item belt (#458) — the item screen, and the document surface with it.
+ */
+
+/**
+ * Everything the belt renders for one arrival: the WHOLE household the item
+ * belongs to, because the belt is that household's manifest bent round a ring
+ * and an item without its date-neighbours is not an arrival, it is a card on
+ * its own.
+ *
+ * The membership test is readItem's, deliberately: the household is found by
+ * looking for the id in data the session already sees, never by building a
+ * request out of the URL, so an unknown id is a 404 and not a probe (#451).
+ *
+ * Documents come from the per-item route, fanned out over the items that
+ * report carrying any — readDocumentsScreen's pattern, and additive in the
+ * same way: an item whose papers cannot be read loses its papers, not the
+ * screen. They are read for the whole household rather than for the centred
+ * item alone because every item's rock wears CON-1's belt ellipse when it has
+ * papers, and because centring a neighbour must not go back to the server.
+ *
+ * #434 rides along: an id that is a mail-in receipt rather than an item is
+ * still the amend-then-accept view, which has no seat in the band — a
+ * suggestion is not in the manifest until it is accepted into it.
+ */
+export async function readBelt(id) {
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const today = todayOf(workspace);
+  const household = workspace.households.find((one) =>
+    (one.items ?? []).some((item) => item.id === id),
+  );
+  if (!household) {
+    const suggestion = await readItem(id);
+    return suggestion?.suggestion ? { kind: "suggestion", item: suggestion } : null;
+  }
+
+  const documentsByItem = {};
+  await Promise.all(
+    (household.items ?? [])
+      .filter((item) => (item.documentCount ?? 0) > 0)
+      .map(async (item) => {
+        try {
+          const body = await json(
+            await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+              credentials: "same-origin",
+            }),
+          );
+          documentsByItem[item.id] = body.documents ?? [];
+        } catch {
+          documentsByItem[item.id] = [];
+        }
+      }),
+  );
+
+  return {
+    kind: "belt",
+    selectedId: id,
+    today,
+    user: session?.user ?? null,
+    household: {
+      ...household,
+      /* The command builders write against the raw item plus the household it
+         proved membership of (#455, commands.js base()). */
+      items: (household.items ?? []).map((item) => ({ ...item, householdId: household.id })),
+    },
+    documentsByItem,
+  };
+}

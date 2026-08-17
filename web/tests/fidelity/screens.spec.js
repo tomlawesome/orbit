@@ -9,8 +9,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const baselines = resolve(here, "baselines");
 const artifacts = resolve(here, "../../test-results/fidelity");
 
-const APP = "http://127.0.0.1:4173";
-const MOCKUPS = "http://127.0.0.1:5174";
+/*
+ * The two hosts the gate photographs. Overridable by environment, and
+ * defaulted to the ports the config starts: more than one of these can be
+ * running at a time on a shared machine — a screen being built, a gate being
+ * re-run, an evidence capture — and a second run must be able to stand up its
+ * own pair rather than silently reusing, or fighting over, somebody else's.
+ * Unset, nothing about this file's behaviour changes.
+ */
+const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
+const MOCKUPS = process.env.FIDELITY_MOCKUPS ?? "http://127.0.0.1:5174";
 
 /**
  * The visual gate, in two stages.
@@ -47,8 +55,17 @@ const SCREENS = [
      * breath that they are not first-run dressing: "they ship as THE login and
      * logout screens for every user, every time". So the sign-in is a fresh
      * port of first-run.html's own login layer and has to earn its baseline
-     * against it. design/family/login.html, and the 2026-08-14 iteration of
-     * the hero lockup that lived here, are history from that ruling on.
+     * against it.
+     *
+     * CORRECTED 2026-08-17. The line that used to end this note — that the
+     * 2026-08-14 hero lockup was history from that ruling on — read the
+     * ratification too widely. What the owner ratified verbatim was the
+     * FLIGHT; the sheet's login CHROME was design/family/login.html's older
+     * v18 drawing, reproduced by accident, and the owner struck it: "the
+     * flight's login screen uses THE MOST RECENT APPROVED LOGIN (the 08-14
+     * rulings: no ribbon, the current lockup)... there shouldnt be a footer."
+     * The 08-14 hero is therefore current, in the sheet and in the app alike,
+     * which is why this entry still ports against the sheet and still reads 0.
      */
     stage: "porting",
     mockup: "/design/v19/first-run.html",
@@ -76,12 +93,53 @@ const SCREENS = [
   {
     name: "logout",
     path: "/logout",
-    /* Owner iterated on 2026-08-14: the SIGNED OUT ribbon removed and the pill
-       reworded to match the sign-in, so the mockup is now history. */
-    stage: "owned",
-    mockup: "/design/family/logout.html",
-    /* The sunset runs once on load; `set` is its completion flag. */
-    settle: () => document.body.classList.contains("set"),
+    /*
+     * A RATIFIED REPLACEMENT, not a drift (§15, owner 2026-08-17): "the
+     * descent is the default logout (re-confirmed)... the old /logout sunset
+     * retires." What this entry used to watch was CON-17's sunset, owned since
+     * 2026-08-14 against design/family/logout.html. That screen is gone from
+     * the product, so watching it would be watching nothing.
+     *
+     * What /logout serves now is the surface the ratified descent lands on, so
+     * this goes back to PORTING against the sheet that draws it — the same
+     * sheet the login is ported from, which is the point: one drawing, two
+     * ends of one session. It earns a fresh baseline against the design the
+     * way every ported screen does.
+     */
+    stage: "porting",
+    mockup: "/design/v19/first-run.html",
+    /*
+     * The sheet's DEFAULT state is the first-run card on the login; the state
+     * this screen ships is the far end of the descent, and toDusk() is the
+     * sheet's own name for it (as toLogin() is for the login's). Asking for it
+     * rather than playing five seconds of flight keeps the selection in the
+     * gate, where it is read alongside the budget.
+     *
+     * The same predicate settles the app, which has no such function: the
+     * goodbye is two body classes in both, because the staging is
+     * class-driven — which is also why the reduced-motion descent can drop
+     * every frame of the journey and still arrive here.
+     */
+    settle: () => {
+      if (typeof window.toDusk === "function" && !document.body.classList.contains("showdusk")) {
+        window.toDusk();
+      }
+      return document.body.classList.contains("showdusk")
+        && document.body.classList.contains("farewell");
+    },
+    /*
+     * The one screen in the family that has only ONE reader. A signed-in
+     * visitor to /logout is handed on to /home — the goodbye is the end of the
+     * descent, earned by revocation, and showing "You are signed out." to a
+     * live session would be a lie the interface tells before doing the work.
+     * The fixture harness answers every session question with "yes, signed
+     * in", which for this address is precisely the wrong reader, so the gate
+     * says who is knocking.
+     */
+    signedOut: true,
+    /* The sheet's own scaffolding: the demos toolbar that replays the flight
+       and switches packs, and the footer line describing the proposal. */
+    mockupOnly: [".demos", ".sheet"],
   },
   {
     name: "notfound",
@@ -147,13 +205,66 @@ const SCREENS = [
     mockupOnly: [".foot"],
   },
   {
-    /* No mockup draws the item view (#424): it is composed from ratified
-       vocabulary and guarded by its owned baseline alone. Discovered missing
-       from this list during #455 — a shipped screen the gate never watched. */
+    /*
+     * THE ITEM BELT (#458, §15) — and with it, the item screen. What used to
+     * stand here was an owned baseline for a view no mockup drew (#424): the
+     * item's card on a bare stage, guarded against itself. The owner ruled on
+     * 2026-08-16 that "this surface IS the item screen", so /item/<id> now
+     * renders design/v19/item-belt.html and has to earn its baseline against
+     * that sheet like every other ported screen. Back to PORTING.
+     */
     name: "item",
     path: "/item/i-mot",
-    stage: "owned",
-    settle: () => Boolean(document.querySelector(".item-card .acts button")),
+    stage: "porting",
+    mockup: "/design/v19/item-belt.html",
+    /*
+     * REDUCED MOTION, deliberately, and only here.
+     *
+     * The belt's ambient bed drifts for ever — fifteen pixels a second, on a
+     * requestAnimationFrame loop that Playwright's `animations: "disabled"`
+     * does not touch, because that flag governs CSS and Web Animations and
+     * not a canvas being painted by hand. Measured on the sheet: two captures
+     * three seconds apart differ by 0.57%, six times the whole budget. There
+     * is no moment to compare, so comparing at all means asking for the one
+     * state in which the belt holds still — and that state is not a testing
+     * hack, it is a ratified design state the sheet spells out in full: "the
+     * band's drift holds still", the mark's breath never runs, the roll
+     * becomes an instant swap. Both sides are captured in it, so what the
+     * budget measures is the still both were drawn to hold.
+     */
+    reducedMotion: "reduce",
+    /*
+     * THE SHEET'S DECLARED FURNITURE, REMOVED BEFORE IT LOADS.
+     *
+     * The mockup's manifest is fourteen items: the six that are fixture-true
+     * and eight the sheet marks `fill:1` and names, in its own header, as
+     * furniture — "drawn in the same household's flavour... purely so the
+     * band reads as a real manifest rather than a six-item sketch — they are
+     * mockup furniture, not fixture, and the build takes the real manifest.
+     * Nothing here depends on the eight existing."
+     *
+     * So they are cut out of the sheet's source on its way to the browser,
+     * which is the same act as masking the demos rail by name — excluding a
+     * known, declared difference so the budget measures real drift — except
+     * that it is stricter: nothing is blanked, and everything that remains,
+     * every rock and every grain of the seeded bed, has to match. It has to
+     * happen at LOAD and not in `settle`, because the ambient stream is sown
+     * once from its seed at first layout: splicing the furniture out
+     * afterwards and rebuilding sows the bed from a stream that has already
+     * run, which lands 0.51% away from the same manifest built cleanly. The
+     * regex takes whole `fill:1` object literals and nothing else; if the
+     * sheet ever stops carrying them it removes nothing and the comparison is
+     * unchanged.
+     */
+    mockupTrim: (html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
+    /* Settled once the band has its seats and the apex has its card — every
+       one of which arrives client-side, off the workspace seam. */
+    settle: () =>
+      document.querySelectorAll("#seats .seat").length > 0
+      && Boolean(document.querySelector(".item-card h2")),
+    /* The sheet's own scaffolding: the demos rail that centres each end of
+       the belt and switches packs, and the footer describing the proposal. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     name: "administration",
@@ -257,10 +368,55 @@ function maskRegions(png, rects) {
   }
 }
 
-async function capture(page, url, settle, mockupOnly = [], viewport = null) {
+async function capture(
+  page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
+  { reducedMotion = null, trim = null } = {},
+) {
   await page.route("https://fonts.googleapis.com/**", (route) =>
     route.fulfill({ contentType: "text/css", body: LOCAL_FONT_CSS }),
   );
+
+  /*
+   * A screen may ask to be judged at rest (the belt, #458): its band is a
+   * canvas painted on requestAnimationFrame, which `animations: "disabled"`
+   * cannot reach, so there is no moment to compare unless the design's own
+   * reduced-motion state — in which the drift holds still — is the one asked
+   * for. Applied to BOTH captures of that screen and to no other screen, so
+   * the rest of the family is still judged in the motion the design has.
+   */
+  if (reducedMotion) await page.emulateMedia({ reducedMotion });
+
+  /*
+   * A mockup may carry data it names as furniture — rows drawn so a sheet
+   * reads as a real screen, which the build is told not to reproduce. Cutting
+   * them out of the source is the same act as masking a demos rail by name,
+   * and stricter, because everything left has to match rather than being
+   * blanked. Only ever applied to the mockup's own document.
+   */
+  if (trim) {
+    await page.route(url, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        contentType: "text/html; charset=utf-8",
+        body: trim(await response.text()),
+      });
+    });
+  }
+
+  /*
+   * WHO IS KNOCKING. The fixture harness answers every session question with
+   * "signed in", because every other screen in this list is a screen only a
+   * signed-in reader ever sees. The goodbye is the one that is the other way
+   * round: it is what /logout serves a reader whose session is gone, and it
+   * hands a live session on to /home rather than telling it that it is signed
+   * out. Saying so here is not a mock of the design — it is the design's only
+   * reader, stated, so the gate photographs the screen instead of the redirect.
+   */
+  if (signedOut) {
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthenticated"}' }),
+    );
+  }
 
   /* Most of the family is drawn for a desk. The mobile dialect is drawn for a
      phone, and comparing it at 1600 wide would measure the wrong thing. */
@@ -345,9 +501,11 @@ for (const screen of SCREENS) {
   if (screen.stage === "porting") {
     test(`${screen.name} matches its mockup (porting)`, async ({ page }) => {
       const mockup = await capture(
-        page, MOCKUPS + screen.mockup, screen.settle, screen.mockupOnly, screen.viewport);
+        page, MOCKUPS + screen.mockup, screen.settle, screen.mockupOnly, screen.viewport,
+        false, { reducedMotion: screen.reducedMotion, trim: screen.mockupTrim });
       const actual = await capture(
-        page, APP + screen.path, screen.settle, [], screen.viewport);
+        page, APP + screen.path, screen.settle, [], screen.viewport, screen.signedOut,
+        { reducedMotion: screen.reducedMotion });
       maskRegions(actual.png, mockup.rects);
       const { ratio, differing } = compare(mockup.png, actual.png, screen.name, "mockup");
       expect(
@@ -361,7 +519,8 @@ for (const screen of SCREENS) {
 
   test(`${screen.name} matches its approved appearance`, async ({ page }) => {
     const { png: actual } = await capture(
-      page, APP + screen.path, screen.settle, [], screen.viewport);
+      page, APP + screen.path, screen.settle, [], screen.viewport, screen.signedOut,
+      { reducedMotion: screen.reducedMotion });
     const baselinePath = `${baselines}/${screen.name}.png`;
 
     if (process.env.UPDATE_BASELINE === "1" || !existsSync(baselinePath)) {
