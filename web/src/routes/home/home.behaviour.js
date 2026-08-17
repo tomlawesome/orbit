@@ -16,6 +16,7 @@
  */
 import { fillStarTiles } from "$lib/sky.js";
 import { placeGalaxy } from "./placement.js";
+import { mountSkies, seedFromWorkspace } from "./skies.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
@@ -29,7 +30,7 @@ import { placeGalaxy } from "./placement.js";
  */
 export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
 
-export function mountHome({ galaxy, primary }) {
+export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
   /*
    * Shadows the global so every bare addEventListener() below — the mockup's
    * own keydown, scroll and resize handlers — is registered against this
@@ -65,6 +66,22 @@ export function mountHome({ galaxy, primary }) {
   let flying = false;
   const hero = document.getElementById("hero");
 
+  /*
+   * WHAT THE PACK SKIES LISTEN TO (§15, the sky wave).
+   *
+   * Three packs now paint their own sky behind this one (skies.js), and two of
+   * them have to follow what happens in here: the galactic plane rides the same
+   * camera as the starfield at its own slower parallax, and the terminator has
+   * to re-material the constellations after a flight has moved them. The sheets
+   * those two come from reach for window.pointSky and window.renderGalaxy,
+   * because an inline script in a mockup has nowhere else to look. A module has
+   * no globals, so the two moments are published as subscriptions instead and
+   * the engines that care subscribe. Nothing else about either function moves.
+   */
+  const cameraWatchers = new Set(), galaxyWatchers = new Set();
+  const subscribe = (set) => (fn) => { set.add(fn); return () => set.delete(fn); };
+  const announce = (set) => { for (const fn of set) fn(); };
+
   /* the starfield offset is a pure function of the camera position, so a
      flight animates between two truths and there is nothing to snap back */
   function pointSky(){
@@ -76,6 +93,7 @@ export function mountHome({ galaxy, primary }) {
     const [cx, cy] = GALAXY[camera].pos;
     document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
     document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
+    announce(cameraWatchers);
   }
 
   function renderGalaxy(settle){
@@ -137,7 +155,7 @@ export function mountHome({ galaxy, primary }) {
         ? `M 206 21 H ${200 - width} L ${184 - width} 40`
         : `M 4 21 H ${width + 10} L ${width + 26} 40`);
       div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent)" opacity=".85">${label}</text>
+        <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
         <path d="${veerFor(tw)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
         <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
         <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
@@ -160,6 +178,9 @@ export function mountHome({ galaxy, primary }) {
         div.querySelector("path").setAttribute("d", veerFor(measured));
       }
     }
+    /* the marks are new nodes, so anything that dresses them — dawn's crossing
+       redraws the ones lying in the night in starlight — has to be told */
+    announce(galaxyWatchers);
   }
 
   function flyTo(key, mini){
@@ -424,7 +445,34 @@ export function mountHome({ galaxy, primary }) {
    * approved dial screen, so .descending is off entirely at scroll 0 and not
    * one descent rule is in effect there.
    */
+  /*
+   * §15, the sky wave: ONE HANDLER, FIVE MORE QUANTITIES. Three packs joined the
+   * descent in the same batch and each measures the drop differently — after
+   * dark's plane spends the same --descent retrograde's walls do, dawn's
+   * terminator wants a second, slower reading of how far down the whole PAGE you
+   * are, and clouds' cloud sea wants three because going through a deck has a
+   * before, an inside and an after. The cloud-sea sheet's own build note asks for
+   * exactly this ("in the app this is the same handler for both dawn scroll
+   * proposals; the constants are the only tuning"), and it is the right shape
+   * anyway: one read of the scrollbar per frame, five numbers off it, every
+   * appearance decision left in the stylesheet. Nothing below chooses a colour.
+   *
+   * Every one of them is a POSITION, not a clock. So they are monotonic by
+   * construction, exact at both ends, identical on the way back up, and a
+   * reduced-motion reader keeps all of them — someone who has turned motion off
+   * still has to know which way is down. What reduced motion drops is the
+   * flourish, and that is decided in CSS, except for --mist: being put INSIDE a
+   * cloud is not a position, it is an effect, so it is the one quantity this
+   * function zeroes for that reader.
+   */
   const doc = document.documentElement;
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const smooth = (t) => t * t * (3 - 2 * t);
+  /* the cloud passage is the shorter of four-fifths of a screen and two-fifths
+     of the page: a tall screen must not make it feel like a long fall, and a
+     short manifest must not leave you still inside the cloud at the end */
+  const PASS_SCREEN = 0.80, PASS_PAGE = 0.42;
   function readDescent(){
     const max = Math.max(1, doc.scrollHeight - innerHeight);
     const s = Math.min(max, Math.max(0, scrollY));
@@ -432,8 +480,31 @@ export function mountHome({ galaxy, primary }) {
        comes first, so even a short manifest is read in the turned room */
     const descent = Math.min(1, s / Math.min(innerHeight, max * 0.45));
     doc.style.setProperty("--descent", descent.toFixed(4));
+
+    /* dawn's warm shift is the whole depth's work, not the first flick's: it
+       starts a little way in — under a sky that is still on its way out — and
+       only spends the last of the pinky-orange at the very bottom of the page.
+       The exponent keeps the top of the run slower still. */
+    const p = clamp01((s / max - 0.12) / 0.88);
+    doc.style.setProperty("--depth", Math.pow(p, 1.35).toFixed(4));
+
+    /* clouds: the deck coming up past you, the blue arriving underneath it, and
+       the long slow loss of height once you are through */
+    const len = Math.max(1, Math.min(innerHeight * PASS_SCREEN, max * PASS_PAGE));
+    const pass = clamp01(s / len);
+    const below = smooth(clamp01((s - len * 0.30) / (len * 0.78)));
+    const deep = smooth(clamp01((s - len) / Math.max(1, max - len)));
+    /* inside it: a single soft rise and fall across the passage */
+    const mist = still.matches ? 0
+      : Math.sin(Math.PI * clamp01((pass - 0.08) / 0.78)) * 0.66;
+    doc.style.setProperty("--pass", pass.toFixed(4));
+    doc.style.setProperty("--below", below.toFixed(4));
+    doc.style.setProperty("--deep", deep.toFixed(4));
+    doc.style.setProperty("--mist", mist.toFixed(4));
+
     doc.classList.toggle("descending", s > 0);
   }
+  still.addEventListener("change", readDescent, { signal: controller.signal });
   let descentQueued = false;
   addEventListener("scroll", () => {
     if (descentQueued) return;
@@ -446,6 +517,23 @@ export function mountHome({ galaxy, primary }) {
   pointSky();
   renderGalaxy(false);
   addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
+
+  /*
+   * THE PACK SKIES (§15, the sky wave). Stood up after the galaxy exists, because
+   * the terminator's guard measures the rendered dial and its tint measures the
+   * rendered marks — before this line there is nothing for either to read. Only
+   * the live pack's engine runs; star chart and retrograde build nothing at all.
+   */
+  const skies = mountSkies({
+    /* alive per load in the product; pinned to the workspace under
+       ORBIT_FIXTURES, which is the sheets' own build note and the only way the
+       fidelity gate can compare two screenshots of a seeded stream. The clock
+       is pinned by the same switch, and only by it. */
+    seed: fixtures ? seedFromWorkspace(workspace) : null,
+    pinClock: fixtures,
+    onCamera: subscribe(cameraWatchers),
+    onGalaxy: subscribe(galaxyWatchers),
+  });
 
   /* ---- wiring that replaces the mockup's inline on* attributes ---- */
   const on = (target, type, handler) =>
@@ -492,14 +580,22 @@ export function mountHome({ galaxy, primary }) {
     timers.clear();
     observer.disconnect();
     callout.remove();
+    /* the pack sky goes before the document is handed back, so its own teardown
+       still has the layers it has to empty (§15, the sky wave) */
+    skies();
+    cameraWatchers.clear();
+    galaxyWatchers.clear();
     document.body.classList.remove(
       "create-open", "constellation-lit", "health-degraded", "health-offline",
     );
     /* The descent is written on <html>, which outlives the screen, so it is
        handed back too — otherwise a reader who scrolls home and then leaves
-       carries a stale altitude to the next screen (#480). */
+       carries a stale altitude to the next screen (#480). All five quantities,
+       not just the first: the sky wave added four more and a stale --deep would
+       follow the reader to a screen with no cloud under it. */
     doc.classList.remove("descending");
-    doc.style.removeProperty("--descent");
+    for (const prop of ["--descent", "--depth", "--pass", "--below", "--deep", "--mist"])
+      doc.style.removeProperty(prop);
   };
 }
 
@@ -552,7 +648,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
         svg.appendChild(el);
         return el;
       };
-      const name = put("text", { x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent)", opacity: ".85" }, label);
+      const name = put("text", { x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
       put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });

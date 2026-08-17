@@ -19,21 +19,34 @@
   let view = $state(null);
 
   /*
-   * The release roster (§15, owner): star-chart, after dark, dawn and
-   * retrograde. Atlas and hanami are retired from the RELEASE — the aged-paper
-   * concept never quite worked as a screen and the §15 refresh, though its
-   * best version, did not change that. The CODE stays: packs.css still defines
-   * atlas in full and forcing data-theme=atlas still renders the pack, so the
-   * record and the rescue attempt survive. What goes is the offer, and this
-   * card is the only place in the product that made one.
+   * THE v1.3.0 ROSTER, FINAL (§15, owner): star-chart, after dark, CLOUDS,
+   * dawn (which now means the terminator) and retrograde. Atlas, hanami,
+   * porcelain, miami and solarium are on the records shelf — packs.css still
+   * defines atlas in full and forcing data-theme=atlas still renders it, so the
+   * record survives. What goes is the OFFER, and this card is the only place in
+   * the product that makes one in words as well as colour.
+   *
+   * Two rows change with the roster, and both of them because the sheet ruled
+   * the picture rather than because a preference was tidied:
+   *   · CLOUDS joins, carrying the lighter end of the range (owner: "one of
+   *     Orbit's MAIN LIGHTER THEMES"). Its strip shows the cool white of a
+   *     cloud crest and its own hazy pastel bodies.
+   *   · DAWN's ground moves to the temperature story's own #d2d3d4 and its
+   *     line stops saying "first light" — that is the pair's shared light, and
+   *     what this pack IS now is the crossing. The words are the sheet's:
+   *     design/v19/dawn-terminator.html, "night hands the sky to day".
+   * Both strips' bodies are the pastels the refresh gave the light packs, so
+   * the swatch is made of the same paint as the screen it promises.
    */
   const PACKS = [
     ["starchart", "star-chart", "the ratified night", "#060b1c",
       ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
     ["afterdark", "after dark", "lights out, ink up", "#05070d",
       ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
-    ["dawn", "dawn", "first light", "#c3ccdb",
-      ["radial-gradient(circle at 35% 30%,#1a2233,#8f6c00 45%,transparent 72%)", "#8f6c00", "#178a4c", "#1f7ac2"]],
+    ["clouds", "clouds", "first light, from altitude", "#eef2f9",
+      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
+    ["dawn", "dawn", "night hands the sky to day", "#d2d3d4",
+      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
     ["retrograde", "retrograde", "the eighties, classy", "#080a14",
       ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
   ];

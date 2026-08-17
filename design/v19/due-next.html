@@ -25,6 +25,9 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    /* #491: the text-grade companions — ink that carries WORDS. Carried from
+       web/src/lib/packs.css, where the measurements are. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -35,6 +38,7 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -45,6 +49,7 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -55,6 +60,7 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --ink-quiet:var(--ink-faint); --accent-text:#14507b; --ok-text:#0f5735;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -65,6 +71,7 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -83,7 +90,7 @@
 
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
         letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -103,7 +110,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
@@ -119,7 +126,7 @@
   .chip{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
         border:1px solid var(--line);border-radius:99px;padding:6px 14px;cursor:pointer}
   .chip:hover{border-color:var(--accent);color:var(--ink)}
-  .chip[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .chip[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
 
   /* the corridor: a spine of time. It is an ORDER, not a scale — months are
      section rules, and within a month entries sit in date order. */
@@ -138,7 +145,7 @@
   .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
                     filter:blur(4px);opacity:.8}
   .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
-  .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+  .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent-text)}
   .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
   .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
   .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
@@ -165,7 +172,7 @@
   .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
   .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
   .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
-  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
 
   .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
   footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);

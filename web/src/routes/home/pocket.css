@@ -80,7 +80,7 @@
 .pocket .sheet .acts{display:flex;gap:9px}
 .pocket .sheet .acts button{flex:1;font:12px var(--mono);padding:10px;border-radius:10px;cursor:pointer;
       background:none;border:1px solid var(--line);color:var(--ink-mid)}
-.pocket .sheet .acts .pri{color:var(--accent);border-color:var(--accent)}
+.pocket .sheet .acts .pri{color:var(--accent-text);border-color:var(--accent)}
 
 /* ---- the three rules the dialect used from family.css, scoped -----------
  * Copied rather than linked: family.css is global and its body rules would
@@ -95,7 +95,7 @@
 
 /* ---- #466: the signals surface — what the relay caught, pocket grammar -- */
 .pocket .mitem.suggest{border-style:dashed;cursor:pointer}
-.pocket .mitem.suggest span{color:var(--accent)}
+.pocket .mitem.suggest span{color:var(--accent-text)}
 .pocket .dot.sug{background:none;border:1.6px solid var(--accent)}
 .pocket .mitem.reading b{color:var(--ink-mid);font-weight:500}
 .pocket .mitem.reading .dot{background:var(--upcoming);animation:pocket-breathe 2.4s ease-in-out infinite}
@@ -112,7 +112,7 @@
 .pocket .sheet .kv b{font-size:11px;font-weight:500;color:var(--ink)}
 .pocket .sheet .amend{display:block;text-align:center;font:10.5px var(--mono);
                       color:var(--ink-mid);text-decoration:none;margin-top:12px}
-.pocket .sheet .amend:hover{color:var(--accent)}
+.pocket .sheet .amend:hover{color:var(--accent-text)}
 @media (prefers-reduced-motion: reduce){ .pocket .mitem.reading .dot{animation:none} }
 
 /* ---- #453: the pocket's labelled sky ----------------------------------- */
@@ -120,6 +120,6 @@
 .pocket .askrow{cursor:pointer}
 .pocket .askrow span{color:var(--ink-faint)}
 .pocket .askrow[data-ask-requested="true"]{border-style:dashed;cursor:default}
-.pocket .askrow[data-ask-requested="true"] span{color:var(--accent)}
+.pocket .askrow[data-ask-requested="true"] span{color:var(--accent-text)}
 .pocket .adrift .burnup a{color:var(--ink-mid);text-decoration:none}
-.pocket .adrift .burnup a:hover{color:var(--accent)}
+.pocket .adrift .burnup a:hover{color:var(--accent-text)}

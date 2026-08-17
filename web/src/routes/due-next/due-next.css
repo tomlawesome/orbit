@@ -26,7 +26,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .corridor-page .chip{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
       border:1px solid var(--line);border-radius:99px;padding:6px 14px;cursor:pointer}
 .corridor-page .chip:hover{border-color:var(--accent);color:var(--ink)}
-.corridor-page .chip[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+.corridor-page .chip[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
 
 /* the corridor: a spine of time. It is an ORDER, not a scale — months are
    section rules, and within a month entries sit in date order. */
@@ -45,7 +45,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
                   filter:blur(4px);opacity:.8}
 .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
-.corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+.corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent-text)}
 .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
 .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
 .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
@@ -73,7 +73,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .corridor .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
 .corridor .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
 .corridor .t.over{color:var(--overdue)} .corridor .t.soon{color:var(--warm)}
-.corridor .t.up{color:var(--upcoming)} .corridor .t.ok{color:var(--ok)}
+.corridor .t.up{color:var(--upcoming)} .corridor .t.ok{color:var(--ok-text)}
 
 .corridor-page .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
 @media (prefers-reduced-motion: reduce){

@@ -127,9 +127,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .fsave{margin-left:auto;font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;
        color:var(--ink-faint);background:none;border:0;padding:0 0 1px;cursor:pointer;
        opacity:.5;transition:color .2s,opacity .2s}
-.household-page .fsave:hover{color:var(--accent);opacity:1}
-.household-page .field.dirty .fsave{color:var(--accent);opacity:1}
-.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok);opacity:1;cursor:default}
+.household-page .fsave:hover{color:var(--accent-text);opacity:1}
+.household-page .field.dirty .fsave{color:var(--accent-text);opacity:1}
+.household-page .fsave.done,.household-page .field.dirty .fsave.done{color:var(--ok-text);opacity:1;cursor:default}
 .household-page .row2{display:flex;gap:13px}
 .household-page .row2>.field{flex:1;min-width:0}
 .household-page .selwrap{position:relative}
@@ -144,12 +144,12 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
 .household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
        border-radius:9px;padding:7px 13px;cursor:pointer}
-.household-page .ghost:hover{border-color:var(--accent);color:var(--accent)}
+.household-page .ghost:hover{border-color:var(--accent);color:var(--accent-text)}
 .household-page .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
 .household-page .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
 .household-page .note.top{margin-top:13px}
 .household-page .note b{color:var(--ink-mid);font-weight:400}
-.household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok);line-height:1.8}
+.household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .said.show{display:block}
 /* What a control says when it could not do what it looked like it did — the
    helm's .note in the warm ink, never on the happy path. */
@@ -172,7 +172,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sec:last-of-type{border-bottom:0}
 .household-page .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
            color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
-.household-page .sec input:focus{outline:none;border-bottom-color:var(--accent)}
+.household-page .sec input:focus{outline:none;border-bottom-color:var(--accent-text)}
 .household-page .sec input:disabled{color:var(--ink-mid)}
 .household-page .sec .used{font:10.5px var(--mono);color:var(--ink-faint);flex:none}
 .household-page .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
@@ -193,7 +193,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .toggle:disabled{opacity:.5;cursor:default}
 .household-page .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
         border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
-.household-page .addsec:hover{border-color:var(--accent);color:var(--accent)}
+.household-page .addsec:hover{border-color:var(--accent);color:var(--accent-text)}
 .household-page .addsec:disabled{opacity:.4;cursor:not-allowed}
 
 /* members */
@@ -207,7 +207,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
 .household-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
-.household-page .role.owner{color:var(--accent);border-color:var(--accent)}
+.household-page .role.owner{color:var(--accent-text);border-color:var(--accent)}
 .household-page .memb .ghost{padding:5px 11px}
 
 /* v3 — the panel's other blocks. Members runs the full height of the right
@@ -227,7 +227,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
           background:var(--panel-raised);padding:16px 18px}
 .household-page .handover.open{display:block}
 .household-page .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
-             color:var(--accent);margin-bottom:12px}
+             color:var(--accent-text);margin-bottom:12px}
 .household-page .step{margin-bottom:13px}
 .household-page .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
          margin-bottom:7px}
@@ -243,7 +243,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .joinreq p b{color:var(--ink);font-weight:530}
 .household-page .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
                 cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
-.household-page .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+.household-page .joinreq button.yes{border-color:var(--ok);color:var(--ok-text)}
 
 /* ── THE DANGER ZONE (§15) ──────────────────────────────────────────────
    Unmistakable from across the room and still drawn with the family's chart
@@ -284,7 +284,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    rule out-specifies .note and .said and swallows them */
 .household-page .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
 .household-page .dangercard .note b{color:var(--ink-mid);font-weight:400}
-.household-page .dangercard .said{font-size:11px;color:var(--ok);max-width:none}
+.household-page .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
 .household-page .dangercard .problem{font-size:11px;color:var(--warm);max-width:none}
 
 /* the button: red on the outside at rest, SOLID red once armed */

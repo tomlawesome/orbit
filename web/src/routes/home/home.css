@@ -18,31 +18,38 @@
    * is POL-11's owner rule and a moving sky is not a luminous device.
    */
   [data-theme=atlas] .dial circle[filter="url(#sun)"],
-  [data-theme=dawn] .dial circle[filter="url(#sun)"]{
+  [data-theme=dawn] .dial circle[filter="url(#sun)"],
+  [data-theme=clouds] .dial circle[filter="url(#sun)"]{
     filter:none}
   /* Paper has no specular. */
   [data-theme=atlas] .dial [fill^="rgba(255,255,255"],
-  [data-theme=dawn] .dial [fill^="rgba(255,255,255"]{
+  [data-theme=dawn] .dial [fill^="rgba(255,255,255"],
+  [data-theme=clouds] .dial [fill^="rgba(255,255,255"]{
     fill:transparent}
-  /* Bodies become flat ink discs. Status survives as colour, not as gloss:
-     each maps to the token the pack already defines for that meaning. CSS
-     fill beats the presentation attribute, so the shared markup is untouched
-     and POL-10's storm selectors still match. */
-  [data-theme=atlas] .dial [fill="url(#p-jade)"],
-  [data-theme=dawn] .dial [fill="url(#p-jade)"]{fill:var(--ok)}
-  [data-theme=atlas] .dial [fill="url(#p-amber)"],
-  [data-theme=dawn] .dial [fill="url(#p-amber)"]{fill:var(--warm)}
-  [data-theme=atlas] .dial [fill="url(#p-ruby)"],
-  [data-theme=dawn] .dial [fill="url(#p-ruby)"]{fill:var(--overdue)}
-  [data-theme=atlas] .dial [fill="url(#p-sky)"],
-  [data-theme=dawn] .dial [fill="url(#p-sky)"]{fill:var(--upcoming)}
+  /* Bodies become flat ink discs — ON ATLAS ALONE now (§15, the pack refresh).
+     This rule was written when no light pack owned the planet stops, so the
+     only way to stop a glossy sphere sitting on paper was to overwrite the fill
+     with the pack's status token. dawn and clouds now own --p-* in full — the
+     hazy pastels the temperature story ratified, seen through morning air — so
+     the fill they render is already the right paint and overwriting it here
+     would throw the refresh away one rule after packs.css declared it. Atlas
+     keeps the flattening because atlas keeps no stops of its own.
+
+     CSS fill beats the presentation attribute, so the shared markup is
+     untouched and POL-10's storm selectors still match. */
+  [data-theme=atlas] .dial [fill="url(#p-jade)"]{fill:var(--ok)}
+  [data-theme=atlas] .dial [fill="url(#p-amber)"]{fill:var(--warm)}
+  [data-theme=atlas] .dial [fill="url(#p-ruby)"]{fill:var(--overdue)}
+  [data-theme=atlas] .dial [fill="url(#p-sky)"]{fill:var(--upcoming)}
   /* Engraving is line work, so the chart's rules carry more weight than they
      do behind a glow. */
   [data-theme=atlas]{--chart-line:rgba(28,43,74,.78); --chart-line-soft:rgba(28,43,74,.42)}
   [data-theme=dawn]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
+  [data-theme=clouds]{--chart-line:rgba(26,34,51,.72); --chart-line-soft:rgba(26,34,51,.38)}
   /* Printed stars do not twinkle. Drift is untouched. */
   [data-theme=atlas] body.quiet .sky .near circle,
-  [data-theme=dawn] body.quiet .sky .near circle{animation:none}
+  [data-theme=dawn] body.quiet .sky .near circle,
+  [data-theme=clouds] body.quiet .sky .near circle{animation:none}
   /*
    * Engraving is weight, not just contrast (owner, 2026-08-14). Darkening the
    * ink alone left the chart looking like a faint night sky printed badly; on
@@ -56,18 +63,24 @@
    * comes from CSS above, not from an attribute.
    */
   [data-theme=atlas] .dial [stroke-width=".5"],
-  [data-theme=dawn] .dial [stroke-width=".5"]{stroke-width:.8}
+  [data-theme=dawn] .dial [stroke-width=".5"],
+  [data-theme=clouds] .dial [stroke-width=".5"]{stroke-width:.8}
   [data-theme=atlas] .dial [stroke-width=".75"],
-  [data-theme=dawn] .dial [stroke-width=".75"]{stroke-width:1.1}
+  [data-theme=dawn] .dial [stroke-width=".75"],
+  [data-theme=clouds] .dial [stroke-width=".75"]{stroke-width:1.1}
   [data-theme=atlas] .dial [stroke-width="1"],
-  [data-theme=dawn] .dial [stroke-width="1"]{stroke-width:1.4}
+  [data-theme=dawn] .dial [stroke-width="1"],
+  [data-theme=clouds] .dial [stroke-width="1"]{stroke-width:1.4}
   [data-theme=atlas] .dial [stroke-width="1.3"],
-  [data-theme=dawn] .dial [stroke-width="1.3"]{stroke-width:1.8}
+  [data-theme=dawn] .dial [stroke-width="1.3"],
+  [data-theme=clouds] .dial [stroke-width="1.3"]{stroke-width:1.8}
   [data-theme=atlas] .dial [stroke-width="1.5"],
-  [data-theme=dawn] .dial [stroke-width="1.5"]{stroke-width:2.1}
+  [data-theme=dawn] .dial [stroke-width="1.5"],
+  [data-theme=clouds] .dial [stroke-width="1.5"]{stroke-width:2.1}
   /* The constellations are the same engraving at another scale. */
   [data-theme=atlas] .minisys [stroke-width="1"],
-  [data-theme=dawn] .minisys [stroke-width="1"]{stroke-width:1.4}
+  [data-theme=dawn] .minisys [stroke-width="1"],
+  [data-theme=clouds] .minisys [stroke-width="1"]{stroke-width:1.4}
   /*
    * The household names sit furthest back and were the hardest thing to read
    * on paper (owner, 2026-08-14). Two causes, both of them a night sky's
@@ -79,9 +92,11 @@
    * measures the rendered text rather than estimating it.
    */
   [data-theme=atlas] .minisys,
-  [data-theme=dawn] .minisys{opacity:clamp(.72, calc(var(--dim, 1) + .22), 1)}
+  [data-theme=dawn] .minisys,
+  [data-theme=clouds] .minisys{opacity:clamp(.72, calc(var(--dim, 1) + .22), 1)}
   [data-theme=atlas] .minisys text,
-  [data-theme=dawn] .minisys text{font-size:11.5px;opacity:1}
+  [data-theme=dawn] .minisys text,
+  [data-theme=clouds] .minisys text{font-size:11.5px;opacity:1}
 
   *{box-sizing:border-box;margin:0}
   html{scroll-behavior:smooth}
@@ -110,14 +125,16 @@
      adds the same width to every star and so preserves that radius variation,
      where a flat r would erase it. Owner call, 2026-08-14. */
   [data-theme=atlas] .sky .far circle,
-  [data-theme=dawn] .sky .far circle{opacity:.5;
+  [data-theme=dawn] .sky .far circle,
+  [data-theme=clouds] .sky .far circle{opacity:.5;
        stroke:var(--star-far);stroke-width:.7}
   [data-theme=atlas] .sky .near circle,
-  [data-theme=dawn] .sky .near circle{opacity:.8;
+  [data-theme=dawn] .sky .near circle,
+  [data-theme=clouds] .sky .near circle{opacity:.8;
        stroke:var(--star-near);stroke-width:.7}
   .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+  [data-theme=atlas] .vignette{background:none}
 
   .page{position:relative;z-index:2;max-width:1160px;margin:0 auto;padding:0 24px 100px}
   .hero{display:grid;place-items:center;padding:0;min-height:100vh;position:relative}
@@ -153,7 +170,7 @@
           border-left:0;border-radius:0 10px 10px 0;padding:14px 6px}
   .handle i{width:7px;height:7px;border-radius:50%;background:var(--warm);
             animation:breathe 3s ease-in-out infinite}
-  .drawer-left .handle{display:flex;color:var(--ok)}
+  .drawer-left .handle{display:flex;color:var(--ok-text)}
   .drawer-left .handle i{background:var(--ok)}
   body.health-degraded .drawer-left .handle{color:var(--degraded)}
   body.health-degraded .drawer-left .handle i{background:var(--degraded)}
@@ -247,9 +264,9 @@
   .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
   .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
   .t.over{color:var(--overdue)} .t.soon{color:var(--warm)}
-  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok)}
+  .t.up{color:var(--upcoming)} .t.ok{color:var(--ok-text)}
   .suggest{border-style:dashed}
-  .suggest .body span{color:var(--accent)}
+  .suggest .body span{color:var(--accent-text)}
   .suggest .actions{display:flex;gap:8px}
   /* #434: a refused approval speaks in the server's own words, in the
      urgency ink the design already uses (the item view's .problem twin). */
@@ -257,7 +274,7 @@
     margin-top:8px;line-height:1.6}
   .suggest button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:default;
                   border:1px solid var(--line);background:none;color:var(--ink-mid)}
-  .suggest button.yes{border-color:var(--accent);color:var(--accent)}
+  .suggest button.yes{border-color:var(--accent);color:var(--accent-text)}
 
   /*
    * THE ROW IS THE ITEM (#424, owner ruling 2026-08-16). The row expands IN
@@ -305,10 +322,10 @@
      it does, the URL stays in the clipboard and the browser bar. */
   .itemview .ivcopy{font:11px var(--mono);color:var(--ink-faint);background:none;border:0;
                     padding:0;cursor:pointer;letter-spacing:.04em}
-  .itemview .ivcopy:hover{color:var(--accent)}
+  .itemview .ivcopy:hover{color:var(--accent-text)}
   .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
                     margin-left:auto}
-  .itemview .ivfull:hover{color:var(--accent)}
+  .itemview .ivfull:hover{color:var(--accent-text)}
   svg text{font-family:var(--mono)}
 
   /* overscroll-behavior goes with the light-dismiss rule (owner, 2026-08-14):
@@ -372,7 +389,7 @@
   .cdrop{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:16px 18px;
          font:12.5px var(--mono);color:var(--ink-faint);text-align:center;cursor:pointer}
   .cdrop:hover{border-color:var(--accent);color:var(--ink-mid)}
-  .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent);
+  .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent-text);
          text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:0 18px}
   .cfull:hover{border-color:var(--accent)}
   .nstar{position:absolute;top:100%;left:50%;transform:translateX(-50%);
@@ -383,7 +400,7 @@
   @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
   .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);
               text-transform:uppercase;opacity:0;transition:opacity .3s}
-  .nstar:hover span,.drawer-top.open .nstar span{opacity:1;color:var(--accent)}
+  .nstar:hover span,.drawer-top.open .nstar span{opacity:1;color:var(--accent-text)}
   /* v18: while open, the star-handle earns a chip so the way back up is
      unmistakable, and everything beneath dims behind a scrim */
   .drawer-top.open .nstar{background:var(--panel-raised);border:1px solid var(--line);
@@ -409,7 +426,7 @@
   @media (prefers-reduced-motion: reduce){.ping{display:none}}
   /* /POL-2 */
   /* POL-3: the current month reads brighter */
-  .now-month{fill:var(--accent);font-weight:600}
+  .now-month{fill:var(--accent-text);font-weight:600}
   /* POL-4: bidirectional highlight */
   .body-link.lit :is(circle,path){transform:scale(1.6)}
   .item.lit{border-color:var(--accent)}
@@ -427,7 +444,7 @@
   .callout.side-left .line{right:-27px}
   .callout b{display:block;font-weight:600;font-size:13.5px}
   .callout small{font:11.5px var(--mono);color:var(--ink-mid)}
-  .callout .chip{display:none;margin-top:7px;font:11px var(--mono);color:var(--accent);
+  .callout .chip{display:none;margin-top:7px;font:11px var(--mono);color:var(--accent-text);
                  border:1px solid var(--line);border-radius:99px;padding:3px 10px;cursor:pointer;background:none}
   .callout.has-docs .chip{display:inline-block}
   .callout .chip:hover{border-color:var(--accent)}
@@ -508,7 +525,7 @@
   .palette div{font:12.5px var(--mono);color:var(--ink-mid);padding:8px 10px;border-radius:8px}
   .palette div b{color:var(--ink);font-weight:500}
   .palette div:hover{background:var(--panel)}
-  .palette .act{color:var(--accent)}
+  .palette .act{color:var(--accent-text)}
 
   /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
      starfield streams past with parallax, the destination holds its place
@@ -571,7 +588,7 @@
 .askacts{display:flex;gap:10px;margin-top:18px}
 .askacts button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
                 background:none;border:1px solid var(--line);color:var(--ink-mid)}
-.askacts button.yes{color:var(--accent);border-color:var(--accent)}
+.askacts button.yes{color:var(--accent-text);border-color:var(--accent)}
 .minisys{cursor:pointer}
 
 /* ---- §14 (#469): the manifest IS the corridor ---------------------------
@@ -592,7 +609,7 @@
 .manifest .corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
                   filter:blur(4px);opacity:.8}
 .manifest .corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
-.manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent)}
+.manifest .corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent-text)}
 .manifest .corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
 .manifest .corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
 .manifest .corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
@@ -612,7 +629,7 @@
 
 /* ---- §14/#472 (owner-approved): the inbox orb -------------------------- */
 .inbox-orb{right:76px;display:grid;place-items:center;color:var(--ink-mid);text-decoration:none}
-.inbox-orb.waiting{color:var(--accent);border-color:var(--accent)}
+.inbox-orb.waiting{color:var(--accent-text);border-color:var(--accent)}
 .inbox-orb.waiting svg{animation:breathe 3.2s ease-in-out infinite}
 .inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
   background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
@@ -865,6 +882,480 @@
     transform:perspective(calc(var(--corridor-gap) * 3.5)) rotateY(-68deg)}
 }
 /* /PACK REFRESH — retrograde, walls only */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   THE SKY WAVE — three packs get their own sky (§15, the v1.3.0 roster)
+
+   The roster ruling landed three ratified backdrops at once, and this block is
+   all three, in one place, because they answer one law in three vocabularies:
+
+     CLOUDS       the cloud sea, from design/v19/dawn-cloudsea.html — first
+                  light seen from altitude, and a descent that goes THROUGH the
+                  deck into under-cloud blue. The pack is one of Orbit's main
+                  lighter themes (owner) and carries the lighter end of the
+                  range.
+     DAWN         the terminator, from design/v19/dawn-terminator.html in its
+                  post-visibility-fix form — night hands the sky to day along a
+                  diagonal of the FRAME, so between a fifth and a quarter of the
+                  first viewport is night at every window size, and a descent
+                  onto warm surface light.
+     AFTER DARK   the galactic plane, from design/v19/afterdark-plane.html — the
+                  happy accident adopted as the pack's default sky, with the
+                  bottom glow in the deep the owner added on approval.
+
+   THREE THINGS ARE TRUE OF EVERY RULE BELOW, and they are what make the wave
+   safe to land in one go:
+
+   1. EVERY RULE IS SCOPED TO ITS PACK. Switch to star chart and not one line
+      here applies — which is also why the fidelity gate, which photographs
+      star chart, reads zero from all of it. The gate is not being dodged; the
+      packs genuinely do not share a sky.
+   2. EVERY DRAWN LAYER IS SCOPED `.desk`, exactly as the walls are and for the
+      same reason (see the note in the retrograde block): this document holds
+      both dialects, the pocket has a `.sky` of its own, and an unqualified
+      selector would paint a cloud deck into a phone screen that has its own
+      ratified design and no weather in it. The one deliberate exception is the
+      pack's GROUND — the body gradient and the vignette's warm lift — because
+      that is the light the pack is made of rather than geometry the desk owns,
+      and a phone holding the same pack should be in the same light.
+   3. AT SCROLL 0 NOTHING DESCENDS. Every descent rule hangs off `.descending`,
+      which home.behaviour.js only puts on <html> while the scrollbar is off the
+      top, so the dial screen is left literally alone rather than merely left at
+      zero. An identity transform is not free: it hands full-window layers to
+      the compositor and makes the gradients re-dither underneath.
+
+   Mirrored line for line in design/v19/home.html — one treatment in two
+   places. The three sheets stay as the record of what was approved.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. THE TEMPERATURE STORY, shared by the two daylight packs ─────────────
+   §15 ordered it for dawn ("dawn gets a temperature story: cool-to-warm
+   vertical ground, hazy pastel planets, sunrise amber") and the roster ruling
+   made clouds a pack of its own standing on the same light. Dawn was a flat
+   cool grey that happened to be light; both packs are now the one pack family
+   with a DIRECTION — cool overhead, warming down to a pale amber horizon. Every
+   move serves that one axis and nothing is added for prettiness. */
+
+/* the ground is a vertical gradient anchored to the WINDOW, not to the page:
+   wherever you are, cool is above you and the horizon is below */
+[data-theme=dawn] body,[data-theme=clouds] body{
+  background:linear-gradient(180deg,var(--sky-1) 0%,var(--sky-2) 30%,
+    var(--sky-3) 58%,var(--sky-4) 84%,var(--sky-5) 100%);
+  background-attachment:fixed}
+/* …and the horizon carries the light. The dark packs' vignette darkens the
+   edges; these two warm the bottom instead — the only packs whose sky is
+   BRIGHTENING. Atlas keeps `background:none`, above: paper is not lit. */
+[data-theme=dawn] .vignette,[data-theme=clouds] .vignette{
+  background:linear-gradient(0deg,rgba(255,193,124,.26) 0%,
+    rgba(255,214,164,.10) 20%,transparent 44%)}
+/* Stars wash out as the light comes up. The two packs part company here, and
+   this is the one line of the shared base that differs: on DAWN they hold
+   overhead and are gone by the horizon, because the horizon is where the light
+   is arriving. On CLOUDS they have to be gone far higher — there is a cloud
+   deck where the horizon would be, and a star drawn over a sunlit crest is a
+   star drawn on a cloud. The palest ones sit high and the day takes them from
+   underneath. */
+[data-theme=dawn] .desk .sky{
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 50%,
+    rgba(0,0,0,.12) 80%,transparent 100%);
+          mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 50%,
+    rgba(0,0,0,.12) 80%,transparent 100%)}
+[data-theme=clouds] .desk .sky{
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.52) 34%,
+    rgba(0,0,0,.14) 54%,transparent 66%);
+          mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.52) 34%,
+    rgba(0,0,0,.14) 54%,transparent 66%)}
+/* Panels are cool morning glass: still translucent, because the gradient must
+   show through or the story stops at the panel edge; lightly frosted; with one
+   cold highlight along the top edge where the light lands. */
+[data-theme=dawn] :is(.item,.callout,.palette,.ctype,.orb),
+[data-theme=clouds] :is(.item,.callout,.palette,.ctype,.orb){
+  backdrop-filter:blur(14px) saturate(1.06);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 8px 20px rgba(48,66,98,.07)}
+[data-theme=dawn] :is(.account,.docview,.drawer,.drawer-top,.itemview),
+[data-theme=clouds] :is(.account,.docview,.drawer,.drawer-top,.itemview){
+  backdrop-filter:blur(20px) saturate(1.06);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 16px 36px rgba(48,66,98,.10)}
+[data-theme=dawn] :is(.item,.account,.docview,.drawer-top,.callout,.palette),
+[data-theme=clouds] :is(.item,.account,.docview,.drawer-top,.callout,.palette){
+  border-top-color:rgba(255,255,255,.85)}
+[data-theme=dawn] .scrim,[data-theme=clouds] .scrim{background:rgba(196,206,222,.5)}
+/* The bodies are hazy pastels rather than flat ink (their stops are in
+   packs.css): the same status colours seen through morning air. The haze is a
+   pale halo, not a glow — it lightens the edge, it does not add light. Gloss
+   stays off; light packs do not do specular and that law is unchanged. */
+[data-theme=dawn] .dial .body-link :is(circle,path),
+[data-theme=clouds] .dial .body-link :is(circle,path){
+  filter:drop-shadow(0 0 3px rgba(255,240,220,.85))}
+/* The sun gets its bloom back — it is the reason the sky is warming, and it is
+   the ONE thing in these packs allowed to glow. Later than the engraved
+   `filter:none` at the head of this file, deliberately: that rule is still
+   right for atlas, and the sheets keep the pair in exactly this order. */
+[data-theme=dawn] .dial circle[filter="url(#sun)"],
+[data-theme=clouds] .dial circle[filter="url(#sun)"]{filter:url(#sun);opacity:.85}
+
+/* ── 2. CLOUDS' OWN SYMBOL — the sounding balloon ──────────────────────────
+   §15: every theme earns its own symbols; only star chart and after dark share
+   theirs. Retrograde's precedent is one mark redrawn in the pack's own material
+   (the neon beacon) plus the pack's own belt materials, and clouds answers in
+   the same shape: the create handle becomes a sounding balloon here, and
+   belt.css carries this pack's rubble and paper.
+
+   Only ever ONE form is rendered — see the markup in +page.svelte for what the
+   balloon is made of and why each part of it is load-bearing. The reticle ticks
+   hold the glint's own ±13.4, so the mark's footprint in the chrome does not
+   move; no bloom, no drop-shadow, because this is a daylight pack and it
+   engraves rather than glows. */
+.nstar .sonde{display:none}
+[data-theme=clouds] .nstar .classic{display:none}
+[data-theme=clouds] .nstar .sonde{display:block}
+/* open: the instrument is already the accent, so what the open state changes is
+   the ENVELOPE — the balloon is lit by the drawer it has pulled down, which is
+   the same grammar retrograde's beacon uses (its wireframe goes accent) and the
+   classic glint uses (its fill goes accent). */
+[data-theme=clouds] .drawer-top.open .nstar .sonde path[stroke]{stroke:var(--accent)}
+
+/* ── 3. DAWN — THE TERMINATOR ──────────────────────────────────────────────
+   Four backdrop layers and nothing else: no rule here touches the dial, the
+   manifest or any panel. The wash, the mask and the constellations' material
+   all come off ONE stop table in sky-terminator.js, so the three can never
+   drift apart, and the geometry is a diagonal of the frame rather than a
+   measurement off the dial — which is the whole of the owner's visibility fix
+   ("the crossing must be seen": between a fifth and a quarter of the sky is
+   night, at every size, on every roll). */
+.night,.nightsky,.tline{display:none;position:fixed;inset:0;pointer-events:none}
+/* 3a. THE NIGHT. A wash, not a fill: it rides ABOVE the ratified ground so the
+   temperature story still shows through it, and its ramp is short and deep
+   because the sky has to READ as night rather than as haze. */
+[data-theme=dawn] .desk .night{display:block;z-index:0}
+/* 3b. THE STARS THAT SURVIVE. A separate field in starlight colours, masked to
+   exactly the night side of the crossing, drifting with the ratified
+   starfield's own two speeds and riding the same camera — so a flight moves
+   both fields together and the crossing keeps its stars. */
+[data-theme=dawn] .desk .nightsky{display:block;z-index:0}
+.nightsky svg{position:absolute;inset:0;width:100%;height:100%}
+/* 3c. THE LIMB. Not a drawn edge — the thin warm air the light reaches first,
+   sitting just on the DAY side of the handover. It is what keeps the dial's own
+   chart ink lifted where the crossing passes through it, which is why the
+   instrument never has to be legible against mud. */
+[data-theme=dawn] .desk .tline{display:block;z-index:1}
+
+/* THE DESCENT. Scrolling down is not a document sliding under a fixed backdrop,
+   it is losing altitude: the sky (the crossing, its night, its stars) rises and
+   goes out of the top of the window, and what is under it is the SURFACE — a
+   vertical gradient, anchored to the window like the ground is, warming very
+   slowly the further down you come. The deep manifest reads over warm surface
+   light, not over sky (owner, §15: "leaving a gradient that changes very slowly
+   as you scroll further: from the lighter colour at the top down to the
+   pinky-orange that sits at the bottom of the dial screen").
+
+   Two positions drive it, both read straight off the scrollbar:
+     --descent  the drop THROUGH the sky (0 at the dial, 1 once clear)
+     --depth    how far down the whole page you are (the warm shift) */
+/* the four layers the crossing is painted on move as ONE — lifted and faded
+   together — so the handover can never tear into a night that is half gone. The
+   fade is written straight from scroll position, so they must not carry the
+   pack-switch transition while it happens. */
+[data-theme=dawn].descending .desk :is(.sky,.night,.nightsky,.tline){
+  transform:translate3d(0,calc(var(--descent) * -118vh),0);
+  opacity:calc(1 - var(--descent) * 1.18);
+  transition:none}
+[data-theme=dawn].descending .desk .sky{
+  opacity:calc(var(--stars) * (1 - var(--descent) * 1.18))}
+/* THE SURFACE. Two grounds cross-faded, never a swap: HIGH is the pale amber
+   that sat at the bottom of the dial screen, barely graded — the light you drop
+   into the moment the sky clears. DEEP puts that same pale amber overhead and
+   runs it all the way down to the pinky-orange. The cross-fade is --depth, so
+   the top of the field warms a shade while the bottom warms a great deal:
+   altitude lost, not a banner swapped. Their shared colour (#f9dcb8, the dial
+   screen's own bottom) is HIGH's last stop and DEEP's first, so the two can
+   never show a seam. */
+.surface{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
+[data-theme=dawn].descending .desk .surface{display:block;
+  opacity:calc(var(--descent) * 1.3);
+  background:linear-gradient(180deg,#f6e6d0 0%,#f8e1c4 46%,#f9dcb8 100%)}
+[data-theme=dawn].descending .desk .surface::after{
+  content:"";position:absolute;inset:0;opacity:var(--depth);
+  background:linear-gradient(180deg,#f9dcb8 0%,#f7c8a2 34%,
+    #f2ab8b 66%,#ea8f80 88%,#e5827e 100%)}
+/* The faint ink follows the ground down. Everything sitting directly ON the
+   surface rather than on glass — the month headings, the horizon line — was
+   tuned for a pale sky; over the pinky-orange it would go to nothing. So it
+   deepens by exactly the same --depth that warms the ground, which is the
+   crossing's own law (a mark's material may never disagree with what is behind
+   it) applied to the descent. Legibility goes UP: the faint ink ends the page
+   with more contrast on the warm surface than it began with on the pale one. */
+[data-theme=dawn].descending body{
+  --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%))}
+/* Reduced motion. The gradient still tracks the scrollbar — it is a POSITION,
+   not an animation, and freezing it would hide the page under a sky it has
+   already left. What goes is the parallax flourish: the sky gives way where it
+   stands instead of being flown out of frame. */
+@media (prefers-reduced-motion: reduce){
+  [data-theme=dawn].descending .desk :is(.sky,.night,.nightsky,.tline){transform:none}
+}
+
+/* ── 4. CLOUDS — THE CLOUD SEA ─────────────────────────────────────────────
+   One backdrop layer at rest; no rule here touches the dial, the manifest or
+   any panel. Three strata of cloud low across the screen with one or two
+   distant peaks standing out of them — the calmest sky of the family, and the
+   restraint IS the design: three strata, two peaks at most, no highlight, no
+   bloom, nothing that moves faster than the eye can ignore. The dial floats
+   above the weather; every stratum's shoulder sits well below the dial's outer
+   arc, so the instrument is never IN the cloud. */
+/* the weather sits ABOVE the vignette's warm lift, because that lift is the
+   light putting the colour ON the cloud, not a wash over it */
+.weather{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
+[data-theme=clouds] .desk .weather{display:block}
+.weather svg{position:absolute;inset:0;width:100%;height:100%}
+
+/* THE DESCENT (owner, §15: "scrolling down takes you below the cloudline and
+   into more blue hues — the deep page reads as under-the-weather altitude, not
+   sky"). SCROLL IS ALTITUDE. Three progresses, all POSITION, nothing on a
+   clock:
+     --pass   0→1 over the deck passage
+     --below  0→1 just behind it, eased: the blue world coming in
+     --deep   0→1 from the end of the passage to the very bottom of the page
+   plus --mist, the single soft rise and fall of being INSIDE the deck. */
+html:not(.descending) .desk :is(.mist,.underlight,.underdeep){display:none}
+/* 4a. The deck comes UP past you. It lay low across the first screen; as you
+   descend it rises, swells (you are getting nearer to it), and leaves over the
+   top of the window. It thins to nothing on the way out — a cloud has no
+   underside edge, and neither may this one. */
+[data-theme=clouds].descending .desk .weather{
+  transform-origin:50% 100%;
+  transform:translate3d(0,calc(var(--pass) * -142vh),0)
+            scale(calc(1 + var(--pass) * .30));
+  opacity:clamp(0,calc((.80 - var(--pass)) / .32),1)}
+/* the svg viewport is one screen tall, so as the layer rides up its own bottom
+   edge would cut the deck off in a straight line across the window. Let the
+   deck draw past it: everything it gains is outside the screen at rest, and
+   while you are inside the cloud it is the whole point — there is no floor. */
+[data-theme=clouds].descending .desk .weather svg{overflow:visible}
+/* 4b. The passage. For a few hundred pixels the deck is AROUND you and the
+   light goes flat, close and colourless — warm still at the top where the sun
+   is, cooling underneath as you come out. It sits BEHIND the page, so the
+   manifest stays crisp the whole way through: fog, not frosting. */
+.mist{display:none;position:fixed;inset:0;z-index:1;pointer-events:none}
+[data-theme=clouds].descending .desk .mist{display:block;opacity:var(--mist);
+  background:linear-gradient(180deg,rgba(250,244,236,.98) 0%,
+    rgba(243,240,240,.98) 42%,rgba(228,234,245,.98) 100%)}
+/* 4c. Underneath, the world is blue. Not sky-blue — sky is above the deck now
+   and you cannot see it. This is the light that gets THROUGH a cloud layer:
+   flat, cool, dimmest overhead where the deck is, hazing paler down toward a
+   ground too far below to resolve. */
+.underlight,.underdeep{display:none;position:fixed;inset:0;z-index:1;
+  pointer-events:none}
+[data-theme=clouds].descending .desk .underlight{display:block;opacity:var(--below);
+  background:linear-gradient(180deg,#93a8c6 0%,#a2b6d1 34%,#b3c6de 70%,#c4d4e7 100%)}
+/* 4d. …and it goes on losing height. The same four stops, carried a third of
+   the way to dusk, faded in across the whole remaining page so the change is
+   never visible AS a change — only as having arrived. */
+[data-theme=clouds].descending .desk .underdeep{display:block;opacity:var(--deep);
+  background:linear-gradient(180deg,#4d6489 0%,#5c7aa4 34%,#7191b7 70%,#89a7c9 100%)}
+/* 4e. The stars leave with the deck. They were already washing out toward the
+   crest; under it there is nothing above you but cloud. */
+[data-theme=clouds].descending .desk .sky{
+  opacity:calc(var(--stars) * (1 - var(--below)))}
+/* 4f. The ink follows the light. This pack's faint tokens were set against a
+   pale amber horizon; on under-cloud blue they would float off it, so they go
+   firmer as the ground goes deeper. --bg is not a colour anyone sees here — it
+   backs the corridor's knockouts and the star strokes — so it tracks the middle
+   of whatever ground is actually showing. */
+[data-theme=clouds].descending body{
+  --bg:color-mix(in srgb,#6b88ae calc(var(--deep) * 100%),
+       color-mix(in srgb,#b5c6dc calc(var(--below) * 100%),#d2d3d4));
+  --ink-faint:color-mix(in srgb,#2f3f5e calc(var(--deep) * 100%),
+       color-mix(in srgb,#5c6c8e calc(var(--below) * 100%),#78849b));
+  --chart-ink:color-mix(in srgb,#22314f calc(var(--deep) * 100%),#40506e);
+  --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d)}
+@media (prefers-reduced-motion: reduce){
+  /* position kept, flourish dropped: the deck still rises and still goes, but
+     it does not swell at you and you are not put inside it. */
+  [data-theme=clouds].descending .desk .weather{
+    transform:translate3d(0,calc(var(--pass) * -142vh),0)}
+  .mist{display:none!important}
+}
+
+/* ── 5. AFTER DARK — THE GALACTIC PLANE ────────────────────────────────────
+   Everything here is scoped to the pack, which is the proof that the plane
+   BELONGS to after dark rather than being a homescreen style bolted over the
+   top. The layer is FIRST in the markup because it paints under the base
+   starfield: the galaxy is the furthest thing in the sky and the pack's own
+   stars stream in front of it. */
+.plane{display:none;position:fixed;inset:0;pointer-events:none;z-index:0}
+[data-theme=afterdark] .desk .plane{display:block}
+.plane svg{position:absolute;inset:0;width:100%;height:100%;
+           opacity:.88;transition:opacity 1.6s ease}
+/* THE MOODS. POL-8 and POL-10 already move the sky; the plane answers them from
+   its own distance. Quiet clears the air and the river comes fully up — the
+   reward state is the night at its best. Storm closes the weather in and the
+   far sky is the first thing lost. It never jitters with the near field: it is
+   too far away to be shaken. */
+body.quiet .plane svg{opacity:1}
+body.storm .plane svg{opacity:.6}
+
+/* ----------------------------------------------------------------------------
+   THE CONTRAST BUDGET — why the band is the brightness it is.
+
+   Every ink in this pack is LIGHT ink, so raising the ground behind it costs
+   contrast rather than earning it. Solving (L_ink + .05)/(L_bg + .05) ≥ 4.5 for
+   the ground gives a CEILING, and that number — not taste — is what sets the
+   lobe alphas in sky-plane.js.
+
+   Re-measured in the app after #490 lifted this pack's ink family, which moved
+   the budget in the reader's favour rather than against it:
+     --ink-mid is now #9fa6b2 (L .3786) on the bare ground #05070d (L .00214),
+     i.e. 8.22:1 where it used to be 5.49:1. The ceiling it implies is
+     L_bg ≤ (.4286/4.5) − .05 = .0452 — three and a third times the .0136 the
+     sheet was written against.
+   The band's measured peak diffuse ground is L = .0120 (brightest 11×11 median,
+   quiet state, where the river comes fully up), which now leaves --ink-mid at
+   7.05:1 over the very brightest part of the band. The sheet's own worst case
+   was 4.62:1; the alphas are unchanged and the margin simply got wider, so
+   there was nothing to re-tune and no reason to spend the gain — the band the
+   owner approved is the band that ships.
+
+   And the honest half of the sheet's own note is now CLOSED rather than
+   qualified. It flagged that this pack's faint tier had never met 4.5:1 (both
+   --ink-faint and --chart-ink at #4a5468, 2.65:1 on the bare ground) and said
+   the answer was a pack decision rather than a backdrop patch. That decision is
+   #490, taken in packs.css in the same wave: the tier is now #717c8e at 4.77:1
+   before the band exists, and the band's marginal cost to it — at worst 0.28 of
+   a ratio point in the sheet's sweep — cannot take it under the law.
+
+   The band therefore needs no guard around the chart. Dawn's terminator has to
+   hold the dial out of its dark side because that wash is deep enough to
+   swallow chart ink; this one is capped where the chart stays legible
+   everywhere, so the river runs behind the instrument — which is exactly the
+   picture the owner liked.
+   -------------------------------------------------------------------------- */
+
+/* THE DESCENT. The plane rides up and out of the top of the window and fades as
+   it goes; the plain starfield stays exactly where §15 leaves it ("leaving the
+   plain starfield behind the deep manifest"); and the DEEP closes in behind, so
+   the manifest is read over emptier, blacker sky than the dial screen ever
+   shows. One position drives all of it — --descent, the same quantity every
+   sibling descent spends. */
+.deep{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
+[data-theme=afterdark].descending .desk .plane{
+  transform:translate3d(0,calc(var(--descent) * -122vh),0);
+  opacity:calc(1 - var(--descent) * 1.22);
+  transition:none}
+/* the deep: not a curtain but a closing-in. Strongest overhead — where the
+   plane just left — and thinnest low, so the starfield thins from the top down
+   and the manifest ends the page on the emptiest sky in the product. */
+[data-theme=afterdark].descending .desk .deep{display:block;
+  opacity:var(--descent);
+  background:
+    linear-gradient(180deg,rgba(0,1,4,.72) 0%,rgba(1,2,6,.55) 46%,
+                           rgba(2,3,8,.34) 100%)}
+
+/* ----------------------------------------------------------------------------
+   THE FLOOR GLOW (§15 amendment, owner on the approved plane: "I like the
+   slight gradient glow at the bottom edge after you'd scrolls down too.. so the
+   bottom part of the manifest gets a glow thats similar").
+
+   The deep is a closing-in, not a blackout. The plane has gone out of the TOP
+   of the window, so the one place its light can still reach from is BELOW the
+   frame — and that is the whole picture: the foot of the deep sits over the same
+   warmth the river is made of, seen from under it. Same palette, same refusal
+   to be a flat ramp: THREE OCTAVES OF LOBE, exactly as the band's own glow is
+   built in the script — two wide wings, three warm bodies, five small warm
+   knots — over one shallow edge gradient that gives the wash its continuity.
+   Every lobe is centred BELOW the bottom edge, so what is on screen is only the
+   upper falloff of something that never resolves: a glow in the deep, not a
+   light source on the page.
+
+   STATIC, NOT STREAMED. The river is rolled and thrown away because it moves
+   past; the deep does not move, so its floor has nothing to roll. Eleven CSS
+   gradients, no script, no seed, no clock.
+
+   ONE DRIVER: the very same --descent as the wash it sits in. The glow is
+   painted into .deep's own ::after, so the parent's opacity carries both, and
+   at scroll 0 .deep is display:none — the glow does not merely measure zero, it
+   does not exist. The moods leave it alone: quiet and storm move the SKY, and
+   this is a position, not weather.
+
+   THE CAP, solved from the same law as the band. The deep's own wash starts the
+   foot well below the bare pack ground, and the octave alphas are set so the
+   brightest 11×11 median the glow reaches anywhere is L = .0083 — 61% of the
+   ceiling the sheet solved for and 69% of the band's own peak. Against this
+   pack's lifted --ink-mid (#9fa6b2) that leaves 8.13:1 sitting on the single
+   brightest pixel-neighbourhood of the glow; against the lifted faint tier
+   (#717c8e) it leaves 4.53:1, which is the tightest number in the wave and
+   still over the law. The deep stays the emptiest sky in the product, which was
+   the point of it.
+   -------------------------------------------------------------------------- */
+[data-theme=afterdark]{
+  /* THE FALLOFF is the river's, to the stop: 0 / .32 / .58 / .80 / 1 of the
+     radius at .95 / .62 / .30 / .10 / 0 of the peak — the five-stop
+     approximation of a gaussian the script uses for every lobe in the band. It
+     is not decoration. A two-stop lobe falls off LINEARLY, and on a ground this
+     close to black the kink where the ramp meets nothing quantises into a
+     visible horizontal edge — the first build of this glow drew exactly that
+     line across the frame at 80% height. Four alphas per octave buys a tail you
+     cannot find. THE ALPHAS are the budget above, not taste. */
+  /* the wings carry the river's cool with much of the warm still in them: a
+     purely cool wing at these alphas reads as grey haze on a blue-black ground,
+     and the foot loses the one thing it is here to echo */
+  --fg-wing-hue:color-mix(in srgb,var(--plane-cool) 45%,var(--plane-warm));
+  --fg-w1:color-mix(in srgb,var(--fg-wing-hue) 2.4%,transparent);
+  --fg-w2:color-mix(in srgb,var(--fg-wing-hue) 1.57%,transparent);
+  --fg-w3:color-mix(in srgb,var(--fg-wing-hue) .76%,transparent);
+  --fg-w4:color-mix(in srgb,var(--fg-wing-hue) .25%,transparent);
+  --fg-w0:color-mix(in srgb,var(--fg-wing-hue) 0%,transparent);
+  --fg-b1:color-mix(in srgb,var(--plane-warm) 4.2%,transparent);
+  --fg-b2:color-mix(in srgb,var(--plane-warm) 2.74%,transparent);
+  --fg-b3:color-mix(in srgb,var(--plane-warm) 1.33%,transparent);
+  --fg-b4:color-mix(in srgb,var(--plane-warm) .44%,transparent);
+  --fg-k1:color-mix(in srgb,var(--plane-warm) 6%,transparent);
+  --fg-k2:color-mix(in srgb,var(--plane-warm) 3.9%,transparent);
+  --fg-k3:color-mix(in srgb,var(--plane-warm) 1.9%,transparent);
+  --fg-k4:color-mix(in srgb,var(--plane-warm) .63%,transparent);
+  --fg-e1:color-mix(in srgb,var(--plane-warm) 4.6%,transparent);
+  --fg-e2:color-mix(in srgb,var(--plane-warm) 2.4%,transparent);
+  --fg-e3:color-mix(in srgb,var(--plane-warm) .95%,transparent);
+  --fg-e4:color-mix(in srgb,var(--plane-warm) .3%,transparent);
+  /* every falloff ends in the colour it started in at zero alpha, never in
+     `transparent` — the same reason the river's gradients end at stop-opacity 0
+     of their own hue rather than at nothing at all */
+  --fg-nil:color-mix(in srgb,var(--plane-warm) 0%,transparent);
+}
+/* scoped to the pack for the same reason the paint is: this is after dark's
+   light, and no other pack's .deep is entitled to it */
+[data-theme=afterdark] .desk .deep::after{content:"";position:absolute;inset:0;background:
+  /* the knots: star clouds, small and warm and unevenly spaced, hugging the very
+     edge. This is the octave that stops the foot reading as a ramp — a smooth
+     ramp is a gradient stripe by another name, which is the same note the
+     band's own glow was rebuilt to answer. */
+  radial-gradient(13% 6% at 9% 104%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+  radial-gradient(10% 5% at 27% 102%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+  radial-gradient(15% 7% at 44% 105%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+  radial-gradient(9% 4.5% at 61% 103%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+  radial-gradient(12% 6% at 79% 104%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+  /* the bodies: the glow as you see it at a glance */
+  radial-gradient(30% 13% at 14% 107%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+  radial-gradient(34% 15% at 52% 110%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+  radial-gradient(26% 12% at 88% 106%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+  /* the wings: the diffuse reach, the furthest the light gets up the frame */
+  radial-gradient(62% 30% at 26% 110%,var(--fg-w1) 0%,var(--fg-w2) 32%,var(--fg-w3) 58%,var(--fg-w4) 80%,var(--fg-w0) 100%),
+  radial-gradient(54% 34% at 76% 118%,var(--fg-w1) 0%,var(--fg-w2) 32%,var(--fg-w3) 58%,var(--fg-w4) 80%,var(--fg-w0) 100%),
+  /* and under all of it, the shallow edge gradient that makes the mottle one
+     wash rather than a row of blooms — the "gradient glow at the bottom edge"
+     of the ruling, with the three octaves laid over it so it is never only
+     that */
+  linear-gradient(0deg,var(--fg-e1) 0%,var(--fg-e2) 8%,var(--fg-e3) 17%,var(--fg-e4) 26%,var(--fg-nil) 34%)}
+/* Reduced motion. The drop is a POSITION, not an animation — freezing it would
+   strand the reader under a sky the page has already left — so the fade, the
+   deep and its floor glow still track the scrollbar. What goes is the flourish:
+   the plane gives way where it stands instead of being flown out of the top of
+   the frame. (The stream is stilled in the script: no rAF, no drift, and the
+   opening window is held.) */
+@media (prefers-reduced-motion: reduce){
+  [data-theme=afterdark].descending .desk .plane{transform:none}
+}
+/* /THE SKY WAVE */
 
 /* ══════════════════════════════════════════════════════════════════════════
    THE LAUNCH LANDS HERE, AND THE DESCENT LEAVES FROM HERE (#410, §15)

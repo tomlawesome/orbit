@@ -40,7 +40,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
               border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
 .types button:hover{color:var(--ink)}
-.types button[aria-pressed=true]{color:var(--accent);border-color:var(--accent);background:rgba(216,180,90,.08)}
+.types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 
 .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:22px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
@@ -69,7 +69,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 
 .field.sugg input,.field.sugg select{border-left:3px solid var(--accent)}
 .field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
-            color:var(--accent);letter-spacing:.04em}
+            color:var(--accent-text);letter-spacing:.04em}
 .field.sugg .tag{display:flex}
 .field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
                    border-radius:6px;padding:2px 9px;cursor:pointer}
