@@ -28,16 +28,23 @@
     ["administration", "Administration", "/administration"],
   ];
   /*
-   * The release roster (§15, owner): star-chart, after dark, dawn and
-   * retrograde. Atlas and hanami are retired from the RELEASE — atlas's pack
-   * is still defined in packs.css and still renders if a theme is forced, but
-   * it is no longer offered anywhere a reader can choose, and this row is one
-   * of those places.
+   * THE v1.3.0 ROSTER, FINAL (§15, owner: "the release theme list is star
+   * chart, after dark, CLOUDS, dawn terminator, and retrograde"). Five packs,
+   * five swatches. Atlas, hanami, porcelain, miami and solarium are on the
+   * records shelf — their code stays and a stored preference still renders,
+   * but they are offered nowhere a reader can choose, and this row is one of
+   * those places (the precedent is atlas leaving at #480/f9261c6).
+   *
+   * The dot is the pack's most telling colour rather than strictly its --bg:
+   * clouds shows the cool white of a cloud crest, which is the lighter end of
+   * the range it was admitted to carry, and dawn shows the temperature story's
+   * own ground now that the terminator has moved it off #c3ccdb.
    */
   const PACKS = [
     ["starchart", "star-chart", "#060b1c", ""],
     ["afterdark", "after dark", "#05070d", ""],
-    ["dawn", "dawn", "#c3ccdb", ""],
+    ["clouds", "clouds", "#eef2f9", ""],
+    ["dawn", "dawn", "#d2d3d4", ""],
     ["retrograde", "retrograde", "#080a14", "inset 0 0 0 1px #ff4fd8"],
   ];
 
@@ -118,9 +125,35 @@
 </div>
 
 <style>
+  /*
+   * THE WAY BACK, KNOCKED OUT (#491, the '← SETTINGS on sky' hazard).
+   *
+   * This label is the one piece of chrome in the family that sits DIRECTLY on
+   * the starfield with nothing behind it — no panel, no glass, no rule. It was
+   * drawn in --ink-faint, which is 2.78:1 on star-chart's ground before a
+   * single star is added, and every star that drifts through it makes it worse:
+   * 11px of tracked-out mono is thin enough that one bright near-field star
+   * landing inside a letter is the difference between reading the word and
+   * guessing it.
+   *
+   * Two moves, and they answer two different problems:
+   *   · the INK goes to the text-grade companion, because this is words —
+   *     6.59:1 on star-chart, and the same lift on every pack;
+   *   · and it gets a BACKING, which is EVA's stencil precedent (that concept
+   *     paints its on-sky title stroke-first in the sky's own colour so it
+   *     survives a starfield). Here the plate is spent as a halo rather than as
+   *     an outline: -webkit-text-stroke at any width a star could hide behind
+   *     would close up 11px mono, so three radii of --bg do the knocking out
+   *     instead. The sky cannot get between the letters, and nothing is drawn
+   *     that a reader would notice as a shape.
+   *
+   * --bg and not a literal: the plate has to be whatever the pack's ground is,
+   * or it becomes a visible smudge the moment someone picks clouds.
+   */
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
-        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -140,7 +173,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;

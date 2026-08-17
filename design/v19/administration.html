@@ -31,6 +31,10 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#4d5878;
+    /* #491: the text-grade companions — ink that carries WORDS. Measured against
+       the worst ground each pack actually paints text on. Carried from
+       web/src/lib/packs.css. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -41,6 +45,7 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -51,6 +56,7 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -61,6 +67,7 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --ink-quiet:#404c64; --accent-text:#134a72; --ok-text:#0d4e30;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -71,6 +78,7 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
   }
 
   *{box-sizing:border-box;margin:0}
@@ -87,9 +95,19 @@
             background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
   [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
 
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
   .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
-        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
-  .back:hover{color:var(--accent)}
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
   .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
        border-radius:50%;border:1px solid var(--line);background:var(--panel);
        backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
@@ -109,7 +127,7 @@
   .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
                  padding:6px 8px;border-radius:8px}
   .account nav a:hover{color:var(--ink);background:var(--panel)}
-  .account nav a[aria-current]{color:var(--accent)}
+  .account nav a[aria-current]{color:var(--accent-text)}
   .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
   .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
@@ -132,7 +150,7 @@
   .card .cardhead button,.card .cardhead a{margin-left:auto;font:11px var(--mono);
         color:var(--ink-mid);background:none;border:1px solid var(--line);
         border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
-  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent)}
+  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent-text)}
 
   .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
           border-bottom:1px solid var(--line-soft)}
@@ -146,10 +164,10 @@
                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
         border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
-  .role.admin{color:var(--accent);border-color:var(--accent)}
+  .role.admin{color:var(--accent-text);border-color:var(--accent)}
   .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
                  border:0;cursor:pointer;padding:4px;flex:none}
-  .person .place:hover{color:var(--accent)}
+  .person .place:hover{color:var(--accent-text)}
 
   .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
           border-bottom:1px solid var(--line-soft)}
@@ -170,10 +188,10 @@
       border-bottom:1px solid var(--line-soft)}
   .kv:last-child{border:0}
   .kv b{color:var(--ink);font-weight:500}
-  .kv .on{color:var(--ok)}
+  .kv .on{color:var(--ok-text)}
   .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
              border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
-  .kv button:hover{border-color:var(--accent);color:var(--accent)}
+  .kv button:hover{border-color:var(--accent);color:var(--accent-text)}
 
   /* §15: the machinery corner — the relay's instance levers are no longer a
      panel of their own; they are MAIL MACHINERY, joined to operations in one
@@ -220,9 +238,14 @@
     <span>THEME</span>
     <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
     <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
-    <!-- atlas is retired from the release roster (§15, owner): its pack still
-         exists and still renders if forced, but it is no longer offered. -->
-    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
+         CLOUDS joins as its own selectable pack, carrying the lighter end of
+         the range; dawn's dot follows its ground onto the temperature story.
+         Atlas, hanami, porcelain, miami and solarium are on the records shelf —
+         their packs still exist and still render if forced, but they are no
+         longer offered. -->
+    <button style="background:#eef2f9" title="clouds" aria-pressed="false" onclick="setSwatch('clouds',this)"></button>
+    <button style="background:#d2d3d4" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
     <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
   </div>
   <button class="signout">sign out →</button>

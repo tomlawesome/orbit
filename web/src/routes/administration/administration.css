@@ -29,7 +29,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .card .cardhead button,.mission-page .card .cardhead a{margin-left:auto;font:11px var(--mono);
       color:var(--ink-mid);background:none;border:1px solid var(--line);
       border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
-.mission-page .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent)}
+.mission-page .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent-text)}
 
 .mission-page .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
         border-bottom:1px solid var(--line-soft)}
@@ -43,10 +43,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
                   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mission-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
       border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
-.mission-page .role.admin{color:var(--accent);border-color:var(--accent)}
+.mission-page .role.admin{color:var(--accent-text);border-color:var(--accent)}
 .mission-page .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
                border:0;cursor:pointer;padding:4px;flex:none}
-.mission-page .person .place:hover{color:var(--accent)}
+.mission-page .person .place:hover{color:var(--accent-text)}
 
 .mission-page .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
         border-bottom:1px solid var(--line-soft)}
@@ -66,10 +66,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
     border-bottom:1px solid var(--line-soft)}
 .mission-page .kv:last-child{border:0}
 .mission-page .kv b{color:var(--ink);font-weight:500}
-.mission-page .kv .on{color:var(--ok)}
+.mission-page .kv .on{color:var(--ok-text)}
 .mission-page .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
            border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
-.mission-page .kv button:hover{border-color:var(--accent);color:var(--accent)}
+.mission-page .kv button:hover{border-color:var(--accent);color:var(--accent-text)}
 
 /* §15: the machinery corner — the relay's instance levers are no longer a
    panel of their own; they are MAIL MACHINERY, joined to operations in one
@@ -99,5 +99,5 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         border-bottom:1px solid var(--line-soft)}
 .mission-page .placerow button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
         border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
-.mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent)}
+.mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
 .mission-page .adminproblem{margin-top:10px;font:11px var(--mono);color:var(--warm)}
