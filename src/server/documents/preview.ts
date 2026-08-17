@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, DOMMatrix, Path2D, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
 import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { AppError } from "@/lib/app-error";
 import {
@@ -123,6 +123,57 @@ function standardFontDirectory(): string | undefined {
   return cachedStandardFontDirectory ?? undefined;
 }
 
+/**
+ * The canvas backend PDF.js is told to use for its own scratch surfaces.
+ *
+ * PDF.js otherwise builds transparency groups, soft masks and tiling patterns
+ * on canvases from whichever copy of `@napi-rs/canvas` its own module URL
+ * resolves to, then draws them onto ours. Skia rejects a surface that belongs
+ * to a different instance of the addon, so the factory is pinned to the same
+ * import this module draws with. The shape mirrors PDF.js's own
+ * `BaseCanvasFactory` rather than extending it, because that class is internal.
+ */
+class PinnedCanvasFactory {
+  create(width: number, height: number): { canvas: Canvas; context: SKRSContext2D } {
+    if (width <= 0 || height <= 0) throw failedPreview();
+    const canvas = createCanvas(width, height);
+    return { canvas, context: canvas.getContext("2d") };
+  }
+
+  reset(canvasAndContext: { canvas: Canvas | null }, width: number, height: number): void {
+    if (!canvasAndContext.canvas || width <= 0 || height <= 0) throw failedPreview();
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+
+  destroy(canvasAndContext: { canvas: Canvas | null; context: SKRSContext2D | null }): void {
+    if (!canvasAndContext.canvas) return;
+    canvasAndContext.canvas.width = 0;
+    canvasAndContext.canvas.height = 0;
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
+/**
+ * Makes PDF.js draw with this module's canvas backend and no other.
+ *
+ * PDF.js reads `Path2D` and `DOMMatrix` off `globalThis`, polyfilling them at
+ * import time from the copy of `@napi-rs/canvas` its own module URL resolves
+ * to. That is not always the copy this module imports: the standalone
+ * container image materialises pnpm's symlinked duplicates as separate
+ * directories, so PDF.js loads a second native Skia addon and every glyph
+ * outline it hands to our context is a foreign object Skia refuses with "Value
+ * is none of these types `String`, `Path`" — a whole-page render failure for
+ * any document with text. Reassigning the globals is safe when both copies are
+ * already the same object, and is the only way to be certain they are.
+ */
+function pinRenderingGlobals(): void {
+  const globals = globalThis as unknown as Record<string, unknown>;
+  if (globals.Path2D !== Path2D) globals.Path2D = Path2D;
+  if (globals.DOMMatrix !== DOMMatrix) globals.DOMMatrix = DOMMatrix;
+}
+
 function boundedCanvasSize(width: number, height: number, allowUpscale: boolean): { width: number; height: number } {
   const longest = Math.max(width, height);
   if (!Number.isFinite(longest) || longest <= 0) throw failedPreview();
@@ -149,8 +200,10 @@ async function withRenderBudget<T>(work: () => Promise<T>): Promise<T> {
 async function renderPdfPageOne(bytes: Buffer): Promise<DocumentPagePreview> {
   let loadingTask: ReturnType<typeof getDocument> | undefined;
   try {
+    pinRenderingGlobals();
     loadingTask = getDocument({
       ...PDF_PREVIEW_PARSER_OPTIONS,
+      CanvasFactory: PinnedCanvasFactory,
       data: new Uint8Array(bytes),
       standardFontDataUrl: standardFontDirectory(),
     });

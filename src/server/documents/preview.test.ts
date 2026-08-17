@@ -56,6 +56,36 @@ describe("renderDocumentPagePreview", () => {
     expect(scratch.entries()).toEqual([]);
   });
 
+  it("draws with its own canvas backend when a foreign Path2D owns the global", async () => {
+    // The standalone container image materialises pnpm's symlinked duplicates
+    // of @napi-rs/canvas as separate directories, so PDF.js polyfills
+    // globalThis.Path2D from a second native Skia addon and every glyph
+    // outline it hands the renderer's context is a foreign object Skia refuses
+    // ("Value is none of these types `String`, `Path`"). A stand-in with the
+    // same surface stands for that second addon here: the renderer must ignore
+    // it and still draw the page's text (#476).
+    const foreignPath2D = class ForeignPath2D {
+      moveTo() { /* accepts the outline, produces nothing Skia knows */ }
+      lineTo() {}
+      bezierCurveTo() {}
+      quadraticCurveTo() {}
+      closePath() {}
+    };
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const restore = globals.Path2D;
+    globals.Path2D = foreignPath2D;
+    try {
+      const preview = await renderDocumentPagePreview(syntheticPdf("Preview fixture"), "application/pdf");
+
+      expect(globals.Path2D).not.toBe(foreignPath2D);
+      // A blank white page of this size compresses to a few hundred bytes; the
+      // drawn text is what pushes it past this.
+      expect(preview.bytes.length).toBeGreaterThan(2_000);
+    } finally {
+      globals.Path2D = restore;
+    }
+  });
+
   it("renders a real producer's PDF, drawing content rather than a blank page", async () => {
     const bytes = readFileSync(resolve(import.meta.dirname, "../../../tests/support/fixtures/chromium-synthetic.pdf"));
 
