@@ -44,7 +44,7 @@ async function signIn(page: Page) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
 }
 
 async function sessionHeaders(page: Page) {
@@ -374,7 +374,9 @@ async function expectCoreSurfacesFit(
   await expectNoHorizontalOverflow(page, `${context}/settings`);
   await expectInsideViewport(page, ".settings-page", `${context} settings page`);
   await page.keyboard.press("Escape");
-  await expect(page).toHaveURL(/\/$/);
+  // See navigateHomeWithFocus (#410, §15): openSettings() above reached
+  // settings from this engine's own workspace, so that is where it returns.
+  await expect(page).toHaveURL(/\/workspace$/);
   await expect(settings).not.toBeVisible();
   if ((page.viewportSize()?.width ?? 0) <= 820) {
     await expect(page.getByRole("button", { name: "Open navigation" })).toBeFocused();
@@ -617,10 +619,15 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       const returnButton = page.getByRole("button", { name: /Return to Orbit/ });
       expect(await returnButton.evaluate((element) => element.contains(document.activeElement) || element === document.activeElement)).toBe(true);
       await page.keyboard.press("Escape");
-      await expect(page).toHaveURL(/\/$/);
+      // "/" is v19's own front door now (#410, §15): this engine's settings
+      // returns to whichever of its own screens sent it here — /workspace,
+      // reached moments ago through the account menu below — not to "/".
+      await expect(page).toHaveURL(/\/workspace$/);
       await expect(settingsTrigger).toBeFocused();
 
-      await page.goto("/settings");
+      await settingsTrigger.click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      await expect(page).toHaveURL(/\/settings$/);
       await expect(settingsHeading).toBeFocused();
       const inboxLink = page.getByRole("link", { name: "Inbox", exact: true });
       await inboxLink.focus();
@@ -628,7 +635,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
       await expect(page).toHaveURL(/\/settings#settings-inbox$/);
       await expect(page.getByRole("heading", { name: "Inbox", exact: true, level: 2 })).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(/\/workspace$/);
       await expect(settingsTrigger).toBeFocused();
 
       const addTrigger = page.locator("button.add-button:visible");
@@ -748,7 +755,7 @@ test.describe("authenticated accessibility and responsive acceptance", () => {
             });
             expect(settingsThemeTokens).toEqual(workspaceThemeTokens);
             await page.keyboard.press("Escape");
-            await expect(page).toHaveURL(/\/$/);
+            await expect(page).toHaveURL(/\/workspace$/);
           }
         }
       }

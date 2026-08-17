@@ -9,7 +9,7 @@ async function signIn(page: Page, identity: string) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: identity }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
 }
 
 interface DisposableWorkspace {

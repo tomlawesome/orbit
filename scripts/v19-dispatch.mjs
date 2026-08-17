@@ -40,10 +40,23 @@ const V19_PREFIXES = [
   "/screens/",
 ];
 
+/* SvelteKit's client router fetches a page's server `load` over
+   "<route>/__data.json" on every client-side navigation (goto(), not a full
+   page load) to a route that has one — a request to the route itself, never
+   a page render. Untrimmed, that suffix matches nothing below and falls
+   through to the retiring engine, which 404s: the destination route was
+   fine, only its own data companion request was invisible here (#456, first
+   caught on /home, the one v19 route with a +page.server.js today, reached
+   by the create form's post-save goto("/home")). */
+const DATA_SUFFIX = "/__data.json";
+
 export function isV19Path(pathname) {
-  const bare = pathname.length > 1 && pathname.endsWith("/")
-    ? pathname.slice(0, -1)
+  const routePath = pathname.endsWith(DATA_SUFFIX)
+    ? pathname.slice(0, -DATA_SUFFIX.length) || "/"
     : pathname;
+  const bare = routePath.length > 1 && routePath.endsWith("/")
+    ? routePath.slice(0, -1)
+    : routePath;
   if (V19_PAGES.has(bare)) return true;
-  return V19_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  return V19_PREFIXES.some((prefix) => routePath.startsWith(prefix));
 }

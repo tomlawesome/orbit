@@ -415,7 +415,7 @@ export function useWorkspace() {
     setSyncMessage("");
   }, []);
 
-  const signOut = useCallback(async (): Promise<void> => {
+  const signOut = useCallback(async (returnTo = "/"): Promise<void> => {
     const activeSession = sessionRef.current;
     if (!activeSession) return;
     operationGenerationRef.current += 1;
@@ -424,7 +424,7 @@ export function useWorkspace() {
     setSyncMessage("");
     try {
       await purgeLegacyWorkspaceCache();
-      const response = await fetch("/api/auth/logout", {
+      const response = await fetch(`/api/auth/logout?returnTo=${encodeURIComponent(returnTo)}`, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -440,7 +440,7 @@ export function useWorkspace() {
       setWorkspace(emptyWorkspace);
       setSyncStatus("signed-out");
       setSyncMessage("");
-      window.location.assign(payload.redirectTo || "/");
+      window.location.assign(payload.redirectTo || returnTo);
     } catch {
       sessionRef.current = activeSession;
       try {

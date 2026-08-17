@@ -62,6 +62,22 @@ describe("v19 path dispatch", () => {
     expect(isV19Path("/home/")).toBe(true);
     expect(isV19Path("/settings/mail/")).toBe(true);
   });
+
+  // #456: goto() to a v19 page with a server `load` (currently only /home)
+  // fetches "<route>/__data.json" as its own request, on client-side
+  // navigation only — a full page load never asks for it. That request must
+  // land on v19 too, or the destination page renders but its data request
+  // 404s into the retiring engine, and SvelteKit shows its own error page
+  // with the URL bar still on the route that "worked".
+  it("routes a v19 page's own __data.json request, not just the page", () => {
+    expect(isV19Path("/home/__data.json")).toBe(true);
+    expect(isV19Path("/__data.json")).toBe(true);
+    expect(isV19Path("/settings/mail/__data.json")).toBe(true);
+    expect(isV19Path("/item/i-mot/__data.json")).toBe(true);
+    // Still not swallowed for a route this table does not own.
+    expect(isV19Path("/workspace/__data.json")).toBe(false);
+    expect(isV19Path("/settings/__data.json")).toBe(false);
+  });
 });
 
 // The entry must fail closed: a container whose image is missing either
