@@ -122,16 +122,19 @@ describe("receipt identity PostgreSQL boundaries", () => {
     setImapClientFactoryForTests(() => ({
       // Exactly one message exists, at UID 1, so the mailbox's own uidNext
       // correctly predicts 2. A fake this simple ignores the requested
-      // range and always yields the same message, so if the range-collapse
-      // guard failed to skip a caught-up poll, the second cycle would
-      // re-fetch and re-record the same UID-1 message a second time.
+      // range and always answers with the same message, so if the
+      // range-collapse guard failed to skip a caught-up poll, the second
+      // cycle would re-fetch and re-record the same UID-1 message again.
       mailbox: { uidValidity: 500n, uidNext: 2 },
       async connect() {},
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
-      async *fetch(range: string) {
-        ranges.push(range);
-        yield { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("steady-state-message") };
+      async search(query: { uid: string }) {
+        ranges.push(query.uid);
+        return [1];
+      },
+      async fetchOne() {
+        return { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("steady-state-message") };
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
@@ -158,14 +161,17 @@ describe("receipt identity PostgreSQL boundaries", () => {
     setImapClientFactoryForTests(() => ({
       // Comfortably above every UID this fixture's fake mailboxes use, so
       // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
-      // never skips these tests' fetch calls.
+      // never skips these tests' search/fetchOne calls.
       mailbox: { uidValidity: 300n, uidNext: 1_000_000 },
       async connect() {},
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
-      async *fetch(range: string) {
-        ranges.push(range);
-        yield { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("post-expiry-current") };
+      async search(query: { uid: string }) {
+        ranges.push(query.uid);
+        return [1];
+      },
+      async fetchOne() {
+        return { uid: 1, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from("post-expiry-current") };
       },
     } as unknown as import("imapflow").ImapFlow));
     try {
@@ -221,12 +227,20 @@ describe("receipt identity PostgreSQL boundaries", () => {
     const fakeClient = {
       // Comfortably above every UID this fixture's fake mailboxes use, so
       // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
-      // never skips these tests' fetch calls.
+      // never skips these tests' search/fetchOne calls.
       mailbox: { uidValidity: 42n, uidNext: 1_000_000 },
       async connect() {},
       async logout() {},
       async getMailboxLock() { return { release() {} }; },
-      async *fetch() { yield* messages; },
+      // Ignores the requested range and always answers with every message,
+      // exactly like the fetch()-based fake this replaces did — the second
+      // cycle's repeated poll proves recordImapReceipt's own idempotency
+      // (onConflictDoNothing), not a client-side filter.
+      async search() { return messages.map((message) => message.uid); },
+      async fetchOne(uid: string) {
+        const message = messages.find((candidate) => candidate.uid === Number(uid));
+        return message ? { ...message } : undefined;
+      },
       async download() { return { content: syntheticPdf("recipient identity") }; },
     };
     setImapClientFactoryForTests(() => fakeClient as unknown as import("imapflow").ImapFlow);
@@ -264,14 +278,17 @@ describe("receipt identity PostgreSQL boundaries", () => {
       const client = {
         // Comfortably above every UID this fixture's fake mailboxes use, so
         // runImapIngestionCycle's "${nextUid}:*" range-collapse guard
-        // (#383) never skips these tests' fetch calls.
+        // (#383) never skips these tests' search/fetchOne calls.
         mailbox: { uidValidity: BigInt(uidValidity), uidNext: 1_000_000 },
         async connect() {},
         async logout() {},
         async getMailboxLock() { return { release() {} }; },
-        async *fetch(range: string) {
-          ranges.push(range);
-          yield { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`rollover-${uidValidity}`) };
+        async search(query: { uid: string }) {
+          ranges.push(query.uid);
+          return [uid];
+        },
+        async fetchOne() {
+          return { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`rollover-${uidValidity}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;
@@ -300,16 +317,24 @@ describe("receipt identity PostgreSQL boundaries", () => {
       const client = {
         // Comfortably above every UID this fixture's fake mailboxes use, so
         // runImapIngestionCycle's "${nextUid}:*" range-collapse guard
-        // (#383) never skips these tests' fetch calls.
+        // (#383) never skips these tests' search/fetchOne calls.
         mailbox: { uidValidity: 200n, uidNext: 1_000_000 },
         async connect() {},
         async logout() {},
         async getMailboxLock() { return { release() {} }; },
-        async *fetch(range: string) {
-          ranges.push(range);
-          const uid = firstPoll ? 1 : 2;
-          yield { uid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`restart-${uid}`) };
-          if (firstPoll) throw new Error("provider disconnect after durable receipt");
+        // The first poll's SEARCH sees both UID 1 and 2 (the provider has
+        // already assigned both), but the connection dies fetching the
+        // second: UID 1 is durably recorded (fetchOne for it completes
+        // first, one command at a time — exactly the ordering #460 fixed
+        // this module to guarantee) before the disconnect surfaces.
+        async search(query: { uid: string }) {
+          ranges.push(query.uid);
+          return firstPoll ? [1, 2] : [2];
+        },
+        async fetchOne(uid: string) {
+          const numericUid = Number(uid);
+          if (firstPoll && numericUid === 2) throw new Error("provider disconnect after durable receipt");
+          return { uid: numericUid, headers: Buffer.from(`X-Original-To: ${alias}\r\n`), source: Buffer.from(`restart-${numericUid}`) };
         },
       };
       return client as unknown as import("imapflow").ImapFlow;

@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, householdJoinRequests, households, memberships, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { VISIBLE_HOUSEHOLDS_LIMIT } from "@/lib/workspace";
 import { isInstanceAdministrator } from "@/server/authorization";
 
 /**
@@ -203,13 +204,19 @@ export async function decideJoinRequest(
 }
 
 /** The choose-branch's label-only sky (§11): every live household's id and
- * name — THE ENTIRE non-member surface — with the caller's pending flags. */
+ * name — THE ENTIRE non-member surface — with the caller's pending flags.
+ * Ordered by name and bounded to workspaceSchema.visibleHouseholds' own cap
+ * (#492): past that many live households, the schema itself would reject the
+ * read for every household-less user, so the query must never hand back more
+ * rows than the contract it feeds allows. The ordering is deterministic
+ * (name, then id to break ties) so the bounded page is stable across polls. */
 export async function listVisibleHouseholds(userId: string) {
   const [rows, pending] = await Promise.all([
     getDb()
       .select({ id: households.id, name: households.name, deletionRequestedAt: households.deletionRequestedAt })
       .from(households)
-      .orderBy(asc(households.createdAt)),
+      .orderBy(asc(households.name), asc(households.id))
+      .limit(VISIBLE_HOUSEHOLDS_LIMIT),
     getDb()
       .select({ householdId: householdJoinRequests.householdId })
       .from(householdJoinRequests)
