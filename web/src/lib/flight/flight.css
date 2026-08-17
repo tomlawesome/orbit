@@ -26,9 +26,14 @@ body.showdusk #dusk{opacity:1}
 #dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
     position:absolute;inset:0;width:100%;height:100%}
 #dawn .world,#dusk .world{position:absolute;inset:0}
-#dawn .sky .far,#dusk .sky .far{animation:appr 360s linear infinite}
-#dawn .sky .near,#dusk .sky .near{animation:appr 180s linear infinite}
+#dawn .sky .far{animation:appr 360s linear infinite}
+#dawn .sky .near{animation:appr 180s linear infinite}
 @keyframes appr{to{transform:translateX(-1600px)}}
+/* the goodbye's stars drift back the way they came — same periods, reversed
+   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below) */
+#dusk .sky .far{animation:recede 360s linear infinite}
+#dusk .sky .near{animation:recede 180s linear infinite}
+@keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
 #dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.15}to{opacity:.8}}
 /* first light: dawn breaks once on load, exactly as the login does it */
@@ -57,29 +62,77 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
 .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 
-/* ══ THE LOCKUP, THE GATE, THE RIBBON ════════════════════════════════════ */
-.loginchrome{position:absolute;inset:0;z-index:3;
+/* ══ THE LOCKUP AND THE GATE ═════════════════════════════════════════════
+   RECONCILED TO THE 08-14 RULINGS (§15, owner 2026-08-17): "The flight's login
+   screen uses THE MOST RECENT APPROVED LOGIN (the 08-14 rulings: no ribbon,
+   the current lockup) — the sheet's accidental resurrection of the older
+   styling loses; and THERE SHOULD BE NO FOOTER on the login."
+
+   What the port carried over from the sheet was design/family/login.html's
+   v18 chrome — a 64px badge at 37vh with a 58px word under it, a wide gold
+   pill at 23vh, and the PRIVATE · SELF-HOSTED · YOURS ribbon at the foot. All
+   of it loses. This is §10's list instead, and it is the rule this app
+   already shipped and baselined on 2026-08-14 before the flight landed on top
+   of it (web/src/routes/login at 0ff28da/cfa8388, and the sunset baseline
+   that was reworded to match it), restored here verbatim:
+
+     · the lockup is CENTRED in the viewport;
+     · the mark is much larger — the ring at 420px with `orbit` set plain
+       INSIDE it and no filled centre, the word occupying that space (CON-19's
+       sign-in exception, amended 2026-08-14);
+     · the ask sits inside the ring directly beneath the word. §10 also
+       records `Authenticate` in a thin white outline pill; that lost the same
+       day, because white on the accent fails contrast in every pack (worst
+       case 1.66:1). The pill came back in dark ink, sized down, reading
+       `Sign in` — and that is the word the ratified sunset's own pill was
+       then matched to;
+     · no ribbon. The 2.6:1 line it carried (#4d5878 on #04060e) goes with it,
+       which is that contrast finding closed by deletion rather than by
+       repainting a thing the owner does not want on the screen.
+
+   The dusk goodbye wears this same lockup and this same gate — both ends of a
+   session show one face, and the descent's mark sets down on the shape the
+   climb lifted off. */
+.loginchrome{position:absolute;inset:0;z-index:3;display:grid;place-items:center;
              transition:opacity .8s ease,transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
-.loginchrome .lockup{position:absolute;left:0;right:0;top:37vh;text-align:center;
-        transform-origin:50% 0;
-        transition:transform 1s cubic-bezier(.3,.7,.3,1)}
-/* No `line-height:0` here, tempting as it is: the mockup lets the glyph sit in
-   a normal line box, and the few pixels of descender space under it are what
-   put the wordmark where the ratified drawing puts it. */
-.loginchrome .lockup .glyph{margin-bottom:18px}
-.loginchrome .lockup .name{font:600 58px var(--display);letter-spacing:.015em;
-        line-height:1;color:#e9edf8}
-.gate-wrap{position:absolute;left:0;right:0;bottom:23vh;text-align:center;
-           opacity:0;transform:translateY(10px);
-           transition:opacity 1.6s ease 1.6s,transform 1.6s ease 1.6s,bottom 1s cubic-bezier(.3,.7,.3,1)}
-body.lit .gate-wrap{opacity:1;transform:none}
-.gate{font:600 14.5px var(--display);color:#04060e;background:#d8b45a;
-      border:0;border-radius:99px;padding:14px 34px;cursor:pointer;
-      box-shadow:0 0 34px rgba(216,180,90,.25);transition:box-shadow .3s,filter .3s}
-.gate:hover{filter:brightness(1.08)}
+/* Glyph, word and ask share ONE grid cell, so the word is centred on the
+   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+.loginchrome .lockup{position:relative;display:inline-grid;place-items:center;
+        text-align:center;transition:transform 1s cubic-bezier(.3,.7,.3,1)}
+.loginchrome .lockup .glyph{grid-area:1/1;line-height:0}
+/* The one motion CON-19 permits the mark anywhere: the planet drifts the
+   ring, once per 40s. The dusk unwinds it — see THE GOODBYE'S SKY. */
+.loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;
+        transform-origin:100px 100px}
+@keyframes spinback{to{transform:rotate(360deg)}}
+.loginchrome .lockup .name{grid-area:1/1;font:600 72px var(--display);
+        letter-spacing:.015em;line-height:1;color:#e9edf8}
+/* Dropped clear of the word inside the ring: 36px is half the name's line
+   box, 20px the gap, 18px half the button. The offset lives on the wrapper
+   and the entrance on .gate, so two transforms never fight over one element. */
+.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+           transform:translateY(74px)}
+/* THE RATIFIED GATE, and the only pill in the family: the goodbye's
+   "Sign back in" is this same rule with one word changed (§15, 2026-08-17 —
+   "the SIGN-IN BUTTON must be IDENTICAL on both surfaces"). The delayed
+   entrance is 08-14's own: the mark holds the screen alone first. */
+/* `#dusk .gate-wrap a` rides in the SAME selector list rather than in a rule
+   of its own: /home renders the goodbye's way back in as <a class="again">
+   and that file is being ported by another hand right now, so the button gets
+   the ratified treatment from one declaration block either way. When that
+   anchor becomes class="gate" the selector can go, and nothing else changes.
+   `line-height:1` is here for the same reason: a <button> and an <a> would
+   otherwise be different heights wearing the same rule. */
+.gate,#dusk .gate-wrap a{font:600 12px var(--display);color:#04060e;background:#d8b45a;
+      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+      letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
+      box-shadow:0 0 28px rgba(216,180,90,.22);
+      opacity:0;transform:translateY(10px);
+      transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+                 filter .35s ease,box-shadow .3s ease}
+body.lit .gate{opacity:1;transform:none}
+.gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
 .gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
-.below{position:absolute;bottom:4.5vh;left:0;right:0;text-align:center;
-       font:10.5px var(--mono);color:#4d5878;letter-spacing:.16em}
 
 /* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
 #warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
@@ -104,18 +157,42 @@ body.showwarp #warp{opacity:1;transition:opacity .45s ease}
 #launchname i{display:block;font:10px var(--mono);font-style:normal;letter-spacing:.3em;
               color:#8791b3;margin-top:11px;text-transform:uppercase}
 
-/* ══ THE DUSK GOODBYE (where the descent lands) ══════════════════════════ */
-#dusk .lockup .name{color:#e4e2ee}
+/* ══ THE DUSK GOODBYE (where the descent lands, and what /logout means) ══
+   §15, owner 2026-08-17: the descent is the default logout, re-confirmed, and
+   the old /logout sunset retires into it. */
+/* the login's ink exactly — the approved goodbye wore the same lockup as the
+   approved sign-in, and the descent's mark sets down on it (2026-08-17) */
+#dusk .lockup .name{color:#e9edf8}
+/* THE SAME BUTTON, not a lookalike: the .gate rule above, one word changed.
+   Only the ENTRANCE differs — on the login the pill arrives with first light,
+   here it arrives with the farewell. */
+#dusk .gate-wrap>*{opacity:0;transform:translateY(10px);
+      transition:opacity .9s ease,transform .9s ease,filter .35s ease,box-shadow .3s ease}
+body.farewell #dusk .gate-wrap>*{opacity:1;transform:none}
 #dusk .farewell{position:absolute;left:0;right:0;bottom:26vh;text-align:center;
       opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
 body.farewell #dusk .farewell{opacity:1;transform:none}
 #dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
 #dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
-#dusk .farewell .again{display:inline-block;margin-top:22px;text-decoration:none;
-      font:600 13.5px var(--display);color:#0a0812;
-      background:#e0b06a;border:0;border-radius:99px;padding:12px 30px;cursor:pointer;
-      box-shadow:0 0 34px rgba(224,176,106,.2)}
-#dusk .farewell .again:hover{filter:brightness(1.08)}
+
+/* ── THE GOODBYE'S SKY LIVES, AND IT LIVES IN REVERSE ────────────────────
+   §15, owner 2026-08-17: the dusk "must carry the same REVERSED PLANET MOTION
+   the login's climb has". The canvas flight was already the climb mirrored —
+   but the LANDING it set down on was a still frame while the login surface it
+   mirrors breathes, sways, drifts and sweeps. Every motion the dawn carries
+   is answered here, running the other way: the stars drift back the way they
+   came (see recede, above), the mark's planet unwinds the ring, the afterglow
+   band breathes slower and cooler than the dawn's scattering, the Belt of
+   Venus breathes on the zodiacal cone's own period, and an ember shimmer
+   travels the limb the other way round. */
+#dusk .lockup .glyph .tr{animation:spinforth 40s linear infinite}
+@keyframes spinforth{to{transform:rotate(-360deg)}}
+#dusk .afterglow{animation:breathe-ember 12s ease-in-out infinite alternate}
+@keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
+#dusk .belt{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+#dusk .shimmer{stroke-dasharray:3 97;animation:sweepback 34s linear infinite;
+      opacity:.7;transition:none}
+@keyframes sweepback{to{stroke-dashoffset:100}}
 
 /* film grain over the dawn/dusk surfaces, as the login has it */
 body.showwarp .grain{opacity:.26}
@@ -127,7 +204,7 @@ body.showwarp .grain{opacity:.26}
    journey is already over. Fixture-only: nothing sets `pinned` in the
    product. */
 body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #flightmark,
-body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate-wrap{
+body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
   transition:none!important}
 
 /* ══ REDUCED MOTION ══════════════════════════════════════════════════════
@@ -139,8 +216,11 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate-wrap{
 @media (prefers-reduced-motion: reduce){
   #dawn *,#dusk *{animation:none!important}
   #flightmark,#launchname,#warp{display:none!important}
-  #dawn,#dusk,.loginchrome,.loginchrome .lockup,.gate-wrap{
+  #dawn,#dusk,.loginchrome,.loginchrome .lockup{
     transition-duration:.7s!important;transition-timing-function:ease!important}
-  .dawnlayer,.rim,.shimmer,.sunpt,.rays,.gate-wrap{
+  /* .gate, not .gate-wrap: the wrapper's transform is the layout that drops
+     the pill clear of the word inside the ring, not motion, and clearing it
+     would land the button on top of the name (08-14's own note). */
+  .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
 }

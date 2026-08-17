@@ -5,6 +5,11 @@
  *
  * Imperative DOM by design: it builds SVG nodes directly. Svelte renders the
  * markup and stands back.
+ *
+ * RETIRED 2026-08-17 and kept as the record, imported by nothing: the owner
+ * re-confirmed that the descent is the default logout, so /logout serves the
+ * flight's dusk goodbye and the sunset it belonged to is gone from the
+ * product. See logout.css's header.
  */
 export function mountSunsetSky() {
 

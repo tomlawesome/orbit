@@ -69,6 +69,16 @@ export const D = {
    down it rides the mirrored window: 923ms. */
 export const MARK_RIDE_UP = 1080;
 export const MARK_RIDE_DOWN = 923;
+/*
+ * WHERE THE MARK ARRIVES at the centre of the screen: 166.4px, the ratified
+ * 2.6 × the 64px badge the sheet used to draw in the lockup. It is stated as
+ * a SIZE and no longer as a multiplier, because the lockup it leaves is the
+ * 08-14 hero (§15, owner 2026-08-17) and the ring there is 420px — so the
+ * ride is now a contraction rather than a growth. Same beat, same window,
+ * same landing size, and the sun still blooms two seconds later out of
+ * exactly that point.
+ */
+export const MARK_ARRIVE = 166.4;
 
 const byTime = (a, b) => a.at - b.at;
 

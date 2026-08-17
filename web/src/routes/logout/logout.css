@@ -1,3 +1,14 @@
+/*
+ * THE RETIRED SUNSET — kept as the record, referenced by nothing.
+ *
+ * CON-17's logout was the limb performing the day ending well, and it was this
+ * screen from #399 until 2026-08-17, when the owner re-confirmed that the
+ * descent is the default logout and retired it: /logout now serves the
+ * flight's dusk goodbye (see +page.svelte, $lib/flight/Dusk.svelte). This file
+ * and sky.js stay in the tree the way every superseded design in this
+ * repository stays — as the record of what was there — and are imported by
+ * nothing.
+ */
 
 /* seamless starfield drift — near layer reads clearly within a few seconds */
 .drift.far{animation:driftf 640s linear infinite}
