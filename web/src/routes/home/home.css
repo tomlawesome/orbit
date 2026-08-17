@@ -1086,7 +1086,8 @@
    it) applied to the descent. Legibility goes UP: the faint ink ends the page
    with more contrast on the warm surface than it began with on the pale one. */
 [data-theme=dawn].descending body{
-  --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%))}
+  --ink-faint:color-mix(in srgb,#78849b,#5e3c3a calc(var(--depth) * 100%));
+  --deep-knockout:#e4ecf5}
 /* Reduced motion. The gradient still tracks the scrollbar — it is a POSITION,
    not an animation, and freezing it would hide the page under a sky it has
    already left. What goes is the parallax flourish: the sky gives way where it
@@ -1168,7 +1169,41 @@ html:not(.descending) .desk :is(.mist,.underlight,.underdeep){display:none}
   --ink-faint:color-mix(in srgb,#2f3f5e calc(var(--deep) * 100%),
        color-mix(in srgb,#5c6c8e calc(var(--below) * 100%),#78849b));
   --chart-ink:color-mix(in srgb,#22314f calc(var(--deep) * 100%),#40506e);
-  --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d)}
+  --ink-mid:color-mix(in srgb,#333f59 calc(var(--deep) * 100%),#46536d);
+  --deep-knockout:#e4ecf5}
+/*
+ * THE DEEP MARKS, KNOCKED OUT (#500, owner ruling 2026-08-17: accessibility
+ * wins in all cases). Three marks ride straight on this descent's own ground
+ * with no panel behind them — the month heading, the TODAY line and an
+ * overdue time — and the ground they ride on is the whole point of 4f above:
+ * it keeps deepening as you go, and these three never move to answer it.
+ * Measured at full descent (--deep:1 / --depth:1, the worst case each pack
+ * reaches):
+ *   clouds  month 2.81:1 · TODAY 1.80:1 · overdue 2.68:1
+ *   dawn    month 5.43:1 · TODAY 6.62:1 · overdue 4.32:1
+ * — clouds' TODAY in particular is nowhere near the law, and dawn's is not
+ * safe either once its own chart-ink (static, not part of 4f's lift) is
+ * weighed against the pinky-orange floor.
+ *
+ * The fix is the '← SETTINGS on sky' hazard's own construction (#491, see
+ * Chrome.svelte): not a new ink — the sky itself is untouched, and the
+ * colours these three marks already carry keep their job — but a BACKING,
+ * three soft radii of one knockout colour standing in for the plate a panel
+ * would have given them. --deep-knockout is a literal rather than --bg
+ * because the two packs' actual grounds diverge (clouds runs to under-cloud
+ * blue, dawn to warm pinky-orange) while the marks need ONE plate light
+ * enough to read against either. Measured against the knockout itself, which
+ * is what a reader's eye meets in the pixels immediately around each glyph:
+ *   clouds  month 10.87:1 · TODAY 7.83:1 · overdue 4.63:1
+ *   dawn    month  6.80:1 · TODAY 7.83:1 · overdue 4.63:1
+ * Scoped to exactly these two packs' descent, because it is their own ground
+ * that goes deep enough to need it — the other packs' equivalents already
+ * clear the law without a plate.
+ */
+:is([data-theme=clouds],[data-theme=dawn]).descending
+  :is(.manifest .corridor .month span,.manifest .corridor .today span,.t.over){
+  text-shadow:0 0 2px var(--deep-knockout),0 0 5px var(--deep-knockout),
+              0 0 11px var(--deep-knockout)}
 @media (prefers-reduced-motion: reduce){
   /* position kept, flourish dropped: the deck still rises and still goes, but
      it does not swell at you and you are not put inside it. */

@@ -26,7 +26,7 @@ import { seededRng } from "$lib/sky.js";
 /* star-chart, verbatim from web/src/lib/packs.css */
 export const PACK = {
   bg: "#060b1c", star: "#e9edf8", starNear: "#f4f0ff", accent: "#d8b45a",
-  up: "#8fb8ff", line: "#243259", lineSoft: "#17203f", ink: "#4d5878",
+  up: "#8fb8ff", line: "#243259", lineSoft: "#17203f", ink: "#737e9e",
   sun: "#ffe9c4", sunCore: "#fff6e6",
   /* The same pen, lifted. --chart-line and friends are set to be legible on
      a panel; against open sky they disappear. One step up, no new hues. */
