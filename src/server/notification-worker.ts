@@ -18,8 +18,23 @@ import {
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
-import { DEFAULT_FINAL_WARNING_DAYS, DEFAULT_FIRST_WARNING_DAYS } from "@/lib/preferences";
+import {
+  DEFAULT_FINAL_WARNING_DAYS,
+  DEFAULT_FIRST_WARNING_DAYS,
+  effectiveReminderOffsets,
+  type ReminderOffset,
+  type RecipientWarningDays,
+} from "@/lib/preferences";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
+
+// Re-exported so every existing import of these from this module (the
+// dispatch worker) keeps working: the pure logic itself now lives in
+// src/lib/preferences.ts so src/lib/notifications.ts (imported by a client
+// component) can share the exact same truth without pulling this module's
+// server-only dependencies (nodemailer, web-push, the database) into a
+// browser bundle (#487).
+export { effectiveReminderOffsets };
+export type { ReminderOffset, RecipientWarningDays };
 
 const notificationEnvironmentSchema = z.object({
   SMTP_HOST: z.string().trim().max(253).optional().default(""),
@@ -316,80 +331,6 @@ export function enabledDeliveryChannels(input: {
   if (input.emailEnabled && input.userEmailEnabled) channels.push("email");
   if (input.pushEnabled && input.userPushEnabled) channels.push("web_push");
   return channels;
-}
-
-/** One warning: how many days before the date it fires, and which channels it may use. */
-export interface ReminderOffset {
-  daysBefore: number;
-  emailEnabled: boolean;
-  pushEnabled: boolean;
-}
-
-/** The recipient's own stored pair, as read from `user_preferences` (#468). */
-export interface RecipientWarningDays {
-  firstWarningDays: number | null;
-  finalWarningDays: number | null;
-}
-
-/**
- * A stored offset that is missing, fractional, or outside the range the
- * settings screen and the CHECK constraints allow falls back to the
- * documented default for its own slot rather than scheduling a date nobody
- * asked for. Unreachable through the route or the database today; this is the
- * behaviour if a row ever arrives by another path.
- */
-function warningDaysOrDefault(stored: number | null, fallback: number, floor: number): number {
-  if (stored === null || !Number.isInteger(stored) || stored < floor || stored > 365) return fallback;
-  return stored;
-}
-
-/**
- * The offsets a single recipient's reminders for one item actually fire at (#479).
- *
- * Precedence, as scoped in the issue: an item that carries its own reminder
- * rules keeps them exactly: the reader set those per item, and the settings
- * screen never claimed to overrule them. The user-level pair is the default
- * for every item that says nothing — until #479 those items produced no
- * reminder at all, because the worker inner-joined `reminder_rules` and an
- * item without rules simply fell out of the join.
- *
- * The pair is per recipient, not per household, and that is the only honest
- * reading of the surrounding code: `notification_deliveries` already carries a
- * `user_id`, materialization already fans one row out per membership, and the
- * recipient's own `email_notifications`/`push_notifications` toggles already
- * decide their own channels. Two people in one household therefore each hear
- * about the same item on their own schedule, which is what a screen headed
- * with the reader's own name promises. Nothing here reads another user's row.
- *
- * The two warnings are returned as a set of offsets, not an ordered pair: the
- * first/final ordering is a promise the *labels* make ("14 days before closest
- * approach", then "3 days before"), and each offset is scheduled
- * independently, so a pair that somehow crossed over still raises two warnings
- * rather than none. A pair whose halves are equal is one warning, not a
- * duplicate. Both channels are open at this level because the item said
- * nothing about channels; the recipient's own toggles still gate them in
- * `enabledDeliveryChannels`.
- *
- * Two consequences worth naming, both inherited rather than introduced and
- * both handled by the caller's existing catch-up window:
- *  - An item created closer to its date than the first warning has already
- *    missed that warning; the moment is in the past, so only the final warning
- *    lands. The worker never back-fires a warning more than 24 hours stale.
- *  - A warning longer than the item's orbital period lands before the previous
- *    occurrence's date. Only the currently open `due_event` is ever considered,
- *    so that warning is simply already past and is skipped, rather than firing
- *    against an occurrence the reader has already dealt with.
- */
-export function effectiveReminderOffsets(
-  itemRules: readonly ReminderOffset[],
-  recipient: RecipientWarningDays,
-): ReminderOffset[] {
-  if (itemRules.length) return [...itemRules];
-  const first = warningDaysOrDefault(recipient.firstWarningDays, DEFAULT_FIRST_WARNING_DAYS, 1);
-  const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
-  return [...new Set([first, final])]
-    .sort((left, right) => right - left)
-    .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
 }
 
 /**
