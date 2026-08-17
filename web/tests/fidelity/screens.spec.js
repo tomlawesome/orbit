@@ -511,6 +511,24 @@ async function capture(
   await page.waitForFunction(settle ?? (() => document.body.classList.contains("lit")));
   await page.evaluate(() => document.fonts.ready);
 
+  /*
+   * #499: the grain overlay is now rasterised once, off the main thread's
+   * paint path, instead of living as a permanent SVG filter — but the
+   * rasterisation is necessarily async (an <img> decode), so a capture taken
+   * before it lands would photograph a blank overlay and never read the 0 px
+   * this gate demands. Grain.svelte marks itself `data-rasterised="pending"`
+   * at build and flips to `"ready"` in the same tick it paints the
+   * background, so waiting for that is waiting for the exact frame the app
+   * would show a real visitor. The mockups' own inline grain SVG carries no
+   * such attribute — it never left the live-filter path this fixes — so the
+   * selector matches nothing there and the wait resolves immediately.
+   */
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".grain[data-rasterised]")].every(
+      (el) => el.dataset.rasterised === "ready",
+    ),
+  );
+
   /* Where the mockup carries scaffolding the product does not, find it by
      selector so the excluded area tracks the design rather than a magic box. */
   const rects = await page.evaluate((selectors) =>
