@@ -87,6 +87,15 @@
   Reduced motion keeps the drop (a position is not an animation) and drops
   the flourish: the plane gives way where it stands instead of being flown
   out of frame, and the stream holds its opening window.
+  AND THE FLOOR GLOW (§15 amendment, owner: "I like the slight gradient
+  glow at the bottom edge after you'd scrolls down too"). The plane leaves
+  by the top, so the last of its light is BELOW the frame: the foot of the
+  deep carries a slight warm glow in the river's own palette and the river's
+  own three octaves of lobe, mottled rather than a flat ramp, static rather
+  than streamed, hung off the same --descent so it is absent at the dial and
+  fully present at the foot. Capped from the same contrast law as the band
+  and at 61% of that budget, so the deep is still the emptiest sky in the
+  product — the numbers are with the descent block in the stylesheet.
 
   SYMBOLS ARE SHARED, NOT INVENTED. After dark shares star-chart's symbol
   vocabulary (owner, §15 — "they just both look great") and this file adds
@@ -998,14 +1007,162 @@
      ground it sits on gets darker all the way down, so the horizon line,
      the month headings and the footer all end the page with MORE contrast
      than they started it with. Nothing to correct — stated so the next
-     reader knows it was checked. */
+     reader knows it was checked. (The floor glow below hands a little of
+     that gain back in the last tenth of the frame. Measured, and stated
+     with the rest of the budget there rather than quietly dropped here.) */
+
+  /* ----------------------------------------------------------------------
+     THE FLOOR GLOW (§15, owner on the approved plane: "I like the slight
+     gradient glow at the bottom edge after you'd scrolls down too.. so the
+     bottom part of the manifest gets a glow thats similar").
+
+     The deep is a closing-in, not a blackout. The plane has gone out of the
+     TOP of the window, so the one place its light can still reach from is
+     BELOW the frame — and that is the whole picture here: the foot of the
+     deep sits over the same warmth the river is made of, seen from under
+     it. Same palette (--plane-warm, and the river's cool carried in the
+     wings), same refusal to be a flat ramp: THREE OCTAVES OF LOBE, exactly
+     as the band's own glow is built in the script — two wide wings, three
+     warm bodies, five small warm knots — over one shallow edge gradient
+     that gives the wash its continuity. Every lobe is centred BELOW the
+     bottom edge, so what is on screen is only the upper falloff of
+     something that never resolves: a glow in the deep, not a light source
+     on the page. It reaches about a fifth of the frame at 1600x1000 and is
+     already back to the bare deep by 77% height.
+
+     STATIC, NOT STREAMED. The river is rolled and thrown away because it
+     moves past; the deep does not move, so its floor has nothing to roll.
+     Eleven CSS gradients, no script, no seed, no clock — one less thing
+     that could differ between two loads, and cheap enough to be free.
+
+     ONE DRIVER. It hangs off the very same --descent as the wash it sits
+     in: the glow is painted into .deep's own ::after, so the parent's
+     opacity:var(--descent) carries both. Nothing at scroll 0 — .deep is
+     display:none there, so the glow does not merely measure zero, it does
+     not exist — up through the descent with the deep, fully present at the
+     foot. The moods leave it alone: quiet and storm move the SKY, and this
+     is a position, not weather. Reduced motion keeps it for the same reason
+     it keeps the wash: a position is not an animation.
+
+     THE CAP, solved from the same law as the band, not chosen. Light ink
+     LOSES contrast as its ground rises, so the ceiling is on the ground:
+     --ink-mid (#7c8699, L = .2362) needs (.2862 / 4.5) − .05, i.e.
+     L_bg ≤ .0136. The deep's own wash starts the foot well below the bare
+     pack ground — the brightest 11x11 median down there measured .00156
+     before this existed, against the bare pack's .00214 — and the octave
+     alphas below are set so the brightest 11x11 median the glow reaches
+     anywhere is L = .0083 (1600x1000; .0083 at 1440x900 too). That is 61%
+     of the ceiling and 69% of the band's own measured peak of .0120: the
+     deep stays the emptiest sky in the product, which was the point of it,
+     and --ink-mid would still clear 4.91:1 sitting on the single brightest
+     pixel-neighbourhood of the glow — better than the 4.62:1 the approved
+     band already spends over the chart.
+
+     WHAT THE INK ACTUALLY MEASURES, at full descent, both viewports, each
+     ink against its own rendered local ground (panels and all):
+       --ink        16.25:1 → 16.25:1   unchanged, the glow never reaches it
+       --accent     11.85:1 → 11.85:1   unchanged
+       --warm       10.62:1 → 10.62:1   unchanged
+       --ok         11.33:1 → 11.28:1   −0.05, the last card's T−161d
+       --ink-mid, worst in the manifest   5.38:1 → 5.38:1
+       --ink-mid, worst anywhere in frame 5.36:1 → 5.19:1
+     The worst CONTENT ink over the glow is therefore --ink-mid at 5.19:1,
+     and that instance is the DEMOS bar's own seed tag sitting in the last
+     forty pixels of the window — the mockup's furniture, not the product.
+     Inside the manifest the worst content ink is --ink-mid at 5.38:1, the
+     last card's "orbital period" line, which is where it was before the
+     glow: the glow peaks under the strip of window the app leaves empty.
+     Every content ink clears 4.5:1 with room, which is the law.
+
+     AND THE HONEST HALF OF IT. after dark's faint tier (#4a5468) has never
+     met 4.5:1 in this pack — see the note above, it is 2.65:1 on the pack's
+     own bare ground before any backdrop exists — and this glow does cost it
+     something at the very bottom of the frame, which is the one claim in
+     the paragraph above this block that the amendment had to qualify:
+       horizon line          2.68:1 → 2.67:1   (−0.01)
+       manifest date, 21 Jan 2.59:1 → 2.59:1   ( 0.00)
+       footer annotation     2.58:1 → 2.53:1   (−0.05)
+       DEMOS seed tag        2.68:1 → 2.49:1   (−0.19)
+     The two that matter to a reader — the horizon line and the manifest's
+     own dates — pay one hundredth of a ratio point and nothing at all,
+     because the glow is spent below them: it peaks under the last strip of
+     the window, where the app has no content. The costs that can be
+     measured at all are to the mockup's own footer and demo bar, which are
+     not the product.
+     The answer to that tier is still a PACK decision, not a backdrop patch,
+     and it is still raised in the proposal report.
+     ---------------------------------------------------------------------- */
+  [data-theme=afterdark]{
+    /* THE FALLOFF is the river's, to the stop: 0 / .32 / .58 / .80 / 1 of
+       the radius at .95 / .62 / .30 / .10 / 0 of the peak — the five-stop
+       approximation of a gaussian the script uses for every lobe in the
+       band. It is not decoration. A two-stop lobe falls off LINEARLY, and
+       on a ground this close to black the kink where the ramp meets nothing
+       quantises into a visible horizontal edge — the first build of this
+       glow drew exactly that line across the frame at 80% height. Four
+       alphas per octave is what buys a tail you cannot find.
+       THE ALPHAS are the budget spelled out above, not taste. */
+    /* the wings carry the river's cool with much of the warm still in them:
+       a purely cool wing at these alphas reads as grey haze on a blue-black
+       ground, and the foot loses the one thing it is here to echo */
+    --fg-wing-hue:color-mix(in srgb,var(--plane-cool) 45%,var(--plane-warm));
+    --fg-w1:color-mix(in srgb,var(--fg-wing-hue) 2.4%,transparent);
+    --fg-w2:color-mix(in srgb,var(--fg-wing-hue) 1.57%,transparent);
+    --fg-w3:color-mix(in srgb,var(--fg-wing-hue) .76%,transparent);
+    --fg-w4:color-mix(in srgb,var(--fg-wing-hue) .25%,transparent);
+    --fg-w0:color-mix(in srgb,var(--fg-wing-hue) 0%,transparent);
+    --fg-b1:color-mix(in srgb,var(--plane-warm) 4.2%,transparent);
+    --fg-b2:color-mix(in srgb,var(--plane-warm) 2.74%,transparent);
+    --fg-b3:color-mix(in srgb,var(--plane-warm) 1.33%,transparent);
+    --fg-b4:color-mix(in srgb,var(--plane-warm) .44%,transparent);
+    --fg-k1:color-mix(in srgb,var(--plane-warm) 6%,transparent);
+    --fg-k2:color-mix(in srgb,var(--plane-warm) 3.9%,transparent);
+    --fg-k3:color-mix(in srgb,var(--plane-warm) 1.9%,transparent);
+    --fg-k4:color-mix(in srgb,var(--plane-warm) .63%,transparent);
+    --fg-e1:color-mix(in srgb,var(--plane-warm) 4.6%,transparent);
+    --fg-e2:color-mix(in srgb,var(--plane-warm) 2.4%,transparent);
+    --fg-e3:color-mix(in srgb,var(--plane-warm) .95%,transparent);
+    --fg-e4:color-mix(in srgb,var(--plane-warm) .3%,transparent);
+    /* every falloff ends in the colour it started in at zero alpha, never in
+       `transparent` — the same reason the river's gradients end at
+       stop-opacity 0 of their own hue rather than at nothing at all */
+    --fg-nil:color-mix(in srgb,var(--plane-warm) 0%,transparent);
+  }
+  /* scoped to the pack for the same reason the paint is: this is after
+     dark's light, and no other pack's .deep is entitled to it */
+  [data-theme=afterdark] .deep::after{content:"";position:absolute;inset:0;background:
+    /* the knots: star clouds, small and warm and unevenly spaced, hugging
+       the very edge. This is the octave that stops the foot reading as a
+       ramp — a smooth ramp is a gradient stripe by another name, which is
+       the same note the band's own glow was rebuilt to answer. */
+    radial-gradient(13% 6% at 9% 104%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+    radial-gradient(10% 5% at 27% 102%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+    radial-gradient(15% 7% at 44% 105%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+    radial-gradient(9% 4.5% at 61% 103%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+    radial-gradient(12% 6% at 79% 104%,var(--fg-k1) 0%,var(--fg-k2) 32%,var(--fg-k3) 58%,var(--fg-k4) 80%,var(--fg-nil) 100%),
+    /* the bodies: the glow as you see it at a glance */
+    radial-gradient(30% 13% at 14% 107%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+    radial-gradient(34% 15% at 52% 110%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+    radial-gradient(26% 12% at 88% 106%,var(--fg-b1) 0%,var(--fg-b2) 32%,var(--fg-b3) 58%,var(--fg-b4) 80%,var(--fg-nil) 100%),
+    /* the wings: the diffuse reach, the furthest the light gets up the frame */
+    radial-gradient(62% 30% at 26% 110%,var(--fg-w1) 0%,var(--fg-w2) 32%,var(--fg-w3) 58%,var(--fg-w4) 80%,var(--fg-w0) 100%),
+    radial-gradient(54% 34% at 76% 118%,var(--fg-w1) 0%,var(--fg-w2) 32%,var(--fg-w3) 58%,var(--fg-w4) 80%,var(--fg-w0) 100%),
+    /* and under all of it, the shallow edge gradient that makes the mottle
+       one wash rather than a row of blooms — the "gradient glow at the
+       bottom edge" of the ruling, with the three octaves laid over it so it
+       is never only that */
+    linear-gradient(0deg,var(--fg-e1) 0%,var(--fg-e2) 8%,var(--fg-e3) 17%,var(--fg-e4) 26%,var(--fg-nil) 34%)}
 
   /* Reduced motion. The drop is a POSITION, not an animation — freezing it
      would strand the reader under a sky the page has already left — so the
-     fade and the deep still track the scrollbar. What goes is the
-     flourish: the plane gives way where it stands instead of being flown
-     out of the top of the frame. (The stream is stilled in the script:
-     no rAF, no drift, and the opening window is held.) */
+     fade, the deep and its floor glow still track the scrollbar. What goes
+     is the flourish: the plane gives way where it stands instead of being
+     flown out of the top of the frame. (The stream is stilled in the
+     script: no rAF, no drift, and the opening window is held.) Nothing is
+     subtracted from the glow here, because there is nothing in it to
+     subtract — it is eleven static gradients driven by a scroll position,
+     so a reduced-motion load of this file is byte-identical to a
+     reduced-motion load of it before the glow existed, at scroll 0. */
   @media (prefers-reduced-motion: reduce){
     [data-theme=afterdark].descending .plane{transform:none}
   }
@@ -1462,7 +1619,7 @@
   <button onclick="driftPlane()">drift +2 min</button>
   <span class="seedtag">plane #<b id="pseed">&mdash;</b> &middot; crossing <b id="pangle">&mdash;</b></span>
 </div>
-<footer>orbit &middot; v19 proposal &middot; after dark / the galactic plane &middot; the happy accident, adopted: a luminous river lying diagonally across the darkest pack&rsquo;s sky, built from a dense extra population of tiny stars, irregular warm dust-glow at its core and dark lanes threading it &mdash; never a gradient stripe. It is the furthest thing in the sky, so it drifts slowest and rides the same camera; its centreline oscillates about the mid-line, so it can stream for hours without ever leaving the frame and without a single tile. Rolled a chunk at a time as it comes into view, thrown away for good once it has passed, and reproducible to the pixel from one published seed. The core is capped where after dark&rsquo;s own mid ink still clears 4.5:1 over the brightest part of it, which is why the river is allowed to run behind the chart. And the scroll is a descent: the plane rides up and out of the window, the plain starfield stays, and the deep closes in &mdash; the manifest is read over the emptiest sky in the product</footer>
+<footer>orbit &middot; v19 proposal &middot; after dark / the galactic plane &middot; the happy accident, adopted: a luminous river lying diagonally across the darkest pack&rsquo;s sky, built from a dense extra population of tiny stars, irregular warm dust-glow at its core and dark lanes threading it &mdash; never a gradient stripe. It is the furthest thing in the sky, so it drifts slowest and rides the same camera; its centreline oscillates about the mid-line, so it can stream for hours without ever leaving the frame and without a single tile. Rolled a chunk at a time as it comes into view, thrown away for good once it has passed, and reproducible to the pixel from one published seed. The core is capped where after dark&rsquo;s own mid ink still clears 4.5:1 over the brightest part of it, which is why the river is allowed to run behind the chart. And the scroll is a descent: the plane rides up and out of the window, the plain starfield stays, and the deep closes in &mdash; the manifest is read over the emptiest sky in the product, its foot over a slight warm glow in the same three octaves of lobe, the river&rsquo;s light coming back from below the frame, capped at 61% of the contrast budget so the deep stays the emptiest sky it was</footer>
 
 <script>
 /* ---- the galaxy: fixed coordinates, five households max (product cap) ---- */
