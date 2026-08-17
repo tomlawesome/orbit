@@ -26,6 +26,20 @@ body.showdusk #dusk{opacity:1}
 #dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
     position:absolute;inset:0;width:100%;height:100%}
 #dawn .world,#dusk .world{position:absolute;inset:0}
+/* Mobile-Safari squeeze (#503): the far/near star groups were the OTHER
+   candidate for will-change:transform below — they too run a `transform`
+   forever (360s/180s linear, never settling). Tried and measured against the
+   fidelity gate rather than assumed: promoting them to their own compositing
+   layer moved 20-29 of 1.6M pixels on Chromium (login/logout/first-run, well
+   under the 0.1% budget but NOT the zero-pixel bar every other baseline
+   holds) — the tiny circles that make up each star anti-alias very slightly
+   differently once rasterised into a separate layer and composited back,
+   rather than painted inline with everything around them. That is a real
+   rendering change, not a performance-only hint doing what the spec promises,
+   so it stays off: the two rows below are exactly HEAD's, unpromoted. The
+   sway rasters (#502) took the same measurement and came back clean (0 px),
+   which is the one difference: a still picture rotating loses nothing to
+   layer promotion; many 1-2px circles repainted at a new layer boundary do. */
 #dawn .sky .far{animation:appr 360s linear infinite}
 #dawn .sky .near{animation:appr 180s linear infinite}
 @keyframes appr{to{transform:translateX(-1600px)}}
@@ -53,8 +67,10 @@ body.lit .sunpt{opacity:1}
       transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
       mix-blend-mode:screen}
 body.lit .rays{opacity:1;transform:scale(1,1)}
-.rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
-.rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+.rays .sway1{transform-origin:800px 920px;will-change:transform;
+             animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;will-change:transform;
+             animation:sway2 63s ease-in-out infinite alternate}
 @keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
 @keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
 .scatter{animation:breathe-band 9s ease-in-out infinite alternate}
@@ -223,4 +239,11 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
      would land the button on top of the name (08-14's own note). */
   .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
+  /* The will-change:transform promotion above (#503) exists only to serve a
+     `transform` animation that reduced motion has just turned off two lines
+     up (`animation:none!important`); a layer kept promoted with nothing left
+     to animate is pure standing cost (GPU memory for a compositing layer no
+     frame will move), so the hint is withdrawn in lockstep with the motion
+     it was promoted for. */
+  .rays .sway1,.rays .sway2{will-change:auto}
 }
