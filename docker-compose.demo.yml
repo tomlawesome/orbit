@@ -30,3 +30,4 @@ services:
       - ./demo-tls/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "0.0.0.0:3443:3443"
+      - "192.168.11.30:3000:3080"
