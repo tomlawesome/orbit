@@ -576,6 +576,14 @@ The full open-questions list, walked in order and ruled:
   cleverly transitioning into grids at the SIDES, either side of the
   manifest, fading at the edge closest to the manifest — the room
   rotating around you as you descend from the dial to the list.
+- **The GPU law** (owner, 2026-08-17): visuals are produced in ways
+  every engine hardware-accelerates. Live SVG filter math is the known
+  slow lane (WebKit rasterises it on CPU regardless of device GPU);
+  the sanctioned lanes are transforms, opacity, canvas, and
+  pre-rasterised textures composited as images. Expensive effects are
+  computed once and blitted (the belt haze, the plane, #499's grain),
+  never re-derived per frame. New backdrops and symbols are built to
+  this law from the start.
 - **The contrast trilogy, ruled in part** (owner, 2026-08-17): the
   household back link FOLLOWS WHERE YOU CAME FROM ("← YOUR SKY" via
   the sun, "← SETTINGS" via the helm). Star-chart's faint-ink lift and
