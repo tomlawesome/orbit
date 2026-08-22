@@ -55,9 +55,13 @@ done
 # network namespace, which can fail where the host and ordinary containers
 # succeed (#436) — measured on one machine: host 200, `docker run` 200,
 # BuildKit EAI_AGAIN. The resulting failure is a corepack stack trace about a
-# pnpm tarball URL, which points at nothing useful. Say so up front instead,
-# using an ordinary `docker run` (not a BuildKit build) so this preflight
-# itself is not subject to the isolation it is checking for.
+# pnpm tarball URL, which points at nothing useful — so when a build fails,
+# say what actually went wrong, using an ordinary `docker run` (not a
+# BuildKit build) so this diagnosis itself is not subject to the isolation it
+# is checking for. Run AFTER a failed build rather than before every build:
+# as a preflight it taxed each green build with a container spin-up and a
+# network round trip to answer a question the build was about to answer
+# anyway (#448).
 #
 # Decision (#436): Orbit does not pin off BuildKit by default. BuildKit is the
 # supported, current builder — CI, most local Docker installs, and the digest-
@@ -73,27 +77,30 @@ done
 # the Dockerfile's instructions changes, not the instructions themselves. That
 # builder is deprecated upstream, so this is offered as a documented escape
 # hatch for this specific failure, not as Orbit's default.
-if ! docker run --rm "$(grep -m1 -oE 'node:[0-9]+-alpine@sha256:[a-f0-9]+' "$repo_dir/Dockerfile")" \
-     node -e "fetch('https://registry.npmjs.org/pnpm').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
-     >/dev/null 2>&1; then
-  printf 'Orbit build: a container on this host cannot reach https://registry.npmjs.org.\n' >&2
-  printf 'Orbit build: the image build installs dependencies, so it will fail the same way.\n' >&2
-  printf 'Orbit build: this usually means BuildKit resolves DNS in its own network namespace\n' >&2
-  printf 'Orbit build: and that namespace cannot reach the registry, even though the host and\n' >&2
-  printf 'Orbit build: plain containers on this machine can. Check Docker DNS and proxy\n' >&2
-  printf 'Orbit build: configuration first.\n' >&2
-  printf 'Orbit build: if this is BuildKit network isolation and you cannot fix the network,\n' >&2
-  printf 'Orbit build: retry with the legacy builder as a workaround:\n' >&2
-  printf 'Orbit build:   DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 bash scripts/build-container.sh\n' >&2
-  exit 1
-fi
+diagnose_registry_reachability() {
+  if ! docker run --rm "$(grep -m1 -oE 'node:[0-9]+-alpine@sha256:[a-f0-9]+' "$repo_dir/Dockerfile")" \
+       node -e "fetch('https://registry.npmjs.org/pnpm').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+       >/dev/null 2>&1; then
+    printf 'Orbit build: a container on this host cannot reach https://registry.npmjs.org.\n' >&2
+    printf 'Orbit build: the image build installs dependencies, so that is likely the failure above.\n' >&2
+    printf 'Orbit build: this usually means BuildKit resolves DNS in its own network namespace\n' >&2
+    printf 'Orbit build: and that namespace cannot reach the registry, even though the host and\n' >&2
+    printf 'Orbit build: plain containers on this machine can. Check Docker DNS and proxy\n' >&2
+    printf 'Orbit build: configuration first.\n' >&2
+    printf 'Orbit build: if this is BuildKit network isolation and you cannot fix the network,\n' >&2
+    printf 'Orbit build: retry with the legacy builder as a workaround:\n' >&2
+    printf 'Orbit build:   DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 bash scripts/build-container.sh\n' >&2
+  fi
+}
 
 # The build context lives in an overlay, because the base compose file
 # describes a deployment that has no source tree.
 readonly build_files=(-f docker-compose.yml -f docker-compose.build.yml)
 
 if [[ -n "$pull_option" ]]; then
-  docker compose --env-file "$environment_file" "${build_files[@]}" build --pull orbit-app
+  docker compose --env-file "$environment_file" "${build_files[@]}" build --pull orbit-app \
+    || { diagnose_registry_reachability; exit 1; }
 else
-  docker compose --env-file "$environment_file" "${build_files[@]}" build orbit-app
+  docker compose --env-file "$environment_file" "${build_files[@]}" build orbit-app \
+    || { diagnose_registry_reachability; exit 1; }
 fi
