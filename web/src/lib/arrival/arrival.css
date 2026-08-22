@@ -1,0 +1,264 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   THE ARRIVAL (#410, §15) — the create-system card and the newcomer's landing.
+
+   Verbatim from design/v19/first-run.html: block 2 (the card, third and fourth
+   pass) and block 4c (the newcomer's labelled sky, its boxless count and its
+   question). The flight itself, the dawn, the lockup, the mark and the name on
+   the void are flight.css's and are not repeated here.
+
+   Loaded only by the front door's arrival, so nothing in it can reach the
+   login at /login or the goodbye at /logout, whose approved appearances are
+   baselined.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/*
+ * The sheet's own reset (`*{box-sizing:border-box;margin:0}`), reaching only
+ * the two surfaces this file draws — a global one would follow the reader onto
+ * every other screen once this chunk had loaded, and those screens were not
+ * written against it. Zero-specificity, so every rule below still wins on the
+ * margins it sets deliberately.
+ */
+:where(#formlayer, #formlayer *, .nf, .nf *){box-sizing:border-box;margin:0}
+
+/* ── THE LOGIN CHROME IS GONE WHILE THE CARD SHOWS ────────────────────────
+   §15, fourth pass, owner verbatim: "Login button still there, but we must
+   have already logged in to see this screen, Orbit word (and logo maybe?)
+   still up top, after we've already logged in? ... this little window pops up,
+   the user fills it in, the orbit logo and text reappear and we run the login
+   intro."
+
+   So while the card shows, the chrome is not receded — it is GONE. No
+   wordmark, no glyph, no identity-provider button, no footer. The DAWN stays,
+   because the dawn is the sky, not login chrome.
+
+   `visibility` rides the same transition on purpose. It stops the lockup being
+   read out while it is not on the screen, and because CSS resolves visibility
+   to the visible end of a transition immediately, the chrome comes back the
+   instant the launch asks for it and only the opacity takes the time.
+
+   The same rule covers the beat BEFORE the card, while the server is still
+   answering "who is knocking": a reader who is already through the door must
+   never watch the door flash past. */
+body.showform:not(.reclaimed) #dawn .loginchrome{opacity:0;visibility:hidden;pointer-events:none}
+
+/* THE RECLAIM. On submit the orbit logo and wordmark come back — the launch
+   takes the login screen back before it flies it — and from that moment the
+   ratified intro runs unchanged. The one and only difference: the identity
+   provider button never returns. We are already through it. */
+body.reclaimed #dawn .gate-wrap{display:none}
+/* the reclaim comes in faster than the chrome's ordinary .8s so that the
+   lockup is fully up and the card is fully gone before the ascent starts: the
+   frame the flight lifts off is the login screen, not a dissolve of two things
+   at once. */
+body.reclaimed #dawn .loginchrome{transition:opacity .5s ease,visibility .5s}
+
+/* ══ THE CREATE-SYSTEM CARD ═══════════════════════════════════════════════
+   THIRD PASS (owner, §15, verbatim): "First run, fails at the card,
+   seriously, you need to look at how stuffed full this looks. Can barely see
+   all the good work you did on the sunrise."
+
+   So the card is three fields, a button and air. Gone: the header band and its
+   mark lockup, the headline, the lede, the two explainers, the button-side
+   caption. One quiet mono line survives, because it is the only sentence that
+   admits to something the reader did not ask for.
+
+   And it sits HIGH. The sun's limb burns at 92% of the frame and its glow
+   reaches up to 40%; the card lives above that, narrow, and see-through
+   enough that the dawn reads clean through it. */
+#formlayer{position:fixed;inset:0;z-index:4;display:flex;flex-direction:column;
+           align-items:center;justify-content:center;gap:12px;
+           padding:24px;
+           overflow:auto;
+           opacity:0;pointer-events:none;
+           transition:opacity .6s ease,transform .7s cubic-bezier(.3,.7,.3,1)}
+body.showform #formlayer{opacity:1;pointer-events:auto}
+body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.3,1)}
+/* errors keep you grounded: the climb starts, catches, and sets back down */
+@keyframes settleback{0%{transform:translateY(0)}22%{transform:translateY(-13px)}
+                      58%{transform:translateY(4px)}100%{transform:translateY(0)}}
+
+/* Genuinely translucent: --panel already carries alpha, and this halves it
+   again, so on star-chart the card sits at ~0.32 opacity over the dawn. */
+.card{width:100%;max-width:404px;
+      background:color-mix(in srgb,var(--panel) 58%,transparent);
+      backdrop-filter:blur(15px) saturate(1.05);
+      border:1px solid color-mix(in srgb,var(--line) 78%,transparent);
+      border-radius:18px;padding:26px 26px 24px;
+      box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px rgba(255,255,255,.03) inset;
+      transition:opacity .5s ease .1s,transform .8s cubic-bezier(.4,0,.2,1) .1s,
+                 border-color .35s ease,box-shadow .5s ease}
+/* `reclaimed` is the create path's hand-over beat and `igniting` is the
+   flight's own: the card leaves on the same curve for both, so the pre-beat
+   runs straight into the ascent with nothing to see at the joint. */
+body.igniting .card,body.reclaimed .card{
+      opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
+body.arming .card{border-color:var(--accent);
+      box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
+                 0 0 70px -12px color-mix(in srgb,var(--accent) 55%,transparent)}
+/* the two light packs paint an ink-on-paper card onto a night sky: thinning
+   their veil the way the dark packs' is thinned washes their faint ink out
+   altogether, so they keep the body they were designed with */
+[data-theme=atlas] .card,[data-theme=dawn] .card{
+      background:color-mix(in srgb,var(--panel) 92%,transparent)}
+
+/* THE CARD HAS NO MARK (owner, 2026-08-17, verbatim): "I actually want the
+   ring logo removed from the card. Just fade the card out and have the bigger
+   logo from the login screen hidden behind the card, which then just melts
+   into the rest of the flight same size etc once flying as it currently is."
+   So the create path departs from exactly the mark the login path departs
+   from, at exactly the size: the login's own 420px hero, standing behind this
+   card the whole time. */
+
+.field{margin-bottom:18px}
+.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+             text-transform:uppercase;margin:0 0 6px}
+.field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font-size:13.5px;padding:10px 12px;font-family:var(--ui)}
+.field input::placeholder{color:var(--ink-faint)}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+.field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+#hhname{font:600 16.5px var(--display);padding:10px 13px}
+.row2{display:flex;gap:14px}
+.row2>.field{flex:1;min-width:0;margin-bottom:0}
+.selwrap{position:relative}
+.selwrap::after{content:"";position:absolute;right:13px;top:calc(50% + 8px);width:6px;height:6px;
+                border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
+                transform:translateY(-50%) rotate(45deg);pointer-events:none}
+.pair{margin-bottom:18px}
+
+/* ── THE REJECTION, in one line ──────────────────────────────────────────
+   Third pass: the three-line banner (code · sentence · footnote) is gone. The
+   refusal is one plain warm line under the field it is about, and the field
+   wears the same warm outline. "Nothing was created" and "your answers are
+   still here" are not said, because the answers are visibly still there. */
+.err{display:none;font:11px var(--mono);color:var(--warm);letter-spacing:.02em;
+     line-height:1.7;margin-top:8px}
+body.rejected .err{display:block;animation:errin .35s ease}
+@keyframes errin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.err b{font-weight:400;color:var(--ink)}
+.err a{color:var(--warm);text-decoration:underline;text-underline-offset:2px;
+       text-decoration-thickness:1px;white-space:nowrap}
+.err a:hover{color:var(--ink)}
+body.rejected #hhname{border-color:var(--warm);
+     box-shadow:0 0 0 1px color-mix(in srgb,var(--warm) 40%,transparent)}
+
+/* the one reassurance that survives: it admits to the four sections that were
+   made without being asked for, and says nothing else */
+.note{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.05em;
+      margin:-4px 0 20px}
+
+.btn{width:100%;font:600 14px var(--display);color:var(--bg);background:var(--accent);
+     border:0;border-radius:11px;padding:12px 24px;cursor:pointer;
+     transition:filter .3s ease,opacity .3s ease}
+.btn:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.34;cursor:not-allowed;filter:none}
+
+/* ══ THE NEWCOMER'S LANDING (§15 second pass, ruling 4) ═══════════════════
+   A reader who belongs to nothing yet flies exactly the same launch and sets
+   down HERE instead: the dial screen with no dial. Every household in the
+   instance hangs as a sub-system — the #453 labelled sky, drawn the way
+   home.behaviour.js's mountEmptySky draws it (label, leader rule, ring,
+   centre, planets, and the waiting note on one already asked) — and the
+   question sits where the chart would have been. */
+.nf{position:fixed;inset:0;z-index:3;opacity:0;pointer-events:none;
+    background:var(--bg);transition:opacity .75s ease}
+body.shownew .nf{opacity:1;pointer-events:auto}
+.nf .sky{position:absolute;inset:0;opacity:var(--stars)}
+.nf .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.nf .vignette{position:absolute;inset:0;
+     background:radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.30) 100%)}
+.nf .hero{position:absolute;inset:0}
+.nf .nstar{position:absolute;top:0;left:50%;transform:translateX(-50%);
+           display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 16px;
+           background:none;border:0;cursor:pointer}
+.nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
+@keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
+.nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
+.nf .nstar:hover span{color:var(--accent)}
+.nf .minisys{position:absolute;transform-origin:118px 95px}
+.nf .minisys svg{display:block}
+.nf .minisys text{font-family:var(--mono)}
+/* the constellations condense out of the same light the planets do */
+body.shownew.bare .nf .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
+@keyframes condense{
+  from{transform:scale(.42);opacity:0;filter:blur(9px)}
+  55%{opacity:1}
+  to{transform:scale(1);opacity:1;filter:blur(0)}}
+body.shownew.bare .nf .nstar{opacity:0}
+body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
+@keyframes chromein{from{opacity:0}to{opacity:1}}
+
+/* ── THE COUNT IS A MOMENT, NOT A PANEL (owner, §15 third pass) ───────────
+   It belongs to the NEWCOMER, who arrives to a sky that already has systems
+   in it — and it is a BEAT, not a fixture. The labelled sky settles, the count
+   fades in on the bare sky with no box around it, holds, fades out, and only
+   then does the question arrive in the space it left. */
+.nf .disc{position:absolute;left:50%;top:50%;z-index:4;text-align:center;
+          width:min(560px,86vw);opacity:0;pointer-events:none;
+          transform:translate(-50%,calc(-50% + 14px));
+          transition:opacity .8s ease,transform .8s cubic-bezier(.3,.7,.3,1)}
+body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
+.nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
+               letter-spacing:-.035em;color:var(--accent)}
+.nf .disc p{font:11.5px var(--mono);color:var(--ink-mid);letter-spacing:.2em;
+            text-transform:uppercase;margin-top:20px}
+.nf .disc p b{color:var(--ink);font-weight:400}
+
+/* THE NEWCOMER'S CARD sits in the MIDDLE (owner, §15 "first-run asks three
+   things only"): the question, the households they can ask to join, and the
+   one other road — name their own system. Kept as thin as the admin's three
+   fields; everything else is a settings question later. */
+.nf .belong{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+            width:min(430px,84vw);z-index:5;opacity:0;
+            background:var(--panel);backdrop-filter:blur(16px);
+            border:1px solid var(--line);border-radius:20px;overflow:hidden;
+            box-shadow:0 34px 90px -30px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.03) inset;
+            transition:opacity 1.1s ease}
+body.belong .nf .belong{opacity:1}
+.nf .belong .top{padding:20px 24px 15px;border-bottom:1px solid var(--line-soft);
+                 background:var(--panel-raised);text-align:center}
+.nf .belong h2{font:600 24px var(--display);letter-spacing:.01em;color:var(--ink)}
+.nf .belong .top p{font:10.5px var(--mono);color:var(--ink-mid);margin-top:8px;
+                   line-height:1.9;letter-spacing:.06em}
+.nf .belong ul{list-style:none;padding:8px 12px 6px;margin:0;max-height:38vh;overflow:auto}
+.nf .belong li button{width:100%;display:flex;align-items:center;gap:11px;
+     background:none;border:0;border-radius:10px;padding:9px 12px;cursor:pointer;text-align:left}
+.nf .belong li button:hover{background:var(--panel-raised)}
+.nf .belong li .dot{flex:none;width:9px;height:9px;border-radius:50%;
+     border:1px solid var(--accent);opacity:.8}
+.nf .belong li .nm{flex:1;min-width:0;font:12.5px var(--ui);color:var(--ink);
+     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
+     color:var(--ink-faint);text-transform:uppercase}
+.nf .belong li button:hover .act{color:var(--accent)}
+.nf .belong li.waiting .act{color:var(--warm)}
+.nf .belong li.waiting button{cursor:default}
+.nf .belong .own{border-top:1px solid var(--line-soft);padding:13px 24px 16px;text-align:center}
+.nf .belong .own button{font:11.5px var(--mono);color:var(--accent);letter-spacing:.04em;
+     background:none;border:0;padding:0;cursor:pointer}
+.nf .belong .own button:hover{text-decoration:underline}
+.nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:7px}
+
+/* ══ PINNED ══════════════════════════════════════════════════════════════
+   A fixture asks for one millisecond of the journey and then holds it still,
+   so the transitions must not play out from where they were — they are the
+   journey, and the journey is already over. Fixture-only: nothing sets
+   `pinned` in the product. */
+body.pinned #formlayer,body.pinned .card,body.pinned .nf,
+body.pinned .nf .disc,body.pinned .nf .belong{transition:none!important}
+body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity:1}
+
+/* ══ REDUCED MOTION ══════════════════════════════════════════════════════
+   The staging survives intact, because the staging is class-driven and not
+   motion-driven: the bare labelled sky still lands bare, the ratified 3s dwell
+   still passes, the count still takes its turn and yields to the question.
+   Only the movement goes. */
+@media (prefers-reduced-motion: reduce){
+  .nf *{animation:none!important}
+  #formlayer,.card,.nf{transition-duration:.7s!important;transition-timing-function:ease!important}
+  #formlayer{animation:none!important}
+  .nf .minisys,.nf .nstar{opacity:1}
+  .nf .belong{transform:translate(-50%,-50%)!important}
+  /* the count still appears and yields, with no fade and no drift */
+  .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
+}

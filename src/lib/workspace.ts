@@ -100,6 +100,20 @@ export const recoverableHouseholdSchema = z.object({
   deleteAfter: z.iso.datetime(),
 });
 
+/** §11 (#453): the ENTIRE surface a non-member sees of a household — an id,
+ * a name, and whether they have already asked to join. Deliberately its own
+ * minimal shape, never the member household schema with empty arrays. */
+export const visibleHouseholdSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  requested: z.boolean().default(false),
+});
+
+/** Mirrored by listVisibleHouseholds' SQL LIMIT (src/server/join-requests.ts,
+ * #492): the schema cap is meaningless if the query it bounds can still
+ * return more rows than it allows. */
+export const VISIBLE_HOUSEHOLDS_LIMIT = 500;
+
 export const workspaceSchema = z.object({
   version: z.literal(WORKSPACE_VERSION),
   /** The server decides whether the user may enter a household or must choose one. */
@@ -107,6 +121,8 @@ export const workspaceSchema = z.object({
   activeHouseholdId: z.string().min(1).nullable(),
   households: z.array(householdWorkspaceSchema).max(500),
   recoverableHouseholds: z.array(recoverableHouseholdSchema).max(500).default([]),
+  /** Populated only on the choose branch: the labelled sky (#453). */
+  visibleHouseholds: z.array(visibleHouseholdSchema).max(VISIBLE_HOUSEHOLDS_LIMIT).default([]),
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
@@ -146,9 +162,45 @@ export type WorkspaceCommand =
   | { type: "notification.dismiss"; householdId: string; notificationId: string }
   | { type: "notification.read-all"; householdId: string; notificationIds: string[] };
 
+/**
+ * WHAT A NEW SYSTEM IS ASKED FOR (§15, "first-run asks three things only").
+ *
+ * The arrival's create card knows three things — a name, a time zone and a
+ * currency — and design/v19/first-run.html is explicit that the fourth is not
+ * the form's business: "sections are no longer in the payload the form
+ * composes; the command applies the default set itself, so there is ONE PLACE
+ * that decides what a new household starts with". That place is
+ * `defaultSections` (src/lib/domain.ts), reached here through `cloneSections()`
+ * — so a browser that knows only the three answers can compose the whole
+ * command, and the default set cannot drift between callers.
+ *
+ * The sheet names `household.setup` for this, on the premise that the install
+ * leaves a household SHELL behind for the first admin to complete. This engine
+ * leaves no shell: `provisionIdentity` creates a user and nothing else, so
+ * there is no `householdId` to address and the road is the one the same sheet
+ * gives the other create ("a second system from an empty sky uses
+ * `household.create` down the same road"). One command, both cases.
+ *
+ * Everything the browser may not know is DEFAULTED rather than removed, so the
+ * shipped dashboard's payload — the full household, composed by
+ * `createHousehold()` below — still parses exactly as it always did.
+ */
+export const householdCreateSchema = householdWorkspaceSchema
+  .extend({
+    memberCount: z.number().int().positive().default(1),
+    canManage: z.boolean().default(true),
+    sections: z.array(workspaceSectionSchema).min(1).max(12).optional(),
+    items: z.array(workspaceItemSchema).max(500).default([]),
+  })
+  .transform((household) => ({
+    ...household,
+    sections: household.sections
+      ?? cloneSections().map((section) => ({ ...section, id: crypto.randomUUID() })),
+  }));
+
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
 export const workspaceCommandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("household.create"), household: householdWorkspaceSchema }),
+  z.object({ type: z.literal("household.create"), household: householdCreateSchema }),
   z.object({
     type: z.literal("household.setup"),
     householdId: z.string().min(1).max(100),

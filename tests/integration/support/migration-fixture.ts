@@ -41,6 +41,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired"],
   imap_notification_kind: ["receipt", "review_ready"],
   item_status: ["active", "expired", "cancelled", "archived"],
+  join_request_status: ["pending", "approved", "declined"],
   membership_role: ["owner", "member"],
   theme_mode: ["system", "light", "dark"],
   reviewed_intake_operation_status: ["processing", "pending_attachment", "completed", "recoverable", "failed"],
@@ -57,6 +58,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   documents: ["id", "household_id", "item_id", "uploaded_by_user_id", "display_name", "media_type", "size_bytes", "content_sha256", "lifecycle", "scan_status", "failure_code", "delete_after", "deleted_at", "available_at", "version", "created_at", "updated_at"],
   due_events: ["id", "household_id", "item_id", "kind", "due_date", "completed_at", "completed_by_user_id", "completion_key", "next_event_id", "created_at"],
   external_identities: ["id", "user_id", "issuer", "subject", "last_login_at", "created_at", "updated_at"],
+  household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
   imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "field_evidence", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at"],
@@ -69,7 +71,7 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
   sections: ["id", "household_id", "slug", "name", "icon", "accent", "position", "visible", "archived_at", "created_at", "updated_at"],
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at"],
-  user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "updated_at"],
+  user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "updated_at"],
   users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "status", "active_until", "created_at", "updated_at"],
   imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
@@ -123,6 +125,9 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   reviewed_intake_operation_result_unique: { table: "reviewed_intake_operations", columns: ["result_id"], unique: true },
   reviewed_intake_operation_actor_idx: { table: "reviewed_intake_operations", columns: ["actor_user_id", "created_at"], unique: false },
   reviewed_intake_operation_item_idx: { table: "reviewed_intake_operations", columns: ["item_id"], unique: false },
+  join_request_household_idx: { table: "household_join_requests", columns: ["household_id", "status"], unique: false },
+  join_request_pending_once: { table: "household_join_requests", columns: ["household_id", "user_id"], unique: true },
+  join_request_user_idx: { table: "household_join_requests", columns: ["user_id", "status"], unique: false },
   item_household_section_idx: { table: "items", columns: ["household_id", "section_id"], unique: false },
   item_household_status_idx: { table: "items", columns: ["household_id", "status"], unique: false },
   membership_user_idx: { table: "memberships", columns: ["user_id"], unique: false },
@@ -186,6 +191,10 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   due_events_pkey: primary("due_events", ["id"]),
   external_identities_pkey: primary("external_identities", ["id"]),
   external_identities_user_id_users_id_fk: foreign("external_identities", ["user_id"], "users", ["id"], "cascade"),
+  household_join_requests_decided_by_user_id_users_id_fk: foreign("household_join_requests", ["decided_by_user_id"], "users", ["id"], "set_null"),
+  household_join_requests_household_id_households_id_fk: foreign("household_join_requests", ["household_id"], "households", ["id"], "cascade"),
+  household_join_requests_pkey: primary("household_join_requests", ["id"]),
+  household_join_requests_user_id_users_id_fk: foreign("household_join_requests", ["user_id"], "users", ["id"], "cascade"),
   households_deletion_requested_by_user_id_users_id_fk: foreign("households", ["deletion_requested_by_user_id"], "users", ["id"], "set_null"),
   households_pkey: primary("households", ["id"]),
   imap_ingestion_attachments_assigned_document_id_documents_id_fk: foreign("imap_ingestion_attachments", ["assigned_document_id"], "documents", ["id"], "set_null"),
@@ -402,10 +411,18 @@ export async function createInvalidMigrationDirectory(migrationsFolder: string):
   const journal = await readJournalDefinition(targetFolder);
   const failedTag = `${String(journal.entries.length).padStart(4, "0")}_invalid_test_migration`;
   await writeFile(join(targetFolder, `${failedTag}.sql`), "CREATE TABLE (\n");
+  // Drizzle applies a migration only when its journal stamp is later than the
+  // newest one already recorded (pg-core/dialect.js: `created_at <
+  // folderMillis`). The checked-in stamps are hand-written, so a wall clock
+  // that happens to sit behind the newest of them would make this appended
+  // migration silently skipped and the test vacuously green. Stamping it past
+  // the newest entry keeps the failure it exists to prove independent of when
+  // the suite is run.
+  const newestStamp = journal.entries.reduce((latest, entry) => Math.max(latest, entry.when), 0);
   journal.entries.push({
     idx: journal.entries.length,
     version: journal.version,
-    when: Date.now(),
+    when: Math.max(Date.now(), newestStamp + 1),
     tag: failedTag,
     breakpoints: true,
   });

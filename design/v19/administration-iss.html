@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — administration over the station (proposal, issue #472/#475)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ADMINISTRATION · THE STATION BACKDROP — §14 (#472/#475).
+
+     Supersedes the plotting-sheet chart room as the direction for this screen.
+     The owner: "the administration backdrop could be based around the
+     International Space Station — YES I love this train of thought."
+
+     WHY A STATION, AND WHY HERE
+     ---------------------------
+     Administration is the only screen that is about the instance itself rather
+     than about anything in it: the people aboard, who may come aboard, the
+     relay that feeds it, the services that keep it alive, the levers. So the
+     backdrop is the platform. The station IS this instance — drawn in the same
+     chart pen as everything else: 1px chart ink, ruled solar cells, a lattice
+     truss, pressurised modules, radiators, an arm, an aft port with a resupply
+     craft on the corridor. Nothing on it is ornament:
+
+       · the truss and the modules are the platform being administered;
+       · the caption under it carries this instance's REAL facts — collection
+         domain, systems aboard, crew, and the attitude/pass this roll drew;
+       · the resupply craft is the relay's ingest, arriving — the same fact the
+         relay card on this page states in words;
+       · the households in the far distance are the instance's real households,
+         on their true bearings, display-only and never clickable;
+       · the named constellations are real sky (Lyra, Vela, Cassiopeia,
+         Andromeda, Perseus, Cygnus) — the fixed stars this platform flies
+         against. They are drawn quieter than the household marks, because a
+         household is yours and a constellation is only where you are.
+
+     THE SKY MOVES, AND IT NEVER LOOPS
+     ---------------------------------
+     Owner rulings, both binding here:
+       1. nothing in the sky may sit static while stars stream past — the
+          household and constellation marks ride the FAR layer's drift, the
+          station is near-field and rides the NEAR layer's faster drift, and
+          its resupply craft and approach corridor drift with it;
+       2. the sky never loops. There is no seamless tile and no <use> repeat.
+          Drift is a WINDOW onto an endless procedural stream: the sky is cut
+          into world-space chunks, each chunk's contents are rolled from the
+          seed the moment it is about to be revealed on the right, and chunks
+          that leave on the left are destroyed and never come back.
+     One seed still determines the entire stream — chunk n's contents are a
+     pure function of (seed, layer, n) — so the whole thing is reproducible.
+
+     BUILD NOTE: in the app the seed is rolled fresh on every load ("never the
+     same sky twice", §14). Under ORBIT_FIXTURES the seed MUST be pinned
+     deterministically — derive it from the fixture workspace id, never from
+     Date.now() or Math.random() — and the drift clock must be pinned too, so
+     the fidelity gate compares one frozen sky against this mockup's. Seed plus
+     clock are the only sources of variation on this screen; pin both and the
+     backdrop is reproducible pixel for pixel.
+
+     The panels, their content and their copy are administration-chartroom.html
+     reproduced faithfully. Only the story behind them has changed. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+
+  /* ---- the three drifting layers -------------------------------------------
+     Each is one <svg> pinned to the viewport, with a single <g> the script
+     translates every frame. Speeds are the parallax: far stars slowest, the
+     household/constellation marks ride the far layer exactly, the station is
+     nearest and rides the near layer. No CSS keyframe drift anywhere — a
+     keyframe can only loop, and the sky is not allowed to. */
+  .layer{position:fixed;inset:0;pointer-events:none}
+  .layer svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky{z-index:0;opacity:var(--stars);transition:opacity .4s}
+  .chartback{z-index:0;opacity:.95}
+  /* the station reads boldest out at the edges and steps back under the
+     column of panels, so it is never competing with a word */
+  .station{z-index:1;opacity:1;
+    -webkit-mask-image:radial-gradient(ellipse 32% 30% at 50% 50%,
+      rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%);
+    mask-image:radial-gradient(ellipse 32% 30% at 50% 50%,
+      rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%)}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+  @media (max-width:880px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px}
+  .card.wide{grid-column:1 / -1}
+  .card .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+  .card .cardhead button,.card .cardhead a{margin-left:auto;font:11px var(--mono);
+        color:var(--ink-mid);background:none;border:1px solid var(--line);
+        border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
+  .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent)}
+
+  .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
+          border-bottom:1px solid var(--line-soft)}
+  .person:last-child{border:0}
+  .person .avatar{width:32px;height:32px;border-radius:50%;flex:none;
+                  border:1px solid var(--line);background:var(--panel-raised);
+                  display:grid;place-items:center;font:11px var(--mono);color:var(--ink-mid)}
+  .person .who{flex:1;min-width:0}
+  .person .who b{display:block;font-size:13.5px;font-weight:530}
+  .person .who span{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
+  .role.admin{color:var(--accent);border-color:var(--accent)}
+  .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
+                 border:0;cursor:pointer;padding:4px;flex:none}
+  .person .place:hover{color:var(--accent)}
+
+  .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
+          border-bottom:1px solid var(--line-soft)}
+  .system:last-child{border:0}
+  .system svg{flex:none}
+  .system .who{flex:1;min-width:0}
+  .system .who b{display:block;font-size:13.5px;font-weight:530}
+  .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
+  .joinbadge{font:10px var(--mono);letter-spacing:.08em;color:var(--warm);
+             border:1px dashed var(--warm);border-radius:99px;padding:3px 10px;flex:none}
+
+  .joinreq{display:flex;align-items:center;gap:12px;border:1px dashed var(--line);
+           border-radius:12px;padding:11px 14px;margin-top:12px}
+  .joinreq .avatar{width:28px;height:28px;border-radius:50%;flex:none;
+                   border:1px solid var(--line);display:grid;place-items:center;
+                   font:10px var(--mono);color:var(--ink-mid)}
+  .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
+  .joinreq p b{color:var(--ink);font-weight:530}
+  .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;cursor:pointer;
+                  border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .joinreq button.yes{border-color:var(--ok);color:var(--ok)}
+
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+      font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;
+      border-bottom:1px solid var(--line-soft)}
+  .kv:last-child{border:0}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok)}
+  .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
+             border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+  .kv button:hover{border-color:var(--accent);color:var(--accent)}
+
+  .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
+  .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+  .svc b{color:var(--ink);font-weight:500;flex:1}
+  .svc small{color:var(--ink-faint);font-size:10.5px}
+
+  .strip{margin-top:22px;text-align:center;font:10.5px var(--mono);
+         color:var(--ink-faint);letter-spacing:.1em}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px;line-height:1.9}
+
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:72vw;font:10.5px var(--mono);color:var(--ink-faint);
+         letter-spacing:.08em}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer;letter-spacing:.04em}
+  .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos .seedtag b{color:var(--ink-mid);font-weight:400}
+
+  @media (max-width:880px){
+    .demos{position:static;max-width:none;justify-content:center;padding:0 24px 26px}
+  }
+  /* stillness: the drift clock is stopped in script as well as here, because a
+     requestAnimationFrame loop cannot be turned off by a media query */
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ---- layer 1: the far stars ------------------------------------------- -->
+<div class="layer sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g id="farL" fill="var(--star-far)"></g>
+    <g id="nearL" fill="var(--star-near)"></g>
+  </svg>
+</div>
+
+<!-- ---- layer 2: what is out tonight -------------------------------------
+     The instance's own households on their true bearings, and the real
+     constellations they are seen against. Rides the far layer's drift so it
+     is part of the same sky, never pinned over it. -->
+<div class="layer chartback" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g id="conL"></g>
+  </svg>
+</div>
+
+<!-- ---- layer 3: the station ---------------------------------------------
+     Near-field, so it drifts at the near layer's rate with a slow attitude
+     sway of its own on top. Drawn once here as parts; the script places a
+     pass, rolls its attitude, scale, elevation and resupply state, and
+     destroys it when it has gone by. -->
+<div class="layer station" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- ruled photovoltaic cells: four columns of blanket, fifteen rows -->
+      <pattern id="pvcell" width="26" height="19.733" patternUnits="userSpaceOnUse"
+               patternTransform="translate(-52,16)">
+        <path d="M 0 0 H 26 M 0 0 V 19.733" fill="none"
+              stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </pattern>
+      <!-- the small Russian-segment and resupply wings -->
+      <pattern id="pvsmall" width="19" height="14" patternUnits="userSpaceOnUse">
+        <path d="M 0 0 H 19 M 0 0 V 14" fill="none"
+              stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </pattern>
+      <!-- heat-rejection radiator: rungs, no cells — a radiator is not a panel -->
+      <pattern id="radrung" width="28" height="15" patternUnits="userSpaceOnUse"
+               patternTransform="translate(0,20)">
+        <path d="M 0 0 H 28" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </pattern>
+
+      <!-- one bay of the integrated truss: post and diagonal -->
+      <g id="bay"><path d="M 0 -15 V 15 M 0 -15 L 68.5 15" fill="none"
+                        stroke="var(--chart-ink)" stroke-width="1.2"/></g>
+
+      <!-- one solar array wing, rooted at its beta gimbal, growing +y -->
+      <g id="wing">
+        <line x1="0" y1="0" x2="0" y2="318" stroke="var(--chart-ink)" stroke-width="1.7"/>
+        <rect x="-52" y="16" width="104" height="296" fill="url(#pvcell)"
+              stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <line x1="-52" y1="164" x2="52" y2="164" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <circle cx="0" cy="7" r="7" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </g>
+
+      <!-- a Zvezda / resupply wing: short, two columns -->
+      <g id="smallwing">
+        <line x1="0" y1="0" x2="30" y2="0" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="30" y="-21" width="76" height="42" fill="url(#pvsmall)"
+              stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </g>
+
+      <!-- three-panel heat-rejection radiator, growing +y -->
+      <g id="rad">
+        <rect x="0"  y="20" width="28" height="150" fill="url(#radrung)" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="32" y="20" width="28" height="150" fill="url(#radrung)" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="64" y="20" width="28" height="150" fill="url(#radrung)" stroke="var(--chart-ink)" stroke-width="1.2"/>
+      </g>
+
+      <!-- the resupply craft: body, cone, two wings, docking probe -->
+      <g id="craft">
+        <line x1="0" y1="0" x2="0" y2="16" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="-19" y="16" width="38" height="54" rx="7" fill="none"
+              stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <path d="M -13 70 L 0 86 L 13 70" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <line x1="-19" y1="40" x2="19" y2="40" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <g transform="translate(19,42) rotate(-90)"><use href="#smallwing"/></g>
+        <g transform="translate(-19,42) rotate(-90) scale(-1,1)"><use href="#smallwing"/></g>
+      </g>
+
+      <!-- THE STATION. Truss along local x, pressurised stack along local y:
+           forward (-y) Unity · Destiny · Harmony with Columbus, Kibo and the
+           cupola off Tranquility; aft (+y) Zarya · Nauka · Zvezda and the port
+           the resupply craft flies to. -->
+      <g id="iss">
+        <!-- integrated truss: two rails, sixteen bays, segment joints -->
+        <path d="M -548 -15 H 548 M -548 15 H 548" fill="none"
+              stroke="var(--chart-ink)" stroke-width="1.7"/>
+        <use href="#bay" x="-548"/><use href="#bay" x="-479.5"/><use href="#bay" x="-411"/>
+        <use href="#bay" x="-342.5"/><use href="#bay" x="-274"/><use href="#bay" x="-205.5"/>
+        <use href="#bay" x="-137"/><use href="#bay" x="-68.5"/><use href="#bay" x="0"/>
+        <use href="#bay" x="68.5"/><use href="#bay" x="137"/><use href="#bay" x="205.5"/>
+        <use href="#bay" x="274"/><use href="#bay" x="342.5"/><use href="#bay" x="411"/>
+        <use href="#bay" x="479.5"/>
+        <path d="M 548 -15 V 15 M -411 -19 V 19 M -274 -19 V 19 M -137 -19 V 19
+                 M 137 -19 V 19 M 274 -19 V 19 M 411 -19 V 19" fill="none"
+              stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <!-- the two rotary joints -->
+        <circle cx="-274" cy="0" r="12" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <circle cx="274"  cy="0" r="12" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+
+        <!-- eight wings on four masts -->
+        <use href="#wing" transform="translate(-455,0)"/>
+        <use href="#wing" transform="translate(-455,0) scale(1,-1)"/>
+        <use href="#wing" transform="translate(-258,0)"/>
+        <use href="#wing" transform="translate(-258,0) scale(1,-1)"/>
+        <use href="#wing" transform="translate(258,0)"/>
+        <use href="#wing" transform="translate(258,0) scale(1,-1)"/>
+        <use href="#wing" transform="translate(455,0)"/>
+        <use href="#wing" transform="translate(455,0) scale(1,-1)"/>
+
+        <!-- radiators, aft face -->
+        <use href="#rad" transform="translate(96,0)"/>
+        <use href="#rad" transform="translate(-188,0)"/>
+
+        <!-- forward stack -->
+        <rect x="-27"  y="-84"  width="54" height="66" rx="10" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-29"  y="-178" width="58" height="94" rx="12" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-27"  y="-240" width="54" height="62" rx="10" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-13"  y="-262" width="26" height="22" rx="4"  fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="27"   y="-230" width="70" height="40" rx="10" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-112" y="-234" width="85" height="48" rx="11" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-96"  y="-266" width="38" height="32" rx="7"  fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="-160" y="-226" width="48" height="30" rx="2"  fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="-96"  y="-78"  width="69" height="46" rx="10" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <!-- the cupola: seven panes, the window the crew administer from -->
+        <path d="M -96 -70 L -116 -62 L -116 -48 L -96 -40 Z" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <path d="M -106 -66 V -44 M -96 -55 H -116" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <!-- module ribs, so the stack reads as pressurised cans -->
+        <path d="M -27 -60 H 27 M -29 -122 H 29 M -29 -150 H 29 M -27 -212 H 27"
+              fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+
+        <!-- aft stack -->
+        <rect x="-13" y="18"  width="26" height="18" rx="4"  fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <rect x="-28" y="36"  width="56" height="84" rx="12" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="27"  y="62"  width="56" height="36" rx="9"  fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-25" y="120" width="50" height="96" rx="12" fill="none" stroke="var(--chart-ink)" stroke-width="1.45"/>
+        <rect x="-11" y="216" width="22" height="14" rx="3"  fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <path d="M -28 78 H 28 M -25 162 H 25" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <use href="#smallwing" transform="translate(25,190)"/>
+        <use href="#smallwing" transform="translate(-25,190) scale(-1,1)"/>
+
+        <!-- Canadarm2, stowed against the truss -->
+        <path d="M 60 -8 L 170 -62 L 142 -158" fill="none" stroke="var(--chart-ink)" stroke-width="1.7"/>
+        <circle cx="60"  cy="-8"   r="4" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <circle cx="170" cy="-62"  r="4" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+        <circle cx="142" cy="-158" r="5" fill="none" stroke="var(--chart-ink)" stroke-width="1.2"/>
+
+        <!-- truss segment identities, the way a chart names what it draws.
+             §14 amendment: read a notch clearer — 9/.7 → 11/.88. They are
+             drawn inside #iss, so the pass's own scale (0.74–1.04) shrinks
+             them again; 9 was landing near 7px and simply vanishing. -->
+        <g fill="var(--chart-ink)" font-size="11" letter-spacing=".16em" opacity=".88"
+           font-family="ui-monospace,SFMono-Regular,Menlo,monospace" text-anchor="middle">
+          <text x="-455" y="-26">P6</text><text x="-258" y="-26">P4</text>
+          <text x="-137" y="-26">P1</text><text x="60" y="-26">S0</text>
+          <text x="137"  y="-26">S1</text><text x="258"  y="-26">S4</text>
+          <text x="455"  y="-26">S6</text>
+        </g>
+      </g>
+
+      <!-- the approach corridor: the pass the platform is flying, and the line
+           the resupply craft comes down. Never drawn across the station body. -->
+      <g id="track">
+        <path d="M 0 300 V 1120 M 0 -300 V -1060" fill="none" stroke="var(--chart-ink)"
+              stroke-width="1.2" stroke-dasharray="2 12" opacity=".68"/>
+      </g>
+    </defs>
+    <g id="stationL"></g>
+  </svg>
+</div>
+
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="home.html">&larr; YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home &middot; owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html" aria-current="page">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out &rarr;</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Administration</h1>
+    <div class="sub">the instance from above &middot; admins see everything by design &middot; 5 people &middot; 5 systems</div>
+  </header>
+
+  <div class="grid">
+
+    <div class="card">
+      <div class="cardhead"><h3>People</h3><button>invite someone</button></div>
+      <div class="person">
+        <span class="avatar">TL</span>
+        <div class="who"><b>Tom Lawson &middot; you</b><span>tom@lawson.example &middot; in 5 systems</span></div>
+        <span class="role admin">admin</span>
+      </div>
+      <div class="person">
+        <span class="avatar">EL</span>
+        <div class="who"><b>Emma Lawson</b><span>emma@lawson.example &middot; owns 2 systems</span></div>
+        <span class="role">user</span>
+        <button class="place" title="Admins can add any user to any system">place in a system&hellip;</button>
+      </div>
+      <div class="person">
+        <span class="avatar">RL</span>
+        <div class="who"><b>Rob Lawson</b><span>rob@lawson.example &middot; in 2 systems</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system&hellip;</button>
+      </div>
+      <div class="person">
+        <span class="avatar">SL</span>
+        <div class="who"><b>Sue Lawson</b><span>sue@lawson.example &middot; owns 1 system</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system&hellip;</button>
+      </div>
+      <div class="person">
+        <span class="avatar">GL</span>
+        <div class="who"><b>Gran</b><span>gran@lawson.example &middot; in 1 system</span></div>
+        <span class="role">user</span>
+        <button class="place">place in a system&hellip;</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead"><h3>Systems</h3><button>new system</button></div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--sun)"/>
+          <circle cx="15.5" cy="20.5" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="12.8" cy="18.3" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="14.8" cy="13" r="1.5" style="fill:var(--warm)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Lawson Home</b><span>2 members &middot; owner Tom Lawson &middot; 6 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="21.7" cy="18.7" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="13" cy="15.7" r="1.5" style="fill:var(--ok)" opacity=".8"/>
+          <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Seaside Cottage</b><span>3 members &middot; owner Emma Lawson &middot; 3 items</span></div>
+        <span class="joinbadge">1 wants in</span>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="20.2" cy="17.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+          <circle cx="12.5" cy="16.2" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Mum &amp; Dad&rsquo;s</b><span>2 members &middot; owner Sue Lawson &middot; 2 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="19.3" cy="18.8" r="1.6" style="fill:var(--upcoming)" opacity=".8"/>
+          <circle cx="13.4" cy="14.4" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>The Narrowboat</b><span>1 member &middot; owner Rob Lawson &middot; 2 items</span></div>
+      </div>
+      <div class="system">
+        <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+          <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+          <circle cx="18.5" cy="21.4" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+          <circle cx="14.6" cy="19.6" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+        </svg>
+        <div class="who"><b>Gran&rsquo;s Flat</b><span>2 members &middot; owner Emma Lawson &middot; 2 items</span></div>
+      </div>
+
+      <div class="joinreq">
+        <span class="avatar">RL</span>
+        <p><b>Rob Lawson</b> asks to join <b>Seaside Cottage</b> &middot; 2d ago</p>
+        <button class="yes">approve</button>
+        <button>decline</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead"><h3>The relay &middot; instance</h3></div>
+      <div class="kv"><span>collection domain</span><b>in.lawson-home.orbit</b></div>
+      <div class="kv"><span>ingest</span><b class="on">enabled &middot; polling every 30s</b></div>
+      <div class="kv"><span>address generation</span><span><b>1</b> &middot; current</span><button>rotate every address</button></div>
+      <div class="kv"><span>unreviewed arrivals</span><b>burn up after 45 days</b></div>
+      <div class="kv"><span>outbound reminders</span><b class="on">configured</b></div>
+    </div>
+
+    <div class="card">
+      <div class="cardhead"><h3>Operations</h3><a href="../family/admin.html">open operations &rarr;</a></div>
+      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
+      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
+      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-clamav</b><small>healthy &middot; scanning required</small></div>
+      <div class="svc"><i style="background:var(--ok)"></i><b>orbit-tika</b><small>running</small></div>
+      <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
+    </div>
+
+  </div>
+
+  <div class="strip">ORBIT v1.3.0 &middot; CHANNEL preview &middot; REVISION fd6a7e6 &middot; self-hosted &mdash; nothing leaves this machine</div>
+</div>
+
+<div class="demos" aria-label="Mockup backdrop demos">
+  <span>DEMOS</span>
+  <button onclick="reroll()">re-roll sky</button>
+  <button id="freezebtn" aria-pressed="false" onclick="toggleFreeze(this)">freeze drift</button>
+  <span class="seedtag">seed #<b id="seedout">&mdash;</b></span>
+</div>
+
+<footer>orbit &middot; administration &middot; ISS backdrop proposal &middot; #472/#475 &middot; &sect;14<br>
+the station is the instance &mdash; the platform the households fly from, being administered &middot;
+the sky streams and never loops: what leaves on the left is gone, what arrives on the right is rolled fresh from the seed</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+}
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+                       for (const k in a) e.setAttribute(k, a[k]); return e; };
+const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
+const VIEW = 1600;                       /* the viewBox is always 1600 wide, and
+                                            xMidYMid slice never shows more */
+
+/* ---------- one seed, an endless stream (#475) ----------------------------
+   mkRng is the same Lehmer generator every other mockup uses. The trick that
+   makes a NON-LOOPING sky possible is chunkSeed: the contents of world chunk
+   n on a given layer are a pure function of (seed, layer, n), so a chunk can
+   be built the instant it is about to enter on the right and thrown away for
+   good when it leaves on the left — no tile, no <use> repeat, nothing that
+   ever comes back around. Rewind is impossible on purpose: the sky ahead of
+   you has simply not been rolled yet.
+
+   BUILD NOTE (fidelity gate): under ORBIT_FIXTURES both the seed and the
+   drift clock must be pinned — seed from the fixture workspace id, clock to a
+   fixed T — so the gate renders exactly one deterministic frame of this sky. */
+function mkRng(s){ let x = Math.abs(Math.floor(s)) % 2147483647; if (x <= 0) x += 2147483646;
+                   return () => (x = (x * 48271) % 2147483647) / 2147483647; }
+function chunkSeed(sd, tag, i){
+  let h = (sd ^ Math.imul(tag, 0x85ebca6b)) >>> 0;
+  h = Math.imul(h ^ (i + 0x9e3779b9), 0xc2b2ae35) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h % 2147483647;
+}
+
+/* ---------- the drift rates are the parallax ------------------------------
+   Far stars slowest; the households and constellations ride the far layer
+   exactly (they are that far away); the station is the nearest thing in the
+   sky, so it moves fastest. Nothing is pinned. */
+const FAR_V = 1.9, NEAR_V = 4.0, STATION_V = NEAR_V;
+
+/* ---------- the instance's real households --------------------------------
+   From the sample workspace fixture (web/src/lib/data/fixtures/workspace.js).
+   Lawson Home is never drawn — you are inside it, exactly as on home. The
+   planet dots are those households' real items in their real due-state
+   colours; nothing out here is invented. BEARINGS ARE SACRED (CON-13): a
+   household's bearing fixes its ELEVATION in the sky and never moves. The
+   roll decides only how far away it floats, how small it reads, and when it
+   next comes round. */
+const SYSTEMS = [
+  { id:"hh-seaside-4551", name:"Seaside Cottage", pos:[-617,-305], items:3,
+    planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  { id:"hh-mumdad-2480",  name:"Mum & Dad’s", pos:[452,522], items:2,
+    planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]] },
+  { id:"hh-narrow-15033", name:"The Narrowboat",  pos:[-515,393], items:2,
+    planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  { id:"hh-grans-1307",   name:"Gran’s Flat", pos:[722,-184], items:2,
+    planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+];
+const elevation = hh => {
+  const r = Math.hypot(hh.pos[0], hh.pos[1]);
+  return 500 + (hh.pos[1] / r) * 320;     /* sacred: from the bearing, not the roll */
+};
+
+/* ---------- real constellations, quieter than the household marks ---------
+   Genuine asterisms, genuine names — never an invented word. These are the
+   fixed sky the platform flies against, so they are drawn thinner, fainter
+   and unlabelled-but-for-a-whisper: a household is yours, a constellation is
+   only where you are. Coordinates are the asterism's own shape. */
+const FIGURES = [
+  { name:"CASSIOPEIA", pts:[[0,22],[24,4],[48,18],[72,2],[96,20]],
+    edges:[[0,1],[1,2],[2,3],[3,4]] },
+  { name:"CYGNUS", pts:[[46,0],[46,40],[46,74],[46,100],[8,36],[86,30]],
+    edges:[[0,1],[1,2],[2,3],[4,1],[1,5]] },
+  { name:"LYRA", pts:[[0,0],[12,30],[38,24],[46,52],[20,58]],
+    edges:[[0,1],[1,2],[2,3],[3,4],[4,1]] },
+  { name:"PERSEUS", pts:[[0,8],[20,26],[38,20],[54,42],[74,48],[62,72],[42,62]],
+    edges:[[0,1],[1,2],[2,3],[3,4],[3,6],[6,5]] },
+  { name:"ANDROMEDA", pts:[[0,4],[30,16],[62,26],[94,40],[36,50]],
+    edges:[[0,1],[1,2],[2,3],[1,4]] },
+  { name:"VELA", pts:[[0,28],[34,0],[70,16],[56,54],[16,60]],
+    edges:[[0,1],[1,2],[2,3],[3,4],[4,0]] },
+];
+
+/* ---------- the window onto the stream ------------------------------------ */
+function Layer(host, speed, chunkW, margin, tag, build){
+  return { host, speed, chunkW, margin, tag, build, live:new Map(),
+    update(T){
+      const off = this.speed * T;
+      const a = Math.floor((off - this.margin) / this.chunkW);
+      const b = Math.floor((off + VIEW + this.margin) / this.chunkW);
+      for (const i of [...this.live.keys()])
+        if (i < a || i > b){ this.live.get(i).remove(); this.live.delete(i); }
+      for (let i = a; i <= b; i++) if (!this.live.has(i)){
+        const g = el("g", { transform:`translate(${(i * this.chunkW).toFixed(1)},0)` });
+        this.build(g, mkRng(chunkSeed(seed, this.tag, i)), i, T);
+        this.host.appendChild(g); this.live.set(i, g);
+      }
+      this.host.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
+    },
+    clear(){ for (const g of this.live.values()) g.remove(); this.live.clear(); } };
+}
+
+/* ---- stars: two depths, rolled a chunk at a time ---- */
+const buildFar = (g, rng) => {
+  for (let i = 0; i < 26; i++) g.appendChild(el("circle", {
+    cx:(rng() * 400).toFixed(1), cy:(rng() * 1000).toFixed(1),
+    r:(0.4 + rng() * 0.5).toFixed(2), opacity:(0.12 + rng() * 0.23).toFixed(2) }));
+};
+const buildNear = (g, rng) => {
+  for (let i = 0; i < 12; i++) g.appendChild(el("circle", {
+    cx:(rng() * 400).toFixed(1), cy:(rng() * 1000).toFixed(1),
+    r:(0.8 + rng() * 0.7).toFixed(2), opacity:(0.3 + rng() * 0.4).toFixed(2) }));
+};
+
+/* ---- what is out: a household, a constellation, or a stretch of nothing ---- */
+function buildMarks(g, rng, i){
+  const roll = rng();
+  if (roll < 0.30) household(g, rng, i);
+  else if (roll < 0.80) figure(g, rng);
+}
+
+function household(g, rng, i){
+  /* WHICH household comes from the chunk itself, not the roll, so that the
+     same house is never out twice at once — neighbouring chunks always name
+     different ones, and a house is one place. The roll still decides whether
+     a house is out here at all, and how far away it is. */
+  const n = SYSTEMS.length;
+  const hh = SYSTEMS[(((i * 3) % n) + n) % n];
+  const x = 60 + rng() * 400;
+  const far = rng();                                  /* how distant, this pass */
+  const y = elevation(hh) + (rng() - 0.5) * 44;       /* a breath, never a move */
+  const scale = 0.86 - far * 0.34;
+  const dim = (0.52 - far * 0.20).toFixed(2);
+  const away = rng() < 0.5, dir = away ? 1 : -1;      /* which side the label reads */
+
+  const root = el("g", { transform:`translate(${x.toFixed(1)},${y.toFixed(1)})`, opacity:dim });
+  const s = el("g", { transform:`scale(${scale.toFixed(3)})` });
+  /* dashed chart ink, not accent: on home an accent ring means "fly here", and
+     from administration you may only look */
+  s.appendChild(el("circle", { r:50, fill:"none", stroke:"var(--chart-ink)",
+                               "stroke-width":1.2, "stroke-dasharray":"3 8" }));
+  s.appendChild(el("circle", { r:2.6, fill:"var(--chart-ink)" }));
+  for (const [px, py, pr, tok] of hh.planets)
+    s.appendChild(el("circle", { cx:px, cy:py, r:pr, fill:`var(${tok})`, opacity:.85 }));
+  root.appendChild(s);
+
+  const lead = 50 * scale + 16;
+  root.appendChild(el("path", { d:`M ${dir * (50 * scale + 4)} -${(34 * scale).toFixed(1)} ` +
+                                  `L ${dir * lead} -${(52 * scale + 12).toFixed(1)} h ${dir * 16}`,
+                                fill:"none", stroke:"var(--chart-ink)", "stroke-width":1, opacity:.75 }));
+  const t = el("text", { x:dir * (lead + 22), y:-(52 * scale + 15), "font-size":9.5,
+                         "letter-spacing":".16em", fill:"var(--chart-ink)", "font-family":MONO,
+                         "text-anchor":away ? "start" : "end" });
+  t.textContent = hh.name.toUpperCase();
+  root.appendChild(t);
+  const c = el("text", { x:dir * (lead + 22), y:-(52 * scale + 3), "font-size":8,
+                         "letter-spacing":".12em", fill:"var(--chart-ink)", "font-family":MONO,
+                         "text-anchor":away ? "start" : "end", opacity:.8 });
+  c.textContent = hh.items + (hh.items === 1 ? " ITEM" : " ITEMS");
+  root.appendChild(c);
+  g.appendChild(root);
+}
+
+/* §14 amendment: the real sky was too faint to read at arm's length. The
+   figure steps up a notch — dim floor 0.26 → 0.38, line 1/.62 → 1.2/.78 and in
+   chart INK rather than chart LINE (line is the ruling colour and all but
+   disappeared against the dark packs; ink is what the name is already drawn
+   in), name 8/.75 → 9/.82. It stays under the household mark on every axis:
+   a household is brighter at the top of its range, carries a leader and a
+   count, and is named a half-point larger at full opacity. */
+function figure(g, rng){
+  const f = FIGURES[Math.floor(rng() * FIGURES.length)];
+  const x = 40 + rng() * 400, y = 120 + rng() * 740;
+  const scale = 0.85 + rng() * 0.85;
+  const dim = (0.38 + rng() * 0.14).toFixed(2);       /* quieter than a household */
+  const root = el("g", { transform:`translate(${x.toFixed(1)},${y.toFixed(1)}) ` +
+                                   `scale(${scale.toFixed(3)})`, opacity:dim });
+  let d = "";
+  for (const [a, b] of f.edges)
+    d += `M ${f.pts[a][0]} ${f.pts[a][1]} L ${f.pts[b][0]} ${f.pts[b][1]} `;
+  root.appendChild(el("path", { d, fill:"none", stroke:"var(--chart-ink)",
+                                "stroke-width":1.2, opacity:.78 }));
+  for (const [px, py] of f.pts)
+    root.appendChild(el("circle", { cx:px, cy:py, r:(1.5 + rng() * 1.1).toFixed(2),
+                                    fill:"var(--star-far)", opacity:.9 }));
+  const t = el("text", { x:f.pts[0][0] - 4, y:f.pts[0][1] - 13, "font-size":9,
+                         "letter-spacing":".2em", fill:"var(--chart-ink)",
+                         "font-family":MONO, opacity:.82 });
+  t.textContent = f.name;
+  root.appendChild(t);
+  g.appendChild(root);
+}
+
+/* ---- the station: one pass per slot, always exactly one in the window -----
+   The slot is the viewport plus the station's own span, so as one pass leaves
+   on the left the next enters on the right — the platform comes round again,
+   as it does, but never the same way twice: attitude, scale, elevation and
+   the state of the resupply craft are rolled fresh for every pass. */
+const SPAN = 1300, SLOT = VIEW + SPAN;
+function buildStation(g, rng, i, T){
+  const cy    = 330 + rng() * 330;
+  const sc    = 0.74 + rng() * 0.30;
+  const rot   = (rng() - 0.5) * 30;
+  const pass  = 1000 + Math.floor(rng() * 8999);
+  const inbound = rng() < 0.45;
+  const d0    = inbound ? 190 + rng() * 380 : 0;
+
+  const pass_g = el("g", { transform:`translate(${SLOT / 2},${cy.toFixed(1)})` });
+  const att = el("g", { class:"att", "data-rot":rot.toFixed(2), "data-sc":sc.toFixed(3) });
+  att.setAttribute("transform", `rotate(${rot.toFixed(2)}) scale(${sc.toFixed(3)})`);
+  att.appendChild(el("use", { href:"#track" }));
+  att.appendChild(el("use", { href:"#iss" }));
+
+  const craft = el("g", { class:"craft", "data-d0":d0.toFixed(0), "data-t0":T.toFixed(1) });
+  craft.setAttribute("transform", `translate(0,${(230 + d0).toFixed(1)})`);
+  craft.appendChild(el("use", { href:"#craft" }));
+  att.appendChild(craft);
+
+  /* the caption is the roll made legible, and it carries the instance's own
+     facts — the same ones the panels above state in words. §14 amendment:
+     it must actually be readable — block .8 → .94, title 9.5 → 11, the two
+     detail lines 8/.8 → 9.5/.88, with the leading opened from 15 to 17 so
+     the bigger type still sets as a block. Like the segment IDs it rides the
+     pass's 0.74–1.04 scale, which was taking the detail lines under 7px. */
+  const cap = el("g", { fill:"var(--chart-ink)", "font-family":MONO, opacity:".94" });
+  const l1 = el("text", { x:-250, y:378, "font-size":11, "letter-spacing":".18em" });
+  l1.textContent = "THE PLATFORM · IN.LAWSON-HOME.ORBIT";
+  const l2 = el("text", { x:-250, y:395, "font-size":9.5, "letter-spacing":".14em", opacity:".88" });
+  l2.textContent = "5 SYSTEMS ABOARD · 5 CREW · 1 JOIN REQUEST HELD";
+  const l3 = el("text", { x:-250, y:412, "font-size":9.5, "letter-spacing":".14em", opacity:".88" });
+  l3.textContent = `PASS ${pass} · ATTITUDE ${rot >= 0 ? "+" : "−"}` +
+                   `${Math.abs(rot).toFixed(1)}° · RESUPPLY ` +
+                   (inbound ? "INBOUND ON THE CORRIDOR" : "DOCKED AT THE AFT PORT");
+  cap.appendChild(l1); cap.appendChild(l2); cap.appendChild(l3);
+  att.appendChild(cap);
+
+  pass_g.appendChild(att);
+  g.appendChild(pass_g);
+}
+
+/* ---------- assembly ------------------------------------------------------ */
+let seed = Math.floor(Math.random() * 2147483646) + 1;
+let T0 = 0, T = 0, frozen = false, raf = null;
+const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+const layers = [
+  Layer(document.getElementById("farL"),     FAR_V,     400,  120, 0x101, buildFar),
+  Layer(document.getElementById("conL"),     FAR_V,     520,  460, 0x202, buildMarks),
+  Layer(document.getElementById("nearL"),    NEAR_V,    400,  120, 0x303, buildNear),
+  Layer(document.getElementById("stationL"), STATION_V, SLOT, 660, 0x404, buildStation),
+];
+
+/* Start the clock so the first frame — the one the owner actually judges — is
+   composed, then let it fly. The page column owns the middle 980px, so the
+   station's CORE (truss centre, module stack, the arm) is placed out in one
+   of the clear margins and its arrays sweep across behind the panels. Which
+   margin, and how far out, is part of the roll. */
+function startClock(){
+  const r = mkRng(chunkSeed(seed, 0xF00D, 7));
+  const side = r() < 0.5 ? -1 : 1;
+  const target = 800 + side * (330 + r() * 250);
+  const slot = 40;                                  /* an arbitrary positive pass */
+  T0 = (slot * SLOT + SLOT / 2 - target) / STATION_V;
+}
+
+function frame(now){
+  if (!frozen) T = T0 + now / 1000;
+  for (const L of layers) L.update(T);
+  /* the station breathes on its attitude the way a real one does, and its
+     resupply craft closes the last of the corridor while it is out */
+  const sway = frozen ? 0 : Math.sin(T / 26) * 1.15 + Math.sin(T / 41) * 0.55;
+  for (const g of layers[3].live.values()){
+    const att = g.querySelector(".att");
+    if (!att) continue;
+    att.setAttribute("transform",
+      `rotate(${(parseFloat(att.dataset.rot) + sway).toFixed(2)}) scale(${att.dataset.sc})`);
+    const c = att.querySelector(".craft");
+    if (c){
+      const d = Math.max(0, parseFloat(c.dataset.d0) - (T - parseFloat(c.dataset.t0)) * 0.22);
+      c.setAttribute("transform", `translate(0,${(230 + d).toFixed(1)})`);
+    }
+  }
+  raf = frozen ? null : requestAnimationFrame(frame);
+}
+
+function run(){
+  if (raf) cancelAnimationFrame(raf);
+  raf = null;
+  if (frozen || still.matches){ T = T0; for (const L of layers) L.update(T); frame(0); }
+  else raf = requestAnimationFrame(frame);
+}
+function reroll(){
+  seed = Math.floor(Math.random() * 2147483646) + 1;
+  document.getElementById("seedout").textContent = String(seed);
+  for (const L of layers) L.clear();
+  startClock();
+  run();
+}
+function toggleFreeze(btn){
+  frozen = !frozen;
+  /* thawing picks the sky back up where it stopped rather than jumping the
+     clock forward by however long it was held */
+  if (!frozen) T0 = T - performance.now() / 1000;
+  btn.setAttribute("aria-pressed", String(frozen));
+  run();
+}
+
+/* stillness is a ruling, not a preference: with reduced motion the clock never
+   advances and the sky is simply the seed's first frame */
+if (still.matches) frozen = true;
+still.addEventListener("change", () => { frozen = still.matches;
+  document.getElementById("freezebtn").setAttribute("aria-pressed", String(frozen)); run(); });
+
+document.getElementById("seedout").textContent = String(seed);
+if (still.matches) document.getElementById("freezebtn").setAttribute("aria-pressed", "true");
+startClock();
+run();
+</script>
+</body></html>

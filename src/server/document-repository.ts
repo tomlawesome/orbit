@@ -709,9 +709,20 @@ export async function uploadItemDocument(input: {
   }
 }
 
+/** The plaintext reads that share this authorization and readiness path. */
+export type DocumentContentAuditAction = "document_downloaded" | "document_previewed";
+
+/**
+ * Decrypts a document's plaintext for an authorized reader.
+ *
+ * Every caller that needs plaintext goes through here so that authorization,
+ * readiness and audit stay one path; only the recorded action varies, so a
+ * page-one preview (#476) is never logged as a whole-document download.
+ */
 export async function readDocumentDownload(
   userId: string,
   documentId: string,
+  auditAction: DocumentContentAuditAction = "document_downloaded",
 ): Promise<{ bytes: Buffer; displayName: string; mediaType: string }> {
   const record = await requireDocumentAccess(userId, documentId);
   const config = getDocumentConfig();
@@ -752,7 +763,7 @@ export async function readDocumentDownload(
   } catch {
     throw new AppError("document_integrity_failed", "That document failed its integrity check", 503);
   }
-  await recordDocumentAudit(record.householdId, documentId, userId, "document_downloaded", { itemId: record.itemId });
+  await recordDocumentAudit(record.householdId, documentId, userId, auditAction, { itemId: record.itemId });
   return { bytes, displayName: record.displayName, mediaType: record.mediaType };
 }
 

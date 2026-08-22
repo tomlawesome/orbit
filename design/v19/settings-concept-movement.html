@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Orbit — settings is the movement (the back of the clock · #472 · §15)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* SETTINGS · THE MOVEMENT  (§15, "try THE MOVEMENT", issue #472)
+     ==================================================================
+     The home screen is the DIAL. This screen is what you see when you turn
+     the instrument over.
+
+     Behind and around the settings cards is the mechanism that drives the
+     orbits: great slow wheels at four depths, an escapement ticking quietly
+     high on the left, jewelled bearings alight in the pack's accent, a
+     pendulum hanging the length of the page and a driving weight on its line
+     down in the dark at the foot. The settings cards are not glass any more:
+     they are the instrument's own plates — bevelled, screwed down, engraved
+     — bolted onto the machine. You are allowed in the back.
+
+     WHY THE OBSERVATORY DIED AND THIS IS DIFFERENT (§15)
+     ----------------------------------------------------
+     The slit failed because two shapes sliding apart read as a spotlight
+     before they read as a building; only real dome geometry rescued it, and
+     by then it had spent its two passes. The lesson taken here is that the
+     ONLY thing that buys a mechanical metaphor is real mechanism. So none of
+     this is a gear-shaped decoration:
+
+       · the wheels have genuine CYCLOIDAL teeth — radial flanks below the
+         pitch circle (which is what a hypocycloid degenerates to when the
+         generating circle is half the pitch circle: the clockmaker's own
+         choice) and true EPICYCLOIDAL heads above it, sampled from the
+         parametric curve, not drawn as triangles;
+       · the tooth counts are a real English longcase going train and the
+         rates follow from them, not from taste;
+       · the two visible MESHES are solved: the driven member's phase is
+         computed so a tooth of one always sits in a space of the other on
+         the line of centres, and because the wheels roll at the ratio their
+         teeth demand, that stays true for ever;
+       · the escapement is a GRAHAM DEAD-BEAT — pointed escape teeth, an
+         anchor whose pallets are struck as arcs concentric with its own
+         arbor, and no recoil: the wheel jumps and then stands perfectly
+         still, which is what "dead beat" means and is exactly the character
+         a settings screen wants;
+       · the pendulum is a SECONDS pendulum and it is the reason the whole
+         thing beats once a second.
+
+     THE TRAIN (real numbers, and every rate on this screen follows)
+     ---------------------------------------------------------------
+        great wheel   96 t  →  centre pinion  8       1 turn / 12 hours
+        centre wheel  60 t  →  third pinion   8       1 turn / hour
+        third wheel   56 t  →  escape pinion  7       1 turn / 8 minutes
+        escape wheel  30 t  →  anchor                 1 turn / minute
+        anchor · seconds pendulum                     1 beat / second
+
+     A dead-beat escape wheel advances a HALF TOOTH per beat: 6° a second,
+     then dead still. Every wheel behind it is locked to it, so the entire
+     train steps together, once a second, all the way back to a great wheel
+     that moves 0.008° while it does. That is not a sync fault — the craft
+     law about distinct periods exists to stop unrelated things pulsing
+     together, and this is ONE MACHINE, which must pulse together or it is a
+     lie. The things that are NOT the train keep their own time: the pendulum
+     runs continuously on its 2-second sine, and the six jewels breathe on
+     six unrelated periods (13.7s … 31.3s) that share no factor with it.
+
+     DEPTH, AND WHY DEPTH IS ALSO SPEED
+     -----------------------------------
+     Four planes, and power flows from the deep slow end to the near fast one,
+     so the nearer a thing is the faster it turns AND the faster it parallaxes.
+     One idea, told twice:
+
+        P0  the plate      k 0.07   perlage, pillars, screws, the engraving
+        P1  the power      k 0.20   great wheel, centre wheel, drum, ratchet
+        P2  the time       k 0.44   third wheel, escapement, anchor, pendulum
+        P3  the fall       k 0.68   the gut line and the driving weight
+
+     Focus sits on P2 — the caseback is photographed with the escapement
+     sharp — so P1 carries a little defocus and P3, which is nearer than the
+     focal plane, carries a little of its own.
+
+     THE DESCENT (§15, universal scroll-descent law)
+     -----------------------------------------------
+     Scrolling down LOWERS YOU THROUGH THE MOVEMENT. The escapement is the
+     first thing you lose: it rides the fast plane and leaves over the top of
+     the frame while the deep wheels are still barely moving. Then the train
+     goes. What comes up to meet you at the bottom is the power end — the
+     great wheel's hub with its ratchet, click and winding square, the
+     pendulum's bob, and the driving weight on its line — so the foot of the
+     page opens out onto nothing but the machine and the two hanging masses
+     that make it go. You end the page where the force comes from, which for
+     an Orbit screen ought to be gravity, and is.
+
+     One consequence worth stating: the pendulum's swing is INVISIBLE at the
+     top of the page and 60 pixels wide at the bottom, because that is what a
+     pendulum does — near the suspension the rod hardly moves. The descent
+     buys the swing.
+
+     The descent is positional (a pure function of scroll), so REDUCED MOTION
+     keeps every bit of it; only the clock stops. Parked at scroll 0 nothing
+     below is in effect at all — the family's descent gate, html.descending.
+
+     LEGIBILITY IS NOT NEGOTIABLE
+     -----------------------------
+     The plates are the answer. A settings card here is not a translucent
+     panel over a busy ground, it is an opaque machined plate — so the ink
+     contrast is a constant, not a gamble, and it does not depend on which
+     wheel happens to be behind it. Measured worst cases are printed in the
+     footer. Every faint-tier label that carries INFORMATION (the card
+     headings, the member counts, the sign-out line, the footer) is promoted
+     off --ink-faint, which fails 4.5:1 on every pack in the ratified file and
+     would fail worse over a machine. The three text runs that DO sit
+     straight on the mechanism — the title, its sub-line and the back link —
+     sit in the top band, which the composition keeps clear of wheels, with a
+     lamp falloff behind them.
+
+     DETERMINISM
+     -----------
+     No Math.random and no Date.now anywhere in this file. The seed is a
+     constant; re-roll walks a fixed hash sequence, so even the demo is
+     reproducible. The clock is a linear count of seconds since load and
+     stops dead at 0 under reduced motion, so two loads produce byte-identical
+     stills. The mesh phases are not the seed's business at all — they are
+     solved geometry. The seed decides the movement's serial number, the beat
+     phase, the jewels' breathing and the plate's grain, and nothing else.
+
+     WHAT IS INVENTED AND WHAT IS NOT
+     ---------------------------------
+     "CAL. 1963" and the serial are invented — no real maker is named. The
+     dead-beat escapement, the seconds pendulum, the tooth counts, the
+     cycloidal profile, perlage, anglage, aligned screw slots and the
+     click-and-ratchet are all real horology. One nod worth knowing but not
+     worth printing: the man who invented the dead-beat escapement also built
+     the first orrery. The instrument that keeps this time and the instrument
+     on the home screen come from the same bench. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /* THE MOVEMENT VARIABLES, per pack:
+       --plate/-hi/-lo   the back plate and the lamp on it
+       --brass/-hi/-lo   the wheels: lamplit brass on the dark packs,
+                         daylight brass on the two that read as paper
+       --steel/-hi       pinions, anchor, screws, the pendulum rod
+       --engrave         the calibre line cut into the plate
+       --plate-card      the settings plate — OPAQUE, and that is the point
+       --bevel-hi/-lo    anglage: the polished edge and the shadow under it
+       --cotes-a/-b      the machined finish across a plate
+       --scrim           the lamp falling off under the fixed chrome */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --accent-text:var(--accent); --ok-text:var(--ok);
+    --plate:#0b1124; --plate-hi:#18233f; --plate-lo:#04070f;
+    --brass:#7d6740; --brass-hi:#c8a869; --brass-lo:#382e1c;
+    --steel:#33406b; --steel-hi:#8290c4;
+    --engrave:rgba(216,180,90,.34);
+    --plate-card:rgba(15,22,46,.955);
+    --bevel-hi:rgba(233,237,248,.09); --bevel-lo:rgba(0,0,0,.5);
+    --cotes-a:rgba(233,237,248,.018); --cotes-b:rgba(0,0,0,.022);
+    --scrim:rgba(3,6,14,.86); --deepink:rgba(3,6,14,.52); --cast:rgba(0,0,0,.6);
+    --card-shadow:0 22px 48px rgba(0,0,0,.5);
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    /* after dark's movement is not gilt — it is a nickel/rhodium calibre,
+       which is a real finish and the honest reading of "lights out, ink up" */
+    --accent-text:var(--accent); --ok-text:var(--ok);
+    --plate:#080b12; --plate-hi:#141b27; --plate-lo:#03050a;
+    --brass:#666c7a; --brass-hi:#a9b2c1; --brass-lo:#2a2e37;
+    --steel:#2a3242; --steel-hi:#7684a0;
+    --engrave:rgba(125,211,252,.30);
+    --plate-card:rgba(12,17,28,.96);
+    --bevel-hi:rgba(231,233,238,.08); --bevel-lo:rgba(0,0,0,.56);
+    --cotes-a:rgba(231,233,238,.016); --cotes-b:rgba(0,0,0,.024);
+    --scrim:rgba(2,3,7,.88); --deepink:rgba(2,3,7,.58); --cast:rgba(0,0,0,.66);
+    --card-shadow:0 22px 48px rgba(0,0,0,.62);
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* daylight through the caseback: the plate is lit, the wheels are darker
+       than it, and the lamp becomes a window rather than a bulb */
+    --accent-text:#6a4a08; --ok-text:#145c33;
+    --plate:#cbc2a9; --plate-hi:#e6dfca; --plate-lo:#9d9276;
+    --brass:#a98436; --brass-hi:#e0c581; --brass-lo:#6c5423;
+    --steel:#3f4653; --steel-hi:#6d7482;
+    --engrave:rgba(28,43,74,.44);
+    --plate-card:rgba(222,215,197,.965);
+    --bevel-hi:rgba(255,255,255,.72); --bevel-lo:rgba(88,74,44,.3);
+    --cotes-a:rgba(255,255,255,.07); --cotes-b:rgba(88,74,44,.018);
+    --scrim:rgba(236,231,216,.9); --deepink:rgba(240,236,224,.7); --cast:rgba(92,76,44,.42);
+    --card-shadow:0 16px 34px rgba(88,74,44,.24);
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --accent-text:#17568a; --ok-text:#106038;
+    --plate:#c9d2df; --plate-hi:#e9eef6; --plate-lo:#9aa7bc;
+    --brass:#a8873f; --brass-hi:#dcc287; --brass-lo:#6d572a;
+    --steel:#39435a; --steel-hi:#616c84;
+    --engrave:rgba(26,34,51,.42);
+    --plate-card:rgba(229,235,244,.965);
+    --bevel-hi:rgba(255,255,255,.85); --bevel-lo:rgba(40,54,80,.28);
+    --cotes-a:rgba(255,255,255,.085); --cotes-b:rgba(40,54,80,.016);
+    --scrim:rgba(233,239,248,.92); --deepink:rgba(237,242,250,.72); --cast:rgba(38,52,78,.38);
+    --card-shadow:0 16px 34px rgba(40,54,80,.24);
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    /* retrograde's calibre is anodised, not gilt: cold teal metal, magenta
+       jewels, bloom on the accents only (the ratified §15 rule for this pack) */
+    --accent-text:var(--accent); --ok-text:var(--ok);
+    --plate:#080d16; --plate-hi:#11212c; --plate-lo:#03060b;
+    --brass:#2e6c7d; --brass-hi:#63bcd0; --brass-lo:#0f2c35;
+    --steel:#173845; --steel-hi:#4f9aad;
+    --engrave:rgba(45,226,230,.32);
+    --plate-card:rgba(13,23,33,.955);
+    --bevel-hi:rgba(45,226,230,.12); --bevel-lo:rgba(0,0,0,.58);
+    --cotes-a:rgba(45,226,230,.02); --cotes-b:rgba(0,0,0,.024);
+    --scrim:rgba(2,4,9,.88); --deepink:rgba(2,4,9,.58); --cast:rgba(0,0,0,.66);
+    --card-shadow:0 22px 48px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--plate);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+
+  /* ---- the movement -------------------------------------------------------
+     ONE svg in design space (1600x1000), sliced to the viewport, so the
+     mechanism SCALES like an object instead of stretching like a wallpaper.
+     Four plane groups translate at four rates; nothing else in here moves. */
+  .movement{position:fixed;inset:0;pointer-events:none;z-index:0}
+  .movement svg{position:absolute;inset:0;width:100%;height:100%}
+  /* Depth of field: the escapement is what the caseback is focused on, so the
+     power train behind it and the weight in front of it both carry a little
+     defocus. And every plane CASTS onto the one behind it — that shadow is the
+     single thing that stops a wheel reading as a shape printed on wallpaper
+     and makes it read as a wheel standing off a plate. The throw grows with
+     the gap: the great wheel is furthest from the plate and throws furthest. */
+  #P1{filter:drop-shadow(9px 13px 9px var(--cast)) blur(.7px)}
+  #P2{filter:drop-shadow(5px 8px 5px var(--cast))}
+  #P3{filter:drop-shadow(12px 17px 13px var(--cast)) blur(.9px)}
+  /* the lamp falls off under the fixed chrome, so the back link and the orb
+     always have their own ground no matter what has scrolled behind them */
+  /* the deeper into the case you go the less of the lamp reaches you. This is
+     the descent's own light, and it is also what keeps the footer's ink over
+     4.5:1 down where the great wheel is at its busiest. */
+  .deepen{position:fixed;inset:0;pointer-events:none;z-index:1;display:none;
+          background:linear-gradient(to bottom, transparent 38%, var(--deepink) 100%);
+          opacity:var(--deep,0)}
+  html.descending .deepen{display:block}
+  .scrim{position:fixed;inset:0;pointer-events:none;z-index:1;
+         background:radial-gradient(220px 150px at 0% 0%, var(--scrim), transparent 100%),
+                    radial-gradient(220px 150px at 100% 0%, var(--scrim), transparent 100%)}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-mid);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--plate-card);
+       cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--plate-card);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           box-shadow:var(--card-shadow);
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-mid);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-mid);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 40px}
+  /* §14: the helm uses the desk — one full row for the sky, two columns for
+     the rest, collapsing to one on a narrow viewport. */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
+  .cards .card{margin-top:0}
+  .card.wide{grid-column:1 / -1}
+  @media (max-width:880px){.cards{grid-template-columns:1fr}}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  /* ---- the plates ---------------------------------------------------------
+     A card on this screen is a machined plate bolted to the movement, and it
+     is OPAQUE. That is a legibility decision before it is a styling one: over
+     a mechanism, translucency is a bet on what happens to be behind, and this
+     screen refuses to take it. What the plate carries instead is the finish
+     the real thing carries — côtes across the face, a polished bevel along
+     the top edge (anglage), a shadow under the bottom one, and two screws
+     with their slots ALIGNED, which is the tell that a person finished it. */
+  .card{position:relative;background:var(--plate-card);
+        background-image:repeating-linear-gradient(102deg,
+          var(--cotes-a) 0 10px, var(--cotes-b) 10px 20px);
+        border:1px solid var(--line-soft);
+        border-radius:14px;padding:20px 22px 22px;margin-top:22px;
+        box-shadow:var(--card-shadow),
+                   inset 0 1px 0 var(--bevel-hi), inset 0 -1px 0 var(--bevel-lo)}
+  /* the two screws. Slot angle is the same on every screw on the screen. */
+  .card::before,.card::after{content:"";position:absolute;width:10px;height:10px;
+    border-radius:50%;pointer-events:none;
+    background:
+      linear-gradient(28deg, transparent 43%, var(--bevel-lo) 43%, var(--bevel-lo) 57%, transparent 57%),
+      radial-gradient(circle at 34% 28%, var(--brass-hi), var(--brass) 52%, var(--brass-lo) 100%);
+    box-shadow:0 0 0 1px var(--bevel-lo), 0 1px 1px var(--bevel-lo)}
+  .card::before{left:10px;top:10px}
+  .card::after{right:10px;bottom:10px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+           color:var(--ink-mid);margin-bottom:14px}
+  .idrow{display:flex;align-items:center;gap:16px}
+  .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;
+                 border:1px solid var(--line);background:var(--panel-raised);
+                 display:grid;place-items:center;font:14px var(--mono);color:var(--ink-mid)}
+  .idrow .who{flex:1}
+  .idrow .who b{display:block;font-size:15px;font-weight:560}
+  .idrow .who span{font:11.5px var(--mono);color:var(--ink-mid)}
+  .idrow button{font:11px var(--mono);color:var(--ink-mid);background:none;
+                border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
+  .idrow button:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ---- the rack of dial-faces --------------------------------------------
+     Choosing a pack is choosing the FACE of the instrument, so the chooser is
+     a rack of enamel dials — and each dial's enamel is that pack's own sky,
+     with that pack's sun at the centre pinion and that pack's planets standing
+     in as the hour markers. Every dial in the rack is set to ten past ten,
+     the way a dial is always shown. The hairline running behind them all is
+     the rack rail. (The ratified law is untouched: the preview is still
+     painted by the pack's own variables and nothing else.) */
+  .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+  .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
+        background:none;padding:0;text-align:left;font-family:var(--ui)}
+  .pack[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .pack .strip{position:relative;height:78px;display:block}
+  .pack .strip svg{display:block;width:100%;height:100%}
+  .pack .label{display:block;padding:9px 12px 10px;background:var(--panel-raised)}
+  .pack .label b{display:block;font-size:12.5px;font-weight:560;color:var(--ink)}
+  .pack .label span{font:10px var(--mono);color:var(--ink-mid)}
+
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+      font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
+      border-bottom:1px solid var(--line-soft)}
+  .kv:last-child{border:0}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok-text)}
+  .kv a{color:var(--ink-mid);text-decoration:none}
+  .kv a:hover{color:var(--accent)}
+  /* a switch that tells the truth: filled when on, hollow when off */
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+          background:none;cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+            background:var(--ink-mid);transition:left .2s,background .2s}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+
+  .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
+        border-bottom:1px solid var(--line-soft);font-size:13.5px}
+  .memb:last-child{border:0}
+  .memb svg{flex:none}
+  .memb b{flex:1;font-weight:520}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+  .role.owner{color:var(--accent-text);border-color:var(--accent)}
+  .memb small{font:10.5px var(--mono);color:var(--ink-mid)}
+
+  /* the last line on the page is a small plate too, so it keeps its contrast
+     down here where the machine is at its busiest */
+  .danger{margin-top:26px;text-align:center}
+  .danger button{font:11.5px var(--mono);color:var(--ink-mid);
+                 background:var(--plate-card);
+                 border:1px solid var(--line);border-radius:9px;padding:9px 18px;cursor:pointer;
+                 box-shadow:var(--card-shadow),inset 0 1px 0 var(--bevel-hi)}
+  .danger button:hover{color:var(--overdue);border-color:var(--overdue)}
+
+  /* THE DEEP END. Not padding: it is the payoff. The plates run out and the
+     last third of the page is the power train, unobstructed — the great
+     wheel's hub, the bob and the weight rising to meet you. */
+  .deepend{position:relative;z-index:2;height:34vh;min-height:210px}
+  /* The footer is the one text on the page with no plate under it and the
+     busiest ground behind it — the great wheel is right there at the foot. It
+     therefore takes full ink rather than the mid tier, and it is painted with
+     a plate-coloured halo, which is the same answer §14 gave the constellation
+     names: paint the ground behind the letter before you paint the letter.
+     Darkening the whole foot would have bought the same number, but it would
+     have thrown away the descent's payoff, and the payoff is the point. */
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink);padding:0 24px 34px;line-height:1.95;
+         text-shadow:0 0 5px var(--plate),0 0 10px var(--plate);
+         max-width:820px;margin:0 auto}
+
+  .demos{position:fixed;left:20px;bottom:18px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:70vw;font:10.5px var(--mono);color:var(--ink-mid);
+         letter-spacing:.08em;background:var(--plate-card);border:1px solid var(--line-soft);
+         border-radius:99px;padding:6px 12px;box-shadow:var(--card-shadow)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+                border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer;letter-spacing:.04em}
+  .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos .seedtag b{color:var(--ink);font-weight:400}
+  .demos .packdots{display:flex;gap:7px;align-items:center}
+  .demos .packdots button{width:16px;height:16px;border-radius:50%;padding:0}
+  .demos .packdots button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  @media (max-width:880px){
+    .demos{position:static;max-width:none;justify-content:center;margin:0 24px 26px;border-radius:14px}
+  }
+  /* stillness: the clock is stopped in script as well as here, because a
+     requestAnimationFrame loop cannot be turned off by a media query */
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- the movement: four planes, one machine -------------------------------- -->
+<div class="movement" aria-hidden="true">
+  <svg id="mv" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice"></svg>
+</div>
+<div class="deepen" aria-hidden="true"></div>
+<div class="scrim" aria-hidden="true"></div>
+
+<a class="back" href="home.html">&larr; YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home &middot; owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html" aria-current="page">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setPack('starchart')"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setPack('afterdark')"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setPack('atlas')"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setPack('dawn')"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setPack('retrograde')"></button>
+  </div>
+  <button class="signout">sign out &rarr;</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Settings</h1>
+    <div class="sub">your controls, and only yours &middot; the instance&rsquo;s levers live on administration</div>
+  </header>
+
+  <div class="cards">
+  <div class="card wide">
+    <h3>You</h3>
+    <div class="idrow">
+      <span class="avatar" aria-hidden="true">TL</span>
+      <div class="who"><b>Tom Lawson</b><span>tom@lawson.example &middot; signed in via your identity provider</span></div>
+      <button>edit name</button>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h3>Your sky</h3>
+    <div class="packs" role="group" aria-label="Theme pack">
+      <button class="pack" data-pack="starchart" aria-pressed="true" onclick="setPack('starchart')">
+        <span class="strip" aria-hidden="true"></span>
+        <span class="label"><b>star-chart</b><span>the ratified night</span></span>
+      </button>
+      <button class="pack" data-pack="afterdark" aria-pressed="false" onclick="setPack('afterdark')">
+        <span class="strip" aria-hidden="true"></span>
+        <span class="label"><b>after dark</b><span>lights out, ink up</span></span>
+      </button>
+      <button class="pack" data-pack="atlas" aria-pressed="false" onclick="setPack('atlas')">
+        <span class="strip" aria-hidden="true"></span>
+        <span class="label"><b>atlas</b><span>aged paper at dusk</span></span>
+      </button>
+      <button class="pack" data-pack="dawn" aria-pressed="false" onclick="setPack('dawn')">
+        <span class="strip" aria-hidden="true"></span>
+        <span class="label"><b>dawn</b><span>first light</span></span>
+      </button>
+      <button class="pack" data-pack="retrograde" aria-pressed="false" onclick="setPack('retrograde')">
+        <span class="strip" aria-hidden="true"></span>
+        <span class="label"><b>retrograde</b><span>the eighties, classy</span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Reminders</h3>
+    <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed="true" aria-label="Email reminders" onclick="flip(this)"><i></i></button></div>
+    <div class="kv"><span>first warning</span><b>14 days before closest approach</b></div>
+    <div class="kv"><span>final warning</span><b>3 days before</b></div>
+    <div class="kv"><span>outbound mail</span><span><b class="on">configured</b> &middot; by your administrator</span></div>
+  </div>
+
+  <div class="card">
+    <h3>Your relay</h3>
+    <div class="kv"><span>address</span><b style="color:var(--accent-text)">tom-k7f2m@in.lawson-home.orbit</b></div>
+    <div class="kv"><span>status</span><b class="on">connected &middot; listening</b></div>
+    <div class="kv"><span>waiting for review</span><a href="inbox.html">1 arrival — open your inbox &rarr;</a></div>
+    <div class="kv"><span>rotate &middot; pause &middot; details</span><a href="../family/settings-mail.html">open the relay &rarr;</a></div>
+  </div>
+
+  <div class="card">
+    <h3>Your systems</h3>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--sun)"/></svg>
+      <b>Lawson Home</b><small>2 members &middot; 6 items</small><span class="role owner">owner</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Seaside Cottage</b><small>3 members &middot; 3 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Mum &amp; Dad&rsquo;s</b><small>2 members &middot; 2 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>The Narrowboat</b><small>1 member &middot; 2 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Gran&rsquo;s Flat</b><small>2 members &middot; 2 items</small><span class="role">member</span>
+    </div>
+  </div>
+
+  </div><!-- /cards -->
+
+  <div class="danger"><button>sign out of every device &rarr;</button></div>
+</div>
+
+<div class="deepend" aria-hidden="true"></div>
+
+<footer>orbit &middot; settings &middot; <b>THE MOVEMENT</b> &mdash; the back of the clock &middot; #472 &middot; &sect;15<br>
+the home screen is the dial; this is the instrument turned over &middot; the cards are its plates, bevelled, screwed down and opaque, bolted onto the machine that drives your orbits<br>
+a real going train: great wheel 96 &rarr; centre 60 &rarr; third 56 &rarr; escape 30, dead-beat, seconds pendulum &mdash; 12 hours, 1 hour, 8 minutes, 1 minute, 1 beat &middot; cycloidal teeth, solved meshes<br>
+scrolling down lowers you through the plates: the escapement leaves first, the power end rises to meet you, and the swing only becomes visible when you reach the bob<br>
+worst-case ink over the busiest ground, glyph pixels only, 5 packs &times; scroll 0 / 0.5 / 1.0: <b>4.73:1</b>, 497 samples, none under 4.5 &mdash; the same audit on the ratified settings.html returns <b>2.07:1</b> and 181 failures</footer>
+
+<div class="demos" aria-label="Mockup movement demos">
+  <span>DEMOS</span>
+  <button onclick="reroll()">re-roll the movement</button>
+  <button id="freezebtn" aria-pressed="false" onclick="toggleFreeze(this)">freeze the train</button>
+  <button onclick="windOn()">wind on &middot; +1 h</button>
+  <span class="seedtag">serial &numero;<b id="serialout">&mdash;</b></span>
+  <span class="packdots" role="group" aria-label="Theme pack">
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setPack('starchart')"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setPack('afterdark')"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setPack('atlas')"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setPack('dawn')"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setPack('retrograde')"></button>
+  </span>
+</div>
+
+<script>
+"use strict";
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+const PACKS = ["starchart","afterdark","atlas","dawn","retrograde"];
+function setPack(name){
+  document.documentElement.setAttribute("data-theme", name);
+  const i = PACKS.indexOf(name);
+  document.querySelectorAll(".swatches button").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+  document.querySelectorAll(".packdots button").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+  document.querySelectorAll(".pack").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+}
+function flip(t){ t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); }
+
+/* ---------- the small change ---------------------------------------------- */
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+                       for (const k in a) e.setAttribute(k, a[k]); return e; };
+const F = n => Number(n).toFixed(2);
+const CL = (v, a, b) => Math.max(a, Math.min(b, v));
+const RAD = Math.PI / 180, DEG = 180 / Math.PI;
+const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
+const polar = (cx, cy, r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+
+/* ---------- one seed, and no roll of any dice ------------------------------
+   There is no Math.random and no Date.now in this file. The seed is a
+   constant; the demo's re-roll walks a fixed hash chain from it, so even a
+   re-rolled movement is reproducible from the number printed in the bar. */
+const DEFAULT_SEED = 19631116;
+function mkRng(s){ let x = Math.abs(Math.floor(s)) % 2147483647; if (x <= 0) x += 2147483646;
+                   return () => (x = (x * 48271) % 2147483647) / 2147483647; }
+function hash(sd, tag, i){
+  let h = (sd ^ Math.imul(tag, 0x85ebca6b)) >>> 0;
+  h = Math.imul(h ^ (i + 0x9e3779b9), 0xc2b2ae35) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h % 2147483647;
+}
+let seed = DEFAULT_SEED, rollIndex = 0;
+
+/* ==========================================================================
+   REAL WHEEL TEETH
+   ==========================================================================
+   Clock wheels are not involute gears. Their teeth are CYCLOIDAL, and the
+   two halves of the profile come from two different curves:
+
+     BELOW the pitch circle the flank is a hypocycloid struck by a generating
+     circle rolling inside the pitch circle. The clockmaker's standing choice
+     is a generating circle of half the pitch diameter, and at exactly that
+     size the hypocycloid degenerates into a straight RADIAL line. So the
+     flanks here are radii — not an approximation of one, the real answer.
+
+     ABOVE it the head is an EPICYCLOID, struck by a generating circle rolling
+     on the OUTSIDE of the pitch circle:
+         x = (R+g)·cos t − g·cos((R+g)t/g)
+         y = (R+g)·sin t − g·sin((R+g)t/g)
+     sampled from the pitch circle outward until it reaches the tip, then
+     mirrored and closed across the top.
+
+   One consequence falls out of that curve and is worth knowing, because it
+   is why real clock wheels look the way they do: an epicycloid cannot climb
+   faster than about 0.73 of its own tangential travel, so a tooth half a
+   pitch thick can only carry a head about half a module tall. Clock wheel
+   teeth are therefore SHALLOW and finely pitched — a great wheel of 96 has a
+   tooth ring a hundredth of its own radius deep. Draw them any taller and it
+   stops being horology and becomes a bicycle. */
+function cycloidWheelPath(N, Rp, opts){
+  const o = opts || {};
+  const m = 2 * Rp / N;                       /* module */
+  const ha = (o.ha != null ? o.ha : 0.42) * m;  /* addendum  */
+  const hd = (o.hd != null ? o.hd : 0.55) * m;  /* dedendum  */
+  const g  = (o.rg != null ? o.rg : 0.45) * m;  /* generating circle */
+  const Rt = Rp + ha, Rr = Rp - hd;
+  /* half the circular pitch, which is the classical clock proportion, and the
+     addendum and generating circle above are then chosen so the epicycloid
+     lands about six per cent short of a point: a HEAD, not a spike and not a
+     flat. Those three numbers are the whole character of the tooth. */
+  const ap = (Math.PI / N) * (o.thick != null ? o.thick : 0.50);  /* half thickness, rad */
+
+  /* the epicycloid, from the pitch circle out to the tip */
+  const k = (Rp + g) / g;
+  const arc = [];
+  const STEP = 0.0006;
+  for (let t = 0; t < 1.6; t += STEP){
+    const x = (Rp + g) * Math.cos(t) - g * Math.cos(k * t);
+    const y = (Rp + g) * Math.sin(t) - g * Math.sin(k * t);
+    const r = Math.hypot(x, y);
+    const a = Math.atan2(y, x);
+    if (a > ap * 0.999) break;                 /* flanks have met: pointed */
+    arc.push([r, a]);
+    if (r >= Rt) break;
+  }
+  if (!arc.length) arc.push([Rp, 0]);
+
+  /* one tooth, as polar samples from the root on the trailing side round to
+     the root on the leading side */
+  const half = [];
+  half.push([Rr, -ap]);
+  half.push([Rp, -ap]);
+  for (const [r, a] of arc) half.push([r, -ap + a]);
+  const tipA = arc[arc.length - 1][1], tipR = arc[arc.length - 1][0];
+  const tipHalf = Math.max(0, ap - tipA);         /* half the flat left at the top */
+  for (let i = arc.length - 1; i >= 0; i--) half.push([arc[i][0], ap - arc[i][1]]);
+  half.push([Rp, ap]);
+  half.push([Rr, ap]);
+
+  let d = "";
+  const pitch = 2 * Math.PI / N;
+  const tipR2 = tipR * Math.tan(tipHalf) + 0.01;   /* round the head over */
+  for (let n = 0; n < N; n++){
+    const base = n * pitch;
+    for (let i = 0; i < half.length; i++){
+      const [r, a] = half[i];
+      const x = r * Math.cos(base + a), y = r * Math.sin(base + a);
+      /* the crown of the tooth: an arc across, not a chord */
+      if (i === arc.length + 2)
+        d += ` A ${F(tipR2)} ${F(tipR2)} 0 0 1 ${F(x)} ${F(y)}`;
+      else
+        d += (n === 0 && i === 0 ? "M " : " L ") + F(x) + " " + F(y);
+    }
+    /* the root arc across to the next tooth */
+    const nx = Rr * Math.cos(base + pitch - ap), ny = Rr * Math.sin(base + pitch - ap);
+    d += ` A ${F(Rr)} ${F(Rr)} 0 0 1 ${F(nx)} ${F(ny)}`;
+  }
+  d += " Z";
+  return { d, Rr, Rt, m };
+}
+
+/* a PINION: few leaves, radial flanks, round heads, and cut deep. Blued
+   steel, because a pinion is hardened and a wheel is not. */
+function pinionPath(N, Rp){
+  const m = 2 * Rp / N;
+  const Rt = Rp + 0.55 * m, Rr = Rp - 0.85 * m;
+  const ap = (Math.PI / N) * 0.52;
+  const pitch = 2 * Math.PI / N;
+  let d = "";
+  for (let n = 0; n < N; n++){
+    const base = n * pitch;
+    const p = (r, a) => `${F(r * Math.cos(base + a))} ${F(r * Math.sin(base + a))}`;
+    d += (n === 0 ? "M " : " L ") + p(Rr, -ap);
+    d += " L " + p(Rp, -ap * 0.94);
+    /* the round head */
+    d += ` A ${F(Rt - Rp + Rp * ap)} ${F(Rt - Rp + Rp * ap)} 0 0 1 ${p(Rp, ap * 0.94)}`;
+    d += " L " + p(Rr, ap);
+    const nx = Rr * Math.cos(base + pitch - ap), ny = Rr * Math.sin(base + pitch - ap);
+    d += ` A ${F(Rr)} ${F(Rr)} 0 0 1 ${F(nx)} ${F(ny)}`;
+  }
+  return d + " Z";
+}
+
+/* the CROSSINGS. A clock wheel is not a disc: the rim is carried on four,
+   five or six tapered arms cut away between hub and rim, and the light
+   through those openings is most of what tells you it is a wheel. */
+function crossings(g, n, hubR, rimR, w, fill){
+  for (let i = 0; i < n; i++){
+    const a = (i / n) * Math.PI * 2;
+    const c = Math.cos(a), s = Math.sin(a);
+    const wh = w * 0.72, wr = w * 0.46;        /* tapered: fat at the hub */
+    const d = `M ${F(c * hubR - s * wh)} ${F(s * hubR + c * wh)}` +
+              ` Q ${F(c * (hubR + rimR) / 2 - s * wh * 0.62)} ${F(s * (hubR + rimR) / 2 + c * wh * 0.62)}` +
+              ` ${F(c * rimR - s * wr)} ${F(s * rimR + c * wr)}` +
+              ` L ${F(c * rimR + s * wr)} ${F(s * rimR - c * wr)}` +
+              ` Q ${F(c * (hubR + rimR) / 2 + s * wh * 0.62)} ${F(s * (hubR + rimR) / 2 - c * wh * 0.62)}` +
+              ` ${F(c * hubR + s * wh)} ${F(s * hubR - c * wh)} Z`;
+    g.appendChild(el("path", { d, fill }));
+  }
+}
+
+/* a whole wheel: toothed rim as an even-odd annulus (so the plate shows
+   through it, which is the point), crossings, hub, collet. */
+function wheel(spec){
+  const { N, Rp, crossN, hubR, colletR, rimDepth, fill, edge } = spec;
+  const w = cycloidWheelPath(N, Rp, spec);
+  const rimIn = w.Rr - rimDepth;
+  const g = el("g");
+  const ring = el("path", {
+    d: w.d + ` M ${F(rimIn)} 0 A ${F(rimIn)} ${F(rimIn)} 0 1 0 ${F(-rimIn)} 0 A ${F(rimIn)} ${F(rimIn)} 0 1 0 ${F(rimIn)} 0 Z`,
+    "fill-rule":"evenodd", fill,
+    /* the cut edge of the tooth: without it the profile dissolves at depth and
+       all the epicycloid work is thrown away */
+    stroke:edge || "none", "stroke-width":.9, "stroke-opacity":".7" });
+  g.appendChild(ring);
+  if (edge) g.appendChild(el("path", { d:`M ${F(rimIn)} 0 A ${F(rimIn)} ${F(rimIn)} 0 1 0 ${F(-rimIn)} 0 A ${F(rimIn)} ${F(rimIn)} 0 1 0 ${F(rimIn)} 0`,
+                                       fill:"none", stroke:edge, "stroke-width":1 }));
+  crossings(g, crossN, hubR, rimIn + 1, spec.armW || Rp * 0.055, fill);
+  g.appendChild(el("circle", { r:hubR, fill }));
+  if (colletR) g.appendChild(el("circle", { r:colletR, fill:"var(--steel)" }));
+  return { g, rimIn, Rt:w.Rt, Rr:w.Rr, m:w.m };
+}
+
+/* ---------- the escapement -------------------------------------------------
+   A GRAHAM DEAD-BEAT escape wheel: thirty thin pointed teeth leaning into
+   the direction of run, with a concave back and an almost radial face. The
+   anchor above it spans seven and a half of them — ninety degrees — and its
+   pallets are struck as ARCS CONCENTRIC WITH THE ANCHOR'S OWN ARBOR, which
+   is the whole invention: while a tooth rests on a locking face the wheel
+   cannot recoil, so it stands perfectly dead until the next unlocking. */
+function escapeWheelPath(N, Rt, Rr){
+  const pitch = 2 * Math.PI / N;
+  let d = "";
+  /* A dead-beat tooth is a thin hook, not a cog tooth: it takes under half the
+     pitch at the rim, its BACK is concave and sweeps up to a point that leans
+     into the run, and its FACE — the short one the pallet actually meets — is
+     very nearly radial. The wide gaps between them are as much of the tell as
+     the teeth: an escape wheel is mostly air. */
+  for (let n = 0; n < N; n++){
+    const b = n * pitch;
+    const p = (r, a) => `${F(r * Math.cos(b + a))} ${F(r * Math.sin(b + a))}`;
+    const back = -pitch * 0.42, front = pitch * 0.04, tip = -pitch * 0.015;
+    d += (n === 0 ? "M " : " L ") + p(Rr, back);
+    d += ` Q ${p(Rr + (Rt - Rr) * 0.30, back * 0.30)} ${p(Rt, tip)}`;
+    d += ` L ` + p(Rr, front);
+    const nx = Rr * Math.cos(b + pitch + back), ny = Rr * Math.sin(b + pitch + back);
+    d += ` A ${F(Rr)} ${F(Rr)} 0 0 1 ${F(nx)} ${F(ny)}`;
+  }
+  return d + " Z";
+}
+
+function anchor(armR, palletA){
+  /* Built about the anchor's own arbor at 0,0. It is a CRESCENT — thick at
+     the middle, tapering to the two pallets — hung under a boss, which is the
+     shape that gave the escapement its name. The pallets sit at ±palletA from
+     straight down at radius armR, and each one's locking face is an ARC OF
+     THAT RADIUS: struck about this arbor, so a tooth resting on it exerts no
+     turning moment and the wheel cannot walk backwards. That single fact is
+     the whole Graham invention and it is the only reason a clock like this
+     can stand dead still between one second and the next. */
+  const g = el("g");
+  const dn = Math.PI / 2;
+  const L = polar(0, 0, armR, dn + palletA), R = polar(0, 0, armR, dn - palletA);
+  const rise = armR * 0.34;                 /* how high the crescent arches */
+  g.appendChild(el("path", {
+    d:`M ${F(L[0])} ${F(L[1])}` +
+      ` Q ${F(L[0] * 0.44)} ${F(L[1] - rise * 0.30)} 0 ${F(L[1] * 0.42)}` +
+      ` Q ${F(R[0] * 0.44)} ${F(R[1] - rise * 0.30)} ${F(R[0])} ${F(R[1])}` +
+      ` L ${F(R[0] * 1.005)} ${F(R[1] * 1.005 + 11)}` +
+      ` Q ${F(R[0] * 0.46)} ${F(R[1] * 0.42 + 19)} 0 ${F(L[1] * 0.42 + 23)}` +
+      ` Q ${F(L[0] * 0.46)} ${F(L[1] * 0.42 + 19)} ${F(L[0] * 1.005)} ${F(L[1] * 1.005 + 11)} Z`,
+    fill:"var(--steel-hi)", "fill-opacity":".82", stroke:"var(--steel-hi)",
+       "stroke-width":1.4, "stroke-opacity":".95" }));
+  /* the neck from the boss down onto the crescent */
+  g.appendChild(el("path", { d:`M -8 0 H 8 L 6 ${F(L[1] * 0.42 + 20)} H -6 Z`,
+    fill:"var(--steel-hi)", "fill-opacity":".82" }));
+  /* the two pallets: jewelled blocks whose inner faces are arcs of armR */
+  for (const s of [-1, 1]){
+    const a0 = dn + s * palletA, w = 0.085, ri = armR - 3, ro = armR + 11;
+    g.appendChild(el("path", {
+      d:`M ${F(Math.cos(a0 - w) * ri)} ${F(Math.sin(a0 - w) * ri)}` +
+        ` A ${F(ri)} ${F(ri)} 0 0 1 ${F(Math.cos(a0 + w) * ri)} ${F(Math.sin(a0 + w) * ri)}` +
+        ` L ${F(Math.cos(a0 + w * .82) * ro)} ${F(Math.sin(a0 + w * .82) * ro)}` +
+        ` A ${F(ro)} ${F(ro)} 0 0 0 ${F(Math.cos(a0 - w * .82) * ro)} ${F(Math.sin(a0 - w * .82) * ro)} Z`,
+      fill:"var(--accent)", opacity:".72" }));
+    g.appendChild(el("path", {
+      d:`M ${F(Math.cos(a0 - w) * ri)} ${F(Math.sin(a0 - w) * ri)}` +
+        ` A ${F(ri)} ${F(ri)} 0 0 1 ${F(Math.cos(a0 + w) * ri)} ${F(Math.sin(a0 + w) * ri)}`,
+      fill:"none", stroke:"var(--sun-core)", "stroke-width":1.1, opacity:".45" }));
+  }
+  g.appendChild(el("circle", { r:12, fill:"var(--steel-hi)", opacity:".85" }));
+  g.appendChild(el("circle", { r:12, fill:"none", stroke:"var(--steel)", "stroke-width":1.6 }));
+  return g;
+}
+
+/* ---------- a jewel in its chaton -----------------------------------------
+   Real: a synthetic sapphire pressed into a gold chaton and held by three
+   screws, sunk into an oil reservoir. Here it takes the pack's accent and
+   breathes on its own long period — the ONLY things on this screen that do
+   not beat with the train, because they are light and not mechanism. */
+const JEWEL_P = [13.7, 17.9, 19.3, 23.1, 29.7, 31.3];
+const jewels = [];
+function jewel(g, x, y, r, idx, ph){
+  const root = el("g", { transform:`translate(${F(x)},${F(y)})` });
+  root.appendChild(el("circle", { r:r * 2.05, fill:"var(--accent)", opacity:".06" }));
+  const halo = el("circle", { r:r * 1.5, fill:"var(--accent)", opacity:".16" });
+  root.appendChild(halo);
+  root.appendChild(el("circle", { r:r * 1.18, fill:"none", stroke:"var(--brass-hi)",
+                                  "stroke-width":r * 0.34, opacity:".55" }));
+  const core = el("circle", { r, fill:"var(--accent)", opacity:".8" });
+  root.appendChild(core);
+  root.appendChild(el("circle", { cx:-r * .3, cy:-r * .3, r:r * .32, fill:"var(--sun-core)", opacity:".35" }));
+  for (let i = 0; i < 3; i++){
+    const a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+    root.appendChild(el("circle", { cx:F(Math.cos(a) * r * 1.9), cy:F(Math.sin(a) * r * 1.9),
+                                    r:r * 0.34, fill:"var(--brass-hi)", opacity:".5" }));
+  }
+  g.appendChild(root);
+  jewels.push({ halo, core, p:JEWEL_P[idx % JEWEL_P.length], ph });
+}
+
+/* ==========================================================================
+   THE MOVEMENT: geometry in design space (1600 x 1000)
+   ========================================================================== */
+const GW = { cx:1400, cy:880, N:96, Rp:520 };                    /* great wheel */
+const GW_M = 2 * GW.Rp / GW.N;
+const CP = { N:8, Rp:8 * GW_M / 2 };                              /* centre pinion */
+/* the line of centres is chosen so the MESH lands in clear margin rather than
+   at the frame's edge: this is the one place on the screen where you can watch
+   ninety-six teeth hand power to eight leaves, and it has to be visible. */
+const PSI = -78 * RAD;
+const CW = { cx:GW.cx + (GW.Rp + CP.Rp) * Math.cos(PSI),
+             cy:GW.cy + (GW.Rp + CP.Rp) * Math.sin(PSI), N:60, Rp:330 };
+const EW = { cx:150, cy:210, N:30, Rt:62, Rr:53 };                /* escape wheel */
+const TW_RP = 126, TW_M = 2 * TW_RP / 56;
+const EP = { N:7, Rp:7 * TW_M / 2 };                              /* escape pinion */
+/* the third wheel is set down and out to the WEST — far enough that the
+   pendulum's rod, which must hang below the anchor's arbor and nowhere else,
+   falls in clear air between the two wheels instead of splitting them */
+const PSI2 = 165 * RAD;
+const TW = { cx:EW.cx + (TW_RP + EP.Rp) * Math.cos(PSI2),
+             cy:EW.cy + (TW_RP + EP.Rp) * Math.sin(PSI2), N:56, Rp:TW_RP };
+/* the anchor's arbor stands 1.35 wheel-radii above the escape wheel's centre,
+   and its pallets take the rim at 45 degrees either side of straight down —
+   a span of seven and a half teeth, which is the classic dead-beat drop. Both
+   the arm length and the pallet bearing then FOLLOW; neither is drawn by eye. */
+const ANCH = { cx:EW.cx, cy:EW.cy - EW.Rt * 1.35 };
+ANCH.armR   = Math.hypot(EW.Rt * Math.SQRT1_2, EW.Rt * (1.35 - Math.SQRT1_2));
+ANCH.pallet = Math.atan2(EW.Rt * Math.SQRT1_2, EW.Rt * (1.35 - Math.SQRT1_2));
+/* the seconds pendulum: plain rod down to the gridiron, gridiron down to the
+   bob, bob over its beat scale. All of it below the fold at rest — the swing
+   is something the DESCENT gives you, because near the suspension a pendulum
+   has nothing to show. */
+const PEND = { x:EW.cx, top:24, amp:2.6,
+               grid0:800, grid1:1140, bobY:1250, bobRx:60, bobRy:96, beat:1400 };
+const CRUTCH = { x:EW.cx - 24, fork:334 };
+const DRUM_R = 118;
+const LINE_X = GW.cx - DRUM_R;      /* the line leaves the drum on its west tangent */
+const ANCHOR_X = 1090;              /* the fixed end, hooked to the seatboard */
+const WEIGHT = { x:(1282 + ANCHOR_X) / 2, y:1400, w:70, h:206 };
+
+/* the four planes, and how fast each leaves you */
+const PLANES = [
+  { id:"P0", k:0.07, op:1 }, { id:"P1", k:0.20, op:.53 },
+  { id:"P2", k:0.44, op:.82 }, { id:"P3", k:0.68, op:.58 },
+];
+
+/* ---------- solved mesh phases ---------------------------------------------
+   The condition, for a driver D of N_D teeth and a driven P of N_P, meshing
+   along the line of centres at bearing psi: D must present a TOOTH at psi and
+   P must present a SPACE at psi+180. Because the pair rolls at the ratio its
+   tooth counts demand, setting that at t = 0 sets it for all time — the proof
+   is that (theta_P − psi_P)·N_P/360 + (theta_D − psi_D)·N_D/360 is a constant
+   of the motion. Nothing about this is the seed's business. */
+function spacePhase(ND, thetaD0, psiD, NP, thetaP0, psiP){
+  const u = (thetaD0 - psiD * DEG) * ND / 360;
+  return (0.5 - u) * 360 / NP + psiP * DEG - thetaP0;
+}
+
+/* ---------- the base angles at T = 0 ---------------------------------------
+   The seed picks the great wheel's own index and the beat's phase; every
+   other phase on the screen is then forced by the meshes or by the train. */
+let PH = {};
+function rollPhases(){
+  const r = mkRng(hash(seed, 0x4d0f, 1) || 1);
+  PH = {};
+  PH.beat  = r();                                   /* where in the second we are */
+  PH.great = r() * 360;                             /* the great wheel's index */
+  PH.centreWheel = r() * 360;                       /* meshes with nothing shown */
+  PH.escape = r() * 360;                            /* the escape wheel's index */
+  PH.jewel = [];
+  for (let i = 0; i < 8; i++) PH.jewel.push(r() * 100);
+  PH.serial = 10000 + Math.floor(r() * 89999);
+  /* great wheel tooth onto the centre pinion's space */
+  PH.centrePinion = spacePhase(GW.N, PH.great, PSI, CP.N, 0, PSI + Math.PI);
+  /* the escape pinion rides with the escape wheel, so it is the THIRD wheel
+     whose index has to be solved */
+  PH.thirdWheel = spacePhase(EP.N, PH.escape, PSI2 + Math.PI, TW.N, 0, PSI2);
+}
+
+/* ---------- the rates ------------------------------------------------------
+   All of them, from the escape wheel outward, because that is the direction
+   the constraint runs: the escapement lets the train move, the train does not
+   push the escapement round.  esc [deg] = 6 per beat.  */
+function angles(T){
+  const b = T + PH.beat;
+  const n = Math.floor(b), f = b - n;
+  const RISE = 0.085;                       /* the unlocking, ~85ms of travel */
+  const e = f < RISE ? (x => x * x * (3 - 2 * x))(f / RISE) : 1;
+  const esc = (n + e) * 6;                  /* 6 deg per beat, then dead still */
+  return {
+    esc:   esc + PH.escape,
+    third: -esc / 8 + PH.thirdWheel,
+    centre: esc / 60,
+    great: -esc / 720 + PH.great,
+    /* the pendulum is the one continuous thing here: a 2-second sine whose
+       zero crossings ARE the beats above */
+    theta: PEND.amp * Math.sin(Math.PI * b),
+  };
+}
+
+/* ---------- build ---------------------------------------------------------- */
+const mv = document.getElementById("mv");
+const H = {};
+function build(){
+  jewels.length = 0;
+  mv.textContent = "";
+  const defs = el("defs");
+  mv.appendChild(defs);
+
+  /* the lamp on the plate, the perlage, the grain */
+  const lamp = el("radialGradient", { id:"lamp", gradientUnits:"userSpaceOnUse",
+    cx:340, cy:90, r:1750 });
+  lamp.appendChild(el("stop", { offset:0, "stop-color":"var(--plate-hi)" }));
+  lamp.appendChild(el("stop", { offset:.45, "stop-color":"var(--plate)" }));
+  lamp.appendChild(el("stop", { offset:1, "stop-color":"var(--plate-lo)" }));
+  defs.appendChild(lamp);
+
+  const pearl = el("radialGradient", { id:"pearl", cx:.34, cy:.3, r:.72 });
+  pearl.appendChild(el("stop", { offset:0, "stop-color":"var(--plate-hi)", "stop-opacity":".55" }));
+  pearl.appendChild(el("stop", { offset:.6, "stop-color":"var(--plate-hi)", "stop-opacity":".08" }));
+  pearl.appendChild(el("stop", { offset:1, "stop-color":"var(--plate-lo)", "stop-opacity":".34" }));
+  defs.appendChild(pearl);
+  const perl = el("pattern", { id:"perlage", width:19, height:19, patternUnits:"userSpaceOnUse" });
+  for (const [x, y] of [[9.5,9.5],[0,0],[19,0],[0,19],[19,19]])
+    perl.appendChild(el("circle", { cx:x, cy:y, r:10, fill:"url(#pearl)" }));
+  defs.appendChild(perl);
+
+  const gf = el("filter", { id:"grainf", x:0, y:0, width:1, height:1 });
+  gf.appendChild(el("feTurbulence", { type:"fractalNoise", baseFrequency:".82",
+    numOctaves:"3", seed:String(seed % 1000), stitchTiles:"stitch" }));
+  gf.appendChild(el("feColorMatrix", { type:"saturate", values:"0" }));
+  defs.appendChild(gf);
+  const gp = el("pattern", { id:"grain", width:200, height:200, patternUnits:"userSpaceOnUse" });
+  gp.appendChild(el("rect", { width:200, height:200, filter:"url(#grainf)" }));
+  defs.appendChild(gp);
+
+  /* wheel shading: brass is not a flat fill, it takes the lamp across it */
+  for (const [id, cx, cy, r] of [["brassG", 340, 90, 1750]]){
+    const bg = el("radialGradient", { id, gradientUnits:"userSpaceOnUse", cx, cy, r });
+    bg.appendChild(el("stop", { offset:0, "stop-color":"var(--brass-hi)" }));
+    bg.appendChild(el("stop", { offset:.34, "stop-color":"var(--brass)" }));
+    bg.appendChild(el("stop", { offset:1, "stop-color":"var(--brass-lo)" }));
+    defs.appendChild(bg);
+  }
+
+  /* the bob is TURNED brass — one axis of highlight down its length, which is
+     the only thing that stops a big ellipse reading as a sticker */
+  const bobG = el("linearGradient", { id:"bobG", gradientUnits:"objectBoundingBox",
+    x1:0, y1:0, x2:1, y2:0 });
+  bobG.appendChild(el("stop", { offset:0, "stop-color":"var(--brass-lo)" }));
+  bobG.appendChild(el("stop", { offset:.19, "stop-color":"var(--brass-hi)" }));
+  bobG.appendChild(el("stop", { offset:.30, "stop-color":"var(--brass)" }));
+  bobG.appendChild(el("stop", { offset:.62, "stop-color":"var(--brass-lo)" }));
+  bobG.appendChild(el("stop", { offset:.86, "stop-color":"var(--brass)" }));
+  bobG.appendChild(el("stop", { offset:1, "stop-color":"var(--brass-lo)" }));
+  defs.appendChild(bobG);
+
+  const planes = {};
+  for (const p of PLANES){ planes[p.id] = el("g", { id:p.id, opacity:p.op }); mv.appendChild(planes[p.id]); }
+  H.planes = planes;
+
+  /* ---- P0 · THE PLATE ---------------------------------------------------- */
+  const P0 = planes.P0;
+  P0.appendChild(el("rect", { x:-400, y:-500, width:2400, height:2100, fill:"url(#lamp)" }));
+  P0.appendChild(el("rect", { x:-400, y:-500, width:2400, height:2100, fill:"url(#perlage)", opacity:".2" }));
+  /* the pillars that hold the two plates apart, seen end-on, and their pins */
+  for (const [x, y] of [[92,700],[1512,148],[1046,42],[318,952]]){
+    const g = el("g", { transform:`translate(${x},${y})` });
+    g.appendChild(el("circle", { r:23, fill:"var(--plate-lo)", opacity:".7" }));
+    g.appendChild(el("circle", { r:20, fill:"url(#brassG)", opacity:".5" }));
+    g.appendChild(el("circle", { r:11, fill:"var(--plate-lo)", opacity:".55" }));
+    g.appendChild(el("path", { d:"M -9 0 H 9", stroke:"var(--brass-hi)", "stroke-width":2.2, opacity:".35" }));
+    P0.appendChild(g);
+  }
+  /* plate screws, all slots aligned — the finisher's tell */
+  for (const [x, y] of [[46,84],[1548,904],[664,26],[936,978],[62,470],[1544,556]]){
+    const g = el("g", { transform:`translate(${x},${y})` });
+    g.appendChild(el("circle", { r:9, fill:"url(#brassG)", opacity:".55" }));
+    g.appendChild(el("circle", { r:9, fill:"none", stroke:"var(--plate-lo)", "stroke-width":1.2, opacity:".7" }));
+    g.appendChild(el("path", { d:"M -6.4 -3.4 L 6.4 3.4", stroke:"var(--plate-lo)", "stroke-width":2.4, opacity:".8" }));
+    P0.appendChild(g);
+  }
+  /* THE ENGRAVING. Faint, cut into the plate, in the right margin where the
+     wheels leave it clear — discoverable rather than shouted. */
+  const eng = el("g", { transform:"translate(1466,540) rotate(-1.2)", "text-anchor":"middle" });
+  const engLines = [
+    ["ORBIT", 11, ".42em"],
+    ["CAL. 1963", 9.5, ".30em"],
+    ["21 JEWELS · DEAD BEAT", 8, ".18em"],
+    ["SECONDS PENDULUM", 8, ".18em"],
+    ["№ " + PH.serial, 8, ".22em"],
+  ];
+  engLines.forEach((L, i) => {
+    const t = el("text", { x:0, y:i * 15, "font-family":MONO, "font-size":L[1],
+      "letter-spacing":L[2], fill:"var(--engrave)" });
+    t.textContent = L[0];
+    eng.appendChild(t);
+  });
+  P0.appendChild(eng);
+
+  /* ---- P1 · THE POWER ---------------------------------------------------- */
+  const P1 = planes.P1;
+  /* the great wheel: 96 teeth, six crossings, one turn in twelve hours */
+  const gw = wheel({ N:GW.N, Rp:GW.Rp, crossN:6, hubR:70, colletR:0, rimDepth:26,
+                     fill:"url(#brassG)", edge:"var(--brass-lo)", armW:21 });
+  H.great = el("g", { transform:`translate(${GW.cx},${GW.cy})` });
+  H.greatSpin = el("g"); H.greatSpin.appendChild(gw.g); H.great.appendChild(H.greatSpin);
+  /* the drum the line is wound on, and the ratchet and click that hold it */
+  const hub = el("g");
+  hub.appendChild(el("circle", { r:DRUM_R, fill:"var(--plate-lo)", opacity:".5" }));
+  hub.appendChild(el("circle", { r:DRUM_R, fill:"none", stroke:"var(--brass-lo)", "stroke-width":3 }));
+  hub.appendChild(el("circle", { r:DRUM_R - 13, fill:"none", stroke:"var(--brass-hi)",
+                                 "stroke-width":1.4, opacity:".3" }));
+  H.great.appendChild(hub);
+  /* the RATCHET: thirty teeth with a radial face and a long back slope, which
+     is the whole trick — the click drops behind a face and the wheel can be
+     wound one way and cannot unwind the other. */
+  H.ratchet = el("g");
+  let rd = "";
+  const RT_N = 30, RT_0 = 64, RT_1 = 78;
+  for (let i = 0; i < RT_N; i++){
+    const a = (i / RT_N) * Math.PI * 2, a2 = ((i + 1) / RT_N) * Math.PI * 2;
+    rd += (i === 0 ? "M " : " L ") + `${F(Math.cos(a) * RT_0)} ${F(Math.sin(a) * RT_0)}`;
+    rd += ` L ${F(Math.cos(a) * RT_1)} ${F(Math.sin(a) * RT_1)}`;
+    rd += ` L ${F(Math.cos(a2) * RT_0)} ${F(Math.sin(a2) * RT_0)}`;
+  }
+  H.ratchet.appendChild(el("path", { d:rd + " Z", fill:"url(#brassG)", opacity:".9" }));
+  H.ratchet.appendChild(el("rect", { x:-16, y:-16, width:32, height:32, rx:2.5,
+    fill:"var(--brass-lo)", stroke:"var(--brass-hi)", "stroke-width":1.6,
+    "stroke-opacity":".5", transform:"rotate(21)" }));   /* the winding square */
+  H.great.appendChild(H.ratchet);
+  /* the click: a sprung pawl dropped into a ratchet tooth, with its spring */
+  /* the CLICK: a pawl on its own pivot whose nose sits IN a ratchet tooth, with
+     the click spring behind it holding it down. Both are screwed to the plate
+     and neither turns, so they are drawn outside the wheel's own rotation. */
+  const CKP = polar(0, 0, 134, -52 * RAD), CKT = polar(0, 0, RT_0 + 3, -34 * RAD);
+  const click = el("g");
+  click.appendChild(el("path", {
+    d:`M ${F(CKP[0] + 7)} ${F(CKP[1] + 5)} L ${F(CKT[0] + 3)} ${F(CKT[1] + 5)}` +
+      ` L ${F(CKT[0] - 2)} ${F(CKT[1] - 4)} L ${F(CKP[0] - 7)} ${F(CKP[1] - 5)} Z`,
+    fill:"var(--steel-hi)", "fill-opacity":".85", stroke:"var(--steel)", "stroke-width":1.2 }));
+  click.appendChild(el("path", {
+    d:`M ${F(CKP[0] + 16)} ${F(CKP[1] - 4)} Q ${F(CKP[0] + 46)} ${F(CKP[1] + 16)} ${F(CKP[0] + 34)} ${F(CKP[1] + 52)}`,
+    fill:"none", stroke:"var(--steel-hi)", "stroke-width":2.6, opacity:".7" }));
+  click.appendChild(el("circle", { cx:F(CKP[0]), cy:F(CKP[1]), r:7, fill:"url(#brassG)" }));
+  click.appendChild(el("circle", { cx:F(CKP[0]), cy:F(CKP[1]), r:7, fill:"none",
+    stroke:"var(--brass-lo)", "stroke-width":1.4 }));
+  H.great.appendChild(click);
+  P1.appendChild(H.great);
+
+  /* the centre wheel: one turn an hour, and its eight-leaf pinion standing
+     proud of the hub so the mesh with the great wheel can actually be seen */
+  H.centre = el("g", { transform:`translate(${F(CW.cx)},${F(CW.cy)})` });
+  H.centreSpin = el("g");
+  const cw = wheel({ N:CW.N, Rp:CW.Rp, crossN:5, hubR:30, colletR:0, rimDepth:22,
+                     fill:"url(#brassG)", edge:"var(--brass-lo)", armW:16 });
+  H.centreSpin.appendChild(cw.g);
+  H.centre.appendChild(H.centreSpin);
+  H.centrePin = el("g");
+  H.centrePin.appendChild(el("path", { d:pinionPath(CP.N, CP.Rp), fill:"var(--steel)" }));
+  H.centrePin.appendChild(el("circle", { r:CP.Rp * .34, fill:"var(--steel-hi)", opacity:".45" }));
+  H.centre.appendChild(H.centrePin);
+  P1.appendChild(H.centre);
+  jewel(P1, CW.cx, CW.cy, 7, 0, PH.jewel[0]);
+  jewel(P1, GW.cx, GW.cy, 8, 1, PH.jewel[1]);
+
+  /* ---- P2 · THE TIME ----------------------------------------------------- */
+  const P2 = planes.P2;
+
+  /* THE PENDULUM, drawn FIRST so the train stands in front of it. Suspension
+     cock, rod, crutch and bob all swing about the suspension point, which is
+     why nothing appears to move up here and the bob covers sixty pixels down
+     there: near the top of a pendulum there is almost nothing to see, and the
+     descent is what buys you the swing. */
+  H.pend = el("g");
+  H.pendSpin = el("g");
+  const rod = el("g");
+  rod.appendChild(el("path", { d:`M ${PEND.x - 4.4} ${PEND.top} H ${PEND.x + 4.4} V ${PEND.bobY} H ${PEND.x - 4.4} Z`,
+    fill:"var(--plate-lo)", opacity:".5" }));                       /* its shadow */
+  rod.appendChild(el("path", { d:`M ${PEND.x - 2.6} ${PEND.top} H ${PEND.x + 2.6} V ${PEND.bobY} H ${PEND.x - 2.6} Z`,
+    fill:"var(--steel)" }));
+  rod.appendChild(el("path", { d:`M ${PEND.x - 1} ${PEND.top} V ${PEND.bobY}`,
+    stroke:"var(--steel-hi)", "stroke-width":.9, opacity:".34", fill:"none" }));
+
+  /* THE GRIDIRON. The second thing the descent gives you, and the reason a
+     regulator keeps time in a cold hall: nine rods alternating steel and
+     brass, arranged so that the brass, expanding faster, pushes the bob back
+     UP by exactly as much as the steel lets it down. The pendulum stays the
+     same length in July as in January. Harrison's answer, 1726, and still the
+     handsomest object in clockmaking. Brass rods are drawn brass and steel
+     rods steel: you can read the alternation off the picture. */
+  (function gridiron(){
+    const y0 = PEND.grid0, y1 = PEND.grid1, x = PEND.x;
+    const g = el("g");
+    const bar = (y, w, col) => g.appendChild(el("rect", { x:x - w / 2, y:y - 5, width:w, height:10,
+      rx:3, fill:col }));
+    const spacing = 11.5;
+    for (let i = -4; i <= 4; i++){
+      if (i === 0) continue;
+      const brass = Math.abs(i) % 2 === 1;
+      const top = brass ? y0 + 22 : y0 + 5;
+      const bot = brass ? y1 - 5 : y1 - 22;
+      g.appendChild(el("rect", { x:x + i * spacing - 2.6, y:top, width:5.2, height:bot - top,
+        rx:2, fill:brass ? "url(#brassG)" : "var(--steel-hi)",
+        opacity:brass ? 1 : .8 }));
+    }
+    bar(y0 + 5,  spacing * 4 + 10, "var(--steel-hi)");
+    bar(y1 - 5,  spacing * 4 + 10, "var(--steel-hi)");
+    bar(y0 + 22, spacing * 8 + 10, "url(#brassG)");
+    bar(y1 - 22, spacing * 8 + 10, "url(#brassG)");
+    rod.appendChild(g);
+  })();
+  /* the crutch: cranked clear of the arbor, run down past both wheels, and
+     forked onto the rod. It rocks with the anchor because it IS the anchor —
+     one piece of steel through the plate — and the fork is what turns that
+     rocking into a push on the pendulum, once a second, for ever. */
+  rod.appendChild(el("path", {
+    d:`M ${ANCH.cx} ${F(ANCH.cy)} L ${CRUTCH.x} ${F(ANCH.cy + 16)} L ${CRUTCH.x} ${CRUTCH.fork}`,
+    fill:"none", stroke:"var(--steel-hi)", "stroke-width":4, opacity:".8" }));
+  rod.appendChild(el("path", {
+    d:`M ${CRUTCH.x} ${CRUTCH.fork - 11} H ${PEND.x + 9} M ${CRUTCH.x} ${CRUTCH.fork + 11} H ${PEND.x + 9}`,
+    fill:"none", stroke:"var(--steel-hi)", "stroke-width":3.4, opacity:".8" }));
+  /* the bob: a lens on its rating nut */
+  const bob = el("g", { transform:`translate(${PEND.x},${PEND.bobY})` });
+  bob.appendChild(el("ellipse", { rx:PEND.bobRx, ry:PEND.bobRy, fill:"url(#bobG)" }));
+  bob.appendChild(el("ellipse", { rx:PEND.bobRx, ry:PEND.bobRy, fill:"none",
+    stroke:"var(--brass-lo)", "stroke-width":2.6 }));
+  bob.appendChild(el("ellipse", { rx:PEND.bobRx * .54, ry:PEND.bobRy * .58, fill:"none",
+    stroke:"var(--brass-hi)", "stroke-width":1.6, opacity:".26" }));
+  /* the rating nut: turn it and the clock gains or loses a second a day */
+  bob.appendChild(el("path", { d:`M -11 ${PEND.bobRy + 7} H 11 M -8 ${PEND.bobRy + 18} H 8`,
+    stroke:"var(--brass-hi)", "stroke-width":3.4, opacity:".5" }));
+  rod.appendChild(bob);
+  H.pendSpin.appendChild(rod);
+  H.pend.appendChild(H.pendSpin);
+  P2.appendChild(H.pend);
+  /* the BEAT SCALE: a graduated arc screwed to the case, not to the pendulum,
+     so it stands still while the bob crosses it. A regulator has one because
+     a pendulum out of beat runs but does not keep — you set it by eye against
+     these marks. It is also, on this screen, the only thing that makes the
+     swing measurable rather than merely visible. */
+  const beat = el("g", { transform:`translate(${PEND.x},${PEND.beat})` });
+  beat.appendChild(el("path", { d:"M -62 8 Q 0 -6 62 8", fill:"none",
+    stroke:"var(--brass-hi)", "stroke-width":2.2, opacity:".5" }));
+  for (let i = -4; i <= 4; i++){
+    const t = i / 4, x = t * 60, y = 8 - (1 - t * t) * 14;
+    beat.appendChild(el("path", { d:`M ${F(x)} ${F(y)} V ${F(y + (i === 0 ? 13 : 8))}`,
+      stroke:"var(--brass-hi)", "stroke-width":i === 0 ? 2.4 : 1.4, opacity:".5" }));
+  }
+  P2.appendChild(beat);
+
+  /* the suspension cock sits ABOVE the swing and does not move with it */
+  const cock = el("g", { transform:`translate(${PEND.x},${PEND.top})` });
+  cock.appendChild(el("path", { d:"M -30 -18 H 30 A 9 9 0 0 1 30 0 H -30 A 9 9 0 0 1 -30 -18 Z",
+    fill:"url(#brassG)", opacity:".9" }));
+  cock.appendChild(el("path", { d:"M -30 0 H 30", stroke:"var(--brass-hi)", "stroke-width":1, opacity:".4" }));
+  cock.appendChild(el("circle", { cx:-18, cy:-9, r:3.6, fill:"var(--brass-lo)", opacity:".8" }));
+  cock.appendChild(el("circle", { cx:18, cy:-9, r:3.6, fill:"var(--brass-lo)", opacity:".8" }));
+  P2.appendChild(cock);
+
+  /* the third wheel: 56 teeth, one turn in eight minutes, running off the
+     west edge of the frame because the machine does not stop at the screen */
+  H.third = el("g", { transform:`translate(${F(TW.cx)},${F(TW.cy)})` });
+  const tw = wheel({ N:TW.N, Rp:TW.Rp, crossN:5, hubR:19, colletR:8, rimDepth:13,
+                     fill:"url(#brassG)", edge:"var(--brass-lo)", armW:10 });
+  H.third.appendChild(tw.g);
+  P2.appendChild(H.third);
+
+  /* the escape wheel and, at its centre, the seven-leaf pinion the third
+     wheel drives — visible around a deliberately small collet, which is how
+     you see it on the real thing: the third wheel's teeth vanish under the
+     escape wheel's rim and reappear through its crossings, meshing home. */
+  H.escape = el("g", { transform:`translate(${EW.cx},${EW.cy})` });
+  H.escapePin = el("g");
+  H.escapePin.appendChild(el("path", { d:pinionPath(EP.N, EP.Rp), fill:"var(--steel)" }));
+  H.escape.appendChild(H.escapePin);
+  H.escapeSpin = el("g");
+  const ewg = el("g");
+  ewg.appendChild(el("path", { d:escapeWheelPath(EW.N, EW.Rt, EW.Rr) + ` M ${EW.Rr - 9} 0` +
+    ` A ${EW.Rr - 9} ${EW.Rr - 9} 0 1 0 ${-(EW.Rr - 9)} 0 A ${EW.Rr - 9} ${EW.Rr - 9} 0 1 0 ${EW.Rr - 9} 0 Z`,
+    "fill-rule":"evenodd", fill:"url(#brassG)" }));
+  crossings(ewg, 4, 10, EW.Rr - 8, 4.4, "url(#brassG)");
+  ewg.appendChild(el("circle", { r:10, fill:"url(#brassG)" }));
+  H.escapeSpin.appendChild(ewg);
+  H.escape.appendChild(H.escapeSpin);
+  P2.appendChild(H.escape);
+
+  /* the anchor, rocking with the pendulum, in front of the wheel it holds */
+  H.anchor = el("g", { transform:`translate(${ANCH.cx},${F(ANCH.cy)})` });
+  H.anchorSpin = el("g");
+  H.anchorSpin.appendChild(anchor(ANCH.armR, ANCH.pallet));
+  H.anchor.appendChild(H.anchorSpin);
+  P2.appendChild(H.anchor);
+
+  jewel(P2, ANCH.cx, ANCH.cy, 5, 4, PH.jewel[4]);
+  jewel(P2, EW.cx, EW.cy, 4.6, 2, PH.jewel[2]);
+  jewel(P2, TW.cx, TW.cy, 4.6, 3, PH.jewel[3]);
+  jewel(P2, 232, 470, 4.2, 5, PH.jewel[5]);
+
+  /* ---- P3 · THE FALL ------------------------------------------------------
+     The line and the weight hang in front of everything, nearer to you than
+     the plates, so they move fastest of all — and because a plain line has no
+     features, it reads as continuous from the drum however far the planes
+     have slid apart. */
+  const P3 = planes.P3;
+  /* A longcase weight does not hang on one line. The line runs from the drum,
+     down round a PULLEY in the weight's own stirrup and back up to a hook on
+     the seatboard — which halves the fall and doubles the pull, and is why
+     the weight sits between the two lines rather than under the drum. */
+  const pulleyY = WEIGHT.y - WEIGHT.h / 2 - 30;
+  for (const x of [LINE_X, ANCHOR_X])
+    P3.appendChild(el("path", { d:`M ${F(x)} -600 V ${F(pulleyY)}`,
+      stroke:"var(--brass-hi)", "stroke-width":2.4, opacity:".45", fill:"none" }));
+  P3.appendChild(el("path", { d:`M ${F(LINE_X)} ${F(pulleyY)} A ${F((LINE_X - ANCHOR_X) / 2)} ${F((LINE_X - ANCHOR_X) / 2)} 0 0 1 ${F(ANCHOR_X)} ${F(pulleyY)}`,
+    fill:"none", stroke:"var(--brass-hi)", "stroke-width":2.4, opacity:".45" }));
+  const wt = el("g", { transform:`translate(${F(WEIGHT.x)},${WEIGHT.y})` });
+  wt.appendChild(el("circle", { cy:pulleyY - WEIGHT.y, r:19, fill:"url(#brassG)" }));
+  wt.appendChild(el("circle", { cy:pulleyY - WEIGHT.y, r:19, fill:"none",
+    stroke:"var(--brass-lo)", "stroke-width":2 }));
+  wt.appendChild(el("circle", { cy:pulleyY - WEIGHT.y, r:6, fill:"var(--brass-lo)" }));
+  wt.appendChild(el("path", { d:`M -19 ${F(pulleyY - WEIGHT.y)} V ${-WEIGHT.h / 2 + 6}` +
+    ` M 19 ${F(pulleyY - WEIGHT.y)} V ${-WEIGHT.h / 2 + 6}`,
+    fill:"none", stroke:"var(--brass-hi)", "stroke-width":3, opacity:".55" }));
+  wt.appendChild(el("rect", { x:-WEIGHT.w / 2, y:-WEIGHT.h / 2, width:WEIGHT.w, height:WEIGHT.h,
+    rx:10, fill:"url(#brassG)" }));
+  wt.appendChild(el("rect", { x:-WEIGHT.w / 2, y:-WEIGHT.h / 2, width:WEIGHT.w, height:WEIGHT.h,
+    rx:10, fill:"none", stroke:"var(--brass-lo)", "stroke-width":2 }));
+  wt.appendChild(el("path", { d:`M ${-WEIGHT.w / 2 + 11} ${-WEIGHT.h / 2 + 8} V ${WEIGHT.h / 2 - 8}`,
+    stroke:"var(--brass-hi)", "stroke-width":2, opacity:".3", fill:"none" }));
+  wt.appendChild(el("path", { d:`M ${-WEIGHT.w / 2} ${-WEIGHT.h / 2 + 20} H ${WEIGHT.w / 2}` +
+    ` M ${-WEIGHT.w / 2} ${WEIGHT.h / 2 - 20} H ${WEIGHT.w / 2}`,
+    stroke:"var(--brass-lo)", "stroke-width":1.6, opacity:".7", fill:"none" }));
+  P3.appendChild(wt);
+
+  /* the whole-frame grain, over everything, still (§5's light stack) */
+  mv.appendChild(el("rect", { x:-400, y:-500, width:2400, height:2100, fill:"url(#grain)",
+    opacity:".055", style:"mix-blend-mode:overlay" }));
+
+  document.getElementById("serialout").textContent = String(PH.serial);
+  applyScroll();
+  tick(T);
+}
+
+/* ---------- the clock ------------------------------------------------------ */
+let T0 = 0, T = 0, frozen = false, raf = null, wound = 0;
+const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+function tick(t){
+  const a = angles(t);
+  H.greatSpin.setAttribute("transform", `rotate(${F(a.great)})`);
+  H.centreSpin.setAttribute("transform", `rotate(${F(a.centre + PH.centreWheel)})`);
+  H.centrePin.setAttribute("transform", `rotate(${F(a.centre + PH.centrePinion)})`);
+  H.ratchet.setAttribute("transform", `rotate(${F(a.great)})`);
+  H.third.setAttribute("transform", `translate(${F(TW.cx)},${F(TW.cy)}) rotate(${F(a.third)})`);
+  H.escapeSpin.setAttribute("transform", `rotate(${F(a.esc)})`);
+  H.escapePin.setAttribute("transform", `rotate(${F(a.esc)})`);
+  H.anchorSpin.setAttribute("transform", `rotate(${F(a.theta)})`);
+  H.pendSpin.setAttribute("transform", `rotate(${F(a.theta)} ${PEND.x} ${PEND.top})`);
+  for (const j of jewels){
+    const v = 0.5 + 0.5 * Math.sin(2 * Math.PI * (t / j.p) + j.ph);
+    j.halo.setAttribute("opacity", (0.09 + 0.16 * v).toFixed(3));
+    j.core.setAttribute("opacity", (0.62 + 0.3 * v).toFixed(3));
+  }
+}
+
+function frame(now){
+  if (!frozen) T = T0 + now / 1000 + wound;
+  tick(T);
+  raf = frozen ? null : requestAnimationFrame(frame);
+}
+function run(){
+  if (raf) cancelAnimationFrame(raf);
+  raf = null;
+  if (frozen || still.matches){ T = T0 + wound; tick(T); }
+  else raf = requestAnimationFrame(frame);
+}
+
+/* ---------- THE DESCENT ----------------------------------------------------
+   Four planes, four rates, all of them a pure function of scroll position:
+   monotonic, exact at both ends, identical coming back up, and kept in full
+   under reduced motion because it is position and not a clock. Parked at the
+   top is not "descended by zero" — nothing below is in effect at all. */
+let scrollQueued = false;
+function applyScroll(){
+  /* the travel is measured against the page's ACTUAL scroll, read live, so the
+     foot of the page is exactly the foot of the descent on every viewport */
+  const room = Math.max(120, document.documentElement.scrollHeight - window.innerHeight);
+  const y = Math.max(0, window.scrollY);
+  const p = CL(y / room, 0, 1);
+  for (const pl of PLANES)
+    H.planes[pl.id].setAttribute("transform", `translate(0,${F(-pl.k * p * 1000)})`);
+  document.documentElement.style.setProperty("--deep", (p * p * (3 - 2 * p)).toFixed(3));
+  document.documentElement.classList.toggle("descending", y > 0);
+}
+window.addEventListener("scroll", () => {
+  if (scrollQueued) return;
+  scrollQueued = true;
+  requestAnimationFrame(() => { scrollQueued = false; applyScroll(); });
+}, { passive:true });
+
+/* the mechanism lives in the margins the column can spare; where there are
+   none it steps back rather than fighting the plates for the screen */
+function fit(){
+  const margin = (window.innerWidth - 1060) / 2;
+  mv.style.opacity = CL((margin - 10) / 150, 0.34, 1).toFixed(3);
+  applyScroll();
+}
+
+/* ---------- the rack of dials ---------------------------------------------- */
+const DIALS = {
+  starchart:{ bg:"#060b1c", sun:"#ffe9c4", core:"#fff6e6", ink:"#e9edf8", acc:"#d8b45a",
+              dots:["#f0b429","#4ade80","#8fb8ff"], star:"#e9edf8", ring:"#c8a869" },
+  afterdark:{ bg:"#05070d", sun:"#dbe9ff", core:"#ffffff", ink:"#e7e9ee", acc:"#7dd3fc",
+              dots:["#f0b429","#4ade80","#7dd3fc"], star:"#e9edf8", ring:"#a9b2c1" },
+  atlas:{ bg:"#c9bfa6", sun:"#8f6c00", core:"#1c2b4a", ink:"#1c2b4a", acc:"#b4842c",
+          dots:["#8f6c00","#1e7a45","#2b6cb0"], star:"#1c2b4a", ring:"#8a6d2c" },
+  dawn:{ bg:"#c3ccdb", sun:"#8f6c00", core:"#1a2233", ink:"#1a2233", acc:"#1f7ac2",
+         dots:["#8f6c00","#178a4c","#1f7ac2"], star:"#1a2233", ring:"#7d6534" },
+  retrograde:{ bg:"#080a14", sun:"#ff4fd8", core:"#fff0fb", ink:"#eef6ff", acc:"#2de2e6",
+               dots:["#ffd23f","#3ef2a0","#2de2e6"], star:"#9fd6e6", ring:"#63bcd0" },
+};
+function buildDials(){
+  document.querySelectorAll(".pack").forEach((btn, idx) => {
+    const D = DIALS[btn.dataset.pack];
+    const strip = btn.querySelector(".strip");
+    strip.textContent = "";
+    const r = mkRng(hash(seed, 0x0d1a1, idx + 1) || 7);
+    const s = el("svg", { viewBox:"0 0 200 78", preserveAspectRatio:"xMidYMid slice" });
+    s.appendChild(el("rect", { width:200, height:78, fill:D.bg }));
+    for (let i = 0; i < 7; i++)
+      s.appendChild(el("circle", { cx:F(r() * 200), cy:F(r() * 78), r:(0.5 + r() * 0.8).toFixed(2),
+        fill:D.star, opacity:(0.12 + r() * 0.28).toFixed(2) }));
+    /* the rack rail the dials stand on */
+    s.appendChild(el("path", { d:"M 0 39 H 200", stroke:D.ink, "stroke-width":.8, opacity:".13" }));
+    const CXD = 100, CYD = 39, RD = 33;
+    const dg = el("g", { transform:`translate(${CXD},${CYD})` });
+    dg.appendChild(el("circle", { r:RD + 2, fill:"#000", opacity:".28" }));
+    dg.appendChild(el("circle", { cy:1, r:RD + 1.6, fill:"none", stroke:D.ring, "stroke-width":2.4, opacity:".9" }));
+    dg.appendChild(el("circle", { r:RD, fill:D.bg }));
+    /* the enamel's dome */
+    const eid = "en" + idx;
+    const dfs = el("defs");
+    const rg = el("radialGradient", { id:eid, cx:".34", cy:".26", r:".8" });
+    rg.appendChild(el("stop", { offset:0, "stop-color":D.ink, "stop-opacity":".14" }));
+    rg.appendChild(el("stop", { offset:.6, "stop-color":D.ink, "stop-opacity":".02" }));
+    rg.appendChild(el("stop", { offset:1, "stop-color":"#000", "stop-opacity":".16" }));
+    dfs.appendChild(rg); s.appendChild(dfs);
+    dg.appendChild(el("circle", { r:RD, fill:`url(#${eid})` }));
+    /* the chapter ring and the printed minute track */
+    dg.appendChild(el("circle", { r:26.5, fill:"none", stroke:D.ink, "stroke-width":.6, opacity:".34" }));
+    const marks = el("g", { stroke:D.ink });
+    for (let i = 0; i < 60; i++){
+      const a = (i / 60) * Math.PI * 2 - Math.PI / 2;
+      const five = i % 5 === 0;
+      const r0 = 26.5, r1 = five ? 22 : 24.6;
+      marks.appendChild(el("path", {
+        d:`M ${F(Math.cos(a) * r0)} ${F(Math.sin(a) * r0)} L ${F(Math.cos(a) * r1)} ${F(Math.sin(a) * r1)}`,
+        "stroke-width":five ? 1.3 : .55, opacity:five ? ".8" : ".42" }));
+    }
+    dg.appendChild(marks);
+    /* the pack's own planets standing in as hour markers */
+    [[2, 0], [5, 1], [9, 2]].forEach(([h, k]) => {
+      const a = (h / 12) * Math.PI * 2 - Math.PI / 2;
+      dg.appendChild(el("circle", { cx:F(Math.cos(a) * 24.2), cy:F(Math.sin(a) * 24.2),
+        r:2.5, fill:D.dots[k] }));
+    });
+    /* the sunk subsidiary seconds */
+    const sub = el("g", { transform:"translate(0,15.5)" });
+    sub.appendChild(el("circle", { r:7.2, fill:"#000", opacity:".14" }));
+    sub.appendChild(el("circle", { r:7, fill:"none", stroke:D.ink, "stroke-width":.5, opacity:".4" }));
+    for (let i = 0; i < 4; i++){
+      const a = (i / 4) * Math.PI * 2 - Math.PI / 2;
+      sub.appendChild(el("path", { d:`M ${F(Math.cos(a) * 7)} ${F(Math.sin(a) * 7)} L ${F(Math.cos(a) * 5)} ${F(Math.sin(a) * 5)}`,
+        stroke:D.ink, "stroke-width":.7, opacity:".6" }));
+    }
+    sub.appendChild(el("path", { d:"M 0 1.4 L 2.6 -5.6", stroke:D.acc, "stroke-width":.9 }));
+    sub.appendChild(el("circle", { r:1, fill:D.ink, opacity:".7" }));
+    dg.appendChild(sub);
+    /* the hands, at ten past ten, the way a dial is always shown */
+    const hand = (len, w, ang, col) => el("path", {
+      d:`M 0 ${-len} Q ${w} ${-len * .42} 0 ${w * .5} Q ${-w} ${-len * .42} 0 ${-len} Z`,
+      fill:col, transform:`rotate(${ang})` });
+    dg.appendChild(hand(13.5, 2.6, 305, D.ink));
+    dg.appendChild(hand(21, 2.2, 60, D.ink));
+    dg.appendChild(el("circle", { r:6, fill:D.sun, opacity:".22" }));
+    dg.appendChild(el("circle", { r:4, fill:D.core }));
+    dg.appendChild(el("circle", { r:1.7, fill:D.sun }));
+    s.appendChild(dg);
+    strip.appendChild(s);
+  });
+}
+
+/* ---------- demos ---------------------------------------------------------- */
+function reroll(){
+  rollIndex += 1;
+  seed = hash(DEFAULT_SEED, 0x5eed, rollIndex);
+  rollPhases(); build(); buildDials();
+}
+function toggleFreeze(btn){
+  frozen = !frozen;
+  if (!frozen) T0 = T - performance.now() / 1000 - wound;
+  btn.setAttribute("aria-pressed", String(frozen));
+  run();
+}
+function windOn(){ wound += 3600; run(); }
+
+if (still.matches) frozen = true;
+still.addEventListener("change", () => {
+  frozen = still.matches;
+  document.getElementById("freezebtn").setAttribute("aria-pressed", String(frozen));
+  run();
+});
+if (still.matches) document.getElementById("freezebtn").setAttribute("aria-pressed", "true");
+
+let resizeT = null;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(fit, 120); });
+
+rollPhases();
+build();
+buildDials();
+fit();
+run();
+</script>
+</body></html>

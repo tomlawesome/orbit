@@ -1,0 +1,103 @@
+/* Administration — mission control (#465), from design/v19/administration.html.
+ * Tokens come from packs.css; everything here is scoped under .mission-page. */
+
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.mission-page *{box-sizing:border-box;margin:0}
+.mission-page{min-height:100vh}
+
+.mission-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.mission-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.mission-page .sky .far{animation:mission-drift 400s linear infinite}
+.mission-page .sky .near{animation:mission-drift 195s linear infinite}
+@keyframes mission-drift{to{transform:translateX(-1600px)}}
+.mission-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
+
+.mission-page .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
+.mission-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.mission-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+.mission-page .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
+@media (max-width:880px){.mission-page .grid{grid-template-columns:1fr}}
+.mission-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+      border-radius:16px;padding:20px 22px}
+.mission-page .card .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.mission-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+.mission-page .card .cardhead button,.mission-page .card .cardhead a{margin-left:auto;font:11px var(--mono);
+      color:var(--ink-mid);background:none;border:1px solid var(--line);
+      border-radius:9px;padding:6px 12px;cursor:pointer;text-decoration:none}
+.mission-page .card .cardhead :is(button,a):hover{border-color:var(--accent);color:var(--accent-text)}
+
+.mission-page .person{display:flex;align-items:center;gap:12px;padding:9px 2px;
+        border-bottom:1px solid var(--line-soft)}
+.mission-page .person:last-child{border:0}
+.mission-page .person .avatar{width:32px;height:32px;border-radius:50%;flex:none;
+                border:1px solid var(--line);background:var(--panel-raised);
+                display:grid;place-items:center;font:11px var(--mono);color:var(--ink-mid)}
+.mission-page .person .who{flex:1;min-width:0}
+.mission-page .person .who b{display:block;font-size:13.5px;font-weight:530}
+.mission-page .person .who span{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mission-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);flex:none}
+.mission-page .role.admin{color:var(--accent-text);border-color:var(--accent)}
+.mission-page .person .place{font:10.5px var(--mono);color:var(--ink-faint);background:none;
+               border:0;cursor:pointer;padding:4px;flex:none}
+.mission-page .person .place:hover{color:var(--accent-text)}
+
+.mission-page .system{display:flex;align-items:center;gap:14px;padding:10px 2px;
+        border-bottom:1px solid var(--line-soft)}
+.mission-page .system:last-child{border:0}
+.mission-page .system svg{flex:none}
+.mission-page .system .who{flex:1;min-width:0}
+.mission-page .system .who b{display:block;font-size:13.5px;font-weight:530}
+.mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-faint)}
+/* §15-2g removed the joinbadge and the dashed join-request row from this
+   panel. Nothing replaces them and no spacing is patched in: the roster closes
+   on its last system (which loses its rule to :last-child), so the card ends on
+   a finished row rather than a cut edge — and the two columns now sit far closer
+   in height than they did with the decision row hanging below the roster. */
+
+.mission-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    font:11.5px var(--mono);color:var(--ink-mid);padding:8px 2px;
+    border-bottom:1px solid var(--line-soft)}
+.mission-page .kv:last-child{border:0}
+.mission-page .kv b{color:var(--ink);font-weight:500}
+.mission-page .kv .on{color:var(--ok-text)}
+.mission-page .kv button{font:11px var(--mono);color:var(--ink-mid);background:none;
+           border:1px solid var(--line);border-radius:9px;padding:5px 11px;cursor:pointer}
+.mission-page .kv button:hover{border-color:var(--accent);color:var(--accent-text)}
+
+/* §15: the machinery corner — the relay's instance levers are no longer a
+   panel of their own; they are MAIL MACHINERY, joined to operations in one
+   panel, split by a hairline. Each half keeps its own head and rows. */
+.mission-page .card.wide{grid-column:1 / -1}
+.mission-page .card.machinery{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+.mission-page .card.machinery .half:last-child{padding-left:26px;border-left:1px solid var(--line-soft)}
+@media (max-width:880px){
+  .mission-page .card.machinery{grid-template-columns:1fr;gap:0}
+  .mission-page .card.machinery .half:last-child{padding-left:0;padding-top:22px;margin-top:22px;
+                                   border-left:0;border-top:1px solid var(--line-soft)}
+}
+
+.mission-page .svc{display:flex;align-items:center;gap:9px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
+.mission-page .svc i{width:7px;height:7px;border-radius:50%;flex:none}
+.mission-page .svc b{color:var(--ink);font-weight:500;flex:1}
+.mission-page .svc small{color:var(--ink-faint);font-size:10.5px}
+
+.mission-page .strip{margin-top:22px;text-align:center;font:10.5px var(--mono);
+       color:var(--ink-faint);letter-spacing:.1em}
+@media (prefers-reduced-motion: reduce){
+  .mission-page .sky .far,.mission-page .sky .near{animation:none!important}
+}
+
+/* #453: the placement picker and the shared problem line */
+.mission-page .placerow{display:flex;gap:6px;flex-wrap:wrap;padding:4px 2px 10px 44px;
+        border-bottom:1px solid var(--line-soft)}
+.mission-page .placerow button{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+        border:1px solid var(--line);border-radius:99px;padding:4px 11px;cursor:pointer}
+.mission-page .placerow button:hover{border-color:var(--accent);color:var(--accent-text)}
+.mission-page .adminproblem{margin-top:10px;font:11px var(--mono);color:var(--warm)}

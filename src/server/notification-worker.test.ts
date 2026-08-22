@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   categorizeProviderError,
   deliveryFailureState,
+  effectiveReminderOffsets,
   enabledDeliveryChannels,
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
@@ -42,6 +43,78 @@ describe("notification worker scheduling", () => {
       userEmailEnabled: true,
       userPushEnabled: true,
     })).toEqual(["email"]);
+  });
+
+  it("#479: lets an item's own reminder rules stand, pair or no pair", () => {
+    const rules = [
+      { daysBefore: 30, emailEnabled: true, pushEnabled: false },
+      { daysBefore: 1, emailEnabled: false, pushEnabled: true },
+    ];
+    // The settings screen never claimed to overrule a per-item choice, so the
+    // stored pair is not consulted at all — not merged, not appended.
+    expect(effectiveReminderOffsets(rules, { firstWarningDays: 21, finalWarningDays: 2 })).toEqual(rules);
+    expect(effectiveReminderOffsets(rules, { firstWarningDays: null, finalWarningDays: null })).toEqual(rules);
+  });
+
+  it("#479: falls back to the recipient's own pair for an item with no rules, and to the documented defaults when it is unset", () => {
+    // No preferences row at all: the column defaults are the answer, and they
+    // are the same numbers the settings screen shows a user who never chose.
+    expect(effectiveReminderOffsets([], { firstWarningDays: null, finalWarningDays: null })).toEqual([
+      { daysBefore: 14, emailEnabled: true, pushEnabled: true },
+      { daysBefore: 3, emailEnabled: true, pushEnabled: true },
+    ]);
+    expect(effectiveReminderOffsets([], { firstWarningDays: 30, finalWarningDays: 7 })).toEqual([
+      { daysBefore: 30, emailEnabled: true, pushEnabled: true },
+      { daysBefore: 7, emailEnabled: true, pushEnabled: true },
+    ]);
+    // Half a stored pair is still half an answer: the missing slot defaults
+    // on its own rather than dragging its partner back to the default too.
+    expect(effectiveReminderOffsets([], { firstWarningDays: 30, finalWarningDays: null })).toEqual([
+      { daysBefore: 30, emailEnabled: true, pushEnabled: true },
+      { daysBefore: 3, emailEnabled: true, pushEnabled: true },
+    ]);
+  });
+
+  it("#479: honours the pair's boundary values and never emits the same warning twice", () => {
+    // "on the day" is a final warning of zero, which the settings screen
+    // offers and the CHECK constraint allows.
+    expect(effectiveReminderOffsets([], { firstWarningDays: 365, finalWarningDays: 0 }).map((offset) => offset.daysBefore))
+      .toEqual([365, 0]);
+    expect(effectiveReminderOffsets([], { firstWarningDays: 1, finalWarningDays: 0 }).map((offset) => offset.daysBefore))
+      .toEqual([1, 0]);
+    // A pair whose halves coincide is one warning, not a duplicate delivery.
+    expect(effectiveReminderOffsets([], { firstWarningDays: 5, finalWarningDays: 5 }).map((offset) => offset.daysBefore))
+      .toEqual([5]);
+  });
+
+  it("#479: treats the pair as a set of offsets, so a crossed pair still raises both warnings", () => {
+    // The route, the schema and two CHECK constraints all refuse a crossed
+    // pair, so this is unreachable today; the first/final ordering is a
+    // promise the labels make, and each offset is scheduled independently, so
+    // a row arriving by some other path must not silence the item entirely.
+    expect(effectiveReminderOffsets([], { firstWarningDays: 2, finalWarningDays: 9 }).map((offset) => offset.daysBefore))
+      .toEqual([9, 2]);
+  });
+
+  it("#479: refuses an out-of-range or fractional stored offset in favour of that slot's default", () => {
+    expect(effectiveReminderOffsets([], { firstWarningDays: 0, finalWarningDays: 3 }).map((offset) => offset.daysBefore))
+      .toEqual([14, 3]);
+    expect(effectiveReminderOffsets([], { firstWarningDays: 400, finalWarningDays: 3 }).map((offset) => offset.daysBefore))
+      .toEqual([14, 3]);
+    expect(effectiveReminderOffsets([], { firstWarningDays: 30, finalWarningDays: -1 }).map((offset) => offset.daysBefore))
+      .toEqual([30, 3]);
+    expect(effectiveReminderOffsets([], { firstWarningDays: 14.5, finalWarningDays: 3 }).map((offset) => offset.daysBefore))
+      .toEqual([14, 3]);
+  });
+
+  it("#479: turns the recipient's pair into the household-local instants the settings screen describes", () => {
+    const dueDate = "2026-08-31";
+    const [first, final] = effectiveReminderOffsets([], { firstWarningDays: 14, finalWarningDays: 3 })
+      .map((offset) => householdReminderTime(dueDate, offset.daysBefore, "Europe/London").toISOString());
+    // "14 days before closest approach", then "3 days before", each at 09:00
+    // household-local (BST here, so 08:00Z).
+    expect(first).toBe("2026-08-17T08:00:00.000Z");
+    expect(final).toBe("2026-08-28T08:00:00.000Z");
   });
 
   it("schedules at 09:00 in the household timezone across DST, calendar, and host timezone boundaries", () => {

@@ -176,6 +176,20 @@
       "when": 1785093000000,
       "tag": "0024_audit_activity_read_index",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786917600000,
+      "tag": "0025_household_join_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787097600000,
+      "tag": "0026_reminder_warning_days",
+      "breakpoints": true
     }
   ]
 }
