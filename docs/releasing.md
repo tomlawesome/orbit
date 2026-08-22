@@ -6,13 +6,13 @@ acceptance records and promotion use the immutable digest.
 
 ## Protected branch flow
 
-- Ordinary issue branches start from and target `develop`.
-- Merge `develop` into protected `preview` to start or update an ordinary
+- Ordinary issue branches start from and target `dev`.
+- Merge `dev` into protected `preview` to start or update an ordinary
   release train.
 - The protected `preview` push runs the authoritative CI and publication path.
 - After digest-based acceptance, merge `preview` into protected `main`.
 - A `hotfix/*` branch starts from `main`, publishes and accepts a patch preview,
-  merges to `main`, and is then reconciled into `develop` and `preview`.
+  merges to `main`, and is then reconciled into `dev` and `preview`.
 
 Do not squash or rebase away the accepted preview revision. Stable promotion
 verifies that revision and its exact tree.
@@ -70,7 +70,7 @@ in the release notes.
 
 ## Required repository settings
 
-- Protect `develop`, `preview` and `main` against direct changes, force-pushes
+- Protect `dev`, `preview` and `main` against direct changes, force-pushes
   and deletion. Require reviewed pull requests and resolved conversations.
 - Keep the fast checks required for ordinary changes and the preview identity
   verification required for pull requests to `main`.
