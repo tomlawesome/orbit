@@ -5,9 +5,9 @@ closes.
 
 Closes #
 
-Ordinary issue branches start from and target `develop`. Release-train pull
-requests merge `develop` into `preview`, then the accepted `preview` into
-`main`. A hotfix must identify its later `develop`/`preview` reconciliation.
+Ordinary issue branches start from and target `dev`. Release-train pull
+requests merge `dev` into `preview`, then the accepted `preview` into
+`main`. A hotfix must identify its later `dev`/`preview` reconciliation.
 
 ## Changes
 

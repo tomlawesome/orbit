@@ -40,9 +40,9 @@ Every implementable issue must define:
 - evidence required before closure.
 
 Work uses short-lived branches created from and normally merged into protected
-`develop`. Release trains merge `develop` into protected `preview`, then move
+`dev`. Release trains merge `dev` into protected `preview`, then move
 the accepted exact source through `main`; `hotfix/*` branches start from
-`main` and are reconciled into `develop` and `preview`. Because the `develop`
+`main` and are reconciled into `dev` and `preview`. Because the `dev`
 ruleset requires up-to-date branches, keep at most two pull requests in
 flight.
 

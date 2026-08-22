@@ -63,8 +63,8 @@ describe("stable promotion workflow", () => {
   it("documents the protected preview-lane merge contract", () => {
     const documentation = `${releaseGuide}\n${releaseDecision}\n${pullRequestTemplate}`;
 
-    expect(documentation).toContain("issue branches start from and target `develop`");
-    expect(documentation).toContain("Merge `develop` into protected `preview`");
+    expect(documentation).toContain("issue branches start from and target `dev`");
+    expect(documentation).toContain("Merge `dev` into protected `preview`");
     expect(documentation).toContain("merge `preview` into protected `main`");
     expect(documentation).toContain("one semantic version per release train");
     expect(documentation.toLowerCase()).not.toContain("release candidate");

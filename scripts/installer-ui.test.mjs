@@ -11,50 +11,40 @@ import { describe, expect, it } from "vitest";
 
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
-// Waits until the target process's /proc/<pid>/status SigCgt bitmap (see
-// proc(5)) shows the TERM trap installed before delivering SIGTERM, instead
-// of racing a wall-clock sleep against scheduler-latency-dependent process
-// setup (the fork/exec of `stty` and the `trap -p` subshells that run before
-// the widget installs its own trap). Bit 0x4000 is signal 15 (TERM). Falls
-// back to firing after ~2s so a genuine regression still surfaces as a test
-// failure instead of a hang.
 /*
- * Send SIGTERM only once the shell has actually installed its handler.
+ * Interrupting a prompt: why both these tests use runPtyInterrupted.
  *
- * These two tests assert that an interrupted prompt restores the terminal, and
- * they were flaky on GitHub Actions for a reason unrelated to the behaviour
- * under test (#284): the kill was a fixed wall-clock guess against process
- * setup - fork, source, open /dev/tty, stty raw, install the trap - which is
- * scheduler-latency bound. Lose that race and SIGTERM lands at its default
- * disposition, killing the process with 143 before the tested code runs.
+ * Both assert that a prompt interrupted by SIGTERM restores the terminal,
+ * and both spent a long time failing on GH Actions with 143 - killed by an
+ * uncaught TERM. Every fix attempted (#284) treated that as a timing race
+ * against trap installation: a wall-clock sleep, then polling SigCgt in
+ * /proc (never observable on the runner), then waiting for the prompt to
+ * appear in a pty transcript.
  *
- * The previous attempt polled SigCgt in /proc for the SIGTERM bit. It worked
- * locally and never fired on the runner: CI reported TRAP_NEVER_INSTALLED on
- * both tests, so on that host the bit was not observable this way at all.
+ * Timing was never the cause. Proved by experiment (#510): a sixty-second
+ * gap between the prompt appearing and the kill still produced 143, and did
+ * so every time rather than intermittently. A timing bug gets better with
+ * slack; this got worse, which is the tell.
  *
- * So synchronise on the process's own output instead. installer_ui_read_value
- * installs the trap (installer-ui.sh:471) and only then writes the prompt
- * (:472), so the prompt appearing in the pty transcript is proof the handler
- * already exists.
+ * The cause is stdin. runPty passes an `input` string to spawnSync, which
+ * closes stdin as soon as it is written; under `script` that closes the pty
+ * master, the widget's read returns EOF immediately, and it leaves through
+ * its read-error path - restoring the caller's traps on the way out. TERM is
+ * back at its default disposition before the signal ever arrives. The widget
+ * was never waiting, so the test was never testing interruption.
  *
- * The marker has to be chosen per call site, and getting it wrong is silent.
- * installer_ui_select prints its HEADER at :371, well before its trap at :385,
- * and only renders the menu at :387 - so waiting for "Choose" killed too early
- * and reproduced the original 143 exactly. The menu options are the first
- * output that postdates the trap, which is why this waits for "1) Install". `script` is given a real typescript file rather than
- * /dev/null, and the waiter polls it for the prompt before killing. This is
- * the same technique that fixed the sibling install-cancellation test, which
- * has not regressed since.
+ * runPtyInterrupted leaves stdin open for the life of the child, so the
+ * widget genuinely blocks with its trap still installed when the signal
+ * lands, and it signals the inner shell's own pid rather than `script`.
  *
- * On timeout it still marks and kills: not killing leaves the prompt blocked
- * until the job timeout, which is worse than a wrong answer.
+ * The marker still has to postdate the trap, and getting it wrong is silent.
+ * installer_ui_read_value traps at installer-ui.sh:471 and writes the prompt
+ * at :472, so "Value: " is safe. installer_ui_select prints its HEADER at
+ * :371, well before its trap at :385, and only renders the menu at :387 - so
+ * waiting for "Choose" killed too early and reproduced the original 143
+ * exactly. Its menu options are the first output that postdates the trap,
+ * which is why that one waits for "1) Install".
  */
-function waitForPromptThenKill(promptMarker, transcript) {
-  return 'target="$BASHPID"; (for i in $(seq 1 2000); do '
-    + `if grep -qF "${promptMarker}" "${transcript}" 2>/dev/null; then `
-    + 'kill -TERM "$target"; exit 0; fi; sleep 0.005; done; '
-    + 'printf "PROMPT_NEVER_APPEARED\n"; kill -TERM "$target") &';
-}
 
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
@@ -462,27 +452,15 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("STATUS=1 RESTORED=yes");
   });
 
-  // Quarantined: intermittently fails on GH Actions with an uncaught
-  // SIGTERM (status 143) even with a correctness-based (not wall-clock)
-  // synchronization check confirming the trap is registered before the
-  // signal is sent. Cross-validated as a GH-Actions-specific runner issue,
-  // not a bug in this test or in installer-ui.sh — see issue #284 and the
-  // "GitLab cross-validation mirror" note in HANDOVER-260-ci.md before
-  // touching this test or its sibling below. Re-enable once GH Actions
-  // runner contention is confirmed back to normal.
-  it("restores terminal state when text entry is interrupted by a signal", () => {
-    const transcript = join(mkdtempSync(join(tmpdir(), "orbit-pty-")), "typescript");
-    const result = runPty(
-      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForPromptThenKill("Value: ", transcript)} if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
-      "",
-      {},
-      transcript,
+  it("restores terminal state when text entry is interrupted by a signal", async () => {
+    const result = await runPtyInterrupted(
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; printf "PID=%s\\n" "$BASHPID"; `
+      + `if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; `
+      + `after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
+      "Value: ",
     );
 
-    expect(result.status).toBe(0);
-    // If this fires, the signal was sent before the prompt (and therefore
-    // before the handler), so a failure below is the harness, not the code.
-    expect(result.stdout).not.toContain("PROMPT_NEVER_APPEARED");
+    expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
@@ -496,8 +474,6 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes CHOICE=none");
   });
 
-  // Quarantined: see the comment on the sibling "text entry is interrupted
-  // by a signal" test above — same investigation, same issue (#284).
   it("restores terminal state when the raw single-key menu is interrupted by a signal", async () => {
     const result = await runPtyInterrupted(
       `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; printf "PID=%s\\n" "$BASHPID"; `
