@@ -132,7 +132,7 @@ boundary:
 - transient direct-upload inspection and one source-aware approval contract;
 - PDF-only mailbox staging, bounded MIME/message limits, ignored non-PDF
   parts, safely rejected malformed PDF claims, five processing attempts, and
-  30-day pending-draft retention; direct upload separately retains PDF, JPEG,
+  45-day pending-draft retention (owner decision 2026-08-15, #434); direct upload separately retains PDF, JPEG,
   and PNG support under the same hostile-content and indirect-injection
   boundary;
 - explicit create-separate or attach-to-existing duplicate outcomes, without

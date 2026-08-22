@@ -139,6 +139,28 @@ describe("immutable container version identity", () => {
     }
   });
 
+  // #450: the image CMD is the composite entry, not Next's generated
+  // server.js; the banner gate must recognise it or startup goes silent.
+  it("prints the banner for the composite entry CMD", () => {
+    const fixture = versionFixture();
+    try {
+      const result = spawnSync(bash, [fixture.script, "node", "scripts/container-server.mjs"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ORBIT_VERSION: "v9.9.9",
+          ORBIT_REVISION: "f".repeat(40),
+          ORBIT_CHANNEL: "latest",
+        },
+      });
+      expect(result.stdout).toBe(
+        `${banner}Orbit v1.2.3 | channel=preview | revision=${"a".repeat(40)}\n`,
+      );
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("exposes the canonical banner as a quiet one-off image command", () => {
     const fixture = versionFixture();
     try {

@@ -1,0 +1,15 @@
+/*
+ * The atmosphere primitives every screen shares (#445), defined once.
+ *
+ * Drift: POL-11 — each depth layer wraps over exactly one 1600-unit tile
+ * width, linear, never snapping. Screens keep their own durations in their
+ * animation shorthand; only the transform lives here. Twinkle stays
+ * per-screen on purpose: the four screens ratified four different ranges.
+ *
+ * Grain: POL-13 — the rule the four copies agreed on byte-for-byte, with the
+ * pack-tunable knobs the owner asked for (2026-08-15).
+ */
+@keyframes driftf{to{transform:translateX(-1600px)}}
+@keyframes driftn{to{transform:translateX(-1600px)}}
+.grain{position:fixed;inset:0;z-index:4;pointer-events:none;
+       opacity:var(--grain-opacity,.5);mix-blend-mode:var(--grain-blend,overlay)}

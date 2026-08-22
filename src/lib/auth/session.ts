@@ -1,7 +1,7 @@
 import { and, eq, gt, sql } from "drizzle-orm";
 import type { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { sessions, userPreferences, users } from "@/db/schema";
+import { auditLog, sessions, userPreferences, users } from "@/db/schema";
 import type { AuthConfig } from "@/lib/env";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { clearSessionCookie, sessionCookieName, setSessionCookie } from "@/lib/auth/cookies";
@@ -52,6 +52,36 @@ export async function createSession(userId: string, config: AuthConfig): Promise
 export async function deleteSessionToken(token: string | undefined): Promise<void> {
   if (!token) return;
   await getDb().delete(sessions).where(eq(sessions.tokenHash, hashSessionToken(token)));
+}
+
+/**
+ * Signs one user out of every device (#468).
+ *
+ * The scope is the user, not the session: the caller's own cookie dies with
+ * all the others, because the point of the action is that a device the reader
+ * no longer trusts loses access. Nothing caches a session — `readSession`
+ * reads the row on every request — so the next request from any of those
+ * devices finds no row and is refused, with no revocation list, token version
+ * or invalidated-before timestamp needed to make that true.
+ *
+ * The audit entry records only ids and a count: session tokens are hashed
+ * secrets and never appear in it, or anywhere else.
+ */
+export async function revokeUserSessions(userId: string): Promise<number> {
+  return getDb().transaction(async (transaction) => {
+    const removed = await transaction.delete(sessions)
+      .where(eq(sessions.userId, userId))
+      .returning({ id: sessions.id });
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: userId,
+      entityType: "user",
+      entityId: userId,
+      action: "sessions_revoked",
+      changes: { sessions: removed.length },
+    });
+    return removed.length;
+  });
 }
 
 export async function readSession(request: NextRequest, config: AuthConfig): Promise<AuthenticatedSession | null> {
