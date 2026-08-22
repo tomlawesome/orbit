@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { externalIdentities, userPreferences, users } from "@/db/schema";
+import { auditLog, externalIdentities, instanceAuthority, userPreferences, users } from "@/db/schema";
 import { getDb } from "@/db";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { AuthError } from "@/lib/auth/errors";
@@ -109,6 +109,23 @@ export async function provisionIdentity(identity: VerifiedIdentity): Promise<Pro
       subject: identity.subject,
     });
     await transaction.insert(userPreferences).values({ userId: created.id }).onConflictDoNothing();
+
+    /* The first administrator is also the instance's primary administrator
+       (#263), assigned atomically under the same first-administrator lock so
+       there is never an instance with administrators but no seat of final
+       authority. #259's protected bootstrap replaces this entry point without
+       changing the invariant. */
+    if (registrationState.registeredUsers === 0) {
+      await transaction.insert(instanceAuthority).values({ primaryUserId: created.id });
+      await transaction.insert(auditLog).values({
+        householdId: null,
+        actorUserId: created.id,
+        entityType: "user",
+        entityId: created.id,
+        action: "primary_administrator_established",
+        changes: { rule: "first_registered_administrator" },
+      });
+    }
     return created;
   });
 }

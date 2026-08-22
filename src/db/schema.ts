@@ -84,6 +84,22 @@ export const userPreferences = pgTable("user_preferences", {
   check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
 ]);
 
+/**
+ * The instance's one primary administrator (#263): a single-row table whose
+ * check constraint forbids a second row and whose ON DELETE RESTRICT foreign
+ * key makes the database itself refuse to delete the current primary user —
+ * a missed application check cannot orphan the instance. Empty only before
+ * the first administrator exists; the #259 bootstrap and the 0027 migration
+ * both seed it.
+ */
+export const instanceAuthority = pgTable("instance_authority", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  primaryUserId: uuid("primary_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_authority_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
