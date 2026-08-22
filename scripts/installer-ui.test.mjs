@@ -49,10 +49,20 @@ const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
  * On timeout it still marks and kills: not killing leaves the prompt blocked
  * until the job timeout, which is worse than a wrong answer.
  */
+// EXPERIMENT (#510), deliberately oversized: the marker proves the trap is
+// installed (installer-ui.sh:471 traps, :472 writes the prompt), yet the
+// kill still lands uncaught on GH Actions. Detection was firing the signal
+// in the same loop iteration as the match -- no margin whatsoever between
+// the handler existing and the signal arriving. This waits KILL_MARGIN
+// seconds first. Sixty is not a proposed fix; it is far beyond any
+// plausible scheduler stall, so if 143 still appears the timing hypothesis
+// is wrong and the cause is structural. Bisect downwards once it passes.
+const KILL_MARGIN_SECONDS = 60;
+
 function waitForPromptThenKill(promptMarker, transcript) {
   return 'target="$BASHPID"; (for i in $(seq 1 2000); do '
     + `if grep -qF "${promptMarker}" "${transcript}" 2>/dev/null; then `
-    + 'kill -TERM "$target"; exit 0; fi; sleep 0.005; done; '
+    + `sleep ${KILL_MARGIN_SECONDS}; kill -TERM "$target"; exit 0; fi; sleep 0.005; done; `
     + 'printf "PROMPT_NEVER_APPEARED\n"; kill -TERM "$target") &';
 }
 
@@ -484,7 +494,10 @@ describe("installer semantic UI", () => {
     // before the handler), so a failure below is the harness, not the code.
     expect(result.stdout).not.toContain("PROMPT_NEVER_APPEARED");
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+    // Vitest's default 5s timeout is shorter than the margin above, so the
+    // test would fail on elapsed time rather than on the behaviour. Raised
+    // to comfortably clear the margin while the experiment runs.
+  }, (KILL_MARGIN_SECONDS + 60) * 1000);
 
   it("cancels the raw single-key menu with a lone Escape and restores the terminal", () => {
     const result = runPty(
