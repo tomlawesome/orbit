@@ -28,6 +28,9 @@ ADRs and reviewed by the owner; the durable governance decision is
   `main`, and promote only the accepted digest without rebuilding it.
 - Never commit credentials, secrets, private keys, tokens, private documents,
   or real personal data.
+- Commit messages and pull requests carry no AI attribution: no
+  `Co-Authored-By` trailers, no "generated with" footers, ever
+  (owner decision, 2026-08-15).
 
 ## Sources of truth
 

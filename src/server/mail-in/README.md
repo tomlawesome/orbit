@@ -31,7 +31,7 @@ journey, persistence.
 | `core/imap-recipient.ts` | Recipient-alias derivation, normalization, and matching; trusted-header parsing. Moved as-is from `imap-recipient.ts`. |
 | `core/imap-rotation.ts` | Alias-rotation state machine (`decideImapRotationState`, `assertImapRotationState`). Moved as-is from `imap-rotation.ts`. |
 | `core/config.ts` | `getImapIngestionConfig`, `imapProviderConnectionOptions`, `imapProviderConfigCommitment`, `imapAttachmentRetryDelayMs` — extracted from `imap-ingestion.ts`, which re-exports them for a churn-free import path. |
-| `core/review-state.ts` | `reviewInboxState`, `findReviewedIntakeCandidateReason` — extracted from `imap-inbox.ts`, which re-exports them for a churn-free import path. |
+| `core/review-state.ts` | `reviewInboxState`, `findReviewedIntakeCandidateReason` — extracted from `imap-inbox.ts`, which re-exports them for a churn-free import path — plus the read-side display shaping added by #467 (`reviewAttachmentDisplayName`, `reviewAttachmentMediaType`, `reviewAttachmentScanState`). |
 | `imap-ingestion.ts` | The ImapFlow network shell: polling cycle, recipient-alias reconciliation, attachment staging/commit, provider preflight. The `globalThis.__orbitImapProviderPreflight` singleton stays here, colocated with the worker that owns it. |
 | `imap-inbox.ts` | Review-inbox CRUD (list/get/discard/assign), staging purge. The `globalThis` singleton(s) for this worker's cycle stay colocated here. |
 | `imap-attachment-holding.ts` | Scan + encrypt inbound attachments to local staging ahead of commit. |

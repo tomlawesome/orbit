@@ -38,6 +38,13 @@ export type { ImapIngestionConfig };
 
 export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "retrying" | "exhausted" | "retention_backlog";
 
+/**
+ * How long a mail-in receipt (and its held suggestion) waits for review
+ * before expiring. Owner decision, 2026-08-15 (#434): 45 days, up from 30 —
+ * a forwarded document should survive a long holiday.
+ */
+export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
+
 export interface ImapProviderPreflightState {
   status: ImapPreflightStatus;
   smtp: "not_configured" | "available" | "provider_unavailable" | "unsafe_input";
@@ -859,7 +866,7 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
           mailbox: config.mailbox, mailboxUidValidity: uidValidity, mailboxUid: message.uid,
           contentSha256, recipientAliasSha256: aliasSha256, recipientAliasGeneration: recipient.generation ?? null,
           userId: userId ?? null, householdId: null,
-          expiresAt: new Date(Date.now() + 30 * 86_400_000),
+          expiresAt: new Date(Date.now() + RECEIPT_RETENTION_MS),
           status: oversized ? "failed" : userId ? "processing" : "quarantined",
           failureCode: oversized ? "message_too_large" : userId ? null : recipient.failureCode ?? "recipient_unverified",
           // A receipt is only meaningful once a verified recipient's attachments
@@ -880,28 +887,35 @@ export async function runImapIngestionCycle(config = getImapIngestionConfig()): 
         if (Buffer.isBuffer(message.headers)) message.headers.fill(0);
         }
       };
+      // processMessage downloads attachment parts over this same connection,
+      // so it must never run while a fetch stream is open: ImapFlow queues the
+      // download behind the active FETCH and the cycle deadlocks until the
+      // socket times out (#459). Every message is fetched as its own complete
+      // command instead, keeping one message in memory at a time.
+      const fetchThenProcess = async (uid: number) => {
+        const message = await client.fetchOne(String(uid), fetchOptions, { uid: true });
+        if (message) await processMessage(message);
+      };
       // Retries are fetched by exact UID in a bounded batch. A poison retry
       // therefore cannot force a mailbox-wide rescan or starve newer mail.
-      for (const retry of retryRows) {
-        for await (const message of client.fetch(`${retry.uid}:${retry.uid}`, fetchOptions, { uid: true })) await processMessage(message);
-      }
-      // New mail is a separate bounded pass from the highest durable UID.
-      // Breaking the iterator bounds work even when the provider has a large
-      // unseen tail; the next poll resumes at the next UID.
+      for (const retry of retryRows) await fetchThenProcess(retry.uid);
+      // New mail is a separate bounded pass from the highest durable UID: one
+      // cheap UID SEARCH, then a capped batch. The cap bounds work even when
+      // the provider has a large unseen tail; the next poll resumes at the
+      // next UID.
       const nextUid = (checkpoint?.lastUid ?? 0) + 1;
-      let newMessages = 0;
       // A "${nextUid}:*" UID range always includes at least the mailbox's
       // highest UID (RFC 3501 §6.4.8), even once nextUid exceeds every
       // assigned UID. Unguarded, steady-state polling (no new mail) would
       // re-fetch and re-process the newest message in full on every poll
-      // forever. Skip the fetch once the checkpoint has caught up to the
-      // mailbox's own next-UID prediction instead (#383).
+      // forever. Skip the pass once the checkpoint has caught up to the
+      // mailbox's own next-UID prediction (#383); the uid filter drops the
+      // same below-checkpoint straggler when expunges leave the prediction
+      // ahead of the highest assigned UID.
       if (nextUid < mailboxUidNext) {
-        for await (const message of client.fetch(`${nextUid}:*`, fetchOptions, { uid: true })) {
-          await processMessage(message);
-          newMessages += 1;
-          if (newMessages >= 25) break;
-        }
+        const unseen = (await client.search({ uid: `${nextUid}:*` }, { uid: true })) || [];
+        const batch = unseen.filter((uid) => uid >= nextUid).sort((a, b) => a - b).slice(0, 25);
+        for (const uid of batch) await fetchThenProcess(uid);
       }
     } finally { lock.release(); }
   } finally {

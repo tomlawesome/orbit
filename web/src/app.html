@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  data-theme is what activates the token packs in home.css — including
+  --stars, which drives the starfield's opacity. Without it the packs never
+  match, --stars is undefined, and the sky renders invisible. Set here rather
+  than on mount so it is correct in the server-rendered HTML, exactly as
+  design/v19/home.html sets it on its own <html>.
+-->
+<html lang="en" data-theme="starchart">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Reapply the reader's chosen pack before the first paint, so a refresh
+      does not flash star-chart at someone who chose dawn. Inline and
+      synchronous for that reason: any later and the flash has happened.
+
+      INTERIM. The signed-in user's theme already lives on the server -
+      themePreferenceSchema, PUT /api/preferences, and GET /api/auth/session
+      returns themeId - but this front end is not yet wired to the API, so the
+      choice has nowhere durable to go. When the shell is wired, the session
+      becomes the source of truth and this reads as the pre-paint cache of it.
+      Fails silently and keeps the default when storage is unavailable, e.g.
+      a private window with storage blocked.
+    -->
+    <script>
+      try {
+        var t = localStorage.getItem("orbit-theme");
+        if (t && ["starchart", "afterdark", "atlas", "clouds", "dawn", "retrograde"].indexOf(t) !== -1)
+          document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    %sveltekit.head%
+  </head>
+  <!--
+    display:contents keeps this wrapper out of the layout entirely, so the
+    mockup's children behave as direct children of <body> — which is what its
+    position:fixed and height:100% rules were authored against.
+  -->
+  <body><div style="display: contents">%sveltekit.body%</div></body>
+</html>

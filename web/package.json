@@ -1,0 +1,33 @@
+{
+  "name": "orbit-web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "node scripts/collect-font-licences.mjs && vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "scaffold": "node scripts/scaffold-screen.mjs",
+    "fidelity": "playwright test",
+    "preview:build": "vite build && rm -rf .preview && cp -r build .preview",
+    "preview:serve": "PORT=4180 node .preview/index.js",
+    "licences": "node scripts/collect-font-licences.mjs"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@fontsource/space-grotesk": "5.3.0",
+    "@playwright/test": "1.62.0",
+    "@sveltejs/adapter-node": "5.5.7",
+    "@sveltejs/kit": "2.70.2",
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "pixelmatch": "7.1.0",
+    "pngjs": "7.0.0",
+    "svelte": "5.56.9",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "8.2.1"
+  }
+}

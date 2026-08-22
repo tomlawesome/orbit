@@ -21,6 +21,11 @@
 .kv:last-of-type{border:0}
 .kv b{color:var(--ok);font-weight:500}
 .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:16px;line-height:1.8}
+.failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+.failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+             color:var(--ink-faint);margin:0 0 8px}
+.failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+.failures .kv span:last-child{color:var(--overdue);text-align:right}
 .btns{display:flex;gap:10px;margin-top:16px}
 .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
@@ -126,6 +131,11 @@
   <div class="kv"><span>last received</span><span>policy-schedule.pdf &middot; 2d ago</span></div>
   <div class="kv"><span>ingest</span><b>enabled</b></div>
   <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+  <div class="failures">
+    <h4>arrived, but could not be read</h4>
+    <div class="kv"><span>09 Aug</span><span>Its attachment is a picture-only scan, and Orbit couldn&rsquo;t read any text from it. You can add the item yourself and attach the file from Documents.</span></div>
+    <div class="kv"><span>06 Aug</span><span>It carried no document Orbit can read (PDFs work best). Nothing was kept.</span></div>
+  </div>
   <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
   outbound reminder email remains configured by your administrator</div>
 </div></div>

@@ -19,9 +19,26 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
     expect(response.status()).toBe(401);
   }
 
+  // #410/§15: "/" is the ratified v19 sign-in now — the door every reader
+  // meets. The retiring engine's own boundary is unchanged behind it.
   await page.goto("/");
+  // The gate reads "Sign in" since the 2026-08-17 reconciliation: the flight's
+  // login screen went back to the ratified 2026-08-14 one, whose pill sits
+  // inside the ring and carries that word (§15).
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.locator("#dawn .lockup .name")).toHaveText("orbit");
+  // No ribbon and no footer on the login — owner, verbatim: "there shouldnt be
+  // a footer" (§15, 2026-08-17). This is the assertion that keeps it gone.
+  await expect(page.locator("#dawn .below")).toHaveCount(0);
+  await expect(page.locator("button.topbar-profile")).toHaveCount(0);
+  await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
+
+  await page.goto("/workspace");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Sign in securely/ })).toHaveAttribute("href", "/api/auth/login");
+  // "/" is v19's own front door now (#410, §15), so this engine's own sign-in
+  // link carries its way back to the address it was mounted on rather than
+  // defaulting there (see AuthenticationGate in src/components/dashboard.tsx).
+  await expect(page.getByRole("link", { name: /Sign in securely/ })).toHaveAttribute("href", "/api/auth/login?returnTo=%2Fworkspace");
   await expect(page.locator("button.topbar-profile")).toHaveCount(0);
   await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /icon\.svg/);
@@ -32,7 +49,7 @@ test("signed-out visitors see only the authentication boundary", async ({ page, 
 });
 
 test("the signed-out boundary has no automated WCAG A or AA violations", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/workspace");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
 
   const results = await new AxeBuilder({ page })
@@ -44,7 +61,7 @@ test("the signed-out boundary has no automated WCAG A or AA violations", async (
 
 test("the authentication boundary fits the mobile viewport", async ({ page, isMobile }) => {
   test.skip(!isMobile, "Mobile viewport check");
-  await page.goto("/");
+  await page.goto("/workspace");
   await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
   const viewport = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -70,7 +87,7 @@ test("confirmed degraded readiness shows startup wording and then recovers", asy
     body: JSON.stringify({ error: { code: "session_required", message: "Authentication is required" } }),
   }));
 
-  await page.goto("/");
+  await page.goto("/workspace");
 
   await expect(page.getByRole("heading", { name: "Orbit is starting…" })).toBeVisible();
   await expect(page.getByText("Orbit is starting. Please wait while the service becomes ready.")).toBeVisible();
@@ -93,7 +110,7 @@ test("missing authentication configuration shows fixed administrator guidance", 
     }),
   }));
 
-  await page.goto("/");
+  await page.goto("/workspace");
 
   await expect(page.getByRole("heading", { name: "Orbit could not open safely." })).toBeVisible();
   await expect(page.getByText("Orbit sign-in is not configured. Ask your administrator to configure authentication, then try again.")).toBeVisible();

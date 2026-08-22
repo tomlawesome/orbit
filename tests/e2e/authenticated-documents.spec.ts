@@ -6,10 +6,10 @@ const administrator = "Orbit Administrator";
 const syntheticPdf = createSyntheticPdf("issue 42 authenticated browser document");
 
 async function signIn(page: Page, identity: string) {
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: identity }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
 }
 
 interface DisposableWorkspace {
@@ -210,7 +210,7 @@ test.describe("authenticated document lifecycle", () => {
           });
         });
 
-        await page.goto("/");
+        await page.goto("/workspace");
         const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
         await expect(itemCard.locator(".item-main")).toBeVisible();
         await itemCard.locator(".item-main").click();
@@ -255,7 +255,7 @@ test.describe("authenticated document lifecycle", () => {
     let journeyFailed = false;
     try {
       await createDisposableWorkspace(page, workspace);
-      await page.goto("/");
+      await page.goto("/workspace");
       await expect(page.getByText(workspace.householdName, { exact: true }).first()).toBeVisible();
       const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
       await expect(itemCard.locator(".item-main")).toBeVisible();
@@ -365,7 +365,7 @@ test.describe("authenticated document lifecycle", () => {
     let journeyFailed = false;
     try {
       await createDisposableWorkspace(page, workspace);
-      await page.goto("/");
+      await page.goto("/workspace");
       const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
       await itemCard.locator(".item-main").click();
 
@@ -424,7 +424,7 @@ test.describe("authenticated document lifecycle", () => {
     let journeyFailed = false;
     try {
       await createDisposableWorkspace(page, workspace);
-      await page.goto("/");
+      await page.goto("/workspace");
       const itemCard = page.locator(".item-card").filter({ hasText: workspace.itemTitle });
       await itemCard.locator(".item-main").click();
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/env";
+import { safeReturnPath } from "@/lib/auth/crypto";
 import { clearSessionCookie } from "@/lib/auth/cookies";
 import { authErrorResponse } from "@/lib/auth/http";
 import { createProviderLogoutUrl, discoverProvider } from "@/lib/auth/oidc";
@@ -15,10 +16,17 @@ export async function POST(request: NextRequest) {
     else assertSameOrigin(request, config);
     await deleteSessionToken(session?.token);
 
-    let redirectTarget = config.appUrl;
+    // Mirrors the login route's returnTo (#410, §15): this engine's own
+    // sign-out button is only ever reached from this engine's own screens
+    // (/workspace, /settings), and "/" being v19's own front door now means
+    // a bare sign-out would strand that journey there instead of showing it
+    // its own signed-out state.
+    const postLogoutReturnTo = new URL(safeReturnPath(request.nextUrl.searchParams.get("returnTo")), config.appUrl);
+
+    let redirectTarget: URL = postLogoutReturnTo;
     try {
       const metadata = await discoverProvider(config);
-      redirectTarget = createProviderLogoutUrl(config, metadata) ?? config.appUrl;
+      redirectTarget = createProviderLogoutUrl(config, metadata, postLogoutReturnTo) ?? postLogoutReturnTo;
     } catch {
       // Local logout must succeed even if the provider is unavailable.
     }

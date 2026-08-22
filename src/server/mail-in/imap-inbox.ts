@@ -10,6 +10,10 @@ import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
   findReviewedIntakeCandidateReason,
+  reviewAttachmentDisplayName,
+  reviewAttachmentMediaType,
+  reviewAttachmentScanState,
+  type ReviewAttachmentMediaType,
   type ReviewInboxClassification,
   type ReviewInboxStateContext,
 } from "./core/review-state";
@@ -17,10 +21,49 @@ import {
 // Re-exported so `@/server/imap-inbox` (now a deprecated stub pointing here)
 // keeps every existing import path working churn-free. See
 // src/server/mail-in/core/review-state.ts for the implementations.
-export { reviewInboxState, findReviewedIntakeCandidateReason };
-export type { ReviewInboxClassification, ReviewInboxStateContext };
+export { reviewInboxState, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
+export type { ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
 
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
+/** Bounds every read on this endpoint: 50 receipts and 50 filed items, each
+ * carrying at most IMAP_ATTACHMENT_LIMITS.attachmentCount (10) attachments. */
+const REVIEW_INBOX_PAGE = 50;
+const REVIEW_INBOX_ATTACHMENT_PAGE = 1_000;
+
+/** Statuses a receipt can hold while it is still somewhere in the review journey. */
+const reviewLaneStatuses = ["processing", "pending_review", "approving", "recoverable", "failed", "quarantined"] as const;
+
+/** A staged attachment named for its recipient, and nobody else (#467). */
+export type ReviewInboxAttachment = {
+  id: string;
+  ordinal: number;
+  displayName: string;
+  mediaType: ReviewAttachmentMediaType;
+  sizeBytes: number;
+  scanState: "clean" | "unknown";
+};
+
+/** One item the relay fed into the reader's orbit, and the document it rode in on. */
+export type MailFiledItem = {
+  itemId: string;
+  householdId: string;
+  title: string;
+  itemStatus: string;
+  documentName: string | null;
+  documentCount: number;
+  filedAt: Date | null;
+};
+
+function orderedAttachments(rows: Array<{ id: string; displayName: string; mediaType: string; sizeBytes: number; status: string }>): ReviewInboxAttachment[] {
+  return rows.map((row, index) => ({
+    id: row.id,
+    ordinal: index + 1,
+    displayName: reviewAttachmentDisplayName(row.displayName, row.mediaType),
+    mediaType: reviewAttachmentMediaType(row.mediaType),
+    sizeBytes: row.sizeBytes,
+    scanState: reviewAttachmentScanState(row.status),
+  }));
+}
 
 async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
   const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
@@ -36,11 +79,25 @@ async function hasHouseholdMembership(userId: string, householdId: string): Prom
   return Boolean(membership);
 }
 
-/** Returns only the caller's receipt states; subjects, headers, and attachment names stay private. */
+/**
+ * Returns only the caller's receipt states; subjects and headers stay
+ * private. Since #467 each held attachment is also named — the sanitized
+ * original filename, its size and its scanned-clean state — because the
+ * sender was the reader themself and the count alone cannot say which
+ * document is waiting.
+ *
+ * The `filed` lane answers the other half: which items this reader's relay
+ * has already fed into their orbit. It is keyed on `approvedItemId` and
+ * never on the receipt's status, so it survives the receipt's own burn-up —
+ * the 45-day expiry sweeper only ever claims a receipt still in review, and
+ * an approved one keeps its item link, its approval timestamp and its
+ * assigned attachment rows for good.
+ */
 export async function listImapInbox(userId: string) {
   const activeUser = await privateMailboxUser(userId);
-  if (activeUser.isInstanceAdmin) return { receipts: [], households: [] };
-  const [receipts, choices] = await Promise.all([
+  if (activeUser.isInstanceAdmin) return { receipts: [], households: [], filed: [] as MailFiledItem[] };
+  const filedAt = sql<Date | null>`coalesce(${imapIngestionMessages.approvedAt}, ${imapIngestionMessages.approvalStartedAt})`;
+  const [receipts, choices, attachmentRows, filedRows] = await Promise.all([
     getDb().select({
       id: imapIngestionMessages.id,
       status: imapIngestionMessages.status,
@@ -56,15 +113,62 @@ export async function listImapInbox(userId: string) {
       attachmentCount: sql<number>`count(${imapIngestionAttachments.id})::int`,
     }).from(imapIngestionMessages)
       .leftJoin(imapIngestionAttachments, eq(imapIngestionAttachments.messageId, imapIngestionMessages.id))
-      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, ["processing", "pending_review", "approving", "recoverable", "failed", "quarantined"])))
+      .where(and(eq(imapIngestionMessages.userId, userId), inArray(imapIngestionMessages.status, [...reviewLaneStatuses])))
       .groupBy(imapIngestionMessages.id)
       .orderBy(desc(imapIngestionMessages.receivedAt))
-      .limit(50),
+      .limit(REVIEW_INBOX_PAGE),
     getDb().select({ id: households.id, name: households.name, currency: households.defaultCurrency })
       .from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt))).orderBy(asc(households.name)),
+    // Named attachments for both lanes in one bounded, user-scoped read: the
+    // ones still held for review, and the ones already filed into an item.
+    getDb().select({
+      id: imapIngestionAttachments.id,
+      messageId: imapIngestionAttachments.messageId,
+      displayName: imapIngestionAttachments.displayName,
+      mediaType: imapIngestionAttachments.mediaType,
+      sizeBytes: imapIngestionAttachments.sizeBytes,
+      status: imapIngestionAttachments.status,
+    }).from(imapIngestionAttachments)
+      .innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionAttachments.messageId))
+      .where(and(
+        eq(imapIngestionMessages.userId, userId),
+        or(inArray(imapIngestionMessages.status, [...reviewLaneStatuses]), isNotNull(imapIngestionMessages.approvedItemId)),
+        inArray(imapIngestionAttachments.status, ["stored", "assigned"]),
+      ))
+      // Newest first so that if a very long-lived mailbox ever reaches the
+      // bound it is the oldest names that fall off — the same end the
+      // receipt and filed pages drop. Each message's own rows are put back
+      // into arrival order below, which is what the ordinal counts.
+      .orderBy(desc(imapIngestionAttachments.createdAt), desc(imapIngestionAttachments.id))
+      .limit(REVIEW_INBOX_ATTACHMENT_PAGE),
+    getDb().select({
+      itemId: items.id,
+      householdId: items.householdId,
+      title: items.title,
+      itemStatus: items.status,
+      messageId: imapIngestionMessages.id,
+      filedAt,
+    }).from(imapIngestionMessages)
+      // The item is the authority on which household this belongs to; a
+      // receipt whose household no longer matches its item is not filed
+      // anywhere the reader can open, so it is simply absent.
+      .innerJoin(items, and(eq(items.id, imapIngestionMessages.approvedItemId), eq(items.householdId, imapIngestionMessages.householdId)))
+      .where(and(
+        eq(imapIngestionMessages.userId, userId),
+        isNotNull(imapIngestionMessages.approvedItemId),
+        inArray(items.status, ["active", "expired", "cancelled"]),
+      ))
+      .orderBy(desc(filedAt), desc(imapIngestionMessages.receivedAt))
+      .limit(REVIEW_INBOX_PAGE),
   ]);
   const visibleHouseholdIds = new Set(choices.map((choice) => choice.id));
+  const attachmentsByMessage = new Map<string, typeof attachmentRows>();
+  for (const row of attachmentRows) {
+    const existing = attachmentsByMessage.get(row.messageId);
+    if (existing) existing.push(row); else attachmentsByMessage.set(row.messageId, [row]);
+  }
+  for (const rows of attachmentsByMessage.values()) rows.reverse();
   return {
     receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
@@ -83,12 +187,28 @@ export async function listImapInbox(userId: string) {
         expiresAt: receipt.expiresAt,
         receivedAt: receipt.receivedAt,
         attachmentCount: receipt.attachmentCount,
+        attachments: orderedAttachments(attachmentsByMessage.get(receipt.id) ?? []),
         ...state,
         cleanupOnly: state.classification === "cleanup",
         ...metadata,
       };
     }),
     households: choices,
+    // Same household boundary as the receipts above: an item in a household
+    // the reader has left, or one scheduled for deletion, is not theirs to
+    // see even though their own mail created it.
+    filed: filedRows.filter((row) => visibleHouseholdIds.has(row.householdId)).map((row): MailFiledItem => {
+      const filedDocuments = (attachmentsByMessage.get(row.messageId) ?? []).filter((attachment) => attachment.status === "assigned");
+      return {
+        itemId: row.itemId,
+        householdId: row.householdId,
+        title: row.title,
+        itemStatus: row.itemStatus,
+        documentName: filedDocuments.length ? reviewAttachmentDisplayName(filedDocuments[0].displayName, filedDocuments[0].mediaType) : null,
+        documentCount: filedDocuments.length,
+        filedAt: row.filedAt,
+      };
+    }),
   };
 }
 
@@ -133,7 +253,13 @@ export async function getImapReview(userId: string, receiptId: string, household
       .where(and(eq(sections.householdId, householdId), eq(sections.visible, true), isNull(sections.archivedAt))).orderBy(asc(sections.position)),
     getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, subtype: items.subtype })
       .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
-    getDb().select({ id: imapIngestionAttachments.id, mediaType: imapIngestionAttachments.mediaType, sizeBytes: imapIngestionAttachments.sizeBytes })
+    getDb().select({
+      id: imapIngestionAttachments.id,
+      displayName: imapIngestionAttachments.displayName,
+      mediaType: imapIngestionAttachments.mediaType,
+      sizeBytes: imapIngestionAttachments.sizeBytes,
+      status: imapIngestionAttachments.status,
+    })
       .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
@@ -145,7 +271,7 @@ export async function getImapReview(userId: string, receiptId: string, household
     receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata },
     sections: householdSections,
     candidates,
-    attachments: attachments.map((attachment, index) => ({ id: attachment.id, ordinal: index + 1, mediaType: attachment.mediaType === "application/pdf" ? "application/pdf" : "application/octet-stream", sizeBytes: attachment.sizeBytes })),
+    attachments: orderedAttachments(attachments),
   };
 }
 

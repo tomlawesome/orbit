@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — your relay, with satellites (proposal v2, issue #475)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* THE RELAY, WITH SATELLITES — v2 — §14 (#475), "backdrops are alive, and
+     never the same twice".
+
+     The card itself is untouched: it is design/family/settings-mail.html
+     reproduced exactly — dish rings, alias, three kv rows, the two buttons,
+     the arrived-but-could-not-be-read list, the note. This proposal only
+     decorates the sky behind it.
+
+     v1 → v2, on the owner's read ("the background is too quiet"):
+
+       · THE SKY NEVER LOOPS. v1 drifted a tiled starfield: one 1600-wide
+         tile translating under a <use> duplicate, so the same stars came
+         round every pass. That is gone. The sky is now a WINDOWED
+         PROCEDURAL STREAM — space is cut into chunks along the drift axis,
+         each chunk's contents are rolled fresh from the seed the moment it
+         is revealed at the right-hand edge, and thrown away when it leaves
+         at the left. You never see the same patch of sky twice.
+       · NOTHING IS PINNED TO THE GLASS. Everything in the backdrop rides the
+         drift, at its own depth: constellations move with the far layer,
+         craft with the near layer — nearer is faster, which is the parallax
+         doing the depth work. Craft keep their own slow local wander on top
+         of it.
+       · A ROSTER OF REAL CRAFT, not one bird repeated: JWST, Hubble,
+         Voyager, Cassini, New Horizons, Rosetta, plus two generic comms
+         birds — all in the same chart-pen vocabulary, ~1px chart-ink, no
+         fills. Every craft that enters the sky rolls its own type, depth,
+         attitude and drift, so a near Rosetta 160px across and a far
+         Voyager 50px across can share the sky.
+       · AIMED AT YOUR ADDRESS, STILL. Comms birds gimbal their dish onto the
+         relay dish on the card and re-aim every frame as they drift. The
+         deep-space probes turn their whole body home the way the real ones
+         do, and trail a long dotted signal arc back to the card from far
+         out. The arc is recomputed each frame, so it always terminates on
+         the dish however far the craft has drifted.
+       · A LOUDER, LIVELIER FIELD: denser stars in both depths, a handful of
+         bright glinted ones, a slow twinkle on a subset.
+       · MORE DISTANT-HOUSEHOLD VOCABULARY: the household marks gain a
+         dashed inner ring, bearing ticks, planet orbit circles and a
+         brighter centre — and are joined by quieter, unnamed-to-you
+         constellations carrying real astronomy names (Lyra, Vela,
+         Cassiopeia, Andromeda, Perseus, Cygnus). Those are drawn in chart
+         ink with hairline figures and no colour: only YOUR households carry
+         the ring, the orbits and the coloured planets, so only they read as
+         meaningful.
+
+     CON-13 and the pan. A household's bearing is derived from its identity
+     and can never move, so the sky is treated as a PANORAMA: the drift is
+     the camera slewing, a household sits at the world position its true
+     bearing gives it, and one full turn brings it round again on exactly
+     that bearing. The stars and the borrowed constellations in between are
+     freshly rolled every time, so the turn is never the same sky twice.
+
+     Nothing here is ornament. A satellite conveys; a household is a real
+     household; the dish is already the relay's status. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  /* the starfield is no longer a tile that repeats: it is two depth layers of
+     procedurally streamed chunks, positioned by the same clock that moves the
+     craft, so the whole sky is one coherent pan */
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  /* a subset of stars breathes — life without a strobe */
+  @keyframes twinkle{0%,100%{opacity:var(--o0)}50%{opacity:var(--o1)}}
+  .tw{animation:twinkle var(--twd) ease-in-out infinite}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:3;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* ---- the traffic layer: satellites, their signals, distant constellations ----
+     One overlay sized 1:1 with the viewport (viewBox in CSS pixels) so a
+     craft's signal arc can be aimed at the real dish on the real card. It
+     sits above the starfield and below the card, so a signal that reaches
+     the relay — or a craft that drifts behind the card — is swallowed by the
+     glass rather than drawn over it. */
+  .traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
+  .traffic svg{position:absolute;inset:0;width:100%;height:100%}
+
+  /* Position is driven by the clock in script, not by CSS keyframes: the sky
+     drifts, so a craft's gimbal and its signal arc have to be re-solved every
+     frame or the beam would come adrift of the dish. What is left to CSS is
+     everything that does not move the craft: */
+  /* attitude: the barely-perceptible sway of something station-keeping */
+  @keyframes sway{from{transform:rotate(calc(var(--sw) * -1))}to{transform:rotate(var(--sw))}}
+  .hull .sway{animation:sway var(--swdur) ease-in-out infinite alternate;
+              transform-box:fill-box;transform-origin:center}
+  /* the station light: a slow blink, never a strobe */
+  @keyframes blink{0%,62%{opacity:.16}72%,86%{opacity:1}100%{opacity:.16}}
+  .lamp{opacity:.85;animation:blink var(--bldur) ease-in-out infinite}
+  /* the conveyed message: dashes travelling craft → relay dish */
+  @keyframes convey{from{stroke-dashoffset:var(--doff)}to{stroke-dashoffset:0}}
+  .beam{stroke-dasharray:var(--dash);animation:convey var(--bmdur) linear infinite}
+
+  /* ---- the ratified relay card, reproduced (design/family/settings-mail.html) ---- */
+  /* the card is centred when the sky has room and simply starts at the top
+     when it hasn't — a short laptop must never clip the note off the bottom */
+  .stage{position:relative;z-index:2;min-height:calc(100vh - 102px);display:flex;
+         align-items:flex-start;justify-content:center;padding:64px 20px 16px}
+  .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .relay-card{width:430px;max-width:100%;padding:30px 32px;margin:auto}
+  .relay-card h2{font:600 19px var(--display)}
+  .relay-card .sub{font:11px var(--mono);color:var(--ink-mid);margin:6px 0 22px;line-height:1.8}
+  .dish{position:relative;width:54px;height:54px;margin:0 auto 6px}
+  .dish i{position:absolute;inset:22px;border-radius:50%;background:var(--ok)}
+  .dish span{position:absolute;inset:0;border:1px solid var(--ok);border-radius:50%;
+             animation:signal 3s ease-out infinite;opacity:0}
+  .dish span:nth-child(2){animation-delay:1s}.dish span:nth-child(3){animation-delay:2s}
+  @keyframes signal{from{opacity:.7;scale:.3}to{opacity:0;scale:1.4}}
+  .alias{font:13px var(--mono);color:var(--accent);background:var(--panel);
+         border:1px dashed var(--line);border-radius:10px;padding:11px 14px;text-align:center;margin:14px 0}
+  .kv{display:flex;justify-content:space-between;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+  .kv:last-of-type{border:0}
+  .kv b{color:var(--ok);font-weight:500}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:16px;line-height:1.8}
+  .failures{margin-top:18px;border-top:1px solid var(--line-soft);padding-top:14px}
+  .failures h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--ink-faint);margin:0 0 8px}
+  .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
+  .failures .kv span:last-child{color:var(--overdue);text-align:right}
+  .btns{display:flex;gap:10px;margin-top:16px}
+  .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
+               background:none;border:1px solid var(--line);color:var(--ink-mid)}
+  .btns button.pri{color:var(--accent);border-color:var(--accent)}
+
+  .foot{position:relative;z-index:4;text-align:center;padding:12px 16px 74px;
+        font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.1em}
+  /* mockup furniture only — it sits on a panel so it stays legible where a
+     short viewport slides the card underneath it */
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:64vw;font:10.5px var(--mono);color:var(--ink-faint);
+         background:var(--panel);backdrop-filter:blur(10px);border:1px solid var(--line-soft);
+         border-radius:20px;padding:7px 13px}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  .demos .swatch{width:16px;height:16px;padding:0;border-radius:50%}
+  .demos .swatch[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .demos .seed{letter-spacing:.12em;opacity:.8}
+  /* on a phone the card owns nearly all the sky: the craft take the strip
+     above and below it, and the demos row wraps rather than running off */
+  @media (max-width:620px){
+    .stage{padding:52px 16px 12px}
+    .demos{max-width:calc(100% - 44px)}
+  }
+
+  /* the law, everywhere: if you have asked for stillness, the sky is still */
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+  body.frozen *{animation:none!important}
+</style>
+</head>
+<body>
+
+<div class="sky" aria-hidden="true">
+  <svg id="skysvg" preserveAspectRatio="none">
+    <g class="far" id="farlayer" fill="var(--star-far)"></g>
+    <g class="near" id="nearlayer" fill="var(--star-near)"></g>
+  </svg>
+</div>
+
+<div class="traffic" aria-hidden="true"><svg id="traffic" preserveAspectRatio="none">
+  <g id="distant"></g>
+  <g id="fleet"></g>
+</svg></div>
+
+<div class="stage">
+  <div class="glass relay-card">
+    <div class="dish" id="relaydish"><span></span><span></span><span></span><i></i></div>
+    <h2 style="text-align:center">Your relay</h2>
+    <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
+    <div class="alias">tom-k7f2m@in.lawson-home.orbit</div>
+    <div class="kv"><span>status</span><b>connected &middot; listening</b></div>
+    <div class="kv"><span>last received</span><span>policy-schedule.pdf &middot; 2d ago</span></div>
+    <div class="kv"><span>ingest</span><b>enabled</b></div>
+    <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+    <div class="failures">
+      <h4>arrived, but could not be read</h4>
+      <div class="kv"><span>09 Aug</span><span>Its attachment is a picture-only scan, and Orbit couldn&rsquo;t read any text from it. You can add the item yourself and attach the file from Documents.</span></div>
+      <div class="kv"><span>06 Aug</span><span>It carried no document Orbit can read (PDFs work best). Nothing was kept.</span></div>
+    </div>
+    <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
+    outbound reminder email remains configured by your administrator</div>
+  </div>
+</div>
+
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="demos" aria-label="Mockup backdrop demos">
+  <span>DEMOS</span>
+  <button onclick="reroll()">re-roll backdrop</button>
+  <button onclick="document.body.classList.toggle('frozen')">freeze motion</button>
+  <span class="seed" id="seedout">seed —</span>
+  <span>THEME</span>
+  <button class="swatch" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+  <button class="swatch" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+  <button class="swatch" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+  <button class="swatch" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+  <button class="swatch" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+</div>
+
+<div class="foot">relay &middot; living backdrop proposal v2 &middot; streaming sky, famous craft &middot; #475 &middot; §14</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll(".swatch")) b.setAttribute("aria-pressed", String(b === btn));
+}
+
+/* ---------------------------------------------------------------------------
+   THE ROLL
+
+   One seeded generator drives the whole backdrop — but the backdrop is now
+   endless, so the seed does not roll a fixed arrangement: it rolls a STREAM.
+
+   Space along the drift axis is cut into fixed-width chunks. Chunk n of a
+   given lane is generated from hash(seed, lane, n), so the contents of any
+   patch of sky are a pure function of the seed and where that patch is —
+   independent of when it happened to be revealed, of frame timing, of how
+   long the page has been open. Chunks are built as they come over the
+   right-hand edge and dropped as they leave on the left; they never come
+   back, and no two turns of the sky look alike.
+
+   In the app this seed is rolled fresh on every load — "never the same
+   arrangement twice" (§14). BUILD NOTE: under ORBIT_FIXTURES the seed MUST be
+   fixed (derive it from the fixture workspace id, not from time or
+   Math.random), so the fidelity gate compares one deterministic sky against
+   this mockup's. The roll is the only source of randomness on the screen —
+   pin it and the whole stream is reproducible, chunk for chunk.
+--------------------------------------------------------------------------- */
+const makeRng = (s) => { s = Math.abs(s % 2147483647) || 17170812; return () => (s = (s * 48271) % 2147483647) / 2147483647; };
+let seed = Math.floor(Math.random() * 2147483646) + 1;
+
+/* hash(seed, lane, chunk) — the address of one patch of sky in the stream.
+   Everything is forced back to unsigned at each step: a signed xor here would
+   hand the generator a negative seed and the whole chunk would come out
+   inside out. */
+function chunkSeed(lane, n){
+  let h = (seed ^ 0x9e3779b9) >>> 0;
+  h = Math.imul(h ^ (lane * 0x85ebca6b), 0xc2b2ae35) >>> 0;
+  h = Math.imul(h ^ ((n + 0x165667b1) | 0), 0x27d4eb2f) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return (h % 2147483646) + 1;
+}
+const laneRng = (lane, n) => { const r = makeRng(chunkSeed(lane, n)); return (a, b) => a + r() * (b - a); };
+const mod = (a, n) => ((a % n) + n) % n;
+
+/* ---------------------------------------------------------------------------
+   THE CRAFT ROSTER
+
+   Drawn in the chart vocabulary the rest of the family uses: ~1px strokes in
+   --chart-ink, ruling in --chart-line, no fills, no gloss, no gradients — the
+   same pen as the star charts. Local units; every craft declares the `span`
+   its drawing occupies so placement and labelling can size themselves.
+
+   Line weight is held at a constant CSS-pixel width whatever the craft's
+   distance (the pen `p` passed to each drawing is pre-divided by the craft's
+   scale) — a chart is drawn with one pen. DEPTH is carried by size and by
+   ink strength instead: near craft are large and near-solid, far craft are
+   small and faint.
+
+   Every craft's dish faces local +y, which is what lets one formula aim them:
+
+     mode "gimbal"  the body lies at whatever attitude it rolled, and the dish
+                    alone turns onto the relay — a comms bird tracking your
+                    address as it passes.
+     mode "aim"     the whole body turns home, the way a deep-space probe
+                    actually flies: the dish IS the bus's front. It carries a
+                    few degrees of jitter, because nothing points perfectly.
+     mode "free"    an observatory: it is looking where its science is, not at
+                    you, and speaks over a long trailing arc instead.
+--------------------------------------------------------------------------- */
+const lamp = (x, y, p) => `<circle class="lamp" cx="${x}" cy="${y}" r="${(p * 1.5).toFixed(2)}" fill="var(--accent)"/>`;
+const RULE = (p) => (p * 0.68).toFixed(2);
+const HAIR = (p) => (p * 0.5).toFixed(2);
+
+/* a dish bowl, drawn open toward local +y, with its feed horn in front */
+const bowl = (r, p) => `<g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linecap="round">
+      <path d="M ${-r} ${(r * .93).toFixed(1)} A ${r} ${r} 0 0 0 ${r} ${(r * .93).toFixed(1)}"/>
+      <path d="M 0 ${(r * .93).toFixed(1)} V ${(r * 1.72).toFixed(1)}"/>
+    </g>
+    <circle cx="0" cy="${(r * 1.8).toFixed(1)}" r="${(r * .2).toFixed(2)}" fill="none"
+            stroke="var(--chart-ink)" stroke-width="${(p * .8).toFixed(2)}"/>`;
+/* the same bowl on a gimbal: script re-points it at the relay every frame */
+const gdish = (x, y, r, p) => `<g class="gimbal" data-gx="${x}" data-gy="${y}"
+      transform="translate(${x} ${y})">${bowl(r, p)}</g>`;
+
+/* JWST's primary: eighteen segments on a hex grid, one notch out of the
+   bottom rank, the way the real mirror is built */
+const JWST_MIRROR = (() => {
+  let d = "";
+  for (let q = -2; q <= 2; q++) {
+    for (let r = Math.max(-2, -q - 2); r <= Math.min(2, -q + 2); r++) {
+      if (q === 0 && r === 2) continue;
+      const cx = 7.97 * (q + r / 2), cy = 6.9 * r - 16, pts = [];
+      for (let k = 0; k < 6; k++) {
+        const a = Math.PI / 180 * (60 * k - 90);
+        pts.push(`${(cx + 4.4 * Math.cos(a)).toFixed(1)} ${(cy + 4.4 * Math.sin(a)).toFixed(1)}`);
+      }
+      d += "M " + pts.join(" L ") + " Z ";
+    }
+  }
+  return d.trim();
+})();
+/* and its five-layer kite sunshield, each layer a touch smaller and lower */
+const JWST_SHIELD = (() => {
+  let s = "";
+  for (let k = 0; k < 5; k++) {
+    const f = 1 - k * 0.055, y = 9 + k * 3.8;
+    s += `<path d="M ${(-40 * f).toFixed(1)} ${y.toFixed(1)} L 0 ${(y - 10 * f).toFixed(1)}
+             L ${(40 * f).toFixed(1)} ${y.toFixed(1)} L 0 ${(y + 10 * f).toFixed(1)} Z"/>`;
+  }
+  return s;
+})();
+
+const ROSTER = [
+  /* --- the generic comms birds: unnamed, because they are yours --- */
+  { key: "comms", span: 44, mode: "gimbal", label: null, start: 16, bow: [.07, .16], talk: .78,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round">
+      <rect x="-9" y="-6.5" width="18" height="13" rx="2.5"/>
+      <path d="M -9 0 H -15.5 M 9 0 H 15.5"/>
+      <rect x="-40" y="-9.5" width="24.5" height="19" rx="1"/>
+      <rect x="15.5" y="-9.5" width="24.5" height="19" rx="1"/>
+      <path d="M -3.5 -6.5 V -9 M 3.5 -6.5 V -9" stroke-width="${HAIR(p)}"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -32 -9.5 V 9.5 M -24 -9.5 V 9.5 M 24 -9.5 V 9.5 M 32 -9.5 V 9.5"/>
+      <path d="M -40 0 H -15.5 M 15.5 0 H 40" opacity=".7"/>
+      <path d="M -5 -3 H 5 M -5 3 H 5" opacity=".55"/>
+    </g>
+    ${lamp(-42.6, 0, p)}
+    ${gdish(0, 0, 7, p)}` },
+
+  { key: "beacon", span: 50, mode: "gimbal", label: null, start: 20, bow: [.07, .16], talk: .78,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round">
+      <path d="M -8 -10 L 5 -10 L 12 0 L 5 10 L -8 10 L -15 0 Z"/>
+      <path d="M 12 0 H 19 M -15 0 H -26"/>
+      <rect x="19" y="-14" width="38" height="28" rx="1"/>
+      <circle cx="-30" cy="0" r="4.2"/>
+      <path d="M -3 -10 L -6 -19 L 3 -19 L 1 -10"/>
+      <path d="M 0 10 V 14.5"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M 28.5 -14 V 14 M 38 -14 V 14 M 47.5 -14 V 14"/>
+      <path d="M 19 0 H 57" opacity=".7"/>
+      <path d="M -8 -10 V 10 M 5 -10 V 10" opacity=".55"/>
+    </g>
+    ${lamp(59, 0, p)}
+    ${gdish(0, 14.5, 6.5, p)}` },
+
+  /* --- the famous ones --- */
+  /* Hubble: the tube, the aperture door, two ruled wings, a steerable HGA */
+  { key: "hubble", span: 42, mode: "gimbal", label: "HUBBLE", start: 24, bow: [.06, .15], talk: .8,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round">
+      <rect x="-27" y="-9.5" width="54" height="19" rx="3"/>
+      <path d="M -27 -9.5 A 3.4 9.5 0 0 0 -27 9.5"/>
+      <path d="M 27 -9.5 A 3.4 9.5 0 0 1 27 9.5"/>
+      <path d="M -27 -9.5 L -37 -16.5 L -33.5 -12.5"/>
+      <path d="M -2 -9.5 V -16 M -2 9.5 V 16"/>
+      <rect x="-19" y="-33" width="36" height="17" rx="1"/>
+      <rect x="-19" y="16" width="36" height="17" rx="1"/>
+      <path d="M 21 9.5 V 15"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -10 -9.5 V 9.5 M 6 -9.5 V 9.5"/>
+      <path d="M -27 0 H 27" opacity=".5"/>
+      <path d="M -10 -33 V -16 M -1 -33 V -16 M 8 -33 V -16"/>
+      <path d="M -10 16 V 33 M -1 16 V 33 M 8 16 V 33"/>
+      <path d="M -19 -24.5 H 17 M -19 24.5 H 17" opacity=".7"/>
+    </g>
+    ${lamp(30, 0, p)}
+    ${gdish(21, 15, 6, p)}` },
+
+  /* Rosetta: a small bus between two enormous solar wings, HGA on a mast,
+     Philae still tucked underneath */
+  { key: "rosetta", span: 76, mode: "gimbal", label: "ROSETTA", start: 20, bow: [.10, .22], talk: .82,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round">
+      <rect x="-9" y="-8" width="18" height="16" rx="2"/>
+      <path d="M -9 0 H -16 M 9 0 H 16"/>
+      <rect x="-72" y="-8" width="56" height="16" rx="1"/>
+      <rect x="16" y="-8" width="56" height="16" rx="1"/>
+      <path d="M 0 -8 V -13.5"/>
+      <path d="M 0 8 V 12 M -5 12 L 5 12 L 6.5 18 L -6.5 18 Z"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -61 -8 V 8 M -50 -8 V 8 M -39 -8 V 8 M -28 -8 V 8"/>
+      <path d="M 27 -8 V 8 M 38 -8 V 8 M 49 -8 V 8 M 60 -8 V 8"/>
+      <path d="M -72 0 H -16 M 16 0 H 72" opacity=".65"/>
+      <path d="M -4 -8 V 8" opacity=".5"/>
+    </g>
+    ${lamp(-74.5, 0, p)}
+    ${gdish(0, -13.5, 6.5, p)}` },
+
+  /* JWST: hex mirror, secondary on its tripod, the five-layer kite below */
+  { key: "jwst", span: 48, mode: "free", label: "JWST", start: 30, bow: [.12, .26], talk: .74,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round">
+      <path d="${JWST_MIRROR}"/>
+      <rect x="-8" y="33" width="16" height="6.5" rx="1.5"/>
+      <rect x="-14" y="40" width="28" height="8" rx="1"/>
+    </g>
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${(p * .85).toFixed(2)}" stroke-linejoin="round">
+      ${JWST_SHIELD}
+    </g>
+    <ellipse cx="0" cy="-43.5" rx="5" ry="2.6" fill="none" stroke="var(--chart-ink)" stroke-width="${p}"/>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -20 -14 L 0 -42 M 20 -14 L 0 -42 M 0 -3 L 0 -42"/>
+      <path d="M -40 9 H 40" opacity=".6"/>
+      <path d="M -5 40 V 48 M 4 40 V 48"/>
+    </g>
+    ${lamp(0, 50, p)}` },
+
+  /* Voyager: the great dish, the decagonal bus behind it, three RTGs on one
+     boom and the magnetometer on the other */
+  { key: "voyager", span: 58, mode: "aim", label: "VOYAGER", start: 18, bow: [.13, .28], talk: 1,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M -21 6 A 21 21 0 0 0 21 6"/>
+      <path d="M -14 1 L 0 15 M 14 1 L 0 15"/>
+      <circle cx="0" cy="16.6" r="2.2"/>
+      <path d="M -8 -24 L -6.5 -30 L -2.5 -33.5 L 2.5 -33.5 L 6.5 -30 L 8 -24
+               L 6.5 -18 L 2.5 -14.5 L -2.5 -14.5 L -6.5 -18 Z"/>
+      <path d="M -8 -24 H -38 M 8 -24 H 54"/>
+      <rect x="-52" y="-28" width="6.5" height="8" rx="2"/>
+      <rect x="-45" y="-28" width="6.5" height="8" rx="2"/>
+      <rect x="-38" y="-28" width="6.5" height="8" rx="2"/>
+      <path d="M -8 -20 L -20 -8"/>
+      <rect x="-31" y="-13" width="11" height="8" rx="1"/>
+      <circle cx="56" cy="-24" r="2"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -21 6 H 21" opacity=".8"/>
+      <path d="M -13 2.4 A 13 13 0 0 0 13 2.4"/>
+      <path d="M -6.5 4.6 A 6.5 6.5 0 0 0 6.5 4.6" opacity=".7"/>
+      <path d="M 22 -27 V -21 M 34 -27 V -21 M 46 -27 V -21"/>
+      <path d="M -52 -24 H -31.5" opacity=".7"/>
+    </g>
+    ${lamp(-55, -24, p)}` },
+
+  /* Cassini: the HGA, the stacked bus, the engine skirt, Huygens on the
+     flank and eleven metres of magnetometer boom on the other side */
+  { key: "cassini", span: 62, mode: "aim", label: "CASSINI", start: 12, bow: [.12, .26], talk: 1,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M -16 4 A 16 16 0 0 0 16 4"/>
+      <path d="M -8 1 L 0 9 M 8 1 L 0 9"/>
+      <circle cx="0" cy="10" r="1.8"/>
+      <rect x="-9" y="-25" width="18" height="11" rx="1.5"/>
+      <rect x="-7.5" y="-38" width="15" height="13" rx="1"/>
+      <path d="M -7.5 -38 L -6 -48 L 6 -48 L 7.5 -38"/>
+      <path d="M -3.5 -48 L -5 -55 M 3.5 -48 L 5 -55"/>
+      <path d="M 9 -26 A 9 11 0 0 1 9 -14"/>
+      <path d="M -9 -30 L -22 -34 M 9 -30 L 20 -33"/>
+      <rect x="-34" y="-38" width="12" height="7" rx="3.5"/>
+      <rect x="20" y="-37" width="11" height="7" rx="3.5"/>
+      <path d="M -9 -20 H -58"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -16 4 H 16" opacity=".8"/>
+      <path d="M -9 1.2 A 9 9 0 0 0 9 1.2"/>
+      <path d="M -7.5 -31.5 H 7.5"/>
+      <path d="M -26 -23 V -17 M -42 -23 V -17"/>
+      <path d="M -34 -34.5 H -22 M 20 -33.5 H 31" opacity=".7"/>
+    </g>
+    ${lamp(-60, -20, p)}` },
+
+  /* New Horizons: the dish, the wedge bus, one RTG out on a stub */
+  { key: "horizons", span: 44, mode: "aim", label: "NEW HORIZONS", start: 10, bow: [.13, .28], talk: 1,
+    draw: (p) => `
+    <g fill="none" stroke="var(--chart-ink)" stroke-width="${p}" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M -14 4 A 14 14 0 0 0 14 4"/>
+      <path d="M -6.5 1.5 L 0 8 M 6.5 1.5 L 0 8"/>
+      <circle cx="0" cy="8.8" r="1.6"/>
+      <path d="M -13 -10 L 13 -10 L 9 -27 L -9 -27 Z"/>
+      <path d="M -13 -16 L -21 -14.5"/>
+      <rect x="-41" y="-19" width="20" height="9" rx="4.5"/>
+      <rect x="13" y="-23" width="7" height="6" rx="1"/>
+      <rect x="13" y="-15" width="5.5" height="4.5" rx="1"/>
+      <path d="M 0 -27 V -32"/>
+      <rect x="-3.5" y="-36.5" width="7" height="4.5" rx="1"/>
+    </g>
+    <g fill="none" stroke="var(--chart-line)" stroke-width="${RULE(p)}">
+      <path d="M -14 4 H 14" opacity=".8"/>
+      <path d="M -7 1.6 A 7 7 0 0 0 7 1.6"/>
+      <path d="M -11.5 -18.5 H 11.5"/>
+      <path d="M -41 -14.5 H -21 M -35 -19 V -10 M -29 -19 V -10" opacity=".8"/>
+    </g>
+    ${lamp(-43, -14.5, p)}` },
+];
+
+/* ---------------------------------------------------------------------------
+   THE HOUSEHOLDS IN THE FAR DISTANCE
+
+   Real coordinates, lifted from the galaxy map on home.html. CON-13 says a
+   bearing can never move, so a household's bearing decides BOTH where it sits
+   in the panorama (its azimuth along the drift axis) and how high it rides
+   (the vertical part of the same bearing). The roll only decides whether a
+   given household is out on a given turn of the sky — never where it is.
+   Faint, unlabelled, no pointer: display-only.
+--------------------------------------------------------------------------- */
+const GALAXY = {
+  seaside: { pos:[-617,-305], planets:[[28,10,2.2,"--warm"],[-24,-8,2,"--ok"],[-6,-26,2.4,"--ok"]] },
+  mumdad:  { pos:[452,522],   planets:[[19,4,2.2,"--ok"],[-27,-5,2.4,"--ok"]] },
+  narrow:  { pos:[-515,393],  planets:[[14,11,2.4,"--upcoming"],[-22,-16,2.5,"--ok"]] },
+  grans:   { pos:[722,-184],  planets:[[9,27,2.5,"--warm"],[-15,16,2.4,"--ok"]] },
+};
+/* the camera is inside Lawson Home — you never see your own constellation */
+
+/* ---------------------------------------------------------------------------
+   AND THE REST OF THE SKY
+
+   Real constellations, borrowed by name and drawn as line figures — the sky
+   an instance happens to be under, nothing to do with Orbit. Deliberately
+   quieter than a household mark: chart-ink hairlines and plain stars, never
+   a ring, never an orbit, never a coloured planet. If it has colour, it is
+   yours; if it is a name in the dark, it is only the sky.
+--------------------------------------------------------------------------- */
+const FIGURES = {
+  LYRA:       { s:[[0,-22],[-9,-4],[7,-2],[-4,12],[10,14]],                 l:[[0,1],[1,2],[2,0],[1,3],[3,4],[4,2]] },
+  VELA:       { s:[[-20,-10],[6,-16],[18,2],[-2,14],[-18,6]],               l:[[0,1],[1,2],[2,3],[3,4],[4,0]] },
+  CASSIOPEIA: { s:[[-24,4],[-12,-8],[0,2],[12,-10],[24,0]],                 l:[[0,1],[1,2],[2,3],[3,4]] },
+  ANDROMEDA:  { s:[[-26,10],[-12,4],[2,0],[14,-8],[24,-16],[6,10]],         l:[[0,1],[1,2],[2,3],[3,4],[2,5]] },
+  PERSEUS:    { s:[[-16,-14],[-4,-2],[8,-10],[2,10],[16,16],[-14,8]],       l:[[0,1],[1,2],[1,3],[3,4],[3,5]] },
+  CYGNUS:     { s:[[0,-20],[0,-4],[0,10],[0,20],[-18,0],[16,-2]],           l:[[0,1],[1,2],[2,3],[4,1],[1,5]] },
+  ORION:      { s:[[-15,-20],[14,-17],[-5,-2],[0,0],[5,2],[-16,18],[12,20]],l:[[0,2],[1,4],[2,3],[3,4],[2,5],[4,6]] },
+  DRACO:      { s:[[-26,14],[-14,6],[-2,10],[8,2],[16,-8],[9,-18],[20,-23]],l:[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]] },
+  AQUILA:     { s:[[0,-16],[0,0],[0,14],[-19,-4],[18,-6],[-10,11]],         l:[[0,1],[1,2],[3,1],[1,4],[2,5]] },
+  CORVUS:     { s:[[-16,-8],[10,-14],[16,6],[-10,12]],                      l:[[0,1],[1,2],[2,3],[3,0]] },
+};
+const FIGURE_NAMES = Object.keys(FIGURES);
+
+/* ---------------------------------------------------------------------------
+   THE STREAM
+
+   Four lanes, two depths. Stars and constellations move at the far rate;
+   stars and craft at the near rate. Nearer is faster — that is the parallax,
+   and it is the only depth cue the sky needs beyond size and ink strength.
+--------------------------------------------------------------------------- */
+const V_FAR = 3.4;                 /* CSS px per second */
+const V_NEAR = 7.2;
+const CW_STAR = 400, CW_DECOR = 520, CW_FLEET = 300;   /* chunk widths, px */
+const PAD = 220;                   /* how far off each edge we keep built */
+
+const SKY = { W:0, H:0, target:{x:0,y:0}, card:null, fleetTarget:3, homeSpots:null, boost:1, slack:1,
+              far:new Map(), near:new Map(), decor:new Map(), homes:new Map(), craft:[], C:3000 };
+
+const el = (id) => document.getElementById(id);
+
+/* --- the two star lanes ------------------------------------------------- */
+function starChunk(lane, n, cw, host, count, rmin, rspan, omin, ospan, glints){
+  const r = laneRng(lane, n), g = document.createElementNS(NS, "g");
+  const x0 = n * cw;
+  for (let i = 0; i < count; i++) {
+    const c = document.createElementNS(NS, "circle");
+    const o = omin + r(0, ospan);
+    c.setAttribute("cx", (x0 + r(0, cw)).toFixed(1));
+    c.setAttribute("cy", r(0, SKY.H).toFixed(1));
+    c.setAttribute("r", (rmin + r(0, rspan)).toFixed(2));
+    c.setAttribute("opacity", o.toFixed(2));
+    if (r(0, 1) < .17) {                       /* a slow breath on a subset */
+      c.setAttribute("class", "tw");
+      c.style.setProperty("--o0", (o * .62).toFixed(2));
+      c.style.setProperty("--o1", Math.min(1, o * 1.5).toFixed(2));
+      c.style.setProperty("--twd", r(3.6, 11).toFixed(1) + "s");
+    }
+    g.appendChild(c);
+  }
+  /* the few that carry a glint — a chart-pen cross, not a lens flare */
+  for (let i = 0; i < glints; i++) {
+    const x = x0 + r(0, cw), y = r(0, SKY.H), L = r(3.4, 6.4), o = r(.5, .85);
+    const q = document.createElementNS(NS, "g");
+    q.setAttribute("class", "tw");
+    q.style.setProperty("--o0", (o * .72).toFixed(2));
+    q.style.setProperty("--o1", o.toFixed(2));
+    q.style.setProperty("--twd", r(5, 13).toFixed(1) + "s");
+    q.setAttribute("opacity", o.toFixed(2));
+    q.innerHTML = `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r(1.1, 1.8).toFixed(2)}"/>
+      <path d="M ${(x - L).toFixed(1)} ${y.toFixed(1)} H ${(x + L).toFixed(1)}
+               M ${x.toFixed(1)} ${(y - L).toFixed(1)} V ${(y + L).toFixed(1)}"
+            fill="none" stroke="var(--star-near)" stroke-width=".6" opacity=".5"/>`;
+    g.appendChild(q);
+  }
+  host.appendChild(g);
+  return g;
+}
+
+/* Where your households sit in the panorama: azimuth along the drift axis,
+   elevation from the vertical part of the same bearing, both derived from the
+   identity coordinates and therefore never moving (CON-13). Positions repeat
+   once per full turn of the sky, so comparisons against them are modulo C. */
+function homeWorld(){
+  if (SKY.homeSpots) return SKY.homeSpots;
+  SKY.homeSpots = Object.entries(GALAXY).map(([key, hh]) => {
+    const [ox, oy] = hh.pos, dist = Math.hypot(ox, oy);
+    return { key, dist,
+      x: mod(Math.atan2(oy, ox) * 180 / Math.PI, 360) / 360 * SKY.C,
+      y: SKY.H / 2 + (oy / dist) * SKY.H * 0.30,
+      r: 32 + (dist % 13),
+      /* your households stay the brightest thing in the backdrop: they are the
+         only marks out there that mean anything */
+      dim: Math.max(.35, Math.min(.68, .74 - dist / 8000)) };
+  });
+  return SKY.homeSpots;
+}
+const turnGap = (a, b) => Math.min(mod(a - b, SKY.C), mod(b - a, SKY.C));
+
+/* --- the borrowed constellations ---------------------------------------- */
+function decorChunk(n, host){
+  const r = laneRng(3, n), g = document.createElementNS(NS, "g"), x0 = n * CW_DECOR;
+  const want = 0.9, k = Math.floor(want) + (r(0, 1) < want % 1 ? 1 : 0);
+  /* no figure may be on screen twice: the ones already out are the ones in the
+     chunks still alive, and a new chunk simply draws again until it finds one
+     that is not */
+  const out = new Set([...SKY.decor.values()].map(e => e.name));
+  let name = "";
+  for (let i = 0; i < k; i++) {
+    name = FIGURE_NAMES[Math.floor(r(0, FIGURE_NAMES.length)) % FIGURE_NAMES.length];
+    for (let t = 0; t < 14 && out.has(name); t++)
+      name = FIGURE_NAMES[Math.floor(r(0, FIGURE_NAMES.length)) % FIGURE_NAMES.length];
+    out.add(name);
+    const fig = FIGURES[name];
+    /* a borrowed constellation and a household both ride the far layer, so an
+       overlap between them would be locked together forever: nudge off it */
+    let x = 0, y = 0;
+    for (let a = 0; a < 8; a++) {
+      x = x0 + r(30, CW_DECOR - 30); y = r(64, Math.max(90, SKY.H - 96));
+      if (!homeWorld().some(h => Math.hypot(turnGap(h.x, x), h.y - y) < h.r + 68)) break;
+    }
+    /* legible, but never competing: a borrowed constellation reads at roughly
+       two thirds of a household mark, and carries no colour at all */
+    const sc = r(.7, 1.5), rot = r(-24, 24), op = r(.26, .44);
+    const links = fig.l.map(([a, b]) =>
+      `M ${fig.s[a][0]} ${fig.s[a][1]} L ${fig.s[b][0]} ${fig.s[b][1]}`).join(" ");
+    const dots = fig.s.map(([sx, sy], idx) =>
+      `<circle cx="${sx}" cy="${sy}" r="${(idx === 0 ? 1.9 : 1.35).toFixed(2)}" fill="var(--chart-ink)"/>`).join("");
+    const mark = document.createElementNS(NS, "g");
+    mark.setAttribute("opacity", op.toFixed(2));
+    mark.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+    mark.innerHTML =
+      `<g transform="rotate(${rot.toFixed(1)}) scale(${sc.toFixed(2)})">
+         <path d="${links}" fill="none" stroke="var(--chart-ink)"
+               stroke-width="${(0.95 / sc).toFixed(2)}" opacity=".82"/>${dots}
+       </g>
+       <text y="${(26 * sc + 13).toFixed(1)}" text-anchor="middle" fill="var(--chart-ink)"
+             opacity=".95">${name}</text>`;
+    const tag = mark.querySelector("text");
+    tag.style.fontFamily = "var(--mono)";
+    tag.style.fontSize = (7.2 + 1.4 * sc).toFixed(1) + "px";
+    tag.style.letterSpacing = ".26em";
+    g.appendChild(mark);
+  }
+  host.appendChild(g);
+  return { g, name };
+}
+
+/* --- your households, on their true bearings ----------------------------- */
+function householdMark(key, turn, host){
+  const hh = GALAXY[key], spot = homeWorld().find(h => h.key === key);
+  const x = spot.x + turn * SKY.C, y = spot.y, dim = spot.dim, R = spot.r;
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("opacity", dim.toFixed(2));
+  g.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+  g.innerHTML =
+    `<circle r="${R.toFixed(1)}" fill="none" stroke="var(--chart-line)" stroke-width="1"/>
+     <circle r="${(R * .62).toFixed(1)}" fill="none" stroke="var(--chart-line-soft)"
+             stroke-width=".85" stroke-dasharray="2 5"/>
+     <path d="M 0 ${(-R - 6).toFixed(1)} V ${(-R - 1.5).toFixed(1)}
+              M 0 ${(R + 1.5).toFixed(1)} V ${(R + 6).toFixed(1)}
+              M ${(-R - 6).toFixed(1)} 0 H ${(-R - 1.5).toFixed(1)}
+              M ${(R + 1.5).toFixed(1)} 0 H ${(R + 6).toFixed(1)}"
+           fill="none" stroke="var(--chart-line)" stroke-width=".85"/>` +
+    hh.planets.map(([px, py]) =>
+      `<circle r="${(Math.hypot(px, py) * .85).toFixed(1)}" fill="none"
+               stroke="var(--chart-line-soft)" stroke-width=".7" opacity=".8"/>`).join("") +
+    `<circle r="2.9" fill="var(--ink)"/>
+     <path d="M -9 0 H 9 M 0 -9 V 9" fill="none" stroke="var(--ink)" stroke-width=".6" opacity=".45"/>` +
+    hh.planets.map(([px, py, pr, tok]) =>
+      `<circle cx="${(px * .85).toFixed(1)}" cy="${(py * .85).toFixed(1)}" r="${pr}" fill="var(${tok})"/>`).join("");
+  host.appendChild(g);
+  return g;
+}
+
+/* --- the fleet ----------------------------------------------------------- */
+function fleetChunk(n, host){
+  const r = laneRng(4, n), x0 = n * CW_FLEET;
+  const g = document.createElementNS(NS, "g");
+  const made = [];
+  /* a little under the target, because the roll is nudged up afterwards if the
+     opening screenful came out thin — and scaled back on a narrow sky, where
+     the card already owns most of it and two craft is a crowd */
+  const density = SKY.fleetTarget * 0.9 * SKY.boost * Math.min(1, SKY.W / 900) / SKY.W;
+  const want = CW_FLEET * density;
+  const k = Math.min(2, Math.floor(want) + (r(0, 1) < want % 1 ? 1 : 0));
+  const sizeF = Math.max(0.72, Math.min(1, SKY.W / 1200));
+
+  for (let i = 0; i < k; i++) {
+    /* type: never the same craft twice in one skyful */
+    let type = null;
+    for (let t = 0; t < 10; t++) {
+      const cand = ROSTER[Math.floor(r(0, ROSTER.length)) % ROSTER.length];
+      if (!SKY.craft.some(c => c.key === cand.key)) { type = cand; break; }
+      type = cand;
+    }
+    /* depth: the deep-space probes sit far out, the comms birds close in —
+       and once in a while the roll turns that on its head */
+    const deep = type.mode === "aim" || type.mode === "free";
+    let depth = deep ? r(.38, 1) : r(0, .72);
+    if (r(0, 1) < .18) depth = 1 - depth;
+
+    const norm = Math.pow(46 / type.span, 0.55);
+    const scale = (1.46 - 0.98 * depth) * norm * sizeF;
+    const halfSpan = type.span * scale + 12;
+    /* the pen holds a readable weight all the way out: a far craft is small
+       and quiet, never a smudge (owner, §14 — "a bit too faded") */
+    const pen = (1.45 - 0.40 * depth) / scale;
+
+    /* where: a free y anywhere in the sky, an x anywhere in this chunk, but
+       never on top of another craft — and, for the chunks that make up the
+       first screenful, never on top of the card either. Later chunks are
+       born off the right-hand edge, where the card is not, so the keep-out
+       simply stops applying and the drift is free to carry a craft behind
+       the glass, which swallows it. */
+    let wx = null, y = 0;
+    const yPad = Math.min(halfSpan * .6, SKY.H * .2);
+    const k1 = SKY.card, sl = SKY.slack, clr = halfSpan * sl;
+    for (let a = 0; a < 14; a++) {
+      const cx = x0 + r(0, CW_FLEET);
+      const cy = r(yPad, SKY.H - yPad);
+      const sx = cx - SKY.wxNear0;
+      if (sl > 0 && sx > k1.left - clr - 26 * sl && sx < k1.right + clr + 26 * sl &&
+          cy > k1.top - clr - 20 * sl && cy < k1.bottom + clr + 20 * sl) continue;
+      /* and not straight on top of a household. The two ride different depths,
+         so the drift pulls them apart within the minute — but if stillness has
+         been asked for there is no minute, and the opening screenful is the
+         whole of it. */
+      if (sl > 0 && homeWorld().some(h => {
+        const gap = mod(h.x - SKY.wxNear0 * V_FAR / V_NEAR - sx + SKY.C / 2, SKY.C) - SKY.C / 2;
+        return Math.hypot(gap, h.y - cy) < h.r + halfSpan * .55;
+      })) continue;
+      if (SKY.craft.concat(made).some(c => Math.hypot(c.wx - cx, c.y - cy) < 118 + halfSpan * .75 + c.span * c.scale * .75)) continue;
+      wx = cx; y = cy; break;
+    }
+    if (wx === null) continue;
+
+    const node = document.createElementNS(NS, "g");
+    node.setAttribute("class", "craft");
+
+    const c = {
+      key: type.key, mode: type.mode, span: type.span, scale, wx, y, depth,
+      att: r(0, 360), jit: r(-11, 11), start: type.start,
+      bowF: r(type.bow[0], type.bow[1]), bowSign: r(0, 1) < .5 ? -1 : 1,
+      ax: r(6, 17), ay: r(4, 11), tx: r(24, 46), ty: r(19, 38),
+      px: r(0, 6.28), py: r(0, 6.28), node,
+    };
+
+    /* the conveyed message: dotted, travelling craft → relay, curving as a
+       real pass would, re-solved every frame as the craft drifts. It ends on
+       the dish itself and is swallowed by the glass. */
+    if (r(0, 1) < type.talk) {
+      const b = document.createElementNS(NS, "path");
+      b.setAttribute("class", "beam");
+      b.setAttribute("fill", "none");
+      b.setAttribute("stroke", "var(--accent)");
+      b.setAttribute("stroke-width", (1.25 - .4 * depth).toFixed(2));
+      b.setAttribute("stroke-linecap", "round");
+      b.setAttribute("opacity", (.52 - .26 * depth).toFixed(2));
+      const gap = 9 + 6 * depth;
+      b.style.setProperty("--dash", `1.7 ${gap.toFixed(1)}`);
+      b.style.setProperty("--doff", (1.7 + gap).toFixed(1));
+      b.style.setProperty("--bmdur", r(3.4, 6.2).toFixed(1) + "s");
+      node.appendChild(b);
+      c.beam = b;
+    }
+
+    const hull = document.createElementNS(NS, "g");
+    hull.setAttribute("class", "hull");
+    hull.setAttribute("opacity", (1 - .36 * depth).toFixed(2));
+    hull.style.setProperty("--bldur", r(4.5, 9).toFixed(1) + "s");
+    hull.innerHTML = `<g class="sway" style="--sw:${r(.7, 1.7).toFixed(2)}deg;--swdur:${r(26, 46).toFixed(0)}s">
+        ${type.draw(+pen.toFixed(2))}</g>`;
+    node.appendChild(hull);
+    c.hull = hull;
+    const gim = hull.querySelector(".gimbal");
+    if (gim) { c.gimbal = gim; c.gx = +gim.dataset.gx; c.gy = +gim.dataset.gy; }
+
+    /* a name, if it is one of the famous ones and it is near enough to carry
+       one without shouting */
+    if (type.label && depth < .86) {
+      const fs = (10.6 - 3.2 * depth) * sizeF;
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("text-anchor", "middle");
+      t.setAttribute("fill", "var(--chart-ink)");
+      t.setAttribute("opacity", (.68 - .3 * depth).toFixed(2));
+      t.style.fontFamily = "var(--mono)";
+      t.style.fontSize = fs.toFixed(1) + "px";
+      t.style.letterSpacing = ".22em";
+      t.textContent = type.label;
+      node.appendChild(t);
+      c.label = t;
+      c.labelDy = type.span * scale * .66 + fs * 1.5;
+    }
+
+    g.appendChild(node);
+    made.push(c);
+  }
+  host.appendChild(g);
+  return { g, craft: made };
+}
+
+/* --- keeping the window stocked ------------------------------------------ */
+function stock(wx){
+  const first = (cw) => Math.floor((wx - PAD) / cw), last = (cw) => Math.floor((wx + SKY.W + PAD) / cw);
+  const sweep = (store, cw, make) => {
+    const a = first(cw), b = last(cw);
+    for (let n = a; n <= b; n++) if (!store.has(n)) store.set(n, make(n));
+    for (const [n, entry] of store) if (n < a || n > b) { (entry.g || entry).remove(); store.delete(n); }
+  };
+  return sweep;
+}
+
+function ensure(t){
+  const wxFar = t * V_FAR, wxNear = t * V_NEAR;
+  const sweepFar = stock(wxFar), sweepNear = stock(wxNear);
+
+  /* densities are per square pixel of sky, so the field reads the same on a
+     phone and on a desk — roughly twice the v1 count in both depths, which is
+     as loud as the star chart gets before it turns into noise */
+  sweepFar(SKY.far, CW_STAR, (n) =>
+    starChunk(1, n, CW_STAR, el("farlayer"), Math.round(CW_STAR * SKY.H * 1.95e-4), .45, .62, .19, .34, 0));
+  sweepNear(SKY.near, CW_STAR, (n) =>
+    starChunk(2, n, CW_STAR, el("nearlayer"), Math.round(CW_STAR * SKY.H * 9.2e-5), .95, .85, .40, .50,
+      Math.round(CW_STAR * SKY.H * 1.15e-5)));
+  sweepFar(SKY.decor, CW_DECOR, (n) => decorChunk(n, el("distant")));
+
+  /* households: not chunks but bearings — one instance per turn of the sky,
+     and a turn where a household is not out is a turn you simply do not see
+     it (§14, "not necessarily all of them every time") */
+  const want = new Set();
+  for (const spot of homeWorld()) {
+    const key = spot.key, base = spot.x;
+    const k0 = Math.ceil((wxFar - PAD - base) / SKY.C), k1 = Math.floor((wxFar + SKY.W + PAD - base) / SKY.C);
+    for (let k = k0; k <= k1; k++) {
+      const r = laneRng(5 + key.length, k * 31 + key.charCodeAt(0));
+      if (r(0, 1) > .78) continue;                       /* out tonight? */
+      want.add(key + "#" + k);
+    }
+  }
+  for (const id of want) if (!SKY.homes.has(id)) {
+    const [key, k] = id.split("#");
+    SKY.homes.set(id, householdMark(key, +k, el("distant")));
+  }
+  for (const [id, node] of SKY.homes) if (!want.has(id)) { node.remove(); SKY.homes.delete(id); }
+
+  /* the fleet: chunk entries carry their craft, so dropping a chunk retires
+     the craft that were in it */
+  const a = Math.floor((wxNear - PAD) / CW_FLEET), b = Math.floor((wxNear + SKY.W + PAD) / CW_FLEET);
+  let changed = false;
+  for (const [n, entry] of SKY.fleetChunks) if (n < a || n > b) { entry.g.remove(); SKY.fleetChunks.delete(n); changed = true; }
+  if (changed) SKY.craft = [].concat(...[...SKY.fleetChunks.values()].map(e => e.craft));
+  for (let n = a; n <= b; n++) if (!SKY.fleetChunks.has(n)) {
+    SKY.fleetChunks.set(n, fleetChunk(n, el("fleet")));
+    SKY.craft = [].concat(...[...SKY.fleetChunks.values()].map(e => e.craft));
+  }
+}
+
+/* --- one frame ------------------------------------------------------------ */
+function place(t){
+  const wxFar = t * V_FAR, wxNear = t * V_NEAR;
+  el("farlayer").setAttribute("transform", `translate(${(-wxFar).toFixed(1)} 0)`);
+  el("nearlayer").setAttribute("transform", `translate(${(-wxNear).toFixed(1)} 0)`);
+  el("distant").setAttribute("transform", `translate(${(-wxFar).toFixed(1)} 0)`);
+
+  const target = SKY.target;
+  for (const c of SKY.craft) {
+    const x = c.wx - wxNear + c.ax * Math.sin(t / c.tx + c.px);
+    const y = c.y + c.ay * Math.sin(t / c.ty + c.py);
+    const dx = target.x - x, dy = target.y - y, len = Math.hypot(dx, dy) || 1;
+    const bearing = Math.atan2(dy, dx) * 180 / Math.PI;
+    /* "aim" turns the whole bus home; anything else lies where it lies */
+    const att = c.mode === "aim" ? bearing - 90 + c.jit : c.att;
+    c.hull.setAttribute("transform",
+      `translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${att.toFixed(1)}) scale(${c.scale.toFixed(3)})`);
+    /* the gimbal: page-frame bearing brought into the craft's own frame, then
+       a quarter turn because every dish is drawn facing local +y */
+    if (c.gimbal) c.gimbal.setAttribute("transform",
+      `translate(${c.gx} ${c.gy}) rotate(${(bearing - att - 90).toFixed(1)})`);
+    if (c.beam) {
+      const sx = x + dx / len * c.start * c.scale, sy = y + dy / len * c.start * c.scale;
+      const bow = c.bowSign * len * c.bowF;
+      const mx = (sx + target.x) / 2 - dy / len * bow, my = (sy + target.y) / 2 + dx / len * bow;
+      c.beam.setAttribute("d", `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`);
+    }
+    if (c.label) c.label.setAttribute("transform", `translate(${x.toFixed(1)} ${(y + c.labelDy).toFixed(1)})`);
+  }
+}
+
+/* --- build / rebuild ------------------------------------------------------ */
+function build(){
+  const W = window.innerWidth, H = window.innerHeight;
+  SKY.W = W; SKY.H = H;
+  for (const svg of [el("skysvg"), el("traffic")]) svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  for (const id of ["farlayer", "nearlayer", "distant", "fleet"]) el(id).textContent = "";
+  SKY.far.clear(); SKY.near.clear(); SKY.decor.clear(); SKY.homes.clear();
+  SKY.fleetChunks = new Map(); SKY.craft = [];
+
+  /* everything is aimed at the dish on the card, wherever the card is */
+  SKY.card = document.querySelector(".relay-card").getBoundingClientRect();
+  const d = el("relaydish").getBoundingClientRect();
+  SKY.target = { x: d.left + d.width / 2, y: d.top + d.height / 2 };
+
+  /* per-roll parameters: how busy this particular sky is, and how far round
+     the panorama the households are spread */
+  const r = laneRng(0, 0);
+  SKY.fleetTarget = 2 + Math.floor(r(0, 3));
+  SKY.C = Math.max(2.1 * W, 1900);        /* one full turn of the panorama */
+  SKY.homeSpots = null;                   /* bearings re-solved against it */
+  SKY.wxNear0 = clock * V_NEAR;      /* the card keep-out applies to the first screenful */
+
+  /* A sky with nothing in it is not a sky. Between the card keep-out and the
+     spacing rule a thin roll can come up empty on the opening screenful — and
+     on a phone, where the card owns nearly all the sky, that is the normal
+     case rather than the unlucky one. If stillness has been asked for, that
+     opening screenful is the only one there will ever be, so the roll steps
+     up: busier, then closer to the card, and in the last resort a craft may
+     slip behind the glass, which swallows it. Steps, never a craft sat
+     squarely on the card at full strength. */
+  const STEPS = [{ d: 1, s: 1 }, { d: 1.35, s: .55 }, { d: 1.7, s: .2 }, { d: 2, s: 0 }];
+  for (let t = 0; t < STEPS.length; t++) {
+    SKY.boost = STEPS[t].d; SKY.slack = STEPS[t].s;
+    for (const e of SKY.fleetChunks.values()) e.g.remove();
+    SKY.fleetChunks.clear(); SKY.craft = [];
+    ensure(clock);
+    const outNow = SKY.craft.filter(c =>
+      c.wx - SKY.wxNear0 > -40 && c.wx - SKY.wxNear0 < SKY.W + 40).length;
+    if (outNow >= 2) break;
+  }
+  place(clock);
+}
+
+/* --- the clock ------------------------------------------------------------ */
+const stillness = matchMedia("(prefers-reduced-motion: reduce)");
+let clock = 0, lastTs = null, lastDrawn = -1;
+function frame(ts){
+  if (lastTs === null) lastTs = ts;
+  const dt = Math.min(0.2, (ts - lastTs) / 1000); lastTs = ts;
+  if (!stillness.matches && !document.body.classList.contains("frozen")) clock += dt;
+  if (clock !== lastDrawn) { ensure(clock); place(clock); lastDrawn = clock; }
+  requestAnimationFrame(frame);
+}
+
+function reroll(){
+  seed = Math.floor(Math.random() * 2147483646) + 1;
+  clock = 0; lastDrawn = -1;
+  el("seedout").textContent = "seed " + seed;
+  build();
+}
+
+el("seedout").textContent = "seed " + seed;
+build();
+requestAnimationFrame(frame);
+
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 140); });
+</script>
+</body></html>
