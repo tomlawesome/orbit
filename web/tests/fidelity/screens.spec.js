@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -572,7 +572,8 @@ async function capture(
   return { png, rects };
 }
 
-function compare(expected, actual, name, label) {
+/** @param {string | null} [expectedFile] the on-disk PNG `expected` was read from, when it has one */
+function compare(expected, actual, name, label, expectedFile = null) {
   expect(
     { width: actual.width, height: actual.height },
     `${label}: sizes must match`,
@@ -591,13 +592,23 @@ function compare(expected, actual, name, label) {
   const ratio = differing / total;
 
   /*
-   * Written pass or fail. A gate whose output you only see when it breaks is a
-   * gate nobody checks is working.
+   * The verdict is printed pass or fail — a gate whose output you only see
+   * when it breaks is a gate nobody checks is working. The image artifacts,
+   * though, exist to diagnose a failure, and each is a full-frame PNG encode
+   * written synchronously, so on green they were sixteen screens of pure tax
+   * (#448): written on failure only, and the baseline copied rather than
+   * re-encoded, since the file already is the PNG being compared.
    */
-  mkdirSync(artifacts, { recursive: true });
-  writeFileSync(`${artifacts}/${name}-${label}-actual.png`, PNG.sync.write(actual));
-  writeFileSync(`${artifacts}/${name}-${label}-expected.png`, PNG.sync.write(expected));
-  writeFileSync(`${artifacts}/${name}-${label}-diff.png`, PNG.sync.write(diff));
+  if (ratio > MAX_DIFF_RATIO) {
+    mkdirSync(artifacts, { recursive: true });
+    writeFileSync(`${artifacts}/${name}-${label}-actual.png`, PNG.sync.write(actual));
+    if (expectedFile) {
+      copyFileSync(expectedFile, `${artifacts}/${name}-${label}-expected.png`);
+    } else {
+      writeFileSync(`${artifacts}/${name}-${label}-expected.png`, PNG.sync.write(expected));
+    }
+    writeFileSync(`${artifacts}/${name}-${label}-diff.png`, PNG.sync.write(diff));
+  }
 
   console.log(
     `${name} [${label}]: ${differing} of ${total} pixels differ ` +
@@ -606,17 +617,39 @@ function compare(expected, actual, name, label) {
   return { ratio, differing };
 }
 
+/*
+ * The app side of a porting screen is photographed by BOTH of its tests — the
+ * porting comparison and the baseline one — and standing the page up again
+ * (navigate, settle, rasterise, screenshot) is the expensive half of the gate
+ * (#448). The worker is single and sequential (playwright.config.js), so the
+ * first capture's raw pixels are kept and every later reader gets a fresh
+ * copy — a copy, because callers mask their PNG in place and a mask must
+ * never leak from one comparison into the next.
+ */
+const appShots = new Map();
+
+async function captureAppOnce(page, screen) {
+  if (!appShots.has(screen.name)) {
+    const { png } = await capture(
+      page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
+      { reducedMotion: screen.reducedMotion });
+    appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
+  }
+  const shot = appShots.get(screen.name);
+  const png = new PNG({ width: shot.width, height: shot.height });
+  shot.data.copy(png.data);
+  return png;
+}
+
 for (const screen of SCREENS) {
   if (screen.stage === "porting") {
     test(`${screen.name} matches its mockup (porting)`, async ({ page }) => {
       const mockup = await capture(
         page, MOCKUPS + screen.mockup, screen.settle, screen.mockupOnly, screen.viewport,
         false, { reducedMotion: screen.reducedMotion, trim: screen.mockupTrim });
-      const actual = await capture(
-        page, APP + screen.path, screen.settle, [], screen.viewport, screen.signedOut,
-        { reducedMotion: screen.reducedMotion });
-      maskRegions(actual.png, mockup.rects);
-      const { ratio, differing } = compare(mockup.png, actual.png, screen.name, "mockup");
+      const actual = await captureAppOnce(page, screen);
+      maskRegions(actual, mockup.rects);
+      const { ratio, differing } = compare(mockup.png, actual, screen.name, "mockup");
       expect(
         ratio,
         `${differing} pixels differ from the mockup (${(ratio * 100).toFixed(4)}%). ` +
@@ -627,9 +660,7 @@ for (const screen of SCREENS) {
   }
 
   test(`${screen.name} matches its approved appearance`, async ({ page }) => {
-    const { png: actual } = await capture(
-      page, APP + screen.path, screen.settle, [], screen.viewport, screen.signedOut,
-      { reducedMotion: screen.reducedMotion });
+    const actual = await captureAppOnce(page, screen);
     const baselinePath = `${baselines}/${screen.name}.png`;
 
     if (process.env.UPDATE_BASELINE === "1" || !existsSync(baselinePath)) {
@@ -641,6 +672,7 @@ for (const screen of SCREENS) {
 
     const { ratio, differing } = compare(
       PNG.sync.read(readFileSync(baselinePath)), actual, screen.name, "baseline",
+      baselinePath,
     );
     expect(
       ratio,

@@ -562,14 +562,6 @@
   .minisys.settle{animation:settle 1s ease .2s backwards}
   @keyframes settle{from{opacity:0}to{opacity:1}}
 
-  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
-         font:10.5px var(--mono);color:var(--ink-faint)}
-  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
-                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
-                padding:4px 10px;cursor:pointer}
-  .demos button:hover{border-color:var(--accent)}
-  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
-         color:var(--ink-faint);padding:10px 0 40px}
   @media (prefers-reduced-motion: reduce){
     .sky .far,.sky .near,.nstar .glint,.rotor{animation:none!important}
   }
