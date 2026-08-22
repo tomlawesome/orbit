@@ -70,23 +70,38 @@
  * The top of the sky is busier than the bottom — the north-star create handle
  * and the account row live there — so upward bearings get 60px more clearance
  * (owner-found: a constellation squashed behind the handle, 2026-08-15).
- *
- * EDGE_INSET replaces three separate outward limits — REACH_PAD_X (40),
- * REACH_OVERSHOOT (40) and EDGE_MARGIN (60) — with the one number that was
- * actually missing (#485, owner ruling 2026-08-22: constellations clipping
- * at the screen edge on tight desks). A ring centre is not the whole
- * constellation: its SVG extends 118px outward of the centre, and the label
- * always points further out still, toward the edge. The old limits let a
- * ring centre sit AT or past the edge, which draws a label off it. 130 = the
- * 118px the SVG extends, plus 12px of air. It bounds every outward limit in
- * this file: reachOn's rx, the separation pass's outward ceiling, and the
- * band slide's clamp — so nothing this module places can ever draw closer
- * to the edge than a constellation needs.
  */
-const EDGE_INSET = 130;
+const REACH_PAD_X = 40;
 const BAND_TOP = 215;
 const BAND_BOTTOM = 155;
 const BAND_FLOOR = 80;
+/* An outward push may overshoot the visible band by this much and no more —
+   the other half of the trapped-behind-the-handle bug. */
+const REACH_OVERSHOOT = 40;
+/* The band slide keeps this much of the hero's own margin. */
+const EDGE_MARGIN = 60;
+/*
+ * EDGE_INSET does not replace REACH_PAD_X, REACH_OVERSHOOT or EDGE_MARGIN
+ * above — those are restored exactly as `dev` had them, because the sky's
+ * ratified reach law was correct all along. EDGE_INSET is a fourth rule,
+ * layered on top: screen containment (#485, follow-up ruling 2026-08-22).
+ * The first attempt at this issue insetted from the HERO's edge, and moved
+ * the ratified fidelity gate at 1600px — wrong, because the hero legitimately
+ * overflows into the viewport's own gutters and the ratified sky depends on
+ * that overflow. The real clip boundary is the SCREEN's edge, which at the
+ * gate sits 244px further out than the hero's. So this rule is measured from
+ * `screen` — the viewport, not the hero — and is applied only as a Math.min
+ * against what the old law above already grants: it can TIGHTEN a placement
+ * the old law would have drawn outside a narrow screen, but it can never
+ * loosen or move anything the old law drew inside a wide one. That is why
+ * the fidelity gate (screen 1600) reproduces byte-for-byte — there the fit
+ * bound is wider than everything the old law can grant. In the law's own
+ * hierarchy this rule outranks separation (a desire) but yields to the
+ * keep-out (a guarantee), and it never touches a bearing. 130 = the 118px a
+ * constellation's own SVG extends outward of its ring centre, plus 12px of
+ * air.
+ */
+const EDGE_INSET = 130;
 const SEPARATION_ROUNDS = 8;
 const BAND_ROUNDS = 6;
 
@@ -105,7 +120,7 @@ export function minSeparationFor(width) {
  * placement instead of REDIRECTING it.
  */
 export function reachOn(angle, width, height) {
-  const rx = width / 2 - EDGE_INSET;
+  const rx = width / 2 + REACH_PAD_X;
   const ry = Math.max(BAND_FLOOR, height / 2 - (Math.sin(angle) < 0 ? BAND_TOP : BAND_BOTTOM));
   return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
 }
@@ -127,6 +142,11 @@ export function dimFor(distance) {
  * @param {number}  options.height  the hero's height in px
  * @param {number}  options.keepOut radius the chart claims at the centre
  *                                  (#427); 0 where there is no chart
+ * @param {number}  [options.screen] the viewport's width in px — the hero is
+ *                                  centred in it, so it is always ≥ width.
+ *                                  Defaults to width. The #485 screen
+ *                                  containment bound is measured from this,
+ *                                  never from the hero.
  * @returns {Array} every household in the galaxy, in stable id order, each
  *                  with `{ id, household, isCamera, dist, angle, radius, ox,
  *                  oy, dim, banded }`. The camera's own entry is included at
@@ -136,8 +156,8 @@ export function dimFor(distance) {
  *                  `banded` marks the one ratified case where the bearing
  *                  yielded — see the band clamp below.
  */
-export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 }) {
-  const cached = memoised(galaxy, camera, width, height, keepOut);
+export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0, screen = width }) {
+  const cached = memoised(galaxy, camera, width, height, keepOut, screen);
   if (cached) return cached;
 
   /* Stable order, always. Not Object.keys(galaxy) — that is the order the
@@ -147,6 +167,16 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
   const origin = camera && galaxy[camera] ? galaxy[camera].pos : [0, 0];
   const minSep = minSeparationFor(width);
   const reach = (angle) => reachOn(angle, width, height);
+  /*
+   * The #485 screen bound, taken on the SCREEN's own half-width — never the
+   * hero's — so it can only tighten what `reach` already grants, never widen
+   * or move it. See EDGE_INSET above for why the screen and not the hero.
+   */
+  const fitX = Math.max(screen / 2 - EDGE_INSET, 0);
+  const fit = (angle) => {
+    const limit = Math.max(height / 2 - (Math.sin(angle) < 0 ? BAND_TOP : BAND_BOTTOM), 0);
+    return Math.hypot(fitX, Math.min(limit, fitX * Math.abs(Math.tan(angle))));
+  };
 
   const points = [];
   const cameraEntry = [];
@@ -212,7 +242,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
    * the constellation sits partly outside the band. The bearing never gives.
    */
   for (const point of points) {
-    point.radius = Math.max(keepOut, Math.min(point.dist, reach(point.angle)));
+    point.radius = Math.max(keepOut, Math.min(point.dist, reach(point.angle), fit(point.angle)));
     resolve(point);
   }
 
@@ -259,25 +289,24 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
          */
         const unspent = shove - (wasInner - inner.radius);
         /*
-         * Capped: an uncapped push could shove a constellation's ring centre
-         * to where its own SVG or label crosses the screen edge (#485). The
-         * cap is bearing-aware, on the outer point's own side (`x`, the same
-         * inset reachOn uses). A shallow bearing hits the side first, at
-         * `x / |cos|` — the ring centre stops at the inset however far up or
-         * down it wandered. A steep bearing hits the band corner first, at
-         * `hypot(x, limit)`, along which a banded constellation slides
-         * exactly as before; near-vertical bearings are safe too, because
-         * `tan` blowing up is caught by the `min`, so the corner still wins.
-         * And the cap can only ever hold a radius back, never pull one in: a
+         * Capped: an uncapped push could shove a constellation past the
+         * visible band — the other half of the trapped-behind-the-handle bug.
+         * For a constellation already sitting on a band edge the limit is the
+         * hero's own side, not the band, because more radius slides it ALONG
+         * the edge rather than off the top. On top of that, `fit` (#485)
+         * tightens the ceiling further wherever the real screen is narrower
+         * than the hero — it only ever narrows this cap, never widens it. And
+         * the cap can only ever hold a radius back, never pull one in: a
          * keep-out that already reaches past the band is #428's AC6 case and
          * the pass after it must not quietly undo it.
          */
-        const x = width / 2 - EDGE_INSET;
-        const limit = Math.max(outer.angle < 0 ? safeTop : safeBottom, 0);
-        const ceiling = Math.hypot(x, Math.min(limit, x * Math.abs(Math.tan(outer.angle))));
+        const ceiling = Math.max(
+          reach(outer.angle) + REACH_OVERSHOOT,
+          Math.hypot(width / 2 - EDGE_MARGIN, outer.angle < 0 ? safeTop : safeBottom),
+        );
         outer.radius = Math.min(
           outer.radius + shove + unspent,
-          Math.max(outer.radius, ceiling),
+          Math.max(outer.radius, Math.min(ceiling, fit(outer.angle))),
         );
         resolve(inner);
         resolve(outer);
@@ -297,15 +326,20 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
    * ALREADY been given leave to yield may move here: a true bearing is never
    * touched to make room for someone else, which is the difference between
    * this and the pass it replaces. The slide stays on its own side of the
-   * sky, inside the hero, and outside the chart — the keep-out is re-asserted
-   * afterwards, so #427 holds absolutely rather than up to the last pass.
+   * sky, inside the hero, and outside the chart — the edge bound (tightened
+   * by `fit`, #485, wherever the real screen demands it) is applied first,
+   * and the keep-out is re-asserted LAST, so #427 holds absolutely rather
+   * than up to the last pass: the guarantee always wins, even where the edge
+   * bound would otherwise have clipped it.
    */
   const slide = (point, by) => {
     let ox = point.ox + by;
     const side = Math.sign(ox) || Math.sign(point.ox) || 1;
     const clear = Math.sqrt(Math.max(keepOut * keepOut - point.oy * point.oy, 0));
+    const bound = Math.min(width / 2 - EDGE_MARGIN, fitX);
+    ox = Math.max(-bound, Math.min(bound, ox));
     if (Math.abs(ox) < clear) ox = side * clear;
-    point.ox = Math.max(-(width / 2) + EDGE_INSET, Math.min(width / 2 - EDGE_INSET, ox));
+    point.ox = ox;
   };
   for (let round = 0; round < BAND_ROUNDS; round++) {
     let crowded = false;
@@ -331,7 +365,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
   /* Back into stable id order with the camera in its place, so the DOM the
      caller writes is in the same order every time too. */
   const placed = [...points, ...cameraEntry].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return remember(galaxy, camera, width, height, keepOut, placed);
+  return remember(galaxy, camera, width, height, keepOut, screen, placed);
 }
 
 /**
@@ -346,20 +380,20 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
  */
 const memo = new WeakMap();
 
-function signature(galaxy, camera, width, height, keepOut) {
+function signature(galaxy, camera, width, height, keepOut, screen) {
   const shape = Object.keys(galaxy).sort()
     .map((id) => `${id}:${galaxy[id].pos[0]},${galaxy[id].pos[1]}`)
     .join("|");
-  return `${camera ?? ""}@${width}x${height}/${keepOut}#${shape}`;
+  return `${camera ?? ""}@${width}x${height}/${keepOut}/${screen}#${shape}`;
 }
 
-function memoised(galaxy, camera, width, height, keepOut) {
-  return memo.get(galaxy)?.get(signature(galaxy, camera, width, height, keepOut)) ?? null;
+function memoised(galaxy, camera, width, height, keepOut, screen) {
+  return memo.get(galaxy)?.get(signature(galaxy, camera, width, height, keepOut, screen)) ?? null;
 }
 
-function remember(galaxy, camera, width, height, keepOut, placed) {
+function remember(galaxy, camera, width, height, keepOut, screen, placed) {
   let bySignature = memo.get(galaxy);
   if (!bySignature) memo.set(galaxy, (bySignature = new Map()));
-  bySignature.set(signature(galaxy, camera, width, height, keepOut), placed);
+  bySignature.set(signature(galaxy, camera, width, height, keepOut, screen), placed);
   return placed;
 }

@@ -18,7 +18,7 @@ const OTHERS = Object.keys(GALAXY).filter((id) => id !== PRIMARY);
  * min-height:100vh. This is the geometry the ratified mockup was measured at,
  * so it is the geometry the numbers below are pinned to.
  */
-const DESK = { width: 1112, height: 1000 };
+const DESK = { width: 1112, height: 1000, screen: 1600 };
 /* .dialwrap is 640 wide; +88 clears the constellation's own r-40 ring. */
 const KEEP_OUT = 640 / 2 + 88;
 
@@ -207,24 +207,28 @@ describe("the fixed map", () => {
   it("never draws a constellation past the screen edge, at every desk width (#485)", () => {
     // The keep-out kept a constellation off the dial; nothing kept it on the
     // screen. Below 1096px the dial (and so the keep-out) shrinks with the
-    // viewport (home.css's `.dialwrap>svg`), so this checks the coupled
-    // relationship the shipped CSS actually produces, not a fixed keep-out.
-    const widths = [901, 950, 1000, 1096, 1200, 1600];
-    for (const width of widths) {
+    // viewport (home.css's `.dialwrap>svg`), and the hero itself is capped by
+    // `.page` at 1160 with 24px padding either side — this checks the coupled
+    // relationship the shipped CSS actually produces: a screen-true, on-screen
+    // bound and the unconditional keep-out guarantee, together.
+    const widths = [901, 950, 1000, 1096, 1144, 1200]; // viewport widths
+    for (const screen of widths) {
+      const width = Math.min(1160, screen) - 48; // the hero .page produces
       const height = 1000;
-      const keepOut = Math.min(408, (width - 456) / 2 + 88);
-      const skies = [
-        ...Object.keys(GALAXY).map((camera) => visible(place({ camera, width, height, keepOut }))),
-        // §11/#453: the newcomer's labelled sky has no chart to clear.
-        visible(placeGalaxy({ galaxy: GALAXY, camera: null, width, height, keepOut: 0 })),
-      ];
-      for (const sky of skies) {
-        for (const point of sky) {
-          expect(Math.abs(point.ox), `${point.id} at ${width}x${height}`).toBeLessThanOrEqual(
-            width / 2 - 130 + 0.001,
-          );
+      const keepOut = Math.min(640, screen - 456) / 2 + 88;
+      const onScreen = (point, where) =>
+        expect(Math.abs(point.ox) + 118, where).toBeLessThanOrEqual(screen / 2 - 12 + 0.001);
+      for (const camera of Object.keys(GALAXY)) {
+        for (const point of visible(place({ camera, width, height, screen, keepOut }))) {
+          const where = `${point.id} from ${camera} at screen ${screen}`;
+          onScreen(point, where);
+          expect(Math.hypot(point.ox, point.oy), where).toBeGreaterThanOrEqual(keepOut - 0.001);
         }
       }
+      // §11/#453: the newcomer's labelled sky has no chart to clear, so it
+      // carries its own keepOut: 0 and is checked for on-screen only.
+      const newcomer = visible(placeGalaxy({ galaxy: GALAXY, camera: null, width, height, screen, keepOut: 0 }));
+      for (const point of newcomer) onScreen(point, `${point.id} (newcomer) at screen ${screen}`);
     }
   });
 
@@ -255,14 +259,6 @@ describe("the sky's measurements", () => {
     const up = reachOn(-Math.PI / 2, 1112, 1000);
     const down = reachOn(Math.PI / 2, 1112, 1000);
     expect(down - up).toBeCloseTo(60, 6);
-  });
-
-  it("insets a horizontal bearing's reach from the edge, not past it (#485)", () => {
-    // EDGE_INSET = 130 replaced REACH_PAD_X = 40: a ring centre used to be
-    // allowed 40px PAST the hero's edge; now it stops 130px INSIDE it, the
-    // room the constellation's own SVG and label need. At width 1112 that is
-    // rx = 556 - 130 = 426 (was 556 + 40 = 596).
-    expect(reachOn(0, 1112, 1000)).toBeCloseTo(426, 6);
   });
 
   it("dims with distance, between the drawn floor and ceiling", () => {
