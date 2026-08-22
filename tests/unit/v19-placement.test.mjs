@@ -204,6 +204,30 @@ describe("the fixed map", () => {
     }
   });
 
+  it("never draws a constellation past the screen edge, at every desk width (#485)", () => {
+    // The keep-out kept a constellation off the dial; nothing kept it on the
+    // screen. Below 1096px the dial (and so the keep-out) shrinks with the
+    // viewport (home.css's `.dialwrap>svg`), so this checks the coupled
+    // relationship the shipped CSS actually produces, not a fixed keep-out.
+    const widths = [901, 950, 1000, 1096, 1200, 1600];
+    for (const width of widths) {
+      const height = 1000;
+      const keepOut = Math.min(408, (width - 456) / 2 + 88);
+      const skies = [
+        ...Object.keys(GALAXY).map((camera) => visible(place({ camera, width, height, keepOut }))),
+        // §11/#453: the newcomer's labelled sky has no chart to clear.
+        visible(placeGalaxy({ galaxy: GALAXY, camera: null, width, height, keepOut: 0 })),
+      ];
+      for (const sky of skies) {
+        for (const point of sky) {
+          expect(Math.abs(point.ox), `${point.id} at ${width}x${height}`).toBeLessThanOrEqual(
+            width / 2 - 130 + 0.001,
+          );
+        }
+      }
+    }
+  });
+
   it("degrades rather than throws where there is no camera or no sky", () => {
     expect(placeGalaxy({ galaxy: {}, camera: null, ...DESK, keepOut: 0 })).toEqual([]);
     // §11/#453: the newcomer stands at the map origin, with no chart to clear.
@@ -231,6 +255,14 @@ describe("the sky's measurements", () => {
     const up = reachOn(-Math.PI / 2, 1112, 1000);
     const down = reachOn(Math.PI / 2, 1112, 1000);
     expect(down - up).toBeCloseTo(60, 6);
+  });
+
+  it("insets a horizontal bearing's reach from the edge, not past it (#485)", () => {
+    // EDGE_INSET = 130 replaced REACH_PAD_X = 40: a ring centre used to be
+    // allowed 40px PAST the hero's edge; now it stops 130px INSIDE it, the
+    // room the constellation's own SVG and label need. At width 1112 that is
+    // rx = 556 - 130 = 426 (was 556 + 40 = 596).
+    expect(reachOn(0, 1112, 1000)).toBeCloseTo(426, 6);
   });
 
   it("dims with distance, between the drawn floor and ceiling", () => {
