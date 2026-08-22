@@ -188,19 +188,25 @@ export async function registerNode(): Promise<void> {
        * bounded detail of what disagreed, and states the remedy - which is
        * never "restart", because a restart cannot change either side.
        */
+      /* Only an actual integrity verdict earns the precise vocabulary. This
+         catch also swallows connection failures - a wrong password reaches
+         here too - and calling that a database mismatch would send an
+         operator hunting the wrong problem. The reason and its remedy are one
+         verdict, so they travel as one pair. */
+      const verdict = !(error instanceof MigrationIntegrityError)
+        ? ({ reason: "migration_integrity", action: "check_migrations" } as const)
+        : code === "database_floor"
+          ? ({ reason: "database_below_floor", action: "upgrade_from_supported_version" } as const)
+          : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
       log.error({
         event: "startup.migration",
         state: "exhausted",
-        /* Only an actual integrity verdict earns the precise vocabulary. This
-           catch also swallows connection failures - a wrong password reaches
-           here too - and calling that a database mismatch would send an
-           operator hunting the wrong problem. */
-        reason: !(error instanceof MigrationIntegrityError)
-          ? "migration_integrity"
-          : code === "database_floor" ? "database_below_floor" : "database_mismatch",
-        action: !(error instanceof MigrationIntegrityError)
-          ? "check_migrations"
-          : code === "database_floor" ? "upgrade_from_supported_version" : "attach_matching_database",
+        ...verdict,
+        /* The bounded description of what disagreed - tags and counts only,
+           never SQL or credentials (see MigrationIntegrityError.detail). */
+        ...(error instanceof MigrationIntegrityError && error.detail
+          ? { detail: error.detail }
+          : {}),
         impact: "migration_blocked",
       });
       throw new Error(code);
