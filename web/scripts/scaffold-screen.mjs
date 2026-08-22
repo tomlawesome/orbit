@@ -10,8 +10,8 @@
  * their GENERATED banners, and become the application's own code: from that
  * point the screen iterates in the running app and the mockup is history.
  *
- *   node scripts/scaffold-screen.mjs           # scaffold the listed screen
- *   node scripts/scaffold-screen.mjs --check   # verify nothing drifted mid-scaffold
+ *   node scripts/scaffold-screen.mjs <mockup> <css> <markup> [js]           # scaffold one screen
+ *   node scripts/scaffold-screen.mjs <mockup> <css> <markup> [js] --check   # verify nothing drifted mid-scaffold
  *
  * Why the CSS cannot live in a Svelte <style> block: Svelte scopes component
  * styles and prunes selectors it believes are unused. The mockups style `body`
@@ -27,14 +27,29 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "../..");
 
 /**
- * Mockup source → generated stylesheet and markup fragment. One entry per
- * screen. The fragment is a .svelte file because Svelte's template language
- * *is* HTML: the mockup's markup is already valid Svelte and needs no
- * translation step. That is the whole reason the framework was chosen.
+ * Mockup source → generated stylesheet and markup fragment, from the command
+ * line. This used to be a TARGETS list in this file, populated with the one
+ * screen being scaffolded and emptied again after promotion — permanently
+ * empty at rest, and a source edit per use (#448). The paths are repo-relative:
+ *
+ *   node scripts/scaffold-screen.mjs design/v19/inbox.html \
+ *     web/src/routes/inbox/inbox.css web/src/routes/inbox/markup.svelte \
+ *     [web/src/routes/inbox/inbox.behaviour.js]
+ *
+ * The fragment is a .svelte file because Svelte's template language *is* HTML:
+ * the mockup's markup is already valid Svelte and needs no translation step.
+ * That is the whole reason the framework was chosen. Pass the optional js
+ * output only for screens whose behaviour is the design (see below).
  */
+const positional = process.argv.slice(2).filter((arg) => arg !== "--check");
+if (positional.length < 3 || positional.length > 4) {
+  console.error(
+    "usage: node scripts/scaffold-screen.mjs <mockup.html> <out.css> <out-markup.svelte> [out.js] [--check]",
+  );
+  process.exit(positional.length === 0 && process.argv.includes("--check") ? 0 : 2);
+}
 const TARGETS = [
-  // Populated with the one screen being scaffolded, then emptied again once
-  // its files are promoted into src/routes/<screen>/ and become the app's own.
+  { from: positional[0], css: positional[1], markup: positional[2], js: positional[3] },
 ];
 
 const CSS_BANNER = (source) =>
