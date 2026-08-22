@@ -115,6 +115,18 @@ describe("PostgreSQL migration evidence", () => {
     if (!migratedUnresolvedReceipt) throw new Error("The unresolved legacy receipt must survive migration");
     expect(migratedUnresolvedReceipt.updated_at).not.toBe(unresolvedReceipt.updated_at);
     unresolvedReceipt.updated_at = migratedUnresolvedReceipt.updated_at;
+    /* 0027 seats the earliest-created active administrator as primary and
+       audits the establishment (#263). The row's id and timestamp are the
+       database's own, so the observed row is verified for content — the
+       deterministic rule chose the fixture's first administrator — and then
+       folded into the expectation at its id-ordered position. */
+    const establishment = afterUpgrade.audit_log.find((row) => row.action === "primary_administrator_established");
+    if (!establishment) throw new Error("The upgrade must seat a primary administrator (#263)");
+    expect(establishment.entity_id).toBe("10000000-0000-4000-8000-000000000001");
+    expect(establishment.actor_user_id).toBeNull();
+    expect(establishment.changes).toEqual({ rule: "earliest_created_active_administrator", migration: "0027_instance_authority" });
+    expectedAfterUpgrade.audit_log = [...expectedAfterUpgrade.audit_log, establishment]
+      .sort((first, second) => String(first.id).localeCompare(String(second.id)));
     expect(afterUpgrade).toEqual(expectedAfterUpgrade);
     const legacyContract = await database.client.unsafe(`
       SELECT id, status, failure_code, approved_item_id
