@@ -37,7 +37,7 @@ describe("stable promotion policy", () => {
 
   it.each([
     [{ releaseStage: "release-candidate" }, acceptedEvidence, /preview/u],
-    [{ sourceBranch: "develop" }, acceptedEvidence, /protected preview lane/u],
+    [{ sourceBranch: "dev" }, acceptedEvidence, /protected preview lane/u],
     [{ sourceBranch: "hotfix/unsafe/path" }, acceptedEvidence, /protected preview lane/u],
     [{ digest: "sha256:not-a-digest" }, acceptedEvidence, /digest/u],
     [{ revision: "not-a-revision" }, acceptedEvidence, /revision/u],
