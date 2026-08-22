@@ -55,8 +55,14 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
 - **V1-ITEM-01:** An authorized member can create, edit, search, schedule,
   complete, reschedule, archive, restore, and review the history of household
   items.
-- **V1-ITEM-02:** Sections and display preferences remain consistent across
-  sessions and do not compromise item access or history.
+- **V1-ITEM-02:** Display preferences remain consistent across sessions and do
+  not compromise item access or history. **Sections leave navigation** (owner,
+  2026-08-14; issue #413): no ratified v19 screen presents a section list, and
+  search plus the manifest carry navigation instead. A section remains an
+  attribute of an item and is still printed on each manifest row as its
+  category, so nothing about item access or history changes. The `sections`
+  table and `items.sectionId` are untouched — retiring them would be a
+  migration against a shipped v1.2.0 and is not a front-end matter.
 
 ### Documents and reminders
 

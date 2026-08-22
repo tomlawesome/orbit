@@ -482,7 +482,9 @@ Orbit already includes:
   favicon, and version-controlled migrations.
 - bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
-  retention purge, and storage reconciliation.
+  retention purge, and storage reconciliation — see
+  [Encryption at rest](docs/encryption-at-rest.md) for the full picture,
+  including what this does not protect and why.
 
 Orbit does not retain authenticated workspace snapshots or queued changes in
 app-controlled browser storage. It purges the legacy preview-build IndexedDB
@@ -718,8 +720,19 @@ the protected branch, test, manual-validation, and digest-promotion workflow.
 3. Run the browser and accessibility checks against the production build.
 4. Schedule `scripts/backup.sh`, retain copies outside the Docker host, and
    perform a test restore.
+5. Read [Encryption at rest](docs/encryption-at-rest.md) and decide whether
+   the host disk needs encryption before going live — Orbit does not decide
+   this for you.
 
 ---
+
+## Licence
+
+Orbit is free software, licensed under the [GNU Affero General Public
+License v3.0 or later](LICENSE). If you run a modified Orbit for others
+over a network, the AGPL's remote-interaction clause applies. The three
+bundled typefaces are separately licensed under the SIL OFL&nbsp;1.1
+(issue&nbsp;#440); their licence text ships with the application.
 
 <p align="center">
   <img src="public/orbit-mark.svg" alt="" width="52" />

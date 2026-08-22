@@ -5,7 +5,7 @@
   --display:'Space Grotesk',var(--ui);
   --bg:#070d1f; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.78);
   --line:#243259; --line-soft:#17203f;
-  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#4d5878;
+  --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
   --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
   --sun:#ffe9c4;
 }

@@ -235,9 +235,32 @@ recoverable state.
 - Responses use `Cache-Control: private, no-store`,
   `X-Content-Type-Options: nosniff`, a restrictive content security policy,
   and `Content-Disposition: attachment` with a safely encoded filename.
-- Range requests and inline previews are not supported in the first release.
+- Range requests are not supported in the first release.
 - Authentication-tag verification must complete successfully; corrupt content
   is not partially returned as a successful download.
+
+### Page-one preview safety
+
+- `GET /api/documents/{documentId}/preview` renders page one of a stored
+  document as an image so a person can recognise it visually (#476). It is
+  reachable exactly where a download is: it obtains plaintext through the same
+  authorization, readiness and integrity path, and refuses everything a
+  download refuses with the same non-disclosing response.
+- The read is audited as `document_previewed`, distinct from
+  `document_downloaded`, so an image request is never recorded as a
+  whole-document export.
+- Rendering is in-process and in-memory: PDF.js parses into a Skia canvas with
+  the same parser posture as structure validation — no scripting, no eval, no
+  XFA, no network, no worker. No plaintext temporary file is written, so there
+  is nothing to unlink; the decrypted buffer is zeroed on every exit, including
+  failures.
+- Bytes are re-identified and re-inspected before rendering rather than trusted
+  from the stored media type. Anything the structure check refuses answers
+  `document_preview_unsupported`; a render that fails or exceeds its wall-clock
+  budget answers `document_preview_failed`. Neither becomes a server error.
+- Output is bounded to a 1200-pixel long edge and carries the download
+  response's headers: `Cache-Control: private, no-store`,
+  `X-Content-Type-Options: nosniff` and a restrictive content security policy.
 
 ### Availability and resource controls
 

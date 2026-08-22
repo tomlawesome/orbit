@@ -1,4 +1,5 @@
 import { daysUntil } from "@/lib/domain";
+import { effectiveReminderOffsets, type RecipientWarningDays, type ReminderOffset } from "@/lib/preferences";
 import type { HouseholdWorkspace } from "@/lib/workspace";
 
 export type NotificationKind = "overdue" | "due-today" | "upcoming";
@@ -14,8 +15,26 @@ export interface HouseholdNotification {
   read: boolean;
 }
 
+/**
+ * The signed-in reader the list is being built for (#487): whoever is
+ * looking at the bell sees warnings on THEIR OWN first/final pair, not a
+ * one-size-fits-all window, for every item that carries no reminder rule of
+ * its own — the same precedence `effectiveReminderOffsets` already applies
+ * to dispatch (#479). `firstWarningDays`/`finalWarningDays` are the raw
+ * stored values (nullable: a reader with no preferences row at all), never
+ * pre-defaulted here, so both surfaces run the exact same fallback logic.
+ */
+export type NotificationReader = RecipientWarningDays & { id: string };
+
 function scheduleLabel(kind: "renewal" | "service" | undefined): string {
   return kind === "service" ? "service" : "renewal";
+}
+
+/** An item's own explicit reminder rules, shaped for `effectiveReminderOffsets`.
+ * The in-app list has no channel distinction of its own — an item's rules win
+ * outright regardless of channel — so every day carries both channels open. */
+function itemReminderRules(reminderDays: readonly number[] | undefined): ReminderOffset[] {
+  return (reminderDays ?? []).map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
 }
 
 /**
@@ -26,7 +45,7 @@ function scheduleLabel(kind: "renewal" | "service" | undefined): string {
  * are checked once per surviving item below, so this builds a Set for each up
  * front (issue #383) instead of doing an `.includes` linear scan per item.
  */
-export function householdNotifications(household: HouseholdWorkspace, today: string): HouseholdNotification[] {
+export function householdNotifications(household: HouseholdWorkspace, today: string, reader: NotificationReader): HouseholdNotification[] {
   const dismissedIds = new Set(household.dismissedNotificationIds);
   const readIds = new Set(household.readNotificationIds);
   return household.items
@@ -35,7 +54,13 @@ export function householdNotifications(household: HouseholdWorkspace, today: str
       const dueDate = item.dueDate as string;
       const days = daysUntil(dueDate, today);
       if (item.snoozedUntil && daysUntil(item.snoozedUntil, today) > 0) return [];
-      const reminderWindow = Math.max(0, ...(item.reminderDays ?? []));
+      // #487: an item with no rules of its own used to show nothing beyond
+      // "overdue"/"due today" (the old Math.max(0, ...[]) === 0 window) even
+      // though dispatch (#479) already warns this reader on their own pair
+      // for that very item. effectiveReminderOffsets is the one truth both
+      // surfaces read the window from now.
+      const offsets = effectiveReminderOffsets(itemReminderRules(item.reminderDays), reader);
+      const reminderWindow = Math.max(0, ...offsets.map((offset) => offset.daysBefore));
       if (days > reminderWindow) return [];
 
       const kind: NotificationKind = days < 0 ? "overdue" : days === 0 ? "due-today" : "upcoming";

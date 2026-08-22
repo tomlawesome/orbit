@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — settings on the cartographer’s desk (concept 2 of 3, issue #472 · §15)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* SETTINGS · CONCEPT 2 — THE CARTOGRAPHER'S DESK  (§15, issue #472)
+     =================================================================
+     One of three concepts the owner asked to see mocked before ruling on the
+     settings backdrop. The cards, their copy and their behaviour are
+     design/v19/settings.html reproduced faithfully — content is spec here.
+     Only the story behind them is new.
+
+     THE IDEA — AND THERE IS NO SKY IN IT
+     ------------------------------------
+     Every other backdrop in the family puts you outside, under the stars.
+     This one does the opposite and shows nothing of the sky at all: you are
+     nose-down over a vast tilted drawing board, up close, and what is on it
+     is YOUR chart being drawn. Faint ruled graticule, a compass rose, a
+     french curve, a parallel rule, a set square, a pencil — and, in ink, the
+     instance's own households plotted one ring at a time with margin
+     annotations in the cartographer's hand.
+
+     NOTHING HERE IS DECORATION (§12, applied to a backdrop)
+     ------------------------------------------------------
+       · every plotted system is a REAL household from
+         web/src/lib/data/fixtures/workspace.js, and every dot on its ring is
+         one of that household's REAL items, at the month it falls due, in its
+         real due-state colour (four states only: on-track, upcoming,
+         due-soon, overdue);
+       · the margin annotations are those items' real titles, real dates and
+         real costs — "EST" where the fixture says the cost is an estimate;
+       · the ring is the identity: one ring, twelve months, tick-marked
+         (§1). One ring drawn is one household's year;
+       · the bearing printed under each block is the household's own
+         bearing, derived from its id, never rolled — BEARINGS ARE SACRED
+         (CON-13);
+       · Lawson Home is not plotted, because you are inside it. It is the
+         DATUM the whole sheet is referenced to, and the title block says so;
+       · the title block is a real title block: sheet number, datum, scale,
+         who drew it and when.
+
+     WHAT MOVES, AND WHAT NEVER LOOPS (§14, both rulings)
+     ----------------------------------------------------
+     There is no sky here, so nothing is sky-dwelling and nothing sits still
+     pretending to be. What moves is the CHART: an endless roll of paper
+     travelling slowly under the instruments, which are laid on the board and
+     never budge. The roll is cut into chunks whose contents are a pure
+     function of (seed, chunk) — rolled just before they enter and destroyed
+     for good once they leave, so the chart never repeats and you can never
+     scroll back to a region you have already seen.
+
+     THE PENCIL IS THE CLOCK
+     -----------------------
+     The drawing frontier is the pencil's own tip: everything that has passed
+     under it is inked (the ellipse draws itself along its length, then the
+     dots and the annotation are written), everything still to its right is
+     construction pencil. So the chart is genuinely half-drawn, and which half
+     depends on where the pencil was put down this load.
+
+     PER-LOAD ROLL (§14, "never the same twice")
+     -------------------------------------------
+     One seed decides: WHICH REGION of the endless chart you are looking at,
+     the board's tilt, where the rose, the parallel rule, the french curve,
+     the set square, the dividers and the pencil are lying, which side the
+     title block is taped to, and where the lamp falls.
+
+     ATLAS AND DAWN
+     --------------
+     This concept is built to sing on the paper packs: on atlas and dawn the
+     board IS paper, the lamp is warm and the grain is the sheet's own tooth.
+     On the three dark packs the same board reads as a drafting table under a
+     shaded lamp, ink turned to chart line.
+
+     BUILD NOTE: in the app the seed rolls fresh on every load. Under
+     ORBIT_FIXTURES it MUST be pinned deterministically — derived from the
+     fixture workspace id, never Date.now() or Math.random() — with the drift
+     clock pinned to a fixed T and the viewport size pinned as the gate
+     already pins it. Those three make this backdrop reproducible pixel for
+     pixel; nothing else on the screen varies. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+
+  /* ---- the board -----------------------------------------------------------
+     A single svg, drawn in the container's own pixels and laid back in real
+     perspective so the board recedes: you are leaning over it, not looking at
+     a picture of it. The container is deliberately larger than the viewport
+     so the tilt never shows an edge. */
+  .deskwrap{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+  .board{position:absolute;left:-13%;top:-17%;width:126%;height:134%;
+         transform:perspective(1500px) rotateX(12deg);transform-origin:50% 58%}
+  .board svg{position:absolute;inset:0;width:100%;height:100%}
+  /* the lamp over the desk, and the fall-off past its pool. On the paper packs
+     it is a real warm lamp on real paper; on the dark packs it is a shaded
+     drafting lamp and the board falls away into the room. */
+  .lamp{position:fixed;inset:0;z-index:1;pointer-events:none;
+        background:radial-gradient(ellipse 58% 50% at var(--lx,44%) 20%, rgba(255,236,196,.13), transparent 62%),
+                   radial-gradient(ellipse at 50% 44%, transparent 44%, rgba(0,0,0,.42) 100%)}
+  [data-theme=atlas] .lamp,[data-theme=dawn] .lamp{
+        background:radial-gradient(ellipse 58% 50% at var(--lx,44%) 18%, rgba(255,246,219,.66), transparent 64%),
+                   radial-gradient(ellipse at 50% 46%, transparent 50%, rgba(74,60,34,.22) 100%)}
+  .grain{opacity:.05}
+  [data-theme=atlas] .grain,[data-theme=dawn] .grain{opacity:.10}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+  /* §14: the helm uses the desk — one full row for the sky, two columns for
+     the rest, collapsing to one on a narrow viewport. */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
+  .cards .card{margin-top:0}
+  .card.wide{grid-column:1 / -1}
+  @media (max-width:880px){.cards{grid-template-columns:1fr}}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px;margin-top:22px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+           color:var(--ink-faint);margin-bottom:14px}
+  .idrow{display:flex;align-items:center;gap:16px}
+  .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;
+                 border:1px solid var(--line);background:var(--panel-raised);
+                 display:grid;place-items:center;font:14px var(--mono);color:var(--ink-mid)}
+  .idrow .who{flex:1}
+  .idrow .who b{display:block;font-size:15px;font-weight:560}
+  .idrow .who span{font:11.5px var(--mono);color:var(--ink-mid)}
+  .idrow button{font:11px var(--mono);color:var(--ink-mid);background:none;
+                border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
+  .idrow button:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* the sky chooser: each card is PAINTED by its own pack variables */
+  .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
+  .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
+        background:none;padding:0;text-align:left;font-family:var(--ui)}
+  .pack[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .pack .strip{position:relative;height:64px;display:block}
+  .pack .strip i{position:absolute;border-radius:50%}
+  .pack .label{display:block;padding:9px 12px 10px;background:var(--panel-raised)}
+  .pack .label b{display:block;font-size:12.5px;font-weight:560;color:var(--ink)}
+  .pack .label span{font:10px var(--mono);color:var(--ink-mid)}
+
+  .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+      font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
+      border-bottom:1px solid var(--line-soft)}
+  .kv:last-child{border:0}
+  .kv b{color:var(--ink);font-weight:500}
+  .kv .on{color:var(--ok)}
+  .kv a{color:var(--ink-mid);text-decoration:none}
+  .kv a:hover{color:var(--accent)}
+  /* a switch that tells the truth: filled when on, hollow when off */
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+          background:none;cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+            background:var(--ink-faint);transition:left .2s,background .2s}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+
+  .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
+        border-bottom:1px solid var(--line-soft);font-size:13.5px}
+  .memb:last-child{border:0}
+  .memb svg{flex:none}
+  .memb b{flex:1;font-weight:520}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+  .role.owner{color:var(--accent);border-color:var(--accent)}
+  .memb small{font:10.5px var(--mono);color:var(--ink-faint)}
+
+  .danger{margin-top:26px;text-align:center}
+  .danger button{font:11.5px var(--mono);color:var(--ink-faint);background:none;
+                 border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
+  .danger button:hover{color:var(--overdue);border-color:var(--overdue)}
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 24px 40px;line-height:1.9}
+
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:72vw;font:10.5px var(--mono);color:var(--ink-faint);
+         letter-spacing:.08em}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer;letter-spacing:.04em}
+  .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}
+  .demos .seedtag b{color:var(--ink-mid);font-weight:400}
+  .demos .packdots{display:flex;gap:7px;align-items:center}
+  .demos .packdots button{width:16px;height:16px;border-radius:50%;padding:0}
+  .demos .packdots button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  @media (max-width:880px){
+    .demos{position:static;max-width:none;justify-content:center;padding:0 24px 26px}
+  }
+  /* stillness: the drift clock is stopped in script as well as here, because a
+     requestAnimationFrame loop cannot be turned off by a media query */
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- the drawing board: the chart, and the instruments lying on it ---------- -->
+<div class="deskwrap" aria-hidden="true">
+  <div class="board"><svg id="boardsvg" preserveAspectRatio="none"></svg></div>
+</div>
+<div class="lamp" aria-hidden="true"></div>
+
+<a class="back" href="home.html">&larr; YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home &middot; owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html" aria-current="page">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setPack('starchart')"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setPack('afterdark')"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setPack('atlas')"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setPack('dawn')"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setPack('retrograde')"></button>
+  </div>
+  <button class="signout">sign out &rarr;</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Settings</h1>
+    <div class="sub">your controls, and only yours &middot; the instance&rsquo;s levers live on administration</div>
+  </header>
+
+  <div class="cards">
+  <div class="card wide">
+    <h3>You</h3>
+    <div class="idrow">
+      <span class="avatar" aria-hidden="true">TL</span>
+      <div class="who"><b>Tom Lawson</b><span>tom@lawson.example &middot; signed in via your identity provider</span></div>
+      <button>edit name</button>
+    </div>
+  </div>
+
+  <div class="card wide">
+    <h3>Your sky</h3>
+    <div class="packs" role="group" aria-label="Theme pack">
+      <button class="pack" aria-pressed="true" onclick="setPack('starchart')">
+        <span class="strip" style="background:#060b1c" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0b429"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#4ade80"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#8fb8ff"></i>
+        </span>
+        <span class="label"><b>star-chart</b><span>the ratified night</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="setPack('afterdark')">
+        <span class="strip" style="background:#05070d" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#f0b429"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#4ade80"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#7dd3fc"></i>
+        </span>
+        <span class="label"><b>after dark</b><span>lights out, ink up</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="setPack('atlas')">
+        <span class="strip" style="background:#c9bfa6" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#1c2b4a,#8f6c00 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#8f6c00"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#1e7a45"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#2b6cb0"></i>
+        </span>
+        <span class="label"><b>atlas</b><span>aged paper at dusk</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="setPack('dawn')">
+        <span class="strip" style="background:#c3ccdb" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#1a2233,#8f6c00 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#8f6c00"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#178a4c"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#1f7ac2"></i>
+        </span>
+        <span class="label"><b>dawn</b><span>first light</span></span>
+      </button>
+      <button class="pack" aria-pressed="false" onclick="setPack('retrograde')">
+        <span class="strip" style="background:#080a14" aria-hidden="true">
+          <i style="left:18px;top:18px;width:26px;height:26px;background:radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)"></i>
+          <i style="left:64px;top:38px;width:7px;height:7px;background:#ffd23f"></i>
+          <i style="left:92px;top:22px;width:5px;height:5px;background:#3ef2a0"></i>
+          <i style="left:120px;top:44px;width:4px;height:4px;background:#2de2e6"></i>
+        </span>
+        <span class="label"><b>retrograde</b><span>the eighties, classy</span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Reminders</h3>
+    <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed="true" aria-label="Email reminders" onclick="flip(this)"><i></i></button></div>
+    <div class="kv"><span>first warning</span><b>14 days before closest approach</b></div>
+    <div class="kv"><span>final warning</span><b>3 days before</b></div>
+    <div class="kv"><span>outbound mail</span><span><b class="on">configured</b> &middot; by your administrator</span></div>
+  </div>
+
+  <div class="card">
+    <h3>Your relay</h3>
+    <div class="kv"><span>address</span><b style="color:var(--accent)">tom-k7f2m@in.lawson-home.orbit</b></div>
+    <div class="kv"><span>status</span><b class="on">connected &middot; listening</b></div>
+    <div class="kv"><span>waiting for review</span><a href="inbox.html">1 arrival — open your inbox &rarr;</a></div>
+    <div class="kv"><span>rotate &middot; pause &middot; details</span><a href="../family/settings-mail.html">open the relay &rarr;</a></div>
+  </div>
+
+  <div class="card">
+    <h3>Your systems</h3>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--sun)"/></svg>
+      <b>Lawson Home</b><small>2 members &middot; 6 items</small><span class="role owner">owner</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Seaside Cottage</b><small>3 members &middot; 3 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Mum &amp; Dad&rsquo;s</b><small>2 members &middot; 2 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>The Narrowboat</b><small>1 member &middot; 2 items</small><span class="role">member</span>
+    </div>
+    <div class="memb">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
+      <b>Gran&rsquo;s Flat</b><small>2 members &middot; 2 items</small><span class="role">member</span>
+    </div>
+  </div>
+
+  </div><!-- /cards -->
+
+  <div class="danger"><button>sign out of every device &rarr;</button></div>
+</div>
+
+<div class="demos" aria-label="Mockup backdrop demos">
+  <span>DEMOS</span>
+  <button onclick="reroll()">re-roll the desk</button>
+  <button id="freezebtn" aria-pressed="false" onclick="toggleFreeze(this)">freeze the roll</button>
+  <span class="seedtag">seed #<b id="seedout">&mdash;</b></span>
+  <span class="packdots" role="group" aria-label="Theme pack">
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setPack('starchart')"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setPack('afterdark')"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setPack('atlas')"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setPack('dawn')"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setPack('retrograde')"></button>
+  </span>
+</div>
+
+<footer>orbit &middot; settings &middot; <b>backdrop concept 2 of 3 &mdash; THE CARTOGRAPHER&rsquo;S DESK</b> &middot; a proposal, no verdict yet &middot; #472 &middot; &sect;15<br>
+no sky at all: a vast tilted board, up close, carrying your own chart being drawn &middot;
+every ring is a real household and every dot a real item at the month it falls due &middot;
+the roll of paper travels under the instruments and never repeats &mdash; what leaves is gone, what arrives is rolled fresh from this load&rsquo;s seed &middot;
+the pencil&rsquo;s tip is the drawing frontier: ink behind it, construction lines ahead of it</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+/* one pack switch for all three controls: the orb's swatches, the demos dots
+   and the pack cards in the helm itself */
+const PACKS = ["starchart","afterdark","atlas","dawn","retrograde"];
+function setPack(name){
+  document.documentElement.setAttribute("data-theme", name);
+  const i = PACKS.indexOf(name);
+  document.querySelectorAll(".swatches button").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+  document.querySelectorAll(".packdots button").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+  document.querySelectorAll(".pack").forEach((b, k) => b.setAttribute("aria-pressed", String(k === i)));
+}
+function flip(t){ t.setAttribute("aria-pressed", String(t.getAttribute("aria-pressed") !== "true")); }
+const NS = "http://www.w3.org/2000/svg";
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+                       for (const k in a) e.setAttribute(k, a[k]); return e; };
+const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
+const INK = "var(--chart-ink)";
+const txt = (s, a) => { const t = el("text", Object.assign({ "font-family":MONO, fill:INK }, a));
+                        t.textContent = s; return t; };
+
+/* ---------- one seed, an endless stream (§14) -----------------------------
+   The same Lehmer generator every other mockup uses, plus the chunk hash that
+   makes a NON-LOOPING sky possible: chunk n of a layer is a pure function of
+   (seed, layer, n), so it can be built the instant before it is revealed and
+   destroyed for good once it has gone. Rewind is impossible on purpose. */
+function mkRng(s){ let x = Math.abs(Math.floor(s)) % 2147483647; if (x <= 0) x += 2147483646;
+                   return () => (x = (x * 48271) % 2147483647) / 2147483647; }
+function chunkSeed(sd, tag, i){
+  let h = (sd ^ Math.imul(tag, 0x85ebca6b)) >>> 0;
+  h = Math.imul(h ^ (i + 0x9e3779b9), 0xc2b2ae35) >>> 0;
+  h = (h ^ (h >>> 15)) >>> 0;
+  return h % 2147483647;
+}
+
+/* ---------- the chart itself ----------------------------------------------
+   The four households the instance holds besides your own, from the sample
+   workspace fixture (web/src/lib/data/fixtures/workspace.js) — with their
+   REAL items: title, real due date, real cost (EST where the fixture marks it
+   an estimate), the real due-state token at DESIGN_TODAY (2026-08-13), and
+   the month of the year the ring puts the dot at. Lawson Home is not plotted:
+   you are inside it, so it is the sheet's datum instead.
+   The bearing under each block is derived from the household's id exactly as
+   chart.js derives it — sacred, never rolled (CON-13). */
+const PLOTS = [
+  { name:"SEASIDE COTTAGE", members:3, bearing:206.3,
+    items:[["SEPTIC TANK EMPTY","20 AUG 26","£210 EST","--warm",7],
+           ["CHIMNEY SWEEP","01 MAR 27","£90 EST","--ok",2],
+           ["DECK RE-OILING","15 JUN 27","£130 EST","--ok",5]] },
+  { name:"MUM & DAD’S", members:2, bearing:49.1,
+    items:[["STAIRLIFT SERVICE","10 JAN 27","£140 EST","--ok",0],
+           ["BOILER SERVICE","20 APR 27","£110 EST","--ok",3]] },
+  { name:"THE NARROWBOAT", members:1, bearing:142.6,
+    items:[["BOAT SAFETY EXAM","27 SEP 26","£180.00","--upcoming",8],
+           ["HULL BLACKING","11 DEC 26","£550 EST","--ok",11]] },
+  { name:"GRAN’S FLAT", members:2, bearing:345.7,
+    items:[["BOILER SERVICE","23 AUG 26","£95 EST","--warm",7],
+           ["GAS SAFETY CERT","30 MAY 27","£85 EST","--ok",4]] },
+];
+
+/* the board is taller than the viewport, so a plot's height is rolled inside
+   the part of it you can actually see */
+const visY = u => (CH - window.innerHeight) / 2 + window.innerHeight * (0.13 + u * 0.62);
+
+const SHEET = 672;        /* world units of chart in one chunk (3 majors) */
+const MINOR = 56, MAJOR = 224;
+const SPEED = 7.2;        /* px/s the roll travels under the pen */
+const INKRUN = 300;       /* how far past the tip a plot takes to finish */
+
+const svg = document.getElementById("boardsvg");
+let seed = Math.floor(Math.random() * 2147483646) + 1;
+let CW = 0, CH = 0, roll = null;
+let drift = null, live = new Map();
+let T0 = 0, T = 0, frozen = false, raf = null;
+const still = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+function rollDesk(){
+  const r = mkRng(chunkSeed(seed, 0x0DE5, 5));
+  roll = {
+    region: 400 + Math.floor(r() * 90000),     /* WHICH stretch of the endless chart */
+    tilt: (r() - 0.5) * 7,
+    roseSide: r() < 0.5 ? -1 : 1,
+    roseY: 0.2 + r() * 0.16,
+    ruleAng: -15 + r() * 30, ruleY: 0.24 + r() * 0.44,
+    curveY: 0.52 + r() * 0.3, curveRot: r() * 90 - 45, curveFlip: r() < 0.5 ? -1 : 1,
+    squareOn: r() < 0.72, squareY: 0.18 + r() * 0.2, squareRot: r() * 40 - 20,
+    dividersOn: r() < 0.6, divY: 0.62 + r() * 0.2,
+    penX: 0.40 + r() * 0.18, penY: 0.5 + r() * 0.28, penAng: -62 + r() * 30,
+    lamp: 32 + r() * 30,
+    sheetNo: 180 + Math.floor(r() * 120),
+  };
+  document.documentElement.style.setProperty("--lx", roll.lamp.toFixed(1) + "%");
+}
+
+/* the pencil's tip, expressed in the sheet's own (rotated) frame — that is the
+   frontier between ink and construction pencil */
+function penLocal(){
+  const t = -roll.tilt * Math.PI / 180, cx = CW / 2, cy = CH / 2;
+  const x = roll.penX * CW - cx, y = roll.penY * CH - cy;
+  return { x: cx + x * Math.cos(t) - y * Math.sin(t), y: cy + x * Math.sin(t) + y * Math.cos(t) };
+}
+
+/* ---------- the board ------------------------------------------------------ */
+function drawBoard(){
+  const host = document.querySelector(".board");
+  CW = Math.max(400, host.offsetWidth);
+  CH = Math.max(400, host.offsetHeight);
+  svg.setAttribute("viewBox", `0 0 ${CW} ${CH}`);
+  svg.textContent = "";
+  live = new Map();
+
+  const defs = el("defs");
+  const f = el("filter", { id:"tooth", x:"0", y:"0", width:"100%", height:"100%" });
+  f.appendChild(el("feTurbulence", { type:"fractalNoise", baseFrequency:"0.85",
+                                     numOctaves:"2", stitchTiles:"stitch" }));
+  f.appendChild(el("feColorMatrix", { type:"saturate", values:"0" }));
+  defs.appendChild(f);
+  svg.appendChild(defs);
+
+  /* the board itself: a sheet lifted a shade off the room, whichever way the
+     pack runs — --ink is pale on the dark packs and navy on the paper ones */
+  svg.appendChild(el("rect", { x:0, y:0, width:CW, height:CH, fill:"var(--ink)", opacity:".03" }));
+
+  /* the roll of paper, laid on the board at the angle it was pulled down */
+  const tilted = el("g", { transform:`rotate(${roll.tilt.toFixed(2)} ${(CW / 2).toFixed(1)} ${(CH / 2).toFixed(1)})` });
+  drift = el("g");
+  tilted.appendChild(drift);
+  svg.appendChild(tilted);
+
+  /* the instruments, lying on top of it and going nowhere */
+  svg.appendChild(tools());
+
+  /* the sheet's tooth — POL-13's whole-frame grain, and on the paper packs it
+     is the actual grain of the paper */
+  svg.appendChild(el("rect", { class:"grain", x:0, y:0, width:CW, height:CH,
+                               filter:"url(#tooth)", "pointer-events":"none" }));
+}
+
+/* ---------- one chunk of the endless chart -------------------------------- */
+function buildChunk(g, r, i){
+  const y0 = -Math.ceil(CH * 0.25 / MINOR) * MINOR, y1 = CH * 1.25;
+  let minor = "", major = "";
+  for (let x = 0; x < SHEET; x += MINOR)
+    (x % MAJOR === 0 ? (major += `M ${x} ${y0} V ${y1} `) : (minor += `M ${x} ${y0} V ${y1} `));
+  for (let y = y0; y < y1; y += MINOR)
+    (Math.round(y) % MAJOR === 0 ? (major += `M 0 ${y} H ${SHEET} `) : (minor += `M 0 ${y} H ${SHEET} `));
+  g.appendChild(el("path", { d:minor, fill:"none", stroke:INK, "stroke-width":0.8, opacity:".26" }));
+  g.appendChild(el("path", { d:major, fill:"none", stroke:INK, "stroke-width":1.1, opacity:".46" }));
+
+  /* the graticule is a graticule: it says where on the sky this square is.
+     Right ascension runs along the roll, declination down it. */
+  for (let x = 0; x < SHEET; x += MAJOR){
+    const mins = ((i * SHEET + x) / MAJOR) * 20;
+    const hh = Math.floor(mins / 60) % 24, mm = Math.round(mins % 60);
+    g.appendChild(txt(`${String(hh).padStart(2, "0")}h ${String(mm).padStart(2, "0")}m`,
+      { x:x + 6, y:y0 + 16, "font-size":9, "letter-spacing":".12em", opacity:".55" }));
+  }
+  for (let y = y0; y < y1; y += MAJOR){
+    const dec = 50 - Math.round((y - y0) / MAJOR) * 10;
+    g.appendChild(txt(`${dec >= 0 ? "+" : "−"}${Math.abs(dec)}°`,
+      { x:6, y:y - 6, "font-size":9, "letter-spacing":".12em", opacity:".5" }));
+    /* the registration cross the sheets are pinned by */
+    g.appendChild(el("path", { d:`M ${MAJOR - 7} ${y} h 14 M ${MAJOR} ${y - 7} v 14`,
+      fill:"none", stroke:INK, "stroke-width":1, opacity:".45" }));
+  }
+
+  /* every so often, the join to the next sheet — the plainest possible proof
+     that this chart goes on for ever and does not come round again */
+  if (((i % 7) + 7) % 7 === 0){
+    const sx = SHEET - 92;
+    g.appendChild(el("path", { d:`M ${sx} ${y0} V ${y1} M ${sx + 5} ${y0} V ${y1}`, fill:"none",
+      stroke:INK, "stroke-width":1.1, opacity:".5" }));
+    const t = txt(`SHEET ${roll.sheetNo + i} · JOINS ${roll.sheetNo + i + 1}`,
+      { x:0, y:0, "font-size":9, "letter-spacing":".2em", opacity:".62",
+        transform:`translate(${sx - 12},${(CH * 0.5).toFixed(0)}) rotate(-90)` });
+    g.appendChild(t);
+  }
+
+  /* One household plotted per chunk, cycling so no household is ever on the
+     board twice at once, and some stretches left blank.
+     THE FIRST THREE DRAWS OF A CHUNK'S STREAM ARE ALWAYS THESE THREE, whether
+     the plot is used or not — plotPos() below replays exactly them to score
+     the opening region, and the two must never drift apart. */
+  const has = r() < 0.66, plotX = 128 + r() * 170, plotY = visY(r());
+  if (has){
+    const n = PLOTS.length;
+    plot(g, PLOTS[(((i * 3) % n) + n) % n], plotX, plotY, r, i);
+  }
+  /* and the surveyor's own working marks, always in pencil */
+  workings(g, r, i);
+}
+
+/* one household: a ring of twelve months, its real items on it, and the
+   annotation written underneath in the cartographer's hand. The block sits
+   BELOW the ring rather than beside it so a whole plot — ring, dots and
+   writing — fits in the clear band next to the helm's column. */
+function plot(g, hh, x, y, r, i){
+  const rx = 84 + r() * 26, ry = rx * (0.54 + r() * 0.1);
+  const rot = -22 + r() * 44;
+  const wx = i * SHEET + x;
+  const p = el("g", { class:"plot", transform:`translate(${x.toFixed(1)},${y.toFixed(1)})` });
+  p.dataset.wx = wx.toFixed(1);
+
+  /* CONSTRUCTION, in pencil: the centre, the axes, the compass arc that set
+     the ring out. It fades as the ink lands, exactly as tracing does. */
+  const draft = el("g", { class:"draft", stroke:INK, fill:"none", "stroke-width":1,
+                          "stroke-dasharray":"4 6", opacity:".62" });
+  draft.appendChild(el("path", { d:`M ${-rx - 24} 0 H ${rx + 24} M 0 ${-ry - 24} V ${ry + 24}` }));
+  draft.appendChild(el("ellipse", { rx:(rx + 13).toFixed(1), ry:(ry + 13).toFixed(1),
+    transform:`rotate(${rot.toFixed(1)})` }));
+  draft.appendChild(el("path", { d:`M ${(rx * 0.2).toFixed(1)} ${(-ry - 28).toFixed(1)} ` +
+    `A ${(rx + 28).toFixed(1)} ${(rx + 28).toFixed(1)} 0 0 1 ${(rx + 32).toFixed(1)} ${(ry * 0.3).toFixed(1)}` }));
+  p.appendChild(draft);
+
+  /* THE INK. The ring draws itself along its own length as it passes the tip;
+     the dots and the writing arrive behind it. */
+  const ring = el("g", { transform:`rotate(${rot.toFixed(1)})` });
+  ring.appendChild(el("ellipse", { class:"inkline", rx:rx.toFixed(1), ry:ry.toFixed(1),
+    fill:"none", stroke:INK, "stroke-width":1.5, pathLength:"1",
+    "stroke-dasharray":"1 1", style:"stroke-dashoffset:1" }));
+  /* twelve months, because the ring IS the year (§1) */
+  for (let m = 0; m < 12; m++){
+    const a = (m / 12) * Math.PI * 2 - Math.PI / 2;
+    const c = Math.cos(a), s2 = Math.sin(a);
+    const L = m % 3 === 0 ? 9 : 5;
+    ring.appendChild(el("line", { class:"inkfade", style:"opacity:0",
+      x1:(rx * c).toFixed(1), y1:(ry * s2).toFixed(1),
+      x2:((rx - L) * c).toFixed(1), y2:((ry - L) * s2).toFixed(1),
+      stroke:INK, "stroke-width":m % 3 === 0 ? 1.3 : 1, opacity:".7" }));
+  }
+  ring.appendChild(el("circle", { class:"inkfade", style:"opacity:0", r:2.8, fill:INK }));
+  /* the household's real items, at the month each falls due */
+  for (const [, , , tok, month] of hh.items){
+    const a = (month / 12) * Math.PI * 2 - Math.PI / 2;
+    ring.appendChild(el("circle", { class:"inkfade", style:"opacity:0",
+      cx:(rx * Math.cos(a)).toFixed(1), cy:(ry * Math.sin(a)).toFixed(1),
+      r:3.4, fill:`var(${tok})` }));
+  }
+  p.appendChild(ring);
+
+  /* the annotation: the same items, written out under the plot */
+  const by = ry + 34;
+  const block = el("g", { class:"inkfade", style:"opacity:0" });
+  block.appendChild(el("line", { x1:0, y1:(ry + 6).toFixed(1), x2:0, y2:(by - 13).toFixed(1),
+    stroke:INK, "stroke-width":1, opacity:".6" }));
+  block.appendChild(txt(`${hh.name} · ${hh.members} MEMBER${hh.members === 1 ? "" : "S"}`,
+    { x:-104, y:by, "font-size":10, "letter-spacing":".13em" }));
+  hh.items.forEach(([title, due, cost], k) => {
+    block.appendChild(txt(`${title.padEnd(19)}${due.padEnd(11)}${cost}`,
+      { x:-104, y:by + 15 + k * 12.5, "font-size":9, "letter-spacing":".04em", opacity:".95" }));
+  });
+  block.appendChild(txt(`BEARING ${hh.bearing.toFixed(1)}° · PLOTTED 13 AUG 2026`,
+    { x:-104, y:by + 17 + hh.items.length * 12.5, "font-size":8.8,
+      "letter-spacing":".08em", opacity:".7" }));
+  p.appendChild(block);
+  g.appendChild(p);
+}
+
+/* the same first three draws buildChunk makes, and nothing else: where a
+   chunk's plot would land, cheap enough to score every candidate opening */
+function plotPos(i){
+  const r = mkRng(chunkSeed(seed, 0x0C1A, i));
+  const has = r() < 0.66, x = 128 + r() * 170, y = visY(r());
+  return has ? { x: i * SHEET + x, y } : null;
+}
+
+/* the marks a surveyor actually leaves: a bearing ray from the datum, a
+   pencilled protractor quadrant, a cross where something is yet to be
+   plotted. All pencil, all honest, none of it inked. */
+function workings(g, r, i){
+  const w = el("g", { stroke:INK, fill:"none", "stroke-width":1, opacity:".34" });
+  const x = 60 + r() * (SHEET - 160), y = CH * (0.12 + r() * 0.72);
+  const kind = Math.floor(r() * 3);
+  if (kind === 0){
+    const a = (r() * 60 - 30) * Math.PI / 180;
+    w.appendChild(el("path", { d:`M ${x.toFixed(1)} ${y.toFixed(1)} l ${(Math.cos(a) * 330).toFixed(1)} ${(Math.sin(a) * 330).toFixed(1)}`,
+      "stroke-dasharray":"3 8" }));
+    w.appendChild(txt(`${(((a * 180 / Math.PI) + 360) % 360).toFixed(1)}°`,
+      { x:(x + 14).toFixed(1), y:(y - 8).toFixed(1), "font-size":9,
+        "letter-spacing":".1em", opacity:".8" }));
+  } else if (kind === 1){
+    const R = 90 + r() * 60;
+    w.appendChild(el("path", { d:`M ${(x - R).toFixed(1)} ${y.toFixed(1)} A ${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(x + R).toFixed(1)} ${y.toFixed(1)}`,
+      "stroke-dasharray":"4 7" }));
+    for (let d = 0; d <= 180; d += 15){
+      const a = Math.PI + d * Math.PI / 180;
+      w.appendChild(el("line", { x1:(x + Math.cos(a) * R).toFixed(1), y1:(y + Math.sin(a) * R).toFixed(1),
+        x2:(x + Math.cos(a) * (R - 8)).toFixed(1), y2:(y + Math.sin(a) * (R - 8)).toFixed(1) }));
+    }
+  } else {
+    w.appendChild(el("path", { d:`M ${(x - 9).toFixed(1)} ${y.toFixed(1)} h 18 M ${x.toFixed(1)} ${(y - 9).toFixed(1)} v 18`,
+      "stroke-dasharray":"" }));
+    w.appendChild(txt("TO BE PLOTTED", { x:(x + 14).toFixed(1), y:(y + 4).toFixed(1),
+      "font-size":9, "letter-spacing":".16em", opacity:".8" }));
+  }
+  g.appendChild(w);
+}
+
+/* ---------- the instruments lying on the board ---------------------------- */
+/* where the board is visible and free of the helm's column, in board units */
+function bands(){
+  const ox = (CW - window.innerWidth) / 2;
+  const colHalf = Math.min(1060, window.innerWidth - 48) / 2;
+  return { l0: ox + 34, l1: ox + window.innerWidth / 2 - colHalf,
+           r0: ox + window.innerWidth / 2 + colHalf, r1: ox + window.innerWidth - 34 };
+}
+
+function tools(){
+  const g = el("g");
+  /* the clear bands either side of the helm's column, measured in board
+     coordinates and clipped to what is actually on screen — the board is
+     wider than the viewport, and an instrument parked off the edge is an
+     instrument nobody sees */
+  const b = bands();
+  const leftMid = (b.l0 + b.l1) / 2, rightMid = (b.r0 + b.r1) / 2;
+
+  /* THE COMPASS ROSE. It is here because bearings are the law this whole
+     product places by (CON-13), and the caption under it says so. */
+  g.appendChild(rose(roll.roseSide < 0 ? leftMid : rightMid, CH * roll.roseY,
+                     Math.min(116, CW * 0.075)));
+
+  /* the parallel rule, laid across the sheet at the angle last used */
+  g.appendChild(rule(CW * 0.5, CH * roll.ruleY, CW * 1.25, roll.ruleAng));
+
+  /* a french curve, put down where it was last needed */
+  g.appendChild(frenchCurve(roll.roseSide < 0 ? rightMid : leftMid, CH * roll.curveY,
+                            roll.curveRot, roll.curveFlip));
+
+  if (roll.squareOn)
+    g.appendChild(setSquare(roll.roseSide < 0 ? rightMid - 40 : leftMid + 40,
+                            CH * roll.squareY, roll.squareRot));
+  if (roll.dividersOn)
+    g.appendChild(dividers(roll.roseSide < 0 ? leftMid + 30 : rightMid - 30, CH * roll.divY));
+
+  /* THE PENCIL — and its tip is the drawing frontier */
+  g.appendChild(pencil(roll.penX * CW, roll.penY * CH, roll.penAng));
+
+  /* THE TITLE BLOCK: sheet, datum, scale, hand, date */
+  const cw = 260;
+  const cX = roll.roseSide < 0 ? Math.min(b.r1 - cw, rightMid - cw / 2)
+                               : Math.max(b.l0, leftMid - cw / 2);
+  g.appendChild(cartouche(cX, CH * 0.72));
+  return g;
+}
+
+function rose(cx, cy, R){
+  const g = el("g", { opacity:".8" });
+  const ring = (r, o, w) => g.appendChild(el("circle", { cx:cx.toFixed(1), cy:cy.toFixed(1),
+    r:r.toFixed(1), fill:"none", stroke:INK, "stroke-width":w, opacity:o }));
+  ring(R, ".7", 1.4); ring(R - 11, ".45", 1); ring(R * 0.42, ".4", 1);
+  for (let d = 0; d < 360; d += 5){
+    const a = (d - 90) * Math.PI / 180, major = d % 30 === 0;
+    g.appendChild(el("line", { x1:(cx + Math.cos(a) * R).toFixed(1), y1:(cy + Math.sin(a) * R).toFixed(1),
+      x2:(cx + Math.cos(a) * (R - (major ? 11 : 5))).toFixed(1),
+      y2:(cy + Math.sin(a) * (R - (major ? 11 : 5))).toFixed(1),
+      stroke:INK, "stroke-width":major ? 1.2 : 0.9, opacity:major ? ".62" : ".34" }));
+    if (major && d % 90 !== 0)
+      g.appendChild(txt(String(d), { x:(cx + Math.cos(a) * (R - 22)).toFixed(1),
+        y:(cy + Math.sin(a) * (R - 22) + 3).toFixed(1), "font-size":7.5,
+        "text-anchor":"middle", opacity:".55" }));
+  }
+  /* the eight points of the rose, drawn as split needles the way they are */
+  for (let k = 0; k < 8; k++){
+    const a = k * Math.PI / 4 - Math.PI / 2;
+    const L = (k % 2 === 0 ? R - 12 : R * 0.62), w = R * 0.085;
+    const tipx = cx + Math.cos(a) * L, tipy = cy + Math.sin(a) * L;
+    const lx = cx + Math.cos(a + Math.PI / 2) * w, ly = cy + Math.sin(a + Math.PI / 2) * w;
+    const rxp = cx + Math.cos(a - Math.PI / 2) * w, ryp = cy + Math.sin(a - Math.PI / 2) * w;
+    g.appendChild(el("path", { d:`M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${lx.toFixed(1)} ${ly.toFixed(1)} ` +
+      `L ${tipx.toFixed(1)} ${tipy.toFixed(1)} Z`, fill:INK, opacity:".16" }));
+    g.appendChild(el("path", { d:`M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${lx.toFixed(1)} ${ly.toFixed(1)} ` +
+      `L ${tipx.toFixed(1)} ${tipy.toFixed(1)} L ${rxp.toFixed(1)} ${ryp.toFixed(1)} Z`,
+      fill:"none", stroke:INK, "stroke-width":1, opacity:".6" }));
+  }
+  for (const [lab, a] of [["N", -90], ["E", 0], ["S", 90], ["W", 180]]){
+    const ar = a * Math.PI / 180;
+    g.appendChild(txt(lab, { x:(cx + Math.cos(ar) * (R + 15)).toFixed(1),
+      y:(cy + Math.sin(ar) * (R + 15) + 4).toFixed(1), "font-size":11,
+      "letter-spacing":".1em", "text-anchor":"middle", opacity:".9" }));
+  }
+  g.appendChild(txt("BEARINGS FROM THE DATUM", { x:cx.toFixed(1), y:(cy + R + 34).toFixed(1),
+    "font-size":9, "letter-spacing":".18em", "text-anchor":"middle", opacity:".72" }));
+  return g;
+}
+
+function rule(cx, cy, L, ang){
+  const g = el("g", { transform:`rotate(${ang.toFixed(2)} ${cx.toFixed(1)} ${cy.toFixed(1)})`,
+                      opacity:".7" });
+  const h = 34, x0 = cx - L / 2;
+  g.appendChild(el("rect", { x:x0.toFixed(1), y:(cy - h / 2).toFixed(1), width:L.toFixed(1),
+    height:h, fill:"var(--ink)", "fill-opacity":".02", stroke:INK, "stroke-width":1.3 }));
+  g.appendChild(el("line", { x1:x0.toFixed(1), y1:(cy + h / 2 - 9).toFixed(1),
+    x2:(x0 + L).toFixed(1), y2:(cy + h / 2 - 9).toFixed(1), stroke:INK,
+    "stroke-width":1, opacity:".45" }));
+  for (let x = x0 + 10, k = 0; x < x0 + L - 6; x += 12, k++){
+    const major = k % 5 === 0;
+    g.appendChild(el("line", { x1:x.toFixed(1), y1:(cy + h / 2).toFixed(1),
+      x2:x.toFixed(1), y2:(cy + h / 2 - (major ? 13 : 7)).toFixed(1),
+      stroke:INK, "stroke-width":major ? 1.1 : 0.9, opacity:major ? ".6" : ".34" }));
+    if (major && k % 10 === 0)
+      g.appendChild(txt(String(k / 5), { x:(x + 2).toFixed(1), y:(cy - h / 2 + 13).toFixed(1),
+        "font-size":8, "letter-spacing":".08em", opacity:".55" }));
+  }
+  return g;
+}
+
+/* a french curve, drawn as the silhouette it is — one outer sweep, one inner
+   cut-out, nothing more */
+function frenchCurve(cx, cy, rot, flip){
+  const g = el("g", { transform:`translate(${cx.toFixed(1)},${cy.toFixed(1)}) rotate(${rot.toFixed(1)}) scale(${flip},1)`,
+                      opacity:".62" });
+  g.appendChild(el("path", { fill:"var(--ink)", "fill-opacity":".025", stroke:INK, "stroke-width":1.3,
+    d:"M -132 44 C -104 -14 -44 -50 22 -52 C 78 -54 126 -34 138 -2 C 148 26 122 52 78 60 " +
+      "C 34 68 -8 56 -46 60 C -84 64 -112 76 -132 44 Z" }));
+  g.appendChild(el("path", { fill:"none", stroke:INK, "stroke-width":1.1, opacity:".7",
+    d:"M -92 34 C -66 -4 -20 -28 26 -28 C 68 -28 100 -14 108 6 C 114 22 96 34 62 38 " +
+      "C 22 43 -14 34 -50 40 C -74 44 -84 48 -92 34 Z" }));
+  return g;
+}
+
+function setSquare(cx, cy, rot){
+  const g = el("g", { transform:`translate(${cx.toFixed(1)},${cy.toFixed(1)}) rotate(${rot.toFixed(1)})`,
+                      opacity:".58" });
+  g.appendChild(el("path", { d:"M -150 84 L 150 84 L -150 -76 Z", fill:"var(--ink)",
+    "fill-opacity":".02", stroke:INK, "stroke-width":1.3 }));
+  g.appendChild(el("path", { d:"M -126 66 L 92 66 L -126 -50 Z", fill:"none",
+    stroke:INK, "stroke-width":1, opacity:".7" }));
+  g.appendChild(txt("45°", { x:"-92", y:"58", "font-size":9, "letter-spacing":".12em", opacity:".8" }));
+  return g;
+}
+
+function dividers(cx, cy){
+  const g = el("g", { stroke:INK, fill:"none", "stroke-width":1.3, opacity:".6" });
+  g.appendChild(el("path", { d:`M ${cx.toFixed(1)} ${cy.toFixed(1)} l -34 96 M ${cx.toFixed(1)} ${cy.toFixed(1)} l 30 98` }));
+  g.appendChild(el("circle", { cx:cx.toFixed(1), cy:cy.toFixed(1), r:6 }));
+  g.appendChild(el("path", { d:`M ${(cx - 34).toFixed(1)} ${(cy + 96).toFixed(1)} l -3 12 ` +
+    `M ${(cx + 30).toFixed(1)} ${(cy + 98).toFixed(1)} l 3 12` }));
+  return g;
+}
+
+/* the pencil. Its point is where the ink stops and the construction lines
+   start, so it is the one instrument on this board that is also a clock. */
+function pencil(tx, ty, ang){
+  const g = el("g", { transform:`translate(${tx.toFixed(1)},${ty.toFixed(1)}) rotate(${ang.toFixed(1)})`,
+                      opacity:".78" });
+  const L = 300, w = 9;
+  g.appendChild(el("path", { d:`M 0 0 L ${w} -22 L ${w} -34 L ${-w} -34 L ${-w} -22 Z`,
+    fill:"none", stroke:INK, "stroke-width":1.3 }));
+  g.appendChild(el("rect", { x:-w, y:-34 - L, width:w * 2, height:L, fill:"var(--ink)",
+    "fill-opacity":".025", stroke:INK, "stroke-width":1.4 }));
+  g.appendChild(el("path", { d:`M ${-w / 3} -34 V ${-34 - L} M ${w / 3} -34 V ${-34 - L}`,
+    fill:"none", stroke:INK, "stroke-width":0.9, opacity:".45" }));
+  g.appendChild(el("circle", { r:1.9, fill:INK }));
+  g.appendChild(txt("2H", { x:"0", y:(-56 - L).toFixed(0), "font-size":9,
+    "letter-spacing":".2em", "text-anchor":"middle", opacity:".75" }));
+  return g;
+}
+
+function cartouche(x, y){
+  const g = el("g", { opacity:".9" });
+  const w = 260, h = 108;
+  g.appendChild(el("rect", { x:x.toFixed(1), y:y.toFixed(1), width:w, height:h,
+    fill:"var(--ink)", "fill-opacity":".025", stroke:INK, "stroke-width":1.3 }));
+  g.appendChild(el("line", { x1:x.toFixed(1), y1:(y + 26).toFixed(1), x2:(x + w).toFixed(1),
+    y2:(y + 26).toFixed(1), stroke:INK, "stroke-width":1.1, opacity:".7" }));
+  g.appendChild(txt("ORBIT · HOUSEHOLD CHART", { x:(x + 12).toFixed(1), y:(y + 17).toFixed(1),
+    "font-size":10.5, "letter-spacing":".16em" }));
+  const rows = [
+    ["SHEET", `${roll.sheetNo} · JOINS ${roll.sheetNo + 1}`],
+    ["DATUM", "LAWSON HOME · 6 ITEMS"],
+    ["PLOTTED", "4 OF 5 SYSTEMS"],
+    ["SCALE", "ONE RING = ONE YEAR"],
+    ["DRAWN", "13 AUG 2026 · T LAWSON"],
+  ];
+  rows.forEach(([k, v], n) => {
+    g.appendChild(txt(k, { x:(x + 12).toFixed(1), y:(y + 42 + n * 14).toFixed(1),
+      "font-size":9, "letter-spacing":".14em", opacity:".64" }));
+    g.appendChild(txt(v, { x:(x + 86).toFixed(1), y:(y + 42 + n * 14).toFixed(1),
+      "font-size":9.5, "letter-spacing":".08em", opacity:".92" }));
+  });
+  return g;
+}
+
+/* ---------- the roll travelling under the pen ----------------------------- */
+function update(T){
+  const off = roll.region + SPEED * T;
+  const a = Math.floor((off - 400) / SHEET);
+  const b = Math.floor((off + CW + 400) / SHEET);
+  for (const i of [...live.keys()])
+    if (i < a || i > b){ live.get(i).g.remove(); live.delete(i); }
+  for (let i = a; i <= b; i++) if (!live.has(i)){
+    const g = el("g", { transform:`translate(${(i * SHEET).toFixed(1)},0)` });
+    buildChunk(g, mkRng(chunkSeed(seed, 0x0C1A, i)), i);
+    drift.appendChild(g);
+    /* cached once, so the pen frontier costs nothing per frame */
+    live.set(i, { g, plots:[...g.querySelectorAll(".plot")].map(p => ({
+      p, wx:parseFloat(p.dataset.wx), draft:p.querySelector(".draft"),
+      lines:[...p.querySelectorAll(".inkline")], fades:[...p.querySelectorAll(".inkfade")] })) });
+  }
+  drift.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
+
+  /* the ink lands as the paper passes the point */
+  const pen = penLocal();
+  for (const { plots } of live.values()) for (const q of plots){
+    const f = Math.max(0, Math.min(1, (pen.x - (q.wx - off)) / INKRUN));
+    q.draft.style.opacity = (0.62 * (1 - f)).toFixed(3);
+    for (const n of q.lines) n.style.strokeDashoffset = (1 - f).toFixed(3);
+    const f2 = Math.max(0, Math.min(1, (f - 0.45) / 0.5));
+    for (const n of q.fades) n.style.opacity = f2.toFixed(3);
+  }
+}
+
+/* ---------- the clock ----------------------------------------------------- */
+function frame(now){
+  if (!frozen) T = T0 + now / 1000;
+  update(T);
+  raf = frozen ? null : requestAnimationFrame(frame);
+}
+function run(){
+  if (raf) cancelAnimationFrame(raf);
+  raf = null;
+  if (frozen || still.matches){ T = T0; frame(0); }
+  else raf = requestAnimationFrame(frame);
+}
+/* THE OPENING REGION. The chart drifts, so a plot cannot own the clear band
+   for ever — but it can own the opening. Exactly as create-v3 picks the sky
+   offset that leaves its card clearest, this walks a chunk's worth of
+   candidate regions and keeps the one whose first frame shows a household
+   already inked and standing clear of the helm's column. */
+function tidyRegion(){
+  const b = bands(), pen = penLocal(), HALF = 118;
+  const base = roll.region;
+  let best = base, bestScore = -1e9;
+  for (let k = 0; k < 28; k++){
+    const off = base + k * 24;
+    let score = 0;
+    const a = Math.floor((off - 200) / SHEET), z = Math.floor((off + CW + 200) / SHEET);
+    for (let i = a; i <= z; i++){
+      const q = plotPos(i);
+      if (!q) continue;
+      const x = q.x - off;
+      if (x < -HALF || x > CW + HALF) continue;
+      const clear = (x + HALF < b.l1 && x - HALF > b.l0) || (x - HALF > b.r0 && x + HALF < b.r1);
+      const inked = pen.x - x > INKRUN * 0.85;
+      score += (clear ? 3 : 0) + (clear && inked ? 4 : 0);
+      if (Math.abs(x - CW / 2) < 200) score -= 1;
+    }
+    if (score > bestScore){ bestScore = score; best = off; }
+  }
+  roll.region = best;
+}
+
+function rebuild(){ drawBoard(); tidyRegion(); run(); }
+function reroll(){
+  seed = Math.floor(Math.random() * 2147483646) + 1;
+  document.getElementById("seedout").textContent = String(seed);
+  rollDesk();
+  rebuild();
+}
+function toggleFreeze(btn){
+  frozen = !frozen;
+  if (!frozen) T0 = T - performance.now() / 1000;
+  btn.setAttribute("aria-pressed", String(frozen));
+  run();
+}
+
+/* stillness is a ruling, not a preference: with reduced motion the roll never
+   advances and the chart is simply the seed's first frame, half-drawn */
+if (still.matches) frozen = true;
+still.addEventListener("change", () => { frozen = still.matches;
+  document.getElementById("freezebtn").setAttribute("aria-pressed", String(frozen)); run(); });
+
+let resizeT = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(rebuild, 120);        /* same seed, same roll, new size */
+});
+
+document.getElementById("seedout").textContent = String(seed);
+if (still.matches) document.getElementById("freezebtn").setAttribute("aria-pressed", "true");
+rollDesk();
+rebuild();
+</script>
+</body></html>

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canApplyCanonicalState,
   fetchPublicReadiness,
   fetchSession,
   fetchWorkspace,
@@ -124,5 +125,29 @@ describe("workspace startup boundary", () => {
 
     expect(message).not.toContain(hostileDetail);
     expect(message).not.toMatch(/provider|database|environment|postgres|token/i);
+  });
+});
+
+describe("canonical state application (#388)", () => {
+  const current = {
+    generation: 3, latestGeneration: 3,
+    sequence: 7, latestSequence: 7,
+    sessionMatches: true,
+  };
+
+  it("applies a response that is still the newest command", () => {
+    expect(canApplyCanonicalState(current)).toBe(true);
+  });
+
+  it("refuses a response overtaken by a newer command", () => {
+    // The reader kept typing, which sent another command. This older response
+    // carries a workspace without those keystrokes; applying it would undo
+    // them, and the newer command's own response will carry the truth.
+    expect(canApplyCanonicalState({ ...current, latestSequence: 8 })).toBe(false);
+  });
+
+  it("refuses a response from a previous session or initialisation", () => {
+    expect(canApplyCanonicalState({ ...current, latestGeneration: 4 })).toBe(false);
+    expect(canApplyCanonicalState({ ...current, sessionMatches: false })).toBe(false);
   });
 });

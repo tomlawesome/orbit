@@ -1,0 +1,401 @@
+/* The item belt (#458), ported from design/v19/item-belt.html into the app.
+ * Tokens come from packs.css; everything below is scoped under .belt-page.
+ * The mockup's own explanatory comments are preserved verbatim as design law. */
+
+  /*
+   * THE ITEM BELT — v4, issue #458.
+   * design/owner-decisions.md §15, and the owner's corrections of 2026-08-16.
+   *
+   * WHAT WAS MISREAD. v2 and v3 both built a belt of ONE ITEM'S DOCUMENTS.
+   * That was wrong, and the owner has said so plainly:
+   *
+   *   "It was supposed to be an ITEM belt, with a search box. An alternative
+   *    way to view the manifest, essentially."
+   *
+   *   "It should just have had all the items in there together, either old on
+   *    the left, newer on the right, or visa versa, I don't mind, but all the
+   *    asteroids are surrounded by the other items that are chronologically
+   *    (by renewal/required date) near to them in the linear list."
+   *
+   *   "v2 was better overall" — so v3's paper is gone. Every sheet, every
+   *    turned corner, every ruled line: deleted. The band is rock and dust
+   *    again, which is what v2 had and what the owner wants back.
+   *
+   *   "Asteroid belt — yes, but they don't form an orderly, linear line,
+   *    they're jumbled around a little." — so the items keep strict date
+   *    ORDER along the band while being scattered within its thickness. See
+   *    THE JUMBLE below.
+   *
+   * AND: THE BELT IS THE ITEM SCREEN (owner, same review). This surface
+   * replaces /item. Arriving at an item from anywhere else — a manifest row
+   * on home, a filed lane in the inbox, a link in a reminder — lands you HERE
+   * with that item already seated at the apex and its neighbours in time
+   * already around it. There is no separate item page to go to afterwards;
+   * this page opening with a card at the apex IS that arrival, which is what
+   * the default view below demonstrates. (documents.html retires into this
+   * too, §14: "the coming asteroid belt (#458) with a well-placed search box
+   * is the document surface.")
+   *
+   * AND: THE DOCUMENTS RIDE IN THE BAND (owner, ruling the open question).
+   * When an item is at the apex, its documents are bodies in the belt beside
+   * it — not a list on the card — and they must be unmistakable against
+   * everything else. He asked for a different-coloured perimeter line, or a
+   * glow or gentle pulse, and floated "Both?" — then, shown the two variants
+   * side by side, RULED for all of it: a document body wears a distinct
+   * accent PERIMETER RING, a soft GLOW, and a slow 2.6s PULSE, one treatment,
+   * no toggle. Under reduced motion the breath stops and the ring and glow
+   * stay: the mark is obvious with no motion at all.
+   * Clicking a document body rolls it to the apex and it becomes the document
+   * card — what it is, when it arrived, that it scanned clean, and the
+   * original in your hands (the page render itself still waits on #476).
+   * When a document is centred the same mark — ring, glow and breath —
+   * appears on ITS ITEM, one short step away, so the way back is never in
+   * doubt.
+   *
+   * WHAT THE BELT IS, THEN. Every item in the household is a body in one
+   * band, and the band is TIME:
+   *
+   *   SOONER  ←──────────────── the apex ────────────────→  LATER
+   *
+   * Left is the past and the near future — overdue first — and it runs
+   * rightward into the wide orbits. Neighbours in the band are neighbours in
+   * the manifest's linear date list, always: the belt is that list, bent
+   * round a ring. Spacing breathes with the date gaps (a cluster of four
+   * renewals in three weeks sits close; a five-month gap opens up) but never
+   * closes below a floor, so labels cannot collide. Documents take no room in
+   * that sequence: their seats are cut out of the space BETWEEN an item and
+   * its neighbour, so opening an item can never reorder the manifest or
+   * change what "next" means.
+   *
+   * THE JUMBLE. Order is strict; position is not. Each body is thrown a
+   * seeded distance off the ring radius, out of the ring plane, and a little
+   * along the band, so the population scatters through the band's ~430px
+   * thickness rather than threading a wire. The throw eases to exactly zero
+   * at the apex, so the centred body still seats on the pin to the pixel and
+   * the card sits precisely where the band's highest point is; the roll
+   * glides a clicked body from wherever it was jumbled to that seat.
+   *
+   * THE BERTH. The centred body is not a 25px rock, it is a 400px card, so it
+   * has swept a wider clearing than its neighbours — and when the centred
+   * item has papers, wider still, because the papers have to sit in the gap
+   * it has cleared. That widening is animated across the same 420ms as the
+   * roll: the neighbours stand off, and the documents come out of the item.
+   *
+   * WHAT v2 KEEPS, UNCHANGED — its geometry and choreography are ratified:
+   *
+   * 1. THE CARD RIDES IN THE BELT. No crown asteroid stands in for the
+   *    centred thing. The centred body's CARD is the body at the apex: it
+   *    sits IN the band, rubble streaming behind it (through it — the glass
+   *    blurs what passes) and a few motes drifting in front.
+   * 2. THE APEX IS AT SCREEN CENTRE, pinned at every viewport size.
+   * 3. NOT A SEMICIRCLE. A real ring seen at an angle: radius A, inclined 40°
+   *    to the line of sight, node line rolled 12°, projected to screen. The
+   *    left flank falls ~300px and turns toward you, the right falls ~240px
+   *    and runs away foreshortened. Nothing is symmetric.
+   * 4. DENSER AND DISORDERLY, AND SOWN THE WHOLE WAY ROUND. Seeded ambient
+   *    bodies at scattered radii (peaked ±19% of A, one in seven thrown 1.75×
+   *    further out) and heights (±6.6% of A), dust to rubble, drawn at depth
+   *    — nearer bodies larger, brighter, faster, the highest passing in FRONT
+   *    of the card. ~2100 of them fill one skyful, and the bed is sown across
+   *    every skyful the roll can reach: the screen window (2.01 rad at
+   *    1280×800, 2.45 at 1600×1000) plus the manifest's own roll span
+   *    (3.10 rad, Window cleaning to Gas safety), so 5341 bodies at 1280×800
+   *    and 4756 at 1600×1000 — the same density per radian, over 2.5× the
+   *    ground. Centring an end item now looks out on rock, not on the bare
+   *    ring the fixed-window sowing used to leave behind it.
+   *    They drift for ever and NEVER loop: a body that leaves the arc for
+   *    good is rebuilt at its far end out of the same running seeded stream
+   *    (§14, "the sky never loops"), and inner bodies drift faster than
+   *    outer — Keplerian shear.
+   *    That ambient bed is scenery. It is also the answer to a thin
+   *    household: when there are not enough real items to fill the band, the
+   *    band is still a belt (owner, confirmed).
+   *
+   * THE MEMBERS must read instantly as the things that mean something. Four
+   * separations, as v2: they are 25px bodies against rubble that tops out
+   * near 9px; they are drawn (a faceted rock) where rubble is a flat tone;
+   * they carry a label and a focus ring; and each has SWEPT ITS
+   * NEIGHBOURHOOD — the rubble thins to nothing in a disc around every one of
+   * them, the way a body big enough to be a body clears its own orbit. One
+   * thing is added for items: each rock wears its urgency as home wears it —
+   * the tone of the manifest's T-minus column on its rim and a single pip
+   * (overdue / due soon / upcoming / wide orbit), so the left end of the band
+   * burns and the right end cools. Items carrying documents also wear the
+   * dial's belt ellipse (CON-1, "documents attached"), which is the promise
+   * that centring them will bring the papers out.
+   *
+   * THE SEARCH BOX (§14's "well-placed search box"). Quiet, mono, on home's
+   * explore-field idiom — underline only — floated over the top of the sky.
+   * Typing LIGHTS the matches and DIMS the rest; nothing vanishes, because
+   * the belt keeps its shape and you are meant to see where in time your hit
+   * sits. It matches title, section, kind, provider and document name — so
+   * searching "service history" lights the car the paper is filed against.
+   * Enter centres the nearest match; so does clicking a lit rock, or a row of
+   * the hit list beside the field.
+   *
+   * Data: the six Lawson Home items are fixture-true, from
+   * web/src/lib/data/fixtures/workspace.js and DOCUMENTS_FIXTURE, rendered
+   * through web/src/lib/format.js against DESIGN_TODAY 2026-08-13. Eight more
+   * are drawn in the same household's flavour (marked `fill:1` below) purely
+   * so the band reads as a real manifest rather than a six-item sketch — they
+   * are mockup furniture, not fixture, and the build takes the real manifest.
+   *
+   * Backdrop: the shared tiled starfield (#445, seed 17170812, 95 far + 46
+   * near) drifting per POL-11, fixed, with the family vignette.
+   */
+  /* The belt's own tokens, not in packs.css: --rubble and --rubble-gain paint
+     the ambient bed of dust and rock, --paper marks the documents. The rest
+     of each pack — --bg, --panel, --ink, --accent, --overdue, --upcoming, and
+     everything else the belt borrows — is already declared by
+     web/src/lib/packs.css and is deliberately not re-declared here. */
+  [data-theme=starchart]{--rubble:#7d88ab; --rubble-gain:1; --paper:#8fb8ff} /* the documents' own line — see THE DOCUMENTS */
+  [data-theme=afterdark]{--rubble:#78849b; --rubble-gain:1; --paper:#c4b5fd}
+  [data-theme=atlas]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
+  [data-theme=dawn]{--rubble:#3a4966; --rubble-gain:1.5; --paper:#6d28d9}
+  [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
+
+  .belt-page *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  /* The belt is a stage, not a document: the band is pinned to the viewport
+     so its apex can BE the screen centre, and the card is hung on that
+     point. The card scrolls inside itself if a viewport is too short for it
+     rather than sliding the belt off the top of the sky. */
+  html body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+       transition:background .4s,color .4s;overflow:hidden;margin:0}
+  /* THE SCROLL LAW, said loudly enough to be heard. §15's universal descent
+     is a law for screens that scroll, and this one does not: the sheet pins
+     the band to the viewport and rules "the item screen has no descent of its
+     own and none is invented here". But this route has a second occupant —
+     #434's amend-then-accept card, which shares the address and DOES need the
+     page to scroll, and whose sheet (item.css) says so in a bare `html body`
+     rule of equal specificity. Source order between two imported stylesheets
+     is not a thing to leave a law resting on, so the belt states its own with
+     the page it belongs to named in the selector. */
+  html:has(.belt-page) body{overflow:hidden}
+
+  /* family.css / item.css: the sky is fixed and drifts (POL-11); the item
+     screen has no descent of its own and none is invented here. */
+  .belt-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .belt-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .belt-page .sky .far{animation:belt-drift 400s linear infinite}
+  .belt-page .sky .near{animation:belt-drift 195s linear infinite}
+  @keyframes belt-drift{to{transform:translateX(-1600px)}}
+  .belt-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
+
+  /* ---- the band ------------------------------------------------------
+     Two canvases sandwich the card, because the card is IN the band:
+     everything at or behind the ring plane paints under it (and blurs
+     through its glass), the nearest few per cent of the population paints
+     over it. The members ride an SVG between them so they keep real hit
+     targets, labels and focus rings. */
+  .belt-page #band,.belt-page #fore{position:fixed;inset:0;pointer-events:none}
+  .belt-page #band{z-index:2}
+  .belt-page #fore{z-index:5}
+  .belt-page #members{position:fixed;inset:0;z-index:3;overflow:visible}
+  .belt-page .hit{pointer-events:auto;cursor:pointer}
+  .belt-page .hit .fring{opacity:0}
+  .belt-page .hit:focus-visible{outline:none}
+  .belt-page .hit:focus-visible .fring{opacity:1}
+  .belt-page .hit:hover .rim{opacity:.9}
+  .belt-page .rim{transition:opacity .25s ease}
+  .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
+  .belt-page .cap-t{font:10px var(--mono);letter-spacing:.06em;text-anchor:middle;
+         font-variant-numeric:tabular-nums}
+  /* The two end-caps: the band's compass. Which way is time? They sit at the
+     far corners of the sky on the search field's own baseline, because that
+     is the one line across this screen the band never reaches — anywhere on
+     the band itself, a jumbled body would eventually sit on top of them. */
+  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
+          text-transform:uppercase}
+
+  /* ---- THE DOCUMENTS' MARK -------------------------------------------
+     The owner: "a different coloured perimeter line around them, and/or
+     some kind of glow, or gentle pulse... Both?" — and, shown the two
+     variants side by side, he took all three. RULED: ring + glow + pulse is
+     the one and only treatment; there is no variant left to switch, so the
+     demo rail's DOCS chip is gone with it.
+     A document body is a small rock inside a hard PERIMETER RING in --paper
+     (a line no item ever wears: items wear their urgency tone, dust wears
+     none) with a soft GLOW behind it, over a faint disc so the ring reads
+     even where the band is thick with rubble — and the whole mark BREATHES,
+     a 2.6s cycle on the ring's own opacity and the halo's radius. Nothing
+     travels; it is a light coming up and going down.
+     Reduced motion kills the breath with every other animation, and the
+     ring and the glow stay exactly where they are — the mark still has to
+     be the loudest thing in the band without a single moving pixel. */
+  .belt-page .doclabel{fill:var(--paper);font-size:10.5px}
+  .belt-page .halo{fill:var(--paper);opacity:.10;
+        animation:belt-halobreath 2.6s ease-in-out infinite alternate;
+        transform-box:fill-box;transform-origin:center}
+  .belt-page .ring{fill:none;stroke:var(--paper);stroke-width:1.7;opacity:.95;
+        animation:belt-ringbreath 2.6s ease-in-out infinite alternate}
+  .belt-page .ringsoft{fill:none;stroke:var(--paper);stroke-width:3.2;opacity:.5;
+            filter:url(#docglow)}
+  @keyframes belt-ringbreath{from{opacity:.42}to{opacity:1}}
+  @keyframes belt-halobreath{from{opacity:.05;transform:scale(.9)}
+                        to{opacity:.17;transform:scale(1.14)}}
+
+  /* ---- the card, seated at the apex ----------------------------------
+     item.css's glass card, unchanged in its parts, hung so that the band's
+     highest point crosses it a third of the way down: the band's thickness
+     (~430px at the apex) and the card's height are of an order, which is
+     what makes it read as riding IN the belt rather than floating above it.
+     The 16px backdrop blur is doing real work here — the rubble streaming
+     behind the card is visible through it, smeared. */
+  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+    max-height:calc(100vh - 150px);overflow:auto;
+    --cdx:0px; --cdy:0px; --csc:1;
+    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 34%;}
+  .belt-page .cardwrap.rollout{opacity:0;
+    transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
+  .belt-page .cardwrap.rollpre{transition:none;opacity:0}
+  .belt-page .cardwrap.rollin{transition:transform 230ms cubic-bezier(.16,.72,.3,1),opacity 205ms linear}
+  .belt-page .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .belt-page .item-card{padding:22px 26px 20px}
+  .belt-page .item-card h2{font:600 21px var(--display);line-height:1.25}
+  .belt-page .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                  margin:5px 0 16px}
+  .belt-page .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:6.5px 2px;border-bottom:1px solid var(--line-soft)}
+  .belt-page .kv:last-of-type{border:0}
+  .belt-page .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .belt-page .kv b.clean{color:var(--ok-text)}
+  .belt-page .kv b.over{color:var(--overdue)} .belt-page .kv b.soon{color:var(--warm)}
+  .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
+  .belt-page .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                color:var(--ink-faint);margin:16px 0 8px}
+  .belt-page .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
+  .belt-page .note b{color:var(--paper);font-weight:500}
+  .belt-page .acts{display:flex;flex-wrap:wrap;gap:7px}
+  .belt-page .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+    border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+    border-radius:999px;padding:6px 13px;cursor:pointer}
+  .belt-page .acts button:hover{border-color:var(--act,var(--ink))}
+  .belt-page .btn-primary{padding:9px 20px;border-radius:11px;border:0;cursor:pointer;
+    font:600 12.5px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  .belt-page .btn-primary:hover{filter:brightness(1.05)}
+  .belt-page .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
+        color:var(--ink-mid);text-decoration:none;background:none;border:0;
+        cursor:pointer;padding:0}
+  .belt-page .back:hover{color:var(--accent-text)}
+
+  /* The document's honest display, v2's, unchanged. No fabricated page image:
+     the plate says what the file is, the rows say what Orbit knows, the
+     button hands over the original. #476's page-one render turns this half
+     into the page itself. */
+  .belt-page .docview{display:flex;gap:20px;align-items:flex-start}
+  .belt-page .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;
+         border:1px solid var(--paper);background:var(--panel);
+         display:grid;place-items:end center;padding-bottom:8px;
+         font:9.5px var(--mono);letter-spacing:.1em;color:var(--paper)}
+  .belt-page .plate::before{content:"";position:absolute;left:14px;right:14px;top:20px;height:1px;
+     background:var(--line);
+     box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
+                0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
+  .belt-page .docbody{flex:1;min-width:0}
+  .belt-page .docbody h3{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
+  .belt-page .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                margin:5px 0 12px}
+  .belt-page .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}
+  /* "the original in your hands" is a real link in the product — an <a> to
+     GET /api/documents/{id}/download, so it can be opened in its own tab or
+     copied like any address — where the sheet drew an inert <button>. These
+     two declarations are all it takes for an anchor to render as that button;
+     nothing else about the plate changes. */
+  .belt-page .getrow a.btn-primary{display:inline-block;text-decoration:none}
+
+  /* ---- the search box -------------------------------------------------
+     home.html's explore field, verbatim in its idiom: no box, one underline,
+     mono, centred. It floats over the top of the sky so it never fights the
+     card. */
+  .belt-page .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
+        text-align:center;width:min(360px,calc(100vw - 48px))}
+  .belt-page .find>input,.belt-page .find>.findnote{position:relative}
+  .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+    width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
+    padding:6px 4px;transition:border-color .25s;-webkit-appearance:none;appearance:none}
+  .belt-page .find input::placeholder{color:var(--ink-faint)}
+  .belt-page .find input:focus{border-color:var(--accent)}
+  .belt-page .find input::-webkit-search-cancel-button{display:none}
+  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+            margin-top:7px;text-transform:uppercase}
+  /* The hit list drops BESIDE the field, not beneath it: beneath it is where
+     the card is, and the search must never cover the thing you are looking
+     at. It hangs in the empty quarter of the sky to the field's right, and
+     it is only a reach for the matches that are round the far side of the
+     ring — the ones on this sky you simply click. */
+  .belt-page .hits{position:absolute;left:calc(100% + 22px);top:0;width:296px;
+        background:var(--panel-raised);backdrop-filter:blur(14px);
+        border:1px solid var(--line);border-radius:12px;padding:6px;display:none;
+        text-align:left;max-height:252px;overflow:auto}
+  .belt-page .hits.open{display:block}
+  .belt-page .hits button{display:flex;width:100%;gap:10px;align-items:baseline;background:none;
+    border:0;cursor:pointer;font:11.5px var(--mono);color:var(--ink-mid);
+    padding:6px 9px;border-radius:7px;text-align:left}
+  .belt-page .hits button b{color:var(--ink);font-weight:500;flex:1;min-width:0;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .belt-page .hits button small{font-size:10px;font-variant-numeric:tabular-nums}
+  .belt-page .hits button:hover,.belt-page .hits button.pick{background:var(--panel);color:var(--ink)}
+  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-faint)}
+  @media (max-width:1140px){ .belt-page .hits{position:static;width:auto;margin-top:9px} }
+
+  /* ---- chrome ----------------------------------------------------------
+     The mockup's own scaffolding stops here. Its .demos rail (centre / belt /
+     theme) and its <footer> describing the proposal are drawn for a reviewer
+     reading a sheet, not for anyone using Orbit, so — like every other v19
+     port, none of which carries them — their rules do not come across. The
+     fidelity gate masks the same two selectors on the mockup's side, which is
+     what keeps the budget measuring real drift rather than a known,
+     deliberate absence. */
+
+  @media (prefers-reduced-motion: reduce){
+    /* The swap is instant rather than animated — the belt still puts the
+       clicked body at the apex, it simply arrives there, the documents are
+       simply already out, the mark's breath never runs (its ring and glow
+       stay put, at rest), and the band's drift holds still. */
+    .belt-page *{animation:none!important}
+    .belt-page .cardwrap{transition:none!important}
+  }
+
+/* ---- the command panels — item.css's vocabulary, scoped -----------------
+   The mockup draws the action pills but leaves them inert: it has no forms
+   behind the "Renew", "Snooze" etc. buttons. So the panel grammar below is
+   not lifted from item-belt.html at all — it is copied from the retired
+   item view's own sheet, web/src/routes/item/[id]/item.css, where it was
+   already composed from create.html's ratified field vocabulary (.field,
+   .row2, .save-row, .btn-primary, .cancel-link). Only the rules the belt
+   actually needs for its panels are copied, each prefixed with .belt-page;
+   the belt's own .btn-primary (and .btn-primary:hover) above, from the
+   mockup itself, is kept and NOT overridden, so it is not repeated here —
+   nor are item.css's .acts, .acts button, .kv, .note, .back, .item-card or
+   html body rules, which the belt already declares its own versions of. */
+.belt-page .panel{margin-top:16px;padding-top:4px}
+.belt-page .panel .field{margin-bottom:13px}
+.belt-page .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
+  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+.belt-page .panel .field input,.belt-page .panel .field textarea{width:100%;background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
+  padding:9px 12px;font-family:var(--ui)}
+.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{outline:none;border-color:var(--accent)}
+.belt-page .panel .field textarea{resize:vertical;line-height:1.5}
+.belt-page .panel .field.mono input{font-family:var(--mono)}
+.belt-page .panel .row2{display:flex;gap:14px}
+.belt-page .panel .row2>.field{flex:1;min-width:0}
+.belt-page .save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
+.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+  cursor:pointer;padding:0}
+.belt-page .cancel-link:hover{color:var(--ink-mid)}
+.belt-page .btn-quiet{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+  border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+  border-radius:999px;padding:8px 16px;cursor:pointer}
+.belt-page .btn-quiet:hover{border-color:var(--act,var(--ink))}
+.belt-page .problem{font:10.5px var(--mono);color:var(--overdue);margin-top:14px;line-height:1.6}
+.belt-page .acts button[aria-pressed=true]{border-color:var(--act,var(--accent));
+  background:color-mix(in srgb, var(--act,var(--accent)) 14%, transparent)}
+.belt-page .acts button:disabled{opacity:.5;cursor:default}
+.belt-page .btn-primary:disabled{opacity:.5;cursor:default}
