@@ -8,6 +8,7 @@ interface InstanceUser {
   displayName: string;
   email: string;
   isInstanceAdmin: boolean;
+  isPrimaryAdministrator: boolean;
   disabledAt: string | null;
 }
 
@@ -205,6 +206,23 @@ export function AdminManager({ session }: AdminManagerProps) {
     finally { setBusyUserId(null); }
   }
 
+  async function transferPrimary(target: InstanceUser) {
+    const confirmation =
+      `Transfer primary administrator authority to ${target.displayName} (${target.email})? ` +
+      `You will remain an ordinary administrator, and only ${target.displayName} will hold final authority over this Orbit.`;
+    if (!window.confirm(confirmation)) return;
+    setBusyUserId(target.id); setMessage("");
+    try {
+      const response = await fetch("/api/admin/primary", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken }, body: JSON.stringify({ targetUserId: target.id }) });
+      if (!response.ok) throw await responseError(response, "Primary authority could not be transferred");
+      const payload = await response.json() as { users?: InstanceUser[] };
+      if (!payload.users) throw new Error("Primary authority could not be transferred");
+      setUsers(payload.users);
+      setMessage(`${target.displayName} is now the primary administrator.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Primary authority could not be transferred"); }
+    finally { setBusyUserId(null); }
+  }
+
   async function mutateJob(
     kind: "deliveries" | "document-jobs",
     id: string,
@@ -306,7 +324,21 @@ export function AdminManager({ session }: AdminManagerProps) {
 
     <section>
       <div className="setting-heading"><h3>Instance administrators</h3><p>Administrators can manage every user, household, section, and item in this Orbit instance.</p></div>
-      <div className="admin-list">{users.map((user) => <article key={user.id}><span className="member-avatar">{initials(user.displayName)}</span><span><strong>{user.displayName}</strong><small>{user.email}{user.id === session.user.id ? " · You" : ""}{user.disabledAt ? " · Account disabled" : ""}</small></span><b>{user.disabledAt ? "Disabled" : user.isInstanceAdmin ? "Administrator" : "User"}</b><span className="admin-user-actions"><button type="button" disabled={busyUserId !== null || Boolean(user.disabledAt) || (user.id === session.user.id && user.isInstanceAdmin)} title={user.disabledAt ? "Enable this account before changing administrator access" : user.id === session.user.id && user.isInstanceAdmin ? "Another administrator must remove your access" : undefined} onClick={() => void updateAdministrator(user)}>{busyUserId === user.id ? "Saving…" : user.id === session.user.id && user.isInstanceAdmin ? "Current admin" : user.isInstanceAdmin ? "Remove admin" : "Make admin"}</button><button type="button" disabled={busyUserId !== null || (user.id === session.user.id && !user.disabledAt)} title={user.id === session.user.id && !user.disabledAt ? "Another administrator must disable your account" : undefined} onClick={() => void updateAccountStatus(user)}>{busyUserId === user.id ? "Saving…" : user.disabledAt ? "Enable account" : "Disable account"}</button></span></article>)}</div>
+      <div className="admin-list">{users.map((user) => {
+        const self = user.id === session.user.id;
+        const viewerIsPrimary = users.some((candidate) => candidate.id === session.user.id && candidate.isPrimaryAdministrator);
+        const transferable = viewerIsPrimary && !self && user.isInstanceAdmin && !user.disabledAt;
+        /* Protected actions are absent rather than deceptively disabled
+           (#263): nothing here may disable, demote or delete the primary
+           administrator or the viewer's own account. Authority moves first,
+           by explicit transfer, and only the primary sees that action. */
+        return <article key={user.id}><span className="member-avatar">{initials(user.displayName)}</span><span><strong>{user.displayName}</strong><small>{user.email}{self ? " · You" : ""}{user.disabledAt ? " · Account disabled" : ""}</small></span><b>{user.disabledAt ? "Disabled" : user.isPrimaryAdministrator ? "Primary administrator" : user.isInstanceAdmin ? "Administrator" : "User"}</b><span className="admin-user-actions">{user.isPrimaryAdministrator
+          ? <small className="admin-primary-note">Authority must be transferred before this account can be changed.</small>
+          : <>
+              {!self && !user.disabledAt && <button type="button" disabled={busyUserId !== null} onClick={() => void updateAdministrator(user)}>{busyUserId === user.id ? "Saving…" : user.isInstanceAdmin ? "Remove admin" : "Make admin"}</button>}
+              {!self && <button type="button" disabled={busyUserId !== null} onClick={() => void updateAccountStatus(user)}>{busyUserId === user.id ? "Saving…" : user.disabledAt ? "Enable account" : "Disable account"}</button>}
+            </>}{transferable && <button type="button" disabled={busyUserId !== null} onClick={() => void transferPrimary(user)}>{busyUserId === user.id ? "Saving…" : "Make primary"}</button>}</span></article>;
+      })}</div>
       {message && <p className="member-message" role="status" aria-live="polite">{message}</p>}
     </section>
   </div>;
