@@ -13,7 +13,10 @@ feature status.
 - Tests, CI and definition of done:
   [quality strategy](quality-strategy.md).
 - Detailed product direction: [feature register](feature-register.md).
-- Priority, ownership and delivery status: GitHub milestones and issues.
+- Priority, ownership and delivery status: the
+  [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4),
+  with GitHub milestones as the release grouping mirrored by the board's Slice
+  field (owner decision, issue #502).
 
 Historical delivery waves for v1.0–v1.2 were completed under the superseded
 plan structure; their evidence lives in the closed GitHub issues, merged pull
@@ -46,7 +49,9 @@ flight.
 ## Phased roadmap
 
 Delivery is organised as five phases. Each phase makes the next one cheaper;
-GitHub milestones named for the phases own live status, and the
+GitHub milestones named for the phases group the work, the
+[Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
+owns live status, and the
 [engineering baseline](engineering-baseline.md) rows moving to proven states
 are the exit evidence.
 
