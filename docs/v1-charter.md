@@ -112,7 +112,7 @@ Requirement identifiers are stable. GitHub issues and tests should cite them.
   Development and versioned-release previews, and stable versions, are
   identified and deployed by immutable digest. Stable promotion accepts only
   the matching tested release-branch preview after its exact source reaches
-  protected `main` and `develop`, and never rebuilds it.
+  protected `main` and `dev`, and never rebuilds it.
 
 ## Quality attributes
 
