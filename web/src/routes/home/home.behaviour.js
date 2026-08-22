@@ -123,6 +123,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
       .filter((point) => !point.isCamera);
 
+    const corrections = [];
     for (const { id: key, household: hh, dim, ox, oy } of placed) {
       const div = document.createElement("div");
       div.className = "minisys" + (settle ? " settle" : "");
@@ -164,16 +165,21 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
-      /*
-       * The leader rule runs under the label and then veers to the ring, so
-       * its length has to match the label. `tw` above estimates that from the
-       * character count at the mockup's own font size; once the text is in the
-       * document its real width is knowable, so measure it and correct the
-       * path. That makes the label size themeable — the engraved packs set a
-       * larger one — without the rule ending short of the word.
-       */
-      const text = div.querySelector("text");
-      const measured = Math.min(150, text.getComputedTextLength());
+      corrections.push({ div, veerFor });
+    }
+    /*
+     * The leader rule runs under the label and then veers to the ring, so its
+     * length has to match the label. `tw` above estimates that from the
+     * character count at the mockup's own font size; once the text is in the
+     * document its real width is knowable, so measure it and correct the
+     * path. That makes the label size themeable — the engraved packs set a
+     * larger one — without the rule ending short of the word.
+     *
+     * Measured in a second pass over the appended nodes, so the run costs one
+     * layout for the first measurement instead of one per constellation (#448).
+     */
+    for (const { div, veerFor } of corrections) {
+      const measured = Math.min(150, div.querySelector("text").getComputedTextLength());
       if (measured) {
         div.querySelector("path").setAttribute("d", veerFor(measured));
       }
@@ -226,11 +232,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   /* ---- starfield: the shared two-layer tiled field ($lib/sky.js, #445) ---- */
   fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
 
-  function setTheme(name, button){
-    document.documentElement.dataset.theme = name;
-    for (const other of button.parentElement.querySelectorAll("button"))
-      other.setAttribute("aria-pressed", String(other === button));
-  }
   const observer = new IntersectionObserver((entries) => {
     for (const entry of entries)
       if (entry.isIntersecting) entry.target.classList.add("seen");
@@ -261,7 +262,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
         chip.onclick = () => openDocsByTitle(link.dataset.title);
       }
       callout.classList.add("show");
-      document.getElementById(link.dataset.body)?.classList.add("lit");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
     });
     link.addEventListener("mouseleave", () => {
@@ -286,16 +286,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
     homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
   }
-  function replayArrival(){
-    const dial = document.querySelector(".dial");
-    dial.style.animation = "none"; void dial.offsetWidth;
-    dial.style.animation = "";
-  }
-  function restoreOrbit(){
-    document.getElementById("b-closest").classList.add("restored");
-    const comet = document.getElementById("comet");
-    comet.classList.remove("fly"); void comet.getBBox; comet.classList.add("fly");
-  }
   /* POL-9 */
   function openPalette(open){
     document.getElementById("palette").classList.toggle("open", open);
@@ -311,18 +301,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     document.getElementById("docview").classList.add("open");
   }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
-  const healthStates = ["healthy","degraded","offline"];
-  let healthIndex = 1;
-  function applyHealth(){
-    document.body.classList.toggle("health-degraded", healthStates[healthIndex]==="degraded");
-    document.body.classList.toggle("health-offline", healthStates[healthIndex]==="offline");
-    const word = healthStates[healthIndex]==="healthy" ? "status" :
-      healthStates[healthIndex]==="offline" ? "offline" : "degraded";
-    document.querySelector("#edge-health span").textContent = word;
-    if (healthStates[healthIndex]==="healthy") document.getElementById("statusdrawer").classList.remove("open");
-  }
-  function cycleHealth(){ healthIndex = (healthIndex+1)%3; applyHealth(); }
-  applyHealth();
+  /* The ratified screen shows the degraded state (the markup's handle already
+     reads "degraded"); real health wiring is deferred functionality (#410). */
+  document.body.classList.add("health-degraded");
   function toggleAccount(button){
     const card = document.getElementById("account");
     const open = card.classList.toggle("open");
@@ -516,7 +497,18 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
 
   pointSky();
   renderGalaxy(false);
-  addEventListener("resize", () => { if (!flying) renderGalaxy(false); });
+  /* Coalesced like the descent's scroll handler: a drag-resize delivers a
+     stream of events, and rebuilding the constellations is layout-heavy work
+     that only the last one per frame needs (#448). */
+  let galaxyQueued = false;
+  addEventListener("resize", () => {
+    if (galaxyQueued) return;
+    galaxyQueued = true;
+    requestAnimationFrame(() => {
+      galaxyQueued = false;
+      if (!flying) renderGalaxy(false);
+    });
+  });
 
   /*
    * THE PACK SKIES (§15, the sky wave). Stood up after the galaxy exists, because

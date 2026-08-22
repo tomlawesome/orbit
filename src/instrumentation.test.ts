@@ -266,6 +266,9 @@ describe("strict startup ordering", () => {
       state: "exhausted",
       reason: "database_mismatch",
       action: "attach_matching_database",
+      /* The bounded what-disagreed travels to the operator's log (#437) —
+         written at the throw site and previously read nowhere (#448). */
+      detail: "applied migration 25 of 25 does not match 0026_x",
       impact: "migration_blocked",
     });
   });

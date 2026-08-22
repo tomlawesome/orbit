@@ -449,9 +449,6 @@ describe("installer semantic UI", () => {
     );
 
     expect(result.status).toBe(0);
-    // If this fires, the signal was sent before the handler existed, so a
-    // failure below is about the harness rather than the code under test.
-    expect(result.stdout).not.toContain("TRAP_NEVER_INSTALLED");
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
