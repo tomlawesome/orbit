@@ -190,6 +190,13 @@
       "when": 1787097600000,
       "tag": "0026_reminder_warning_days",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787443200000,
+      "tag": "0027_instance_authority",
+      "breakpoints": true
     }
   ]
 }
