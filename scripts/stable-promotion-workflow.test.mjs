@@ -71,6 +71,26 @@ describe("stable promotion workflow", () => {
     expect(documentation.toLowerCase()).not.toContain("release-candidate");
   });
 
+  // The assertions above concatenate three files, so any one of them can be
+  // wrong while another supplies the expected string -- which is how the
+  // decision record kept saying `develop` through the branch rename and
+  // still passed. These check each source that names the branch on its own.
+  it("names the current integration branch in every file that states it", () => {
+    // The decision record's amendment note names the old branch on purpose,
+    // so only what the ADR prescribes is checked -- everything from the
+    // Decision heading onwards.
+    const decisionBody = releaseDecision.slice(releaseDecision.indexOf("## Decision"));
+    expect(decisionBody).not.toBe("");
+
+    for (const source of [releaseGuide, decisionBody, pullRequestTemplate]) {
+      expect(source).not.toMatch(/`develop`/u);
+    }
+
+    expect(decisionBody).toContain("`dev` is the protected integration branch");
+    expect(releaseGuide).toContain("issue branches start from and target `dev`");
+    expect(pullRequestTemplate).toContain("issue branches start from and target `dev`");
+  });
+
   it("retains historic preview identities without publishing new per-run tags", () => {
     expect(releaseGuide).toContain(
       "Historic `preview-*` and `rc-*` tags remain",

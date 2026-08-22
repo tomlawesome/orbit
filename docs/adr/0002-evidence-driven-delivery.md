@@ -2,6 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-07-27
+**Amended:** 2026-08-22 — the integration branch was renamed `develop` -> `dev`.
+The decision is unchanged; see [ADR-0003](0003-gitflow-preview-and-stable-channels.md).
 
 ## Context
 
@@ -23,7 +25,7 @@ requirement to its implementation and release evidence.
 - A preview is published only after its gates pass. Manual release acceptance
   records the versioned-release preview digest. Stable promotion retags that
   accepted digest without rebuilding after its exact source reaches protected
-  `main` and `develop`. Channel semantics are defined in
+  `main` and `dev`. Channel semantics are defined in
   [ADR-0003](0003-gitflow-preview-and-stable-channels.md).
 - Protected planning is authored or materially changed only by Sol Extra High.
   Bounded implementation subagents default to Luna Extra High; a different
