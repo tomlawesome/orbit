@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-08-08
+**Amended:** 2026-08-22 — the integration branch was renamed `develop` -> `dev`
+for consistency across repositories. The decision below is unchanged; only the
+branch's name is. The same amendment disambiguates the reserved `dev` *image
+tag*, which predates the branch name, from the branch itself.
 
 ## Context
 
@@ -13,10 +17,10 @@ the tested image and the eventual release record.
 
 ## Decision
 
-- `develop` is the protected integration branch. Ordinary issue branches start
-  from and target `develop`; they run static and unit checks without building
+- `dev` is the protected integration branch. Ordinary issue branches start
+  from and target `dev`; they run static and unit checks without building
   or publishing an image.
-- `preview` is the protected release lane. A reviewed merge of `develop` into
+- `preview` is the protected release lane. A reviewed merge of `dev` into
   `preview` runs the complete PostgreSQL, exact-image, browser, recovery and
   supply-chain path once and publishes the tested digest behind the mutable
   `preview` tag.
@@ -31,8 +35,10 @@ the tested image and the eventual release record.
 - Stable promotion points only `latest` at the accepted digest, then creates the
   matching immutable Git tag and GitHub Release. The release records the digest.
   It does not publish semantic-version container tags.
-- Preview publication points only `preview` at the tested digest. `dev` is
-  reserved but is not initially published. No commit, branch, run, release or
+- Preview publication points only the `preview` *image tag* at the tested
+  digest. The `dev` *image tag* is reserved but is not initially published;
+  it is a registry tag name and is unrelated to the `dev` branch, which
+  publishes no image at all. No commit, branch, run, release or
   semantic-version container tags are published.
 - Orbit calculates one semantic version per release train from the highest
   stable Git tag. An ordinary preview train increments minor once; a bounded
@@ -43,7 +49,7 @@ the tested image and the eventual release record.
   version and revision are embedded into the image and cannot be replaced by
   runtime environment variables.
 - A rare `hotfix/*` branch may publish the `preview` pointer and merge directly
-  to `main`; it must subsequently be reconciled into `develop` and `preview`.
+  to `main`; it must subsequently be reconciled into `dev` and `preview`.
 - Historic `preview-*`, `rc-*` and semantic-version image tags remain untouched
   as audit evidence. They are never eligible for new promotion.
 
