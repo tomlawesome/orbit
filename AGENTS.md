@@ -10,6 +10,17 @@ direction. Architecture and security decisions are recorded in ADRs and
 reviewed by the owner; the durable governance decision is
 [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
+## Who does design work
+
+UX and UI design work on Orbit is done by Claude Fable 5 (owner decision,
+2026-08-22). That covers the visual and interaction design itself: screen and
+component design, layout, motion, colour and typography decisions, mockup
+work, and any judgement made against the ratified designs or the fidelity
+gate.
+
+Other models may implement, test and deliver design work that is already
+ratified, and may do the rest of the engineering.
+
 ## Delivery workflow
 
 - Start from an issue with a user outcome, acceptance criteria, non-goals,
