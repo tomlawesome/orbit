@@ -120,8 +120,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      * The camera's own constellation is in the answer and dropped here: you
      * never see it, because you are inside it.
      */
-    const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
-      .filter((point) => !point.isCamera);
+    // screen, not the hero's own width: the #485 screen-containment bound in
+    // placement.js is measured from the real viewport, which the hero (capped
+    // at 1160, padded 24px either side) can sit well inside of.
+    const placed = placeGalaxy({
+      galaxy: GALAXY, camera, width: w, height: h, keepOut,
+      screen: document.documentElement.clientWidth,
+    }).filter((point) => !point.isCamera);
 
     const corrections = [];
     for (const { id: key, household: hh, dim, ox, oy } of placed) {
