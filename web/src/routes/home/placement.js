@@ -70,16 +70,23 @@
  * The top of the sky is busier than the bottom — the north-star create handle
  * and the account row live there — so upward bearings get 60px more clearance
  * (owner-found: a constellation squashed behind the handle, 2026-08-15).
+ *
+ * EDGE_INSET replaces three separate outward limits — REACH_PAD_X (40),
+ * REACH_OVERSHOOT (40) and EDGE_MARGIN (60) — with the one number that was
+ * actually missing (#485, owner ruling 2026-08-22: constellations clipping
+ * at the screen edge on tight desks). A ring centre is not the whole
+ * constellation: its SVG extends 118px outward of the centre, and the label
+ * always points further out still, toward the edge. The old limits let a
+ * ring centre sit AT or past the edge, which draws a label off it. 130 = the
+ * 118px the SVG extends, plus 12px of air. It bounds every outward limit in
+ * this file: reachOn's rx, the separation pass's outward ceiling, and the
+ * band slide's clamp — so nothing this module places can ever draw closer
+ * to the edge than a constellation needs.
  */
-const REACH_PAD_X = 40;
+const EDGE_INSET = 130;
 const BAND_TOP = 215;
 const BAND_BOTTOM = 155;
 const BAND_FLOOR = 80;
-/* An outward push may overshoot the visible band by this much and no more —
-   the other half of the trapped-behind-the-handle bug. */
-const REACH_OVERSHOOT = 40;
-/* The band slide keeps this much of the hero's own margin. */
-const EDGE_MARGIN = 60;
 const SEPARATION_ROUNDS = 8;
 const BAND_ROUNDS = 6;
 
@@ -98,7 +105,7 @@ export function minSeparationFor(width) {
  * placement instead of REDIRECTING it.
  */
 export function reachOn(angle, width, height) {
-  const rx = width / 2 + REACH_PAD_X;
+  const rx = width / 2 - EDGE_INSET;
   const ry = Math.max(BAND_FLOOR, height / 2 - (Math.sin(angle) < 0 ? BAND_TOP : BAND_BOTTOM));
   return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
 }
@@ -252,24 +259,22 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
          */
         const unspent = shove - (wasInner - inner.radius);
         /*
-         * Capped: an uncapped push could shove a constellation past the
-         * visible band — the other half of the trapped-behind-the-handle bug.
-         * For a constellation already sitting on a band edge the limit is the
-         * hero's own side, not the band, because more radius slides it ALONG
-         * the edge rather than off the top. And the cap can only ever hold a
-         * radius back, never pull one in: a keep-out that already reaches
-         * past the band is #428's AC6 case and the pass after it must not
-         * quietly undo it.
+         * Capped: an uncapped push could shove a constellation's ring centre
+         * to where its own SVG or label crosses the screen edge (#485). The
+         * cap is bearing-aware, on the outer point's own side (`x`, the same
+         * inset reachOn uses). A shallow bearing hits the side first, at
+         * `x / |cos|` — the ring centre stops at the inset however far up or
+         * down it wandered. A steep bearing hits the band corner first, at
+         * `hypot(x, limit)`, along which a banded constellation slides
+         * exactly as before; near-vertical bearings are safe too, because
+         * `tan` blowing up is caught by the `min`, so the corner still wins.
+         * And the cap can only ever hold a radius back, never pull one in: a
+         * keep-out that already reaches past the band is #428's AC6 case and
+         * the pass after it must not quietly undo it.
          */
-        const ceiling = Math.max(
-          reach(outer.angle) + REACH_OVERSHOOT,
-          /* Pushed far enough, a constellation meets the band edge and starts
-             sliding ALONG it; the sky only truly runs out at the corner. So
-             the ceiling is the band's far corner on this bearing's own side —
-             room the old code reached by shifting `ox` off the bearing, taken
-             here on the bearing instead. */
-          Math.hypot(width / 2 - EDGE_MARGIN, outer.angle < 0 ? safeTop : safeBottom),
-        );
+        const x = width / 2 - EDGE_INSET;
+        const limit = Math.max(outer.angle < 0 ? safeTop : safeBottom, 0);
+        const ceiling = Math.hypot(x, Math.min(limit, x * Math.abs(Math.tan(outer.angle))));
         outer.radius = Math.min(
           outer.radius + shove + unspent,
           Math.max(outer.radius, ceiling),
@@ -300,7 +305,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0 
     const side = Math.sign(ox) || Math.sign(point.ox) || 1;
     const clear = Math.sqrt(Math.max(keepOut * keepOut - point.oy * point.oy, 0));
     if (Math.abs(ox) < clear) ox = side * clear;
-    point.ox = Math.max(-(width / 2) + EDGE_MARGIN, Math.min(width / 2 - EDGE_MARGIN, ox));
+    point.ox = Math.max(-(width / 2) + EDGE_INSET, Math.min(width / 2 - EDGE_INSET, ox));
   };
   for (let round = 0; round < BAND_ROUNDS; round++) {
     let crowded = false;
