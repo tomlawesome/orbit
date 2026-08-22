@@ -1,0 +1,1792 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — the item belt v4: the manifest, laid out in time (proposal, issue #458)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /*
+   * THE ITEM BELT — v4, issue #458.
+   * design/owner-decisions.md §15, and the owner's corrections of 2026-08-16.
+   *
+   * WHAT WAS MISREAD. v2 and v3 both built a belt of ONE ITEM'S DOCUMENTS.
+   * That was wrong, and the owner has said so plainly:
+   *
+   *   "It was supposed to be an ITEM belt, with a search box. An alternative
+   *    way to view the manifest, essentially."
+   *
+   *   "It should just have had all the items in there together, either old on
+   *    the left, newer on the right, or visa versa, I don't mind, but all the
+   *    asteroids are surrounded by the other items that are chronologically
+   *    (by renewal/required date) near to them in the linear list."
+   *
+   *   "v2 was better overall" — so v3's paper is gone. Every sheet, every
+   *    turned corner, every ruled line: deleted. The band is rock and dust
+   *    again, which is what v2 had and what the owner wants back.
+   *
+   *   "Asteroid belt — yes, but they don't form an orderly, linear line,
+   *    they're jumbled around a little." — so the items keep strict date
+   *    ORDER along the band while being scattered within its thickness. See
+   *    THE JUMBLE below.
+   *
+   * AND: THE BELT IS THE ITEM SCREEN (owner, same review). This surface
+   * replaces /item. Arriving at an item from anywhere else — a manifest row
+   * on home, a filed lane in the inbox, a link in a reminder — lands you HERE
+   * with that item already seated at the apex and its neighbours in time
+   * already around it. There is no separate item page to go to afterwards;
+   * this page opening with a card at the apex IS that arrival, which is what
+   * the default view below demonstrates. (documents.html retires into this
+   * too, §14: "the coming asteroid belt (#458) with a well-placed search box
+   * is the document surface.")
+   *
+   * AND: THE DOCUMENTS RIDE IN THE BAND (owner, ruling the open question).
+   * When an item is at the apex, its documents are bodies in the belt beside
+   * it — not a list on the card — and they must be unmistakable against
+   * everything else. He asked for a different-coloured perimeter line, or a
+   * glow or gentle pulse, and floated "Both?" — then, shown the two variants
+   * side by side, RULED for all of it: a document body wears a distinct
+   * accent PERIMETER RING, a soft GLOW, and a slow 2.6s PULSE, one treatment,
+   * no toggle. Under reduced motion the breath stops and the ring and glow
+   * stay: the mark is obvious with no motion at all.
+   * Clicking a document body rolls it to the apex and it becomes the document
+   * card — what it is, when it arrived, that it scanned clean, and the
+   * original in your hands (the page render itself still waits on #476).
+   * When a document is centred the same mark — ring, glow and breath —
+   * appears on ITS ITEM, one short step away, so the way back is never in
+   * doubt.
+   *
+   * WHAT THE BELT IS, THEN. Every item in the household is a body in one
+   * band, and the band is TIME:
+   *
+   *   SOONER  ←──────────────── the apex ────────────────→  LATER
+   *
+   * Left is the past and the near future — overdue first — and it runs
+   * rightward into the wide orbits. Neighbours in the band are neighbours in
+   * the manifest's linear date list, always: the belt is that list, bent
+   * round a ring. Spacing breathes with the date gaps (a cluster of four
+   * renewals in three weeks sits close; a five-month gap opens up) but never
+   * closes below a floor, so labels cannot collide. Documents take no room in
+   * that sequence: their seats are cut out of the space BETWEEN an item and
+   * its neighbour, so opening an item can never reorder the manifest or
+   * change what "next" means.
+   *
+   * THE JUMBLE. Order is strict; position is not. Each body is thrown a
+   * seeded distance off the ring radius, out of the ring plane, and a little
+   * along the band, so the population scatters through the band's ~430px
+   * thickness rather than threading a wire. The throw eases to exactly zero
+   * at the apex, so the centred body still seats on the pin to the pixel and
+   * the card sits precisely where the band's highest point is; the roll
+   * glides a clicked body from wherever it was jumbled to that seat.
+   *
+   * THE BERTH. The centred body is not a 25px rock, it is a 400px card, so it
+   * has swept a wider clearing than its neighbours — and when the centred
+   * item has papers, wider still, because the papers have to sit in the gap
+   * it has cleared. That widening is animated across the same 420ms as the
+   * roll: the neighbours stand off, and the documents come out of the item.
+   *
+   * WHAT v2 KEEPS, UNCHANGED — its geometry and choreography are ratified:
+   *
+   * 1. THE CARD RIDES IN THE BELT. No crown asteroid stands in for the
+   *    centred thing. The centred body's CARD is the body at the apex: it
+   *    sits IN the band, rubble streaming behind it (through it — the glass
+   *    blurs what passes) and a few motes drifting in front.
+   * 2. THE APEX IS AT SCREEN CENTRE, pinned at every viewport size.
+   * 3. NOT A SEMICIRCLE. A real ring seen at an angle: radius A, inclined 40°
+   *    to the line of sight, node line rolled 12°, projected to screen. The
+   *    left flank falls ~300px and turns toward you, the right falls ~240px
+   *    and runs away foreshortened. Nothing is symmetric.
+   * 4. DENSER AND DISORDERLY, AND SOWN THE WHOLE WAY ROUND. Seeded ambient
+   *    bodies at scattered radii (peaked ±19% of A, one in seven thrown 1.75×
+   *    further out) and heights (±6.6% of A), dust to rubble, drawn at depth
+   *    — nearer bodies larger, brighter, faster, the highest passing in FRONT
+   *    of the card. ~2100 of them fill one skyful, and the bed is sown across
+   *    every skyful the roll can reach: the screen window (2.01 rad at
+   *    1280×800, 2.45 at 1600×1000) plus the manifest's own roll span
+   *    (3.10 rad, Window cleaning to Gas safety), so 5341 bodies at 1280×800
+   *    and 4756 at 1600×1000 — the same density per radian, over 2.5× the
+   *    ground. Centring an end item now looks out on rock, not on the bare
+   *    ring the fixed-window sowing used to leave behind it.
+   *    They drift for ever and NEVER loop: a body that leaves the arc for
+   *    good is rebuilt at its far end out of the same running seeded stream
+   *    (§14, "the sky never loops"), and inner bodies drift faster than
+   *    outer — Keplerian shear.
+   *    That ambient bed is scenery. It is also the answer to a thin
+   *    household: when there are not enough real items to fill the band, the
+   *    band is still a belt (owner, confirmed).
+   *
+   * THE MEMBERS must read instantly as the things that mean something. Four
+   * separations, as v2: they are 25px bodies against rubble that tops out
+   * near 9px; they are drawn (a faceted rock) where rubble is a flat tone;
+   * they carry a label and a focus ring; and each has SWEPT ITS
+   * NEIGHBOURHOOD — the rubble thins to nothing in a disc around every one of
+   * them, the way a body big enough to be a body clears its own orbit. One
+   * thing is added for items: each rock wears its urgency as home wears it —
+   * the tone of the manifest's T-minus column on its rim and a single pip
+   * (overdue / due soon / upcoming / wide orbit), so the left end of the band
+   * burns and the right end cools. Items carrying documents also wear the
+   * dial's belt ellipse (CON-1, "documents attached"), which is the promise
+   * that centring them will bring the papers out.
+   *
+   * THE SEARCH BOX (§14's "well-placed search box"). Quiet, mono, on home's
+   * explore-field idiom — underline only — floated over the top of the sky.
+   * Typing LIGHTS the matches and DIMS the rest; nothing vanishes, because
+   * the belt keeps its shape and you are meant to see where in time your hit
+   * sits. It matches title, section, kind, provider and document name — so
+   * searching "service history" lights the car the paper is filed against.
+   * Enter centres the nearest match; so does clicking a lit rock, or a row of
+   * the hit list beside the field.
+   *
+   * Data: the six Lawson Home items are fixture-true, from
+   * web/src/lib/data/fixtures/workspace.js and DOCUMENTS_FIXTURE, rendered
+   * through web/src/lib/format.js against DESIGN_TODAY 2026-08-13. Eight more
+   * are drawn in the same household's flavour (marked `fill:1` below) purely
+   * so the band reads as a real manifest rather than a six-item sketch — they
+   * are mockup furniture, not fixture, and the build takes the real manifest.
+   *
+   * Backdrop: the shared tiled starfield (#445, seed 17170812, 95 far + 46
+   * near) drifting per POL-11, fixed, with the family vignette.
+   */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /* The five packs, verbatim from web/src/lib/packs.css plus the body
+     gradient stops home.html names, so the belt is judged in each. */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --rubble:#7d88ab; --rubble-gain:1;
+    --paper:#8fb8ff;      /* the documents' own line — see THE DOCUMENTS */
+    /* #491: the text-grade companions — ink that carries WORDS. Carried from
+       web/src/lib/packs.css, where the measurements are. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --rubble:#78849b; --rubble-gain:1;
+    --paper:#c4b5fd;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --rubble:#3d4a70; --rubble-gain:1.55;
+    --paper:#2b6cb0;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --rubble:#3a4966; --rubble-gain:1.5;
+    --paper:#6d28d9;
+    --ink-quiet:var(--ink-faint); --accent-text:#14507b; --ok-text:#0f5735;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --rubble:#6ea6b8; --rubble-gain:1;
+    --paper:#2de2e6;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  /* The belt is a stage, not a document: the band is pinned to the viewport
+     so its apex can BE the screen centre, and the card is hung on that
+     point. The card scrolls inside itself if a viewport is too short for it
+     rather than sliding the belt off the top of the sky. */
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+       transition:background .4s,color .4s;overflow:hidden}
+
+  /* family.css / item.css: the sky is fixed and drifts (POL-11); the item
+     screen has no descent of its own and none is invented here. */
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* ---- the band ------------------------------------------------------
+     Two canvases sandwich the card, because the card is IN the band:
+     everything at or behind the ring plane paints under it (and blurs
+     through its glass), the nearest few per cent of the population paints
+     over it. The members ride an SVG between them so they keep real hit
+     targets, labels and focus rings. */
+  #band,#fore{position:fixed;inset:0;pointer-events:none}
+  #band{z-index:2}
+  #fore{z-index:5}
+  #members{position:fixed;inset:0;z-index:3;overflow:visible}
+  .hit{pointer-events:auto;cursor:pointer}
+  .hit .fring{opacity:0}
+  .hit:focus-visible{outline:none}
+  .hit:focus-visible .fring{opacity:1}
+  .hit:hover .rim{opacity:.9}
+  .rim{transition:opacity .25s ease}
+  .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
+  .cap-t{font:10px var(--mono);letter-spacing:.06em;text-anchor:middle;
+         font-variant-numeric:tabular-nums}
+  /* The two end-caps: the band's compass. Which way is time? They sit at the
+     far corners of the sky on the search field's own baseline, because that
+     is the one line across this screen the band never reaches — anywhere on
+     the band itself, a jumbled body would eventually sit on top of them. */
+  .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-faint);
+          text-transform:uppercase}
+
+  /* ---- THE DOCUMENTS' MARK -------------------------------------------
+     The owner: "a different coloured perimeter line around them, and/or
+     some kind of glow, or gentle pulse... Both?" — and, shown the two
+     variants side by side, he took all three. RULED: ring + glow + pulse is
+     the one and only treatment; there is no variant left to switch, so the
+     demo rail's DOCS chip is gone with it.
+     A document body is a small rock inside a hard PERIMETER RING in --paper
+     (a line no item ever wears: items wear their urgency tone, dust wears
+     none) with a soft GLOW behind it, over a faint disc so the ring reads
+     even where the band is thick with rubble — and the whole mark BREATHES,
+     a 2.6s cycle on the ring's own opacity and the halo's radius. Nothing
+     travels; it is a light coming up and going down.
+     Reduced motion kills the breath with every other animation, and the
+     ring and the glow stay exactly where they are — the mark still has to
+     be the loudest thing in the band without a single moving pixel. */
+  .doclabel{fill:var(--paper);font-size:10.5px}
+  .halo{fill:var(--paper);opacity:.10;
+        animation:halobreath 2.6s ease-in-out infinite alternate;
+        transform-box:fill-box;transform-origin:center}
+  .ring{fill:none;stroke:var(--paper);stroke-width:1.7;opacity:.95;
+        animation:ringbreath 2.6s ease-in-out infinite alternate}
+  .ringsoft{fill:none;stroke:var(--paper);stroke-width:3.2;opacity:.5;
+            filter:url(#docglow)}
+  @keyframes ringbreath{from{opacity:.42}to{opacity:1}}
+  @keyframes halobreath{from{opacity:.05;transform:scale(.9)}
+                        to{opacity:.17;transform:scale(1.14)}}
+
+  /* ---- the card, seated at the apex ----------------------------------
+     item.css's glass card, unchanged in its parts, hung so that the band's
+     highest point crosses it a third of the way down: the band's thickness
+     (~430px at the apex) and the card's height are of an order, which is
+     what makes it read as riding IN the belt rather than floating above it.
+     The 16px backdrop blur is doing real work here — the rubble streaming
+     behind the card is visible through it, smeared. */
+  .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+    max-height:calc(100vh - 150px);overflow:auto;
+    --cdx:0px; --cdy:0px; --csc:1;
+    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 34%;}
+  .cardwrap.rollout{opacity:0;
+    transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
+  .cardwrap.rollpre{transition:none;opacity:0}
+  .cardwrap.rollin{transition:transform 230ms cubic-bezier(.16,.72,.3,1),opacity 205ms linear}
+  .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .item-card{padding:22px 26px 20px}
+  .item-card h2{font:600 21px var(--display);line-height:1.25}
+  .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                  margin:5px 0 16px}
+  .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:6.5px 2px;border-bottom:1px solid var(--line-soft)}
+  .kv:last-of-type{border:0}
+  .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .kv b.clean{color:var(--ok-text)}
+  .kv b.over{color:var(--overdue)} .kv b.soon{color:var(--warm)}
+  .kv b.up{color:var(--upcoming)} .kv b.ok{color:var(--ok-text)}
+  .item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                color:var(--ink-faint);margin:16px 0 8px}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:13px;line-height:1.75}
+  .note b{color:var(--paper);font-weight:500}
+  .acts{display:flex;flex-wrap:wrap;gap:7px}
+  .acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+    border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+    border-radius:999px;padding:6px 13px;cursor:pointer}
+  .acts button:hover{border-color:var(--act,var(--ink))}
+  .btn-primary{padding:9px 20px;border-radius:11px;border:0;cursor:pointer;
+    font:600 12.5px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  .btn-primary:hover{filter:brightness(1.05)}
+  .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
+        color:var(--ink-mid);text-decoration:none;background:none;border:0;
+        cursor:pointer;padding:0}
+  .back:hover{color:var(--accent-text)}
+
+  /* The document's honest display, v2's, unchanged. No fabricated page image:
+     the plate says what the file is, the rows say what Orbit knows, the
+     button hands over the original. #476's page-one render turns this half
+     into the page itself. */
+  .docview{display:flex;gap:20px;align-items:flex-start}
+  .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;
+         border:1px solid var(--paper);background:var(--panel);
+         display:grid;place-items:end center;padding-bottom:8px;
+         font:9.5px var(--mono);letter-spacing:.1em;color:var(--paper)}
+  .plate::before{content:"";position:absolute;left:14px;right:14px;top:20px;height:1px;
+     background:var(--line);
+     box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
+                0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
+  .docbody{flex:1;min-width:0}
+  .docbody h3{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
+  .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                margin:5px 0 12px}
+  .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}
+
+  /* ---- the search box -------------------------------------------------
+     home.html's explore field, verbatim in its idiom: no box, one underline,
+     mono, centred. It floats over the top of the sky so it never fights the
+     card. */
+  .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
+        text-align:center;width:min(360px,calc(100vw - 48px))}
+  .find>input,.find>.findnote{position:relative}
+  .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+    width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
+    padding:6px 4px;transition:border-color .25s;-webkit-appearance:none;appearance:none}
+  .find input::placeholder{color:var(--ink-faint)}
+  .find input:focus{border-color:var(--accent)}
+  .find input::-webkit-search-cancel-button{display:none}
+  .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+            margin-top:7px;text-transform:uppercase}
+  /* The hit list drops BESIDE the field, not beneath it: beneath it is where
+     the card is, and the search must never cover the thing you are looking
+     at. It hangs in the empty quarter of the sky to the field's right, and
+     it is only a reach for the matches that are round the far side of the
+     ring — the ones on this sky you simply click. */
+  .hits{position:absolute;left:calc(100% + 22px);top:0;width:296px;
+        background:var(--panel-raised);backdrop-filter:blur(14px);
+        border:1px solid var(--line);border-radius:12px;padding:6px;display:none;
+        text-align:left;max-height:252px;overflow:auto}
+  .hits.open{display:block}
+  .hits button{display:flex;width:100%;gap:10px;align-items:baseline;background:none;
+    border:0;cursor:pointer;font:11.5px var(--mono);color:var(--ink-mid);
+    padding:6px 9px;border-radius:7px;text-align:left}
+  .hits button b{color:var(--ink);font-weight:500;flex:1;min-width:0;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hits button small{font-size:10px;font-variant-numeric:tabular-nums}
+  .hits button:hover,.hits button.pick{background:var(--panel);color:var(--ink)}
+  .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-faint)}
+  @media (max-width:1140px){ .hits{position:static;width:auto;margin-top:9px} }
+
+  /* ---- chrome --------------------------------------------------------- */
+  .demos{position:fixed;left:22px;bottom:18px;z-index:7;display:flex;gap:7px;
+         align-items:center;flex-wrap:wrap;max-width:calc(100% - 44px)}
+  .demos span{font:9.5px var(--mono);letter-spacing:.16em;color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+    border:1px solid var(--line);border-radius:99px;padding:6px 12px;cursor:pointer;
+    backdrop-filter:blur(8px)}
+  .demos button:hover{border-color:var(--accent);color:var(--ink)}
+  .demos button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
+  .demos .sw{width:18px;height:18px;border-radius:50%;padding:0}
+  .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .demos i{width:1px;height:16px;background:var(--line);display:inline-block;margin:0 3px}
+
+  footer{position:fixed;left:50%;transform:translateX(-50%);bottom:56px;z-index:6;
+         text-align:center;font:10.5px var(--mono);color:var(--ink-faint);
+         line-height:1.85;max-width:min(1120px,calc(100vw - 80px));pointer-events:none}
+
+  @media (prefers-reduced-motion: reduce){
+    /* The swap is instant rather than animated — the belt still puts the
+       clicked body at the apex, it simply arrives there, the documents are
+       simply already out, the mark's breath never runs (its ring and glow
+       stay put, at rest), and the band's drift holds still. */
+    *{animation:none!important}
+    .cardwrap{transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<!-- the band: everything at or behind the ring plane -->
+<canvas id="band" aria-hidden="true"></canvas>
+
+<!-- the members: every item in the household in date order along the band,
+     plus the centred item's documents in the berth beside it -->
+<svg id="members" aria-label="The item belt: every item in this household, placed in order of when it comes due — sooner to the left, later to the right. The body at the apex of the band is shown as its card, and its documents ride in the belt beside it.">
+  <defs>
+    <!-- The rock's shading, lit from the same quarter as home's planets, so
+         every body in the sky shares one light. -->
+    <radialGradient id="rockshade" cx="32%" cy="26%" r="82%">
+      <stop offset="0%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="55%" stop-color="#000" stop-opacity=".16"/>
+      <stop offset="100%" stop-color="#000" stop-opacity=".46"/>
+    </radialGradient>
+    <!-- the documents' glow: the perimeter line, blurred twice under itself -->
+    <filter id="docglow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <g id="ends" aria-hidden="true"></g>
+  <g id="seats"></g>
+  <g id="caps"></g>
+</svg>
+
+<!-- the card, riding at the apex -->
+<div class="cardwrap" id="cardwrap"></div>
+
+<!-- the nearest few per cent of the band: rubble that passes in FRONT -->
+<canvas id="fore" aria-hidden="true"></canvas>
+
+<!-- §14's "well-placed search box": the belt's way into the manifest -->
+<div class="find">
+  <input id="find" type="search" placeholder="find an item — name, section, provider, document"
+         aria-label="Find an item in the belt" autocomplete="off" spellcheck="false"
+         aria-describedby="findnote">
+  <div class="findnote" id="findnote"></div>
+  <div class="hits" id="hits" role="listbox" aria-label="Matching items"></div>
+</div>
+
+<div class="demos" aria-label="Mockup state demos">
+  <span>CENTRE</span>
+  <button id="c-first" onclick="centreById('i-window')">sooner end</button>
+  <button id="c-docs" onclick="centreById('i-svc')">with papers</button>
+  <button id="c-last" onclick="centreById('i-gas')">later end</button>
+  <button onclick="arriveAt('i-boiler')" title="as a click on the manifest row would: the belt IS the item screen">arrive from home</button>
+  <i></i>
+  <span>BELT</span>
+  <button id="b-full" onclick="setHousehold('lawson')" aria-pressed="true">14 items</button>
+  <button id="b-empty" onclick="setHousehold('empty')" aria-pressed="false">empty</button>
+  <i></i>
+  <span>THEME</span>
+  <button class="sw" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+  <button class="sw" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+  <button class="sw" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+  <button class="sw" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+  <button class="sw" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+</div>
+
+<footer>orbit · the item belt v4 · issue #458 · the owner's correction: <b>an ITEM belt — the whole manifest laid out in time</b>, not one item's documents ·
+every item is a body in one band, in strict order of when it comes due, sooner left to later right — jumbled through the band's thickness, never out of order, so an item's neighbours here are its neighbours in the list ·
+this surface IS the item screen: arriving at an item from anywhere lands you here with it seated at the apex as its card ·
+the centred item's documents ride in the belt beside it — ringed, glowing and slowly breathing so they cannot be missed; click one and it rolls in and becomes its own card ·
+the search box lights the matches and dims the rest — the belt keeps its shape — and enter rolls the nearest hit to the apex</footer>
+
+<script>
+/* ==================================================================== *
+ * THE GEOMETRY — a ring seen at an angle, not a rainbow. Verbatim v2.
+ *
+ * The belt is a circle of radius A lying in its own plane. Two rotations
+ * put it on screen:
+ *   INC   40°  inclination — how far the ring plane is tipped away from us.
+ *              This is what turns the circle into a shallow ellipse
+ *              (minor/major = cos 40° = .766) and what makes the arc across
+ *              the sky a sweep rather than a bow.
+ *   NODE −12°  the node roll — the ring's line of nodes is not level with
+ *              the horizon. This is the asymmetry: it drops the left flank
+ *              and lifts the right, so the two halves of the visible band
+ *              fall by different amounts (~300px left, ~240px right at
+ *              1600×1000) and foreshorten differently.
+ *
+ * The apex — the highest point of the projected ellipse, found analytically,
+ * not assumed — is then translated to the horizontal centre of the viewport
+ * at 35% of its height. Everything else follows from that one pin.
+ *
+ * Ring angle phi runs anticlockwise; on screen INCREASING PHI MOVES LEFT.
+ * Since the manifest runs sooner-left to later-right, a body's angular
+ * offset along the belt DECREASES phi: offset 0 is the first item due.
+ * ==================================================================== */
+const RAD = Math.PI / 180;
+const INC = 40 * RAD, NODE = -12 * RAD;
+const COS_I = Math.cos(INC), SIN_I = Math.sin(INC);
+const COS_N = Math.cos(NODE), SIN_N = Math.sin(NODE);
+const A_FRAC = 0.74, A_MIN = 1150;   /* ring radius against the viewport */
+const APEX_FRAC = 0.35;              /* where the apex hangs in the sky   */
+const R_ITEM = 25;                   /* an item's radius                  */
+const R_DOC = 17;                    /* a document's — smaller, on purpose */
+const RADIAL = 0.19;                 /* the band's radial half-spread     */
+const HFRAC = 0.066;                 /* its out-of-plane half-thickness   */
+const SWEEP = 74;                    /* the neighbourhood an item clears  */
+const SWEEP_DOC = 52;                /* a document's smaller clearing     */
+const DRIFT = 0.0125;                /* rad/s along the ring, leftward    */
+const GLIDE = 420;                   /* the roll, unchanged from v1/v2    */
+
+/* ---- the spacing law -------------------------------------------------
+   Position along the band is the item's DATE. Consecutive items are set
+   apart by an angle that grows with the gap between their due dates, from a
+   floor (below which two labels would touch) to a ceiling (beyond which a
+   five-month wait would push the next item off the world). The growth is
+   e-folded at 45 days: a fortnight apart reads noticeably tighter than a
+   season apart, but the whole manifest still fits on one ring. */
+const MIN_GAP = 11.5 * RAD;
+const MAX_GAP = 17.5 * RAD;
+const GAP_EFOLD = 45;                /* days, the gap law's scale         */
+/* A document's seat is cut out of the space BETWEEN its item and the next
+   one along — 6° of ring, well inside the floor — so putting documents in
+   the band can never reorder the manifest or change what "next" means. */
+const DOC_OFF = 6.0 * RAD;
+
+/* ---- the card's berth ------------------------------------------------
+   The centred body is not a rock, it is a ~400px card, so it has swept a
+   wider clearing than its neighbours: angles are pushed away from the apex
+   by a smooth ODD function, which stretches the seats flanking the card and
+   leaves everything further out merely shifted. warp(0) === 0 exactly, so
+   the centred body still lands on the apex pin to the pixel, and because
+   warp is smooth and monotonic the roll never jumps and the date order can
+   never be disturbed.
+
+   The berth WIDENS when the centred item has papers, because the papers have
+   to sit in it: the neighbours stand off from ~295px to ~480px, and the
+   documents take the ground they leave, at ~285px — clear of the card's edge
+   on one side and of the neighbour's label on the other. It widens across
+   the roll itself, so opening an item is a visible act: the belt makes room
+   and the papers come out. */
+const BERTH_NARROW = 0.075, BERTH_WIDE = 0.28, BERTH_K = 0.16;
+let berthNow = BERTH_NARROW, berthFrom = BERTH_NARROW, berthTo = BERTH_NARROW;
+const warp = (u) => u + berthNow * Math.tanh(u / BERTH_K);
+
+/* ---- the jumble ------------------------------------------------------
+   "They don't form an orderly, linear line, they're jumbled around a
+   little" (owner). Each body carries a seeded throw: off the ring radius,
+   out of the ring plane, and a little along the band. The along-band throw
+   is a tenth of the minimum gap, which cannot reorder anything and cannot
+   close two labels to touching; the other two scatter the bodies through the
+   band's thickness. All three ease to zero at the apex. */
+const J_PHI = 0.10;                  /* × the minimum gap                 */
+const J_RHO = 0.100;                 /* × A, off the ring radius          */
+const J_H   = 0.038;                 /* × A, out of the ring plane        */
+const J_FADE = 0.62;                 /* × the min gap: the settling zone  */
+
+let W = 0, H = 0, A = 0, CX = 0, CY = 0, APEX_Y = 0;
+let PHI_APEX = 0, PHI_L = 0, PHI_R = 0, DIP_L = 0, DIP_R = 0, GAP_SCALE = 1;
+
+function project(phi, rho, hh) {
+  const s = Math.sin(phi), c = Math.cos(phi);
+  const u = rho * c;                          /* along the node line       */
+  const v = rho * s * COS_I + hh * SIN_I;     /* screen-up, foreshortened  */
+  const d = -rho * s * SIN_I + hh * COS_I;    /* toward the viewer         */
+  return { x: CX + u * COS_N - v * SIN_N, y: CY - (u * SIN_N + v * COS_N), d };
+}
+
+/* x(phi) falls monotonically across the visible arc, so a walk-and-refine
+   is exact enough and cannot be tripped by the ellipse's turning points. */
+function phiAtX(targetX, dir) {
+  let phi = PHI_APEX, step = 0.02 * dir, last = project(phi, A, 0).x;
+  for (let i = 0; i < 400; i++) {
+    const next = phi + step, x = project(next, A, 0).x;
+    if ((dir < 0 && x >= targetX) || (dir > 0 && x <= targetX)) {
+      const t = (targetX - last) / (x - last);
+      return phi + step * Math.max(0, Math.min(1, t));
+    }
+    if ((dir < 0 && x < last) || (dir > 0 && x > last)) return phi; /* turned */
+    phi = next; last = x;
+  }
+  return phi;
+}
+
+function computeGeometry() {
+  W = window.innerWidth; H = window.innerHeight;
+  A = Math.max(A_MIN, W * A_FRAC);
+  APEX_Y = Math.round(H * APEX_FRAC);
+  /* d/dphi of the projected height, solved: the true apex of the tilted
+     ellipse, which is NOT the top of the untilted one. */
+  PHI_APEX = Math.atan2(COS_I * COS_N, SIN_N);
+  if (PHI_APEX < 0) PHI_APEX += Math.PI * 2;
+  CX = 0; CY = 0;
+  const p = project(PHI_APEX, A, 0);
+  CX = W / 2 - p.x; CY = APEX_Y - p.y;
+  PHI_R = phiAtX(W + 200, -1);
+  PHI_L = phiAtX(-200, +1);
+  /* The gaps are real angles of ring, but a narrow sky cannot hold two of
+     them either side of the apex once the card's widest berth is added: on
+     one, the belt sits its items closer together rather than rolling them
+     off the world. The date law survives the squeeze — every gap scales
+     together, so clusters stay clusters. */
+  const held = berthNow;
+  berthNow = BERTH_WIDE;
+  GAP_SCALE = 1;
+  for (let k = 0; k < 24; k++) {
+    const one = warp(MIN_GAP * GAP_SCALE);
+    if (project(PHI_APEX - one, A, 0).x <= W - 86 &&
+        project(PHI_APEX + one, A, 0).x >= 86) break;
+    GAP_SCALE -= 0.04;
+    if (GAP_SCALE < 0.55) { GAP_SCALE = 0.55; break; }
+  }
+  berthNow = held;
+  /* How far the band falls 300px either side of the apex: the card slides
+     ALONG the band when it leaves, so it has to know the dip. */
+  DIP_L = project(phiAtX(W / 2 - 300, +1), A, 0).y - APEX_Y;
+  DIP_R = project(phiAtX(W / 2 + 300, -1), A, 0).y - APEX_Y;
+}
+
+/* ==================================================================== *
+ * The manifest — Lawson Home.
+ *
+ * SIX of these are fixture-true, straight out of
+ * web/src/lib/data/fixtures/workspace.js (LAWSON_ITEMS) with their documents
+ * from DOCUMENTS_FIXTURE: i-gutter, i-mot, i-boiler, i-chimney, i-smoke,
+ * i-svc. EIGHT more (fill:1) are drawn in the same household's flavour —
+ * TV licence, the bins, the insurances, the tyres, the broadband, the gas
+ * certificate — for one reason only: a belt has to be a belt, and six bodies
+ * do not show what fourteen items in date order look like. The build reads
+ * the real manifest; nothing here depends on the eight existing.
+ *
+ * Order in this array IS the order along the band, and it is sorted by
+ * dueDate ascending. Everything downstream — seats, keyboard steps, the hit
+ * list — reads this order and never re-sorts, because that is the promise:
+ * neighbours in the belt are neighbours in the list.
+ * ==================================================================== */
+const DESIGN_TODAY = "2026-08-13";
+
+const MANIFEST = [
+  { id:"i-window", title:"Window cleaning", section:"Home", kind:"service", fill:1,
+    due:"2026-07-21", cost:2500, months:2, remind:[3] },
+  { id:"i-gutter", title:"Gutter clearing", section:"Home", kind:"service",
+    due:"2026-07-28", cost:15000, months:12, remind:[14,3] },
+  { id:"i-garden", title:"Garden waste bins", section:"Services", kind:"renewal", fill:1,
+    due:"2026-08-18", cost:4800, months:12, remind:[14] },
+  { id:"i-tv", title:"TV licence", section:"Services", kind:"renewal", fill:1,
+    due:"2026-08-24", cost:17450, months:12, remind:[21], provider:"TV Licensing" },
+  { id:"i-mot", title:"Car MOT — Volvo V60", section:"Vehicles", kind:"inspection",
+    due:"2026-08-29", cost:5485, months:12, remind:[21,7], docs:[
+      { id:"d-mot-cert", name:"MOT certificate 2025", size:"240 KB",
+        added:"12 June 2026", type:"PDF (application/pdf)" },
+      { id:"d-mot-history", name:"Service history", size:"88 KB",
+        added:"12 June 2026", type:"PDF (application/pdf)" } ] },
+  { id:"i-boiler", title:"Boiler service", section:"Home", kind:"service",
+    due:"2026-09-04", cost:12000, months:12, remind:[14], provider:"British Gas" },
+  { id:"i-homeins", title:"Home insurance", section:"Services", kind:"renewal", fill:1,
+    due:"2026-09-30", cost:41200, months:12, remind:[30,7], provider:"Aviva" },
+  { id:"i-chimney", title:"Chimney sweep", section:"Home", kind:"service",
+    due:"2026-10-13", cost:9000, months:12, remind:[14] },
+  { id:"i-tyres", title:"Winter tyre swap", section:"Vehicles", kind:"service", fill:1,
+    due:"2026-11-02", cost:6000, months:12, remind:[14] },
+  { id:"i-smoke", title:"Smoke alarm batteries", section:"Devices", kind:"service",
+    due:"2026-12-13", cost:1200, months:6, remind:[7] },
+  { id:"i-carins", title:"Car insurance", section:"Vehicles", kind:"renewal", fill:1,
+    due:"2026-12-29", cost:38900, months:12, remind:[30,7], provider:"Direct Line" },
+  { id:"i-svc", title:"Car full service", section:"Vehicles", kind:"service",
+    due:"2027-01-21", cost:30000, months:12, remind:[21], docs:[
+      { id:"d-svc-invoice", name:"service-invoice-2026.pdf", size:"240 KB",
+        added:"12 June 2026", type:"PDF (application/pdf)" },
+      { id:"d-svc-checklist", name:"service-checklist.pdf", size:"88 KB",
+        added:"12 June 2026", type:"PDF (application/pdf)" } ] },
+  { id:"i-broadband", title:"Broadband contract", section:"Services", kind:"renewal", fill:1,
+    due:"2027-03-14", cost:37200, months:12, remind:[30] },
+  { id:"i-gas", title:"Gas safety certificate", section:"Home", kind:"inspection", fill:1,
+    due:"2027-05-18", cost:8500, months:12, remind:[14] },
+];
+
+/* web/src/lib/format.js, transcribed — one vocabulary for dates and money so
+   T−161d means here exactly what it means on home and in the corridor. No
+   clock is ever read: every string below is a pure function of the fixture's
+   own today, which is what keeps two loads of this page identical. */
+const dayOf = (iso) => Math.round(Date.parse(iso + "T00:00:00Z") / 86400000);
+const daysTo = (iso) => dayOf(iso) - dayOf(DESIGN_TODAY);
+const tminus = (iso) => { const d = daysTo(iso); return d < 0 ? `T+${-d}d` : `T−${d}d`; };
+const longDate = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB",
+  { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const shortDate = (iso) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB",
+  { day: "2-digit", month: "short", timeZone: "UTC" });
+const money = (minor) => new Intl.NumberFormat("en-GB",
+  { style: "currency", currency: "GBP" }).format(minor / 100);
+const every = (m) => m === 12 ? "every year" : m === 1 ? "every month" : `every ${m} months`;
+const remindOf = (days) => days.map((d) => `${d}d`).join(" and ") + " before";
+
+/* chart.js bandOf(), and home.css's T-minus column tones. The manifest reads
+   time in four colours; the belt says the same thing in the same four, on the
+   rock's rim and its pip, so the sooner end of the band burns and the later
+   end cools. */
+function bandOf(days) {
+  if (days < 0) return "over";
+  if (days <= 30) return "soon";
+  if (days <= 90) return "up";
+  return "ok";
+}
+const BAND_VAR = { over:"var(--overdue)", soon:"var(--warm)",
+                   up:"var(--upcoming)", ok:"var(--ok)" };
+
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs = {}) => {
+  const node = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+};
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* A Lehmer stream. Two of them: one fixed seed for the members' silhouettes
+   and their jumble (so a rock is the same rock, in the same place, every
+   load — fixture truth), and one that runs for ever for the ambient band,
+   never rewound, which is exactly why the band can never repeat itself. */
+const rngFrom = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+const bandRng = rngFrom(19170812);
+
+/* ==================================================================== *
+ * The ambient band's population — v2's, unchanged.
+ *
+ * Bodies are scattered in three dimensions of the ring, not along a line:
+ *   phi   where round the belt
+ *   rho   A · (1 ± .19), triangular — dense at the ring radius, frayed out
+ *   h     ±.066·A out of the ring plane, triangular
+ * and each carries its own size, tone and silhouette. Sizes are cubed so
+ * the population is overwhelmingly dust with a scattering of real rubble:
+ * that ratio, not the count, is what makes a belt look like a belt.
+ *
+ * Drift: leftward along the ring for ever. Inner bodies run faster than
+ * outer ones (Keplerian shear, softened to a ±15% spread so the band shears
+ * rather than smears), and near bodies faster than far ones. A body that
+ * leaves the left edge does not come back: it is REBUILT from the running
+ * stream at the far end with fresh radius, height, size and shape. The
+ * band you are shown one minute is not the band you were shown before.
+ *
+ * WHERE IT IS SOWN — the correction. The bed used to be sown across the
+ * screen window and nothing else: [PHI_R − M, PHI_L + M], the arc the sky
+ * shows AT REST. But the ambient bodies ride the roll like everything else
+ * in the field, so centring the sooner end carried the whole populated
+ * stretch off to the left and left bare ring behind it — a belt that ran
+ * out. The bed is now sown across THE WHOLE ARC THE CAMERA CAN EVER REACH:
+ * the screen window, plus the roll span the seats themselves produce
+ * (sooner-most seat to later-most seat, measured off the built manifest, not
+ * guessed at), so every roll looks out on ground that was already sown.
+ *
+ * A body is held in BAND COORDINATES — where it sits when the belt is rolled
+ * to its sooner end — because that is the one frame the roll cannot move.
+ * Its own arc is [PHI_R − M − REACH·rate, PHI_L + M]: a fast body has to
+ * start further out to still be in the sky at the later end, and because
+ * every rate class is sown uniformly across its own arc, the density the
+ * screen sees is the same at every roll.
+ *
+ * These are inert decor and nothing else. They are also the reason a
+ * household with three items still has a belt (owner, confirmed): the real
+ * members stand proud of an ambient bed that is always there.
+ * ==================================================================== */
+let rubble = [];
+
+/* The screen window's own overhang, either side, in radians of ring: a body
+   is alive a little past the edge so nothing is seen to pop. */
+const BAND_MARGIN = 0.16;
+/* The roll's reach, off the seats. ROLL_BASE is the sooner-most seat (the
+   roll at the sooner end); ROLL_REACH is the angle from there to the
+   later-most, documents included, since a paper can be centred too. */
+let ROLL_BASE = 0, ROLL_REACH = 0;
+
+function rollRange() {
+  ROLL_BASE = 0; ROLL_REACH = 0;
+  if (!bodies.length) return;
+  let lo = bodies[0].off, hi = bodies[0].off;
+  for (const b of bodies) { if (b.off < lo) lo = b.off; if (b.off > hi) hi = b.off; }
+  ROLL_BASE = lo; ROLL_REACH = hi - lo;
+}
+
+/* u is where along this body's OWN sown arc it lands, 0 at the far end the
+   band feeds from and 1 at the edge it retires over. Respawn passes 0. */
+function spawn(rk, u) {
+  const r = bandRng;
+  /* A belt has a core and a fray, not an even slab: radius and height come
+     off a peaked distribution, and one body in seven is a stray thrown well
+     outside it. That is what stops the population reading as a rectangle of
+     confetti and lets the sweep of the ring still be seen through it. */
+  const stray = r() < 0.14 ? 1.75 : 1;
+  rk.rho = A * (1 + ((r() + r() + r() - 1.5) / 1.5) * RADIAL * stray);
+  rk.h = A * ((r() + r() + r() - 1.5) / 1.5) * HFRAC * stray;
+  const g = r();
+  rk.size = 0.42 + g * g * g * 7.6;
+  rk.tone = r() < 0.17 ? 1 : 0;               /* 1 = accent-lit, 0 = ink   */
+  rk.alpha = (0.2 + r() * 0.55) / (stray > 1 ? 1.5 : 1);
+  rk.rate = Math.pow(A / rk.rho, 0.9) * (0.94 + (rk.h / (A * HFRAC)) * 0.12);
+  rk.poly = null;
+  if (rk.size > 2.3) {                        /* big enough to have a shape */
+    const n = 7, pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r() * 0.5;
+      const rr = 0.72 + r() * 0.5;
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.9]);
+    }
+    rk.poly = pts;
+  }
+  /* Sown across the arc THIS body can ever be seen on, then stored as the
+     ring angle it was BORN at, so the running drift and the belt's roll both
+     apply to it at its own rate for the rest of its life. */
+  const lo = PHI_R - BAND_MARGIN - ROLL_REACH * rk.rate;
+  const hi = PHI_L + BAND_MARGIN;
+  rk.phi = lo + u * (hi - lo) - (drift + ROLL_BASE) * rk.rate;
+  return rk;
+}
+
+function buildBand() {
+  rollRange();
+  /* Density per arc-length is the constant, not the count: the sky's own
+     window keeps exactly the population it had, and the ground the roll adds
+     is sown at the same rate. */
+  const win = PHI_L - PHI_R + BAND_MARGIN * 2;
+  const n = Math.round(((bodies.length ? 2100 : 880) / win) * (win + ROLL_REACH));
+  rubble = [];
+  for (let i = 0; i < n; i++) rubble.push(spawn({}, bandRng()));
+}
+
+/* ==================================================================== *
+ * THE ORDER OF THE BELT — the whole point of v4.
+ *
+ * `bodies` is the flat seat list, sorted by `off` — the angular distance
+ * along the band from the first item due. Item offsets are a running sum of
+ * gaps, each gap a function of the days between two consecutive due dates:
+ *
+ *   · the sequence is the manifest's own linear order, exactly;
+ *   · a cluster in the calendar is a cluster in the band;
+ *   · nothing ever falls below MIN_GAP, so no two labels can touch.
+ *
+ * Document seats hang off their item at ±DOC_OFF, inside that gap. They
+ * exist always but are only SHOWN when their item is the centred one (or one
+ * of its own siblings is): `bloom` per item, 0 to 1. So the manifest's
+ * spacing is never disturbed by a document, and no rebuild ever happens
+ * mid-roll — opening an item is an opacity and a widening berth, not a
+ * relayout.
+ *
+ * The belt rolls by `roll`; seat i sits at PHI_APEX − warp(off[i] − roll).
+ * ==================================================================== */
+let household = "lawson", bodies = [], selected = 0, prevSel = 0;
+let roll = 0, rollFrom = 0, rollTo = 0, rollT0 = -1, drift = 0, swapTimer = null;
+let query = "", matches = new Set();
+let bloom = [], bloomFrom = [], bloomTo = [];
+
+/* A caption in the band is an identifier, not the record: a long filename is
+   elided in the middle so its extension survives, because ".pdf" is half of
+   what tells you what the thing is. The card carries the whole name. */
+function shortName(s) {
+  return s.length <= 21 ? s : s.slice(0, 11) + "…" + s.slice(-8);
+}
+
+function docSpread(n) {
+  /* v2's split: half the papers sit before the item, half after. Never wider
+     than two-thirds of the tightest item gap, so they stay in the berth. */
+  const cut = Math.ceil(n / 2), out = [];
+  for (let j = 0; j < n; j++) {
+    const side = j < cut ? -1 : 1;
+    const rank = j < cut ? cut - j : j - cut + 1;
+    out.push(side * Math.min(rank * DOC_OFF, MIN_GAP * GAP_SCALE * 0.66));
+  }
+  return out;
+}
+
+function buildBodies() {
+  bodies = [];
+  if (household !== "lawson") { bloom = bloomFrom = bloomTo = []; selected = prevSel = 0; return; }
+  /* item offsets first — the date law, untouched by any document */
+  const itemOff = [];
+  let acc = 0;
+  MANIFEST.forEach((it, i) => {
+    if (i) {
+      const gapDays = daysTo(it.due) - daysTo(MANIFEST[i - 1].due);
+      const t = 1 - Math.exp(-Math.max(0, gapDays) / GAP_EFOLD);
+      acc += (MIN_GAP + (MAX_GAP - MIN_GAP) * t) * GAP_SCALE;
+    }
+    itemOff.push(acc);
+  });
+
+  MANIFEST.forEach((it, i) => {
+    const days = daysTo(it.due), urg = bandOf(days), docs = it.docs ?? [];
+    bodies.push({
+      kind: "item", id: it.id, item: it, itemIdx: i, off: itemOff[i],
+      label: it.title, sub: `${tminus(it.due)} · ${shortDate(it.due)}`,
+      tone: BAND_VAR[urg], urg, days, r: R_ITEM, sweep: SWEEP, seed: 7717 + i * 913,
+      t: tminus(it.due), when: shortDate(it.due), longWhen: longDate(it.due),
+      docs,
+    });
+    docSpread(docs.length).forEach((d, j) => {
+      bodies.push({
+        kind: "doc", id: docs[j].id, doc: docs[j], item: it, itemIdx: i,
+        off: itemOff[i] + d,
+        label: shortName(docs[j].name), sub: docs[j].size,
+        tone: "var(--paper)", r: R_DOC, sweep: SWEEP_DOC, seed: 4231 + i * 617 + j * 149,
+        docs: [],
+      });
+    });
+  });
+  bodies.sort((a, b) => a.off - b.off);
+
+  bodies.forEach((b, i) => {
+    const j = rngFrom(1013 + i * 7919);       /* this body's own jumble */
+    const soft = b.kind === "doc" ? 0.55 : 1; /* papers ride tighter in     */
+    /* The throw, in units: along-band, radial, out-of-plane. Flat, not
+       peaked — a peaked throw leaves most of the bodies sitting on the very
+       line it was supposed to break them off, which is the whole complaint. */
+    b.jp = (j() * 2 - 1) * J_PHI * soft;
+    b.jr = (j() * 2 - 1) * J_RHO * soft;
+    b.jh = (j() * 2 - 1) * J_H * soft;
+  });
+
+  /* The default arrival: Car MOT — Volvo V60, the next real thing with paper
+     attached, seated at the apex with its neighbours in time around it and
+     its two documents out beside it. This is what following a manifest row
+     into the belt looks like. */
+  selected = prevSel = Math.max(0, bodies.findIndex((b) => b.id === "i-mot"));
+  roll = rollFrom = rollTo = bodies[selected]?.off ?? 0;
+  bloomTo = bloomTargets(selected);
+  bloom = bloomFrom = bloomTo.slice();
+  berthNow = berthFrom = berthTo = berthFor(selected);
+}
+
+/* An item's papers are out when that item is centred, or when one of its own
+   papers is. Nothing else opens them. */
+function bloomTargets(sel) {
+  const t = MANIFEST.map(() => 0);
+  const s = bodies[sel];
+  if (s && (s.item.docs ?? []).length) t[s.itemIdx] = 1;
+  return t;
+}
+const berthFor = (sel) => bloomTargets(sel).some((v) => v) ? BERTH_WIDE : BERTH_NARROW;
+
+/* Where a body actually is at this instant: its seat, plus its jumble, with
+   the jumble eased to nothing as it comes into the apex so the card seats on
+   the pin exactly. */
+function seatAt(i) {
+  const u = bodies[i].off - roll;
+  const phi0 = PHI_APEX - warp(u);
+  const f = clamp01(Math.abs(phi0 - PHI_APEX) / (MIN_GAP * GAP_SCALE * J_FADE));
+  const s = f * f * (3 - 2 * f);               /* smoothstep; 0 at the apex */
+  const b = bodies[i];
+  return {
+    phi: phi0 + b.jp * MIN_GAP * GAP_SCALE * s,
+    rho: A * (1 + b.jr * s),
+    h: A * b.jh * s,
+  };
+}
+const seatPoint = (i) => { const s = seatAt(i); return project(s.phi, s.rho, s.h); };
+
+/* ==================================================================== *
+ * The members' pen. Everything in a belt is stone: an item is v2's faceted
+ * rock at 25px wearing its urgency tone on the rim and one pip, and a
+ * document is the same rock at 17px inside the paper ring and its glow.
+ * There are no planet spheres here — on the dial a body is a planet because
+ * the dial is a system; in a belt everything is rock.
+ * ==================================================================== */
+function drawRock(g, seed, r, tone, pip) {
+  const rng = rngFrom(seed);
+  const facets = 11, pts = [];
+  for (let i = 0; i < facets; i++) {
+    const a = (i / facets) * Math.PI * 2 + rng() * 0.14;
+    const rr = r * (0.80 + rng() * 0.26);
+    pts.push(`${(Math.cos(a) * rr).toFixed(2)},${(Math.sin(a) * rr * 0.92).toFixed(2)}`);
+  }
+  const points = pts.join(" ");
+  g.appendChild(el("polygon", { points,
+    fill: "color-mix(in srgb, var(--accent) 34%, var(--bg))",
+    stroke: tone, "stroke-opacity": ".85", "stroke-width": "1.35",
+    "stroke-linejoin": "round" }));
+  for (let i = 0; i < 3; i++) {
+    const a = rng() * Math.PI * 2, d = rng() * 0.5 * r;
+    g.appendChild(el("circle", { cx: (Math.cos(a) * d).toFixed(2),
+      cy: (Math.sin(a) * d * 0.9).toFixed(2), r: (1.6 + rng() * 2.4).toFixed(2),
+      fill: "#000", opacity: ".2" }));
+  }
+  g.appendChild(el("polygon", { points, fill: "url(#rockshade)" }));
+  /* the urgency pip — one dot, the same four colours the corridor uses */
+  if (pip) {
+    g.appendChild(el("circle", { cx: (0.44 * r).toFixed(2), cy: (-0.46 * r).toFixed(2),
+      r: "4.6", fill: "var(--bg)", opacity: ".85" }));
+    g.appendChild(el("circle", { cx: (0.44 * r).toFixed(2), cy: (-0.46 * r).toFixed(2),
+      r: "3.1", fill: tone }));
+  }
+}
+
+/* The mark the owner asked for: a perimeter line in a colour nothing else in
+   this sky wears, a glow under it, and a faint disc so both survive being
+   seen against a thick part of the band. Worn by a centred item's documents
+   — and mirrored onto the ITEM when one of its documents is centred, so the
+   way back is as loud as the way in. */
+function drawMark(g, r) {
+  const mark = el("g", { class: "mark", opacity: "0" });
+  mark.appendChild(el("circle", { class: "halo", r: (r + 19).toFixed(1) }));
+  mark.appendChild(el("circle", { class: "ringsoft", r: (r + 9).toFixed(1) }));
+  mark.appendChild(el("circle", { class: "ring", r: (r + 9).toFixed(1) }));
+  g.appendChild(mark);
+  return mark;
+}
+
+function buildSeats() {
+  const seats = document.getElementById("seats"), caps = document.getElementById("caps");
+  seats.textContent = ""; caps.textContent = "";
+
+  bodies.forEach((b, i) => {
+    const seat = el("g", { class: "seat" });
+    const hit = el("g", { class: "hit", role: "button", tabindex: "0" });
+    hit.setAttribute("aria-label", b.kind === "item"
+      ? `${b.label} — ${b.item.section}, due ${b.longWhen}, ${b.t}` +
+        (b.docs.length ? `, ${b.docs.length} documents attached` : "")
+      : `${b.doc.name}, ${b.sub}, a document attached to ${b.item.title}`);
+    hit.appendChild(el("circle", { r: b.r * 1.8, fill: "transparent" }));
+    hit.appendChild(el("circle", { class: "fring", r: b.r + 13, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1.4", "stroke-dasharray": "3 3" }));
+    b.mark = drawMark(hit, b.r);
+    /* CON-1's belt ellipse: this item has documents attached. On this screen
+       it is also a promise — centre it and they come out into the band. */
+    if (b.kind === "item" && b.docs.length)
+      hit.appendChild(el("ellipse", { rx: (b.r * 1.93).toFixed(1),
+        ry: (b.r * 0.66).toFixed(1), transform: "rotate(-24)", fill: "none",
+        stroke: "var(--paper)", "stroke-width": "1.3", opacity: ".75" }));
+    drawRock(hit, b.seed, b.r, b.tone, b.kind === "item");
+    hit.appendChild(el("circle", { class: "rim", r: b.r + 10, fill: "none",
+      stroke: "var(--accent)", "stroke-width": "1", opacity: "0" }));
+    hit.addEventListener("click", () => centre(i));
+    hit.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); centre(i); }
+    });
+    seat.appendChild(hit); seats.appendChild(seat);
+
+    /* The label rides upright beneath the body — the band's tangent turns the
+       rock, never the words. */
+    const cap = el("g", { class: "capseat" });
+    const name = el("text", { class: "cap-name", y: (b.r + 21).toFixed(0) });
+    if (b.kind === "doc") name.setAttribute("class", "cap-name doclabel");
+    name.textContent = b.label;
+    const sub = el("text", { class: "cap-t", y: (b.r + 36.5).toFixed(0), fill: b.tone });
+    sub.textContent = b.sub;
+    cap.append(name, sub); caps.appendChild(cap);
+  });
+}
+
+/* The two end-caps: which way time runs. Quiet, at the two far corners. */
+function buildEnds() {
+  const ends = document.getElementById("ends");
+  ends.textContent = "";
+  if (!bodies.length) return;
+  for (const [x, anchor, text] of
+       [[28, "start", "← sooner"], [W - 28, "end", "later →"]]) {
+    const t = el("text", { class: "endcap", x, y: 38, "text-anchor": anchor });
+    t.textContent = text;
+    ends.appendChild(t);
+  }
+}
+
+/* How solid a body is at this instant of the roll. The body at the apex is
+   NOT drawn: it is the card. Its rock fades back in as it leaves, and the
+   arriving one fades out as the card blooms — which is the whole trick of
+   "the card rides in the belt". */
+function bodyOpacity(i, p) {
+  if (i === selected) return 1 - clamp01((p - 0.32) / 0.34);
+  if (i === prevSel) return clamp01((p - 0.1) / 0.42);
+  return 1;
+}
+
+function paintMembers(p) {
+  const seats = document.getElementById("seats").children;
+  const caps = document.getElementById("caps").children;
+  /* the papers coming out, and the old ones folding away: out fast, in late,
+     so the two never cross in the middle of the apex */
+  bloom = bloomFrom.map((f, k) => {
+    const tg = bloomTo[k];
+    const q = tg > f ? clamp01((p - 0.42) / 0.58) : clamp01(p / 0.4);
+    return f + (tg - f) * q;
+  });
+  const selBody = bodies[selected];
+
+  bodies.forEach((b, i) => {
+    const open = b.kind === "doc" ? bloom[b.itemIdx] : 1;
+    const s = seatAt(i);
+    const a = project(s.phi, s.rho, s.h), q = project(s.phi + 0.03, s.rho, s.h);
+    const ang = Math.atan2(a.y - q.y, a.x - q.x) / RAD;
+    /* Rolled round the back of the ring: not on this sky at all. */
+    const away = s.phi > PHI_L + 0.2 || s.phi < PHI_R - 0.2;
+    /* The search dims, it does not hide: the belt keeps its shape so you can
+       see WHERE IN TIME the thing you asked for sits. */
+    const lit = !query || matches.has(i);
+    let o = bodyOpacity(i, p) * (lit ? 1 : 0.26) * open;
+    if (away) o = 0;
+    /* a paper folds out of its item: it grows into place as it appears */
+    const sc = b.kind === "doc" ? (0.45 + 0.55 * open) : 1;
+    seats[i].setAttribute("transform",
+      `translate(${a.x.toFixed(1)},${a.y.toFixed(1)}) rotate(${ang.toFixed(2)}) scale(${sc.toFixed(3)})`);
+    seats[i].setAttribute("opacity", o.toFixed(3));
+    /* The body at the apex is the card: it is neither clickable nor
+       tabbable while it is being the card, or the keyboard would land on
+       something nobody can see. Nor is a body that has rolled off the sky,
+       nor a paper that is still folded inside its item. */
+    const gone = o < 0.5;
+    seats[i].style.pointerEvents = gone ? "none" : "";
+    const hit = seats[i].firstChild;
+    hit.setAttribute("tabindex", gone ? "-1" : "0");
+    hit.setAttribute("aria-hidden", gone ? "true" : "false");
+    /* A lit hit wears its rim while the search is open, so matches read as
+       matches even before you reach for them. */
+    hit.querySelector(".rim").setAttribute("opacity", query && lit ? ".85" : "0");
+    /* THE MARK. On every paper that is out; and mirrored onto the item when
+       one of its own papers is the thing at the apex. */
+    const marked = b.kind === "doc"
+      ? open
+      : (selBody && selBody.kind === "doc" && selBody.itemIdx === b.itemIdx ? bloom[b.itemIdx] : 0);
+    /* the glow is a real SVG filter, so a mark nobody can see is taken out
+       of the tree rather than left to be rasterised at zero opacity */
+    b.mark.setAttribute("opacity", marked.toFixed(3));
+    b.mark.style.display = marked < 0.004 ? "none" : "";
+    caps[i].setAttribute("transform", `translate(${a.x.toFixed(1)},${a.y.toFixed(1)})`);
+    caps[i].setAttribute("opacity", o.toFixed(3));
+  });
+}
+
+/* ==================================================================== *
+ * Painting the band. v2's, unchanged.
+ * ==================================================================== */
+const bandC = document.getElementById("band"), foreC = document.getElementById("fore");
+const bctx = bandC.getContext("2d"), fctx = foreC.getContext("2d");
+const hazeCanvas = document.createElement("canvas"), hctx = hazeCanvas.getContext("2d");
+let TONE = ["#737e9e", "#d8b45a", "#243259"], hazePts = [], cardRect = null;
+
+let GAIN = 1;
+function readTones() {
+  const cs = getComputedStyle(document.documentElement);
+  TONE = [cs.getPropertyValue("--rubble").trim() || cs.getPropertyValue("--chart-ink").trim(),
+          cs.getPropertyValue("--accent").trim(),
+          cs.getPropertyValue("--chart-line").trim()];
+  /* Dark ink on a printed sky needs more weight than lit stone on a night
+     sky to carry the same amount of belt: the packs say how much. */
+  GAIN = parseFloat(cs.getPropertyValue("--rubble-gain")) || 1;
+}
+
+function sizeCanvas() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  for (const [c, ctx] of [[bandC, bctx], [foreC, fctx]]) {
+    c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+    c.style.width = W + "px"; c.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+
+function buildHaze() {
+  hazePts = [];
+  for (let k = 0; k <= 80; k++)
+    hazePts.push(project(PHI_R + ((PHI_L - PHI_R) * k) / 80, A, 0));
+  /* The glow never changes between resizes, and it is by far the most
+     expensive thing on the plate, so it is rasterised once and blitted. */
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  hazeCanvas.width = Math.round(W * dpr); hazeCanvas.height = Math.round(H * dpr);
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  hctx.clearRect(0, 0, W, H);
+  paintHaze(hctx);
+}
+
+/* The band's body: a broad, soft glow along the ring, fading out at the
+   edges of the sky rather than stopping. No hairline track — v1's wire is
+   exactly what the owner said a belt is not, and a hard-edged glow is only
+   a fatter wire, so the glow is laid down as eighteen near-transparent
+   passes of falling width. The profile that builds up has no edge at all;
+   the band simply stops being there. */
+function paintHaze(ctx) {
+  /* Still a gradient, and deliberately: the fade has come out of it (see THE
+     EDGE FADE below) but the paint path must not change. Skia carries a
+     gradient's premultiplied source at more precision than a flat colour, and
+     eighteen passes at globalAlpha 0.0135 are exactly where that shows —
+     handing the same colour over as a plain string thins the whole band from
+     54/255 to 37/255. So the stops stay; only their alphas go to one. */
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  for (const o of [0, 0.17, 0.83, 1]) grad.addColorStop(o, tint(TONE[2], 1));
+  ctx.strokeStyle = grad;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const thick = A * RADIAL * COS_I * 2 + A * HFRAC * SIN_I * 2;
+  const passes = 18;
+  for (let k = 0; k < passes; k++) {
+    const t = k / (passes - 1);
+    ctx.globalAlpha = 0.0135;
+    ctx.lineWidth = thick * (0.78 - 0.7 * t * t);
+    ctx.beginPath();
+    hazePts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  fadeEdges(ctx);
+}
+
+/* ---- THE EDGE FADE ---------------------------------------------------
+   Owner, 2026-08-16: "Why is there still this discoloured box in either
+   side? I asked for the discolouration to be removed. Though, you could try
+   instead fading the edge to nothing instead.. that might work well."
+
+   The fade to nothing was always meant to be there, but it lived INSIDE the
+   stroke, as an alpha ramp on the stroke's own gradient — and that is what
+   drew the box. Each of the eighteen passes goes down at globalAlpha
+   0.0135, so inside the ramp a pass carries 0.0135 x g, and an 8-bit canvas
+   cannot hold a number that small: below g = 0.145 every pass rounds to
+   nothing at all, and just above it every pass rounds to exactly 1/255. So
+   the wash switched on at a dead-straight vertical line and then sat at a
+   flat 18/255 for the next fifty-odd pixels before the next quantisation
+   step could land — a rectangular slab of even tone with a hard edge onto
+   pure sky. Measured on both flanks at every viewport: at 1280 wide, alpha
+   0 out to x=31, 8 at x=32, then 18 flat from x=34 to x=87.
+
+   So the fade comes out of the stroke and is applied ONCE, to the finished
+   wash, as a destination-out mask. The passes now accumulate at full weight
+   everywhere, which leaves the middle of the band bit-for-bit what it was,
+   and the mask then scales an alpha of ~50 instead of one of ~1: it has
+   fifty steps to spend on the ramp instead of two, so it reads as a fade
+   rather than a slab. It runs on a smoothstep, so even the first step is
+   sub-quantum, and it reaches solid a little INSIDE every bound of the
+   canvas — the glow is already nothing before there is any edge for it to
+   stop at. All four sides, because a short sky clips the wash top and
+   bottom exactly the way a narrow one clips it left and right.
+
+   The rubble is NOT masked. The bodies go on drifting out past the glow and
+   off the world on their own longer fade (fadeIn, below), which is what
+   makes the belt leave the sky instead of ending. */
+const EDGE_IN = 0.012;      /* the wash is already nothing this far in    */
+const EDGE_X = 0.17;        /* ...and at full weight by here. v2's figure */
+const EDGE_Y = 0.10;        /* the sky is shorter than it is wide         */
+const EDGE_STOPS = 24;      /* enough to read as a curve, not a polyline  */
+
+function fadeEdges(ctx) {
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  for (const [across, fade] of [[true, EDGE_X], [false, EDGE_Y]]) {
+    const g = across ? ctx.createLinearGradient(0, 0, W, 0)
+                     : ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "rgba(0,0,0,1)");
+    g.addColorStop(1, "rgba(0,0,0,1)");
+    for (let i = 0; i <= EDGE_STOPS; i++) {
+      const u = i / EDGE_STOPS;
+      const o = EDGE_IN + (fade - EDGE_IN) * u;
+      const e = (1 - u * u * (3 - 2 * u)).toFixed(4);   /* 1 - smoothstep */
+      g.addColorStop(o, `rgba(0,0,0,${e})`);
+      g.addColorStop(1 - o, `rgba(0,0,0,${e})`);
+    }
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
+
+function tint(col, a) {
+  if (col.startsWith("rgba")) return col.replace(/[\d.]+\)$/, a + ")");
+  if (col.startsWith("rgb")) return col.replace("rgb(", "rgba(").replace(")", `,${a})`);
+  const h = col.replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const v = parseInt(n, 16);
+  return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`;
+}
+
+function paintBand() {
+  bctx.clearRect(0, 0, W, H); fctx.clearRect(0, 0, W, H);
+  bctx.drawImage(hazeCanvas, 0, 0, W, H);
+
+  /* Every member's swept neighbourhood — fourteen of them now, a chain of
+     clearings down the band — plus the card's own footprint, because the
+     card is a body in the band too and nothing sits on top of it. A paper
+     still folded inside its item has swept nothing. */
+  const clears = [];
+  for (let i = 0; i < bodies.length; i++) {
+    const b = bodies[i];
+    const open = b.kind === "doc" ? (bloom[b.itemIdx] ?? 0) : 1;
+    if (open < 0.5) continue;
+    const c = seatPoint(i);
+    if (c.x > -SWEEP && c.x < W + SWEEP) clears.push([c, b.sweep]);
+  }
+  const hMax = A * HFRAC;
+  const foreCut = hMax * 0.58;   /* above this, a body passes in FRONT */
+  const fadeIn = 0.14 * W;   /* the belt leaves the sky, it does not stop */
+
+  for (const rk of rubble) {
+    /* Retirement is judged in BAND coordinates — at the sooner end of the
+       roll, the one frame the belt cannot move — so a body is only ever
+       rebuilt when it has left the arc for good, not merely when the current
+       roll has carried it off this particular screen. It re-enters at the
+       far end of the widened arc, freshly made: never a loop. */
+    const band = rk.phi + (drift + ROLL_BASE) * rk.rate;
+    if (band > PHI_L + BAND_MARGIN) { spawn(rk, 0); continue; }
+    const phi = band + (roll - ROLL_BASE) * rk.rate;
+    /* Sown far wider than one sky, so most of the bed is over the horizon at
+       any one roll: cost it out before projecting it. */
+    if (phi < PHI_R - BAND_MARGIN || phi > PHI_L + BAND_MARGIN) continue;
+    const p = project(phi, rk.rho, rk.h);
+    if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
+
+    /* depth: the arc's ends lean toward you, and height above the plane
+       brings a body forward. Near bodies are bigger, brighter, quicker. */
+    const dn = clamp01(0.5 + (p.d / (A * 0.62)) * 0.9);
+    let a = rk.alpha * (0.55 + dn * 0.75) * GAIN;
+    const s = rk.size * (0.78 + dn * 0.5);
+
+    a *= Math.min(1, p.x / fadeIn) * Math.min(1, (W - p.x) / fadeIn);
+    for (const [c, sw] of clears) {
+      if (Math.abs(p.x - c.x) > sw || Math.abs(p.y - c.y) > sw) continue;
+      const d = Math.hypot(p.x - c.x, p.y - c.y);
+      if (d < sw) a *= clamp01((d - sw * 0.45) / (sw * 0.55));
+    }
+    if (a <= 0.012) continue;
+
+    /* Bodies riding high above the ring plane pass in FRONT of the card:
+       the card is IN the belt, so some of the belt is between it and you.
+       Dimmed, and dimmed again over the card, so it never fights the text. */
+    const front = rk.h > foreCut && rk.size < 5.6;
+    const ctx = front ? fctx : bctx;
+    if (front) {
+      a *= 0.8;
+      if (cardRect && p.x > cardRect.l && p.x < cardRect.r && p.y > cardRect.t && p.y < cardRect.b)
+        a *= 0.85;
+    }
+    ctx.globalAlpha = Math.min(a, 0.95);
+    ctx.fillStyle = TONE[rk.tone];
+    if (rk.poly) {
+      ctx.beginPath();
+      rk.poly.forEach(([px, py], i) =>
+        i ? ctx.lineTo(p.x + px * s, p.y + py * s) : ctx.moveTo(p.x + px * s, p.y + py * s));
+      ctx.closePath(); ctx.fill();
+      if (s > 4) {           /* a lit edge on the biggest rubble only */
+        ctx.globalAlpha = Math.min(a * 0.5, 0.4);
+        ctx.strokeStyle = TONE[1]; ctx.lineWidth = 0.7; ctx.stroke();
+      }
+    } else {
+      ctx.beginPath(); ctx.arc(p.x, p.y, s, 0, 6.2832); ctx.fill();
+    }
+  }
+  bctx.globalAlpha = 1; fctx.globalAlpha = 1;
+}
+
+/* ==================================================================== *
+ * The roll — one motion, 420ms, v2's choreography exactly:
+ *
+ *   0ms    the belt starts turning. The card, which IS the apex body,
+ *          leaves with it: it slides along the band in the direction of
+ *          travel (dipping as the band dips away from the apex), shrinking
+ *          toward body size and fading — collapsing back into its rock. The
+ *          outgoing item's papers fold back into it over the first 170ms.
+ *   ~190ms the rock it collapsed into has faded up at the seat the card
+ *          slid toward; the card's content swaps out of sight.
+ *   190ms  the arriving body's rock is gone and the new card blooms out of
+ *          it, riding IN from the opposite side along the band. The berth
+ *          has been widening the whole way if the arriving item has papers.
+ *   ~240ms the arriving item's papers unfold into the berth beside it.
+ *   420ms  the belt settles; the card is seated at the apex — the arriving
+ *          body's jumble having eased out to nothing on the way in, so it
+ *          lands on the pin and not near it.
+ *
+ * Under reduced motion the same thing happens with no tween: the belt is
+ * simply already turned, the card is simply already the new one, and the
+ * papers are simply already out.
+ * ==================================================================== */
+const bez = (p1x, p1y, p2x, p2y) => (t) => {
+  let lo = 0, hi = 1, u = t;
+  const bx = (u) => 3 * (1 - u) * (1 - u) * u * p1x + 3 * (1 - u) * u * u * p2x + u * u * u;
+  for (let i = 0; i < 22; i++) { const x = bx(u); if (x < t) lo = u; else hi = u; u = (lo + hi) / 2; }
+  return 3 * (1 - u) * (1 - u) * u * p1y + 3 * (1 - u) * u * u * p2y + u * u * u;
+};
+const ease = bez(0.32, 0.72, 0.26, 1);
+
+function centre(i) {
+  if (i === selected || i < 0 || i >= bodies.length) return;
+  const dir = Math.sign(bodies[i].off - bodies[selected].off) || 1;
+  prevSel = selected; selected = i;
+  rollFrom = roll; rollTo = bodies[selected].off; rollT0 = performance.now();
+  bloomFrom = bloom.slice(); bloomTo = bloomTargets(selected);
+  berthFrom = berthNow; berthTo = berthFor(selected);
+  syncDemos();
+
+  const wrap = document.getElementById("cardwrap");
+  clearTimeout(swapTimer);
+  if (reduced()) {
+    roll = rollTo; rollT0 = -1; berthNow = berthTo;
+    bloom = bloomFrom = bloomTo.slice();
+    renderCard(); paintMembers(1); measureCard(); paintBand();
+    return;
+  }
+  /* The card leaves the apex the way the belt leaves it: along the band. */
+  const outDx = dir > 0 ? -300 : 300, outDy = dir > 0 ? DIP_L : DIP_R;
+  wrap.classList.remove("rollin", "rollpre");
+  wrap.classList.add("rollout");
+  wrap.style.setProperty("--cdx", outDx + "px");
+  wrap.style.setProperty("--cdy", outDy.toFixed(1) + "px");
+  wrap.style.setProperty("--csc", "0.5");
+  swapTimer = setTimeout(() => {
+    renderCard();
+    wrap.classList.remove("rollout");
+    wrap.classList.add("rollpre");
+    wrap.style.setProperty("--cdx", (dir > 0 ? 300 : -300) + "px");
+    wrap.style.setProperty("--cdy", (dir > 0 ? DIP_R : DIP_L).toFixed(1) + "px");
+    void wrap.offsetWidth;                       /* commit the pre-state */
+    wrap.classList.remove("rollpre");
+    wrap.classList.add("rollin");
+    wrap.style.removeProperty("opacity");
+    wrap.style.setProperty("--cdx", "0px");
+    wrap.style.setProperty("--cdy", "0px");
+    wrap.style.setProperty("--csc", "1");
+    setTimeout(measureCard, 240);
+  }, 190);
+}
+function centreById(id) {
+  const i = bodies.findIndex((b) => b.id === id);
+  if (i >= 0) centre(i);
+}
+
+/* Arriving from elsewhere — a manifest row on home, a filed lane in the
+   inbox, a link in a reminder. THE BELT IS THE ITEM SCREEN, so there is no
+   navigation to play: the page is simply already showing that item at the
+   apex, papers out, with its neighbours in time around it. Same code path a
+   fresh load takes; the demo button only proves it. */
+function arriveAt(id) {
+  const i = bodies.findIndex((b) => b.id === id);
+  if (i < 0) return;
+  clearTimeout(swapTimer);
+  selected = prevSel = i; rollT0 = -1;
+  roll = rollFrom = rollTo = bodies[i].off;
+  bloomTo = bloomTargets(i); bloom = bloomFrom = bloomTo.slice();
+  berthNow = berthFrom = berthTo = berthFor(i);
+  const wrap = document.getElementById("cardwrap");
+  wrap.classList.remove("rollout", "rollin", "rollpre");
+  wrap.style.removeProperty("opacity");
+  wrap.style.setProperty("--cdx", "0px"); wrap.style.setProperty("--cdy", "0px");
+  wrap.style.setProperty("--csc", "1");
+  renderCard(); syncDemos(); paintMembers(1); measureCard(); paintBand();
+}
+
+/* ==================================================================== *
+ * What the apex displays — the card, which is the body.
+ *
+ * An item shows the item screen (#424) as web/src/routes/item/[id] renders
+ * it: what it is, when it is due, how often it comes round, what it costs,
+ * who does it, when you will be warned, every command reachable. It does NOT
+ * list its documents any more — they are out in the band beside it, which is
+ * the owner's ruling; the card only says so, and says how many.
+ *
+ * A document shows what Orbit honestly holds: what the file is, when it
+ * arrived, that it scanned clean, and the original in your hands. The page
+ * render itself waits on #476.
+ * ==================================================================== */
+function renderCard() {
+  const wrap = document.getElementById("cardwrap");
+  if (!bodies.length) {
+    /* The empty household. The band is still a belt — ambient rock and dust,
+       thinner, because nothing here has swept anything yet. */
+    wrap.innerHTML = `
+      <article class="glass item-card">
+        <h2>Nothing in orbit yet</h2>
+        <div class="sub">Lawson Home · an empty manifest</div>
+        <div class="note">the belt IS the manifest. every item you add takes a seat in it,
+          in the order it comes due — sooner to the left, later to the right — and the one
+          you are looking at rides at the apex as this card. add the first and the band has
+          something to carry.</div>
+        <h4>start</h4>
+        <div class="acts" role="group" aria-label="Actions">
+          <button style="--act:var(--accent)">add an item</button>
+          <button style="--act:var(--upcoming)">mail something in</button>
+        </div>
+        <a class="back" href="home.html">← back to your orbit</a>
+      </article>`;
+    return;
+  }
+  const b = bodies[selected];
+  if (b.kind === "doc") {
+    wrap.innerHTML = `
+      <article class="glass item-card">
+        <div class="docview">
+          <div class="plate" aria-hidden="true">PDF</div>
+          <div class="docbody">
+            <h3>${b.doc.name}</h3>
+            <div class="sub">document · attached to ${b.item.title}</div>
+            <div class="kv"><span>added</span><b>${b.doc.added}</b></div>
+            <div class="kv"><span>size</span><b>${b.doc.size}</b></div>
+            <div class="kv"><span>kind</span><b>${b.doc.type}</b></div>
+            <div class="kv"><span>scan</span><b class="clean">scanned clean</b></div>
+            <div class="getrow">
+              <button class="btn-primary">download the original</button>
+            </div>
+          </div>
+        </div>
+        <!-- #476: when Orbit can render page one, that render fills this half
+             of the card and the plate retires. Until it can, the screen says
+             what it holds and hands over the file — it does not draw a page
+             it has never seen. -->
+        <div class="note">the page itself is not something Orbit holds yet — until it does,
+          this is the honest read, and the original is one click away.<br>
+          <b>${b.item.title}</b> is the ringed body beside you in the belt.</div>
+        <button class="back" onclick="centreById('${b.item.id}')">← back to ${b.item.title}</button>
+      </article>`;
+    return;
+  }
+  const n = b.docs.length;
+  wrap.innerHTML = `
+    <article class="glass item-card">
+      <h2>${b.label}</h2>
+      <div class="sub">${b.item.section} · ${b.item.kind}</div>
+      <div class="kv"><span>due</span><b class="${b.urg}">${b.t} · ${b.longWhen}</b></div>
+      <div class="kv"><span>orbital period</span><b>${every(b.item.months)}</b></div>
+      <div class="kv"><span>cost</span><b>${money(b.item.cost)}</b></div>
+      ${b.item.provider ? `<div class="kv"><span>provider</span><b>${b.item.provider}</b></div>` : ""}
+      <div class="kv"><span>reminders</span><b>${remindOf(b.item.remind)}</b></div>
+      <h4>actions</h4>
+      <div class="acts" role="group" aria-label="Item actions">
+        <button style="--act:var(--ok)">complete</button>
+        <button style="--act:var(--upcoming)">reschedule</button>
+        <button style="--act:var(--warm)">snooze</button>
+        <button style="--act:var(--accent)">edit</button>
+        <button style="--act:var(--overdue)">retire</button>
+      </div>
+      ${n ? `<div class="note"><b>${n === 1 ? "one document rides" : n + " documents ride"}</b>
+          in the belt beside this item — the ringed bodies either side. click one to bring
+          it in.</div>`
+          : `<div class="note">no documents yet — anything you attach, or mail in to your
+          relay, takes a seat in the belt beside this item.</div>`}
+      <a class="back" href="home.html">← back to your orbit</a>
+    </article>`;
+}
+
+function measureCard() {
+  const r = document.getElementById("cardwrap").getBoundingClientRect();
+  cardRect = { l: r.left, r: r.right, t: r.top, b: r.bottom };
+}
+
+/* ==================================================================== *
+ * THE SEARCH BOX.
+ *
+ * It matches title, section, kind, provider and document name, because all
+ * five are things a person types when they are looking for one thing in a
+ * household. A document's name lights ITS ITEM, because the item is how you
+ * get to the paper — and lights the paper too, if it is already out.
+ *
+ * What it does NOT do is remove anything: the band keeps its shape and its
+ * order, matches stay lit and everything else falls back to a quarter of its
+ * weight, so you can see where in time your hit lives before you go to it.
+ * ==================================================================== */
+function haystack(b) {
+  return (b.kind === "doc"
+    ? [b.doc.name, b.item.title, "document"]
+    : [b.label, b.item.section, b.item.kind, b.item.provider ?? "",
+       ...b.docs.map((d) => d.name)]).join(" ").toLowerCase();
+}
+
+function runSearch(q) {
+  query = q.trim().toLowerCase();
+  matches = new Set();
+  if (query) bodies.forEach((b, i) => { if (haystack(b).includes(query)) matches.add(i); });
+  renderHits();
+  paintMembers(rollT0 < 0 ? 1 : 0);
+}
+
+/* The nearest hit is the nearest ALONG THE BELT, not the first in the list:
+   you are standing somewhere in time and the belt should turn the shortest
+   way it can to the thing you asked for. A paper still folded inside its
+   item is not somewhere you can be sent — its item is. */
+function reachable(i) {
+  const b = bodies[i];
+  return b.kind !== "doc" || (bloom[b.itemIdx] ?? 0) > 0.5;
+}
+function nearestMatch() {
+  let best = -1, bestD = Infinity;
+  for (const i of matches) {
+    if (i === selected || !reachable(i)) continue;
+    const d = Math.abs(bodies[i].off - bodies[selected].off);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+function renderHits() {
+  const box = document.getElementById("hits"), note = document.getElementById("findnote");
+  box.textContent = "";
+  if (!bodies.length) {
+    note.textContent = "the belt is empty";
+    box.classList.remove("open");
+    return;
+  }
+  const items = bodies.filter((b) => b.kind === "item").length;
+  if (!query) {
+    note.textContent = `${items} items · ← → steps in date order`;
+    box.classList.remove("open");
+    return;
+  }
+  const list = [...matches].filter(reachable);
+  note.textContent = list.length
+    ? `${list.length} of ${items} lit · enter centres the nearest`
+    : `nothing matches · the belt keeps its shape`;
+  box.classList.add("open");
+  if (!list.length) {
+    const none = document.createElement("div");
+    none.className = "none";
+    none.textContent = "no item, section, provider or document by that name";
+    box.appendChild(none);
+    return;
+  }
+  const near = nearestMatch();
+  for (const i of list.slice(0, 7)) {
+    const b = bodies[i];
+    const row = document.createElement("button");
+    row.type = "button";
+    if (i === near) row.className = "pick";
+    row.innerHTML = `<b>${b.kind === "doc" ? b.doc.name : b.label}</b>` +
+      `<small style="color:${b.tone}">${b.kind === "doc" ? "document" : b.t}</small>` +
+      `<small>${b.kind === "doc" ? b.sub : b.when}</small>`;
+    row.addEventListener("mousedown", (e) => e.preventDefault());
+    row.addEventListener("click", () => centre(i));
+    box.appendChild(row);
+  }
+}
+
+function syncDemos() {
+  for (const [btn, id] of [["c-first", "i-window"], ["c-docs", "i-svc"], ["c-last", "i-gas"]]) {
+    const b = document.getElementById(btn);
+    b.setAttribute("aria-pressed", String(bodies[selected]?.id === id));
+    b.disabled = !bodies.some((x) => x.id === id);
+    b.style.opacity = b.disabled ? ".38" : "1";
+  }
+}
+
+/* ==================================================================== *
+ * The loop. The rubble drifts; the members do not — they are the
+ * instrument, held at their seats the way §14 holds the dial's
+ * constellations still because there they mean something. Everything else in
+ * this sky is scenery, and scenery moves.
+ * ==================================================================== */
+let last = 0, lastPaint = 0;
+function frame(now) {
+  const dt = last ? Math.min((now - last) / 1000, 0.08) : 0;
+  last = now;
+  const rolling = rollT0 >= 0;
+  if (rolling) {
+    const p = clamp01((now - rollT0) / GLIDE);
+    const e = ease(p);
+    roll = rollFrom + (rollTo - rollFrom) * e;
+    berthNow = berthFrom + (berthTo - berthFrom) * e;
+    paintMembers(p);
+    if (p >= 1) { rollT0 = -1; bloomFrom = bloom.slice(); }
+  }
+  drift += DRIFT * dt;
+  /* The roll gets every frame it can have. The idle drift is fifteen pixels
+     a second and does not: repainting a full-width plate under the card's
+     backdrop blur sixty times a second to move it a quarter of a pixel is
+     work nobody can see. */
+  if (rolling || now - lastPaint > 30) { paintBand(); lastPaint = now; }
+  requestAnimationFrame(frame);
+}
+
+function layout() {
+  const wasSel = bodies[selected]?.id;
+  computeGeometry();
+  buildBodies();                    /* GAP_SCALE may have moved with W */
+  if (wasSel) {
+    const i = bodies.findIndex((b) => b.id === wasSel);
+    if (i >= 0) {
+      selected = prevSel = i;
+      bloomTo = bloomTargets(i); bloom = bloomFrom = bloomTo.slice();
+      berthNow = berthFrom = berthTo = berthFor(i);
+    }
+  }
+  buildSeats();
+  sizeCanvas(); readTones(); buildHaze(); buildBand();
+  if (rollT0 < 0) roll = rollFrom = rollTo = bodies[selected]?.off ?? 0;
+  document.getElementById("members").setAttribute("viewBox", `0 0 ${W} ${H}`);
+  buildEnds();
+  const wrap = document.getElementById("cardwrap");
+  wrap.style.top = APEX_Y + "px";
+  /* The card is a body in the belt, so it has to fit BETWEEN its neighbours:
+     it takes the berth its own bulk has cleared, less a clear margin for the
+     next body along. Measured at the NARROW berth and the tightest possible
+     gap, so the card is the same card whatever is centred — it must not
+     breathe every time an item happens to carry paper. */
+  const held = berthNow; berthNow = BERTH_NARROW;
+  const gap = Math.abs(project(PHI_APEX - warp(MIN_GAP * GAP_SCALE), A, 0).x - W / 2);
+  berthNow = held;
+  wrap.style.width = Math.max(340, Math.min(480, 2 * (gap - 104), W - 56)) + "px";
+  renderCard(); renderHits(); syncDemos();
+  paintMembers(rollT0 < 0 ? 1 : 0);
+  measureCard(); paintBand();
+}
+
+function setHousehold(which) {
+  household = which;
+  document.getElementById("b-full").setAttribute("aria-pressed", String(which === "lawson"));
+  document.getElementById("b-empty").setAttribute("aria-pressed", String(which === "empty"));
+  document.getElementById("find").value = "";
+  query = ""; matches = new Set();
+  const wrap = document.getElementById("cardwrap");
+  wrap.classList.remove("rollout", "rollin", "rollpre");
+  wrap.style.removeProperty("opacity");
+  wrap.style.setProperty("--cdx", "0px"); wrap.style.setProperty("--cdy", "0px");
+  wrap.style.setProperty("--csc", "1");
+  buildBodies(); layout();
+}
+function setSwatch(name, btn) {
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll(".sw"))
+    b.setAttribute("aria-pressed", String(b === btn));
+  requestAnimationFrame(() => { readTones(); buildHaze(); paintBand(); });
+}
+/* ---- keyboard --------------------------------------------------------
+   ← and → step through the belt in date order, which is its whole grammar —
+   over the papers too, when they are out, because they are then bodies in
+   the band like any other. Inside the search field the arrows belong to the
+   caret; there, enter centres the nearest hit and escape gives the belt
+   back. */
+function stepBy(d) {
+  const order = bodies.map((_, i) => i).filter(reachable);
+  const at = order.indexOf(selected);
+  const next = order[at + d];
+  if (next !== undefined) centre(next);
+}
+const findEl = document.getElementById("find");
+findEl.addEventListener("input", (e) => runSearch(e.target.value));
+findEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const i = nearestMatch();
+    if (i >= 0) centre(i);
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (findEl.value) { findEl.value = ""; runSearch(""); } else findEl.blur();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target === findEl) return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); stepBy(-1); }
+  if (e.key === "ArrowRight") { e.preventDefault(); stepBy(1); }
+  if (e.key === "/" || ((e.metaKey || e.ctrlKey) && e.key === "k")) {
+    e.preventDefault(); findEl.focus(); findEl.select();
+  }
+});
+window.addEventListener("resize", layout);
+
+/* The item screen's own sky: the shared generator's seed and layers. */
+(function stars() {
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const rng = rngFrom(17170812);
+  for (const [tile, n, rMin, rSpan, oMin, oSpan] of
+       [[far, 95, 0.4, 0.5, 0.12, 0.23], [near, 46, 0.8, 0.7, 0.3, 0.4]]) {
+    for (let i = 0; i < n; i++) {
+      tile.appendChild(el("circle", {
+        cx: (rng() * 1600).toFixed(1), cy: (rng() * 1000).toFixed(1),
+        r: (rMin + rng() * rSpan).toFixed(2),
+        opacity: (oMin + rng() * oSpan).toFixed(2),
+      }));
+    }
+  }
+})();
+
+computeGeometry();
+buildBodies();
+layout();
+if (!reduced()) requestAnimationFrame(frame);
+</script>
+</body></html>

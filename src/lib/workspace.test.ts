@@ -192,4 +192,73 @@ describe("household workspace", () => {
     expect(workspaceCommandSchema.safeParse({ ...command, expectedVersion: 0 }).success).toBe(false);
     expect(workspaceCommandSchema.safeParse({ ...command, expectedVersion: 1 }).success).toBe(true);
   });
+
+  /*
+   * THE ARRIVAL'S CREATE (#410, §15 — "first-run asks three things only").
+   * The card knows a name, a time zone and a currency; the sections are the
+   * server's, so there is one place that decides what a new system starts with.
+   */
+  describe("household.create from the arrival's three answers", () => {
+    const threeAnswers = {
+      type: "household.create",
+      household: {
+        id: "11111111-2222-3333-4444-555555555555",
+        name: "Lawson Home",
+        timezone: "Europe/London",
+        currency: "GBP",
+        onboardingComplete: true,
+      },
+    };
+
+    it("applies the default sections when the payload carries none", () => {
+      const parsed = workspaceCommandSchema.parse(threeAnswers);
+      expect(parsed.type).toBe("household.create");
+      if (parsed.type !== "household.create") throw new Error("unreachable");
+      expect(parsed.household.sections.map((section) => section.name))
+        .toEqual(["Home", "Vehicles", "Devices", "Services"]);
+      /* each default gets its own identity, never the shared slug-as-id */
+      expect(new Set(parsed.household.sections.map((section) => section.id)).size).toBe(4);
+      expect(parsed.household.sections.map((section) => section.id))
+        .not.toContain("home");
+    });
+
+    it("fills the rest of the household the browser cannot know", () => {
+      const parsed = workspaceCommandSchema.parse(threeAnswers);
+      if (parsed.type !== "household.create") throw new Error("unreachable");
+      expect(parsed.household).toMatchObject({
+        memberCount: 1,
+        canManage: true,
+        onboardingComplete: true,
+        items: [],
+      });
+    });
+
+    it("still takes the shipped dashboard's whole household unchanged", () => {
+      const household = createHousehold({ id: "22222222-3333-4444-5555-666666666666", name: "The cottage" });
+      const parsed = workspaceCommandSchema.parse({ type: "household.create", household });
+      if (parsed.type !== "household.create") throw new Error("unreachable");
+      expect(parsed.household.sections).toEqual(household.sections);
+    });
+
+    it("bounds the words it is given", () => {
+      const tooLong = { ...threeAnswers.household, name: "x".repeat(61) };
+      expect(workspaceCommandSchema.safeParse({ type: "household.create", household: tooLong }).success).toBe(false);
+      const noName = { ...threeAnswers.household, name: "   " };
+      expect(workspaceCommandSchema.safeParse({ type: "household.create", household: noName }).success).toBe(false);
+      const badCurrency = { ...threeAnswers.household, currency: "POUNDS" };
+      expect(workspaceCommandSchema.safeParse({ type: "household.create", household: badCurrency }).success).toBe(false);
+      const emptySections = { ...threeAnswers.household, sections: [] };
+      expect(workspaceCommandSchema.safeParse({ type: "household.create", household: emptySections }).success).toBe(false);
+    });
+
+    it("reduces to an active household with the defaults in place", () => {
+      const parsed = workspaceCommandSchema.parse(threeAnswers);
+      if (parsed.type !== "household.create") throw new Error("unreachable");
+      const next = reduceWorkspace(createEmptyWorkspace(), parsed);
+      expect(next.householdLanding).toBe("active");
+      expect(next.activeHouseholdId).toBe(threeAnswers.household.id);
+      expect(activeHousehold(next).sections.map((section) => section.name))
+        .toEqual(["Home", "Vehicles", "Devices", "Services"]);
+    });
+  });
 });

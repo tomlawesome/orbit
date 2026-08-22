@@ -5,5 +5,7 @@ import nextTypescript from "eslint-config-next/typescript";
 export default defineConfig([
   ...nextVitals,
   ...nextTypescript,
-  globalIgnores([".next/**", "coverage/**", "drizzle/**", "dist/**"]),
+  globalIgnores([".next/**",
+  // web/ build artefacts: gitignored output, not source (#419)
+  "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**"]),
 ]);

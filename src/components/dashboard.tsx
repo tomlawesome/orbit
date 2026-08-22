@@ -23,7 +23,7 @@ import {
   type SectionAccent,
   type SectionIcon,
 } from "@/lib/domain";
-import { householdNotifications, type HouseholdNotification } from "@/lib/notifications";
+import { householdNotifications, type HouseholdNotification, type NotificationReader } from "@/lib/notifications";
 import {
   textSizes,
   themePackInfo,
@@ -72,6 +72,12 @@ const settingsSectionIds = {
 
 function visibleSettingsTrigger(): "desktop-profile" | "mobile-menu" {
   return window.matchMedia("(min-width: 821px)").matches ? "desktop-profile" : "mobile-menu";
+}
+
+/** See navigateHomeWithFocus: the marker's presence is the only trace of
+ *  whether this settings visit came from this engine's own workspace. */
+function settingsExitTarget(): string {
+  return sessionStorage.getItem(SETTINGS_RETURN_FOCUS_KEY) ? "/workspace" : "/";
 }
 
 function focusSettingsSection(sectionId: string) {
@@ -139,11 +145,13 @@ function AuthenticationGate({
   loadingMessage,
   error,
   onRetry,
+  returnTo,
 }: {
   loading: boolean;
   loadingMessage?: string;
   error?: string;
   onRetry?: () => void;
+  returnTo: string;
 }) {
   const message = loading ? loadingMessage : error;
   return (
@@ -158,7 +166,7 @@ function AuthenticationGate({
             : "Your household information is private and is only available after authentication.")}
         </p>
         {!loading && error && onRetry && <button className="wizard-primary" type="button" onClick={onRetry}>Try again <Icon name="chevron" /></button>}
-        {!loading && !error && <a className="wizard-primary" href="/api/auth/login">Sign in securely <Icon name="chevron" /></a>}
+        {!loading && !error && <a className="wizard-primary" href={`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`}>Sign in securely <Icon name="chevron" /></a>}
       </section>
     </main>
   );
@@ -176,6 +184,11 @@ export function Dashboard({ mode = "workspace" }: { mode?: DashboardMode } = {})
         loadingMessage={workspaceState.syncStatus === "loading" ? workspaceState.syncMessage || undefined : undefined}
         error={workspaceState.syncStatus === "error" ? workspaceState.syncMessage : undefined}
         onRetry={workspaceState.syncStatus === "error" ? workspaceState.retryInitialization : undefined}
+        // "/" is v19's own door now (#410, §15): a bare login redirect would
+        // strand this engine's sign-in on the wrong front end. This gate only
+        // ever renders at the address it was mounted on, so returning there
+        // (not "/") is what "signed in" actually means for this reader.
+        returnTo={mode === "settings" ? "/settings" : "/workspace"}
       />
     );
   }
@@ -217,6 +230,26 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const textSize = themePreference.textSize;
   const emailNotifications = themePreference.emailNotifications;
   const pushNotifications = themePreference.pushNotifications;
+  // #487: the in-app notification list must warn this reader on THEIR OWN
+  // first/final pair, exactly like dispatch does (#479) — not a fixed window.
+  // Starts with no stored pair (falls back to the documented defaults inside
+  // householdNotifications) until the fetch below resolves, so the list never
+  // blocks on this request; an item with its own reminder rules is unaffected
+  // either way, since a rule always wins outright.
+  const [reminderReader, setReminderReader] = useState<NotificationReader>({
+    id: session.user.id, firstWarningDays: null, finalWarningDays: null,
+  });
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/settings/reminders", { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() as Promise<{ reminders?: { firstWarningDays: number; finalWarningDays: number } }> : null))
+      .then((body) => {
+        if (cancelled || !body?.reminders) return;
+        setReminderReader({ id: session.user.id, firstWarningDays: body.reminders.firstWarningDays, finalWarningDays: body.reminders.finalWarningDays });
+      })
+      .catch(() => { /* Keeps the documented defaults; the bell degrades gracefully rather than blocking. */ });
+    return () => { cancelled = true; };
+  }, [session.user.id]);
   // Memoized (issue #383): household.items keeps a stable reference across
   // renders that don't touch the workspace (menu toggles, notices, etc.), so
   // these only need to recompute when the underlying data actually changes.
@@ -233,7 +266,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   // Memoized (issue #383): householdNotifications does O(items x id-array)
   // work; without this it reran on every render, including every keystroke
   // in the unrelated topbar search input.
-  const notifications = useMemo(() => householdNotifications(household, today), [household, today]);
+  const notifications = useMemo(() => householdNotifications(household, today, reminderReader), [household, today, reminderReader]);
   const unreadNotificationCount = notifications.filter((notification) => !notification.read).length;
   const detailItem = household.items.find((item) => item.id === detailItemId);
 
@@ -266,10 +299,16 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
   const focusDays = mostUrgent?.dueDate ? daysUntil(mostUrgent.dueDate, today) : undefined;
 
   const navigateHomeWithFocus = useCallback(() => {
-    if (!sessionStorage.getItem(SETTINGS_RETURN_FOCUS_KEY)) {
+    // navigateToSettings() (below) writes this marker before router.push("/settings")
+    // whenever settings was entered from this engine's own workspace — its
+    // presence here is the only trace of that, since /settings is reachable
+    // from v19's helm too (#410, §15) and this component cannot otherwise
+    // tell the two apart.
+    const target = settingsExitTarget();
+    if (target === "/") {
       sessionStorage.setItem(SETTINGS_RETURN_FOCUS_KEY, visibleSettingsTrigger());
     }
-    router.push("/");
+    router.push(target);
   }, [router]);
 
   useEffect(() => {
@@ -606,7 +645,10 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
     setLogoutBusy(true);
     setNotice(null);
     try {
-      await signOut();
+      // mode "workspace" is only ever this engine's own address (#410, §15);
+      // mode "settings" is reachable from v19's helm too, so the same
+      // came-from-workspace marker navigateHomeWithFocus reads decides it.
+      await signOut(mode === "workspace" ? "/workspace" : settingsExitTarget());
     } catch {
       setLogoutBusy(false);
     }
@@ -752,7 +794,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
               key={household.id}
               household={household}
               onSave={updateHousehold}
-              onRemoved={() => router.replace("/")}
+              onRemoved={() => router.replace(settingsExitTarget())}
               csrfToken={session.csrfToken}
             />
           </section>

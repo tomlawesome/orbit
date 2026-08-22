@@ -26,3 +26,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0009: Sol-governed, capability-routed implementation](0009-capability-routed-implementation.md)
 - [ADR-0010: Outage-recoverable document scanning](0010-outage-recoverable-document-scanning.md)
 - [ADR-0011: Operator experience as product, single-reviewer governance](0011-operator-experience-as-product.md)
+- [ADR-0012: The front end leaves React for SvelteKit](0012-front-end-leaves-react.md)

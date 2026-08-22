@@ -71,8 +71,18 @@ export const userPreferences = pgTable("user_preferences", {
   urgencyPalette: text("urgency_palette").notNull().default("themed"),
   emailNotifications: boolean("email_notifications").notNull().default(true),
   pushNotifications: boolean("push_notifications").notNull().default(true),
+  // The reader's own reminder timing (#468, settings §13): how far ahead the
+  // first warning is raised, and how close in the final one lands. Stored per
+  // user because the settings screen presents them as the reader's own
+  // choice; per-item overrides remain in reminder_rules.
+  firstWarningDays: integer("first_warning_days").notNull().default(14),
+  finalWarningDays: integer("final_warning_days").notNull().default(3),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
+  // The final warning is the closer one, so it is always the smaller offset.
+  check("user_preference_final_warning_last", sql`${table.finalWarningDays} < ${table.firstWarningDays}`),
+]);
 
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -127,6 +137,25 @@ export const memberships = pgTable("memberships", {
   role: membershipRole("role").notNull().default("member"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.householdId, table.userId] }), index("membership_user_idx").on(table.userId)]);
+
+export const joinRequestStatus = pgEnum("join_request_status", ["pending", "approved", "declined"]);
+
+/** §11 (#453): a no-household user's signal to a household's owners. One
+ * pending request per (household, user) — enforced by a partial unique index
+ * — makes creation idempotent; decisions keep the row as an audit trail. */
+export const householdJoinRequests = pgTable("household_join_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: joinRequestStatus("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  decidedByUserId: uuid("decided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+}, (table) => [
+  uniqueIndex("join_request_pending_once").on(table.householdId, table.userId).where(sql`${table.status} = 'pending'`),
+  index("join_request_household_idx").on(table.householdId, table.status),
+  index("join_request_user_idx").on(table.userId, table.status),
+]);
 
 export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),

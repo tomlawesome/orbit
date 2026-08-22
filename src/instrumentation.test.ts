@@ -28,12 +28,18 @@ const mocks = vi.hoisted(() => ({
   verifyMigrationJournalComplete: vi.fn(),
   migrate: vi.fn(),
   workerCalls: [] as string[],
+  /* Mirrors the real signature (code, detail?). It previously took a message
+     and hardcoded code, which silently made every stubbed error look like a
+     generic integrity failure - so a test asserting the database_floor path
+     could not have caught a regression in it. */
   MigrationIntegrityError: class MigrationIntegrityError extends Error {
-    code: "migration_integrity";
+    code: string;
+    detail?: string;
 
-    constructor(_message: string) {
-      super(_message);
-      this.code = "migration_integrity";
+    constructor(code: string, detail?: string) {
+      super("Orbit migration integrity check failed");
+      this.code = code;
+      this.detail = detail;
     }
   },
 }));
@@ -215,7 +221,7 @@ describe("strict startup ordering", () => {
 
   it("does not start workers when the migration precheck, migrate, or postcheck fails", async () => {
     const { registerNode } = await import("./instrumentation-node");
-    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("private drift"));
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("migration_integrity", "private drift"));
     await expect(registerNode()).rejects.toThrow("migration_integrity");
     expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
 
@@ -246,6 +252,36 @@ describe("strict startup ordering", () => {
       impact: "migration_blocked",
     });
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("password authentication");
+  });
+
+  it("names a genuine mismatch precisely, and never tells the operator to restart (#437)", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(
+      new mocks.MigrationIntegrityError("migration_integrity", "applied migration 25 of 25 does not match 0026_x"),
+    );
+
+    await expect(registerNode()).rejects.toThrow("migration_integrity");
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "database_mismatch",
+      action: "attach_matching_database",
+      impact: "migration_blocked",
+    });
+  });
+
+  it("distinguishes a database below the supported floor (#437)", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("database_floor"));
+
+    await expect(registerNode()).rejects.toThrow("database_floor");
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "database_below_floor",
+      action: "upgrade_from_supported_version",
+      impact: "migration_blocked",
+    });
   });
 });
 

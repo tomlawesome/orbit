@@ -8,11 +8,19 @@ export type MigrationIntegrityCode = "database_floor" | "migration_integrity";
 
 export class MigrationIntegrityError extends Error {
   readonly code: MigrationIntegrityCode;
+  /**
+   * A bounded description of what disagreed, for the operator's log (#437).
+   * Refusing to start is correct; refusing without saying which migration
+   * disagreed leaves nothing to act on. Deliberately names tags and counts
+   * only - never SQL, connection details or credentials.
+   */
+  readonly detail?: string;
 
-  constructor(code: MigrationIntegrityCode) {
+  constructor(code: MigrationIntegrityCode, detail?: string) {
     super("Orbit migration integrity check failed");
     this.name = "MigrationIntegrityError";
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -72,13 +80,24 @@ export async function verifyMigrationIntegrity(client: SqlClient, folder: string
   }
   const floorIndex = expected.findIndex((migration) => migration.tag === SUPPORTED_FLOOR_TAG);
   if (applied.length === 0 && await hasExistingProductTables(client)) {
-    throw new MigrationIntegrityError("database_floor");
+    throw new MigrationIntegrityError(
+      "database_floor",
+      `database has product tables but no migration journal; supported floor is ${SUPPORTED_FLOOR_TAG}`,
+    );
   }
   if (applied.length > 0 && (floorIndex < 0 || applied.length < floorIndex + 1)) {
-    throw new MigrationIntegrityError("database_floor");
+    throw new MigrationIntegrityError(
+      "database_floor",
+      `database is older than the supported floor ${SUPPORTED_FLOOR_TAG}; applied ${applied.length} migrations`,
+    );
   }
-  if (applied.some((hash, index) => expected[index]?.hash !== hash)) {
-    throw new MigrationIntegrityError("migration_integrity");
+  const divergence = applied.findIndex((hash, index) => expected[index]?.hash !== hash);
+  if (divergence >= 0) {
+    throw new MigrationIntegrityError(
+      "migration_integrity",
+      `applied migration ${divergence + 1} of ${applied.length} does not match `
+        + `${expected[divergence]?.tag ?? "an unknown migration"}; this database was migrated by a different build`,
+    );
   }
 }
 
