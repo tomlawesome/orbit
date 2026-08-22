@@ -27,6 +27,7 @@ on:
   push:
     branches:
       - develop
+      - dev
       - preview
       - main
     paths:
