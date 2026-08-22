@@ -88,8 +88,8 @@ accessibility, or recoverability. Those require the appropriate layer above.
 ```mermaid
 flowchart LR
     issue["Issue PR: static + unit"]
-    develop["Protected develop"]
-    train["Merge develop into preview"]
+    dev["Protected dev"]
+    train["Merge dev into preview"]
     integration["PostgreSQL service/API + migrations"]
     build["Build one production image"]
     system["Compose + browser + security + recovery against that image"]
@@ -99,7 +99,7 @@ flowchart LR
     stable["Verify preview into main without rebuild"]
     promote["Promote exact digest"]
 
-    issue --> develop --> train --> integration --> build --> system
+    issue --> dev --> train --> integration --> build --> system
     system --> supply --> preview --> manual --> stable --> promote
 ```
 
@@ -120,7 +120,7 @@ and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
 
 | Lane | Additional evidence | Typical eligible change |
 | --- | --- | --- |
-| issue pull request | static analysis and unit regression evidence | ordinary work targeting `develop` or a release-lane merge proposal |
+| issue pull request | static analysis and unit regression evidence | ordinary work targeting `dev` or a release-lane merge proposal |
 | protected preview push | production build, source dependency/secret policy, two isolated PostgreSQL runs, exact-image Compose, vulnerability, malware, recovery, browser/accessibility, installer and digest-bound attestations | accepted merge to `preview` or a bounded `hotfix/**` source |
 | stable pull request | existing preview digest, embedded identity and attestation verification | `preview` or a tested hotfix proposed to `main` |
 
