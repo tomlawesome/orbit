@@ -173,6 +173,14 @@ set -Eeuo pipefail
 #   application-unhealthy           — this deployment's orbit-app container
 #                                   exists but Docker reports its health
 #                                   status as `unhealthy`.
+#   database-schema-mismatch        — the application refused to start because
+#                                   the database was migrated by a different
+#                                   build. Reported instead of, not as well
+#                                   as, application-unhealthy: restarting
+#                                   cannot change either side (#437).
+#   database-below-floor            — the application refused to start because
+#                                   the database predates the supported
+#                                   migration floor. Also not restartable.
 #
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
@@ -1180,6 +1188,8 @@ readonly -a class_order=(
   database-credential-mismatch
   stale-container
   application-unhealthy
+  database-schema-mismatch
+  database-below-floor
 )
 
 # Reason class -> action class for --plan (see the "Action-class mapping
@@ -1198,6 +1208,11 @@ readonly -A action_for_class=(
   [database-credential-mismatch]=rotate-database-credential
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
+  # Both sides of a schema disagreement survive a restart, so restart-services
+  # would loop forever (#437). These need an operator decision: attach the
+  # matching database, or upgrade from a supported version.
+  [database-schema-mismatch]=manual
+  [database-below-floor]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
   [managed-file-symlink]=manual
@@ -1241,6 +1256,12 @@ readonly -A manual_guidance=(
   [docker-unavailable]="ensure the docker CLI is installed and the daemon is reachable, then re-run diagnosis"
   [unrelated-resource-present]="confirm whether the reported resource under a different Compose project is still needed; it is out of scope for this deployment's repair"
   [database-unreachable]="verify the database container/service is running and reachable, then re-run diagnosis; repair never starts a service to investigate"
+  # Neither side of a schema disagreement moves on its own (#437): point this
+  # build at the database it expects, or point this database at a build that
+  # still recognises its migration history. repair never merges or migrates
+  # a database on the operator's behalf.
+  [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
+  [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
 )
 
 declare -a findings=()
@@ -1920,7 +1941,19 @@ check_application_container() {
     add_finding stale-container container warn
   fi
   if [[ "$health_status" == unhealthy ]]; then
-    add_finding application-unhealthy application fail
+    # An unhealthy container that refused to start over its database says so in
+    # its own operational log. Report that precisely rather than as a generic
+    # unhealthy app, because the two have different remedies and only one of
+    # them is "restart" (#437). Read-only: docker logs mutates nothing.
+    local app_log=""
+    app_log="$(timeout "$docker_probe_timeout" docker logs --tail 50 "$app_id" 2>&1 || true)"
+    if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
+      add_finding database-schema-mismatch application fail
+    elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
+      add_finding database-below-floor application fail
+    else
+      add_finding application-unhealthy application fail
+    fi
   fi
 }
 

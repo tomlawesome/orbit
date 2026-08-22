@@ -1,0 +1,249 @@
+/*
+ * THE FLIGHT'S OWN SURFACES (#410, §15) — the dawn you leave, the dusk you
+ * land on, the canvas between them, the mark that rides it and the name
+ * written on the void.
+ *
+ * Every rule is design/v19/first-run.html's own at 159ec9f, the sheet the
+ * owner ratified verbatim. The body-class vocabulary is the mockup's too
+ * (showdawn / showdusk / showwarp / arming / bare / instrument / withdrawing /
+ * descending / farewell), because the staging is class-driven, which is
+ * exactly what lets reduced motion keep the whole story and drop only the
+ * movement.
+ */
+
+/* ══ THE DAWN AND THE DUSK ═══════════════════════════════════════════════ */
+/* the sign-in's own ground, under its dawn */
+.signin-stage{position:fixed;inset:0;z-index:0;background:#04060e}
+
+#dawn,#dusk{position:fixed;inset:0;z-index:1;opacity:0;
+            transition:opacity .7s ease}
+/* `shown` is a surface standing on its own (the sign-in); the body classes are
+   the FLIGHT holding it up and then letting it go. */
+#dawn.shown{opacity:1}
+body.showdawn #dawn{opacity:1}
+body.showdusk #dusk{opacity:1}
+#dawn .sky,#dusk .sky{position:absolute;inset:-4%}
+#dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
+    position:absolute;inset:0;width:100%;height:100%}
+#dawn .world,#dusk .world{position:absolute;inset:0}
+/* Mobile-Safari squeeze (#503): the far/near star groups were the OTHER
+   candidate for will-change:transform below — they too run a `transform`
+   forever (360s/180s linear, never settling). Tried and measured against the
+   fidelity gate rather than assumed: promoting them to their own compositing
+   layer moved 20-29 of 1.6M pixels on Chromium (login/logout/first-run, well
+   under the 0.1% budget but NOT the zero-pixel bar every other baseline
+   holds) — the tiny circles that make up each star anti-alias very slightly
+   differently once rasterised into a separate layer and composited back,
+   rather than painted inline with everything around them. That is a real
+   rendering change, not a performance-only hint doing what the spec promises,
+   so it stays off: the two rows below are exactly HEAD's, unpromoted. The
+   sway rasters (#502) took the same measurement and came back clean (0 px),
+   which is the one difference: a still picture rotating loses nothing to
+   layer promotion; many 1-2px circles repainted at a new layer boundary do. */
+#dawn .sky .far{animation:appr 360s linear infinite}
+#dawn .sky .near{animation:appr 180s linear infinite}
+@keyframes appr{to{transform:translateX(-1600px)}}
+/* the goodbye's stars drift back the way they came — same periods, reversed
+   (§15, owner 2026-08-17; see THE GOODBYE'S SKY below) */
+#dusk .sky .far{animation:recede 360s linear infinite}
+#dusk .sky .near{animation:recede 180s linear infinite}
+@keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
+#dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
+/* first light: dawn breaks once on load, exactly as the login does it */
+.dawnlayer{opacity:0;transition:opacity 3s ease}
+body.lit .dawnlayer{opacity:1}
+.rim{opacity:0;transition:opacity 2.2s ease .3s}
+body.lit .rim{opacity:1}
+.shimmer{stroke-dasharray:3 97;animation:sweep 22s linear infinite;opacity:0;
+         transition:opacity 1.8s ease 1.2s}
+body.lit .shimmer{opacity:.9}
+@keyframes sweep{to{stroke-dashoffset:-100}}
+.sunpt{opacity:0;transition:opacity 3.2s ease .5s}
+body.lit .sunpt{opacity:1}
+.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
+.rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
+      transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
+      mix-blend-mode:screen}
+body.lit .rays{opacity:1;transform:scale(1,1)}
+.rays .sway1{transform-origin:800px 920px;will-change:transform;
+             animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;will-change:transform;
+             animation:sway2 63s ease-in-out infinite alternate}
+@keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+@keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+.scatter{animation:breathe-band 9s ease-in-out infinite alternate}
+@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+
+/* ══ THE LOCKUP AND THE GATE ═════════════════════════════════════════════
+   RECONCILED TO THE 08-14 RULINGS (§15, owner 2026-08-17): "The flight's login
+   screen uses THE MOST RECENT APPROVED LOGIN (the 08-14 rulings: no ribbon,
+   the current lockup) — the sheet's accidental resurrection of the older
+   styling loses; and THERE SHOULD BE NO FOOTER on the login."
+
+   What the port carried over from the sheet was design/family/login.html's
+   v18 chrome — a 64px badge at 37vh with a 58px word under it, a wide gold
+   pill at 23vh, and the PRIVATE · SELF-HOSTED · YOURS ribbon at the foot. All
+   of it loses. This is §10's list instead, and it is the rule this app
+   already shipped and baselined on 2026-08-14 before the flight landed on top
+   of it (web/src/routes/login at 0ff28da/cfa8388, and the sunset baseline
+   that was reworded to match it), restored here verbatim:
+
+     · the lockup is CENTRED in the viewport;
+     · the mark is much larger — the ring at 420px with `orbit` set plain
+       INSIDE it and no filled centre, the word occupying that space (CON-19's
+       sign-in exception, amended 2026-08-14);
+     · the ask sits inside the ring directly beneath the word. §10 also
+       records `Authenticate` in a thin white outline pill; that lost the same
+       day, because white on the accent fails contrast in every pack (worst
+       case 1.66:1). The pill came back in dark ink, sized down, reading
+       `Sign in` — and that is the word the ratified sunset's own pill was
+       then matched to;
+     · no ribbon. The 2.6:1 line it carried (#4d5878 on #04060e) goes with it,
+       which is that contrast finding closed by deletion rather than by
+       repainting a thing the owner does not want on the screen.
+
+   The dusk goodbye wears this same lockup and this same gate — both ends of a
+   session show one face, and the descent's mark sets down on the shape the
+   climb lifted off. */
+.loginchrome{position:absolute;inset:0;z-index:3;display:grid;place-items:center;
+             transition:opacity .8s ease,transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
+/* Glyph, word and ask share ONE grid cell, so the word is centred on the
+   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+.loginchrome .lockup{position:relative;display:inline-grid;place-items:center;
+        text-align:center;transition:transform 1s cubic-bezier(.3,.7,.3,1)}
+.loginchrome .lockup .glyph{grid-area:1/1;line-height:0}
+/* The one motion CON-19 permits the mark anywhere: the planet drifts the
+   ring, once per 40s. The dusk unwinds it — see THE GOODBYE'S SKY. */
+.loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;
+        transform-origin:100px 100px}
+@keyframes spinback{to{transform:rotate(360deg)}}
+.loginchrome .lockup .name{grid-area:1/1;font:600 72px var(--display);
+        letter-spacing:.015em;line-height:1;color:#e9edf8}
+/* Dropped clear of the word inside the ring: 36px is half the name's line
+   box, 20px the gap, 18px half the button. The offset lives on the wrapper
+   and the entrance on .gate, so two transforms never fight over one element. */
+.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+           transform:translateY(74px)}
+/* THE RATIFIED GATE, and the only pill in the family: the goodbye's
+   "Sign back in" is this same rule with one word changed (§15, 2026-08-17 —
+   "the SIGN-IN BUTTON must be IDENTICAL on both surfaces"). The delayed
+   entrance is 08-14's own: the mark holds the screen alone first. */
+/* `#dusk .gate-wrap a` rides in the SAME selector list rather than in a rule
+   of its own: /home renders the goodbye's way back in as <a class="again">
+   and that file is being ported by another hand right now, so the button gets
+   the ratified treatment from one declaration block either way. When that
+   anchor becomes class="gate" the selector can go, and nothing else changes.
+   `line-height:1` is here for the same reason: a <button> and an <a> would
+   otherwise be different heights wearing the same rule. */
+.gate,#dusk .gate-wrap a{font:600 12px var(--display);color:#04060e;background:#d8b45a;
+      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+      letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
+      box-shadow:0 0 28px rgba(216,180,90,.22);
+      opacity:0;transform:translateY(10px);
+      transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+                 filter .35s ease,box-shadow .3s ease}
+body.lit .gate{opacity:1;transform:none}
+.gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
+.gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
+
+/* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
+#warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
+      transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
+body.showwarp #warp{opacity:1;transition:opacity .45s ease}
+/* §15 second pass, ruling 2: the canvas does NOT cut out under the bloom. It
+   dissolves over 1.7 near-linear seconds, so the glow it is holding is still
+   on the screen while the planets condense out of it. */
+#flightmark{position:fixed;z-index:6;opacity:0;pointer-events:none;
+            transition:opacity .35s ease}
+#flightmark.on{opacity:1}
+#flightmark.collapse{opacity:0;transform:scale(.05);
+            transition:opacity .55s ease .1s,transform .7s cubic-bezier(.6,0,.9,.4)}
+#flightmark svg{width:100%;height:100%;display:block}
+#flightmark .core{fill:#fff6e6}
+/* the household's name written on the void, once, at the top of the climb */
+#launchname{position:fixed;left:0;right:0;top:26%;z-index:7;text-align:center;
+            pointer-events:none;opacity:0;transition:opacity .55s ease;
+            font:600 13px var(--display);letter-spacing:.62em;text-transform:uppercase;
+            color:#dfe6f7;text-shadow:0 0 30px rgba(216,180,90,.4)}
+#launchname.on{opacity:1}
+#launchname i{display:block;font:10px var(--mono);font-style:normal;letter-spacing:.3em;
+              color:#8791b3;margin-top:11px;text-transform:uppercase}
+
+/* ══ THE DUSK GOODBYE (where the descent lands, and what /logout means) ══
+   §15, owner 2026-08-17: the descent is the default logout, re-confirmed, and
+   the old /logout sunset retires into it. */
+/* the login's ink exactly — the approved goodbye wore the same lockup as the
+   approved sign-in, and the descent's mark sets down on it (2026-08-17) */
+#dusk .lockup .name{color:#e9edf8}
+/* THE SAME BUTTON, not a lookalike: the .gate rule above, one word changed.
+   Only the ENTRANCE differs — on the login the pill arrives with first light,
+   here it arrives with the farewell. */
+#dusk .gate-wrap>*{opacity:0;transform:translateY(10px);
+      transition:opacity .9s ease,transform .9s ease,filter .35s ease,box-shadow .3s ease}
+body.farewell #dusk .gate-wrap>*{opacity:1;transform:none}
+#dusk .farewell{position:absolute;left:0;right:0;bottom:26vh;text-align:center;
+      opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
+body.farewell #dusk .farewell{opacity:1;transform:none}
+#dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
+#dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
+
+/* ── THE GOODBYE'S SKY LIVES, AND IT LIVES IN REVERSE ────────────────────
+   §15, owner 2026-08-17: the dusk "must carry the same REVERSED PLANET MOTION
+   the login's climb has". The canvas flight was already the climb mirrored —
+   but the LANDING it set down on was a still frame while the login surface it
+   mirrors breathes, sways, drifts and sweeps. Every motion the dawn carries
+   is answered here, running the other way: the stars drift back the way they
+   came (see recede, above), the mark's planet unwinds the ring, the afterglow
+   band breathes slower and cooler than the dawn's scattering, the Belt of
+   Venus breathes on the zodiacal cone's own period, and an ember shimmer
+   travels the limb the other way round. */
+#dusk .lockup .glyph .tr{animation:spinforth 40s linear infinite}
+@keyframes spinforth{to{transform:rotate(-360deg)}}
+#dusk .afterglow{animation:breathe-ember 12s ease-in-out infinite alternate}
+@keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
+#dusk .belt{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+#dusk .shimmer{stroke-dasharray:3 97;animation:sweepback 34s linear infinite;
+      opacity:.7;transition:none}
+@keyframes sweepback{to{stroke-dashoffset:100}}
+
+/* film grain over the dawn/dusk surfaces, as the login has it */
+body.showwarp .grain{opacity:.26}
+
+/* ══ PINNED ══════════════════════════════════════════════════════════════
+   A fixture asks for one millisecond of the flight and then holds it still.
+   Every beat up to that moment is applied at once, so the transitions must
+   not then play out from where they were — they are the journey, and the
+   journey is already over. Fixture-only: nothing sets `pinned` in the
+   product. */
+body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #flightmark,
+body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
+  transition:none!important}
+
+/* ══ REDUCED MOTION ══════════════════════════════════════════════════════
+   The launch is the one thing here that cannot simply be slowed down, so
+   under prefers-reduced-motion it is NOT played at all: the canvas never
+   runs, no starfield streaks, no camera. The flight becomes a plain
+   crossfade, and the 3s dwell and the staging still happen, so the sequence
+   tells the same story without any motion. */
+@media (prefers-reduced-motion: reduce){
+  #dawn *,#dusk *{animation:none!important}
+  #flightmark,#launchname,#warp{display:none!important}
+  #dawn,#dusk,.loginchrome,.loginchrome .lockup{
+    transition-duration:.7s!important;transition-timing-function:ease!important}
+  /* .gate, not .gate-wrap: the wrapper's transform is the layout that drops
+     the pill clear of the word inside the ring, not motion, and clearing it
+     would land the button on top of the name (08-14's own note). */
+  .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
+    opacity:1!important;transform:none!important;transition:none}
+  /* The will-change:transform promotion above (#503) exists only to serve a
+     `transform` animation that reduced motion has just turned off two lines
+     up (`animation:none!important`); a layer kept promoted with nothing left
+     to animate is pure standing cost (GPU memory for a compositing layer no
+     frame will move), so the hint is withdrawn in lockstep with the motion
+     it was promoted for. */
+  .rays .sway1,.rays .sway2{will-change:auto}
+}

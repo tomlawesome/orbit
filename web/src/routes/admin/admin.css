@@ -1,0 +1,35 @@
+/*
+ * The observatory — lifted from design/family/admin.html and owned here from
+ * that point on. CON-9 gives admin the observatory personality: the same sky,
+ * instrumented. The graticule precesses once every 200 seconds and three
+ * telemetry points pulse on a stagger — motion slow enough to read as
+ * instrumentation rather than decoration.
+ *
+ * Global rather than component-scoped, alongside family.css.
+ */
+
+body{overflow:auto}
+.sky .grid{animation:precess 200s linear infinite;transform-origin:50% 50%}
+@keyframes precess{to{transform:rotate(360deg)}}
+.pulse{animation:tele 4s ease-in-out infinite}
+.pulse.p2{animation-delay:1.3s}.pulse.p3{animation-delay:2.6s}
+@keyframes tele{0%,100%{opacity:.15}50%{opacity:.8}}
+.obs{position:relative;z-index:2;max-width:1080px;margin:0 auto;padding:34px 24px;
+     display:grid;grid-template-columns:210px 1fr;gap:22px;min-height:100%}
+.obs-head{grid-column:1/3;display:flex;align-items:center;gap:18px}
+.obs-head .badge{font:10px var(--mono);letter-spacing:.16em;color:var(--accent-text);
+                 border:1px solid var(--line);border-radius:99px;padding:3px 12px}
+.obs nav{padding:18px}
+.obs nav a{display:block;font:12.5px var(--mono);color:var(--ink-mid);text-decoration:none;
+           padding:9px 12px;border-radius:9px;letter-spacing:.04em}
+.obs nav a.on{color:var(--accent-text);background:var(--panel)}
+.obs nav a:hover{color:var(--ink)}
+.pane{padding:22px 24px}
+.pane h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+         color:var(--ink-faint);margin-bottom:12px}
+.row{display:flex;align-items:center;gap:10px;font:12.5px var(--mono);color:var(--ink-mid);
+     padding:9px 4px;border-bottom:1px solid var(--line-soft)}
+.row:last-child{border:0}
+.row i{width:7px;height:7px;border-radius:50%;flex:none}
+.row b{color:var(--ink);font-weight:500;flex:1}
+.row small{color:var(--ink-faint)}

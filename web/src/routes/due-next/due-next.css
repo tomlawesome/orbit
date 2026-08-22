@@ -1,0 +1,81 @@
+/* Due next — the approach corridor (#461), from design/v19/due-next.html.
+ * Tokens come from packs.css; everything here is scoped under .corridor-page
+ * so nothing bleeds into home's identically-named manifest vocabulary. */
+
+/* The route owns its ground: nothing global paints body on a direct load,
+   and the double selector outranks family.css if another screen linked it. */
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.corridor-page *{box-sizing:border-box;margin:0}
+.corridor-page{min-height:100vh}
+
+.corridor-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.corridor-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.corridor-page .sky .far{animation:corridor-drift 400s linear infinite}
+.corridor-page .sky .near{animation:corridor-drift 195s linear infinite}
+@keyframes corridor-drift{to{transform:translateX(-1600px)}}
+.corridor-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .corridor-page .vignette,[data-theme=dawn] .corridor-page .vignette{background:none}
+
+.corridor-page .page{position:relative;z-index:2;max-width:760px;margin:0 auto;padding:96px 24px 120px}
+.corridor-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.corridor-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+.corridor-page .filters{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 8px}
+.corridor-page .chip{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+      border:1px solid var(--line);border-radius:99px;padding:6px 14px;cursor:pointer}
+.corridor-page .chip:hover{border-color:var(--accent);color:var(--ink)}
+.corridor-page .chip[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
+
+/* the corridor: a spine of time. It is an ORDER, not a scale — months are
+   section rules, and within a month entries sit in date order. */
+.corridor{position:relative;margin-top:26px;padding-left:46px}
+.corridor::before{content:"";position:absolute;left:15px;top:0;bottom:0;width:1.5px;
+                  background:var(--chart-line)}
+/* the red zone: everything above today has already passed its date */
+.corridor .redzone{position:relative;border-radius:14px;margin-bottom:6px;
+         background:linear-gradient(180deg,
+           color-mix(in srgb,var(--overdue) 7%, transparent),
+           color-mix(in srgb,var(--overdue) 2%, transparent))}
+.corridor .redzone::before{content:"";position:absolute;left:-31px;top:0;bottom:0;width:1.5px;
+                 background:var(--overdue);opacity:.55}
+.corridor .today{position:relative;display:flex;align-items:center;gap:12px;margin:16px 0 22px}
+.corridor .today .sunmark{position:absolute;left:-38px;width:15px;height:15px}
+.corridor .today .sunmark i{position:absolute;inset:0;border-radius:50%;background:var(--sun);
+                  filter:blur(4px);opacity:.8}
+.corridor .today .sunmark b{position:absolute;inset:4px;border-radius:50%;background:var(--sun-core)}
+.corridor .today span{font:11px var(--mono);letter-spacing:.18em;color:var(--accent-text)}
+.corridor .today .rule{flex:1;height:1px;background:var(--accent);opacity:.4}
+.corridor .month{position:relative;display:flex;align-items:center;gap:12px;margin:26px 0 12px}
+.corridor .month::before{content:"";position:absolute;left:-34px;width:7px;height:7px;border-radius:50%;
+               border:1px solid var(--chart-ink);background:var(--bg)}
+.corridor .month span{font:10.5px var(--mono);letter-spacing:.22em;color:var(--chart-ink)}
+.corridor .month .rule{flex:1;height:1px;background:var(--chart-line-soft)}
+.corridor .month small{font:10.5px var(--mono);color:var(--ink-faint)}
+
+.corridor .item{position:relative;display:flex;align-items:center;gap:15px;border-radius:14px;
+      padding:14px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
+      background:var(--panel);backdrop-filter:blur(8px);cursor:pointer;
+      color:inherit;text-decoration:none}
+.corridor .item:hover{background:var(--panel-raised);border-color:var(--line)}
+/* the entry's planet sits ON the spine — the same body it is on the dial */
+.corridor .item .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
+.corridor .item .planet i{width:9px;height:9px;border-radius:50%;background:currentColor;
+                box-shadow:0 0 0 2.5px var(--bg)}
+.corridor .item .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
+.corridor .item .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
+.corridor .item .body{flex:1;min-width:0}
+.corridor .item .body b{display:block;font-size:14.5px;font-weight:520}
+.corridor .item .body span{font-size:12.5px;color:var(--ink-mid)}
+.corridor .sys{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+.corridor .sys.away{color:var(--upcoming)}
+.corridor .t{font:500 13.5px var(--mono);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.corridor .t small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-faint)}
+.corridor .t.over{color:var(--overdue)} .corridor .t.soon{color:var(--warm)}
+.corridor .t.up{color:var(--upcoming)} .corridor .t.ok{color:var(--ok-text)}
+
+.corridor-page .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
+@media (prefers-reduced-motion: reduce){
+  .corridor-page .sky .far,.corridor-page .sky .near{animation:none!important}
+}

@@ -129,6 +129,9 @@ function dockerShimScript({
   const authResult = (db && db.authResult) || "ok";
   const appImage = (app && app.image) || "";
   const appHealth = app && app.health !== undefined ? app.health : "healthy";
+  // The app's own operational log, so a refusal to start over the database can
+  // be told apart from a generic unhealthy container (#437).
+  const appLog = (app && app.log) || "";
   const alterRoleExit = alterRoleFails ? 1 : 0;
   const logLine = argvLogPath
     ? `printf '%s\\n' "$*" >> '${argvLogPath}' 2>/dev/null || true`
@@ -248,6 +251,12 @@ function dockerShimScript({
     "      esac",
     "    fi",
     "    exit 1",
+    "    ;;",
+    "  logs)",
+    // The app's own operational log, so a refusal to start over the database
+    // can be told apart from a generic unhealthy container (#437).
+    `    printf '%s\\n' '${appLog}'`,
+    "    exit 0",
     "    ;;",
     "  inspect)",
     `    app_health="$(${appHealthExpr})"`,
@@ -838,6 +847,53 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
   });
 
+  it("names a database the app refuses, rather than calling it unhealthy (#437)", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-schema-mismatch target=application severity=fail");
+    // Reported INSTEAD of, not as well as: restarting cannot change either side.
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("distinguishes a database below the supported floor (#437)", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "ERROR orbit migrations startup.migration state=exhausted reason=database_below_floor action=upgrade_from_supported_version impact=migration_blocked",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-below-floor target=application severity=fail");
+  });
+
+  it("plans neither of those as a restart (#437)", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--plan"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "reason=database_mismatch",
+      },
+    });
+
+    expect(result.stdout).not.toContain("restart-services");
+    expect(result.stdout).toContain("manual");
+  });
+
   it("does not report application-unhealthy while the app container is still starting", () => {
     const targetDir = makeFixture();
 
@@ -1192,6 +1248,32 @@ describe("scripts/repair.sh --plan", () => {
       resolves: "database-unreachable",
       setup: () => {},
       dockerOptions: { db: { present: false } },
+      withConfigure: true,
+    },
+    {
+      name: "database-schema-mismatch",
+      resolves: "database-schema-mismatch",
+      setup: () => {},
+      dockerOptions: {
+        app: {
+          present: true,
+          health: "unhealthy",
+          log: "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
+        },
+      },
+      withConfigure: true,
+    },
+    {
+      name: "database-below-floor",
+      resolves: "database-below-floor",
+      setup: () => {},
+      dockerOptions: {
+        app: {
+          present: true,
+          health: "unhealthy",
+          log: "ERROR orbit migrations startup.migration state=exhausted reason=database_below_floor action=upgrade_from_supported_version impact=migration_blocked",
+        },
+      },
       withConfigure: true,
     },
     // Note: unrelated-resource-present and docker-unavailable are

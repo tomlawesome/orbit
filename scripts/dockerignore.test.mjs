@@ -22,4 +22,18 @@ describe(".dockerignore", () => {
     expect(lines).toContain(".orbit-secrets");
     expect(lines).toContain(".env-orbit");
   });
+
+  // #449: web/ became a workspace member with its own node_modules (108 MB)
+  // and generated build/preview/test outputs. A bare `node_modules` entry only
+  // matches the root directory, so all of it flowed into the build context
+  // and into builder-stage layers. The image must build web/ from source, so
+  // its generated outputs must never leak in from the host either.
+  it("excludes nested node_modules and the web build outputs from the context", () => {
+    const lines = entries();
+    expect(lines).toContain("**/node_modules");
+    expect(lines).toContain("web/build");
+    expect(lines).toContain("web/.svelte-kit");
+    expect(lines).toContain("web/.preview");
+    expect(lines).toContain("web/test-results");
+  });
 });

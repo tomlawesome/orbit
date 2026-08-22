@@ -62,21 +62,32 @@ function pdfBodyStructure() {
 }
 
 function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructure: unknown; source?: Buffer; size?: number; downloadError?: string }>) {
-  const fetches: string[] = [];
+  // Every UID runImapIngestionCycle ever asks for is now its own command
+  // (#460): a retry or a post-search fetch is a fetchOne(uid) call, and the
+  // new-mail sweep is a search({uid: range}) that returns matching UIDs
+  // rather than message bodies. Tracked separately so a test can assert on
+  // whichever half of the surface it cares about.
+  const searches: string[] = [];
+  const fetchedUids: string[] = [];
   const downloads: string[] = [];
   const client = {
     // Comfortably above every UID this fixture's fake mailboxes use, so
     // runImapIngestionCycle's "${nextUid}:*" range-collapse guard (#383)
-    // never skips these tests' fetch calls.
+    // never skips these tests' search/fetchOne calls.
     mailbox: { uidValidity: 77, uidNext: 1_000_000 },
     async connect() {},
     async logout() {},
     async getMailboxLock() { return { release() {} }; },
-    async *fetch(range: string) {
-      fetches.push(range);
-      const exact = /^(\d+):\1$/u.exec(range)?.[1];
-      const start = exact ? Number(exact) : Number(/^\d+/u.exec(range)?.[0] ?? 0);
-      for (const message of messages) if (exact ? message.uid === start : message.uid >= start) yield { ...message, headers: message.headers ? Buffer.from(message.headers) : undefined, internalDate: new Date() };
+    async search(query: { uid: string }) {
+      searches.push(query.uid);
+      const start = Number(/^\d+/u.exec(query.uid)?.[0] ?? 0);
+      return messages.filter((message) => message.uid >= start).map((message) => message.uid);
+    },
+    async fetchOne(uid: string) {
+      fetchedUids.push(uid);
+      const message = messages.find((candidate) => candidate.uid === Number(uid));
+      if (!message) return undefined;
+      return { ...message, headers: message.headers ? Buffer.from(message.headers) : undefined, internalDate: new Date() };
     },
     async download(uid: number, part: string) {
       downloads.push(`${uid}:${part}`);
@@ -85,7 +96,7 @@ function fakeClient(messages: Array<{ uid: number; headers: Buffer; bodyStructur
       return { content: syntheticPdf("mailbox attachment") };
     },
   };
-  return { client, fetches, downloads };
+  return { client, searches, fetchedUids, downloads };
 }
 
 describe("IMAP attachment processing PostgreSQL boundaries", () => {
@@ -133,7 +144,8 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       ]);
       setImapClientFactoryForTests(() => provider.client as never);
       await runImapIngestionCycle(config);
-      expect(provider.fetches).toEqual(["800:800", "801:*"]);
+      expect(provider.fetchedUids).toEqual(["800", "801"]);
+      expect(provider.searches).toEqual(["801:*"]);
       expect(provider.downloads).toEqual(["800:1"]);
       const [retry] = await getDb().select().from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailboxUid, 800), eq(imapIngestionMessages.mailboxUidValidity, "77")));
       const [ignored] = await getDb().select().from(imapIngestionMessages).where(and(eq(imapIngestionMessages.mailboxUid, 801), eq(imapIngestionMessages.mailboxUidValidity, "77")));
@@ -142,9 +154,14 @@ describe("IMAP attachment processing PostgreSQL boundaries", () => {
       expect(await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments).where(eq(imapIngestionAttachments.messageId, ignored.id))).toHaveLength(0);
 
       await getDb().update(imapIngestionMessages).set({ attachmentProcessingNextAttemptAt: new Date(0) }).where(eq(imapIngestionMessages.mailboxUid, 800));
-      provider.fetches.length = 0;
+      provider.fetchedUids.length = 0;
+      provider.searches.length = 0;
       await runImapIngestionCycle(config);
-      expect(provider.fetches).toEqual(["800:800", "802:*"]);
+      // Poison retry is still bounded to its own UID (800), and the search
+      // for new mail now starts past 801 (already durably recorded above)
+      // and finds nothing.
+      expect(provider.fetchedUids).toEqual(["800"]);
+      expect(provider.searches).toEqual(["802:*"]);
 
       const changedRecipient = fixture.users.owner.id;
       const changedAlias = imapRecipientAlias(changedRecipient, config);
