@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   verifyMigrationIntegrity: vi.fn(),
   verifyMigrationJournalComplete: vi.fn(),
   migrate: vi.fn(),
+  ensureMigrationRunsTable: vi.fn(),
+  recordMigrationOutcome: vi.fn(),
   workerCalls: [] as string[],
   /* Mirrors the real signature (code, detail?). It previously took a message
      and hardcoded code, which silently made every stubbed error look like a
@@ -76,6 +78,10 @@ vi.mock("@/db/migration-integrity", () => ({
   MigrationIntegrityError: mocks.MigrationIntegrityError,
 }));
 vi.mock("drizzle-orm/postgres-js/migrator", () => ({ migrate: mocks.migrate }));
+vi.mock("@/db/migration-outcome", () => ({
+  ensureMigrationRunsTable: mocks.ensureMigrationRunsTable,
+  recordMigrationOutcome: mocks.recordMigrationOutcome,
+}));
 vi.mock("@/server/notification-worker", () => ({ startNotificationWorker: () => mocks.workerCalls.push("notification") }));
 vi.mock("@/server/document-worker", () => ({ startDocumentWorker: () => mocks.workerCalls.push("document") }));
 vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
@@ -93,6 +99,8 @@ describe("instrumentation runtime boundary", () => {
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
     mocks.migrate.mockReset();
+    mocks.ensureMigrationRunsTable.mockReset();
+    mocks.recordMigrationOutcome.mockReset();
     mocks.getConfigurationProblems.mockReset();
     mocks.getConfigurationProblems.mockReturnValue([]);
     mocks.getDatabaseClient.mockClear();
@@ -160,6 +168,8 @@ describe("strict startup ordering", () => {
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
     mocks.migrate.mockReset();
+    mocks.ensureMigrationRunsTable.mockReset();
+    mocks.recordMigrationOutcome.mockReset();
     vi.stubEnv("MIGRATE_ON_START", "true");
     vi.stubEnv("WORKER_ENABLED", "true");
     mocks.validateStartupConfiguration.mockImplementation(() => mocks.workerCalls.push("configuration"));
@@ -168,7 +178,9 @@ describe("strict startup ordering", () => {
       return {};
     });
     mocks.verifyMigrationIntegrity.mockImplementation(() => mocks.workerCalls.push("precheck"));
+    mocks.ensureMigrationRunsTable.mockImplementation(() => mocks.workerCalls.push("ensure-outcome-table"));
     mocks.migrate.mockImplementation(() => mocks.workerCalls.push("migrate"));
+    mocks.recordMigrationOutcome.mockImplementation(() => mocks.workerCalls.push("record-outcome"));
     mocks.verifyMigrationJournalComplete.mockImplementation(() => mocks.workerCalls.push("postcheck"));
   });
 
@@ -179,7 +191,7 @@ describe("strict startup ordering", () => {
   it("validates, reports auth, checks and migrates before workers", async () => {
     const { registerNode } = await import("./instrumentation-node");
     await registerNode();
-    expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "migrate", "postcheck", "notification", "document", "imap", "receipt"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "ensure-outcome-table", "migrate", "record-outcome", "postcheck", "notification", "document", "imap", "receipt"]);
     expect(mocks.log.info).toHaveBeenCalledWith({ event: "startup.migration", state: "starting", action: "check_migrations" });
     expect(mocks.log.info).not.toHaveBeenCalledWith({ event: "application.startup", state: "ready", action: "none" });
   });
@@ -229,13 +241,13 @@ describe("strict startup ordering", () => {
     mocks.verifyMigrationIntegrity.mockResolvedValue(undefined);
     mocks.migrate.mockRejectedValueOnce(new Error("private SQL"));
     await expect(registerNode()).rejects.toThrow("migration_failed");
-    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "ensure-outcome-table", "record-outcome"]);
 
     mocks.workerCalls.length = 0;
     mocks.migrate.mockResolvedValue(undefined);
     mocks.verifyMigrationJournalComplete.mockRejectedValueOnce(new Error("private postcheck"));
     await expect(registerNode()).rejects.toThrow("migration_integrity");
-    expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
+    expect(mocks.workerCalls).toEqual(["configuration", "auth", "ensure-outcome-table", "record-outcome"]);
   });
 
   it("maps a database authentication failure to the bounded migration code", async () => {
@@ -285,6 +297,88 @@ describe("strict startup ordering", () => {
       action: "upgrade_from_supported_version",
       impact: "migration_blocked",
     });
+  });
+
+  it("ensures the outcome table before migrate() and records a succeeded run with a null reason (#528)", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    await registerNode();
+
+    expect(mocks.ensureMigrationRunsTable).toHaveBeenCalledTimes(1);
+    expect(mocks.recordMigrationOutcome).toHaveBeenCalledTimes(1);
+    const [, run] = mocks.recordMigrationOutcome.mock.calls[0] as [unknown, {
+      startedAt: Date;
+      finishedAt: Date;
+      outcome: string;
+      reason: string | null;
+    }];
+    expect(run.outcome).toBe("succeeded");
+    expect(run.reason).toBeNull();
+    expect(run.startedAt).toBeInstanceOf(Date);
+    expect(run.finishedAt).toBeInstanceOf(Date);
+    expect(run.finishedAt.getTime()).toBeGreaterThanOrEqual(run.startedAt.getTime());
+  });
+
+  it("records a failed run with reason=migration_failed when migrate() throws, and still exits fatally (#528)", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.migrate.mockRejectedValueOnce(new Error("private SQL detail"));
+
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+
+    expect(mocks.recordMigrationOutcome).toHaveBeenCalledTimes(1);
+    const [, run] = mocks.recordMigrationOutcome.mock.calls[0] as [unknown, {
+      outcome: string;
+      reason: string | null;
+    }];
+    expect(run.outcome).toBe("failed");
+    expect(run.reason).toBe("migration_failed");
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "migration_failed",
+      action: "check_migrations",
+      impact: "migration_blocked",
+    });
+  });
+
+  it("still runs and completes migrate() when ensuring the outcome table fails, without masking success", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.ensureMigrationRunsTable.mockRejectedValueOnce(new Error("permission denied for schema drizzle"));
+
+    await expect(registerNode()).resolves.toBeUndefined();
+
+    expect(mocks.migrate).toHaveBeenCalledTimes(1);
+    expect(mocks.workerCalls).toContain("document");
+    expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
+      .not.toContain("permission denied for schema drizzle");
+  });
+
+  it("still exits with the original migration_failed error when recording the outcome row itself fails", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.migrate.mockRejectedValueOnce(new Error("private SQL detail"));
+    mocks.recordMigrationOutcome.mockRejectedValueOnce(new Error("connection refused at 10.0.0.5"));
+
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "migration_failed",
+      action: "check_migrations",
+      impact: "migration_blocked",
+    });
+    expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
+      .not.toContain("connection refused at 10.0.0.5");
+  });
+
+  it("still starts workers when recording a succeeded outcome row fails", async () => {
+    const { registerNode } = await import("./instrumentation-node");
+    mocks.recordMigrationOutcome.mockRejectedValueOnce(new Error("connection refused at 10.0.0.5"));
+
+    await expect(registerNode()).resolves.toBeUndefined();
+
+    expect(mocks.workerCalls).toContain("document");
+    expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
+      .not.toContain("connection refused at 10.0.0.5");
   });
 });
 
