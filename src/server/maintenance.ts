@@ -291,18 +291,45 @@ export async function editMaintenanceMessage(
   return readMaintenanceState();
 }
 
-/** Ends currently active maintenance, clearing the published message. */
+/**
+ * Ends maintenance, clearing the published message.
+ *
+ * "Ends" means effective maintenance (ADR-0015 decision 5), so this both
+ * clears the singleton and cancels every due, unclaimed notice in the same
+ * transaction, and it succeeds when either of those is what holds the
+ * instance closed. Clearing the singleton alone would not reopen anything a
+ * due notice was pinning, and once #525's worker exists it would claim that
+ * stale notice and re-activate maintenance seconds after an administrator
+ * ended it.
+ *
+ * A notice that is not yet due survives: ending today's window is not a
+ * decision about next week's.
+ */
 export async function endMaintenance(actorUserId: string, expectedVersion: number): Promise<MaintenanceState> {
   requireUuid(actorUserId, "Actor");
   requireVersion(expectedVersion);
 
   await getDb().transaction(async (transaction) => {
     await requireActiveAdministrator(transaction, actorUserId);
+    const now = new Date();
+    const dueNotices = and(
+      isNull(maintenanceNotices.activatedAt),
+      isNull(maintenanceNotices.cancelledAt),
+      lte(maintenanceNotices.startsAt, now),
+    );
+
     const [current] = await transaction.select({ active: instanceMaintenance.active }).from(instanceMaintenance).limit(1);
-    if (!current?.active) {
+    const [pinnedByNotice] = await transaction
+      .select({ id: maintenanceNotices.id })
+      .from(maintenanceNotices)
+      .where(dueNotices)
+      .limit(1);
+    if (!current?.active && !pinnedByNotice) {
       throw new AppError("maintenance_not_active", "Maintenance is not currently active", 409);
     }
-    const now = new Date();
+
+    // The version gate first, so a stale token cancels nothing and writes no
+    // audit row — the transaction never reaches the statements below.
     const entityId = await updateSingletonVersion(transaction, expectedVersion, {
       active: false,
       message: null,
@@ -310,13 +337,18 @@ export async function endMaintenance(actorUserId: string, expectedVersion: numbe
       expectedEndAt: null,
       activatedAt: null,
     }, now);
+    const cancelled = await transaction.update(maintenanceNotices)
+      .set({ cancelledAt: now })
+      .where(dueNotices)
+      .returning({ id: maintenanceNotices.id });
+
     await transaction.insert(auditLog).values({
       householdId: null,
       actorUserId,
       entityType: "instance_maintenance",
       entityId,
       action: "maintenance_ended",
-      changes: { active: false },
+      changes: { active: false, cancelledNotices: cancelled.length },
     });
   });
 
