@@ -79,7 +79,7 @@ test.describe("maintenance recovery drill (#524)", () => {
     await ensureMaintenanceEnded(page);
   });
 
-  test("an administrator closes Orbit, signs in again while it is closed, and reopens it", async ({ page }) => {
+  test("an administrator closes Orbit, signs in again while it is closed, and reopens it", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
@@ -112,8 +112,18 @@ test.describe("maintenance recovery drill (#524)", () => {
        path, and it has to work with no session at all. */
     await page.goto("/workspace");
     await expect(page.locator(".maintenance-banner")).toBeVisible();
-    await page.getByRole("button", { name: "Open account menu" }).click();
-    await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+    /* The account control is desktop-only below 821px by ratified decision
+       (authenticated-accessibility.spec.ts). Mobile signs out through the
+       drawer, so the drill must walk the path the administrator actually has,
+       not the one the desktop has. */
+    if (isMobile) {
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await page.getByRole("button", { name: "Personalise" }).click();
+      await page.getByRole("button", { name: "Sign out securely" }).click();
+    } else {
+      await page.getByRole("button", { name: "Open account menu" }).click();
+      await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+    }
     await expect(page.getByRole("heading", { name: "Sign in to Orbit." })).toBeVisible();
 
     await signIn(page);
