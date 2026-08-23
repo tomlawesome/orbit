@@ -20,6 +20,15 @@ function jobBlock(job, nextJob) {
 }
 
 describe("exact-image publication workflow", () => {
+  it("can be dispatched on demand and re-evaluates when a label is applied (#572)", () => {
+    const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
+
+    expect(trigger).toContain("workflow_dispatch:");
+    // `labeled` is required for applying `ci: acceptance` to start a run by
+    // itself; without it a PR would need an unrelated push to re-trigger.
+    expect(trigger).toMatch(/types:\s*\n(\s*-\s*\w+\n)*\s*-\s*labeled\n/u);
+  });
+
   it("keeps ordinary pull requests on the static and unit lane", () => {
     const fast = jobBlock("fast", "supply_chain_source");
     const supplyChain = jobBlock("supply_chain_source", "integration");
@@ -28,9 +37,21 @@ describe("exact-image publication workflow", () => {
 
     expect(fast).toContain("run: bash scripts/test-backend.sh");
     expect(fast).toContain("github.event_name == 'push'");
-    expect(supplyChain).toContain("if: github.event_name == 'push'");
+    expect(supplyChain).toContain("github.event_name == 'push'");
     expect(integration).toContain("github.event_name == 'push'");
-    expect(smoke).toContain("if: ${{ false }}");
+    // An ordinary pull request carries neither a workflow_dispatch event nor
+    // the acceptance label, so it reaches none of the opt-in on-demand
+    // lanes below (#572).
+    expect(supplyChain).toContain("github.event_name == 'workflow_dispatch'");
+    expect(integration).toContain("github.event_name == 'workflow_dispatch'");
+    expect(supplyChain).toContain("ci: acceptance");
+    expect(integration).toContain("ci: acceptance");
+    expect(smoke).not.toContain("if: ${{ false }}");
+    expect(smoke).toContain("github.event_name == 'workflow_dispatch'");
+    expect(smoke).toContain("ci: acceptance");
+    // publish_preview already runs this exact step sequence once on push;
+    // smoke itself must never also fire on a push event.
+    expect(smoke).not.toContain("'push'");
   });
 
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
@@ -51,7 +72,13 @@ describe("exact-image publication workflow", () => {
     expect(fast).toContain("run: pnpm build");
     expect(integration).toContain("needs.changes.outputs.integration == 'true'");
     expect(integration).toContain("github.event_name == 'push'");
-    expect(smoke).toContain("if: ${{ false }}");
+    // The changed-paths filter is a cost filter, not a publication gate, so
+    // it stays in force even for the on-demand dispatch and label events
+    // that extend integration's event condition (#572).
+    expect(integration).toContain("github.event_name == 'workflow_dispatch'");
+    expect(integration).toContain("ci: acceptance");
+    expect(smoke).not.toContain("if: ${{ false }}");
+    expect(smoke).toContain("github.event_name == 'workflow_dispatch'");
     expect(workflow).not.toContain("paths:");
     expect(workflow).not.toContain("paths-ignore:");
   });
@@ -71,7 +98,7 @@ describe("exact-image publication workflow", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(supplyChain).toContain("name: Source dependency and secret policy");
-    expect(supplyChain).toContain("if: github.event_name == 'push'");
+    expect(supplyChain).toContain("github.event_name == 'push'");
     expect(supplyChain).toContain("contents: read");
     expect(supplyChain).not.toContain("packages: write");
     expect(supplyChain).not.toContain("id-token: write");
@@ -83,13 +110,18 @@ describe("exact-image publication workflow", () => {
     expect(preview).toContain("- supply_chain_source");
   });
 
-  it("defers pull-request container validation to the protected preview merge", () => {
+  it("defers ordinary pull-request container validation, but not a dispatch or the acceptance label", () => {
     const smoke = jobBlock("smoke", "publish_preview");
 
-    expect(smoke).toContain("if: ${{ false }}");
+    expect(smoke).not.toContain("if: ${{ false }}");
+    expect(smoke).toContain("github.event_name == 'workflow_dispatch'");
+    expect(smoke).toContain(
+      "contains(github.event.pull_request.labels.*.name, 'ci: acceptance')",
+    );
     expect(smoke).toContain("contents: read");
     expect(smoke).not.toContain("packages: write");
     expect(smoke).toContain("steps: &container_validation_steps");
+    expect(smoke).toContain("PUBLICATION_CHANNEL: ci");
   });
 
   it("publishes previews only from the protected preview or bounded hotfix lanes", () => {
