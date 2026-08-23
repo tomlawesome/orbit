@@ -517,3 +517,118 @@ export async function cancelMaintenanceNotice(
 
   return readMaintenanceState();
 }
+
+export interface MaintenanceTickResult {
+  /** The notice this call claimed, or null when there was nothing due to claim. */
+  activatedNoticeId: string | null;
+}
+
+export interface MaintenanceTickDependencies {
+  /**
+   * Test seam for the crash-before-commit contract: runs inside the
+   * transaction, after every write and before the commit. Precedent is the
+   * notification worker's `beforeProviderDispatch`.
+   */
+  beforeCommit?: () => Promise<void>;
+  /**
+   * Test seam for the exactly-once contract: runs after this transaction has
+   * chosen a due notice but before it tries to claim it, which is the only
+   * window in which two ticks can genuinely race. Holding one tick here while
+   * another completes is what proves the conditional claim — rather than the
+   * select's own filter — is what excludes the duplicate.
+   */
+  beforeClaim?: () => Promise<void>;
+}
+
+/**
+ * The durable half of scheduled activation (ADR-0013 decision 5, #525).
+ *
+ * Effective state already treats a due, unclaimed notice as active from the
+ * scheduled instant, on every process at once — the clock is the trigger, not
+ * this tick. What this adds is the durable transition behind it: claim the
+ * notice, copy it into the singleton, and audit it exactly once.
+ *
+ * Exclusion is the conditional claim alone. The house worker pattern of an
+ * owner token and a lease expiry earns its complexity on long-running work;
+ * here the claim and the completion are the same transaction, so a crash
+ * before commit leaves nothing durable and the next tick simply retries.
+ *
+ * Deliberately no expected-version gate: the worker's authority is the claim.
+ * A concurrent administrator mutation either serialises behind the singleton
+ * row lock or finds its own token stale and re-reads.
+ */
+export async function activateDueMaintenanceNotice(
+  dependencies: MaintenanceTickDependencies = {},
+): Promise<MaintenanceTickResult> {
+  return getDb().transaction(async (transaction) => {
+    // Database time throughout, so processes with skewed clocks cannot
+    // disagree about whether a notice is due.
+    const [due] = await transaction
+      .select({ id: maintenanceNotices.id })
+      .from(maintenanceNotices)
+      .where(and(
+        isNull(maintenanceNotices.activatedAt),
+        isNull(maintenanceNotices.cancelledAt),
+        lte(maintenanceNotices.startsAt, sql`now()`),
+      ))
+      .orderBy(asc(maintenanceNotices.startsAt), asc(maintenanceNotices.id))
+      .limit(1);
+    if (!due) return { activatedNoticeId: null };
+
+    await dependencies.beforeClaim?.();
+
+    const [claimed] = await transaction.update(maintenanceNotices)
+      .set({ activatedAt: sql`now()` })
+      .where(and(
+        eq(maintenanceNotices.id, due.id),
+        isNull(maintenanceNotices.activatedAt),
+        isNull(maintenanceNotices.cancelledAt),
+        lte(maintenanceNotices.startsAt, sql`now()`),
+      ))
+      .returning({
+        id: maintenanceNotices.id,
+        message: maintenanceNotices.message,
+        startsAt: maintenanceNotices.startsAt,
+        expectedEndAt: maintenanceNotices.expectedEndAt,
+        activatedAt: maintenanceNotices.activatedAt,
+      });
+    // Zero rows means another process claimed it between the read and the
+    // update. Stop: no singleton write, no audit row, no duplicate.
+    if (!claimed) return { activatedNoticeId: null };
+
+    const now = claimed.activatedAt ?? new Date();
+    const [updated] = await transaction.update(instanceMaintenance)
+      .set({
+        active: true,
+        message: claimed.message,
+        messagePublishedAt: now,
+        expectedEndAt: claimed.expectedEndAt,
+        activatedAt: now,
+        version: sql`${instanceMaintenance.version} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(instanceMaintenance.singleton, true))
+      .returning({ id: instanceMaintenance.id });
+    if (!updated) {
+      throw new AppError("maintenance_state_missing", "Maintenance state has not been initialized", 500);
+    }
+
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: null,
+      entityType: "instance_maintenance",
+      entityId: claimed.id,
+      action: "maintenance_activated_scheduled",
+      changes: {
+        active: true,
+        message: claimed.message,
+        startsAt: claimed.startsAt.toISOString(),
+        expectedEndAt: claimed.expectedEndAt?.toISOString() ?? null,
+      },
+    });
+
+    await dependencies.beforeCommit?.();
+
+    return { activatedNoticeId: claimed.id };
+  });
+}
