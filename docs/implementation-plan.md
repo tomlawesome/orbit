@@ -15,8 +15,10 @@ feature status.
 - Detailed product direction: [feature register](feature-register.md).
 - Priority, ownership and delivery status: the
   [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4),
-  with GitHub milestones as the release grouping mirrored by the board's Slice
-  field (owner decision, issue #502).
+  with GitHub milestones as capability slices (M0 onwards) mirrored by the
+  board's Slice field, and one milestone per version release moment holding
+  only its promote-to-main issue (owner decision, 2026-08-23, recorded on
+  issue #502).
 
 Historical delivery waves for v1.0–v1.2 were completed under the superseded
 plan structure; their evidence lives in the closed GitHub issues, merged pull
@@ -48,12 +50,17 @@ flight.
 
 ## Phased roadmap
 
-Delivery is organised as five phases. Each phase makes the next one cheaper;
-GitHub milestones named for the phases group the work, the
-[Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
+Delivery is organised as five phases. Each phase makes the next one cheaper.
+The [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
 owns live status, and the
 [engineering baseline](engineering-baseline.md) rows moving to proven states
 are the exit evidence.
+
+The phase *milestones* are retired (owner decision, 2026-08-23, recorded on
+issue #502). A phase is no more finishable than a release, so milestones now
+name capability slices with a definition of done. The phases below remain the
+reasoning about sequencing and what makes what cheaper; they are no longer the
+tracker's shape, and any remaining phase work lives in a capability milestone.
 
 ### Phase 0 — Decide and delete
 
@@ -126,9 +133,9 @@ state.
   here, surfaced through the launcher's Repair flow.
 - **Phase 0** is delivered by the governance-slimdown pull request that
   introduces this plan revision.
-- **Phase 1** starts with the guarantee catalogue and the exemplar harness
-  scenario; its issues live in the `Phase 1 — Ops acceptance harness`
-  milestone.
+- **Phase 1** started with the guarantee catalogue and the exemplar harness
+  scenario. Its milestone has been retired along with the other phase
+  milestones.
 - **Deferred portfolio work:**
   [#75](https://github.com/tomlawesome/orbit/issues/75) awaits an explicit
   destination-repository decision.
