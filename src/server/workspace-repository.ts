@@ -14,6 +14,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
 import {
@@ -93,6 +94,9 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
       activeHouseholdId: null,
       households: [],
       recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
+      /* §11 (#453): the labelled sky — id and name are the entire surface a
+         non-member sees, with their own pending-request flags. */
+      visibleHouseholds: await listVisibleHouseholds(userId),
     });
   }
 
@@ -264,6 +268,28 @@ export async function applyWorkspaceCommand(
         };
       }));
       await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
+      /*
+       * A system coming into existence is the one household event that had no
+       * audit row (§15's arrival made it a reader-facing act, and #410's create
+       * card is now the ordinary way it happens). Written inside the same
+       * transaction as the insert, so the trail cannot exist without the
+       * household or the household without the trail. `entityType` is
+       * "household" and not "item", so readWorkspace's item-activity feed —
+       * which filters on "item" — never sees it.
+       */
+      await transaction.insert(auditLog).values({
+        householdId,
+        actorUserId: userId,
+        entityType: "household",
+        entityId: householdId,
+        action: "household_created",
+        changes: {
+          name: command.household.name,
+          timezone: command.household.timezone,
+          currency: command.household.currency,
+          sections: command.household.sections.map((section) => section.name),
+        },
+      });
     });
     return readWorkspace(userId, sessionId, householdId);
   }

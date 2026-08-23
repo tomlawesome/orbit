@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
@@ -51,19 +51,60 @@ function runPlain(args, cwd, envOverrides = {}) {
   });
 }
 
+/*
+ * Driving the pty: why runPty holds stdin open.
+ *
+ * This helper used to pass `input` to spawnSync, which closes stdin as soon
+ * as the string is written. Under `script` that closes the pty master, so the
+ * widget's next read returns EOF instead of blocking. #512 diagnosed the same
+ * defect in installer-ui.test.mjs; this file was never brought across, and it
+ * failed intermittently on CI ever since.
+ *
+ * It matters most where the *absence* of a byte carries meaning.
+ * installer_ui_read_key reads the first byte, then does a short second read to
+ * tell a lone Escape from an arrow sequence. Its failure path recognises only
+ * a timeout (installer-ui.sh:174); a genuine EOF is a read error and leaves
+ * through installer_ui_select's status=1 branch rather than the Escape branch
+ * that yields 130. Whether the pty tore down before `script` forwarded the
+ * byte decided which happened, so the lone-Escape test raced.
+ *
+ * Holding stdin open for the life of the child makes silence read as idleness
+ * rather than end-of-input, which is what a real terminal does. The widget
+ * then leaves through its own logic in every case, so no test depends on EOF
+ * to terminate. The timeout below is a backstop for a genuine hang, and says
+ * so rather than surfacing as a bare null status.
+ */
 function runPty(cwd, input, args = []) {
-  return spawnSync(
-    "script",
-    ["-qeE", "never", "-c", `bash '${simulationScript}' ${args.join(" ")}`, "/dev/null"],
-    {
-      cwd,
-      encoding: "utf8",
-      input,
-      timeout: 10000,
-      killSignal: "SIGKILL",
-      env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
-    },
-  );
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qeE", "never", "-c", `bash '${simulationScript}' ${args.join(" ")}`, "/dev/null"],
+      {
+        cwd,
+        env: { PATH: `${fakeBinDir()}:${process.env.PATH}`, TERM: "xterm" },
+      },
+    );
+
+    let stdout = "";
+    let timedOut = false;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.on("error", reject);
+
+    // Written once, then left open: never child.stdin.end().
+    child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
+    child.stdin.write(input);
+
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, 10000);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(new Error(`runPty timed out after 10s; stdout so far:\n${stdout}`));
+        return;
+      }
+      resolve({ status, stdout });
+    });
+  });
 }
 
 describe("scripts/installer-simulation.sh", () => {
@@ -147,30 +188,30 @@ describe("scripts/installer-simulation.sh", () => {
     expect(result.stdout).toContain("No deployment occurred.");
   });
 
-  it("cancels with a lone Escape at the top-level menu and restores the terminal", () => {
+  it("cancels with a lone Escape at the top-level menu and restores the terminal", async () => {
     const cwd = scratchDir();
     const before = readdirSync(cwd);
 
-    const result = runPty(cwd, "\x1b");
+    const result = await runPty(cwd, "\x1b");
 
     expect(result.status).toBe(130);
     expect(result.stdout).toContain("Simulation: Greetings");
     expect(readdirSync(cwd)).toEqual(before);
   });
 
-  it("exits cleanly from the top-level Exit choice", () => {
+  it("exits cleanly from the top-level Exit choice", async () => {
     const cwd = scratchDir();
 
-    const result = runPty(cwd, "\x1b[B\x1b[B\x1b[B\r");
+    const result = await runPty(cwd, "\x1b[B\x1b[B\x1b[B\r");
 
     expect(result.status).toBe(130);
   });
 
-  it("keeps Repair presentation-only", () => {
+  it("keeps Repair presentation-only", async () => {
     const cwd = scratchDir();
     const before = readdirSync(cwd);
 
-    const result = runPty(cwd, "\x1b[B\x1b[B\r");
+    const result = await runPty(cwd, "\x1b[B\x1b[B\r");
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("repair_unavailable");
@@ -178,12 +219,12 @@ describe("scripts/installer-simulation.sh", () => {
     expect(readdirSync(cwd)).toEqual(before);
   });
 
-  it("never echoes or persists the synthetic hidden-input exercise", () => {
+  it("never echoes or persists the synthetic hidden-input exercise", async () => {
     const cwd = scratchDir();
     const secret = "discard-me-please";
     const before = readdirSync(cwd);
 
-    const result = runPty(cwd, `\r\rnote-value\r${secret}\r\r\r`);
+    const result = await runPty(cwd, `\r\rnote-value\r${secret}\r\r\r`);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("note-value");
@@ -192,18 +233,18 @@ describe("scripts/installer-simulation.sh", () => {
     expect(readdirSync(cwd)).toEqual(before);
   });
 
-  it("rejects a hostile bracketed-paste payload during the text exercise without any side effect", () => {
+  it("rejects a hostile bracketed-paste payload during the text exercise without any side effect", async () => {
     const cwd = scratchDir();
     const before = readdirSync(cwd);
 
-    const result = runPty(cwd, "\r\r\x1b[200~first\r\nsecond\x1b[201~\r");
+    const result = await runPty(cwd, "\r\r\x1b[200~first\r\nsecond\x1b[201~\r");
 
     expect(result.status).toBe(2);
     expect(result.stdout).not.toContain("first");
     expect(readdirSync(cwd)).toEqual(before);
   });
 
-  it("presents every fixed representative failure scenario without a real error", () => {
+  it("presents every fixed representative failure scenario without a real error", async () => {
     const cwd = scratchDir();
     const scenarios = [
       ["\r\rnote\rsecret\r\r\x1b[B\r", "database-auth-migration"],
@@ -212,7 +253,7 @@ describe("scripts/installer-simulation.sh", () => {
     ];
 
     for (const [input, expectedReason] of scenarios) {
-      const result = runPty(cwd, input);
+      const result = await runPty(cwd, input);
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(expectedReason);
       expect(result.stdout).toContain("No deployment occurred.");

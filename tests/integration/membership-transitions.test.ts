@@ -1,9 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, memberships, users } from "@/db/schema";
+import { auditLog, dueEvents, items, memberships, users } from "@/db/schema";
 import { DELETE as removeMember, GET as listMembers, PATCH as transferOwnership, POST as addMember } from "@/app/api/households/[householdId]/members/route";
 import { GET as readWorkspace } from "@/app/api/workspace/route";
+import { POST as requestToJoin } from "@/app/api/households/[householdId]/join-requests/route";
 import { GET as listDocuments } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import {
@@ -63,10 +64,46 @@ async function waitForAdvisoryLockWaiters(minimum: number): Promise<void> {
   throw new Error(`Expected ${minimum} advisory-lock waiter(s)`);
 }
 
+/* Distinctive event data planted before the reads below, so "no event crosses"
+   is an assertion about something that actually exists to cross. */
+const PLANTED_COST_MINOR = 424_242;
+const PLANTED_DUE_DATE = "2031-07-19";
+
+/** Gives the household one real, scheduled, priced event to leak. */
+async function plantRealEvent(fixture: IntegrationFixture): Promise<string> {
+  const [planted] = await getDb().update(items)
+    .set({ costMinor: PLANTED_COST_MINOR, renewalDate: PLANTED_DUE_DATE })
+    .where(eq(items.id, fixture.item.id))
+    .returning({ title: items.title });
+  await getDb().insert(dueEvents).values({
+    householdId: fixture.household.id,
+    itemId: fixture.item.id,
+    kind: "renewal",
+    dueDate: PLANTED_DUE_DATE,
+  });
+  return planted.title;
+}
+
+/** The whole entry a workspace read carried for one household, or undefined. */
+function visibleEntry(payload: JsonBody, householdId: string) {
+  const workspace = payload.workspace as { visibleHouseholds?: Array<Record<string, unknown>> } | undefined;
+  return (workspace?.visibleHouseholds ?? []).find((row) => row.id === householdId);
+}
+
+/**
+ * The ruled boundary (#489). A former member is simply a non-member, so §11
+ * discoverability applies to them like any signed-in stranger: they see the
+ * household's NAME and whether they may ask to join, and that is the whole
+ * surface. Real events — item titles, due dates, amounts, document names,
+ * member and entry counts — belong to real members, on the dial and in the
+ * manifest alike, and never cross to a non-member.
+ */
 async function expectFormerMemberPrivacy(
   fixture: IntegrationFixture,
   memberSession: IntegrationSession,
 ) {
+  const itemTitle = await plantRealEvent(fixture);
+
   const membersResponse = await listMembers(
     requestForSession(memberSession, "http://127.0.0.1:3000/api/households/members"),
     householdContext(fixture.household.id),
@@ -77,8 +114,54 @@ async function expectFormerMemberPrivacy(
   const workspaceResponse = await readWorkspace(requestForSession(memberSession, "http://127.0.0.1:3000/api/workspace"));
   expect(workspaceResponse.status).toBe(200);
   const workspacePayload = await body(workspaceResponse);
-  expect(workspacePayload.workspace).toMatchObject({ households: [] });
-  expect(JSON.stringify(workspacePayload)).not.toContain(fixture.household.name);
+  expect(workspacePayload.workspace).toMatchObject({ householdLanding: "choose", households: [] });
+
+  /* The name is visible, and toEqual (not toMatchObject) is the point: an id,
+     a name and a joinability flag are the ENTIRE entry. */
+  expect(visibleEntry(workspacePayload, fixture.household.id)).toEqual({
+    id: fixture.household.id,
+    name: fixture.household.name,
+    requested: false,
+  });
+  /* Nothing beyond the name and joinability — not the planted event, not the
+     item that carries it, not a count of what is inside. */
+  const serialized = JSON.stringify(workspacePayload);
+  for (const withheld of [
+    itemTitle,
+    fixture.item.id,
+    fixture.document.displayName,
+    PLANTED_DUE_DATE,
+    /* Field names, not values: an amount is digits, and digits collide with
+       the hex of every uuid in the payload. The field must be absent. */
+    "costMinor",
+    "dueDate",
+    "memberCount",
+    "items",
+    "sections",
+    "activities",
+  ]) {
+    expect(serialized).not.toContain(withheld);
+  }
+
+  /* Joinability is the other half of the ruling: they may ask back in, and
+     the answer carries the request's own identity and nothing of the
+     household but the id they already asked about. */
+  const joinResponse = await requestToJoin(
+    requestForSession(memberSession, `http://127.0.0.1:3000/api/households/${fixture.household.id}/join-requests`, { method: "POST" }),
+    householdContext(fixture.household.id),
+  );
+  expect(joinResponse.status).toBe(200);
+  expect((await body(joinResponse)).request).toEqual({
+    id: expect.any(String),
+    householdId: fixture.household.id,
+    status: "pending",
+  });
+  const afterAsking = await readWorkspace(requestForSession(memberSession, "http://127.0.0.1:3000/api/workspace"));
+  expect(visibleEntry(await body(afterAsking), fixture.household.id)).toEqual({
+    id: fixture.household.id,
+    name: fixture.household.name,
+    requested: true,
+  });
 
   const documentsResponse = await listDocuments(
     requestForSession(memberSession, "http://127.0.0.1:3000/api/households/items/documents"),

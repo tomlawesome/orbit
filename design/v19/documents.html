@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — documents: the belt, unrolled (proposal, issue #452)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* On the dial, documents are the belt around a body. This screen is the
+     belt unrolled: every file, its provenance, and the body it belongs to.
+     Counts and sizes are the archive's own truth — nothing decorative. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    /* #491: the text-grade companions — ink that carries WORDS. Carried from
+       web/src/lib/packs.css, where the measurements are. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --ink-quiet:var(--ink-faint); --accent-text:#14507b; --ok-text:#0f5735;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-faint);text-decoration:none}
+  .back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent-text)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  .page{position:relative;z-index:2;max-width:760px;margin:0 auto;padding:96px 24px 120px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+  .findrow{margin:24px 0 4px}
+  .findrow input{background:none;border:0;outline:0;width:100%;
+                 border-bottom:1px solid var(--line);
+                 font:12.5px var(--mono);color:var(--ink);padding:8px 4px;
+                 transition:border-color .25s}
+  .findrow input::placeholder{color:var(--ink-faint)}
+  .findrow input:focus{border-color:var(--accent)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 8px}
+  .chip{font:11.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+        border:1px solid var(--line);border-radius:99px;padding:6px 14px;cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--ink)}
+  .chip[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
+  .facts{display:flex;gap:18px;flex-wrap:wrap;font:11px var(--mono);color:var(--ink-faint);
+         letter-spacing:.06em;margin:18px 0 8px;padding:0 2px}
+  .facts b{color:var(--ok-text);font-weight:500}
+
+  .group{margin-top:28px}
+  .group h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:10px;padding-left:4px}
+  .doc{display:flex;align-items:center;gap:15px;border-radius:14px;
+       padding:13px 18px;margin-bottom:6px;border:1px solid var(--line-soft);
+       background:var(--panel);backdrop-filter:blur(8px);cursor:pointer}
+  .doc:hover{background:var(--panel-raised);border-color:var(--line)}
+  .doc .thumb{flex:none;width:38px;height:46px;border-radius:6px;position:relative;
+              border:1px solid var(--line);background:var(--panel-raised);
+              display:grid;place-items:center;font:10px var(--mono);color:var(--ink-faint)}
+  .doc .thumb::before{content:"";position:absolute;left:7px;right:7px;top:9px;height:1px;
+                      background:var(--line);box-shadow:0 5px 0 var(--line),0 10px 0 var(--line-soft),0 15px 0 var(--line-soft)}
+  .doc .thumb small{position:absolute;bottom:3px;font-size:8px;letter-spacing:.08em}
+  .doc .body{flex:1;min-width:0}
+  .doc .body b{display:block;font-size:14px;font-weight:520;font-family:var(--mono)}
+  .doc .body span{font:11px var(--mono);color:var(--ink-mid)}
+  .doc .body .clean{color:var(--ok-text)}
+  .doc .via{color:var(--accent-text)}
+  .orbitchip{flex:none;display:flex;align-items:center;gap:7px;font:11px var(--mono);
+             color:var(--ink-mid);border:1px solid var(--line);border-radius:99px;padding:5px 12px}
+  .orbitchip i{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+  .orbitchip:hover{border-color:var(--accent);color:var(--ink)}
+  .orbitchip.loose{border-style:dashed;color:var(--accent-text)}
+  .sys{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 0 40px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<a class="back" href="home.html">← YOUR SKY</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setSwatch('starchart',this)"></button>
+    <button style="background:#05070d" title="after dark" aria-pressed="false" onclick="setSwatch('afterdark',this)"></button>
+    <button style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setSwatch('atlas',this)"></button>
+    <button style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setSwatch('dawn',this)"></button>
+    <button style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setSwatch('retrograde',this)"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <h1>Documents</h1>
+    <div class="sub">the belt, unrolled · every file, its origin, and the body it circles</div>
+  </header>
+
+  <div class="findrow">
+    <input placeholder="find a document — name, item, or system" aria-label="Search documents">
+  </div>
+  <div class="filters" role="group" aria-label="Filter documents">
+    <button class="chip" aria-pressed="true">all systems</button>
+    <button class="chip" aria-pressed="false">Lawson Home</button>
+    <button class="chip" aria-pressed="false">via the relay</button>
+    <button class="chip" aria-pressed="false">not yet attached</button>
+  </div>
+  <div class="facts">
+    <span>5 documents</span><span>1.4&nbsp;MB held</span>
+    <span>all <b>encrypted</b></span><span>all <b>scanned clean</b></span>
+  </div>
+
+  <div class="group">
+    <h3>This month</h3>
+    <div class="doc">
+      <span class="thumb" aria-hidden="true"><small>PDF</small></span>
+      <div class="body">
+        <b>policy-schedule.pdf</b>
+        <span>added 11 Aug · 812&nbsp;KB · <span class="clean">scanned clean</span> · <span class="via">via your relay</span></span>
+      </div>
+      <span class="orbitchip loose" title="Awaiting review on your inbox"><i></i>suggested: Home insurance renewal</span>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Earlier this year</h3>
+    <div class="doc">
+      <span class="thumb" aria-hidden="true"><small>PDF</small></span>
+      <div class="body">
+        <b>service-checklist.pdf</b>
+        <span>added 12 Jun · 88&nbsp;KB · <span class="clean">scanned clean</span></span>
+      </div>
+      <span class="orbitchip" style="color:var(--ok)"><i></i>Car full service</span>
+      <span class="sys">LAWSON HOME</span>
+    </div>
+    <div class="doc">
+      <span class="thumb" aria-hidden="true"><small>PDF</small></span>
+      <div class="body">
+        <b>service-invoice-2026.pdf</b>
+        <span>added 12 Jun · 240&nbsp;KB · <span class="clean">scanned clean</span></span>
+      </div>
+      <span class="orbitchip" style="color:var(--ok)"><i></i>Car full service</span>
+      <span class="sys">LAWSON HOME</span>
+    </div>
+    <div class="doc">
+      <span class="thumb" aria-hidden="true"><small>PDF</small></span>
+      <div class="body">
+        <b>Service history</b>
+        <span>added 12 Jun · 88&nbsp;KB · <span class="clean">scanned clean</span></span>
+      </div>
+      <span class="orbitchip" style="color:var(--warm)"><i></i>Car MOT — Volvo V60</span>
+      <span class="sys">LAWSON HOME</span>
+    </div>
+    <div class="doc">
+      <span class="thumb" aria-hidden="true"><small>PDF</small></span>
+      <div class="body">
+        <b>MOT certificate 2025</b>
+        <span>added 12 Jun · 240&nbsp;KB · <span class="clean">scanned clean</span></span>
+      </div>
+      <span class="orbitchip" style="color:var(--warm)"><i></i>Car MOT — Volvo V60</span>
+      <span class="sys">LAWSON HOME</span>
+    </div>
+  </div>
+</div>
+
+<footer>orbit · documents · issue #452 · the chip is the document’s body, wearing its dial colour · dashed means not yet in orbit · nothing leaves your instance</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setSwatch(name, btn){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of btn.parentElement.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b === btn));
+}
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+</script>
+</body></html>

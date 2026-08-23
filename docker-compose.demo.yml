@@ -1,0 +1,33 @@
+# Demo overlay: makes the disposable acceptance OIDC provider reachable from
+# a browser on the owner's LAN (the base acceptance overlay binds it to
+# loopback and names it by container, which only other containers can
+# resolve). Compose with: base + mail + acceptance + THIS, last.
+# The provider's certificate is self-signed and regenerated per start — the
+# browser will warn once at https://192.168.11.30:4443 and must be told to
+# proceed, after which the login round-trip works from any LAN device.
+#
+# The app itself is served https://192.168.11.30:3443 via the demo-tls proxy
+# (APP_URL's own law requires HTTPS off loopback). Generate its throwaway
+# cert before first bring-up (never committed):
+#   openssl req -x509 -newkey rsa:2048 -keyout demo-tls/demo.key \
+#     -out demo-tls/demo.crt -days 30 -nodes -subj "/CN=192.168.11.30" \
+#     -addext "subjectAltName=IP:192.168.11.30"
+services:
+  orbit-app:
+    environment:
+      APP_URL: https://192.168.11.30:3443
+      OIDC_ISSUER: https://192.168.11.30:4443/
+      OIDC_CALLBACK_URL: https://192.168.11.30:3443/api/auth/callback
+  orbit-oidc:
+    environment:
+      TEST_OIDC_ISSUER: https://192.168.11.30:4443/
+    ports: !override
+      - "0.0.0.0:4443:4443"
+  demo-tls:
+    image: nginx:alpine
+    volumes:
+      - ./demo-tls:/etc/demo:ro
+      - ./demo-tls/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "0.0.0.0:3443:3443"
+      - "192.168.11.30:3000:3080"

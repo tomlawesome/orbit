@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { listInstanceUsers, setInstanceAdministrator, setInstanceUserDisabled } from "@/server/admin-repository";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,7 @@ const disabledUpdateSchema = z.object({
 
 export async function GET(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const session = await requireSession(request, getAuthConfig());
     const users = await listInstanceUsers(session.user.id);
     return NextResponse.json({ users }, { headers: { "Cache-Control": "no-store" } });
@@ -28,6 +30,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
@@ -45,6 +48,7 @@ export async function PUT(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canApplyCanonicalState,
   fetchPublicReadiness,
   fetchSession,
   fetchWorkspace,
@@ -26,6 +27,7 @@ afterEach(() => {
 describe("workspace startup boundary", () => {
   it.each([
     [200, { status: "ready" }, "ready"],
+    [200, { status: "maintenance" }, "maintenance"],
     [503, { status: "degraded" }, "degraded"],
   ] as const)("accepts only the public health contract (%s)", async (status, body, expected) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(status, body)));
@@ -36,12 +38,25 @@ describe("workspace startup boundary", () => {
   it.each([
     [200, { status: "degraded" }],
     [503, { status: "ready" }],
+    [503, { status: "maintenance" }],
     [503, { error: hostileDetail }],
     [500, { status: "degraded" }],
   ] as const)("does not treat an unknown health response as startup", async (status, body) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(status, body)));
 
     await expect(fetchPublicReadiness()).rejects.toMatchObject({ category: "schema" });
+  });
+
+  it("proceeds through maintenance like ready: the guarded APIs decide, not the boot gate", async () => {
+    let checks = 0;
+    await expect(waitForStartupReadiness(
+      async () => {
+        checks += 1;
+        return "maintenance";
+      },
+      async () => {},
+    )).resolves.toBeUndefined();
+    expect(checks).toBe(1);
   });
 
   it("recovers after confirmed degraded readiness without overlapping checks", async () => {
@@ -124,5 +139,29 @@ describe("workspace startup boundary", () => {
 
     expect(message).not.toContain(hostileDetail);
     expect(message).not.toMatch(/provider|database|environment|postgres|token/i);
+  });
+});
+
+describe("canonical state application (#388)", () => {
+  const current = {
+    generation: 3, latestGeneration: 3,
+    sequence: 7, latestSequence: 7,
+    sessionMatches: true,
+  };
+
+  it("applies a response that is still the newest command", () => {
+    expect(canApplyCanonicalState(current)).toBe(true);
+  });
+
+  it("refuses a response overtaken by a newer command", () => {
+    // The reader kept typing, which sent another command. This older response
+    // carries a workspace without those keystrokes; applying it would undo
+    // them, and the newer command's own response will carry the truth.
+    expect(canApplyCanonicalState({ ...current, latestSequence: 8 })).toBe(false);
+  });
+
+  it("refuses a response from a previous session or initialisation", () => {
+    expect(canApplyCanonicalState({ ...current, latestGeneration: 4 })).toBe(false);
+    expect(canApplyCanonicalState({ ...current, sessionMatches: false })).toBe(false);
   });
 });

@@ -1,0 +1,91 @@
+/*
+ * New entry — lifted from design/family/create.html and owned here from that
+ * point on. The mockup was the input to this file, not a live dependency of
+ * it: changes are made here and judged in the running app.
+ *
+ * Not scoped to a component. The design styles `body` and depends on state
+ * selectors (`.disclose.open`, `.field.sugg .tag`) that Svelte would prune as
+ * unused, so this stays plain global CSS, linked alongside family.css.
+ */
+
+
+/* html body, not body: family.css loads via <link> AFTER this bundled sheet,
+   so at equal specificity its body{overflow:hidden} wins and a card taller
+   than the viewport cannot scroll (owner hit this adding a document). */
+html body{overflow-y:auto;overflow-x:hidden}
+.sky svg{opacity:.55}
+.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;justify-content:center;
+       padding:64px 20px 96px}
+.card{width:100%;max-width:600px;padding:34px 38px}
+.card h2{font:600 22px var(--display)}
+.sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 26px}
+
+.field{margin-bottom:15px}
+.field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+             text-transform:uppercase;margin:0 0 6px}
+.field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
+       border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+.field input::placeholder{color:var(--ink-faint)}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent)}
+.field textarea{resize:vertical;line-height:1.5}
+.field.mono input{font-family:var(--mono)}
+
+/* The heading IS the name (owner, 2026-08-15): you edit the title of the
+   card itself, so there is no separate name box. Styled as the card's h2. */
+.name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+
+.types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+              border-radius:99px;padding:7px 14px;cursor:pointer;letter-spacing:.02em}
+.types button:hover{color:var(--ink)}
+.types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
+
+.dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:22px;text-align:center;
+          cursor:pointer;transition:border-color .2s,background .2s}
+.dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04);outline:none}
+.dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
+.dropzone .dz-hint{font:10px var(--mono);color:var(--ink-faint);margin-top:7px;letter-spacing:.06em}
+
+.disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .4s ease,opacity .3s ease}
+.disclose.open{grid-template-rows:1fr;opacity:1}
+.disclose-inner{overflow:hidden}
+.disclose-content{padding-top:24px;margin-top:22px;border-top:1px solid var(--line-soft)}
+
+.docnote{display:none;font:10.5px var(--mono);color:var(--ink-faint);line-height:1.6;margin:0 0 18px}
+.docnote.show{display:block}
+
+.row2{display:flex;gap:14px}
+.row2>.field{flex:1;min-width:0}
+.daterow{display:flex;gap:14px}
+.daterow .f-date{flex:1.4}
+.daterow .f-recur{flex:1}
+
+.prefix-wrap{position:relative}
+.prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
+                      color:var(--ink-mid);font-size:13.5px;pointer-events:none}
+.prefix-wrap input{padding-left:24px}
+
+.field.sugg input,.field.sugg select{border-left:3px solid var(--accent)}
+.field .tag{display:none;align-items:center;gap:8px;margin-top:7px;font:10px var(--mono);
+            color:var(--accent-text);letter-spacing:.04em}
+.field.sugg .tag{display:flex}
+.field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
+                   border-radius:6px;padding:2px 9px;cursor:pointer}
+.field .tag button:hover{filter:brightness(1.12)}
+
+.save-row{display:flex;align-items:center;gap:18px;margin-top:24px}
+.btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
+             font:600 14px var(--display);color:var(--bg);background:var(--accent)}
+.btn-primary:hover{filter:brightness(1.05)}
+.cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
+.cancel-link:hover{color:var(--ink-mid)}
+
+/* Interim, and the only rule on this screen the design did not draw: the save
+   has no pending or failure state in design/family/create.html, and a form
+   that can fail silently is worse than one carrying a line of type. Typeset as
+   the form's own small print, not as an alarm — recorded as an open design
+   question rather than a decision taken here. */
+.save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
+.save-note:empty{display:none}

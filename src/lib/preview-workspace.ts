@@ -34,6 +34,32 @@ const WORKSPACE_FAILURE_MESSAGES: Record<WorkspaceFailureCategory, string> = {
   startup_unavailable: "Orbit is temporarily unavailable. Ask your administrator to check the service, then try again.",
 };
 
+/**
+ * Whether a command's response may still be applied to local state (#388).
+ *
+ * A command's response carries the whole canonical workspace, so applying a
+ * stale one overwrites everything the reader has done since — including
+ * keystrokes typed while the request was in flight. Three things can make a
+ * response stale, and only the first was previously checked:
+ *
+ *   - the session ended, or the workspace was re-initialised (generation)
+ *   - a NEWER command has since been sent, whose own response will carry the
+ *     newer truth; applying this older one would undo it
+ *
+ * Last write wins by send order, which is the order the server applied them.
+ */
+export function canApplyCanonicalState(state: {
+  generation: number;
+  latestGeneration: number;
+  sequence: number;
+  latestSequence: number;
+  sessionMatches: boolean;
+}): boolean {
+  return state.sessionMatches
+    && state.generation === state.latestGeneration
+    && state.sequence === state.latestSequence;
+}
+
 export function getWorkspaceFailureMessage(category: WorkspaceFailureCategory): string {
   return WORKSPACE_FAILURE_MESSAGES[category];
 }
@@ -71,7 +97,7 @@ export class WorkspaceCommandError extends Error {
   }
 }
 
-type PublicReadinessStatus = "ready" | "degraded";
+type PublicReadinessStatus = "ready" | "degraded" | "maintenance";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -121,6 +147,7 @@ export async function fetchPublicReadiness(signal?: AbortSignal): Promise<Public
   }
   const payload = await readResponseJson(response);
   if (response.status === 200 && isRecord(payload) && payload.status === "ready") return "ready";
+  if (response.status === 200 && isRecord(payload) && payload.status === "maintenance") return "maintenance";
   if (response.status === 503 && isRecord(payload) && payload.status === "degraded") return "degraded";
   throw new WorkspaceInitializationError("schema");
 }
@@ -174,7 +201,11 @@ export async function waitForStartupReadiness(
 ): Promise<void> {
   for (let retry = 0; ; retry += 1) {
     const readiness = await check();
-    if (readiness === "ready") return;
+    // Maintenance proceeds like ready: the process is healthy, the exempt
+    // session route answers who this is, and the guarded APIs decide what an
+    // administrator may reach (ADR-0013 decision 4). Everyone else meets the
+    // guard's 503 downstream instead of waiting here forever.
+    if (readiness === "ready" || readiness === "maintenance") return;
     if (readiness !== "degraded") throw new WorkspaceInitializationError("schema");
     if (retry >= STARTUP_RETRY_DELAYS_MS.length) {
       throw new WorkspaceInitializationError("startup_unavailable");
@@ -196,6 +227,9 @@ export function useWorkspace() {
   const confirmedWorkspaceRef = useRef<WorkspaceState>(createEmptyWorkspace());
   const commandTailRef = useRef<Promise<void>>(Promise.resolve());
   const operationGenerationRef = useRef(0);
+  /* Bumped per command, so a response that has been overtaken by a newer
+     command is not applied over it (#388). */
+  const commandSequenceRef = useRef(0);
   const startupRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [initializationAttempt, setInitializationAttempt] = useState(0);
 
@@ -304,10 +338,14 @@ export function useWorkspace() {
       throw new WorkspaceCommandError("session_required", "A valid session is required");
     }
     const operationGeneration = operationGenerationRef.current;
-    const isCurrentOperation = () => (
-      operationGenerationRef.current === operationGeneration
-      && sessionRef.current === activeSession
-    );
+    const commandSequence = (commandSequenceRef.current += 1);
+    const isCurrentOperation = () => canApplyCanonicalState({
+      generation: operationGeneration,
+      latestGeneration: operationGenerationRef.current,
+      sequence: commandSequence,
+      latestSequence: commandSequenceRef.current,
+      sessionMatches: sessionRef.current === activeSession,
+    });
     try {
       const response = await fetch("/api/workspace/commands", {
         method: "POST",
@@ -382,7 +420,7 @@ export function useWorkspace() {
     setSyncMessage("");
   }, []);
 
-  const signOut = useCallback(async (): Promise<void> => {
+  const signOut = useCallback(async (returnTo = "/"): Promise<void> => {
     const activeSession = sessionRef.current;
     if (!activeSession) return;
     operationGenerationRef.current += 1;
@@ -391,7 +429,7 @@ export function useWorkspace() {
     setSyncMessage("");
     try {
       await purgeLegacyWorkspaceCache();
-      const response = await fetch("/api/auth/logout", {
+      const response = await fetch(`/api/auth/logout?returnTo=${encodeURIComponent(returnTo)}`, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -407,7 +445,7 @@ export function useWorkspace() {
       setWorkspace(emptyWorkspace);
       setSyncStatus("signed-out");
       setSyncMessage("");
-      window.location.assign(payload.redirectTo || "/");
+      window.location.assign(payload.redirectTo || returnTo);
     } catch {
       sessionRef.current = activeSession;
       try {

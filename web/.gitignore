@@ -1,0 +1,9 @@
+node_modules
+.svelte-kit
+build
+test-results
+
+# The preview server runs from its own copy of the build, so a fidelity run
+# rebuilding build/ cannot pull the assets out from under a live page.
+.preview
+static/licenses

@@ -4,10 +4,10 @@ import { syntheticPdf } from "../support/synthetic-documents";
 const terminalInspectionMessage = /Document inspected|Suggestions are unavailable|Automatic suggestions require the optional document processor\. You can still attach this file\./u;
 
 async function signIn(page: Page) {
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
 }
 
 async function readWorkspace(page: Page) {
