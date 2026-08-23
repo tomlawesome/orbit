@@ -106,6 +106,18 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     expect(bundleSource).not.toMatch(/require\(["']\.\.?\//);
   });
 
+  // ADR-0015 decision 3. The CLI now bundles application domain code — the
+  // `end-maintenance` command reaches src/server/maintenance.ts — and that
+  // code must stay free of any runtime framework import. `next` is marked
+  // external in the bundle step, so a stray runtime import cannot quietly
+  // disappear into the output: it survives as a literal `require("next/...")`
+  // and fails here. This test, not vigilance, is what holds the boundary for
+  // the next operator command too.
+  it("links no Next runtime, so the operator boundary holds", () => {
+    const bundleSource = readFileSync(bundlePath, "utf8");
+    expect(bundleSource).not.toMatch(/require\(["']next(\/[^"']*)?["']\)/);
+  });
+
   it("`node <bundle>` with no arguments refuses with a usage message (nonzero exit)", () => {
     const result = spawnSync("node", [bundlePath], SPAWN_OPTS);
     expect(result.status).not.toBe(0);
