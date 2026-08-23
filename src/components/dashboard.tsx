@@ -11,6 +11,7 @@ import type { HouseholdInput } from "@/components/household-onboarding";
 import type { HouseholdSettingsInput } from "@/components/household-settings";
 import { HouseholdRecovery, HouseholdRecoveryPrompt } from "@/components/household-recovery";
 import { HeroSky, ItemRow, type ItemFilter } from "@/components/hero-sky";
+import { MaintenanceBanner } from "@/components/maintenance-banner";
 import { Icon } from "@/components/icons";
 import type { CompletionInput } from "@/components/item-detail";
 import { calendarDateInTimeZone, formatLongDate, householdInitials, storePreference, THEME_STORAGE_KEY } from "@/components/dashboard-utils";
@@ -852,6 +853,7 @@ function AuthenticatedDashboard({ session, workspaceState, mode }: { session: No
       data-theme={theme}
       data-text-size={textSize}
     >
+      <MaintenanceBanner session={session} />
       <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
         <div className="brand">
           <span className="brand-mark"><Image src="/orbit-mark.svg" alt="" width={56} height={56} priority /></span>

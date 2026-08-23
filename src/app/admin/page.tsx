@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AdminManager } from "@/components/admin-manager";
+import { MaintenanceBanner } from "@/components/maintenance-banner";
 import { usePersistedThemePreference } from "@/components/appearance-preference";
 import { useWorkspace } from "@/lib/preview-workspace";
 
@@ -54,6 +55,7 @@ export default function AdminPage() {
 
   return (
     <main className="admin-page" {...appearanceAttributes}>
+      <MaintenanceBanner session={session} />
       <div className="admin-page-inner">
         {/* This heading must not contain, or be contained by, any heading
             rendered inside AdminManager. Playwright matches accessible names by
