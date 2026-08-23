@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { hardDeleteHousehold, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 const bodySchema = z.discriminatedUnion("action", [
@@ -15,6 +16,7 @@ interface RouteContext { params: Promise<{ householdId: string }> }
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
