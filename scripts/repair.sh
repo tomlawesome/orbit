@@ -1297,11 +1297,18 @@ checked=0
 diagnosis_early=0
 
 # issue #528: true once a migration-failed finding has been added by either
-# detection channel (app-log sentinel scan or the SQL backstop), so the other
-# channel never adds a second one for the same run. $app_identity_* are set
-# by check_application_container so Step 13 (check_image_identity) can tell
-# "no eligible container" from "not yet run".
+# detection channel (the primary app-log sentinel scan, or the SQL backstop
+# sequenced after it), so the second channel never adds one for the same run.
+# $migration_backstop_* carry the database coordinates from Step 11
+# (check_database_reachability) to the backstop, which runs after Step 12's
+# sentinel scan; they are set only once the authenticated SELECT 1 probe has
+# succeeded, so empty means "no authenticated path — the backstop must skip".
+# $app_identity_* are set by check_application_container so Step 13
+# (check_image_identity) can tell "no eligible container" from "not yet run".
 migration_failed_reported=0
+migration_backstop_db_id=""
+migration_backstop_pg_user=""
+migration_backstop_pg_db=""
 app_identity_container_id=""
 app_identity_pinned_image=""
 
@@ -1864,6 +1871,20 @@ run_diagnosis() {
     fi
   fi
 
+  # --- migration-failed SQL backstop (issue #528) ----------------------------
+  #
+  # Deliberately sequenced AFTER Step 12: the bounded app-log sentinel scan
+  # inside check_application_container is the PRIMARY migration-failed
+  # channel, and this backstop's one fixed-literal SELECT runs only when that
+  # scan reported nothing — because the logs rotated the sentinel away, or
+  # because the container is gone entirely (check_application_container
+  # returns early with no scan at all in that case). Internally guarded to a
+  # no-op unless Step 11's authenticated SELECT 1 probe already succeeded
+  # ($migration_backstop_* empty otherwise), so it widens nothing on the
+  # common path and never runs unauthenticated. Part of Step 11's database
+  # check rather than a counted step of its own.
+  check_migration_failed_backstop
+
   # --- Step 13: application container image IDENTITY (issue #528) -----------
   #
   # Distinct from Step 12's stale-container comparison, which only compares
@@ -1959,35 +1980,48 @@ check_database_reachability() {
       add_finding database-unreachable database fail
     fi
   else
-    check_migration_failed_backstop "$pg_user" "$pg_db" "$db_id"
+    # Authenticated probe succeeded: record the coordinates the
+    # migration-failed SQL backstop would need. The backstop itself is
+    # deliberately NOT run here — the primary channel is Step 12's app-log
+    # sentinel scan, and check_migration_failed_backstop is sequenced after
+    # it in run_diagnosis so the SQL only ever runs when that scan
+    # found nothing (rotated logs, or the container removed entirely).
+    migration_backstop_db_id="$db_id"
+    migration_backstop_pg_user="$pg_user"
+    migration_backstop_pg_db="$pg_db"
   fi
   psql_output=""
 }
 
-# migration-failed backstop (issue #528 decision, 2026-08-23 comment): only
-# ever called after the SELECT 1 probe above has already succeeded, i.e. over
-# the identical already-authenticated connection path — no new docker verb,
-# no new exec target. Exactly one additional fixed-literal query, byte for
-# byte, zero interpolation: reads the migrator's own outcome bookkeeping row
-# (never a journal comparison this script would have to interpret). The
-# response is untrusted: bounded to 256 bytes and accepted only if it matches
-# a strict `[a-z_]{1,32}` enum shape for both columns; a missing table, a
-# database error, or any other non-matching byte sequence is treated
-# identically — skip, never guess. Never reported alongside a sentinel-scan
-# finding for the same run: see $migration_failed_reported.
+# migration-failed backstop (issue #528 decision, 2026-08-23 comment): the
+# SECONDARY channel, called from run_diagnosis after Step 12's app-log
+# sentinel scan (the primary channel) and skipping itself whenever that scan
+# already reported ($migration_failed_reported). It exists for the two cases
+# the scan cannot answer: the sentinel rotated out of the bounded log window,
+# or the container removed entirely. Reads its database coordinates from
+# $migration_backstop_*, which Step 11 (check_database_reachability) sets
+# only once the authenticated SELECT 1 probe has succeeded — so this runs
+# strictly over that identical already-authenticated connection path, no new
+# docker verb, no new exec target, never unauthenticated. Exactly one
+# additional fixed-literal query, byte for byte, zero interpolation: reads
+# the migrator's own outcome bookkeeping row (never a journal comparison this
+# script would have to interpret). The response is untrusted: bounded to 256
+# bytes and accepted only if it matches a strict `[a-z_]{1,32}` enum shape
+# for both columns; a missing table, a database error, or any other
+# non-matching byte sequence is treated identically — skip, never guess.
 check_migration_failed_backstop() {
-  local mig_pg_user="$1" mig_pg_db="$2" mig_db_id="$3"
   local mig_pg_password="" mig_output=""
   local -r mig_pattern='^([a-z_]{1,32})\|([a-z_]{0,32})$'
 
   [[ "$migration_failed_reported" == 0 ]] || return 0
+  [[ -n "$migration_backstop_db_id" ]] || return 0
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
   mig_pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
   mig_output="$(
     { PGPASSWORD="$mig_pg_password" timeout "$docker_probe_timeout" \
-      docker exec -e PGPASSWORD -T "$mig_db_id" \
-      psql -h 127.0.0.1 -U "$mig_pg_user" -d "$mig_pg_db" -t -A -F'|' \
+      docker exec -e PGPASSWORD -T "$migration_backstop_db_id" \
+      psql -h 127.0.0.1 -U "$migration_backstop_pg_user" -d "$migration_backstop_pg_db" -t -A -F'|' \
       -c 'SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ORDER BY "id" DESC LIMIT 1' \
       2>&1 || true; } | head -c 256
   )"
@@ -2053,10 +2087,11 @@ check_application_container() {
       # writes this sentinel before the crash-looping/exited container's
       # process exits, exactly like the two #437 sentinels above — same
       # bounded `docker logs` read, same fixed-token match, no new docker
-      # verb. Primary migration-failed detection path; see
-      # check_migration_failed_backstop for the rotated-logs/no-container
-      # fallback and $migration_failed_reported for why only one of the two
-      # channels ever adds this finding.
+      # verb. Primary migration-failed detection path: the SQL backstop
+      # (check_migration_failed_backstop, for the rotated-logs/no-container
+      # cases) runs only after this scan, and skips itself entirely once
+      # $migration_failed_reported is set here — so when this sentinel
+      # matches, the backstop query is never issued at all.
       if [[ "$migration_failed_reported" == 0 ]]; then
         add_finding migration-failed application fail
         migration_failed_reported=1

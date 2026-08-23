@@ -1056,9 +1056,11 @@ describe("scripts/repair.sh --check", () => {
   // Primary path: extends the existing #437 app-log sentinel scan with
   // `reason=migration_failed` (works on a stopped/crash-looping container).
   // Backstop: a single fixed-literal SELECT of the migrator's own outcome
-  // bookkeeping row, only ever run over the already-authenticated SELECT-1
-  // probe path (check_database_reachability), for when logs are rotated away
-  // or the container is gone entirely.
+  // bookkeeping row, sequenced strictly AFTER the sentinel scan and skipped
+  // whenever that scan already reported; run only over the
+  // already-authenticated SELECT-1 probe path (check_database_reachability
+  // records the coordinates, the query itself fires after Step 12), for when
+  // logs are rotated away or the container is gone entirely.
 
   it("reports migration-failed (fail) via the app-log sentinel scan on a crash-looping/stopped container", () => {
     const targetDir = makeFixture();
@@ -1076,6 +1078,52 @@ describe("scripts/repair.sh --check", () => {
     // Reported INSTEAD of, not as well as (same #437 discipline as the other
     // two sentinel-derived classes).
     expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("keeps the sentinel scan primary: when both channels would report, the sentinel fires and the backstop SQL is never issued", () => {
+    const targetDir = makeFixture();
+    const logDir = scratchDir();
+    const argvLogPath = join(logDir, "docker-argv.log");
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "ERROR orbit migrations startup.migration state=exhausted reason=migration_failed impact=migration_blocked",
+      },
+      migrationRun: { outcome: "failed", reason: "migration_error" },
+      argvLogPath,
+    });
+
+    expect(result.status).toBe(4);
+    // The finding comes from the log-sentinel channel (target=application),
+    // never the SQL channel (target=database), and only once.
+    const migrationFindingLines = lines(result.stdout).filter((line) => line.includes("class=migration-failed"));
+    expect(migrationFindingLines).toHaveLength(1);
+    expect(migrationFindingLines[0]).toContain("target=application");
+    // The ordering proof: every docker invocation's argv is logged by the
+    // shim, and the backstop's outcome-row query (fingerprinted by its
+    // literal table name) must never have been issued at all.
+    const argvLog = readFileSync(argvLogPath, "utf8");
+    expect(argvLog).not.toContain("orbit_migration_runs");
+  });
+
+  it("falls back to the SQL backstop when the container is present but the sentinel has rotated out of its logs", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        // The bounded --tail window no longer carries any startup sentinel:
+        // exactly the rotated-logs case the backstop exists for.
+        log: "unrelated recent log output only",
+      },
+      migrationRun: { outcome: "failed", reason: "migration_error" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=migration-failed target=database severity=fail");
   });
 
   it("reports migration-failed (fail) via the SQL backstop when the app container is absent (logs unavailable)", () => {
