@@ -40,6 +40,29 @@ of the engineering: orchestration, integration, tests, CI.
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
 
+## Traps when running things locally
+
+Two known ways to lose an afternoon, or worse. Both have open issues; until
+those land, this is the procedure.
+
+**Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
+0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
+a stale snapshot and emits a migration that recreates almost the whole schema.
+It looks like success. Hand-write the migration in the style of
+`drizzle/0027_instance_authority.sql`, add the journal entry by hand, and
+update both `tests/integration/support/migration-fixture.ts` and
+`tests/integration/migrations.test.ts`. See #535.
+
+**Compose commands attach to whatever project `.env-orbit` names.**
+`COMPOSE_PROJECT_NAME` lives in that file, so
+`docker compose --env-file .env-orbit ...` adopts that project and its named
+volumes from any checkout or worktree, and the fixed `container_name` pins in
+`docker-compose.yml` stop a second stack coexisting. Pass an explicit `-p` for
+anything disposable, confirm isolation with
+`docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}'`
+before trusting it, and never run `docker compose down --volumes` against a
+project you did not create. See #536.
+
 ## Sources of truth
 
 - `docs/v1-charter.md`: supported product and release contract.
