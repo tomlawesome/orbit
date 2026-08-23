@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { updateDocumentJob } from "@/server/admin-operations";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 const actionSchema = z.object({
   action: z.enum(["retry", "discard"]),
@@ -15,6 +16,7 @@ export async function POST(
   context: { params: Promise<{ jobId: string }> },
 ) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

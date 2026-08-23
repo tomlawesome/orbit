@@ -10,6 +10,7 @@ import {
   removeHouseholdMember,
   transferHouseholdOwnership,
 } from "@/server/workspace-repository";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ const transferOwnerSchema = z.object({ userId: z.uuid() });
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const session = await requireSession(request, getAuthConfig());
     const { householdId } = await context.params;
     const members = await listHouseholdMembers(session.user.id, householdId);
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
@@ -50,6 +53,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
@@ -67,6 +71,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

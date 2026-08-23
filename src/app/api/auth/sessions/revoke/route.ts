@@ -3,6 +3,7 @@ import { getAuthConfig } from "@/lib/env";
 import { clearSessionCookie } from "@/lib/auth/cookies";
 import { authErrorResponse } from "@/lib/auth/http";
 import { assertCsrf, requireSession, revokeUserSessions } from "@/lib/auth/session";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

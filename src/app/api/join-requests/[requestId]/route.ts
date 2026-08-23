@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { decideJoinRequest } from "@/server/join-requests";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ const requestIdSchema = z.uuid();
  * only, enforced in the transaction that reads the request. */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
