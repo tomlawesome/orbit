@@ -154,6 +154,46 @@ Retry actions must state this duplicate-delivery risk.
 Document worker completions use an unguessable lease token. A stale worker may
 not overwrite a job claimed by a newer worker.
 
+## Maintenance mode and the way back in
+
+Maintenance closes Orbit to users while administrators keep full access
+(ADR-0013). Administrators pass the request guard on every route, so the
+maintenance control needs no exempt path: a non-administrator probing it during
+maintenance receives the same bounded `503` as any other path, and the control
+is neither discoverable nor invocable from outside.
+
+Sign-in stays open while maintenance is active — the sign-in page and the OIDC
+login, callback, session and logout routes are exempt — so the ordinary
+recovery path is simply to sign in and end maintenance from the control.
+
+`/api/health` answers `200` with `status: maintenance` while the instance is
+closed but healthy, so orchestrators keep routing traffic to it and do not
+restart it. Only a genuine dependency failure answers `503 degraded`.
+
+### The emergency path, when OIDC itself is down
+
+If no administrator can sign in, reopen the instance from the host:
+
+```sh
+bash scripts/end-maintenance.sh
+```
+
+The script runs the application's own deactivation function inside the already
+published image, as a disposable one-off (ADR-0015). It never edits the
+database directly: the write is versioned and audited exactly as an
+administrator's would be, with a null actor and `origin: operator_shell` in the
+audit row, so the recovery is visible in the audit history afterwards.
+
+It also cancels any scheduled notice that has already come due. Effective
+maintenance is the singleton being active *or* such a notice existing, so
+clearing one without the other would leave the instance closed and the operator
+still locked out.
+
+The script is idempotent: running it against an instance that is already open
+changes nothing, writes no audit row, and still succeeds. It requires the
+database to be reachable, which is true whenever maintenance is what stands
+between users and a running instance.
+
 ## Provider tests
 
 The SMTP test verifies connection and authentication only. It does not send a
