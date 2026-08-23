@@ -321,6 +321,78 @@ export async function endMaintenance(actorUserId: string, expectedVersion: numbe
   return readMaintenanceState();
 }
 
+/**
+ * The operator-shell recovery path (ADR-0013 decision 4, #524): the way back
+ * in when OIDC itself is down and no administrator can sign in.
+ *
+ * It takes no actor and no expected version, and that is deliberate. There is
+ * no session to name an actor, and an operator reading a shell has no version
+ * token to carry; the audit row records `origin: operator_shell` with a null
+ * actor instead, which is what the ADR asks for. The write is still versioned
+ * in the sense that matters: it increments `version` inside one transaction,
+ * so every administrator token in flight goes stale rather than silently
+ * overwriting this recovery.
+ *
+ * It also cancels every due, unclaimed notice. Effective maintenance is
+ * `active` OR such a notice existing (decision 5), so clearing the singleton
+ * alone would leave the instance closed and the operator still locked out —
+ * the one outcome this path exists to prevent. Cancellation retains the rows.
+ *
+ * Idempotent: running it against an already-open instance changes nothing and
+ * writes no audit row, so an operator may safely run it twice.
+ */
+export async function endMaintenanceFromOperatorShell(): Promise<{
+  changed: boolean;
+  cancelledNotices: number;
+}> {
+  return getDb().transaction(async (transaction) => {
+    const now = new Date();
+    const [current] = await transaction
+      .select({ id: instanceMaintenance.id, active: instanceMaintenance.active })
+      .from(instanceMaintenance)
+      .limit(1);
+    if (!current) {
+      throw new AppError("maintenance_state_missing", "Maintenance state has not been initialized", 500);
+    }
+
+    const cancelled = await transaction.update(maintenanceNotices)
+      .set({ cancelledAt: now })
+      .where(and(
+        isNull(maintenanceNotices.activatedAt),
+        isNull(maintenanceNotices.cancelledAt),
+        lte(maintenanceNotices.startsAt, now),
+      ))
+      .returning({ id: maintenanceNotices.id });
+
+    if (!current.active && cancelled.length === 0) {
+      return { changed: false, cancelledNotices: 0 };
+    }
+
+    await transaction.update(instanceMaintenance)
+      .set({
+        active: false,
+        message: null,
+        messagePublishedAt: null,
+        expectedEndAt: null,
+        activatedAt: null,
+        version: sql`${instanceMaintenance.version} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(instanceMaintenance.singleton, true));
+
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId: null,
+      entityType: "instance_maintenance",
+      entityId: current.id,
+      action: "maintenance_ended",
+      changes: { active: false, origin: "operator_shell", cancelledNotices: cancelled.length },
+    });
+
+    return { changed: true, cancelledNotices: cancelled.length };
+  });
+}
+
 /** Schedules a future notice. Bounded to 12 pending notices (#522). */
 export async function scheduleMaintenanceNotice(
   actorUserId: string,
