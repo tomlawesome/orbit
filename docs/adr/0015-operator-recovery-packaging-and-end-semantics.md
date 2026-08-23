@@ -1,6 +1,6 @@
 # ADR-0015: Operator recovery packaging and the meaning of "end"
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-23
 **Relates to:**
 [ADR-0013](0013-maintenance-mode-state-and-interception.md) (maintenance mode)
