@@ -1524,6 +1524,12 @@ is_real_non_symlink_directory "$secrets_directory" ||
 # repeats persistence as defence in depth: scripts/configure.sh already
 # persists ORBIT_IMAGE from the environment above.
 orbit_image_line="ORBIT_IMAGE=${resolved_reference}"
+# An env file that already carried the key twice would otherwise come out
+# still carrying it twice, both rewritten to the same value: harmless to
+# docker compose, which takes the last, but it leaves a duplicated managed
+# key behind for every later reader to disagree about. Emit the resolved
+# line once, at the position of the first occurrence, and drop the rest.
+orbit_image_line_written=0
 tmp_environment="$(mktemp "$staging_dir/.env-orbit.persist.XXXXXX")" ||
   fail "Could not create the staged environment file."
 chmod 600 "$tmp_environment" || fail "Could not restrict the staged environment file."
@@ -1531,7 +1537,10 @@ if grep -q '^ORBIT_IMAGE=' "$environment_file"; then
   if ! {
     while IFS= read -r line || [[ -n "$line" ]]; do
       if [[ "$line" == ORBIT_IMAGE=* ]]; then
-        printf '%s\n' "$orbit_image_line"
+        if [[ "$orbit_image_line_written" == 0 ]]; then
+          printf '%s\n' "$orbit_image_line"
+          orbit_image_line_written=1
+        fi
       else
         printf '%s\n' "$line"
       fi
