@@ -13,9 +13,31 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Diagnose stalls instead of letting them die silently on the CI job
+    // timeout (#572). "default" is the normal pass/fail report; the other
+    // two only add output when something is actually stuck:
+    //  - the local progress reporter prints each file/test as it *starts*,
+    //    so the last line in a stalled log names the culprit directly;
+    //  - "hanging-process" is Vitest's own built-in diagnostic for the case
+    //    where every test finished but the process still won't exit (an
+    //    open handle — timer, socket, child process). Vitest recommends it
+    //    by name for exactly that symptom.
+    reporters: ["default", "hanging-process", "./scripts/vitest-progress-reporter.mjs"],
+    // Vitest's defaults (5s / 10s) already fail a hung test rather than the
+    // whole job — pinned here, unchanged, so intent is explicit and can't
+    // silently drift. A handful of tests that spawn real subprocesses
+    // already declare their own longer `timeout` and are unaffected.
+    testTimeout: 5_000,
+    hookTimeout: 10_000,
     exclude: [
       ...configDefaults.exclude,
       ".agents/worktrees/**",
+      // Same reason as .agents/worktrees/** above: a parallel agent's
+      // checkout nested under here must never be collected as if it were
+      // part of this tree — its state is someone else's in-progress work,
+      // not this run's subject, and can otherwise fail or hang for reasons
+      // that have nothing to do with this change (#572).
+      ".claude/worktrees/**",
       "tests/e2e/**",
       "tests/integration/**",
       // web/ is a separate project with its own runners: its fidelity and
