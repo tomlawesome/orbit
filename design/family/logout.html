@@ -1,3 +1,23 @@
+<!--
+  THE APPROVED SIGN-OUT, and half of the ratified pair. Brought into line with
+  the 2026-08-14 rulings on 2026-08-17, alongside login.html, for the same
+  reason: this sheet had been left at its v18 drawing — a 64px badge, a 58px
+  word under it, a wide pill low on the frame and a SIGNED OUT ribbon at the
+  foot — while the app was built and baselined to the ruling that struck all
+  four. The chrome below is now the approved one: the hero lockup, the word
+  inside the ring, the small gold pill inside the ring beneath it, no ribbon.
+  It is login.html's chrome exactly, with the planet unwound the other way and
+  one word changed in the pill.
+
+  ITS SKY, HOWEVER, IS RETIRED. CON-17's sunset — the limb performing the day
+  ending well — was what /logout served until 2026-08-17, when the owner
+  re-confirmed that THE DESCENT IS THE DEFAULT LOGOUT and retired it. /logout
+  now serves the flight's dusk goodbye (design/v19/first-run.html's dusk layer,
+  built in web/src/lib/flight/Dusk.svelte), which keeps this lockup and this
+  pill and sets them over the descent's own sky. The gate no longer watches
+  this sheet; it is kept as the record of the sunset, with its chrome corrected
+  so nothing copies the stale drawing out of it again.
+-->
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orbit — signed out</title>
@@ -74,22 +94,46 @@ body.set .shimmer-ember{opacity:.7}
 @keyframes sweep{to{stroke-dashoffset:-100}}
 
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
-.lockup{position:relative;z-index:3;text-align:center;top:-13vh}
-.lockup .glyph{margin-bottom:18px}
-.lockup .name{font:600 58px var(--display);letter-spacing:.015em;line-height:1}
-.gate-wrap{position:fixed;left:0;right:0;bottom:23vh;text-align:center;z-index:3;
-           opacity:0;transform:translateY(10px);transition:opacity 1.8s ease 2.6s,transform 1.8s ease 2.6s}
-body.set .gate-wrap{opacity:1;transform:none}
-.gate{font:600 14.5px var(--display);color:var(--bg);background:var(--accent);
-      border:0;border-radius:99px;padding:14px 34px;cursor:pointer;display:inline-block;
-      text-decoration:none;box-shadow:0 0 34px rgba(216,180,90,.2)}
+/* The same hero lockup as the sign-in: the ring large, the name set plain
+   inside it, the ask beneath. Both ends of a session wear the same face
+   (CON-19, amended 2026-08-14 for the sign-in hero and applied here too).
+   The glyph and the name share one grid cell, so the word is centred on the
+   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+.lockup{position:relative;z-index:3;text-align:center;
+        display:inline-grid;place-items:center}
+.lockup .glyph{grid-area:1/1;line-height:0}
+.lockup .name{grid-area:1/1;font:600 72px var(--display);letter-spacing:.015em;line-height:1}
+/* The planet drifts the other way here: the day winds one way and the evening
+   unwinds it (owner, 2026-08-14). Same 40s period as the sign-in — the only
+   motion CON-19 permits the mark anywhere. */
+.glyph .tr{animation:spinforth 40s linear infinite;transform-origin:100px 100px}
+@keyframes spinforth{to{transform:rotate(-360deg)}}
+/* Inside the ring, directly under the name — 36px is half the name's line box,
+   20px the gap, 18px half the button. The offset lives here and the entrance
+   on .gate, so the two transforms never fight over one element. */
+.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+           transform:translateY(74px)}
+/* IDENTICAL to the sign-in's pill (owner, 2026-08-17: "the sign-in button must
+   be identical on both surfaces") — one word changed. Smaller than this
+   sheet's original: at hero scale the full-size pill crowds the ring (owner,
+   2026-08-14). Dark ink on the accent, never white — every pack fails
+   white-on-accent, worst case 1.66:1. */
+.gate{font:600 12px var(--display);color:var(--bg);background:var(--accent);
+      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;display:inline-block;
+      text-decoration:none;letter-spacing:.04em;line-height:normal;
+      box-shadow:0 0 28px rgba(216,180,90,.22);
+      opacity:0;transform:translateY(10px);
+      transition:opacity 1.8s ease 2.6s,transform 1.8s ease 2.6s,filter .35s ease}
+body.set .gate{opacity:1;transform:none}
 .gate:hover{filter:brightness(1.08)}
-.below{position:fixed;bottom:4.5vh;left:0;right:0;text-align:center;z-index:3;
-       font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.16em}
+/* the SIGNED OUT ribbon was removed entirely (owner, 2026-08-14), as the
+   sign-in's was. Its rule goes with it rather than lingering as dead CSS. */
 @media (prefers-reduced-motion: reduce){
   .sunpt,.rays,.zodiacal-wrap,.scatter-day,.skywash-day,.rim-day{
     opacity:0!important;transform:none!important;transition:none}
-  .sky,.scatter-night,.skywash-night,.rim-ember,.shimmer-ember,.gate-wrap{
+  /* .gate, not .gate-wrap: the wrapper's transform is layout, not motion, and
+     clearing it would drop the button back on top of the name. */
+  .sky,.scatter-night,.skywash-night,.rim-ember,.shimmer-ember,.gate{
     opacity:1!important;transform:none!important;transition:none}
 }
 </style></head><body>
@@ -230,11 +274,17 @@ body.set .gate-wrap{opacity:1;transform:none}
           stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>
 </svg></div>
 <div class="stage"><div class="lockup">
-  <div class="glyph"><svg width="64" height="64" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="9"/><circle cx="163" cy="63.5" r="20" style="fill:var(--accent)"/></svg></div>
+  <!--
+    Drawn for this size, not scaled up from the favicon geometry: the mark's
+    own 9-unit stroke and 20-unit planet render as a heavy badge at 420px.
+    2 units = ~4px of line, 7 units = a ~29px planet. Position unchanged —
+    the planet still sits on the ring at radius 72.
+  -->
+  <div class="glyph"><svg width="420" height="420" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="2"/><g class="tr"><circle cx="163" cy="63.5" r="7" style="fill:var(--accent)"/></g></svg></div>
   <div class="name">orbit</div>
+  <!-- the ask lives inside the ring, directly beneath the name -->
+  <div class="gate-wrap"><a class="gate" href="login.html">Sign back in</a></div>
 </div></div>
-<div class="gate-wrap"><a class="gate" href="login.html">Sign back in</a></div>
-<div class="below">SIGNED OUT</div>
 <svg class="grain" width="100%" height="100%"><filter id="gr">
   <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
   <feColorMatrix type="saturate" values="0"/>

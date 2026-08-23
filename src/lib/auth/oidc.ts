@@ -281,10 +281,10 @@ export async function completeAuthorization(
   return profileFromClaims(config, { ...idClaims, ...userInfo, sub: idClaims.sub });
 }
 
-export function createProviderLogoutUrl(config: AuthConfig, metadata: OidcMetadata): URL | null {
+export function createProviderLogoutUrl(config: AuthConfig, metadata: OidcMetadata, postLogoutReturnTo: URL): URL | null {
   if (!metadata.end_session_endpoint) return null;
   const url = new URL(metadata.end_session_endpoint);
   url.searchParams.set("client_id", config.clientId);
-  url.searchParams.set("post_logout_redirect_uri", config.appUrl.href);
+  url.searchParams.set("post_logout_redirect_uri", postLogoutReturnTo.href);
   return url;
 }

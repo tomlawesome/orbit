@@ -11,15 +11,40 @@ import { describe, expect, it } from "vitest";
 
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
-// Waits until the target process's /proc/<pid>/status SigCgt bitmap (see
-// proc(5)) shows the TERM trap installed before delivering SIGTERM, instead
-// of racing a wall-clock sleep against scheduler-latency-dependent process
-// setup (the fork/exec of `stty` and the `trap -p` subshells that run before
-// the widget installs its own trap). Bit 0x4000 is signal 15 (TERM). Falls
-// back to firing after ~2s so a genuine regression still surfaces as a test
-// failure instead of a hang.
-const waitForTermTrapThenKill =
-  'target="$BASHPID"; (for i in $(seq 1 400); do line="$(grep SigCgt: /proc/$target/status 2>/dev/null)"; sigcgt="${line#*:}"; sigcgt="${sigcgt//[[:space:]]/}"; if [[ -n "$sigcgt" ]] && (( 0x$sigcgt & 0x4000 )); then break; fi; sleep 0.005; done; kill -TERM "$target") &';
+/*
+ * Interrupting a prompt: why both these tests use runPtyInterrupted.
+ *
+ * Both assert that a prompt interrupted by SIGTERM restores the terminal,
+ * and both spent a long time failing on GH Actions with 143 - killed by an
+ * uncaught TERM. Every fix attempted (#284) treated that as a timing race
+ * against trap installation: a wall-clock sleep, then polling SigCgt in
+ * /proc (never observable on the runner), then waiting for the prompt to
+ * appear in a pty transcript.
+ *
+ * Timing was never the cause. Proved by experiment (#510): a sixty-second
+ * gap between the prompt appearing and the kill still produced 143, and did
+ * so every time rather than intermittently. A timing bug gets better with
+ * slack; this got worse, which is the tell.
+ *
+ * The cause is stdin. runPty passes an `input` string to spawnSync, which
+ * closes stdin as soon as it is written; under `script` that closes the pty
+ * master, the widget's read returns EOF immediately, and it leaves through
+ * its read-error path - restoring the caller's traps on the way out. TERM is
+ * back at its default disposition before the signal ever arrives. The widget
+ * was never waiting, so the test was never testing interruption.
+ *
+ * runPtyInterrupted leaves stdin open for the life of the child, so the
+ * widget genuinely blocks with its trap still installed when the signal
+ * lands, and it signals the inner shell's own pid rather than `script`.
+ *
+ * The marker still has to postdate the trap, and getting it wrong is silent.
+ * installer_ui_read_value traps at installer-ui.sh:471 and writes the prompt
+ * at :472, so "Value: " is safe. installer_ui_select prints its HEADER at
+ * :371, well before its trap at :385, and only renders the menu at :387 - so
+ * waiting for "Choose" killed too early and reproduced the original 143
+ * exactly. Its menu options are the first output that postdates the trap,
+ * which is why that one waits for "1) Install".
+ */
 
 function runHelper(modeArgs = [], env = {}) {
   return spawnSync(
@@ -38,10 +63,58 @@ function runHelper(modeArgs = [], env = {}) {
   );
 }
 
-function runPty(body, input, env = {}) {
+/*
+ * Like runPty, but the terminal never reaches EOF (#441).
+ *
+ * runPty hands spawnSync an `input` string, which closes stdin as soon as it
+ * is written. Under `script` that closes the pty master, so a read on the
+ * slave returns EOF immediately - and installer_ui_select treats a failed read
+ * as a read error, breaks out with status 1, and restores the caller's traps
+ * on the way. Everything after that runs with SIGTERM back at its default
+ * disposition, which is what killed the harness with 143 and looked for all
+ * the world like the widget ignoring its own trap.
+ *
+ * So the menu was never waiting for input, and the test was not testing
+ * interruption. Here stdin is left open for the life of the child: the widget
+ * genuinely blocks, and the signal arrives while its trap is installed.
+ *
+ * The body prints its own pid so the signal can reach the shell running the
+ * widget rather than `script`, which would not be the process under test.
+ */
+function runPtyInterrupted(body, marker, env = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+      { env: { ...process.env, TERM: "xterm", ...env } },
+    );
+    let stdout = "";
+    let signalled = false;
+    let innerPid = null;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const pid = stdout.match(/PID=(\d+)/u);
+      if (pid) innerPid = Number(pid[1]);
+      // Only once the marker is on screen is the trap known to be installed.
+      if (!signalled && innerPid && stdout.includes(marker)) {
+        signalled = true;
+        try { process.kill(innerPid, "SIGTERM"); } catch { /* already gone */ }
+      }
+    });
+    child.on("error", reject);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ status, stdout, signalled });
+    });
+  });
+}
+
+function runPty(body, input, env = {}, transcript = "/dev/null") {
   return spawnSync(
     "script",
-    ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+    ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, transcript],
     {
       encoding: "utf8",
       input,
@@ -379,21 +452,15 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("STATUS=1 RESTORED=yes");
   });
 
-  // Quarantined: intermittently fails on GH Actions with an uncaught
-  // SIGTERM (status 143) even with a correctness-based (not wall-clock)
-  // synchronization check confirming the trap is registered before the
-  // signal is sent. Cross-validated as a GH-Actions-specific runner issue,
-  // not a bug in this test or in installer-ui.sh — see issue #284 and the
-  // "GitLab cross-validation mirror" note in HANDOVER-260-ci.md before
-  // touching this test or its sibling below. Re-enable once GH Actions
-  // runner contention is confirmed back to normal.
-  it.skip("restores terminal state when text entry is interrupted by a signal", () => {
-    const result = runPty(
-      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
-      "",
+  it("restores terminal state when text entry is interrupted by a signal", async () => {
+    const result = await runPtyInterrupted(
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; printf "PID=%s\\n" "$BASHPID"; `
+      + `if installer_ui_read_text 3 "Value: " 64 >/dev/null; then status=0; else status=$?; fi; `
+      + `after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
+      "Value: ",
     );
 
-    expect(result.status).toBe(0);
+    expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 
@@ -407,15 +474,15 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes CHOICE=none");
   });
 
-  // Quarantined: see the comment on the sibling "text entry is interrupted
-  // by a signal" test above — same investigation, same issue (#284).
-  it.skip("restores terminal state when the raw single-key menu is interrupted by a signal", () => {
-    const result = runPty(
-      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; ${waitForTermTrapThenKill} if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; wait || true; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
-      "",
+  it("restores terminal state when the raw single-key menu is interrupted by a signal", async () => {
+    const result = await runPtyInterrupted(
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; printf "PID=%s\\n" "$BASHPID"; `
+      + `if installer_ui_select 3 "Choose" install install Install update Update >/dev/null; then status=0; else status=$?; fi; `
+      + `after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
+      "1) Install",
     );
 
-    expect(result.status).toBe(0);
+    expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   });
 

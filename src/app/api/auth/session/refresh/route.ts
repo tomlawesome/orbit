@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/env";
 import { authErrorResponse } from "@/lib/auth/http";
 import { assertCsrf, requireSession, rotateSession } from "@/lib/auth/session";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

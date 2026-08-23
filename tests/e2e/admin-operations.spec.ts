@@ -8,10 +8,10 @@ interface SyntheticHousehold {
 }
 
 async function signIn(page: Page) {
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: administrator }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/$/);
+  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
 }
 
 async function readDurableWorkspace(page: Page): Promise<{ households: SyntheticHousehold[] }> {
@@ -197,6 +197,160 @@ test.describe("administrator operations evidence", () => {
       await administration.getByRole("button", { name: "Load older history" }).click();
       await expect(administration.getByText("Account disabled", { exact: true })).toBeVisible();
       await expect(administration.getByRole("button", { name: "Load older history" })).toHaveCount(0);
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
+    } finally {
+      if (createdHousehold) {
+        try {
+          await cleanupSyntheticHousehold(page, createdHousehold);
+        } catch (cleanupError) {
+          if (!journeyFailed) throw cleanupError;
+        }
+      }
+    }
+  });
+});
+
+interface InstanceUserFixture {
+  id: string;
+  displayName: string;
+  email: string;
+  isInstanceAdmin: boolean;
+  isPrimaryAdministrator: boolean;
+  disabledAt: string | null;
+}
+
+const secondAdministrator = "Ada Second";
+const ordinaryMember = "Nell Ordinary";
+
+async function signedInUserId(page: Page): Promise<string> {
+  const response = await page.request.get("/api/auth/session");
+  if (!response.ok()) throw new Error(`Could not read the authenticated session (${response.status()})`);
+  const payload = await response.json() as { user?: { id?: string } };
+  if (!payload.user?.id) throw new Error("Authenticated session carried no user id");
+  return payload.user.id;
+}
+
+/* The instance roster is the only thing these journeys are about, so the rest
+   of the administration page is served quiet: a healthy instance with nothing
+   queued keeps the protected-action assertions unambiguous. */
+async function quietAdministrationPage(page: Page, users: InstanceUserFixture[]) {
+  await page.route("**/api/admin/users", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ users }) });
+  });
+  await page.route("**/api/admin/documents/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ health: {
+        overall: "healthy",
+        encryption: { status: "ready" },
+        storage: { status: "ready" },
+        scanner: { status: "ready", mode: "required" },
+        quota: { usedBytes: 128, limitBytes: 1024 },
+        worker: { started: true, running: false, lastSuccessAt: new Date().toISOString(), lastErrorAt: null, lastErrorCode: null, lastReconciliationAt: new Date().toISOString() },
+        scanRecovery: { retrying: 0, failed: 0, purgePending: 0, nextExpiryAt: null },
+      } }),
+    });
+  });
+  await page.route("**/api/admin/operations**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(operationsPayload([], null)) });
+  });
+}
+
+test.describe("primary administrator authority (#263)", () => {
+  test("the primary account carries no destructive actions, and authority moves only by explicit transfer", async ({ page }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+
+    await signIn(page);
+    const viewerId = await signedInUserId(page);
+    let createdHousehold: SyntheticHousehold | null = null;
+    let journeyFailed = false;
+    let transferRequestedFor: string | null = null;
+
+    const before: InstanceUserFixture[] = [
+      { id: viewerId, displayName: administrator, email: "admin@example.invalid", isInstanceAdmin: true, isPrimaryAdministrator: true, disabledAt: null },
+      { id: "00000000-0000-4000-8000-0000000000a2", displayName: secondAdministrator, email: "ada@example.invalid", isInstanceAdmin: true, isPrimaryAdministrator: false, disabledAt: null },
+      { id: "00000000-0000-4000-8000-0000000000a3", displayName: ordinaryMember, email: "nell@example.invalid", isInstanceAdmin: false, isPrimaryAdministrator: false, disabledAt: null },
+    ];
+    const after = before.map((user) => ({ ...user, isPrimaryAdministrator: user.displayName === secondAdministrator }));
+
+    await quietAdministrationPage(page, before);
+    await page.route("**/api/admin/primary", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      transferRequestedFor = (route.request().postDataJSON() as { targetUserId?: string }).targetUserId ?? null;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ users: after }) });
+    });
+
+    try {
+      createdHousehold = await ensureSyntheticHousehold(page);
+      await page.goto("/admin");
+      const roster = page.locator(".admin-page .admin-list");
+      const rowFor = (name: string) => roster.locator("article").filter({ hasText: name });
+
+      await expect(rowFor(administrator)).toContainText("Primary administrator");
+      await expect(rowFor(administrator)).toContainText("Authority must be transferred before this account can be changed.");
+      // Absent, not disabled: the page never offers an action the server would refuse.
+      await expect(rowFor(administrator).getByRole("button", { name: "Disable account" })).toHaveCount(0);
+      await expect(rowFor(administrator).getByRole("button", { name: "Remove admin" })).toHaveCount(0);
+      await expect(rowFor(administrator).getByRole("button", { name: "Make primary" })).toHaveCount(0);
+
+      // Only another administrator can receive authority — never an ordinary member.
+      await expect(rowFor(ordinaryMember).getByRole("button", { name: "Make primary" })).toHaveCount(0);
+      await expect(rowFor(secondAdministrator).getByRole("button", { name: "Make primary" })).toBeVisible();
+
+      page.once("dialog", async (dialog) => {
+        expect(dialog.message()).toContain("Transfer primary administrator authority");
+        expect(dialog.message()).toContain(secondAdministrator);
+        await dialog.accept();
+      });
+      await rowFor(secondAdministrator).getByRole("button", { name: "Make primary" }).click();
+
+      await expect(page.getByText(`${secondAdministrator} is now the primary administrator.`, { exact: true })).toBeVisible();
+      expect(transferRequestedFor).toBe(before[1].id);
+      await expect(rowFor(secondAdministrator)).toContainText("Primary administrator");
+      await expect(rowFor(secondAdministrator).getByRole("button", { name: "Disable account" })).toHaveCount(0);
+      // Authority given away is given away: the former primary can no longer transfer it.
+      await expect(roster.getByRole("button", { name: "Make primary" })).toHaveCount(0);
+    } catch (error) {
+      journeyFailed = true;
+      throw error;
+    } finally {
+      if (createdHousehold) {
+        try {
+          await cleanupSyntheticHousehold(page, createdHousehold);
+        } catch (cleanupError) {
+          if (!journeyFailed) throw cleanupError;
+        }
+      }
+    }
+  });
+
+  test("an administrator who is not primary is offered no way to take authority", async ({ page }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+
+    await signIn(page);
+    const viewerId = await signedInUserId(page);
+    let createdHousehold: SyntheticHousehold | null = null;
+    let journeyFailed = false;
+
+    await quietAdministrationPage(page, [
+      { id: viewerId, displayName: administrator, email: "admin@example.invalid", isInstanceAdmin: true, isPrimaryAdministrator: false, disabledAt: null },
+      { id: "00000000-0000-4000-8000-0000000000a2", displayName: secondAdministrator, email: "ada@example.invalid", isInstanceAdmin: true, isPrimaryAdministrator: true, disabledAt: null },
+    ]);
+
+    try {
+      createdHousehold = await ensureSyntheticHousehold(page);
+      await page.goto("/admin");
+      const roster = page.locator(".admin-page .admin-list");
+      const rowFor = (name: string) => roster.locator("article").filter({ hasText: name });
+
+      await expect(rowFor(secondAdministrator)).toContainText("Primary administrator");
+      await expect(roster.getByRole("button", { name: "Make primary" })).toHaveCount(0);
+      await expect(rowFor(secondAdministrator).getByRole("button", { name: "Disable account" })).toHaveCount(0);
+      await expect(rowFor(secondAdministrator).getByRole("button", { name: "Remove admin" })).toHaveCount(0);
     } catch (error) {
       journeyFailed = true;
       throw error;

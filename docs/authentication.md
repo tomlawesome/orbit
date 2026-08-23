@@ -98,9 +98,11 @@ Membership and owner checks are repeated by every household-scoped API. Client-s
 | `GET` | `/api/auth/session` | Returns the current user, expiry, household context, and CSRF token. |
 | `POST` | `/api/auth/session/refresh` | Rotates the local session after origin and CSRF validation. |
 | `POST` | `/api/auth/logout` | Invalidates the local session and redirects through provider logout when advertised. |
+| `POST` | `/api/auth/sessions/revoke` | Ends every session the caller holds, including the calling device, and clears its cookie. |
 | `GET` | `/api/workspace` | Returns the caller&apos;s authorized households and records. |
 | `POST` | `/api/workspace/commands` | Applies one validated, authorized workspace mutation. |
 | `PUT` | `/api/preferences` | Saves the caller&apos;s appearance preferences. |
+| `GET/PUT` | `/api/settings/reminders` | Reads or saves the caller&apos;s own reminder timing and reports the instance&apos;s outbound-mail state. |
 | `GET/POST/DELETE` | `/api/households/:id/members` | Lists or changes direct household membership. |
 | `POST/DELETE` | `/api/push/subscriptions` | Registers or revokes the caller&apos;s browser push subscription. |
 

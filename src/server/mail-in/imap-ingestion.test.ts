@@ -20,6 +20,13 @@ afterEach(() => {
   temporaryDirectories.splice(0).forEach((directory) => rmSync(directory, { recursive: true, force: true }));
 });
 
+describe("receipt retention", () => {
+  it("holds a suggestion for 45 days (#434, owner decision 2026-08-15)", async () => {
+    const { RECEIPT_RETENTION_MS } = await import("./imap-ingestion");
+    expect(RECEIPT_RETENTION_MS).toBe(45 * 86_400_000);
+  });
+});
+
 describe("IMAP ingestion configuration", () => {
   const environment = (values: Record<string, string | undefined>): NodeJS.ProcessEnv => ({ ...values, NODE_ENV: "test" } as NodeJS.ProcessEnv);
 

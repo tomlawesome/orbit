@@ -25,7 +25,7 @@ Every pull request and trusted preview run performs these steps:
 5. The repository policy verifies that the vulnerability report and SBOM name
    the same image that enters Compose, recovery, privacy, browser and
    accessibility tests.
-6. Pull requests stop with read-only evidence. A trusted `develop` or
+6. Pull requests stop with read-only evidence. A trusted `dev` or
    versioned-release push may log in to GHCR only after every preceding gate
    passes.
 7. CI pushes that exact tested image without rebuilding, resolves the registry
