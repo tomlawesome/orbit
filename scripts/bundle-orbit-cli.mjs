@@ -43,6 +43,13 @@ if (!existsSync(esbuildBinary)) {
 
 mkdirSync(dirname(outfile), { recursive: true });
 
+// `--external:next` marks the boundary of ADR-0015 decision 3: the CLI
+// bundles application domain code (the `end-maintenance` command reaches
+// src/server/maintenance.ts) and that code must stay free of any runtime
+// framework import. Marking next external does not make a stray import safe
+// — it makes it *visible*, surviving as a literal `require("next/...")` in
+// the output, which scripts/bundle-orbit-cli.test.mjs fails on. The test,
+// not vigilance, is the enforcement.
 const args = [
   entryPoint,
   "--bundle",
@@ -50,6 +57,8 @@ const args = [
   "--target=node22",
   "--format=cjs",
   "--legal-comments=none",
+  "--external:next",
+  "--external:next/*",
   `--outfile=${outfile}`,
 ];
 
