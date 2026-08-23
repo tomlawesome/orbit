@@ -10,6 +10,22 @@ readonly secrets_directory=".orbit-secrets"
 readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
 readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
 readonly maximum_secret_bytes=65536
+# configuration.sh's own rollback_suffix constant (scripts/configuration.sh
+# line 9), duplicated here rather than sourced (this script's own source-less
+# convention). Only configuration.sh ever creates a file at this suffix.
+readonly configuration_rollback_suffix=".orbit-config.rollback"
+# --check-rollback (issue #529, ADR-0014 decision 7) runs the identical
+# --check logic below against configuration.sh's own rollback copy at its
+# conventional location instead of the live file — no path argument, no
+# override, so this script never accepts untrusted path input; a caller
+# wanting a nonstandard layout checked simply gets the same "does not fire"
+# fallback repair.sh already has for every other undetectable case. Set once
+# here, at startup, from the selected mode, so run_check's own body reads a
+# single variable rather than branching on which mode is active.
+checked_environment_file="$environment_file"
+if [[ "${1:-}" == --check-rollback ]]; then
+  checked_environment_file="${environment_file}${configuration_rollback_suffix}"
+fi
 temporary_file=""
 terminal_fd=""
 terminal_echo_disabled=0
@@ -56,7 +72,7 @@ fail() {
 }
 
 usage() {
-  printf 'Usage: %s [--check|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]]\n' "$0" >&2
+  printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]]\n' "$0" >&2
 }
 
 cleanup() {
@@ -937,12 +953,12 @@ run_check() {
     fail "${environment_example} is missing."
 
   local source_path=""
-  if [[ -e "$environment_file" ]]; then
-    [[ -f "$environment_file" && ! -L "$environment_file" ]] ||
-      fail "Refusing to use ${environment_file} because it is not a regular file."
-    [[ "$(stat -c '%a' -- "$environment_file" 2>/dev/null)" == 600 ]] ||
-      fail "Refusing to check ${environment_file} because its permissions are not restricted to the owner."
-    source_path="$environment_file"
+  if [[ -e "$checked_environment_file" ]]; then
+    [[ -f "$checked_environment_file" && ! -L "$checked_environment_file" ]] ||
+      fail "Refusing to use ${checked_environment_file} because it is not a regular file."
+    [[ "$(stat -c '%a' -- "$checked_environment_file" 2>/dev/null)" == 600 ]] ||
+      fail "Refusing to check ${checked_environment_file} because its permissions are not restricted to the owner."
+    source_path="$checked_environment_file"
   fi
 
   local -A values=()
@@ -1225,6 +1241,24 @@ case "${1:-}" in
   "")
     ;;
   --check)
+    if [[ $# -ne 1 ]]; then
+      usage
+      exit 2
+    fi
+    if run_check; then
+      exit 0
+    else
+      exit 1
+    fi
+    ;;
+  --check-rollback)
+    # issue #529, ADR-0014 decision 7: identical to --check in every respect
+    # (readiness rules, exit codes, stderr behavior, never delegated to the
+    # containerized engine) except which .env-orbit-shaped file is read —
+    # $checked_environment_file was already set at startup, above, from this
+    # exact literal. .orbit-secrets and every other input still resolve to
+    # the real installation directory, since only run_check's own file-
+    # safety/read block consults $checked_environment_file.
     if [[ $# -ne 1 ]]; then
       usage
       exit 2
