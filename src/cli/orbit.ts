@@ -1183,6 +1183,56 @@ function commandInstallOrUpdate(action: "install" | "update", deployDirArg: stri
     });
 }
 
+/**
+ * `orbit end-maintenance` — the emergency recovery path of ADR-0013 decision
+ * 4, packaged here per ADR-0015 decision 2 (#524).
+ *
+ * It calls the application's own domain function rather than touching the
+ * database directly, so the write is versioned and audited exactly as an
+ * administrator's would be, with a null actor and `origin: operator_shell`.
+ * It spawns no `docker`, so the in-container guard above does not apply —
+ * this is pure logic against the database, like `check`.
+ *
+ * The domain module is imported lazily. Every other command here runs on a
+ * bare host with no database in sight, and loading the driver and schema for
+ * `install` or `backup` would be pointless weight on paths that never use it.
+ *
+ * Idempotent: exits 0 whether or not anything changed, so an operator who is
+ * unsure whether it worked may simply run it again.
+ */
+function commandEndMaintenance(args: string[]): void {
+  if (args.length > 0) fail(`orbit: unknown option ${args[0]} (usage: orbit end-maintenance)`);
+  void (async () => {
+    const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
+      import("../server/maintenance"),
+      import("../db"),
+    ]);
+    try {
+      const { changed, cancelledNotices } = await endMaintenanceFromOperatorShell();
+      if (!changed) {
+        process.stdout.write("orbit: maintenance was not active; nothing to change\n");
+      } else if (cancelledNotices > 0) {
+        const plural = cancelledNotices === 1 ? "notice" : "notices";
+        process.stdout.write(
+          `orbit: maintenance ended; cancelled ${cancelledNotices} due ${plural}\n`,
+        );
+      } else {
+        process.stdout.write("orbit: maintenance ended\n");
+      }
+    } catch {
+      // Category only, like every other refusal this CLI surfaces: a
+      // connection failure's own message can carry the connection string,
+      // and this command runs in the one place an operator is most likely to
+      // be pasting output to someone else. The container's logs hold the
+      // detail if it is needed.
+      process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
+      await closeDatabase().catch(() => {});
+      process.exit(1);
+    }
+    await closeDatabase();
+  })();
+}
+
 function main(): void {
   const [, , command, ...rest] = process.argv;
 
@@ -1242,6 +1292,9 @@ function main(): void {
       case "import-recovery-bundle":
         commandImportRecoveryBundle(deployDir, commandArgs);
         break;
+      case "end-maintenance":
+        commandEndMaintenance(commandArgs);
+        break;
       default:
         failUsage();
     }
@@ -1260,7 +1313,7 @@ function main(): void {
 
 function failUsage(): never {
   fail(
-    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
+    "orbit: supported commands: check, configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]], backup, restore, export-recovery-bundle, import-recovery-bundle, end-maintenance [--dir <deployment>] | install --dir <deployment> | update --dir <deployment>",
   );
 }
 
