@@ -2414,10 +2414,10 @@ do_restore_transaction() {
 # immediately before touching anything; refuse a symlinked parent directory
 # on either side and a symlinked rollback file; back up the current live
 # .env-orbit into this run's private recovery directory before it is
-# touched; on any failure, self-restore every path already touched and
-# report failed, leaving the rollback copy in place for a future retry; on
-# full success, remove the rollback copy (mirroring do_restore_transaction's
-# own staging-directory removal) and report done.
+# touched; on any failure report failed, leaving both .env-orbit and the
+# rollback copy exactly as they were for a future retry; on full success,
+# remove the rollback copy (mirroring do_restore_transaction's own
+# staging-directory removal) and report done.
 #
 # Unlike do_restore_transaction's remove-then-cp replacement, this action
 # writes the new content to a same-directory temporary file first and
@@ -2426,7 +2426,7 @@ do_restore_transaction() {
 # never observably absent or partially written.
 do_restore_configuration_rollback() {
   local rollback_path="${environment_file}${configuration_rollback_suffix}"
-  local parent staged have_live=0
+  local parent staged
 
   is_regular_non_symlink_file "$rollback_path" || return 1
   has_mode "$rollback_path" 600 || return 1
@@ -2439,23 +2439,27 @@ do_restore_configuration_rollback() {
   ensure_recovery_dir || return 1
 
   if [[ -e "$environment_file" || -L "$environment_file" ]]; then
-    have_live=1
     mkdir -p -- "$(dirname -- "$recovery_dir/live/$environment_file")" || return 1
     cp -a -- "$environment_file" "$recovery_dir/live/$environment_file" || return 1
   fi
 
-  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || {
-    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
-    return 1
-  }
+  # No branch below calls restore_transaction_self_restore, deliberately.
+  # None of them can have changed .env-orbit: the new content is assembled in
+  # a separate temporary file, and the only write to .env-orbit is a
+  # same-filesystem rename, which either succeeds or leaves the target
+  # exactly as it was. Self-restoring an untouched path is not free — that
+  # helper removes the path first and then copies the backup back, swallowing
+  # a failure of the copy — so calling it here could delete a file this
+  # action never modified. The backup above is still taken: it is the
+  # operator's evidence in the one case that does end with .env-orbit
+  # changed and the action reporting failed, the rollback-copy removal below.
+  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
   if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null; then
     rm -f -- "$staged"
-    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
     return 1
   fi
   if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
     rm -f -- "$staged"
-    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
     return 1
   fi
 
