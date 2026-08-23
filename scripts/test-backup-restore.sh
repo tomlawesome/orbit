@@ -18,6 +18,9 @@
 #     journal; late failure restores the previous journal)
 #   test_ordinary_rollback, checkpoint recovery restore.sh #13, #14, #19, #20
 #     (verified, durable, point-in-time checkpoint as the rollback target)
+#   test_restore_during_maintenance             ADR-0013 decision 4 (#524): a
+#     restore works while the instance is closed, and end-maintenance.sh
+#     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
 set -Eeuo pipefail
@@ -359,6 +362,58 @@ run_valid_restore() {
   assert_recovery_jobs_restored
 }
 
+maintenance_sql() {
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="$1"' \
+    sh "$1"
+}
+
+maintenance_active() {
+  maintenance_sql 'select active from instance_maintenance where singleton;'
+}
+
+close_instance_for_maintenance() {
+  maintenance_sql "insert into instance_maintenance (singleton, active, message, message_published_at, activated_at) values (true, true, 'Restore drill.', now(), now()) on conflict (singleton) do update set active = true, message = 'Restore drill.', message_published_at = now(), activated_at = now(), version = instance_maintenance.version + 1, updated_at = now();" >/dev/null
+}
+
+# The restore-during-maintenance check (#524, ADR-0013 decision 4). Two claims
+# that ADR-0013 argues from first principles and nothing has ever tested: a
+# restore still works while the instance is closed to users, and an operator
+# can always reopen it afterwards — including when the restored database is
+# itself the thing saying "closed".
+#
+# It is also the first end-to-end exercise of scripts/end-maintenance.sh
+# against a real deployment. Until now that wrapper had only been syntax
+# checked, which is a poor place to discover a mistake: the one moment it
+# runs is the moment nobody can sign in.
+test_restore_during_maintenance() {
+  close_instance_for_maintenance
+  [[ "$(maintenance_active)" == 't' ]] || fail 'Maintenance did not become active for the restore drill.'
+  # Maintenance is a healthy category, not an outage, so the readiness probe
+  # restore.sh waits on must keep answering while the instance is closed.
+  health_check || fail 'Health stopped answering while maintenance was active.'
+
+  local maintenance_backup_output maintenance_backup_path
+  maintenance_backup_output="$(bash scripts/backup.sh)"
+  maintenance_backup_path="${maintenance_backup_output#Orbit backup created: }"
+  [[ -f "$maintenance_backup_path" ]] || fail 'Backup during maintenance did not return a bundle path.'
+
+  ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$maintenance_backup_path" >/dev/null
+  wait_for_health
+  [[ "$(maintenance_active)" == 't' ]] || fail 'The restored instance did not come back closed to users.'
+  assert_fixture_present
+
+  bash scripts/end-maintenance.sh >/dev/null
+  [[ "$(maintenance_active)" == 'f' ]] || fail 'The operator recovery path did not reopen Orbit after a restore.'
+  # Idempotent by design, so an operator who is unsure may simply run it again.
+  bash scripts/end-maintenance.sh >/dev/null
+  [[ "$(maintenance_active)" == 'f' ]] || fail 'Re-running the recovery path did not leave Orbit open.'
+
+  rm -f -- "$maintenance_backup_path"
+  # Leave the canonical bundle applied for the assertions that follow.
+  run_valid_restore
+}
+
 test_local_key_rejections() {
   key_backup="$test_directory/document-kek.backup"
   cp -- "$live_kek" "$key_backup"
@@ -629,8 +684,9 @@ test_ordinary_rollback
 test_checkpoint_failure_recovery
 test_hard_interruption_recovery
 test_wrong_recovery_material
+test_restore_during_maintenance
 
 remove_document_fixture
 assert_fixture_absent
 
-printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, and document/crypto round trip passed.\n'
+printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, and document/crypto round trip passed.\n'
