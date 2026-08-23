@@ -42,8 +42,8 @@ of the engineering: orchestration, integration, tests, CI.
 
 ## Traps when running things locally
 
-Two known ways to lose an afternoon, or worse. Both have open issues; until
-those land, this is the procedure.
+Three known ways to lose an afternoon, or worse. The first two have open
+issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
 0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
@@ -62,6 +62,15 @@ anything disposable, confirm isolation with
 `docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}'`
 before trusting it, and never run `docker compose down --volumes` against a
 project you did not create. See #536.
+
+**Never drive a pty test by closing its own stdin.** `spawnSync({ input })`
+closes stdin as soon as the string is written, which under `script` closes the
+pty master and makes the next read return EOF instead of blocking — so a widget
+that tells a timeout from a read error takes the wrong branch, and the test
+either races or silently never exercises what it claims. Keep stdin open for
+the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
+and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
+has been diagnosed twice: #510/#512, then again in #552.
 
 ## The demo stack is disposable
 
