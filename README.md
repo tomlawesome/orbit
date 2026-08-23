@@ -543,6 +543,16 @@ ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 ```
 
+`bash scripts/test-e2e-local.sh` does all of the above -- plus the mail
+overlay, an isolated Compose project so it can never collide with a real
+deployment on the same host, a health wait, and guaranteed teardown -- in one
+command, mirroring the acceptance stage of the container-validation workflow:
+
+```sh
+bash scripts/test-e2e-local.sh
+bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
+```
+
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
 
