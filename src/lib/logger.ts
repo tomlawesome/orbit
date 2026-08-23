@@ -191,6 +191,7 @@ export const operationalEvents = {
   "delivery.push": "delivery",
   "backup.operation": "backup",
   "recovery.operation": "recovery",
+  "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
