@@ -7,6 +7,8 @@ export async function GET() {
   const readiness = await getPublicReadiness();
   return NextResponse.json(
     { status: readiness.status, service: "orbit", timestamp: new Date().toISOString() },
-    { status: readiness.status === "ready" ? 200 : 503, headers: { "Cache-Control": "no-store" } },
+    // 503 only for genuine dependency failure: a maintained instance is
+    // healthy, must not be restarted, and keeps receiving traffic (ADR-0013).
+    { status: readiness.status === "degraded" ? 503 : 200, headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -27,6 +27,7 @@ afterEach(() => {
 describe("workspace startup boundary", () => {
   it.each([
     [200, { status: "ready" }, "ready"],
+    [200, { status: "maintenance" }, "maintenance"],
     [503, { status: "degraded" }, "degraded"],
   ] as const)("accepts only the public health contract (%s)", async (status, body, expected) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(status, body)));
@@ -37,12 +38,25 @@ describe("workspace startup boundary", () => {
   it.each([
     [200, { status: "degraded" }],
     [503, { status: "ready" }],
+    [503, { status: "maintenance" }],
     [503, { error: hostileDetail }],
     [500, { status: "degraded" }],
   ] as const)("does not treat an unknown health response as startup", async (status, body) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(status, body)));
 
     await expect(fetchPublicReadiness()).rejects.toMatchObject({ category: "schema" });
+  });
+
+  it("proceeds through maintenance like ready: the guarded APIs decide, not the boot gate", async () => {
+    let checks = 0;
+    await expect(waitForStartupReadiness(
+      async () => {
+        checks += 1;
+        return "maintenance";
+      },
+      async () => {},
+    )).resolves.toBeUndefined();
+    expect(checks).toBe(1);
   });
 
   it("recovers after confirmed degraded readiness without overlapping checks", async () => {
