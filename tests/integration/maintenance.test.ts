@@ -1,8 +1,12 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { closeDatabase, getDb } from "@/db";
+import * as schema from "@/db/schema";
 import { auditLog, instanceMaintenance, maintenanceNotices } from "@/db/schema";
 import {
+  activateDueMaintenanceNotice,
   activateMaintenance,
   cancelMaintenanceNotice,
   editMaintenanceMessage,
@@ -385,5 +389,209 @@ describe("ending maintenance ends effective maintenance (#524)", () => {
     expect(state.notices[0].cancelledAt).toBeNull();
 
     await fixture.cleanup();
+  });
+});
+
+describe("scheduled notices activate durably and exactly once (#525)", () => {
+  /* ADR-0013 decision 5. Effective state already treats a due, unclaimed
+     notice as active from the scheduled instant, so these tests are about the
+     durable transition behind it: claiming the notice, copying it into the
+     singleton, and auditing that exactly once. */
+
+  async function scheduleDueNotice(adminId: string, startsAt: Date, expectedEndAt: Date | null = null) {
+    const state = await scheduleMaintenanceNotice(adminId, 1, {
+      message: "Scheduled database upgrade.",
+      startsAt,
+      expectedEndAt,
+    });
+    return state.notices[0];
+  }
+
+  it("claims a due notice and copies it into the singleton with one audit event", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-activates");
+    const startsAt = new Date(Date.now() - 60_000);
+    const expectedEndAt = new Date(Date.now() + 3_600_000);
+    const notice = await scheduleDueNotice(fixture.users.admin.id, startsAt, expectedEndAt);
+
+    const result = await activateDueMaintenanceNotice();
+    expect(result.activatedNoticeId).toBe(notice.id);
+
+    const state = await readMaintenanceState();
+    expect(state.active).toBe(true);
+    expect(state.effectivelyActive).toBe(true);
+    expect(state.message).toBe("Scheduled database upgrade.");
+    expect(state.expectedEndAt?.getTime()).toBe(expectedEndAt.getTime());
+    expect(state.activatedAt).not.toBeNull();
+    // The notice is claimed, not deleted, and retains its scheduled instant.
+    expect(state.notices[0].activatedAt).not.toBeNull();
+    expect(state.notices[0].cancelledAt).toBeNull();
+
+    const events = await getDb().select().from(auditLog)
+      .where(eq(auditLog.action, "maintenance_activated_scheduled"));
+    expect(events).toHaveLength(1);
+    expect(events[0].actorUserId).toBeNull();
+    expect(events[0].entityId).toBe(notice.id);
+  });
+
+  it("lets only one of two racing ticks activate the same notice, writing one audit event", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-race");
+    const notice = await scheduleDueNotice(fixture.users.admin.id, new Date(Date.now() - 60_000));
+
+    /* The race has to be forced, not hoped for. Two ticks fired at once
+       normally serialise, and the second's select then filters the claimed
+       notice out on its own - so the test would pass even with no conditional
+       claim at all. Holding the first tick between its select and its claim,
+       and letting the second run to completion inside that window, is the
+       only interleaving where the conditional claim is what does the work. */
+    let releaseFirst: (() => void) | undefined;
+    const firstReachedClaim = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let firstIsWaiting: (() => void) | undefined;
+    const firstHasSelected = new Promise<void>((resolve) => { firstIsWaiting = resolve; });
+
+    const first = activateDueMaintenanceNotice({
+      beforeClaim: async () => {
+        firstIsWaiting?.();
+        await firstReachedClaim;
+      },
+    });
+
+    await firstHasSelected;
+    // The second tick selects the same still-unclaimed notice, claims it and
+    // commits, all while the first is parked before its own claim.
+    const second = await activateDueMaintenanceNotice();
+    releaseFirst?.();
+    const firstResult = await first;
+
+    expect(second.activatedNoticeId).toBe(notice.id);
+    expect(firstResult.activatedNoticeId).toBeNull();
+
+    const events = await getDb().select().from(auditLog)
+      .where(eq(auditLog.action, "maintenance_activated_scheduled"));
+    expect(events).toHaveLength(1);
+
+    // One activation means one version increment, not two.
+    const state = await readMaintenanceState();
+    expect(state.version).toBe(3);
+    const claimedRows = await getDb().select().from(maintenanceNotices)
+      .where(eq(maintenanceNotices.id, notice.id));
+    expect(claimedRows[0].activatedAt).not.toBeNull();
+  });
+
+  it("leaves nothing durable when the transition fails before commit, and completes on the next tick", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-crash");
+    const notice = await scheduleDueNotice(fixture.users.admin.id, new Date(Date.now() - 60_000));
+    const versionBefore = (await readMaintenanceState()).version;
+
+    await expect(activateDueMaintenanceNotice({
+      beforeCommit: async () => { throw new Error("process died mid-transition"); },
+    })).rejects.toThrow("process died mid-transition");
+
+    // The claim, the singleton copy and the audit row all roll back together.
+    const crashed = await readMaintenanceState();
+    expect(crashed.active).toBe(false);
+    expect(crashed.version).toBe(versionBefore);
+    expect(crashed.notices[0].activatedAt).toBeNull();
+    expect(await getDb().select().from(auditLog)
+      .where(eq(auditLog.action, "maintenance_activated_scheduled"))).toHaveLength(0);
+
+    const retried = await activateDueMaintenanceNotice();
+    expect(retried.activatedNoticeId).toBe(notice.id);
+    expect((await readMaintenanceState()).active).toBe(true);
+  });
+
+  it("never activates a notice cancelled before its start time", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-cancelled");
+    const admin = fixture.users.admin;
+    const future = new Date(Date.now() + 3_600_000);
+    const scheduled = await scheduleMaintenanceNotice(admin.id, 1, {
+      message: "Upgrade that gets called off.",
+      startsAt: future,
+      expectedEndAt: null,
+    });
+    const noticeId = scheduled.notices[0].id;
+    await cancelMaintenanceNotice(admin.id, scheduled.version, noticeId);
+
+    // Move the cancelled notice's start time into the past: cancellation, not
+    // timing, is what must keep it from ever activating.
+    await getDb().update(maintenanceNotices)
+      .set({ startsAt: new Date(Date.now() - 60_000) })
+      .where(eq(maintenanceNotices.id, noticeId));
+
+    const result = await activateDueMaintenanceNotice();
+    expect(result.activatedNoticeId).toBeNull();
+
+    const state = await readMaintenanceState();
+    expect(state.active).toBe(false);
+    expect(state.effectivelyActive).toBe(false);
+    expect(state.notices[0].activatedAt).toBeNull();
+    expect(await getDb().select().from(auditLog)
+      .where(eq(auditLog.action, "maintenance_activated_scheduled"))).toHaveLength(0);
+  });
+
+  it("leaves a notice that is not yet due unclaimed", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-not-due");
+    await scheduleDueNotice(fixture.users.admin.id, new Date(Date.now() + 3_600_000));
+
+    const result = await activateDueMaintenanceNotice();
+    expect(result.activatedNoticeId).toBeNull();
+    const state = await readMaintenanceState();
+    expect(state.active).toBe(false);
+    expect(state.effectivelyActive).toBe(false);
+  });
+
+  it("claims the earliest due notice first, one per tick", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-order");
+    const admin = fixture.users.admin;
+    const earlier = new Date(Date.now() - 120_000);
+    const later = new Date(Date.now() - 60_000);
+    const first = await scheduleMaintenanceNotice(admin.id, 1, {
+      message: "Later notice.", startsAt: later, expectedEndAt: null,
+    });
+    await scheduleMaintenanceNotice(admin.id, first.version, {
+      message: "Earlier notice.", startsAt: earlier, expectedEndAt: null,
+    });
+
+    const result = await activateDueMaintenanceNotice();
+    const state = await readMaintenanceState();
+    expect(state.message).toBe("Earlier notice.");
+    expect(state.notices.find((n) => n.id === result.activatedNoticeId)?.startsAt.getTime())
+      .toBe(earlier.getTime());
+  });
+
+  it("makes a scheduled activation visible to a second connection without a restart", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-second-process");
+    await scheduleDueNotice(fixture.users.admin.id, new Date(Date.now() - 60_000));
+
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL is required for maintenance worker integration tests");
+    // A connection opened before the transition stands in for a second
+    // application process that is already running: nothing caches maintenance
+    // state, so it must observe the change without reconnecting or restarting.
+    const client = postgres(url, { max: 1, prepare: false });
+    const other = drizzle(client, { schema });
+    try {
+      const [before] = await other.select().from(schema.instanceMaintenance).limit(1);
+      expect(before.active).toBe(false);
+
+      await activateDueMaintenanceNotice();
+
+      const [after] = await other.select().from(schema.instanceMaintenance).limit(1);
+      expect(after.active).toBe(true);
+      expect(after.message).toBe("Scheduled database upgrade.");
+      expect(after.version).toBe(before.version + 1);
+    } finally {
+      await client.end({ timeout: 5 });
+    }
+  });
+
+  it("stores scheduled instants as UTC, unchanged by the server's local zone", async () => {
+    const fixture = await createIntegrationFixture("maintenance-tick-utc");
+    const startsAt = new Date("2026-11-03T02:30:00.000Z");
+    const notice = await scheduleDueNotice(fixture.users.admin.id, startsAt);
+    expect(notice.startsAt.toISOString()).toBe("2026-11-03T02:30:00.000Z");
+
+    const [row] = await getDb().select().from(maintenanceNotices)
+      .where(eq(maintenanceNotices.id, notice.id));
+    expect(row.startsAt.getTime()).toBe(startsAt.getTime());
   });
 });
