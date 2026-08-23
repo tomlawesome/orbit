@@ -27,6 +27,7 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const repairScriptSource = readFileSync(join(scriptsDir, "repair.sh"), "utf8");
 const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
+const configurationScriptSource = readFileSync(join(scriptsDir, "configuration.sh"), "utf8");
 const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
 
@@ -415,6 +416,32 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
   chmodSync(join(targetDir, ".env-orbit"), 0o600);
 }
 
+// Overwrites .env-orbit with a file-backed OIDC_CLIENT_SECRET_FILE instead
+// of makeFixture()'s default direct OIDC_CLIENT_SECRET value — the shape
+// every real install.sh deployment actually produces. Backed by the
+// .orbit-secrets/oidc-client-secret file makeFixture() already writes, so
+// no other setup is needed. A targeted overwrite (mirroring
+// writeDigestPinnedEnv above), not a makeFixture() option: makeFixture() is
+// shared by ~170 other tests that rely on its direct-secret default, and
+// this shape is only relevant to the configuration-migration-interrupted
+// tests below (issue #529 follow-up — the staged-directory validation this
+// replaced could never see this shape, since it deliberately omitted
+// .orbit-secrets).
+function writeFileBackedOidcSecretEnv(targetDir) {
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    "ORBIT_IMAGE=orbit-local:abcdef123456",
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
 function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
@@ -711,6 +738,26 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("configuration-incomplete");
   });
 
+  it("fires on the file-backed OIDC_CLIENT_SECRET_FILE shape a real install produces (issue #529 follow-up)", () => {
+    const targetDir = makeFixture();
+    writeFileBackedOidcSecretEnv(targetDir);
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    // Live fails validation (content-incomplete, not mode-644, so this
+    // exercises the same file-backed-secret shape on both sides without a
+    // managed-file-permissions finding also firing).
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "finding class=configuration-migration-interrupted target=configuration severity=fail",
+    );
+  });
+
   it("reports plain configuration-invalid, unchanged, when the live file fails validation and no rollback copy exists", () => {
     const targetDir = makeFixture();
     chmodSync(join(targetDir, ".env-orbit"), 0o644);
@@ -761,6 +808,24 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=16 skipped=0"]);
+  });
+
+  it("the .orbit-config.rollback suffix literal agrees across configuration.sh (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
+    const extractReadonlyString = (source, varName) => {
+      const match = source.match(new RegExp(`readonly ${varName}=("[^"]*")`));
+      if (!match) {
+        throw new Error(`Could not find "readonly ${varName}=" in the given source`);
+      }
+      return JSON.parse(match[1]);
+    };
+
+    const fromConfiguration = extractReadonlyString(configurationScriptSource, "rollback_suffix");
+    const fromRepair = extractReadonlyString(repairScriptSource, "configuration_rollback_suffix");
+    const fromConfigure = extractReadonlyString(configureScriptSource, "configuration_rollback_suffix");
+
+    expect(fromConfiguration).toBe(".orbit-config.rollback");
+    expect(fromRepair).toBe(fromConfiguration);
+    expect(fromConfigure).toBe(fromConfiguration);
   });
 
   it("reports compose-interpolation-failed when docker compose config fails", () => {
