@@ -915,6 +915,51 @@ describe("configure.sh", () => {
       expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
     });
 
+    it("keeps CRLF line endings on rewritten managed keys, not just on untouched lines", () => {
+      // A CRLF .env-orbit must stay CRLF throughout. mapfile -t strips only
+      // the newline, so unmanaged lines keep their carriage return while a
+      // rewritten managed line is rebuilt without one - leaving a file with
+      // mixed endings that later readers treat inconsistently.
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\r\nOIDC_CLIENT_SECRET=old-direct-value\r\n");
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "new-secret-value\n");
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      const bare = updated.split("\n").filter((l) => l !== "").filter((l) => !l.endsWith("\r"));
+      expect(bare).toEqual([]);
+      expect(updated).toContain("UNRELATED_KEY=keep-me\r\n");
+      expect(updated).toMatch(/^OIDC_CLIENT_SECRET=\r$/m);
+    });
+
+    it("leaves an LF file entirely LF, gaining no stray carriage returns", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\nOIDC_CLIENT_SECRET=old-direct-value\n");
+
+      const result = runConfigure(targetDir, ["--set-oidc-secret"], {}, "new-secret-value\n");
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).not.toContain("\r");
+    });
+
+    it("converges byte-identically when --set-oidc-secret runs twice with the same secret", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const first = runConfigure(targetDir, ["--set-oidc-secret"], {}, "same-secret-value\n");
+      expect(first.status).toBe(0);
+      const afterFirst = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+      const second = runConfigure(targetDir, ["--set-oidc-secret"], {}, "same-secret-value\n");
+      expect(second.status).toBe(0);
+      const afterSecond = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+      // Repeated configuration must be a no-op, not an accumulating rewrite:
+      // a second run that appends or reorders keys would drift the file on
+      // every install re-run.
+      expect(afterSecond).toBe(afterFirst);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
     it("replaces an existing OIDC client secret file and leaves no staging leftovers", () => {
       const targetDir = makeFixture("OIDC_CLIENT_SECRET=old-direct-value\n");
       mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });

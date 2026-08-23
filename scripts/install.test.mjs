@@ -2044,6 +2044,28 @@ describe("install.sh", () => {
     expect(environmentLines).not.toContain(`EXISTING_ENV=1ORBIT_IMAGE=${resolvedReference}`);
   });
 
+  it("collapses a duplicated image assignment to a single resolved line", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    // An env file that already carries the key twice must not come out still
+    // carrying it twice. docker compose takes the last and is unharmed, but a
+    // duplicated managed key leaves every other reader free to disagree.
+    const doubled = readFileSync(join(targetDir, ".env-orbit"), "utf8").replace(
+      /^ORBIT_IMAGE=.*$/m,
+      (line) => `${line}\n${line}`,
+    );
+    writeFileSync(join(targetDir, ".env-orbit"), doubled);
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    expect(doubled.split("\n").filter((line) => line.startsWith("ORBIT_IMAGE=")).length).toBe(2);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    const environmentLines = readFileSync(join(targetDir, ".env-orbit"), "utf8").split("\n");
+    const imageLines = environmentLines.filter((line) => line.startsWith("ORBIT_IMAGE="));
+    expect(imageLines).toEqual([`ORBIT_IMAGE=${resolvedReference}`]);
+  });
+
   it("refuses an incomplete recognised upgrade without starting Compose", () => {
     const targetDir = makeTarget();
     makeExistingDeployment(targetDir);
