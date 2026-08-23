@@ -6,6 +6,7 @@ import { getAuthConfig } from "@/lib/env";
 import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { themePreferenceSchema } from "@/lib/preferences";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ const DARK_PACKS = new Set(["starchart", "afterdark"]);
 
 export async function PUT(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

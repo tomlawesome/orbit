@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { createJoinRequest } from "@/server/join-requests";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ const householdIdSchema = z.uuid();
  * clicked is the entire surface, and the entire response. */
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
