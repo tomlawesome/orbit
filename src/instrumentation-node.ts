@@ -167,10 +167,24 @@ export async function registerNode(): Promise<void> {
   await reportAuthConfigurationReadiness();
 
   if (process.env.MIGRATE_ON_START === "true") {
-    const [{ migrate }, { getDb }] = await Promise.all([
+    const [{ migrate }, { getDb }, { ensureMigrationRunsTable, recordMigrationOutcome }] = await Promise.all([
       import("drizzle-orm/postgres-js/migrator"),
       import("@/db"),
+      import("@/db/migration-outcome"),
     ]);
+    /* The outcome table is bookkeeping, not a startup gate (#528): a
+       problem creating or writing it must never mask or alter the
+       migration's own success or failure, so failures here only degrade.
+       Reuses existing sentinel vocabulary (no new reason/impact tokens) -
+       the migration's own outcome is already logged in full above/below;
+       this only flags that its bookkeeping row may be missing. */
+    const logMigrationOutcomeUnavailable = () => log.warn({
+      event: "startup.migration",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
     try {
       const migrationsFolder = process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
       log.info({ event: "startup.migration", state: "starting", action: "check_migrations" });
@@ -212,6 +226,12 @@ export async function registerNode(): Promise<void> {
       throw new Error(code);
     }
     try {
+      await ensureMigrationRunsTable(getDatabaseClient());
+    } catch {
+      logMigrationOutcomeUnavailable();
+    }
+    const migrationStartedAt = new Date();
+    try {
       await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
     } catch {
       log.error({
@@ -221,7 +241,27 @@ export async function registerNode(): Promise<void> {
         action: "check_migrations",
         impact: "migration_blocked",
       });
+      try {
+        await recordMigrationOutcome(getDatabaseClient(), {
+          startedAt: migrationStartedAt,
+          finishedAt: new Date(),
+          outcome: "failed",
+          reason: "migration_failed",
+        });
+      } catch {
+        logMigrationOutcomeUnavailable();
+      }
       throw new Error("migration_failed");
+    }
+    try {
+      await recordMigrationOutcome(getDatabaseClient(), {
+        startedAt: migrationStartedAt,
+        finishedAt: new Date(),
+        outcome: "succeeded",
+        reason: null,
+      });
+    } catch {
+      logMigrationOutcomeUnavailable();
     }
     try {
       await verifyMigrationJournalComplete(getDatabaseClient(), process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle");
