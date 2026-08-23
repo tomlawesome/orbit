@@ -8,7 +8,8 @@ as the only coordinator);
 [ADR-0004](0004-supported-upgrades-and-recoverable-restore.md) (restore is a
 stopped-application protocol);
 [ADR-0012](0012-front-end-leaves-react.md) (two frameworks until the cut);
-#263 (instance authority singleton)
+#263 (instance authority singleton);
+#580 (window/update data model, ratified 2026-08-23)
 
 ## Context
 
@@ -32,44 +33,73 @@ is coordinated through PostgreSQL claims.
 
 ### 1. Persistent state and versioning
 
-Two tables, migrated in house style under `drizzle/`.
+Three tables, migrated in house style under `drizzle/` — the slimmed
+`instance_maintenance` singleton, and two new tables, `maintenance_windows` and
+`maintenance_updates`, that separate closure state from narrative (amended
+2026-08-23, see Amendments).
 
-`instance_maintenance` follows the `instance_authority` singleton precedent:
-`singleton boolean PRIMARY KEY DEFAULT true` with `CHECK ("singleton")`, plus
-a stable `id uuid NOT NULL DEFAULT gen_random_uuid()` solely to satisfy
-`audit_log.entity_id`. Columns: `active boolean NOT NULL DEFAULT false`,
-`message text` with `CHECK (message IS NULL OR char_length(message) <= 500)`,
-`message_published_at timestamptz`, `expected_end_at timestamptz`,
-`activated_at timestamptz`, `version bigint NOT NULL DEFAULT 1`, `updated_at
-timestamptz NOT NULL DEFAULT now()`. Unlike `instance_authority` it has no
-foreign key, so the migration seeds the inactive row unconditionally; the
-guard read is always a plain primary-key lookup.
+`instance_maintenance` is slimmed to the guard's closure record and concurrency
+token. It keeps `singleton boolean PRIMARY KEY DEFAULT true` with `CHECK
+("singleton")`, the stable `id uuid NOT NULL DEFAULT gen_random_uuid()` for
+`audit_log.entity_id`, `active boolean NOT NULL DEFAULT false`,
+`expected_end_at timestamptz`, `version bigint NOT NULL DEFAULT 1`, and
+`updated_at timestamptz NOT NULL DEFAULT now()`. It gains `current_window_id
+uuid REFERENCES maintenance_windows(id)` and drops `message`,
+`message_published_at` and `activated_at` — that narrative now lives in
+`maintenance_updates`, and `started_at` moves to the window. Unlike
+`instance_authority` it has no foreign key of its own, so the migration seeds
+the inactive row unconditionally; the guard read is always a plain primary-key
+lookup.
 
-`maintenance_notices` holds scheduled future notices: `id uuid PRIMARY KEY`,
-`message text` (same length check), `starts_at timestamptz NOT NULL`,
-`expected_end_at timestamptz`, `activated_at timestamptz`, `cancelled_at
-timestamptz`, `created_at timestamptz NOT NULL DEFAULT now()`, and a partial
-index on `starts_at` where `activated_at IS NULL AND cancelled_at IS NULL`.
-All times are stored UTC (`timestamptz`) and rendered in the viewer's locale.
-Display ordering is `starts_at ASC, id ASC` — deterministic, no tiebreak
-ambiguity. Cancellation sets `cancelled_at`; rows are retained, not deleted.
-The application additionally enforces at most 8 lines and no control
-characters in messages, and at most 12 pending notices.
+`maintenance_windows` holds one row per maintenance episode, covering all three
+tenses at once: `id uuid PRIMARY KEY`, `status text NOT NULL CHECK (status IN
+('scheduled', 'open', 'resolved', 'cancelled', 'absorbed'))`,
+`scheduled_start_at timestamptz` (null when opened immediately), `started_at
+timestamptz`, `expected_end_at timestamptz`, `ended_at timestamptz`,
+`cancelled_at timestamptz`, `absorbed_into_id uuid REFERENCES
+maintenance_windows(id)`, `created_at timestamptz NOT NULL DEFAULT now()`,
+`updated_at timestamptz NOT NULL DEFAULT now()`. All times are stored UTC
+(`timestamptz`) and rendered in the viewer's locale, as before. A partial
+unique index permits at most one `open` window at a time. A partial index on
+`scheduled_start_at WHERE status = 'scheduled'` serves the effective-state
+probe exactly as the retired notice index did.
 
-`version` is the expected-current-state token, and it versions the **whole**
-maintenance configuration — singleton and notices together. Every
-administrator mutation (activate, edit, schedule, cancel, end) carries the
-version it read, and executes as one transaction whose singleton update is
-`... SET version = version + 1 WHERE singleton AND version = $expected`. Zero
-rows updated means the state moved underneath the administrator: the
-transaction rolls back, the API returns `409 maintenance_state_stale`, and no
-audit event is written — a stale write never produces a misleading audit
-success. Successful mutations insert an `audit_log` row in the same
-transaction (`entity_type` `instance_maintenance`, entity id as above, or the
-notice id for notice events) with actor, prior/new state and timestamps.
-Message text may appear in audit `changes` — it is instance state, visible to
-administrators anyway — but ordinary structured logs record only lengths and
-booleans, never the text.
+`maintenance_updates` holds the ordered entries within a window: `id uuid
+PRIMARY KEY`, `window_id uuid NOT NULL REFERENCES maintenance_windows(id) ON
+DELETE CASCADE`, `kind text NOT NULL CHECK (kind IN ('scheduled', 'started',
+'update', 'resolved'))`, `body text NOT NULL` under the same rules the retired
+singleton message enforced (`CHECK (char_length(body) <= 500)`, plus the
+application's existing 8-line and no-control-character checks), `published_at
+timestamptz NOT NULL DEFAULT now()`, `created_at timestamptz NOT NULL DEFAULT
+now()`, `edited_at timestamptz`. Display ordering is `published_at ASC, id ASC`
+— the same deterministic tiebreak the retired notice index used.
+
+`instance_maintenance.expected_end_at` is denormalised from the open window's
+`expected_end_at`, written in the same transaction as any change to the window,
+so the guard's per-request read stays a single primary-key lookup; the window
+row is the source of truth, and an invariant test holds the two equal whenever
+a window is open.
+
+`version` continues to version the **whole** maintenance configuration —
+singleton, windows and updates together — so the 409 `maintenance_state_stale`
+contract below is unchanged by this amendment. Every administrator mutation
+carries the version it read, and executes as one transaction whose singleton
+update is `... SET version = version + 1 WHERE singleton AND version =
+$expected`. Zero rows updated means the state moved underneath the
+administrator: the transaction rolls back, the API returns `409
+maintenance_state_stale`, and no audit event is written — a stale write never
+produces a misleading audit success. Successful mutations insert an `audit_log`
+row in the same transaction (`entity_type` `instance_maintenance` for
+singleton-level changes, or `maintenance_window` with the window id for window
+opened/updated/resolved/absorbed events) with actor, prior/new state and
+timestamps. Update text may appear in audit `changes` — it is instance state,
+visible to administrators anyway — but ordinary structured logs record only
+lengths and booleans, never the text.
+
+`maintenance_notices` is retired outright, along with the 12-pending-notice cap
+and every "which message wins" arbitration: both defended a queue that does not
+occur now that a due scheduled window is absorbed into an open one (decision 5)
+rather than competing with it.
 
 ### 2. Request interception boundary
 
@@ -160,28 +190,52 @@ recovery path.
 
 ### 5. Scheduled activation: lease and idempotency contract
 
-Effective maintenance state is `active` **or** the existence of a due,
-unclaimed, uncancelled notice (`starts_at <= now()`, `activated_at IS NULL`,
-`cancelled_at IS NULL`, via the partial index). Activation therefore takes
+Effective maintenance state is `active` **or** the existence of a due
+scheduled window (`status = 'scheduled'`, `scheduled_start_at <= now()`, via
+the partial index — the status alone carries what the retired notice model
+spelled out as unclaimed and uncancelled). Activation therefore takes
 effect at the scheduled instant on every process simultaneously, regardless of
 worker timing or restarts — the clock, not a tick, is the trigger.
 
 A maintenance worker tick (in-process interval started from
 `instrumentation-node.ts` like the other workers, every 30 seconds) performs
-the durable transition in **one transaction**: claim the due notice with
-`UPDATE maintenance_notices SET activated_at = now() WHERE id = $1 AND
-activated_at IS NULL AND cancelled_at IS NULL AND starts_at <= now()`; if zero
-rows, another process already did it — stop, no duplicate audit. If the claim
-succeeds, copy the notice's message and times into the singleton, set
-`active = true`, increment `version`, and insert one audit event
-(`maintenance_activated_scheduled`, actor null, notice id). The house worker
-invariant of an owner token and expiry exists for long-running claims; here
-the claim and the completion are the same transaction, so a crash before
-commit leaves nothing durable and the next tick retries, and duplicate workers
-are excluded by the conditional update alone. The worker does not use
-`expected version`: its authority is the notice claim, and a concurrent
-administrator edit either serializes behind the row locks or finds its own
-token stale and re-reads.
+the durable transition in **one transaction**. It takes the singleton row lock
+every administrator mutation already takes, which serialises it against a
+concurrent edit and against a second worker, and reads whether a window is
+currently open. It then claims the due window conditionally — `UPDATE
+maintenance_windows SET status = $2, started_at = $3 WHERE id = $1 AND status =
+'scheduled' AND scheduled_start_at <= now()`; if zero rows, another process
+already did it — stop, no duplicate audit. Whether `$2` is `open` or `absorbed`
+follows from that read (amended 2026-08-23, see Amendments, following #580's
+ratified absorb rule and the #525 finding that motivated it).
+
+If no window is open, the claimed window opens: `started_at` is set, a
+`started` entry is appended to its timeline — its original `scheduled` entry is
+retained, because decision 8 makes an entry's `kind` immutable —
+`instance_maintenance` is updated to `active = true` with `current_window_id`
+set and `expected_end_at` denormalised from it, `version` is incremented, and
+one audit event is inserted (`maintenance_activated_scheduled`, actor null,
+window id): the same shape as before, notice replaced by window.
+
+If a window is already open, the due window is **absorbed** rather than opened:
+it moves to `absorbed` with `absorbed_into_id` set to the open window's id and
+`started_at` left null, its text is appended to the open window as an `update`
+entry, and the open window's `expected_end_at` becomes the later of the two —
+never the earlier. `expected_end_at` does not shorten automatically under any
+circumstance; an administrator's stated `Retry-After` is never silently cut
+short by a scheduled window coming due. `version` is incremented and one audit
+event records the absorption (`maintenance_window_absorbed`, actor null, the
+open window's id). Because an absorbed window never enters `open`, the partial
+unique index on open windows is never even momentarily contended.
+
+Either way, the claim and the completion are the same transaction, so a crash
+before commit leaves nothing durable and the next tick retries; duplicate
+workers are excluded by the conditional claim, and the singleton row lock keeps
+the open-window read consistent with it. The house worker invariant of an owner
+token and expiry exists for long-running claims and is not needed here. The
+worker does not use `expected version`: its authority is the window claim, and
+a concurrent administrator edit either serializes behind the row locks or finds
+its own token stale and re-reads.
 
 ### 6. Public health semantics
 
@@ -212,6 +266,49 @@ during the window may lead a user to the maintenance page, which is the
 correct experience. Startup, backup, restore and migration flows do not
 auto-enter maintenance; the tables travel in backups like any others.
 
+### 8. Editability and the timeline/audit boundary
+
+This decision was added 2026-08-23 (see Amendments); the model it governs is
+decision 1's.
+
+An update's `published_at`, `kind` and `window_id` are immutable, as are the
+system-set `started_at` and `ended_at` on a window. Re-dating an entry, or
+re-stating what kind of entry it was, would falsify the narrative it exists to
+record.
+
+An update's `body` is editable, recording `edited_at`, with the prior text
+preserved in the audit row — a public message with a typo in it should be
+fixable without pretending it was never wrong. The open window's
+`expected_end_at` is editable too: revising the estimate is the single most
+common action an operator takes in a real window.
+
+Nothing is ever deleted. A wrong entry is corrected by editing it or by a
+following entry, matching the existing retain-rather-than-delete treatment of
+cancelled notices. Scheduled windows may be rescheduled or cancelled only
+before they open; once open, neither.
+
+**The timeline is not the audit log.** The audit log stays private, append-only
+and administrative, exactly as decision 1 describes. The timeline is public and
+editable product surface: it is what a blocked user reads, and it is allowed to
+be corrected the way any published copy is. The two are easy to conflate and
+are stated separately on purpose.
+
+Presentation is fixed here as constraints, not layout: newest entry first; only
+the open window's entries are shown, never a resolved or scheduled one; the
+screen must read well with exactly one entry, the overwhelmingly common case;
+no private data reaches the body; the `503` status and `no-store` header are
+unchanged from decision 2. The visual design itself belongs to #526's mockup
+rounds, not to this ADR — the ratified v19 screen is deliberately minimal
+artwork, and a rolling timeline is in genuine tension with that; this ADR fixes
+only what the timeline must satisfy, not how it looks.
+
+Resolved windows are retained in the database indefinitely — the rows are tiny,
+they travel in backups, and they are the operator's own record — but are never
+displayed: the maintenance screen is served only while the instance is closed,
+so a resolved window has no audience. There is no public status-history surface
+and no pruning job; both remain available to propose later, and neither is
+needed for this decision.
+
 ## Consequences
 
 - Every guarded request pays one singleton read and one partial-index probe,
@@ -228,7 +325,11 @@ auto-enter maintenance; the tables travel in backups like any others.
 - Administrators can mutate data while maintenance is active. That is the
   point — the operator is working — but it means maintenance never implies
   "nothing changed during the window".
-- One migration adds two tables; restore into active maintenance is safe
+- The original migration adds `instance_maintenance` and
+  `maintenance_notices`; a second migration (amended 2026-08-23, see
+  Amendments) adds `maintenance_windows` and `maintenance_updates`, alters
+  `instance_maintenance` to the slimmed shape in decision 1, and drops
+  `maintenance_notices`. Restore into active maintenance is safe either way,
   because recovery depends on exempt routes and the operator script, not on
   the stored state.
 
@@ -238,9 +339,13 @@ tested for stale tokens and restart persistence; (2) the guard, 503 semantics,
 exact exemption set and the repository-wide route-contract test, plus the
 health change, all negative-tested; (3) the administrator API and control UI,
 the recovery drill and the emergency script; (4) scheduled notices, the worker
-tick and duplicate-worker tests; (5) page presentation — the interim shell on
-Next, and the `hooks.server.ts` wiring of the built `/maintenance` screen with
-Playwright/axe evidence, landing with #411's cut.
+tick and duplicate-worker tests; (5) the window/update data model (decisions
+1, 5 and 8, amended 2026-08-23): its migration, the absorb-on-collision worker
+path, the editability rules and the new audit actions, with their own
+stale-token, restart-persistence and duplicate-worker tests; (6) page
+presentation — the interim shell on Next, and the `hooks.server.ts` wiring of
+the built `/maintenance` screen with Playwright/axe evidence, landing with
+#411's cut and consuming the timeline built in (5).
 
 ## Alternatives rejected
 
@@ -261,3 +366,37 @@ Playwright/axe evidence, landing with #411's cut.
 - **Stopping background workers during maintenance.** Creates backlog, risks
   blowing recovery deadlines, and sells a quiesce guarantee that only the
   ADR-0004 stopped-application protocol actually provides.
+- **A single overwritable current message (the original decision 1).** Every
+  administrator action and every scheduled activation overwrote whatever was
+  published before it; there was no way to say "we are running late, here is
+  why" as a follow-on rather than a replacement.
+- **Arbitrating which message wins when a scheduled notice comes due during
+  active maintenance.** #525 showed the failure mode directly: a scheduled
+  notice activating mid-window could silently shorten an operator's stated
+  `Retry-After`. Absorbing the notice into the open window, rather than
+  picking a winner, removes the arbitration question instead of answering it.
+- **A bounded pending-notice queue.** The 12-notice cap and its arbitration
+  existed to defend against contention that does not occur in practice;
+  retiring `maintenance_notices` for the window/update model removes the
+  queue they were defending.
+
+## Amendments
+
+**2026-08-23 — window/update data model, absorb-on-collision and timeline
+editability (issue #580).** Decisions 1 and 5 originally modelled maintenance
+narrative as a single overwritable message on the `instance_maintenance`
+singleton, with a bounded queue of future notices waiting to become that
+message. The singleton held **the** current message, so every administrator
+action and every scheduled activation overwrote the previous one: there was no
+way to publish "we are running late, here is why" as a follow-on rather than a
+replacement. #525 surfaced the sharper failure: a scheduled notice coming due
+during active maintenance silently shortened an operator's stated
+`Retry-After`, because activation copied the notice over the singleton with no
+arbitration against what was already published. Decision 1 is rewritten for
+the `maintenance_windows`/`maintenance_updates` model that separates closure
+state from narrative; decision 5's worker mechanism now absorbs a due window
+into an already-open one instead of overwriting it, with `expected_end_at`
+never shortening automatically; and decision 8 is added to fix the
+editability boundary and the public-timeline/private-audit split that the new
+model makes possible. Decisions 2, 3, 4, 6 and 7 are unaffected. Full trail on
+issue #580.
