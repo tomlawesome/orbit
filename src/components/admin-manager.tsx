@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MaintenanceControl } from "@/components/maintenance-control";
 import type { WorkspaceSession } from "@/lib/preview-workspace";
 
 interface InstanceUser {
@@ -283,6 +284,8 @@ export function AdminManager({ session }: AdminManagerProps) {
   }
 
   return <div className="settings-content">
+    <MaintenanceControl session={session} />
+
     <section>
       <div className="setting-heading admin-heading"><div><h3>Operations</h3><p>Safe status for delivery, jobs and configured providers.</p></div><button type="button" className="admin-refresh" onClick={() => void loadOperations()} disabled={operationsLoading}>{operationsLoading ? "Refreshing…" : "Refresh"}</button></div>
       {operationsError && <p className="admin-health-warning" role="alert">{operationsError}</p>}
