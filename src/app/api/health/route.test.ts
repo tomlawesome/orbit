@@ -14,6 +14,16 @@ describe("public health route", () => {
     expect(await response.json()).toMatchObject({ status: "ready", service: "orbit" });
   });
 
+  it("returns 200 for a maintained instance so orchestrators leave it alone (#523)", async () => {
+    mocks.readiness.mockResolvedValueOnce({ status: "maintenance" });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ status: "maintenance", service: "orbit" });
+    expect(Object.keys(body).sort()).toEqual(["service", "status", "timestamp"]);
+  });
+
   it("returns content-free non-success when required readiness is unavailable", async () => {
     mocks.readiness.mockResolvedValueOnce({ status: "degraded" });
     const response = await GET();

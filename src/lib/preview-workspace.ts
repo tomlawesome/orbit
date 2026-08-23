@@ -97,7 +97,7 @@ export class WorkspaceCommandError extends Error {
   }
 }
 
-type PublicReadinessStatus = "ready" | "degraded";
+type PublicReadinessStatus = "ready" | "degraded" | "maintenance";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -147,6 +147,7 @@ export async function fetchPublicReadiness(signal?: AbortSignal): Promise<Public
   }
   const payload = await readResponseJson(response);
   if (response.status === 200 && isRecord(payload) && payload.status === "ready") return "ready";
+  if (response.status === 200 && isRecord(payload) && payload.status === "maintenance") return "maintenance";
   if (response.status === 503 && isRecord(payload) && payload.status === "degraded") return "degraded";
   throw new WorkspaceInitializationError("schema");
 }
@@ -200,7 +201,11 @@ export async function waitForStartupReadiness(
 ): Promise<void> {
   for (let retry = 0; ; retry += 1) {
     const readiness = await check();
-    if (readiness === "ready") return;
+    // Maintenance proceeds like ready: the process is healthy, the exempt
+    // session route answers who this is, and the guarded APIs decide what an
+    // administrator may reach (ADR-0013 decision 4). Everyone else meets the
+    // guard's 503 downstream instead of waiting here forever.
+    if (readiness === "ready" || readiness === "maintenance") return;
     if (readiness !== "degraded") throw new WorkspaceInitializationError("schema");
     if (retry >= STARTUP_RETRY_DELAYS_MS.length) {
       throw new WorkspaceInitializationError("startup_unavailable");
