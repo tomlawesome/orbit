@@ -4,7 +4,9 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, instanceMaintenance, maintenanceNotices, users } from "@/db/schema";
-import { AppError, MaintenanceActiveError } from "@/lib/app-error";
+// Direct from the framework-free module, not the re-export: this module is
+// bundled into the operator CLI, which must not link Next (ADR-0015).
+import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { readSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 
