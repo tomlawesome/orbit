@@ -10,31 +10,10 @@ direction. Architecture and security decisions are recorded in ADRs and
 reviewed by the owner; the durable governance decision is
 [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
-## Who makes design and architecture calls
-
-UX/UI design work and architecture judgement on Orbit are done by Claude
-Fable 5 (owner decision, 2026-08-22). That covers the visual and interaction
-design itself — screen and component design, layout, motion, colour and
-typography decisions, mockup work, judgement against the ratified designs or
-the fidelity gate — and macro system-design choices of the kind ADRs record.
-
-Issues whose substance is that judgement carry `fable: subagent` or
-`fable: dialogue`. The pair records how the call is routed, not just that it
-is Fable's:
-
-- `fable: subagent` — a Fable sub-agent produces the artefact (the design
-  proposal, the ADR draft, the trade-off call) and the orchestrator integrates
-  it without altering the call. Use where the artefact stands or falls whole.
-- `fable: dialogue` — the owner works with Fable directly. Never delegate one;
-  hand the issue back with a starting prompt. Use where finishing depends on
-  the owner ratifying rounds, or where they are liable to accept one part of a
-  proposal and reject another.
-
-If unlabelled work turns out to conceal such a call mid-implementation, stop
-and escalate rather than make it.
-
-Other models implement, test and deliver ratified judgement, and do the rest
-of the engineering: orchestration, integration, tests, CI.
+Orbit is Claude-delivered, so the design and architecture calls the global
+rules reserve for the top model are Fable's (owner decision, 2026-08-22).
+Everything else about who makes those calls, how they are labelled and how
+they are routed is global; it is not repeated here.
 
 ## Delivery workflow
 
