@@ -629,4 +629,60 @@ test.describe("authenticated household lifecycle", () => {
     await page.reload();
     await openItemRow(page, updatedTitle);
   });
+
+  test("keeps the household menu reachable once the household list overflows it", async ({ page, isMobile }) => {
+    test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
+    test.setTimeout(180_000);
+
+    // #564: `.household-menu` had no bound on its own height, so once a
+    // household list grew past what the sidebar had room for, the menu
+    // painted past the bottom of the screen. That was true even at desktop
+    // height, because the sidebar is a sticky, non-scrolling rail
+    // (globals.css:74-78) that page scroll never reaches. "Add a household"
+    // and the households near the end of the list were visible, enabled and
+    // stable, but Playwright (like a real pointer) could not reach them. The
+    // fix bounds the menu itself with max-height/overflow-y instead. Seed
+    // well past the ~8-item budget so the dropdown is provably overflowing,
+    // on both the mobile-chromium and desktop-chromium projects.
+    await signIn(page, member);
+    const suffix = Date.now();
+    const seededNames: string[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const name = `Menu overflow ${suffix} ${index}`;
+      seededNames.push(name);
+      await createManualHousehold(page, isMobile, name);
+    }
+
+    await openMobileNavigationIfNeeded(page);
+    const householdPicker = page.locator("button.household-picker");
+    await expect(householdPicker, "Expected the household picker before opening the overflowing menu").toBeVisible({ timeout: 15_000 });
+    await householdPicker.click();
+    const householdMenu = page.locator(".household-menu");
+    await expect(householdMenu).toBeVisible({ timeout: 15_000 });
+
+    const menuBox = await householdMenu.boundingBox();
+    if (!menuBox) throw new Error("Expected the overflowing household menu to report a bounding box");
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("Expected a configured viewport for this project");
+    expect(menuBox.y + menuBox.height, "Expected the household menu to stay within the viewport once it overflows").toBeLessThanOrEqual(viewport.height);
+
+    // The original repro: Playwright refused this click pre-fix because the
+    // button was visible, enabled and stable but sat outside the viewport.
+    const addHousehold = householdMenu.locator("button.add-household");
+    await expect(addHousehold).toBeVisible();
+    await addHousehold.click();
+    const onboarding = page.getByRole("dialog", { name: "Set up your space" });
+    await expect(onboarding).toBeVisible({ timeout: 15_000 });
+    await onboarding.getByRole("button", { name: "Close household setup" }).click();
+    await expect(onboarding).toHaveCount(0);
+
+    // The most recently seeded household sits at the end of the list, the
+    // position most likely to be scrolled out of view; it must still be
+    // reachable and clickable inside the scroll container.
+    const lastName = seededNames[seededNames.length - 1];
+    const lastItem = householdMenu.getByRole("menuitem").filter({ hasText: lastName });
+    await expect(lastItem, `Expected exactly one household menu item for "${lastName}"`).toHaveCount(1, { timeout: 15_000 });
+    await lastItem.click();
+    await waitForActiveHousehold(page, lastName);
+  });
 });
