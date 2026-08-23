@@ -137,6 +137,17 @@ set -Eeuo pipefail
 #                                   and also wrote to stderr (a structural
 #                                   problem: unreadable/unsafe .env-orbit or
 #                                   a missing .env-orbit.example template).
+#   configuration-migration-interrupted — replaces configuration-invalid/
+#                                   configuration-incomplete for this run
+#                                   (ADR-0014 decision 7): fires only when
+#                                   the live .env-orbit fails validation AND
+#                                   configuration.sh's own
+#                                   `.env-orbit.orbit-config.rollback` copy
+#                                   exists, is a regular non-symlink file
+#                                   mode 600, and itself passes the same
+#                                   configure.sh --check semantics — a
+#                                   deterministically recoverable interrupted
+#                                   `configuration.sh --migrate` run.
 #   staging-evidence-present       — a leftover `.orbit-install-staging.*`
 #                                   directory from an interrupted installer
 #                                   transaction (see issue #291 comment on #261).
@@ -205,7 +216,7 @@ set -Eeuo pipefail
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 23 reason classes, the same optional docker probes, the same
+# same 24 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -276,13 +287,18 @@ set -Eeuo pipefail
 # Action-class mapping table (reason class -> action class), and the
 # mutation/backup rationale for each action class:
 #
-#   restore-transaction        <- staging-evidence-present
+#   restore-transaction        <- staging-evidence-present,
+#                                   configuration-migration-interrupted
 #     mutation=reversible backup=required. Restoring a recognized prior
 #     managed-file transaction overwrites the *current* (possibly still
 #     valid) live managed files with the staged prior-good copies, so a
 #     fresh backup of the current live state is required before slice 4
 #     may perform this overwrite, even though the staging evidence itself
-#     already holds the content being restored.
+#     already holds the content being restored. ADR-0014 decision 7 extends
+#     this same action class to a second, unrelated boundary —
+#     configuration.sh's own `.orbit-config.rollback` copy of .env-orbit —
+#     with the identical mutation/backup rationale; see
+#     do_restore_configuration_rollback for the implementation.
 #
 #   fix-permissions             <- managed-file-permissions,
 #                                   secret-permissions,
@@ -492,6 +508,27 @@ set -Eeuo pipefail
 #                         trap, which always removes its staging directory
 #                         once a transaction concludes) and the action is
 #                         reported `done`.
+#
+#                         For the resolves=configuration-migration-interrupted
+#                         boundary (ADR-0014 decision 7,
+#                         do_restore_configuration_rollback), the shape is
+#                         narrower because there is no staging tree to walk:
+#                         only the single fixed literal path .env-orbit is
+#                         ever touched. The `.orbit-config.rollback` copy and
+#                         .env-orbit's own parent are re-verified (regular,
+#                         non-symlink, mode 600, no symlinked parent) before
+#                         anything is touched; the current live .env-orbit
+#                         (if any) is copied into this run's private recovery
+#                         directory first, then the rollback content is
+#                         written to a same-directory temporary file and
+#                         `mv`d onto .env-orbit — an atomic same-filesystem
+#                         rename, matching configuration.sh's own
+#                         migrate_file() write pattern, rather than
+#                         remove-then-copy. Any failure self-restores
+#                         .env-orbit from the recovery-directory backup and
+#                         reports `failed`, leaving the rollback copy in
+#                         place for a future retry. On success the rollback
+#                         copy is removed and the action is reported `done`.
 #
 #   restart-services      Re-resolves the target container immediately
 #                         before acting, using the identical Compose
@@ -1121,8 +1158,15 @@ cleanup() {
 trap cleanup EXIT
 
 readonly environment_file=".env-orbit"
+readonly environment_example=".env-orbit.example"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
+# configuration.sh's own rollback_suffix constant (scripts/configuration.sh
+# line 9), duplicated here rather than sourced — see the top-of-file
+# source-less rule. Only configuration.sh ever creates a file at this
+# suffix (migrate_file(), non-transaction path), and only when the
+# migration was NOT already running inside install's own transaction.
+readonly configuration_rollback_suffix=".orbit-config.rollback"
 readonly database_volume_key="orbit-db-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
@@ -1189,6 +1233,7 @@ readonly -a class_order=(
   secret-permissions
   configuration-incomplete
   configuration-invalid
+  configuration-migration-interrupted
   staging-evidence-present
   compose-interpolation-failed
   docker-unavailable
@@ -1216,6 +1261,13 @@ readonly -A action_for_class=(
   [secret-permissions]=fix-permissions
   [configuration-incomplete]=rerun-configuration
   [configuration-invalid]=rerun-configuration
+  # ADR-0014 decision 7: a deterministically recoverable interrupted
+  # configuration.sh migration — the live file fails validation AND its
+  # `.orbit-config.rollback` copy exists, is a regular non-symlink file, and
+  # itself passes validation — reuses the same restore-transaction action as
+  # the install-transaction boundary, rather than only telling the operator
+  # to re-run configure.sh (rerun-configuration, above).
+  [configuration-migration-interrupted]=restore-transaction
   [staging-evidence-present]=restore-transaction
   [volume-retained-without-credentials]=rotate-database-credential
   [database-credential-mismatch]=rotate-database-credential
@@ -1359,6 +1411,66 @@ read_environment_value() {
   done < "$environment_file"
   [[ "$found" == 1 ]] || return 1
   printf '%s' "$value"
+}
+
+# --- configuration-migration-interrupted (ADR-0014 decision 7) -------------
+#
+# repair.sh validates the live .env-orbit by running `bash scripts/
+# configure.sh --check` as a subprocess (Step 5 below) rather than
+# reimplementing configure.sh's readiness rules. That same subprocess is the
+# only deterministic way to validate the `.orbit-config.rollback` candidate
+# with identical semantics, but configure.sh has no `--file` flag: it always
+# forces its own cwd to `dirname "$0"/..` and reads a hardcoded relative
+# `.env-orbit`, so it cannot be pointed at an arbitrary path directly. The
+# least-invasive way to reuse it unmodified is to run it from a disposable,
+# private staging directory (outside the installation directory, matching
+# the existing $TMPDIR-based `configure_check_stderr` precedent below —
+# `--check`/`--plan` remain read-only with respect to the installation
+# directory itself) holding a fresh copy of the candidate content named
+# `.env-orbit`, plus copies of the two other inputs configure.sh's own
+# `run_check` requires to be present as real, non-symlink files:
+# scripts/configure.sh itself and .env-orbit.example.
+#
+# The staged directory deliberately does NOT reproduce .orbit-secrets: run_
+# check only consults it for file-backed secret readiness (e.g.
+# OIDC_CLIENT_SECRET_FILE), and copying secret material into a second
+# on-disk location purely to answer a diagnosis-time readiness question is
+# not worth the exposure. The one-sided consequence is intentional and safe:
+# a rollback candidate that depends on a file-backed secret reads back as
+# configuration-incomplete (not "passes") in this isolated check, so
+# configuration-migration-interrupted simply never fires for that
+# deployment shape and diagnosis falls back to today's plain
+# configuration-invalid/manual — never an incorrectly-approved restore.
+run_isolated_configure_check() {
+  local candidate="$1" stage status=0
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/orbit-repair-configuration-rollback.XXXXXX")" || return 2
+  chmod 700 -- "$stage" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
+  mkdir -p -- "$stage/scripts" || { rm -rf -- "$stage"; return 2; }
+  cp -- scripts/configure.sh "$stage/scripts/configure.sh" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
+  cp -- "$environment_example" "$stage/.env-orbit.example" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
+  cp -- "$candidate" "$stage/.env-orbit" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
+  chmod 600 -- "$stage/.env-orbit" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
+  bash "$stage/scripts/configure.sh" --check >/dev/null 2>/dev/null || status=$?
+  rm -rf -- "$stage"
+  return "$status"
+}
+
+# The deterministic, no-guessing gate for configuration-migration-interrupted
+# (ADR-0014 decision 7): true only when the rollback copy exists, is a
+# regular non-symlink file restricted to mode 600 (configuration.sh's own
+# migrate_file() always creates it this way — see scripts/configuration.sh
+# lines 243-248), and itself passes the same configure.sh --check semantics
+# the live file just failed. Any other outcome (missing, symlink, wrong
+# mode, unreadable, or a failing check) returns false and leaves diagnosis
+# exactly as it was before this class existed.
+configuration_migration_rollback_recoverable() {
+  local rollback_path="${environment_file}${configuration_rollback_suffix}"
+  is_regular_non_symlink_file "$rollback_path" || return 1
+  has_mode "$rollback_path" 600 || return 1
+  is_regular_non_symlink_file "$environment_example" || return 1
+  local status=0
+  run_isolated_configure_check "$rollback_path" || status=$?
+  [[ "$status" == 0 ]]
 }
 
 # $1: "early" forces exit 5 (not-an-orbit-installation) regardless of
@@ -1716,20 +1828,28 @@ run_diagnosis() {
   #     on stdout was involved).
   #   - exit non-zero with stderr output -> configuration-invalid (a
   #     structural problem such as an unreadable/unsafe .env-orbit or a
-  #     missing .env-orbit.example template).
+  #     missing .env-orbit.example template) — UNLESS a recoverable
+  #     `.orbit-config.rollback` copy is present (see
+  #     configuration_migration_rollback_recoverable above), in which case
+  #     configuration-migration-interrupted (ADR-0014 decision 7) replaces
+  #     it: exactly one configuration finding is ever recorded per run.
   if is_regular_non_symlink_file scripts/configure.sh; then
     checked=$((checked + 1))
     configure_check_stderr="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-configure-check.XXXXXX")"
     configure_check_status=0
     bash scripts/configure.sh --check >/dev/null 2>"$configure_check_stderr" || configure_check_status=$?
+    configure_check_had_stderr=0
+    [[ -s "$configure_check_stderr" ]] && configure_check_had_stderr=1
+    rm -f -- "$configure_check_stderr"
     if [[ "$configure_check_status" != 0 ]]; then
-      if [[ -s "$configure_check_stderr" ]]; then
+      if configuration_migration_rollback_recoverable; then
+        add_finding configuration-migration-interrupted configuration fail
+      elif [[ "$configure_check_had_stderr" == 1 ]]; then
         add_finding configuration-invalid configuration fail
       else
         add_finding configuration-incomplete configuration fail
       fi
     fi
-    rm -f -- "$configure_check_stderr"
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------
@@ -2276,6 +2396,70 @@ do_restore_transaction() {
   done
 
   rm -rf -- "$staging_root" || return 1
+  return 0
+}
+
+# --- restore-transaction (configuration-migration-interrupted boundary) -----
+#
+# ADR-0014 decision 7: extends restore-transaction to a second, unrelated
+# boundary — configuration.sh's own `.orbit-config.rollback` copy — rather
+# than adding a new action class. A separate function, not a branch inside
+# do_restore_transaction above, because the two boundaries share nothing
+# beyond the action-class name: this one restores exactly one fixed literal
+# path (never anything enumerated from disk), and configuration.sh's own
+# migrate_file() already wrote the rollback content, so there is no staging
+# tree to walk.
+#
+# Discipline mirrors do_restore_transaction exactly: re-verify (TOCTOU-safe)
+# immediately before touching anything; refuse a symlinked parent directory
+# on either side and a symlinked rollback file; back up the current live
+# .env-orbit into this run's private recovery directory before it is
+# touched; on any failure, self-restore every path already touched and
+# report failed, leaving the rollback copy in place for a future retry; on
+# full success, remove the rollback copy (mirroring do_restore_transaction's
+# own staging-directory removal) and report done.
+#
+# Unlike do_restore_transaction's remove-then-cp replacement, this action
+# writes the new content to a same-directory temporary file first and
+# renames it onto .env-orbit — an atomic same-filesystem rename, matching
+# configuration.sh's own migrate_file() write pattern, so .env-orbit is
+# never observably absent or partially written.
+do_restore_configuration_rollback() {
+  local rollback_path="${environment_file}${configuration_rollback_suffix}"
+  local parent staged have_live=0
+
+  is_regular_non_symlink_file "$rollback_path" || return 1
+  has_mode "$rollback_path" 600 || return 1
+
+  parent="$(dirname -- "$environment_file")"
+  [[ "$parent" == "." || ! -L "$parent" ]] || return 1
+  parent="$(dirname -- "$rollback_path")"
+  [[ "$parent" == "." || ! -L "$parent" ]] || return 1
+
+  ensure_recovery_dir || return 1
+
+  if [[ -e "$environment_file" || -L "$environment_file" ]]; then
+    have_live=1
+    mkdir -p -- "$(dirname -- "$recovery_dir/live/$environment_file")" || return 1
+    cp -a -- "$environment_file" "$recovery_dir/live/$environment_file" || return 1
+  fi
+
+  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || {
+    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
+    return 1
+  }
+  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null; then
+    rm -f -- "$staged"
+    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
+    return 1
+  fi
+  if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
+    rm -f -- "$staged"
+    [[ "$have_live" == 1 ]] && restore_transaction_self_restore "$environment_file"
+    return 1
+  fi
+
+  rm -f -- "$rollback_path" || return 1
   return 0
 }
 
@@ -2943,7 +3127,17 @@ run_safe_batch() {
     status=0
     case "$action" in
       fix-permissions) do_fix_permissions "$fclass" "$ftarget" || status=$? ;;
-      restore-transaction) do_restore_transaction || status=$? ;;
+      restore-transaction)
+        # Two independent boundaries share the restore-transaction action
+        # class (ADR-0014 decision 7); $fclass tells them apart. See
+        # do_restore_configuration_rollback's own comment for why this is a
+        # separate function rather than a branch inside do_restore_transaction.
+        if [[ "$fclass" == configuration-migration-interrupted ]]; then
+          do_restore_configuration_rollback || status=$?
+        else
+          do_restore_transaction || status=$?
+        fi
+        ;;
       restart-services) do_restart_services "$fclass" || status=$? ;;
     esac
 
