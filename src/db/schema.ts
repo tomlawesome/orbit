@@ -1,4 +1,4 @@
-import { boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
@@ -98,6 +98,50 @@ export const instanceAuthority = pgTable("instance_authority", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("instance_authority_singleton", sql`${table.singleton}`),
+]);
+
+/**
+ * The instance's one maintenance configuration (#235, ADR-0013 decision 1):
+ * the `instance_authority` singleton shape, but with no foreign key, so
+ * unlike that table the 0028 migration seeds the inactive row
+ * unconditionally and the guard read is always a plain primary-key lookup.
+ * `id` exists solely to give `audit_log.entity_id` something stable to
+ * point at. `version` versions the whole maintenance configuration —
+ * this row and `maintenanceNotices` together — and every administrator
+ * mutation is a single transaction gated on it (src/server/maintenance.ts).
+ */
+export const instanceMaintenance = pgTable("instance_maintenance", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  active: boolean("active").notNull().default(false),
+  message: text("message"),
+  messagePublishedAt: timestamp("message_published_at", { withTimezone: true }),
+  expectedEndAt: timestamp("expected_end_at", { withTimezone: true }),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_maintenance_singleton", sql`${table.singleton}`),
+  check("instance_maintenance_message_length", sql`${table.message} IS NULL OR char_length(${table.message}) <= 500`),
+]);
+
+/**
+ * Scheduled future maintenance notices (#235, ADR-0013 decision 1). Rows are
+ * retained, never deleted: cancellation sets `cancelledAt`. The partial index
+ * matches the "due, unclaimed, uncancelled" predicate the effective-state
+ * read and the future scheduled-activation worker (#525) both use.
+ */
+export const maintenanceNotices = pgTable("maintenance_notices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  message: text("message").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  expectedEndAt: timestamp("expected_end_at", { withTimezone: true }),
+  activatedAt: timestamp("activated_at", { withTimezone: true }),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("maintenance_notice_message_length", sql`char_length(${table.message}) <= 500`),
+  index("maintenance_notice_pending_starts_idx").on(table.startsAt).where(sql`${table.activatedAt} IS NULL AND ${table.cancelledAt} IS NULL`),
 ]);
 
 export const externalIdentities = pgTable("external_identities", {
