@@ -127,6 +127,11 @@ button { color: inherit; }
   color: #f5f9f6;
   background: #1c1d3a;
   box-shadow: 0 18px 42px rgb(0 0 0 / 28%);
+  max-height: min(420px, calc(100dvh - 230px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 25%) transparent;
 }
 .household-menu > p { margin: 3px 6px 8px; color: #9e99c5; font-size: calc(8px + var(--text-bump)); font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 .household-menu > button:not(.add-household) {
