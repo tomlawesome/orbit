@@ -2,6 +2,13 @@ name: Validate Orbit and publish previews
 
 on:
   pull_request:
+    # `labeled` is required so applying `ci: acceptance` starts a run by
+    # itself; the default types alone only fire on a new commit or open.
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
     branches:
       - main
       - dev
@@ -10,6 +17,7 @@ on:
     branches:
       - preview
       - "hotfix/**"
+  workflow_dispatch: {}
 
 concurrency:
   group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
@@ -119,7 +127,16 @@ jobs:
 
   supply_chain_source:
     name: Source dependency and secret policy
-    if: github.event_name == 'push'
+    # Runs on a push (existing), an on-demand dispatch, or a pull request
+    # that opted in with the `ci: acceptance` label. Neither new path
+    # publishes anything; only the push branch/ref restriction above
+    # decides that, and this job stays read-only regardless.
+    if: >-
+      ${{
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -178,9 +195,16 @@ jobs:
       - changes
       - fast
     # Skipped rather than filtered out, so the required check still reports.
+    # The changed-paths filter stays in force for every event that reaches
+    # here, including the new dispatch and label paths — it is a cost
+    # filter, not a publication gate.
     if: >-
       ${{
-        github.event_name == 'push' &&
+        (
+          github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch' ||
+          contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+        ) &&
         needs.changes.outputs.integration == 'true'
       }}
     runs-on: ubuntu-latest
@@ -231,9 +255,16 @@ jobs:
       - supply_chain_source
       - integration
     # Retain the existing check identity for branch protection, but defer the
-    # expensive exact-image path until the protected preview merge. The publish
-    # job below reuses these steps and runs them exactly once for that revision.
-    if: ${{ false }}
+    # expensive exact-image path until the protected preview merge, except when
+    # evidence was explicitly requested on demand or via the acceptance label.
+    # `publish_preview` below reuses these same steps for the one push-triggered
+    # run that actually publishes, so this job and that one never both run for
+    # the same event: this job is gated to non-push events only.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
