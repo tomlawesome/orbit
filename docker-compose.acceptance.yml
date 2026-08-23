@@ -43,7 +43,13 @@ services:
     environment:
       TEST_OIDC_ISSUER: https://orbit-oidc:4443/
     ports:
-      - "127.0.0.1:4443:4443"
+      # Host-side only; the container always listens on 4443 and the
+      # in-container TEST_OIDC_ISSUER/OIDC_ISSUER URLs above are fixed to
+      # that port. TEST_OIDC_PORT (scripts/test-e2e-local.sh) lets the host
+      # binding move when a real deployment already holds 4443; the browser
+      # is redirected to the new host port via playwright.config.ts's
+      # host-resolver-rules, not by changing this URL.
+      - "127.0.0.1:${TEST_OIDC_PORT:-4443}:4443"
 
   # The mail proving ground (#459): SMTP + IMAPS in one disposable container,
   # so real messages with real attachments travel the real collection pipe.
@@ -61,5 +67,8 @@ services:
     volumes:
       - ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/greenmail.p12:/certs/greenmail.p12:ro
     ports:
-      # SMTP for the seeding spec, loopback only.
-      - "127.0.0.1:3025:3025"
+      # SMTP for the seeding spec, loopback only. TEST_SMTP_PORT
+      # (scripts/test-e2e-local.sh) must match tests/e2e/v19-mail-collection.spec.ts's
+      # SMTP_PORT exactly -- both read the same variable so they can never
+      # diverge.
+      - "127.0.0.1:${TEST_SMTP_PORT:-3025}:3025"
