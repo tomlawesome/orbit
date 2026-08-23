@@ -102,23 +102,43 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 plugin is requ
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env-orbit.example && -f docker-compose.yml ]] || fail "run from the Orbit repository root."
 
-# The two sidecars with a genuinely fixed host port -- GreenMail (the mail
-# collection spec hardcodes 3025) and the disposable OIDC provider (its own
-# issuer URL is https://orbit-oidc:4443/, embedded in both the container
-# environment and the browser's host-resolver override) -- plus the app's
-# own port, must be free before anything starts. A real Orbit deployment on
-# this host is exactly what would occupy them; refuse clearly rather than
-# fail deep inside `compose up` or hang waiting for health.
 port_free() {
   ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
-for port_check in "3025:GreenMail SMTP (tests/e2e/v19-mail-collection.spec.ts hardcodes this port)" \
-  "4443:the disposable OIDC provider (its issuer URL is fixed)" \
+
+# GreenMail's SMTP port and the disposable OIDC provider's port are fixed in
+# CI (3025 and 4443: tests/e2e/v19-mail-collection.spec.ts's SMTP_PORT,
+# docker-compose.acceptance.yml's host bindings, and playwright.config.ts's
+# host-resolver-rules all default to them via TEST_SMTP_PORT/TEST_OIDC_PORT)
+# but that is exactly what a real Orbit deployment on this host already
+# holds. Pick free ports instead and export them so every one of those
+# readers agrees -- the test and the compose host-binding must always
+# resolve to the SAME number, which is why this is one variable each rather
+# than two that could diverge. An explicit override from the caller's
+# environment is respected as-is.
+free_port() {
+  node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
+}
+export TEST_SMTP_PORT="${TEST_SMTP_PORT:-$(free_port)}"
+export TEST_OIDC_PORT="${TEST_OIDC_PORT:-$(free_port)}"
+while [[ "$TEST_OIDC_PORT" == "$TEST_SMTP_PORT" ]]; do
+  TEST_OIDC_PORT="$(free_port)"
+done
+export TEST_OIDC_PORT
+
+# The app's own port and the two ports just selected must be free before
+# anything starts -- refuse clearly rather than fail deep inside
+# `compose up` or hang waiting for health. TEST_SMTP_PORT/TEST_OIDC_PORT are
+# freshly chosen above, so this is normally a formality; it still guards an
+# explicit caller override and the narrow race between selection and use.
+for port_check in "${TEST_SMTP_PORT}:GreenMail SMTP (TEST_SMTP_PORT)" \
+  "${TEST_OIDC_PORT}:the disposable OIDC provider (TEST_OIDC_PORT)" \
   "${app_port}:the Orbit application"; do
   port="${port_check%%:*}"
   label="${port_check#*:}"
   port_free "$port" || fail "port ${port} (${label}) is already in use -- likely a real Orbit deployment on this host. Stop it before running the local acceptance suite."
 done
+log "using TEST_SMTP_PORT=${TEST_SMTP_PORT} TEST_OIDC_PORT=${TEST_OIDC_PORT}"
 
 # The renamed containers (docker-compose.local-e2e.yml) must not already
 # exist under a different project; a name collision there would mean this
