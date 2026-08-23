@@ -239,11 +239,12 @@ export async function registerNode(): Promise<void> {
   }
 
   if (process.env.WORKER_ENABLED === "true") {
-    const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }] = await Promise.all([
+    const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
       import("@/server/notification-worker"),
       import("@/server/document-worker"),
       import("@/server/imap-ingestion"),
       import("@/server/imap-receipt-worker"),
+      import("@/server/maintenance-worker"),
     ]);
     const optionalSettings = new Set(
       getConfigurationProblems()
@@ -266,6 +267,8 @@ export async function registerNode(): Promise<void> {
     startDocumentWorker();
     if (!optionalSettings.has("imap")) startImapIngestionWorker();
     if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
+    // Unconditional: scheduled maintenance depends on no optional setting.
+    startMaintenanceWorker();
   }
 
   // Probed after workers start so a slow or absent scanner never delays them.
