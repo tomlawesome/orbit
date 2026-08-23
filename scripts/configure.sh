@@ -217,6 +217,14 @@ ensure_secrets_directory() {
 # in a single atomic rewrite.
 update_managed_keys() {
   local temp line key found final_newline=1 output_line index last_byte=""
+  # mapfile -t strips the newline but not a preceding carriage return, so a
+  # CRLF file arrives with one still attached to every line. Unmanaged lines
+  # therefore keep theirs automatically, while a rewritten managed line is
+  # rebuilt from scratch and would lose it - leaving mixed endings in a file
+  # that started out consistent. `cr` carries the ending of the line being
+  # replaced; `file_cr` carries the file's own convention, for keys appended
+  # at the end that have no original line to copy from.
+  local cr="" file_cr=""
   local -a input_lines=() output_lines=()
   local -A pending=() written=()
   local -a order=()
@@ -244,7 +252,13 @@ update_managed_keys() {
   fi
 
   for line in "${input_lines[@]}"; do
+    [[ "$line" == *$'\r' ]] && file_cr=$'\r'
+  done
+
+  for line in "${input_lines[@]}"; do
     found=0
+    cr=""
+    [[ "$line" == *$'\r' ]] && cr=$'\r'
 
     # Keep the file-backed OIDC selector beside its authentication
     # documentation. Active managed lines are the only lines eligible for
@@ -254,7 +268,7 @@ update_managed_keys() {
     if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
       "$line" == "# OIDC_CLIENT_SECRET_FILE="* ]]; then
       if [[ -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" ]]; then
-        output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}")
+        output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}$cr")
         written[OIDC_CLIENT_SECRET_FILE]=1
       fi
       continue
@@ -269,7 +283,7 @@ update_managed_keys() {
           # older active copy in an arbitrary location.
           break
         elif [[ -z "${written[$key]:-}" ]]; then
-          output_lines+=("$key=${pending[$key]}")
+          output_lines+=("$key=${pending[$key]}$cr")
           written["$key"]=1
         fi
         break
@@ -282,13 +296,13 @@ update_managed_keys() {
     if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
       -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" &&
       "$line" == OIDC_CLIENT_SECRET=* ]]; then
-      output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}")
+      output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}$cr")
       written[OIDC_CLIENT_SECRET_FILE]=1
     fi
   done
   for key in "${order[@]}"; do
     if [[ -z "${written[$key]:-}" ]]; then
-      output_lines+=("$key=${pending[$key]}")
+      output_lines+=("$key=${pending[$key]}$file_cr")
       # Adding a new assignment requires a line boundary after the value,
       # even when the source file ended without one.
       final_newline=1
