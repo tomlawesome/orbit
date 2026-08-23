@@ -120,13 +120,22 @@ The reason classes cover every distinction #261 names: `secret-missing`,
 `container-foreign-owner`, plus `volume-retained-without-credentials` — the
 28P01 precursor, detected from the retained volume name and the absent
 password file alone, without opening a connection. The delta slice adds
-`migration-failed` (a read-only comparison of the applied migration journal,
-over the already-authenticated probe path, against the journal the pinned
-image ships) and `image-identity-mismatch`; the reserved name
+`migration-failed` and `image-identity-mismatch`; the reserved name
 `unsupported-schema` is retired as covered by the two #437 classes.
-`migration-failed` plans as `manual`: ADR-0004's update recovery point owns
-that rollback boundary, and the migrator's idempotent retry already happens
-on any restart — repair must not invent a competing path.
+`migration-failed` reads the migrator's own published verdict rather than
+re-deriving it (amended 2026-08-23, see Amendments): primarily the same
+bounded app-log sentinel scan the #437 classes use, matching
+`reason=migration_failed`, which works on a stopped or crash-looping
+container; backed, for rotated logs or a removed container, by one
+fixed-literal `SELECT` of the migrator's own outcome bookkeeping row
+(`drizzle.orbit_migration_runs`, written by the startup wrapper) over the
+already-authenticated probe path. `image-identity-mismatch` compares the
+running container's content-addressable image ID against the locally-present
+image for the digest-pinned `ORBIT_IMAGE` reference — local reads only,
+never a registry call. `migration-failed` plans as `manual`: ADR-0004's
+update recovery point owns that rollback boundary, and the migrator's
+idempotent retry already happens on any restart — repair must not invent a
+competing path.
 
 Exit codes are stable per mode and reflect that run's own outcome, never the
 target's post-hoc health: `--check` 0 healthy / 3 attention / 4 failed;
@@ -340,10 +349,11 @@ that could drift.
 Slices 1–5 (diagnosis, database/application probes, planning, safe-set
 execution, credential rotation) are shipped on `dev`. Remaining:
 
-1. **Migration and identity diagnosis** — `migration-failed` (read-only
-   journal comparison over the authenticated probe path) and
-   `image-identity-mismatch`; retire the `unsupported-schema` reserved name;
-   fixed manual guidance citing the ADR-0004 recovery point.
+1. **Migration and identity diagnosis** — `migration-failed` (the migrator's
+   published verdict: sentinel scan plus outcome-row backstop; amended
+   2026-08-23) and `image-identity-mismatch`; retire the
+   `unsupported-schema` reserved name; fixed manual guidance citing the
+   ADR-0004 recovery point.
 2. **Configuration-migration recovery** — recognize the
    `.orbit-config.rollback` boundary and restore it under the
    restore-transaction discipline, only when the live file fails validation
@@ -363,3 +373,24 @@ execution, credential rotation) are shipped on `dev`. Remaining:
    prompts; `install.sh --repair` signposts `repair.sh`; the repair line
    grammar is fully recorded in `docs/engine-events.md`; catalogue entries
    land in the same pull requests throughout.
+
+## Amendments
+
+**2026-08-23 — `migration-failed` mechanism (issue #528).** Decision 3
+originally specified a read-only comparison of the applied migration journal
+against the journal the pinned image ships. Drizzle wraps each migration in a
+transaction and writes its journal row only on success, so a failed migration
+rolls back leaving no row: a journal comparison can only ever report
+"database behind image" and cannot distinguish "ran and failed" from "never
+ran" — the class would misreport by design. Following the established
+pattern (Flyway/Liquibase record per-migration outcomes; container platforms
+read job status), the migrator now publishes its own verdict — the existing
+`reason=migration_failed` log sentinel plus a durable outcome row in
+`drizzle.orbit_migration_runs`, a bookkeeping table the startup wrapper
+creates itself (deliberately not a journal migration) — and repair.sh reads
+that verdict: sentinel scan first, outcome-row backstop when logs are gone.
+Superseded en route: `docker exec` into orbit-app to read the shipped
+journal (needs a running container — unavailable in exactly the
+failed-migration state), and a build-time image label carrying the journal
+hash (readable with the app down, but still only detects "behind"). Full
+trail on issue #528.

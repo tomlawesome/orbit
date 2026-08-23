@@ -52,8 +52,16 @@ function scratchDir() {
 //   - `docker compose --project-name X ... config --quiet` -> interpolation
 //   - `docker volume ls --filter ... --format ...`         -> volume retention
 //   - `docker exec ... pg_isready ...` / `docker exec -e PGPASSWORD ... psql ...`
-//                                                           -> database reachability/auth
+//                                                           -> database reachability/auth,
+//                                                              plus the issue #528
+//                                                              migration-failed backstop
+//                                                              SELECT (fingerprinted by the
+//                                                              literal orbit_migration_runs
+//                                                              table name)
 //   - `docker inspect --format '{{.Config.Image}}|...' <id>` -> app image/health
+//   - `docker inspect --format '{{.Image}}' <id>`           -> issue #528 running image ID
+//   - `docker image inspect --format '{{.Id}}' <ref>`       -> issue #528 locally-present
+//                                                              image for the pinned ref
 // `unavailable: true` makes every subcommand fail, simulating a missing or
 // unreachable Docker without needing to hide the real `docker` binary from
 // PATH (which shares a directory with bash/coreutils in this sandbox).
@@ -115,6 +123,30 @@ function dockerShimScript({
   // assert the rotation SQL genuinely arrived via stdin (not argv, and not
   // simply absent because the call never happened).
   execStdinLogPath = "",
+  // issue #528 migration-failed backstop support: the single fixed-literal
+  // `SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ...`
+  // repair.sh issues over the already-authenticated probe path, fingerprinted
+  // by the literal table name (never by full SQL text matching — that would
+  // defeat the point of testing byte-for-byte literal issuance). Default
+  // (`migrationRun: undefined`, `migrationRunRaw: undefined`) simulates the
+  // bookkeeping table not existing yet (a real `psql` ERROR on stderr, exit
+  // 1) so every test that doesn't opt in stays a no-finding skip.
+  // `migrationRun: { outcome, reason }` returns a clean
+  // `-t -A -F'|'` row: `${outcome}|${reason}`, exit 0. `migrationRunRaw`
+  // overrides with an arbitrary raw byte sequence (for hostile/garbage-output
+  // tests) instead of the outcome/reason shape, still exit 0.
+  migrationRun = undefined,
+  migrationRunRaw = undefined,
+  // issue #528 image-identity-mismatch support. `imageInspect: { present,
+  // id }` controls `docker image inspect --format '{{.Id}}' <pinned-ref>`:
+  // present=false (the default) makes it fail, exactly like a pinned image
+  // never pulled locally, so every test that doesn't opt in leaves Step 13 a
+  // no-finding skip. `appImageId` controls `docker inspect --format
+  // '{{.Image}}' <container>` — the RUNNING container's actual image ID,
+  // deliberately independent from `app.image` (the Config.Image reference
+  // string Step 12's stale-container check reads).
+  imageInspect = { present: false, id: "" },
+  appImageId = "sha256:" + "9".repeat(64),
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -133,6 +165,19 @@ function dockerShimScript({
   // be told apart from a generic unhealthy container (#437).
   const appLog = (app && app.log) || "";
   const alterRoleExit = alterRoleFails ? 1 : 0;
+  const migrationRunHasData = migrationRunRaw !== undefined || migrationRun;
+  const migrationRunExit = migrationRunHasData ? 0 : 1;
+  const migrationRunLine =
+    migrationRunRaw !== undefined
+      ? `printf '%s' '${migrationRunRaw}'`
+      : migrationRun
+        ? `printf '%s|%s\\n' '${migrationRun.outcome ?? ""}' '${migrationRun.reason ?? ""}'`
+        : `printf 'ERROR:  relation \"drizzle.orbit_migration_runs\" does not exist\\n' >&2`;
+  const imageInspectPresent = Boolean(imageInspect && imageInspect.present === true);
+  // Defaults to appImageId (not a separate literal) so a "match" scenario
+  // needs only `imageInspect: { present: true }`, and a "mismatch" scenario
+  // only needs to override this one field.
+  const imageInspectId = (imageInspect && imageInspect.id) || appImageId;
   const logLine = argvLogPath
     ? `printf '%s\\n' "$*" >> '${argvLogPath}' 2>/dev/null || true`
     : "true";
@@ -231,6 +276,14 @@ function dockerShimScript({
     alterRoleExit === 0 && dbAuthMarkerPath ? `      : > '${dbAuthMarkerPath}'` : "      true",
     `      exit ${alterRoleExit}`,
     "    fi",
+    // issue #528 migration-failed backstop: fingerprinted by the literal
+    // table name, checked BEFORE the generic *psql* branch below (which
+    // would otherwise also match this call and answer with the unrelated
+    // SELECT-1 authResult instead).
+    '    if [[ "$joined" == *"orbit_migration_runs"* ]]; then',
+    `      ${migrationRunLine}`,
+    `      exit ${migrationRunExit}`,
+    "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
     dbAuthMarkerPath
       ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
@@ -259,9 +312,28 @@ function dockerShimScript({
     "    exit 0",
     "    ;;",
     "  inspect)",
+    // issue #528 Step 13: `docker inspect --format '{{.Image}}' <id>` — the
+    // running container's actual image ID — is a distinct call from Step
+    // 12's combined Config.Image/Health format just below, so it must be
+    // routed first.
+    '    if [[ "${3:-}" == "{{.Image}}" ]]; then',
+    `      printf '%s\\n' '${appImageId}'`,
+    "      exit 0",
+    "    fi",
     `    app_health="$(${appHealthExpr})"`,
     `    printf '%s|%s\\n' '${appImage}' "$app_health"`,
     "    exit 0",
+    "    ;;",
+    "  image)",
+    // issue #528 Step 13: `docker image inspect --format '{{.Id}}' <ref>` —
+    // the locally-present image for the pinned reference. Absent by default
+    // (imageInspectPresent=false), simulating a pinned image never pulled
+    // locally, so Step 13 skips (never guesses) unless a test opts in.
+    '    if [[ "${2:-}" == "inspect" ]]; then',
+    imageInspectPresent ? `      printf '%s\\n' '${imageInspectId}'` : "      true",
+    imageInspectPresent ? "      exit 0" : "      exit 1",
+    "    fi",
+    "    exit 1",
     "    ;;",
     "  restart)",
     restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
@@ -440,7 +512,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=15 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=16 skipped=0"]);
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -479,7 +551,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=14",
+      "diagnosis result=failed checked=1 skipped=15",
     ]);
   });
 
@@ -592,7 +664,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=15 skipped=0",
+      "diagnosis result=attention checked=16 skipped=0",
     ]);
   });
 
@@ -692,7 +764,8 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=container severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=5");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=6");
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
@@ -838,6 +911,90 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("stale-container");
   });
 
+  // --- image-identity-mismatch (issue #528 slice C) -------------------------
+  //
+  // Distinct from stale-container above: this compares content-addressable
+  // image IDs (docker inspect .Image on the container vs. docker image
+  // inspect .Id on the pinned reference), not the Config.Image string.
+
+  it("reports image-identity-mismatch (fail) when the running image ID differs from the locally pinned image", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+    const runningId = "sha256:" + "1".repeat(64);
+    const pinnedLocalId = "sha256:" + "2".repeat(64);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: pinned, health: "healthy" },
+      appImageId: runningId,
+      imageInspect: { present: true, id: pinnedLocalId },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=image-identity-mismatch target=image severity=fail");
+  });
+
+  it("does not report image-identity-mismatch when the running image ID matches the locally pinned image", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+    const sameId = "sha256:" + "3".repeat(64);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: pinned, health: "healthy" },
+      appImageId: sameId,
+      imageInspect: { present: true, id: sameId },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("image-identity-mismatch");
+  });
+
+  it("skips image-identity-mismatch (never guesses) when the pinned image is not present locally", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: pinned, health: "healthy" },
+      appImageId: "sha256:" + "1".repeat(64),
+      imageInspect: { present: false },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("image-identity-mismatch");
+  });
+
+  it("skips image-identity-mismatch when ORBIT_IMAGE is not digest-pinned", () => {
+    // makeFixture()'s default ORBIT_IMAGE is not digest-pinned; even if a
+    // mismatched local image happened to be configured, there is nothing
+    // safe to compare against.
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: "something-else:latest", health: "healthy" },
+      appImageId: "sha256:" + "1".repeat(64),
+      imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("image-identity-mismatch");
+  });
+
+  it("skips image-identity-mismatch when the app container does not exist", () => {
+    const targetDir = makeFixture();
+    const pinned = `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`;
+    writeDigestPinnedEnv(targetDir, pinned);
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: false },
+      imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("image-identity-mismatch");
+  });
+
   it("reports application-unhealthy (fail) when the app container's health status is unhealthy", () => {
     const targetDir = makeFixture();
 
@@ -892,6 +1049,101 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.stdout).not.toContain("restart-services");
     expect(result.stdout).toContain("manual");
+  });
+
+  // --- migration-failed (issue #528 slice B) ---------------------------------
+  //
+  // Primary path: extends the existing #437 app-log sentinel scan with
+  // `reason=migration_failed` (works on a stopped/crash-looping container).
+  // Backstop: a single fixed-literal SELECT of the migrator's own outcome
+  // bookkeeping row, only ever run over the already-authenticated SELECT-1
+  // probe path (check_database_reachability), for when logs are rotated away
+  // or the container is gone entirely.
+
+  it("reports migration-failed (fail) via the app-log sentinel scan on a crash-looping/stopped container", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "ERROR orbit migrations startup.migration state=exhausted reason=migration_failed impact=migration_blocked",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=migration-failed target=application severity=fail");
+    // Reported INSTEAD of, not as well as (same #437 discipline as the other
+    // two sentinel-derived classes).
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("reports migration-failed (fail) via the SQL backstop when the app container is absent (logs unavailable)", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: false },
+      migrationRun: { outcome: "failed", reason: "migration_error" },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=migration-failed target=database severity=fail");
+  });
+
+  it("does not report migration-failed (backstop) when the latest migration run succeeded", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: false },
+      migrationRun: { outcome: "succeeded", reason: "" },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("migration-failed");
+  });
+
+  it("does not report migration-failed (skip, never guess) when the outcome bookkeeping table does not exist yet", () => {
+    const targetDir = makeFixture();
+
+    // migrationRun left unset: the shim simulates `orbit_migration_runs` not
+    // existing yet (a real psql ERROR, non-matching output).
+    const result = runRepair(targetDir, ["--check"], { app: { present: false } });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("migration-failed");
+  });
+
+  it("does not report migration-failed (skip, never guess) for hostile backstop output that fails the strict enum pattern", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: false },
+      migrationRunRaw: "not a valid enum row; DROP TABLE orbit_migration_runs; -- 12345",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("migration-failed");
+  });
+
+  it("emits at most one migration-failed finding when both the sentinel and the backstop would independently report it", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "reason=migration_failed",
+      },
+      migrationRun: { outcome: "failed", reason: "migration_error" },
+    });
+
+    expect(result.status).toBe(4);
+    const migrationFindingLines = lines(result.stdout).filter((line) => line.includes("class=migration-failed"));
+    expect(migrationFindingLines).toHaveLength(1);
+  });
+
+  it("retires the unsupported-schema reserved class name entirely (issue #528)", () => {
+    expect(repairScriptSource).not.toContain("unsupported-schema");
   });
 
   it("does not report application-unhealthy while the app container is still starting", () => {
@@ -1276,6 +1528,32 @@ describe("scripts/repair.sh --plan", () => {
       },
       withConfigure: true,
     },
+    {
+      // issue #528 slice B.
+      name: "migration-failed",
+      resolves: "migration-failed",
+      setup: () => {},
+      dockerOptions: {
+        app: {
+          present: true,
+          health: "unhealthy",
+          log: "ERROR orbit migrations startup.migration state=exhausted reason=migration_failed impact=migration_blocked",
+        },
+      },
+      withConfigure: true,
+    },
+    {
+      // issue #528 slice C.
+      name: "image-identity-mismatch",
+      resolves: "image-identity-mismatch",
+      setup: (targetDir) => writeDigestPinnedEnv(targetDir, `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`),
+      dockerOptions: {
+        app: { present: true, image: `ghcr.io/tomlawesome/orbit@sha256:${"a".repeat(64)}`, health: "healthy" },
+        appImageId: "sha256:" + "1".repeat(64),
+        imageInspect: { present: true, id: "sha256:" + "2".repeat(64) },
+      },
+      withConfigure: true,
+    },
     // Note: unrelated-resource-present and docker-unavailable are
     // deliberately NOT in this table — both are always info-severity
     // findings under --check, and the severity gate (see the "Severity
@@ -1298,6 +1576,24 @@ describe("scripts/repair.sh --plan", () => {
       expect(result.stderr.length).toBeGreaterThan(0);
     });
   }
+
+  it("migration-failed's manual guidance cites the ADR-0004 recovery point, field-level only (no path/value)", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--plan"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        log: "reason=migration_failed",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain("resolves=migration-failed");
+    expect(result.stderr.toLowerCase()).toContain("recovery point");
+    expect(result.stderr).not.toContain(targetDir);
+    expect(result.stderr).not.toContain(".env-orbit");
+  });
 
   // --- severity gate: info-severity findings are never planned ----------
   //
@@ -1510,7 +1806,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=14",
+      "diagnosis result=failed checked=1 skipped=15",
     ]);
   });
 
@@ -1523,7 +1819,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
-      "diagnosis result=healthy checked=15 skipped=0",
+      "diagnosis result=healthy checked=16 skipped=0",
     ]);
   });
 
@@ -2326,7 +2622,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // resolved it), and the trailing diagnosis is the very last thing
     // printed, reporting the deployment healthy.
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=14 skipped=1");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=15 skipped=1");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
 
     // The local secret was actually rotated to a fresh 64-hex value, distinct
