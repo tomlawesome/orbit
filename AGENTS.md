@@ -79,8 +79,11 @@ it.
 - `docs/implementation-plan.md`: the phased roadmap.
 - The [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
   is the live delivery-status surface: per-issue Status, Slice, Priority, Risk
-  and Delivery lane. GitHub milestones remain the release grouping and are
-  mirrored by the board's Slice field (owner decision, issue #502).
+  and Delivery lane. GitHub milestones are capability slices (M0 onwards), each
+  a coherent outcome with a definition of done, mirrored by the board's Slice
+  field. A version release moment gets its own milestone holding only its
+  promote-to-main issue, and an issue with no milestone is not scheduled (owner
+  decision, 2026-08-23, recorded on issue #502).
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
