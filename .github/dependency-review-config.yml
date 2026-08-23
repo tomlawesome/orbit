@@ -26,6 +26,17 @@ allow-licenses:
 # LGPL generally. Owner, rationale, evidence and 2026-10-31 review deadline:
 # https://github.com/tomlawesome/orbit/issues/107
 allow-dependencies-licenses:
+  # Version-bound OFL-1.1 exception for the three self-hosted typefaces. This
+  # does NOT allow OFL-1.1 generally: a blanket entry would silently admit any
+  # future font package, including ones with bundled binaries or different
+  # reserved-name obligations. OFL and AGPL coexist by aggregation - the fonts
+  # stay under OFL, Orbit stays under AGPL - provided each package's LICENSE
+  # ships in the image and the faces are neither modified nor renamed.
+  # Owner approval, rationale and review trigger:
+  # https://github.com/tomlawesome/orbit/issues/440
+  - pkg:npm/@fontsource/space-grotesk@5.3.0
+  - pkg:npm/@fontsource-variable/inter@5.3.0
+  - pkg:npm/@fontsource-variable/jetbrains-mono@5.3.0
   - pkg:npm/@img/sharp-libvips-darwin-arm64@1.3.0
   - pkg:npm/@img/sharp-libvips-darwin-x64@1.3.0
   - pkg:npm/@img/sharp-libvips-linux-arm@1.3.0

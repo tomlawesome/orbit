@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { approveDocumentDraft } from "@/server/document-drafts";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 export const dynamic = "force-dynamic";
 const reviewedValue = (maximum: number) => z.union([z.string().trim().min(1).max(maximum), z.null()]);
 const bodySchema = z.object({
@@ -15,4 +16,4 @@ const bodySchema = z.object({
   targetItemId: z.uuid().optional(),
 }).strict();
 interface RouteContext { params: Promise<{ draftId: string }> }
-export async function POST(request: NextRequest, context: RouteContext) { try { const config = getAuthConfig(); const session = await requireSession(request, config); assertCsrf(request, session, config); const { draftId } = await context.params; const body = bodySchema.parse(await request.json()); return NextResponse.json(await approveDocumentDraft(session.user.id, draftId, body.sectionId, { title: body.title, provider: body.provider, reference: body.reference }, body.mode, body.targetItemId), { headers: { "Cache-Control": "no-store" } }); } catch (error) { return appErrorResponse(error); } }
+export async function POST(request: NextRequest, context: RouteContext) { try { await assertOutsideMaintenance(request); const config = getAuthConfig(); const session = await requireSession(request, config); assertCsrf(request, session, config); const { draftId } = await context.params; const body = bodySchema.parse(await request.json()); return NextResponse.json(await approveDocumentDraft(session.user.id, draftId, body.sectionId, { title: body.title, provider: body.provider, reference: body.reference }, body.mode, body.targetItemId), { headers: { "Cache-Control": "no-store" } }); } catch (error) { return appErrorResponse(error); } }

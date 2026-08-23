@@ -1,0 +1,1795 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — your system: household management (proposal v3 — §15 column swap + danger zone)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ONE household, seen by the person who owns it. Administration is the
+     instance from above; this is a single system from inside — reached from
+     the helm's memberships card ("Your systems" → a row → manage).
+
+     §15 / 2i — THERE IS NO ADMIN VARIANT OF THIS SCREEN, EVER. An instance
+     admin who needs an owner's powers over some household picks that
+     household off the dial and is handed THIS EXACT SCREEN in its owner
+     state. Admin surfaces carry admin-only functions; anything an owner can
+     do is done on the owner's screen, so there is one drawing to maintain
+     and one set of words to get right.
+
+     Everything drawn here is served by a route that already exists (#410):
+       rename / time zone / currency  → /api/workspace/commands household.update
+       sections                       → /api/workspace/commands sections.replace
+       members, add, remove, leave    → /api/households/{id}/members
+       hand the system over           → /api/households/{id}/members  (PATCH)
+       joiners                        → /api/join-requests/{id}       (§11, 2g:
+                                        here ONLY — administration drops its block)
+       request deletion               → /api/households/{id}/lifecycle
+     Sections save as ONE list because the command replaces the list. The
+     three identity fields each carry their own save to the eye (2c) while
+     the client sends the one bundled household.update underneath — see the
+     comment on that card.
+
+     2f — restore-from-deletion and hard delete are ADMIN-ONLY and are drawn
+     on the admin panel, not here. This screen keeps the request (two taps
+     and the typed name) and nothing else on that clock.
+
+     BACKDROP: the standard drifting star tiles, provisionally. The settings
+     backdrop is still out for a ruling (§15 — observatory / cartographer's
+     desk / gimbal room); this family adopts whichever is chosen, unchanged
+     in every other respect. §14's non-looping sky arrives with it. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --on-danger:#060b1c;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+    --sec-plum:#b79ae0; --sec-coral:#f0907a;
+    /* #491: the text-grade companions — ink that carries WORDS. Measured against
+       the worst ground each pack actually paints text on. Carried from
+       web/src/lib/packs.css. */
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#7c8699; --ink-faint:#4a5468;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --on-danger:#05070d;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+    --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+    --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+  [data-theme=atlas]{
+    --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
+    --line:#a89c80; --line-soft:#b8ae95;
+    --ink:#1c2b4a; --ink-mid:#4a5570; --ink-faint:#7b8296;
+    --accent:#b4842c; --ok:#1e7a45; --warm:#8f6c00; --overdue:#b02458; --upcoming:#2b6cb0;
+    --degraded:#c2570e;
+    --on-danger:#f6f1e4;
+    --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    --sec-sage:#3f6f4d; --sec-blue:#2b6cb0; --sec-sand:#a9761f;
+    --sec-plum:#6f4788; --sec-coral:#ab4a34;
+    --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
+  }
+  [data-theme=dawn]{
+    --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
+    --line:#9daabf; --line-soft:#b2bccd;
+    --ink:#1a2233; --ink-mid:#48546e; --ink-faint:#78849b;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#8f6c00; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --on-danger:#ffffff;
+    --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+    --sec-plum:#71499a; --sec-coral:#bd4f36;
+    --ink-quiet:#404c64; --accent-text:#134a72; --ok-text:#0d4e30;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#7fb6c6; --ink-faint:#4c7788;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --on-danger:#0a0410;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+    --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);
+       line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
+  .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .sky .far{animation:drift 400s linear infinite}
+  .sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-1600px)}}
+
+  /* ══ H2 — THE HOUSEHOLD'S OWN CHART, AT ROOM SCALE (§15) ═══════════════════
+     THE BACKDROP RULING. The cards below are the ratified v3 drawing, untouched
+     — "90% there — the actual form, everything is great; the background is the
+     only issue" — and H2 is what answers the background: the household's own
+     constellation, at room scale, behind the glass. household-inside.html is
+     the record of the concept and the argument for every mark in it; this file
+     carries the same treatment because it is the sheet the built screen is
+     gated against, and the two must be one drawing.
+
+     WHAT CHANGED SINCE THE CONCEPT WAS DRAWN. household-inside.html HAND-PLACED
+     where you stand — sun [690,340] scale 4.95 for Lawson Home, [1034,448] and
+     4.6 for Seaside Cottage — and said so. A real instance has arbitrary
+     households, so the composition is now SOLVED by a rule: the room.js block
+     at the foot of this file, which is the app's own module copied verbatim so
+     a reader can diff it. Two households, two skies, one rule, no authored
+     coordinates anywhere.
+
+     Behind the dust, not in front of it: your system is the structure you are
+     standing in, and the dust of the wider sky streams past nearer to the eye.
+     It sits at the same z as the sky so the vignette still closes the corners
+     over it, which is a good part of the restraint. */
+  .consty{position:fixed;inset:0;pointer-events:none;z-index:0;
+          opacity:var(--con-op,1);
+          transform:translate3d(0,calc(var(--lift,0) * (.35 + .65 * var(--lift,0)) * -138vh),0)
+                    scale(calc(1 + var(--lift,0) * var(--lift,0) * .13))}
+  .consty svg{position:absolute;inset:0;width:100%;height:100%}
+  /* the light packs need the ink pulled right back before a whisper stops being
+     a whisper — dark lines on pale ground read far louder than pale lines on
+     dark, at the same alpha */
+  [data-theme=afterdark]  .consty{--con-op:.92}
+  [data-theme=retrograde] .consty{--con-op:.82}
+  [data-theme=atlas]      .consty{--con-op:.46}
+  [data-theme=dawn]       .consty{--con-op:.46}
+  /* THE SKY DRIFTS AS ONE (§14): near dust 8.2px/s, far dust 4.0px/s (the two
+     rates above) and the system's own architecture at 1.2px/s. It moves LEAST
+     because you are standing in the middle of it — you travel with your own
+     system; what streams past is everything outside it. Bounded rather than
+     endless (96 units out, 96 back, for ever, at exactly 1.2px/s): a screen
+     somebody leaves open outlives a sheet somebody judges, and a system that
+     drifts away for ever leaves the room it is here to describe. */
+  .consty .drift{animation:hh-system 160s linear infinite alternate}
+  @keyframes hh-system{to{transform:translateX(-96px)}}
+  .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+  /* THE WAY BACK, KNOCKED OUT (#491). This label is the one piece of chrome
+     in the family sitting DIRECTLY on the starfield with nothing behind it,
+     and it was drawn in --ink-faint, which is 2.78:1 on star-chart's ground
+     before a single star is added. Two moves: the ink goes to the text-grade
+     companion (6.59:1 on star-chart), and it gets a BACKING — EVA's stencil
+     precedent, spent as a halo rather than an outline because
+     -webkit-text-stroke at any width a star could hide behind would close up
+     11px mono. --bg and not a literal, so the plate is whatever the pack's
+     ground is. */
+  .back{position:fixed;top:30px;left:26px;z-index:6;font:11px var(--mono);
+        letter-spacing:.14em;color:var(--ink-quiet);text-decoration:none;
+        text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .back:hover{color:var(--accent-text)}
+  .orb{position:fixed;top:22px;right:26px;z-index:6;width:40px;height:40px;
+       border-radius:50%;border:1px solid var(--line);background:var(--panel);
+       backdrop-filter:blur(10px);cursor:pointer;display:grid;place-items:center;
+       font:12px var(--mono);color:var(--ink-mid)}
+  .orb:hover{border-color:var(--accent)}
+  .account{position:fixed;top:70px;right:26px;z-index:6;width:240px;
+           background:var(--panel-raised);backdrop-filter:blur(14px);
+           border:1px solid var(--line);border-radius:16px;padding:18px 20px;
+           opacity:0;transform:translateY(-6px);pointer-events:none;
+           transition:opacity .25s,transform .25s}
+  .account.open{opacity:1;transform:none;pointer-events:auto}
+  .account .who b{display:block;font-size:14px;font-weight:560}
+  .account .who span{font-size:12px;color:var(--ink-mid)}
+  .account nav{display:flex;flex-direction:column;gap:2px;margin:14px 0;
+               padding:12px 0;border-top:1px solid var(--line-soft);
+               border-bottom:1px solid var(--line-soft)}
+  .account nav a{font-size:13.5px;color:var(--ink-mid);text-decoration:none;
+                 padding:6px 8px;border-radius:8px}
+  .account nav a:hover{color:var(--ink);background:var(--panel)}
+  .account nav a[aria-current]{color:var(--accent-text)}
+  .swatches{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  .swatches span{font:10.5px var(--mono);color:var(--ink-faint);margin-right:2px}
+  .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
+                   border:1px solid var(--line);padding:0}
+  .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
+  .signout:hover{color:var(--overdue)}
+
+  /* §14: the desk. Same scale as the helm and administration. */
+  .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+  header.screen{display:flex;align-items:center;gap:17px}
+  header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+  header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:5px;letter-spacing:.04em}
+  header.screen .glyph{flex:none}
+
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px;align-items:start}
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px}
+
+  /* ── §15 v3, the column swap ────────────────────────────────────────────
+     The owner read v2 and found the hole: sections stood alone on the right
+     and left a dead quarter under "the system". So the desk is re-laid.
+
+       OWNER     left  │ the system  →  sections (the long list, under it)
+                 right │ members, running the FULL height of that column
+                 foot  │ the danger line, across both
+
+       NON-OWNER left  │ the system (read-only)  →  leaving
+                 right │ members, full height
+
+     Members is stretched, not floated: its box ends level with sections, so
+     both columns finish on the same rule and the closing line inside it is
+     pinned to its own foot rather than leaving a gap under the roster. The
+     old lone wide card at the bottom of the member's screen is gone with the
+     same move — the member now reads two tidy columns like the owner does. */
+  .card.c-system  {grid-column:1;grid-row:1}
+  .card.c-sections{grid-column:1;grid-row:2}
+  .card.c-leaving {grid-column:1;grid-row:2}
+  .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
+                   display:flex;flex-direction:column}
+  .card.c-danger  {grid-column:1 / -1;grid-row:3}
+  /* the panel is taller than its content in a family this size, so the slack
+     is SHARED between the blocks instead of collecting in one hole at the
+     bottom: three auto margins, three even breaths, rules evenly spaced. */
+  .c-members .block,
+  .c-members .note.foot{margin-top:auto}
+  .c-members .note.foot{padding-top:14px;border-top:1px solid var(--line-soft)}
+  /* the member's screen has only three blocks in the whole desk, so the panel
+     takes its own height instead of stretching over air — nothing sits under
+     it to frame a hole, and the two columns simply finish where they finish */
+  body.member .card.c-members{align-self:start}
+  body.member .c-members .note.foot{margin-top:14px}
+  @media (max-width:880px){
+    .cards{grid-template-columns:1fr}
+    .card.c-system,.card.c-sections,.card.c-leaving,.card.c-members,.card.c-danger{
+      grid-column:1;grid-row:auto;align-self:auto}
+    .c-members .block{margin-top:16px}
+    .c-members .note.foot{margin-top:13px;padding-top:0}
+  }
+  .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+  .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+  .cardhead .act{margin-left:auto;font:11px var(--mono);color:var(--ink-mid);background:none;
+                 border:1px solid var(--line);border-radius:9px;padding:6px 12px;cursor:pointer}
+  .cardhead .act:hover{border-color:var(--accent);color:var(--accent-text)}
+
+  /* the create screen's field vocabulary, unchanged */
+  .field{margin-bottom:13px}
+  .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
+               text-transform:uppercase;margin:0 0 6px}
+  .field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line);
+         border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 12px;font-family:var(--ui)}
+  .field input::placeholder{color:var(--ink-faint)}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+  .field input:disabled,.field select:disabled{opacity:.62;cursor:default}
+  .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+  /* 2c: each field wears its own quiet save. It sits on the label line, in
+     pen-grey until the field is touched, then in accent; it answers with a
+     tick and goes quiet again. No save bar, no "remember to press this". */
+  .lab{display:flex;align-items:baseline;gap:10px;margin:0 0 6px}
+  .lab label{margin:0}
+  .fsave{margin-left:auto;font:10px var(--mono);letter-spacing:.13em;text-transform:uppercase;
+         color:var(--ink-faint);background:none;border:0;padding:0 0 1px;cursor:pointer;
+         opacity:.5;transition:color .2s,opacity .2s}
+  .fsave:hover{color:var(--accent-text);opacity:1}
+  .field.dirty .fsave{color:var(--accent-text);opacity:1}
+  .fsave.done,.field.dirty .fsave.done{color:var(--ok-text);opacity:1;cursor:default}
+  .row2{display:flex;gap:13px}
+  .row2>.field{flex:1;min-width:0}
+  .selwrap{position:relative}
+  .selwrap::after{content:"";position:absolute;right:13px;top:50%;width:6px;height:6px;
+                  border-right:1.4px solid var(--ink-faint);border-bottom:1.4px solid var(--ink-faint);
+                  transform:translateY(-72%) rotate(45deg);pointer-events:none}
+
+  .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
+  .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
+       border-radius:10px;padding:9px 19px;cursor:pointer}
+  .btn:hover{filter:brightness(1.06)}
+  .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
+  .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
+         border-radius:9px;padding:7px 13px;cursor:pointer}
+  .ghost:hover{border-color:var(--accent);color:var(--accent-text)}
+  .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
+  .note.top{margin-top:13px}
+  .note b{color:var(--ink-mid);font-weight:400}
+  .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
+  .said.show{display:block}
+
+  /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
+     member never sees this card at all, not even read-only. */
+  .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;
+       border-bottom:1px solid var(--line-soft)}
+
+  /* 2b — the section mark returns: a chart-pen glyph (drawn in the same ink
+     as every rule and dial on the sky) with ONE small accent dot. The pen
+     line carries the meaning, the dot carries the colour; nothing is filled
+     and nothing shouts. Demos can pull the marks off for a side-by-side.
+     Five sections, five accents: sage / blue / sand / plum / coral. */
+  .mark{position:relative;width:20px;height:20px;flex:none;display:grid;place-items:center}
+  .mark svg{display:block;fill:none;stroke:var(--ink-mid);stroke-width:1.15;
+            stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+  .mark i{position:absolute;right:-1px;bottom:0;width:5px;height:5px;border-radius:50%;
+          background:var(--sec);opacity:.92}
+  body.nomarks .mark{display:none}
+  .sec.off .mark{opacity:.6}
+  .sec:last-of-type{border-bottom:0}
+  .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
+             color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
+  .sec input:focus{outline:none;border-bottom-color:var(--accent)}
+  .sec input:disabled{color:var(--ink-mid)}
+  .sec .used{font:10.5px var(--mono);color:var(--ink-faint);flex:none}
+  .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;
+              text-align:right;flex:none}
+  .sec.off{opacity:.55}
+  .sec.off .state{color:var(--ink-faint)}
+  .sec .drop{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+             cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
+  .sec.empty .drop{visibility:visible}
+  .sec .drop:hover{color:var(--overdue)}
+  /* the switch that tells the truth: filled when on, hollow when off */
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
+          background:none;cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
+            background:var(--ink-faint);transition:left .2s,background .2s}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+  .toggle:disabled{opacity:.5;cursor:default}
+  .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+          border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
+  .addsec:hover{border-color:var(--accent);color:var(--accent-text)}
+  .addsec:disabled{opacity:.4;cursor:not-allowed}
+
+  /* members */
+  .memb{display:flex;align-items:center;gap:12px;padding:9px 2px;
+        border-bottom:1px solid var(--line-soft)}
+  .memb:last-of-type{border-bottom:0}
+  .memb.hidden{display:none}
+  .avatar{width:32px;height:32px;border-radius:50%;flex:none;border:1px solid var(--line);
+          background:var(--panel-raised);display:grid;place-items:center;
+          font:11px var(--mono);color:var(--ink-mid)}
+  .memb b{flex:1;min-width:0;font-size:13.5px;font-weight:530}
+  .memb b em{font-style:normal;color:var(--ink-mid);font-weight:400}
+  .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;flex:none;
+        border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+  .role.owner{color:var(--accent-text);border-color:var(--accent)}
+  .memb .ghost{padding:5px 11px}
+
+  /* v3 — the panel's other blocks. Members runs the full height of the
+     right column now, so who is waiting and who you could add are simply
+     BLOCKS of the same panel, each under its own small rule, instead of
+     drawers you had to open. Registered accounts only — the route has no
+     email invite (#481). */
+  .block{margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
+  .block h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+            color:var(--ink-faint);margin-bottom:9px}
+  .cand{display:flex;align-items:center;gap:12px;padding:6px 2px;
+        border-bottom:1px solid var(--line-soft)}
+  .cand:last-of-type{border-bottom:0}
+  .cand b{flex:1;font-size:13px;font-weight:520}
+  /* the resting state of the joiners block: it says so, rather than vanishing */
+  .restline{display:block}
+  body.wants .restline{display:none}
+
+  /* the handover: two deliberate steps, and the second asks twice */
+  .handover{display:none;margin-top:14px;border:1px solid var(--accent);border-radius:13px;
+            background:var(--panel-raised);padding:16px 18px}
+  .handover.open{display:block}
+  .handover h4{font:10px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+               color:var(--accent-text);margin-bottom:12px}
+  .step{margin-bottom:13px}
+  .step>.n{display:block;font:10px var(--mono);letter-spacing:.14em;color:var(--ink-faint);
+           margin-bottom:7px}
+  .pick{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:5px 2px;cursor:pointer}
+  .pick input{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+  .handover .row{display:flex;align-items:center;gap:12px}
+
+  /* joiners (§11) — the same protocol administration draws */
+  .joinreq{display:none;align-items:center;gap:12px;border:1px dashed var(--warm);
+           border-radius:12px;padding:11px 14px}
+  body.wants .joinreq{display:flex}
+  .joinreq .avatar{width:28px;height:28px;font-size:10px}
+  .joinreq p{flex:1;font-size:13px;color:var(--ink-mid)}
+  .joinreq p b{color:var(--ink);font-weight:530}
+  .joinreq button{font-size:12px;font-family:var(--ui);border-radius:9px;padding:6px 13px;
+                  cursor:pointer;border:1px solid var(--line);background:none;color:var(--ink-mid)}
+  .joinreq button.yes{border-color:var(--ok);color:var(--ok-text)}
+
+  /* ── THE DANGER ZONE (§15, owner on v2 + the refinement) ────────────────
+     v2 asked politely and the owner was right to reject it: a paragraph in
+     pen-grey with a grey button is not a danger line, it's a footnote. This
+     card is now unmistakable from across the room and still drawn with the
+     family's chart pen — no gradient, no gloss, no siren stripes. Just red:
+     a red rule around it, a flat red wash under it, hazard ticks along the
+     top edge, the heading in red, and a red-outlined button that FILLS red
+     the moment it is armed.
+
+     And it is SMALLER than v2: the copy runs ACROSS the card in two short
+     columns instead of stacking in a tall left-hand block, and the button
+     sits UP on the right of the heading line where it can be seen — never
+     buried at the bottom. The protocol underneath is untouched: type the
+     system's name exactly, then tap twice. */
+  .card.dangercard{position:relative;overflow:hidden;
+                   border:1.5px solid var(--overdue);padding:15px 22px 17px}
+  /* the wash — one flat plane of the same red, laid under the panel */
+  .dangercard::after{content:"";position:absolute;inset:0;border-radius:inherit;
+                     background:var(--overdue);opacity:.085;pointer-events:none}
+  /* the light packs need more of it before the red is felt rather than seen */
+  [data-theme=atlas] .dangercard::after,
+  [data-theme=dawn] .dangercard::after{opacity:.12}
+  /* the hazard rule — chart-pen ticks, hard edges only, along the top */
+  .dangercard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;
+                      pointer-events:none;opacity:.9;
+                      background:repeating-linear-gradient(115deg,
+                        var(--overdue) 0 2px, transparent 2px 6px)}
+  .dangercard>*{position:relative;z-index:1}
+
+  .dangerhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+  .dangercard h3{color:var(--overdue);letter-spacing:.2em;font-weight:600}
+  .dangerhead svg{flex:none;fill:none;stroke:var(--overdue);stroke-width:1.5;
+                  stroke-linecap:round;stroke-linejoin:round}
+  .dangerhead .spacer{margin-left:auto}
+
+  /* the copy, spread across the width: the act on the left, the small print
+     about who holds the clock on the right */
+  .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
+  .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
+  .dangercard p b{color:var(--ink);font-weight:560}
+  .dangercard p b.red{color:var(--overdue);font-weight:600}
+  /* the card's prose is 13px; its mono asides are not — say so, or the
+     prose rule out-specifies .note and .said and swallows them */
+  .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
+  .dangercard .note b{color:var(--ink-mid);font-weight:400}
+  .dangercard .said{font-size:11px;color:var(--ok-text);max-width:none}
+
+  /* the button: red on the outside at rest, SOLID red once armed */
+  .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+             color:var(--overdue);background:none;border:1.5px solid var(--overdue);
+             border-radius:9px;padding:9px 16px;cursor:pointer;white-space:nowrap;
+             transition:background .15s,color .15s,border-color .15s}
+  .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
+  .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
+  .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none;
+                      color:var(--overdue);border-color:var(--overdue)}
+  .dangerbtn[hidden]{display:none}
+
+  .confirm{display:none;margin-top:13px;padding-top:13px;
+           border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
+  .confirm.open{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end}
+  .confirm .field{margin-bottom:0;min-width:0}
+  .confirm .field label{color:var(--overdue);opacity:.9}
+  .confirm .field input{font-family:var(--mono);font-size:12.5px;
+                        border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
+  .confirm .field input:focus{border-color:var(--overdue)}
+  .confirm .note{align-self:end;padding-bottom:2px}
+  @media (max-width:880px){
+    .dangerbody,.confirm.open{grid-template-columns:1fr;gap:10px}
+    .dangerhead{flex-wrap:wrap}
+  }
+
+  /* 2f — the scheduled-for-deletion banner and its restore button USED to
+     live here; they are gone. The recovery window is an instance-admin
+     affair now and is drawn on the admin panel. What survives on this
+     screen is the request itself, above. */
+
+  /* who may do what */
+  body.member .own-only{display:none!important}
+  .mem-only{display:none!important}
+  body.member .mem-only{display:revert!important}
+
+  footer{position:relative;z-index:2;text-align:center;font:11px var(--mono);
+         color:var(--ink-faint);padding:10px 24px 44px;line-height:1.95;max-width:960px;margin:0 auto}
+  .demos{position:fixed;left:22px;bottom:20px;z-index:7;display:flex;gap:8px;align-items:center;
+         flex-wrap:wrap;max-width:74vw;font:10.5px var(--mono);color:var(--ink-faint)}
+  .demos button{font:10.5px var(--mono);color:var(--ink-mid);background:var(--panel);
+                backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:99px;
+                padding:4px 10px;cursor:pointer}
+  .demos button:hover{border-color:var(--accent)}
+  .demos button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent)}
+  .demos .sw{width:15px;height:15px;border-radius:50%;padding:0;backdrop-filter:none}
+  .demos .sw[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<!-- your own system, drawn from the inside (§15 H2). Everything in here is
+     generated at load from the fixture, the dial law and the placement rule —
+     there is not one authored coordinate in the markup. -->
+<div class="consty" id="consty" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <!-- the chart key's four paints as FIELDS rather than filled planets: at
+           room scale a body is a region of sky you are standing near, not a
+           disc. The alphas keep the key's own order — ruby loudest, jade
+           quietest — because that order is the information. -->
+      <radialGradient id="hh-ruby"><stop offset="0" style="stop-color:var(--overdue)" stop-opacity=".24"/><stop offset=".55" style="stop-color:var(--overdue)" stop-opacity=".08"/><stop offset="1" style="stop-color:var(--overdue)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
+    </defs>
+    <g class="drift" id="con-drift">
+      <g class="rings" id="con-rings"></g>
+      <g class="figures" id="con-figures"></g>
+      <g class="bodies" id="con-bodies"></g>
+      <g class="labels" id="con-labels"></g>
+    </g>
+  </svg>
+</div>
+
+<div class="sky" aria-hidden="true">
+  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
+    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
+  </svg>
+</div>
+<div class="vignette" aria-hidden="true"></div>
+
+<!-- THE WAY BACK IS THE WAY YOU CAME (§15, owner ruling 2026-08-17). This
+     screen has two doors: the helm's memberships card ("Your systems" → a row →
+     manage), and the SUN at the centre of the dial. Arriving by the helm the way
+     back reads "← SETTINGS", as drawn here; arriving by the sun it reads
+     "← YOUR SKY" and returns to the sky, because sending a reader back to a
+     settings page they were never on is the kind of small lie that makes an
+     interface feel like software rather than a place.
+
+     The signal is a one-shot session marker written by the sun and read once on
+     arrival (web/src/routes/household/[id]/door.js): a query string would be
+     bookmarked and shared, so a link somebody sent you would claim a door you
+     never touched. ABSENCE IS THE HELM — every deep link, every bookmark, and
+     the state this sheet draws. The demos rail flips it. -->
+<a class="back" id="back" href="settings.html">← SETTINGS</a>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick="toggleAccount(this)">TL</button>
+<div class="account" id="account" role="region" aria-label="Account and menu">
+  <div class="who"><b>Tom Lawson</b><span>Lawson Home · owner</span></div>
+  <nav>
+    <a href="inbox.html">Inbox</a>
+    <a href="settings.html" aria-current="page">Settings</a>
+    <a href="administration.html">Administration</a>
+  </nav>
+  <div class="swatches" role="group" aria-label="Theme">
+    <span>THEME</span>
+    <button data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
+    <button data-swatch="afterdark" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setTheme('afterdark')"></button>
+    <button data-swatch="atlas" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setTheme('atlas')"></button>
+    <button data-swatch="dawn" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setTheme('dawn')"></button>
+    <button data-swatch="retrograde" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setTheme('retrograde')"></button>
+  </div>
+  <button class="signout">sign out →</button>
+</div>
+
+<div class="page">
+  <header class="screen">
+    <!-- the same ring administration draws for this system, wearing its real
+         due-state dots (§12: nothing on it is decoration) -->
+    <svg class="glyph own-only" width="44" height="44" viewBox="0 0 34 34" aria-hidden="true">
+      <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+      <circle cx="17" cy="17" r="2.6" style="fill:var(--sun)"/>
+      <circle cx="15.5" cy="20.5" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="12.8" cy="18.3" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="14.8" cy="13" r="1.5" style="fill:var(--warm)" opacity=".8"/>
+    </svg>
+    <svg class="glyph mem-only" width="44" height="44" viewBox="0 0 34 34" aria-hidden="true">
+      <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+      <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+      <circle cx="21.7" cy="18.7" r="1.6" style="fill:var(--warm)" opacity=".8"/>
+      <circle cx="13" cy="15.7" r="1.5" style="fill:var(--ok)" opacity=".8"/>
+      <circle cx="16" cy="12.7" r="1.6" style="fill:var(--ok)" opacity=".8"/>
+    </svg>
+    <div>
+      <h1><span class="own-only">Lawson Home</span><span class="mem-only">Seaside Cottage</span></h1>
+      <div class="sub">
+        <span class="own-only">your system · you own it · 4 members · 6 entries in orbit</span>
+        <span class="mem-only">a system you’re in · Emma Lawson owns it · 3 members · 3 entries in orbit</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 2f: the scheduled-for-deletion banner and its restore used to sit
+       here. They now belong to the admin panel only. -->
+
+  <div class="cards">
+
+    <!-- ── the system ──────────────────────────────────────────────────────
+         2c: three fields, three saves TO THE EYE — "it's more human". Each
+         field owns its little save; you finish a thought and put it away.
+
+         UNDERNEATH IT IS STILL ONE COMMAND. The client sends the bundled
+         household.update carrying name + time zone + currency together; a
+         per-field save simply submits that one command with the other two
+         values unchanged. Nothing about the route changes — only who does
+         the remembering, which is now the interface, not the person. -->
+    <div class="card c-system">
+      <div class="cardhead"><h3>The system</h3></div>
+      <div class="field">
+        <div class="lab">
+          <label>name</label>
+          <button class="fsave own-only" onclick="saveField(this)">save</button>
+        </div>
+        <input id="hhname" class="lock" value="Lawson Home" maxlength="60" autocomplete="off"
+               aria-label="Household name" oninput="markDirty(this)">
+      </div>
+      <div class="row2">
+        <div class="field selwrap">
+          <div class="lab">
+            <label>time zone</label>
+            <button class="fsave own-only" onclick="saveField(this)">save</button>
+          </div>
+          <select class="lock" aria-label="Time zone" onchange="markDirty(this)">
+            <option>Europe/London</option><option>Europe/Dublin</option>
+            <option>Europe/Paris</option><option>America/New York</option>
+            <option>Australia/Sydney</option><option>UTC</option>
+          </select>
+        </div>
+        <div class="field selwrap">
+          <div class="lab">
+            <label>currency</label>
+            <button class="fsave own-only" onclick="saveField(this)">save</button>
+          </div>
+          <select class="lock" aria-label="Currency" onchange="markDirty(this)">
+            <option>GBP</option><option>EUR</option><option>USD</option>
+            <option>CAD</option><option>AUD</option><option>NZD</option>
+          </select>
+        </div>
+      </div>
+      <p class="note top own-only">
+        each field saves on its own — <b>name</b>, <b>time zone</b> and<br>
+        <b>currency</b> are three small acts, not one form
+      </p>
+      <p class="note top">
+        the name is what you type to delete this system later,<br>
+        and what a joiner sees when they ask to come in
+      </p>
+      <p class="note top mem-only"><b>read-only</b> — only Emma Lawson can change this system</p>
+    </div>
+
+    <!-- ── sections: one list, replaced whole. OWNER-ONLY (2b) ──────────────
+         The editor is drawn for owners and for admins wearing the owner
+         screen. A plain member never sees it — not disabled, not greyed:
+         absent. They meet sections where sections mean something, printed
+         beside entries in the manifest.
+
+         The marks (2b) are back: a chart-pen glyph and one accent dot per
+         section. Toggle "section marks" in the demos to judge with/without. -->
+    <div class="card c-sections own-only">
+      <div class="cardhead">
+        <h3>Sections</h3><span class="count" id="seccount">5 of 12</span>
+      </div>
+
+      <div id="secs-own">
+        <div class="sec">
+          <span class="mark" style="--sec:var(--sec-sage)" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 16 16">
+              <path d="M2.6 7.7 8 3.1l5.4 4.6"/><path d="M4.3 7.4v5.6h7.4V7.4"/>
+            </svg><i></i>
+          </span>
+          <input class="lock" value="Home" maxlength="30" aria-label="Section name">
+          <span class="used">3 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Home on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec">
+          <span class="mark" style="--sec:var(--sec-blue)" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 16 16">
+              <path d="M2.7 10.6V9.1l1.6-2.7h7.4l1.6 2.7v1.5"/>
+              <circle cx="5.2" cy="10.7" r="1.15"/><circle cx="10.8" cy="10.7" r="1.15"/>
+            </svg><i></i>
+          </span>
+          <input class="lock" value="Vehicles" maxlength="30" aria-label="Section name">
+          <span class="used">2 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Vehicles on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec">
+          <span class="mark" style="--sec:var(--sec-sand)" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 16 16">
+              <rect x="4.2" y="2.7" width="7.6" height="10.6" rx="1.5"/>
+              <path d="M6.7 11.6h2.6"/>
+            </svg><i></i>
+          </span>
+          <input class="lock" value="Devices" maxlength="30" aria-label="Section name">
+          <span class="used">1 entry</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Devices on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec empty">
+          <span class="mark" style="--sec:var(--sec-plum)" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" style="stroke-width:1.7">
+              <path d="M14.6 6.4a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>
+            </svg><i></i>
+          </span>
+          <input class="lock" value="Services" maxlength="30" aria-label="Section name">
+          <span class="used">0 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Services on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+        <div class="sec empty">
+          <span class="mark" style="--sec:var(--sec-coral)" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 16 16">
+              <rect x="2.6" y="3.6" width="10.8" height="9.8" rx="1.4"/>
+              <path d="M2.6 6.6h10.8M5.6 2.3v2.2M10.4 2.3v2.2"/>
+            </svg><i></i>
+          </span>
+          <input class="lock" value="Dates &amp; renewals" maxlength="30" aria-label="Section name">
+          <span class="used">0 entries</span>
+          <button class="toggle lock" aria-pressed="true" aria-label="Dates and renewals on the chart" onclick="flipSec(this)"><i></i></button>
+          <span class="state">shown</span>
+          <button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>
+        </div>
+      </div>
+
+      <button class="addsec lock" id="addsec" onclick="addSec()">+ add a section</button>
+      <div class="savebar">
+        <button class="btn" onclick="say('sections')">save</button>
+        <span class="note">the whole list saves at once</span>
+      </div>
+      <p class="said" id="said-sections">saved · the manifest prints the new names beside their entries</p>
+      <p class="note top">
+        each entry wears one section, printed beside it in the manifest,<br>
+        and the mark travels with it. a section holding entries can be<br>
+        <b>hidden</b>, never removed — its entries would have nowhere to sit.<br>
+        <b>open question:</b> choosing a mark for a NEW section isn’t drawn yet.
+      </p>
+    </div>
+
+    <!-- ── members: v3 moves this to the right-hand column, running its full
+         height, so nothing sits under "the system" but sections ── -->
+    <div class="card c-members">
+      <div class="cardhead">
+        <h3>Members</h3><span class="count" id="membcount">4 in this system</span>
+      </div>
+
+      <div class="roster own-only" id="roster-own">
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">TL</span>
+          <b>Tom Lawson <em>· you</em></b>
+          <span class="role owner">owner</span>
+          <button class="ghost" onclick="toggleDrawer('handover', this)">hand over →</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">EL</span>
+          <b>Emma Lawson</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">RL</span>
+          <b>Rob Lawson</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">GL</span>
+          <b>Gran</b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="remove" onclick="twoTap(this,'tap again to remove',()=>dropMember(this))">remove</button>
+        </div>
+      </div>
+
+      <div class="roster mem-only">
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">EL</span>
+          <b>Emma Lawson</b>
+          <span class="role owner">owner</span>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">TL</span>
+          <b>Tom Lawson <em>· you</em></b>
+          <span class="role">member</span>
+          <button class="ghost" data-rest="leave this system"
+                  onclick="twoTap(this,'tap again to leave',left)">leave this system</button>
+        </div>
+        <div class="memb">
+          <span class="avatar" aria-hidden="true">RL</span>
+          <b>Rob Lawson</b>
+          <span class="role">member</span>
+        </div>
+      </div>
+      <p class="said" id="said-left">you’ve left Seaside Cottage · it becomes a label in your sky again, and you can ask to rejoin</p>
+
+      <!-- §11 + 2g: the owner decides who comes in, and this is the ONLY
+           place the decision is offered. Administration's join-requests
+           block is dropped — an instance admin who needs to answer one
+           opens the household from the dial and answers it here.
+
+           v3: now that members owns the whole right-hand column, the two
+           other halves of "who is in this system" come out of their drawers
+           and stand as blocks of the same panel — who is waiting, and who
+           you could add. Nothing is hidden behind a button that had only
+           been there to save room the column no longer lacks. -->
+      <div class="block own-only">
+        <h4>Waiting to come in</h4>
+        <div class="joinreq">
+          <span class="avatar" aria-hidden="true">SL</span>
+          <p><b>Sue Lawson</b> asks to join <b>Lawson Home</b> · 2d ago</p>
+          <button class="yes" onclick="approveJoin(this)">approve</button>
+          <button onclick="declineJoin(this)">decline</button>
+        </div>
+        <p class="restline note">
+          nobody is asking just now — when someone picks this system out of<br>
+          their sky and asks, they appear here, and <b>only</b> here (2g).
+        </p>
+        <p class="said" id="said-join">Sue Lawson is in · she sees this system’s entries from her next sign-in</p>
+      </div>
+
+      <div class="block own-only" id="addpeople">
+        <h4>Add someone who already has an account</h4>
+        <div class="cand"><span class="avatar" aria-hidden="true">BL</span><b>Ben Lawson</b>
+          <button class="ghost" onclick="addMember('Ben Lawson','BL')">add</button></div>
+        <div class="cand"><span class="avatar" aria-hidden="true">AR</span><b>Ada Reid</b>
+          <button class="ghost" onclick="addMember('Ada Reid','AR')">add</button></div>
+        <p class="note top">
+          people sign in through your identity provider first, then an owner puts<br>
+          them in a system. Nobody’s email address is shown here, only the name<br>
+          they chose.<br>
+          <b>email invitations come later</b> — deferred as its own package (#481).
+        </p>
+      </div>
+
+      <div class="handover own-only" id="handover">
+        <h4>Hand this system over</h4>
+        <div class="step">
+          <span class="n">STEP ONE — WHO TAKES IT</span>
+          <label class="pick"><input type="radio" name="heir" onchange="armHeir(this)" value="Emma Lawson"> Emma Lawson</label>
+        </div>
+        <div class="step">
+          <span class="n">STEP TWO — CONFIRM</span>
+          <div class="row">
+            <button class="ghost" id="heirbtn" data-rest="hand over" disabled
+                    onclick="twoTap(this,'tap again to hand over',handedOver)">hand over</button>
+            <button class="ghost" onclick="closeDrawer('handover')">cancel</button>
+          </div>
+        </div>
+        <p class="note">
+          you stay a member and keep everything you added.<br>
+          only the new owner can hand it back — and an owner<br>
+          can never leave a system, so this is the way out.
+        </p>
+        <p class="said" id="said-handover">Emma Lawson owns Lawson Home now · you’re a member</p>
+      </div>
+
+      <p class="note top foot own-only">
+        an owner can’t be removed and can’t leave — hand the system over first.
+      </p>
+      <p class="note top foot mem-only">
+        <b>Emma Lawson</b> owns this system — she adds and removes people.<br>
+        you can leave whenever you like.
+      </p>
+    </div>
+
+    <!-- ── THE DANGER ZONE ──────────────────────────────────────────────────
+         Red rule, red wash, hazard ticks, red heading, and the button UP on
+         the heading line at the right. The opener steps aside for the armed
+         button so the card's one dangerous act always lives in the same
+         place — nothing about the protocol changes: the name must be typed
+         exactly before that button wakes, and then it asks twice. -->
+    <div class="card c-danger dangercard own-only">
+      <div class="dangerhead">
+        <svg width="17" height="17" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M9 2.2 16.4 15H1.6L9 2.2Z"/>
+          <path d="M9 6.6v4.1"/><path d="M9 12.8v.05"/>
+        </svg>
+        <h3>The danger line</h3>
+        <span class="spacer"></span>
+        <button class="dangerbtn" id="delopen" onclick="openConfirm(this)">request deletion →</button>
+        <button class="dangerbtn" id="delbtn" data-rest="request deletion" disabled hidden
+                onclick="twoTap(this,'tap again to schedule deletion',requested)">request deletion</button>
+      </div>
+      <div class="dangerbody">
+        <p>
+          <b class="red">Request deletion.</b> Everything in Lawson Home — 6 entries, their
+          documents, their history and every reminder still queued — stops the moment you
+          ask. You have <b class="red">30 days</b> to change your mind; after that it is
+          gone for good, and nothing on this machine can bring it back.
+        </p>
+        <p class="note">
+          asking is all this screen does — the countdown,<br>
+          the restore and the final hard delete are<br>
+          instance-admin acts, drawn on the admin panel (2f).
+        </p>
+      </div>
+      <div class="confirm" id="delconfirm">
+        <div class="field">
+          <label>type the system’s name exactly to wake the button above</label>
+          <input id="delname" placeholder="Lawson Home" autocomplete="off" oninput="checkName()"
+                 aria-label="Type the household name to confirm">
+        </div>
+        <p class="note">
+          the name is the first ask, the second tap is<br>
+          the second — this is the one act with a clock on it.
+        </p>
+      </div>
+      <p class="said" id="said-doom">
+        requested · Lawson Home stops now, and is gone for good in 30 days ·
+        changing your mind is an instance-admin act now — the admin panel carries the restore (2f)
+      </p>
+    </div>
+
+    <!-- ── leaving: the member's second card, and it sits UNDER the system in
+         the left column, exactly where sections sits for an owner — so the
+         member reads two tidy columns too, with no lone card across the foot -->
+    <div class="card c-leaving mem-only">
+      <div class="cardhead"><h3>Leaving</h3></div>
+      <p style="font-size:13.5px;color:var(--ink-mid)">
+        You can leave Seaside Cottage whenever you like. Nothing you added goes with you —
+        the entries belong to the system, not to you. It returns to your sky as a label,
+        and you can ask to come back.
+      </p>
+      <p class="note top">only Emma Lawson can rename, restructure or delete this system.</p>
+    </div>
+
+  </div><!-- /cards -->
+</div>
+
+<div class="demos" aria-label="Mockup state demos">
+  <span>DEMOS</span>
+  <button id="d-owner" aria-pressed="true" onclick="setRole('owner')">owner</button>
+  <button id="d-member" aria-pressed="false" onclick="setRole('member')">non-owner</button>
+  <button id="d-wants" aria-pressed="false" onclick="toggleWants()">someone wants in</button>
+  <button id="d-marks" aria-pressed="true" onclick="toggleMarks()">section marks on</button>
+  <button id="d-door" aria-pressed="false" onclick="toggleDoor()">came in by the helm</button>
+  <button onclick="location.reload()">reset</button>
+  <span style="margin-left:6px">THEME</span>
+  <button class="sw" data-swatch="starchart" style="background:#060b1c" title="star-chart" aria-pressed="true" onclick="setTheme('starchart')"></button>
+  <button class="sw" data-swatch="afterdark" style="background:#05070d" title="after dark" aria-pressed="false" onclick="setTheme('afterdark')"></button>
+  <button class="sw" data-swatch="atlas" style="background:#c9bfa6" title="atlas" aria-pressed="false" onclick="setTheme('atlas')"></button>
+  <button class="sw" data-swatch="dawn" style="background:#c3ccdb" title="dawn" aria-pressed="false" onclick="setTheme('dawn')"></button>
+  <button class="sw" data-swatch="retrograde" style="background:#080a14;border-color:#ff4fd8" title="retrograde" aria-pressed="false" onclick="setTheme('retrograde')"></button>
+</div>
+
+<footer>
+  orbit · your system · PROPOSAL v3 for the /settings cutover family (#410) — §15 rulings 2a–2m, then the owner’s v2 review: sections under the system, members down the right, and a danger line that looks like one ·
+  reached from the helm’s memberships card · name, time zone and currency each save on their own to the eye
+  while the client sends the one bundled household.update underneath; sections are still one list, replaced whole ·
+  the sections editor belongs to owners alone · joiners are answered here and nowhere else ·
+  <b style="color:var(--ink-mid);font-weight:400">the way back is the way you came</b>: the helm's memberships card
+  leaves it reading ← SETTINGS, and the sun at the centre of the dial leaves it reading ← YOUR SKY (demos) ·
+  deletion is requested here and recovered only from the admin panel ·
+  every destructive act asks twice (§14) and deletion also asks for the name ·
+  members are shown by the name they chose, never by email, because the route never discloses one ·
+  an instance admin needing owner powers sees this same screen for the household they pick off the dial
+</footer>
+
+<script>
+function toggleAccount(orb){
+  const card = document.getElementById("account");
+  const open = card.classList.toggle("open");
+  orb.setAttribute("aria-expanded", String(open));
+}
+function setTheme(name){
+  document.documentElement.setAttribute("data-theme", name);
+  for (const b of document.querySelectorAll("[data-swatch]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.swatch === name));
+  }
+}
+
+/* ── the two-tap protocol (§14): the first tap arms, the second fires, and an
+      unfired arm relaxes on its own so nothing stays cocked. ─────────────── */
+const armed = new WeakMap();
+function disarm(btn){
+  const state = armed.get(btn);
+  if (!state) return;
+  clearTimeout(state.timer);
+  armed.delete(btn);
+  btn.textContent = btn.dataset.rest;
+  btn.classList.remove("armed");
+}
+function twoTap(btn, label, fire){
+  if (armed.get(btn)) { disarm(btn); fire(btn); return; }
+  btn.classList.add("armed");
+  btn.textContent = label;
+  armed.set(btn, { timer: setTimeout(() => disarm(btn), 5000) });
+}
+
+function say(which){
+  const line = document.getElementById("said-" + which);
+  if (line) line.classList.add("show");
+}
+
+/* ── the identity fields (2c) ──────────────────────────────────────────────
+      Three fields, three saves to the eye. The real client keeps ONE call:
+        POST /api/workspace/commands { household.update: { name, timeZone,
+        currency } } — a per-field save sends that same bundle with the other
+      two values as they stand. The split is a courtesy to the person, not a
+      change to the protocol. ──────────────────────────────────────────────── */
+function markDirty(control){
+  const field = control.closest(".field");
+  if (!field) return;
+  field.classList.add("dirty");
+  const btn = field.querySelector(".fsave");
+  if (btn) { clearTimeout(btn._t); btn.classList.remove("done"); btn.textContent = "save"; }
+}
+function saveField(btn){
+  const field = btn.closest(".field");
+  if (field) field.classList.remove("dirty");
+  clearTimeout(btn._t);
+  btn.classList.add("done");
+  btn.textContent = "saved ✓";
+  btn._t = setTimeout(() => { btn.classList.remove("done"); btn.textContent = "save"; }, 2600);
+}
+
+/* ── sections (owner only) ─────────────────────────────────────────────────── */
+function countSecs(){
+  const member = document.body.classList.contains("member");
+  const list = document.getElementById("secs-own");
+  const n = list ? list.querySelectorAll(".sec").length : 0;
+  const label = document.getElementById("seccount");
+  if (label) label.textContent = n + " of 12";
+  const add = document.getElementById("addsec");
+  if (add) add.disabled = n >= 12 || member;
+}
+function flipSec(btn){
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", String(on));
+  const row = btn.closest(".sec");
+  row.classList.toggle("off", !on);
+  row.querySelector(".state").textContent = on ? "shown" : "hidden";
+}
+function dropSec(btn){
+  const row = btn.closest(".sec");
+  if (!row.classList.contains("empty")) return;
+  row.remove();
+  countSecs();
+}
+function addSec(){
+  const list = document.getElementById("secs-own");
+  if (!list || list.querySelectorAll(".sec").length >= 12) return;
+  const row = document.createElement("div");
+  row.className = "sec empty";
+  /* the neutral pen mark: a new section has no glyph of its own yet — how one
+     is CHOSEN is an open question, so nothing is invented here. */
+  row.innerHTML =
+    '<span class="mark" style="--sec:var(--ink-faint)" aria-hidden="true">' +
+      '<svg width="17" height="17" viewBox="0 0 16 16">' +
+        '<circle cx="8" cy="8" r="4.6" stroke-dasharray="2 2"/>' +
+      '</svg><i></i></span>' +
+    '<input class="lock" value="" maxlength="30" placeholder="name it" aria-label="Section name">' +
+    '<span class="used">0 entries</span>' +
+    '<button class="toggle lock" aria-pressed="true" aria-label="On the chart" onclick="flipSec(this)"><i></i></button>' +
+    '<span class="state">shown</span>' +
+    '<button class="drop lock" title="remove" aria-label="Remove section" onclick="dropSec(this)">×</button>';
+  list.appendChild(row);
+  countSecs();
+  row.querySelector("input").focus();
+}
+
+/* ── members ──────────────────────────────────────────────────────────────── */
+function countMembers(){
+  const roster = document.getElementById("roster-own");
+  const n = roster ? roster.querySelectorAll(".memb:not(.hidden)").length : 0;
+  const label = document.getElementById("membcount");
+  if (label && !document.body.classList.contains("member")) {
+    label.textContent = n + " in this system";
+  }
+}
+function toggleDrawer(id, btn){
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  const open = !panel.classList.contains("open");
+  for (const other of document.querySelectorAll(".handover.open")) other.classList.remove("open");
+  panel.classList.toggle("open", open);
+  if (btn) btn.setAttribute("aria-expanded", String(open));
+}
+function closeDrawer(id){
+  const panel = document.getElementById(id);
+  if (panel) panel.classList.remove("open");
+}
+function dropMember(btn){
+  const row = btn.closest(".memb");
+  row.classList.add("hidden");
+  countMembers();
+}
+function addMember(name, initials){
+  const roster = document.getElementById("roster-own");
+  if (!roster) return;
+  const row = document.createElement("div");
+  row.className = "memb";
+  row.innerHTML =
+    '<span class="avatar" aria-hidden="true">' + initials + '</span>' +
+    '<b>' + name + '</b><span class="role">member</span>' +
+    '<button class="ghost" data-rest="remove">remove</button>';
+  const drop = row.querySelector("button");
+  drop.addEventListener("click", () => twoTap(drop, "tap again to remove", () => dropMember(drop)));
+  roster.appendChild(row);
+  countMembers();
+}
+function armHeir(radio){
+  const btn = document.getElementById("heirbtn");
+  if (!btn) return;
+  btn.disabled = false;
+  btn.dataset.rest = "hand over to " + radio.value;
+  if (!armed.get(btn)) btn.textContent = btn.dataset.rest;
+}
+function handedOver(){
+  say("handover");
+}
+function left(){
+  say("left");
+}
+function approveJoin(btn){
+  btn.closest(".joinreq").style.display = "none";
+  addMember("Sue Lawson", "SL");
+  say("join");
+}
+function declineJoin(btn){
+  btn.closest(".joinreq").style.display = "none";
+}
+
+/* ── the danger line ──────────────────────────────────────────────────────── */
+/* the opener steps aside and hands its place to the armed button, so the one
+   dangerous act stays put at the top-right of the card */
+function openConfirm(btn){
+  const panel = document.getElementById("delconfirm");
+  panel.classList.add("open");
+  btn.hidden = true;
+  const fire = document.getElementById("delbtn");
+  if (fire) fire.hidden = false;
+  const field = document.getElementById("delname");
+  if (field) field.focus();
+}
+function checkName(){
+  const field = document.getElementById("delname");
+  const btn = document.getElementById("delbtn");
+  const target = (document.getElementById("hhname") || {}).value || "";
+  const ok = field.value.trim() === target.trim() && target.trim().length > 0;
+  disarm(btn);
+  btn.disabled = !ok;
+}
+/* 2f: the request is the end of this screen's involvement. No banner, no
+   restore — the clock and its undo are drawn on the instance admin panel. */
+function requested(btn){
+  btn.disabled = true;
+  say("doom");
+}
+
+/* ── demo states ──────────────────────────────────────────────────────────── */
+function setRole(role){
+  const member = role === "member";
+  document.body.classList.toggle("member", member);
+  document.getElementById("d-owner").setAttribute("aria-pressed", String(!member));
+  document.getElementById("d-member").setAttribute("aria-pressed", String(member));
+  if (member) {
+    for (const open of document.querySelectorAll(".handover.open")) open.classList.remove("open");
+  }
+  for (const control of document.querySelectorAll(".lock")) control.disabled = member;
+  /* the read-only view is a DIFFERENT system — Seaside Cottage, which Tom is
+     only a member of — so the identity card has to say so */
+  const field = document.getElementById("hhname");
+  if (field) field.value = member ? "Seaside Cottage" : "Lawson Home";
+  const label = document.getElementById("membcount");
+  if (label) label.textContent = member ? "3 in this system" : "";
+  countMembers();
+  countSecs();
+}
+function toggleWants(){
+  const on = document.body.classList.toggle("wants");
+  document.getElementById("d-wants").setAttribute("aria-pressed", String(on));
+}
+/* THE TWO DOORS (§15, owner 2026-08-17): the way back is the way you came, so
+   both states are here to be read. The sheet's own state is the DEFAULT one —
+   the helm — because that is what an absent marker means. */
+function toggleDoor(){
+  const sky = document.body.classList.toggle("bysky");
+  const btn = document.getElementById("d-door");
+  btn.setAttribute("aria-pressed", String(sky));
+  btn.textContent = sky ? "came in by the sun" : "came in by the helm";
+  const back = document.getElementById("back");
+  back.textContent = sky ? "← YOUR SKY" : "← SETTINGS";
+  back.setAttribute("href", sky ? "home.html" : "settings.html");
+  /* the way back is one of the runs of small type the backdrop keeps clear, and
+     it just changed width, so the room is composed again against it */
+  drawSystem(system);
+}
+
+/* 2b: the marks are here to be JUDGED — pull them off and put them back
+   without leaving the screen. */
+function toggleMarks(){
+  const off = document.body.classList.toggle("nomarks");
+  const btn = document.getElementById("d-marks");
+  btn.setAttribute("aria-pressed", String(!off));
+  btn.textContent = off ? "section marks off" : "section marks on";
+}
+
+countSecs();
+countMembers();
+
+const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(17170812);
+(function stars(){
+  const far = document.getElementById("fartile"), near = document.getElementById("neartile");
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 95; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.4 + rng() * 0.5).toFixed(2));
+    c.setAttribute("opacity", (0.12 + rng() * 0.23).toFixed(2));
+    far.appendChild(c);
+  }
+  for (let i = 0; i < 46; i++) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", (rng() * 1600).toFixed(1)); c.setAttribute("cy", (rng() * 1000).toFixed(1));
+    c.setAttribute("r", (0.8 + rng() * 0.7).toFixed(2));
+    c.setAttribute("opacity", (0.3 + rng() * 0.4).toFixed(2));
+    near.appendChild(c);
+  }
+})();
+/* ══════════════════════════════════════════════════════════════════════════
+   H2 — INSIDE THIS SYSTEM
+   The backdrop, and nothing but the backdrop. Not one line below this point
+   touches the desk above it.
+
+   home.html carries one line in its galaxy renderer:
+
+       // you never see your own constellation — you're inside it
+
+   This is that line, drawn. Everywhere else in Orbit your household is a
+   distant mark: a 40px ring with three dots on it, out in someone's sky. The
+   little ring in the page header, top left of this very screen, is what Lawson
+   Home looks like from OUTSIDE. What is behind these cards is the SAME FIGURE
+   at room scale, seen from the middle of it — and every mark in it is true:
+
+     · the stars ARE the entries, placed by the dial law;
+     · the joined figures are the SECTIONS, in their own accents — count the
+       stars on a figure and you have read the sections card beside you;
+     · the dashed red circle is the chart key's "overdue — inside the ring";
+     · the giant arc is the dial's calendar band, its +1 year ring, so the
+       thing sweeping your room is a year and you only ever see an arc of it;
+     · flip the demos to NON-OWNER and the sky changes with the desk, because
+       that state is a different household.
+
+   The full argument, and the concept's own report, is household-inside.html.
+   ══════════════════════════════════════════════════════════════════════════ */
+const NS = "http://www.w3.org/2000/svg";
+
+/* ── THE LAW ───────────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/chart.js. Copied rather than paraphrased so a
+   reader can diff it: the backdrop is drawn by the SAME arithmetic the home
+   dial is drawn by, which is the only reason it may claim to be this
+   household's own constellation. */
+function daysUntil(dueDate, today){
+  return dueDate ? Math.round((Date.parse(dueDate) - Date.parse(today)) / 86400000) : null;
+}
+function bandOf(days){
+  if (days === null || days === undefined) return "unscheduled";
+  if (days < 0)   return "overdue";
+  if (days <= 30) return "due-soon";
+  if (days <= 90) return "upcoming";
+  return "ok";
+}
+function dialPlacement(days){
+  const angle = (Math.max(-90, Math.min(days, 430)) - 90) * (Math.PI / 180);
+  const radius = days >= 0 ? Math.min(62 + 0.242 * days, 166)
+                           : Math.max(24, 62 - 0.625 * -days);
+  return { angle, radius };
+}
+function bodySize(costMinor){
+  if (!costMinor) return 4;
+  const pounds = Math.max(costMinor / 100, 1);
+  return Math.min(8.5, Math.max(3.5, Math.round((0.8 + 1.09 * Math.log(pounds)) * 10) / 10));
+}
+/* web/src/lib/format.js: T+ is behind you, T− is ahead. */
+const tminus = (due, today) => {
+  const days = daysUntil(due, today);
+  return days < 0 ? "T+" + -days + "d" : "T−" + days + "d";
+};
+
+/* ── THE FIXTURE ───────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/fixtures/workspace.js. BOTH households the
+   demos can put on this desk are here, because the backdrop has to tell the
+   truth in both states: the owner sees Lawson Home, and flipping to
+   "non-owner" puts you inside SEASIDE COTTAGE — Emma's system, which Tom is
+   only a member of — so the sky behind the cards changes to that system's
+   geometry. Two different households, two different skies, one law and one
+   rule. Real ids, real due dates, real costs: change a date and the star
+   moves, because the star IS the date. */
+const FIXTURE_TODAY = "2026-08-13";
+const SYSTEMS = {
+  lawson: {
+    sections: [
+      { id:"s-home",     name:"Home",             accent:"sage"  },
+      { id:"s-vehicles", name:"Vehicles",         accent:"blue"  },
+      { id:"s-devices",  name:"Devices",          accent:"sand"  },
+      { id:"s-services", name:"Services",         accent:"plum"  },
+      { id:"s-dates",    name:"Dates & renewals", accent:"coral" },
+    ],
+    items: [
+      { id:"i-gutter",  title:"Gutter clearing",       sectionId:"s-home",     dueDate:"2026-07-28", costMinor:15000 },
+      { id:"i-mot",     title:"Car MOT — Volvo V60",   sectionId:"s-vehicles", dueDate:"2026-08-29", costMinor:5485  },
+      { id:"i-boiler",  title:"Boiler service",        sectionId:"s-home",     dueDate:"2026-09-04", costMinor:12000 },
+      { id:"i-chimney", title:"Chimney sweep",         sectionId:"s-home",     dueDate:"2026-10-13", costMinor:9000  },
+      { id:"i-smoke",   title:"Smoke alarm batteries", sectionId:"s-devices",  dueDate:"2026-12-13", costMinor:1200  },
+      { id:"i-svc",     title:"Car full service",      sectionId:"s-vehicles", dueDate:"2027-01-21", costMinor:30000 },
+    ],
+  },
+  seaside: {
+    sections: [
+      { id:"s-home",    name:"Home",    accent:"sage" },
+      { id:"s-outside", name:"Outside", accent:"plum" },
+    ],
+    items: [
+      { id:"i-seaside-0", title:"Septic tank empty",       sectionId:"s-outside", dueDate:"2026-08-20", costMinor:21000 },
+      { id:"i-seaside-1", title:"Chimney sweep — Seaside", sectionId:"s-home",    dueDate:"2027-03-01", costMinor:9000  },
+      { id:"i-seaside-2", title:"Deck re-oiling",          sectionId:"s-outside", dueDate:"2027-06-15", costMinor:13000 },
+    ],
+  },
+};
+
+/* ── THE MARKS ─────────────────────────────────────────────────────────────
+   Verbatim from web/src/lib/data/household.js constellationOf: the household's
+   entries as dial-space marks. What travels is the OFFSET from the dial's own
+   centre, in dial units — where the household is DRAWN is the room's business,
+   and how far each entry sits from its sun is the law's. */
+function constellationOf(system, today){
+  const accents = new Map(system.sections.map((section) => [section.id, section]));
+  const marks = system.items.map((item) => {
+    const days = daysUntil(item.dueDate, today);
+    const p = dialPlacement(days);
+    return {
+      id: item.id, title: item.title, sectionId: item.sectionId,
+      accent: accents.get(item.sectionId) ? accents.get(item.sectionId).accent : null,
+      days, tag: tminus(item.dueDate, today), band: bandOf(days),
+      dx: Math.cos(p.angle) * p.radius, dy: Math.sin(p.angle) * p.radius,
+      halo: bodySize(item.costMinor),
+    };
+  });
+  marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const figures = [];
+  for (const section of system.sections) {
+    const members = marks.filter((mark) => mark.sectionId === section.id);
+    if (members.length < 2) continue;
+    figures.push({ id: section.id, accent: section.accent, members: members.map((m) => m.id) });
+  }
+  return { marks, figures };
+}
+
+/* ══ THE RULE — WHERE YOU STAND ═════════════════════════════════════════════
+   Verbatim from web/src/routes/household/[id]/room.js, which is the module the
+   built screen composes with; the argument for every constant is written out
+   there, at length, and this is a copy so the sheet and the screen cannot
+   drift. In brief, in order of authority:
+
+     1. THE ROOM IS A ROOM — a guarantee. The year band always leaves the
+        frame, so the giant figure can only ever be an ARC: a ring drawn whole
+        inside the frame is a logo, and a household is not a logo. Bought with
+        a scale FLOOR nothing below may cross.
+     2. THE UNPROTECTED TYPE IS SACRED — a law. No halo and no word on the page
+        header, the way back or the account orb: the runs of small type with no
+        panel under them. The CARDS are not protected — glass with a
+        backdrop-filter over it is exactly what the figure composes behind.
+     3. THE COMPOSITION IS A DESIRE. Fitting every entry into the room, centred
+        behind the two columns, is what YIELDS when the first two cannot both
+        be had — which is the concept rather than a shortfall of it: you cannot
+        see all of your own system at once.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const FIELD = { width: 1600, height: 1000 };
+const OVERDUE_RING = dialPlacement(0).radius;
+const YEAR_RING = dialPlacement(364).radius;
+const BAND_RIM = YEAR_RING + 18;
+const BAND_TICK = YEAR_RING - 7;
+const MONTH_TEXT = YEAR_RING + 10;
+const SUN_FIELD = 16;
+const FIT_MARGIN = 90;
+const DEFAULT_SCALE = 4.95;
+const DEFAULT_SUN = [690 / FIELD.width, 340 / FIELD.height];
+const ESCAPE_GAP = 1;
+const SCALE_STEPS = [1, 0.92, 0.84, 0.76];
+const CANDIDATE_CAP = 72;
+const ORDER = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const round = (n) => Math.round(n * 10) / 10;
+
+const scaleFloorFor = (width, height) => (Math.min(width, height) / 2 + 10) / YEAR_RING;
+const scaleCeilingFor = (width, height) => (0.9 * Math.hypot(width / 2, height / 2)) / YEAR_RING;
+
+function cloudOf(marks, seen){
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+  for (const mark of marks) {
+    const halo = seen === false ? 0 : mark.halo;
+    left = Math.min(left, mark.dx - halo);
+    right = Math.max(right, mark.dx + halo);
+    top = Math.min(top, mark.dy - halo);
+    bottom = Math.max(bottom, mark.dy + halo);
+  }
+  return { left, right, top, bottom };
+}
+function fitScale(marks, width, height){
+  if (!marks.length) return Infinity;
+  const seen = cloudOf(marks, true), centres = cloudOf(marks, false);
+  const byWidth = centres.right > centres.left ? (width - 2 * FIT_MARGIN) / (seen.right - seen.left) : Infinity;
+  const byHeight = centres.bottom > centres.top ? (height - 2 * FIT_MARGIN) / (seen.bottom - seen.top) : Infinity;
+  return Math.min(byWidth, byHeight);
+}
+function idealSun(marks, scale, width, height){
+  if (!marks.length) return [DEFAULT_SUN[0] * width, DEFAULT_SUN[1] * height];
+  const box = cloudOf(marks, true);
+  return [width / 2 - ((box.left + box.right) / 2) * scale,
+          height / 2 - ((box.top + box.bottom) / 2) * scale];
+}
+function forbidden(marks, scale, keepOut){
+  const rects = [];
+  const ordered = marks.slice().sort((a, b) => ORDER(a.id, b.id));
+  const add = (guard, radius, dx, dy) => rects.push({
+    left: guard.left - radius - dx, right: guard.right + radius - dx,
+    top: guard.top - radius - dy, bottom: guard.bottom + radius - dy });
+  for (const guard of keepOut) add(guard, SUN_FIELD * scale, 0, 0);
+  for (const mark of ordered) {
+    for (const guard of keepOut) add(guard, mark.halo * scale, mark.dx * scale, mark.dy * scale);
+  }
+  return rects;
+}
+const inside = (rect, x, y) => x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
+function exposureAt(rects, x, y){
+  let cost = 0;
+  for (const rect of rects) {
+    if (!inside(rect, x, y)) continue;
+    cost += Math.min(x - rect.left, rect.right - x) * Math.min(y - rect.top, rect.bottom - y);
+  }
+  return cost;
+}
+function axisCandidates(ideal, pairs, low, high){
+  const seen = new Set([ideal]);
+  for (const pair of pairs) {
+    if (pair[0] >= low && pair[0] <= high) seen.add(pair[0]);
+    if (pair[1] >= low && pair[1] <= high) seen.add(pair[1]);
+  }
+  return [...seen]
+    .sort((p, q) => Math.abs(p - ideal) - Math.abs(q - ideal) || p - q)
+    .slice(0, CANDIDATE_CAP);
+}
+function clearest(marks, scale, ideal, keepOut, width, height){
+  const rects = forbidden(marks, scale, keepOut);
+  if (!rects.length || !rects.some((rect) => inside(rect, ideal[0], ideal[1]))) {
+    return { sun: [round(ideal[0]), round(ideal[1])], exposure: 0 };
+  }
+  const xs = axisCandidates(ideal[0], rects.map((r) => [r.left - ESCAPE_GAP, r.right + ESCAPE_GAP]), 0, width);
+  const ys = axisCandidates(ideal[1], rects.map((r) => [r.top - ESCAPE_GAP, r.bottom + ESCAPE_GAP]), 0, height);
+  const candidates = [];
+  for (const x of xs) for (const y of ys) candidates.push([x, y, Math.hypot(x - ideal[0], y - ideal[1])]);
+  candidates.sort((a, b) => a[2] - b[2] || a[0] - b[0] || a[1] - b[1]);
+  let best = null;
+  for (const candidate of candidates) {
+    const exposure = exposureAt(rects, candidate[0], candidate[1]);
+    if (exposure === 0) return { sun: [round(candidate[0]), round(candidate[1])], exposure: 0 };
+    if (!best || exposure < best.exposure) best = { sun: [round(candidate[0]), round(candidate[1])], exposure };
+  }
+  return best;
+}
+const MONTHS = ["AUG","SEP","OCT","NOV","DEC","JAN","FEB","MAR","APR","MAY","JUN","JUL"];
+function monthsOf(sun, scale){
+  return MONTHS.map((label, index) => {
+    const angle = ((index * 30 - 90) * Math.PI) / 180;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+    return { label,
+      x1: round(sun[0] + ca * YEAR_RING * scale), y1: round(sun[1] + sa * YEAR_RING * scale),
+      x2: round(sun[0] + ca * BAND_TICK * scale), y2: round(sun[1] + sa * BAND_TICK * scale),
+      tx: round(sun[0] + ca * MONTH_TEXT * scale), ty: round(sun[1] + sa * MONTH_TEXT * scale + 11) };
+  });
+}
+function roomOf(options){
+  const marks = options.marks || [];
+  const width = options.width, height = options.height, keepOut = options.keepOut || [];
+  const floor = scaleFloorFor(width, height), ceiling = scaleCeilingFor(width, height);
+  const fit = fitScale(marks, width, height);
+  const fitted = Number.isFinite(fit);
+  const base = fitted ? Math.min(Math.max(fit, floor), ceiling) : DEFAULT_SCALE;
+  let best = null;
+  for (const step of SCALE_STEPS) {
+    const scale = Math.max(floor, base * step);
+    const chosen = clearest(marks, scale, idealSun(marks, scale, width, height), keepOut, width, height);
+    if (!best || chosen.exposure < best.exposure) best = Object.assign({}, chosen, { scale });
+    if (chosen.exposure === 0) break;
+    if (scale === floor) break;
+  }
+  if (!best) {
+    const scale = Math.max(floor, Math.min(DEFAULT_SCALE, ceiling));
+    best = Object.assign({}, clearest([], scale, [DEFAULT_SUN[0] * width, DEFAULT_SUN[1] * height], keepOut, width, height), { scale });
+  }
+  const sun = best.sun, scale = best.scale;
+  return {
+    sun, scale, clear: best.exposure === 0, crowded: best.exposure > 0, fitted,
+    arc: YEAR_RING * scale > Math.min(sun[0], width - sun[0], sun[1], height - sun[1]),
+    stars: marks.map((mark) => Object.assign({}, mark, {
+      cx: round(sun[0] + mark.dx * scale),
+      cy: round(sun[1] + mark.dy * scale),
+      r: round(mark.halo * scale) })),
+    rings: { sun: round(SUN_FIELD * scale), overdue: round(OVERDUE_RING * scale),
+             year: round(YEAR_RING * scale), rim: round(BAND_RIM * scale) },
+    months: monthsOf(sun, scale),
+  };
+}
+
+/* ── THE WORDS ─────────────────────────────────────────────────────────────
+   Also verbatim from room.js, and this part was already solved by the concept:
+   each star asks for a berth reading AWAY from the centre of the figure first,
+   then back toward it, stepping further out each time, and takes the first one
+   wholly inside the frame, wholly clear of every panel and of every word
+   already placed. A star that can find no berth is simply not lettered — the
+   sky says it is there, the desk beside you says what it is. Urgent entries
+   choose first, because if only some names fit they should be the ones you
+   needed to see. */
+const LADDER = [-11, 21, -34, 44, -57, 67, -80, 90, -103, 113];
+const BERTH_REACH = 38, WORD_HEIGHT = 15, WORD_TOP = 11;
+const ADVANCE = 11.5 * 0.6 + 2.1;
+const FRAME_MARGIN = 16, GUARD_PAD = 6, WORD_PAD = 8;
+const wordOf = (mark) => ({ text: (mark.title || "").toUpperCase(), tag: "  ·  " + (mark.tag || "") });
+function wordBox(star, dx, dy, anchor){
+  const word = wordOf(star);
+  const width = (word.text.length + word.tag.length) * ADVANCE;
+  const x = star.cx + dx;
+  const left = anchor === "start" ? x : x - width;
+  return { left, right: left + width,
+           top: star.cy + dy - WORD_TOP, bottom: star.cy + dy - WORD_TOP + WORD_HEIGHT };
+}
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+const pad = (r, n) => ({ left:r.left-n, right:r.right+n, top:r.top-n, bottom:r.bottom+n });
+function berthsOf(options){
+  const stars = options.stars || [], sun = options.sun, guards = options.guards || [];
+  const width = options.width, height = options.height;
+  const taken = [], words = [];
+  const order = stars.slice().sort((a, b) => a.days - b.days || ORDER(a.id, b.id));
+  for (const star of order) {
+    const away = star.cx >= sun[0] ? 1 : -1;
+    let berth = null;
+    for (const dy of LADDER) {
+      for (const dir of [away, -away]) {
+        const anchor = dir > 0 ? "start" : "end";
+        const box = wordBox(star, dir * BERTH_REACH, dy, anchor);
+        if (box.left < FRAME_MARGIN || box.top < FRAME_MARGIN) continue;
+        if (box.right > width - FRAME_MARGIN || box.bottom > height - FRAME_MARGIN) continue;
+        if (guards.some((guard) => overlaps(box, pad(guard, GUARD_PAD)))) continue;
+        if (taken.some((word) => overlaps(box, pad(word, WORD_PAD)))) continue;
+        berth = { dx: dir * BERTH_REACH, dy, anchor };
+        break;
+      }
+      if (berth) break;
+    }
+    if (!berth) continue;
+    taken.push(wordBox(star, berth.dx, berth.dy, berth.anchor));
+    const length = Math.hypot(berth.dx, berth.dy) || 1;
+    const word = wordOf(star);
+    words.push({ id: star.id, x: round(star.cx + berth.dx), y: round(star.cy + berth.dy),
+      anchor: berth.anchor, text: word.text, tag: word.tag,
+      leader: { x1: round(star.cx + (berth.dx / length) * (star.r + 5)),
+                y1: round(star.cy + (berth.dy / length) * (star.r + 5)),
+                x2: round(star.cx + berth.dx * 0.9),
+                y2: round(star.cy + berth.dy * 0.9) } });
+  }
+  return words;
+}
+/* room.js liftOf: the descent is a pure function of scrollTop. */
+function liftOf(scrollTop, innerHeight, scrollHeight){
+  const max = Math.max(1, scrollHeight - innerHeight);
+  const travelled = Math.min(max, Math.max(0, scrollTop));
+  return Math.min(1, travelled / Math.min(innerHeight, max * 0.72));
+}
+/* room.js skyMap / toField: preserveAspectRatio "slice" is a uniform scale
+   about the centre, so a rectangle measured in CSS pixels reaches the rule in
+   the field's own units by one multiply rather than a guess. */
+function skyMap(innerWidth, innerHeight){
+  const k = Math.max(innerWidth / FIELD.width, innerHeight / FIELD.height);
+  return { k, ox: (innerWidth - FIELD.width * k) / 2, oy: (innerHeight - FIELD.height * k) / 2 };
+}
+const toField = (rect, map) => ({
+  left: (rect.left - map.ox) / map.k, right: (rect.right - map.ox) / map.k,
+  top: (rect.top - map.oy) / map.k, bottom: (rect.bottom - map.oy) / map.k });
+
+/* ── THE DRAWING ─────────────────────────────────────────────────────────── */
+const PAINT = { overdue:["--overdue","hh-ruby"], "due-soon":["--warm","hh-amber"],
+                upcoming:["--upcoming","hh-sky"], ok:["--ok","hh-jade"],
+                unscheduled:["--ok","hh-jade"] };
+const el = (tag, attrs) => {
+  const node = document.createElementNS(NS, tag);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  return node;
+};
+const rectsOf = (selector) => [...document.querySelectorAll(selector)]
+  .map((node) => node.getBoundingClientRect())
+  .filter((rect) => rect.width > 0 && rect.height > 0);
+
+function drawSystem(key){
+  const system = SYSTEMS[key];
+  const chart = constellationOf(system, FIXTURE_TODAY);
+  /* KEEP-OUT is the type with no panel under it — the header's ring and its two
+     lines (the row is full-width but its ink is not, so the row's own children
+     are the guards), the way back and the account orb. PANELS are the cards:
+     not keep-out, because composing behind glass is the whole idea, but guards
+     for WORDS, because a word under glass is unreadable ink that costs that
+     panel's own small type contrast for nothing. */
+  const map = skyMap(innerWidth, innerHeight);
+  const keepOut = rectsOf("header.screen > *, .back, .orb").map((rect) => toField(rect, map));
+  const panels = rectsOf(".card").map((rect) => toField(rect, map));
+  const room = roomOf({ marks: chart.marks, width: FIELD.width, height: FIELD.height, keepOut });
+  const words = berthsOf({ stars: room.stars, sun: room.sun, guards: keepOut.concat(panels),
+                           width: FIELD.width, height: FIELD.height });
+
+  const consty = document.getElementById("consty");
+  /* transform-origin IS the sun, in CSS pixels, so the descent is a fall INTO
+     the system rather than a pan across it. */
+  consty.style.transformOrigin =
+    (map.ox + room.sun[0] * map.k).toFixed(1) + "px " + (map.oy + room.sun[1] * map.k).toFixed(1) + "px";
+
+  const rings = document.getElementById("con-rings");
+  const figures = document.getElementById("con-figures");
+  const bodies = document.getElementById("con-bodies");
+  const labels = document.getElementById("con-labels");
+  for (const g of [rings, figures, bodies, labels]) g.textContent = "";
+
+  /* the sun: the dial's own disc and its core, at room scale. Held RIGHT down —
+     the concept's first pass gave it a wide corona and it was the single worst
+     thing on the screen for contrast, a soft bright field lying under the whole
+     left column (10px mono at 2.07:1). A sun seen from inside its own system is
+     a light, not a lamp. */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.sun, fill:"url(#hh-sun)" }));
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:(2.2 * room.scale).toFixed(1),
+    style:"fill:var(--sun-core)", opacity:".26" }));
+  /* r=62 — the chart key's own words, "overdue: inside the ring". */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.overdue, fill:"none",
+    style:"stroke:var(--overdue)", "stroke-opacity":".17", "stroke-width":"1.4",
+    "stroke-dasharray": (3 * room.scale).toFixed(1) + " " + (5 * room.scale).toFixed(1) }));
+  /* THE GIANT ONE: the dial's calendar band, whose r=150 is exactly +1 YEAR by
+     the law, so the thing sweeping your room is a year. */
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.year, fill:"none",
+    style:"stroke:var(--chart-line)", "stroke-opacity":".72", "stroke-width":"2.4" }));
+  rings.appendChild(el("circle", { cx:room.sun[0], cy:room.sun[1], r:room.rings.rim, fill:"none",
+    style:"stroke:var(--chart-line-soft)", "stroke-opacity":".8", "stroke-width":"1.2" }));
+  for (const month of room.months) {
+    rings.appendChild(el("line", { x1:month.x1, y1:month.y1, x2:month.x2, y2:month.y2,
+      style:"stroke:var(--chart-line)", "stroke-opacity":".72", "stroke-width":"2.4" }));
+  }
+  for (const month of room.months) {
+    const t = el("text", { x:month.tx, y:month.ty, "text-anchor":"middle", "font-size":"31",
+      "letter-spacing":"6", style:"fill:var(--chart-ink);font-family:var(--mono)", opacity:".2" });
+    t.textContent = month.label;
+    rings.appendChild(t);
+  }
+
+  /* THE FIGURES: a section's entries joined in date order, in that section's own
+     accent (2b — the mark travels with the entry). */
+  const byId = new Map(room.stars.map((star) => [star.id, star]));
+  for (const figure of chart.figures) {
+    figures.appendChild(el("polyline", {
+      points: figure.members.map((id) => byId.get(id).cx + "," + byId.get(id).cy).join(" "),
+      fill:"none", style:"stroke:var(" + (figure.accent ? "--sec-" + figure.accent : "--ink-faint") + ")",
+      "stroke-opacity":".30", "stroke-width":"1.3", "stroke-linecap":"round",
+      "stroke-dasharray": room.scale.toFixed(1) + " " + (5 * room.scale).toFixed(1) }));
+  }
+
+  /* THE STARS */
+  for (const star of room.stars) {
+    const paint = PAINT[star.band];
+    bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy, r:star.r, fill:"url(#" + paint[1] + ")" }));
+    if (star.band === "overdue") {
+      /* the chart key's overdue ping, on any body that has earned it */
+      bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy, r:(star.r * 1.27).toFixed(1), fill:"none",
+        style:"stroke:var(--overdue)", "stroke-opacity":".20", "stroke-width":"1.3" }));
+    }
+    bodies.appendChild(el("circle", { cx:star.cx, cy:star.cy,
+      r:Math.max(2.1, star.r * 0.115).toFixed(2), style:"fill:var(" + paint[0] + ")", opacity:".55" }));
+  }
+
+  /* THE WHISPER LABELS */
+  for (const word of words) {
+    const leader = el("line", { x1:word.leader.x1, y1:word.leader.y1, x2:word.leader.x2, y2:word.leader.y2,
+      style:"stroke:var(--chart-ink)", "stroke-opacity":".38", "stroke-width":"1" });
+    leader.dataset.leader = "1";
+    labels.appendChild(leader);
+    const t = el("text", { x:word.x, y:word.y, "text-anchor":word.anchor, "font-size":"11.5",
+      "letter-spacing":"2.1", style:"fill:var(--chart-ink);font-family:var(--mono)", opacity:".72" });
+    t.textContent = word.text;
+    const tag = el("tspan", { opacity:".62" });
+    tag.textContent = word.tag;
+    t.appendChild(tag);
+    labels.appendChild(t);
+  }
+  legible();
+}
+
+/* ── A WORD IS DRAWN ONLY WHERE IT CAN BE READ ─────────────────────────────
+   The words are placed from an ESTIMATE of their own width; only the browser
+   knows what the font actually did, so the drawing is measured once it exists —
+   and the month names, which take no berth, are measured with it. Any word
+   touching a panel, the header, the chrome or the edge of the frame is not
+   drawn at all: no word is ever cut in half by a card edge (which reads as a
+   rendering fault, not a backdrop), and no word is ever laid unreadable under
+   a panel where its only measurable effect is to cost that panel's small type
+   contrast — which is exactly what the concept's first pass did, at 2.70:1 →
+   2.43:1, for nothing.
+
+   Measured at rest and on resize, never during a scroll: the composition being
+   judged is the one at scroll 0, and words winking out as you descend would be
+   its own kind of lie. */
+function legible(){
+  const guards = rectsOf("header.screen > *, .back, .orb, .card");
+  for (const word of document.querySelectorAll("#consty text")) {
+    word.style.display = "";
+    const r = word.getBoundingClientRect();
+    const blocked =
+      r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight ||
+      guards.some((g) => r.left < g.right && r.right > g.left && r.top < g.bottom && r.bottom > g.top);
+    word.style.display = blocked ? "none" : "";
+    const leader = word.previousElementSibling;
+    if (leader && leader.dataset && leader.dataset.leader) leader.style.display = blocked ? "none" : "";
+  }
+}
+
+let system = "lawson";
+/* THE BACKDROP WAITS FOR THE FONTS, AND THEN FOR A FRAME.
+
+   It waits for the fonts because the composition is solved against MEASURED
+   rectangles — where the header's two lines actually end — and those move when
+   the real faces arrive, so a room composed before them would be composed
+   against fallback metrics and would jump once when they landed.
+
+   It then waits for a FRAME, and that one is measured on the built screen:
+   composing allocates a few thousand small objects, and doing that INSIDE
+   document.fonts.ready's own callback runs it at the exact moment the browser is
+   settling that promise. Blink's pending `ready` promise does not survive it —
+   anything else awaiting the same signal is handed "Resulting promise was
+   garbage collected" instead of an answer, which is how the fidelity gate met
+   it. Measuring layout belongs in a frame anyway. The sheet keeps the built
+   screen's shape, so there is one drawing and one reasoning. */
+if (document.fonts && document.fonts.ready) {
+  document.fonts.ready.then(() => requestAnimationFrame(() => drawSystem(system)));
+} else {
+  drawSystem(system);
+}
+addEventListener("resize", () => drawSystem(system), { passive:true });
+
+/* the demos' role switch changes WHICH SYSTEM you are standing in — the
+   non-owner state is Seaside Cottage, Emma's — so the sky has to follow it.
+   The ratified handler is untouched; it is wrapped. */
+const ratifiedSetRole = setRole;
+setRole = function(role){
+  ratifiedSetRole(role);
+  system = role === "member" ? "seaside" : "lawson";
+  drawSystem(system);
+};
+
+/* ── THE DESCENT (§15, universal) ──────────────────────────────────────────
+   You are already inside; scrolling takes you DEEPER. The whole figure travels
+   up and out as one rigid drawing — the sun leaves early and the +1 year ring
+   is the last thing over your head — because a system does not stop existing
+   when you stop looking at it. --lift is a pure function of scrollTop, so
+   scroll 0 is scroll 0 for ever, the way back up is the way down reversed to
+   the pixel, and reduced motion keeps every bit of it: a position is not an
+   animation. */
+(function descent(){
+  const doc = document.documentElement;
+  const read = () => doc.style.setProperty("--lift",
+    liftOf(scrollY, innerHeight, doc.scrollHeight).toFixed(4));
+  let queued = false;
+  const onScroll = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; read(); });
+  };
+  addEventListener("scroll", onScroll, { passive:true });
+  addEventListener("resize", onScroll, { passive:true });
+  read();
+})();
+
+</script>
+</body></html>

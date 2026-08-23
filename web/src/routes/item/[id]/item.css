@@ -1,0 +1,127 @@
+/*
+ * The item view (#424).
+ *
+ * No mockup draws this screen — none of v2..v19 has one — so nothing here is
+ * invented. Every rule is composed from vocabulary the design already
+ * ratified, and each block below names where it came from. That is the
+ * discipline standing in for a mockup: the view can only recombine what the
+ * design already established, so it cannot introduce a visual language of its
+ * own while nobody is looking.
+ *
+ * Sources:
+ *   .stage, .glass, .sky, .vignette   design/family/family.css
+ *   card sizing, h2, .sub             design/family/create.html and settings-mail.html,
+ *                                     where each screen names its own card
+ *   .kv                               design/family/settings-mail.html — the
+ *                                     ratified label/value row for read-only detail
+ *   .note                             the same, for small print
+ */
+
+/* create.html's override: the family stage centres a fixed card, and a detail
+   view has to be able to grow past the fold. Doubled selectors because
+   family.css loads via <link> after this bundled sheet and would win a tie
+   (the create form's unscrollable-card bug, owner-found 2026-08-15). */
+html body{overflow-y:auto;overflow-x:hidden}
+.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;
+       justify-content:center;padding:56px 20px}
+
+/* Each screen names its own card and sizes it. The relay is 430px, the create
+   form 600px; an item sits between them. */
+.item-card{width:100%;max-width:520px;padding:30px 34px}
+.item-card h2{font:600 22px var(--display);line-height:1.25}
+.item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                margin:6px 0 22px}
+
+/* settings-mail.html's read-only row, unchanged. */
+.kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+    color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
+.kv:last-of-type{border:0}
+.kv b{color:var(--ink);font-weight:500;text-align:right}
+.kv .over{color:var(--overdue)}
+
+/* Section headings inside the card borrow the drawer's, which is the design's
+   existing "quiet label above a group" treatment. */
+.item-card h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+              color:var(--ink-faint);margin:22px 0 8px}
+
+/* home.css's document row, which is already the ratified way to list a
+   document with a size beneath it. */
+.doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
+     border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
+.doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+
+.note{font:10.5px var(--mono);color:var(--ink-faint);margin-top:18px;line-height:1.8}
+
+/* The action pills: create.html's .types button grammar, carrying each
+   action's own ink (owner, 2026-08-15: more colour, especially the action
+   buttons) — completing is the ok green, rescheduling the upcoming blue,
+   snoozing the warm amber, editing the accent, retiring the overdue red. */
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+.acts button{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+  border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+  border-radius:999px;padding:7px 14px;cursor:pointer}
+.acts button:hover{border-color:var(--act,var(--ink))}
+.acts button[aria-pressed=true]{border-color:var(--act,var(--accent));
+  background:color-mix(in srgb, var(--act,var(--accent)) 14%, transparent)}
+.acts button:disabled{opacity:.5;cursor:default}
+
+/* The panels reuse create.html's field grammar (create.css .field/.row2/
+   .save-row/.btn-primary/.cancel-link); only their placement inside this card
+   is local. */
+.panel{margin-top:16px;padding-top:4px}
+.panel .field{margin-bottom:13px}
+.panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
+  color:var(--ink-faint);text-transform:uppercase;margin:0 0 6px}
+.panel .field input,.panel .field textarea{width:100%;background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
+  padding:9px 12px;font-family:var(--ui)}
+.panel .field input:focus,.panel .field textarea:focus{outline:none;border-color:var(--accent)}
+.panel .field textarea{resize:vertical;line-height:1.5}
+.panel .field.mono input{font-family:var(--mono)}
+.panel .row2{display:flex;gap:14px}
+.panel .row2>.field{flex:1;min-width:0}
+.save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
+.btn-primary{flex:0 0 auto;padding:10px 22px;border-radius:11px;border:0;cursor:pointer;
+  font:600 13px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+.btn-primary:hover{filter:brightness(1.05)}
+.btn-primary:disabled{opacity:.5;cursor:default}
+/* create.html's cancel link as a button — same type, no chrome. */
+.cancel-link{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
+  cursor:pointer;padding:0}
+.cancel-link:hover{color:var(--ink-mid)}
+/* A quieter sibling for the secondary destructive choice: the pill grammar
+   at the save-row's size. */
+.btn-quiet{font:11px var(--mono);color:var(--act,var(--ink-mid));background:var(--panel);
+  border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+  border-radius:999px;padding:8px 16px;cursor:pointer}
+.btn-quiet:hover{border-color:var(--act,var(--ink))}
+
+/* Failure carries a line of type in the server's own words — create.css's
+   save-note treatment, toned with the urgency ink the design already uses. */
+.problem{font:10.5px var(--mono);color:var(--overdue);margin-top:14px;line-height:1.6}
+
+/* create.html's cancel link, which is its established way back. */
+.back{display:inline-block;margin-top:20px;font:11.5px var(--mono);
+      color:var(--ink-mid);text-decoration:none}
+.back:hover{color:var(--accent-text)}
+
+/* POL-11, the owner rule that every page's starfield drifts: perceptible
+   within a few seconds, one direction, seamless over a tiled field. The same
+   two speeds home uses, so this is the same sky from another page. */
+.sky svg{position:absolute;inset:0;width:100%;height:100%}
+.sky .far{animation:driftf 400s linear infinite}
+.sky .near{animation:driftn 195s linear infinite}
+@media (prefers-reduced-motion:reduce){
+  .sky .far,.sky .near{animation:none}
+}
+
+/* #434 amend-then-accept: the suggestion wears the create form's grammar —
+   the heading IS the name (create.css .name-title, mirrored here because this
+   screen does not load that sheet), and a field extraction read from the
+   document carries the from-document mark (create.css .field.sugg). */
+.name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.panel .field.sugg input{border-left:3px solid var(--accent)}
+.save-row .back{margin-top:0}

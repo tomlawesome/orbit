@@ -1,3 +1,13 @@
+# web/ is a workspace member (#419). Before this it sat outside, which meant
+# pnpm silently ignored web/pnpm-lock.yaml unless --ignore-workspace was
+# passed: a `pnpm add` there wrote the ROOT lockfile and left web's stale, so
+# local installs passed while a clean --frozen-lockfile failed. It also kept
+# web's dependency graph outside the overrides below, outside the SBOM, and
+# outside scripts/classify-changed-paths.mjs.
+packages:
+  - "."
+  - "web"
+
 allowBuilds:
   esbuild: true
   sharp: true

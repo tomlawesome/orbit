@@ -1,3 +1,29 @@
+<!--
+  THE APPROVED SIGN-IN. Brought into line with the 2026-08-14 rulings on
+  2026-08-17, because it had been left at its v18 drawing and that stale copy
+  is what leaked back into the product.
+
+  What changed, and why. This sheet used to draw a 64px badge with a 58px word
+  under it, a wide gold pill low on the frame, and a PRIVATE · SELF-HOSTED ·
+  YOURS ribbon at the foot. The owner struck all three on 2026-08-14
+  (owner-decisions.md §10, CON-19 amended for the sign-in hero) and the app was
+  built and baselined to the ruling the same day — but this file was never
+  updated. design/v19/first-run.html then reproduced THIS sheet's chrome, which
+  is how the old styling came back into the flight, and the owner struck it a
+  second time on 2026-08-17: "the flight's login screen uses THE MOST RECENT
+  APPROVED LOGIN (the 08-14 rulings: no ribbon, the current lockup)... there
+  shouldnt be a footer."
+
+  So the chrome below is now the approved one, restored from its built form
+  (web/src/routes/login at 0ff28da/cfa8388) and checked against the baseline
+  that form earned: the lockup centred, the ring at 420px with `orbit` set
+  plain inside it, the ask a small gold pill inside the ring beneath the word,
+  and no ribbon and no footer anywhere. The SKY is untouched — it was always
+  right, and design/v19/first-run.html carries it across verbatim.
+
+  The pair: logout.html wears the same lockup, the same pill, and unwinds the
+  planet the other way. Both ends of a session show one face.
+-->
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orbit — sign in</title>
@@ -41,20 +67,47 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
 .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 .grain{position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.5;mix-blend-mode:overlay}
-.lockup{position:relative;z-index:3;text-align:center;top:-13vh}
-.lockup .glyph{margin-bottom:18px}
-.lockup .name{font:600 58px var(--display);letter-spacing:.015em;line-height:1}
-.gate-wrap{position:fixed;left:0;right:0;bottom:23vh;text-align:center;z-index:3;
-           opacity:0;transform:translateY(10px);transition:opacity 1.6s ease 1.6s,transform 1.6s ease 1.6s}
-body.lit .gate-wrap{opacity:1;transform:none}
-.gate{font:600 14.5px var(--display);color:var(--bg);background:var(--accent);
-      border:0;border-radius:99px;padding:14px 34px;cursor:pointer;
-      box-shadow:0 0 34px rgba(216,180,90,.25)}
+/* THE HERO (owner, 2026-08-14). The mark is the hero, at scale, and the name
+   sits INSIDE the ring — one object, not a badge with a caption. The sun rises
+   toward the planet riding the ring. The glyph and the name occupy the same
+   grid cell, so the word is centred on the ring's own centre (cx=100 cy=100 of
+   the 200 viewBox) at any size, and .stage centres the whole thing in the
+   viewport. */
+.lockup{position:relative;z-index:3;text-align:center;
+        display:inline-grid;place-items:center}
+.lockup .glyph{grid-area:1/1;line-height:0}
+/* The one motion CON-19 permits anywhere in the identity: on live surfaces the
+   planet drifts slowly around the ring, once per 40s. */
+.glyph .tr{animation:spinback 40s linear infinite;transform-origin:100px 100px}
+@keyframes spinback{to{transform:rotate(360deg)}}
+.lockup .name{grid-area:1/1;font:600 72px var(--display);letter-spacing:.015em;line-height:1}
+/* The ask sits inside the ring, directly under the name. It shares the
+   lockup's single grid cell so the name stays centred on the ring's own
+   centre; the button is then dropped clear of it — 36px is half the name's
+   line box, 20px the gap, 18px half the button. The offset lives here and the
+   entrance animation lives on .gate, so the two transforms never fight over
+   the same element. */
+.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+           transform:translateY(74px)}
+/* The gold pill, restored and sized down — the same treatment and size the
+   sign-out carries, so both ends of a session offer the identical control.
+   Dark ink on the accent, never white: every theme pack fails white-on-accent
+   contrast, worst case 1.66:1. The delayed entrance stays — the mark holds
+   alone first. */
+.gate{font:600 12px var(--display);color:var(--bg);background:var(--accent);
+      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
+      letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
+      box-shadow:0 0 28px rgba(216,180,90,.22);
+      opacity:0;transform:translateY(10px);
+      transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,filter .35s ease}
+body.lit .gate{opacity:1;transform:none}
 .gate:hover{filter:brightness(1.08)}
-.below{position:fixed;bottom:4.5vh;left:0;right:0;text-align:center;z-index:3;
-       font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.16em}
+/* the PRIVATE · SELF-HOSTED · YOURS ribbon was removed entirely (owner,
+   2026-08-14). Its rule goes with it rather than lingering as dead CSS. */
 @media (prefers-reduced-motion: reduce){
-  .dawnlayer,.rim,.gate-wrap{opacity:1!important;transform:none!important;transition:none}
+  /* .gate, not .gate-wrap: the wrapper's transform is layout, not motion, and
+     clearing it would drop the button back on top of the name. */
+  .dawnlayer,.rim,.gate{opacity:1!important;transform:none!important;transition:none}
 }
 </style></head><body>
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
@@ -310,11 +363,20 @@ body.lit .gate-wrap{opacity:1;transform:none}
           stroke="#fff6e6" stroke-width="3.4" stroke-linecap="round"/>
 </svg></div>
 <div class="stage"><div class="lockup">
-  <div class="glyph"><svg width="64" height="64" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="9"/><circle cx="163" cy="63.5" r="20" style="fill:var(--accent)"/></svg></div>
+  <!--
+    Drawn for this size, not scaled up from the favicon geometry. The viewBox
+    units are the same, so stroke-width and the planet radius are restated
+    rather than inherited: at 420px the mark's original 9-unit stroke renders
+    ~19px and its 20-unit planet an 84px disc, which reads as a heavy badge
+    instead of a slim ring with a small body riding it. 2 units = ~4px of line,
+    7 units = a ~29px planet. Position is unchanged — cx/cy still sit on the
+    ring at radius 72.
+  -->
+  <div class="glyph"><svg width="420" height="420" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="2"/><g class="tr"><circle cx="163" cy="63.5" r="7" style="fill:var(--accent)"/></g></svg></div>
   <div class="name">orbit</div>
+  <!-- the ask lives inside the ring, directly beneath the name -->
+  <div class="gate-wrap"><button class="gate">Sign in</button></div>
 </div></div>
-<div class="gate-wrap"><button class="gate">Continue with your identity provider</button></div>
-<div class="below">PRIVATE &middot; SELF-HOSTED &middot; YOURS</div>
 <svg class="grain" width="100%" height="100%"><filter id="gr">
   <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
   <feColorMatrix type="saturate" values="0"/>

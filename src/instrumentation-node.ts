@@ -177,11 +177,36 @@ export async function registerNode(): Promise<void> {
       await verifyMigrationIntegrity(getDatabaseClient(), migrationsFolder);
     } catch (error) {
       const code = error instanceof MigrationIntegrityError ? error.code : "migration_integrity";
+      /*
+       * Refusing to start against a database this build does not recognise is
+       * correct and deliberate. Saying so unreadably is not (#437): the only
+       * thing an operator saw was Next's "error occurred while loading
+       * instrumentation hook", repeated on every restart, with the container
+       * stuck at health: starting and no way to tell it from a slow boot.
+       *
+       * So the log now names the condition in Orbit's own words, carries the
+       * bounded detail of what disagreed, and states the remedy - which is
+       * never "restart", because a restart cannot change either side.
+       */
+      /* Only an actual integrity verdict earns the precise vocabulary. This
+         catch also swallows connection failures - a wrong password reaches
+         here too - and calling that a database mismatch would send an
+         operator hunting the wrong problem. The reason and its remedy are one
+         verdict, so they travel as one pair. */
+      const verdict = !(error instanceof MigrationIntegrityError)
+        ? ({ reason: "migration_integrity", action: "check_migrations" } as const)
+        : code === "database_floor"
+          ? ({ reason: "database_below_floor", action: "upgrade_from_supported_version" } as const)
+          : ({ reason: "database_mismatch", action: "attach_matching_database" } as const);
       log.error({
         event: "startup.migration",
         state: "exhausted",
-        reason: "migration_integrity",
-        action: "check_migrations",
+        ...verdict,
+        /* The bounded description of what disagreed - tags and counts only,
+           never SQL or credentials (see MigrationIntegrityError.detail). */
+        ...(error instanceof MigrationIntegrityError && error.detail
+          ? { detail: error.detail }
+          : {}),
         impact: "migration_blocked",
       });
       throw new Error(code);

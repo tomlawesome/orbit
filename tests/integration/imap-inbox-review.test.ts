@@ -99,9 +99,12 @@ describe("authenticated mailbox review read boundary", () => {
     const payload = await response.json() as Record<string, unknown>;
     expect(payload).toMatchObject({ receipt: { id: receipt.id }, sections: expect.any(Array), candidates: expect.any(Array) });
     expect(payload.candidates).toEqual([{ itemId: selectedCandidate.id, title: "Other household record", reason: "matching provider" }]);
+    // #467: attachments now also carry displayName (re-normalized on the way
+    // out, never trusted verbatim from the stored column) and scanState
+    // (read off the holding state machine — "stored" is the clean verdict).
     expect(payload.attachments).toEqual([
-      { id: secondAttachmentId, ordinal: 1, mediaType: "application/pdf", sizeBytes: 13 },
-      { id: firstAttachmentId, ordinal: 2, mediaType: "application/pdf", sizeBytes: 12 },
+      { id: secondAttachmentId, ordinal: 1, displayName: "second.pdf", mediaType: "application/pdf", sizeBytes: 13, scanState: "clean" },
+      { id: firstAttachmentId, ordinal: 2, displayName: "first.pdf", mediaType: "application/pdf", sizeBytes: 12, scanState: "clean" },
     ]);
     expect(JSON.stringify(payload)).not.toContain("must-not-appear");
     expect(JSON.stringify(payload)).not.toContain("storageKey");

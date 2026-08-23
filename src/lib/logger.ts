@@ -95,6 +95,12 @@ export const operationalReasons = [
   "not_configured",
   "disabled",
   "invalid_event",
+  /* Startup refusals that a restart cannot fix (#437). Named separately from
+     the generic migration_integrity so an operator - and repair.sh - can tell
+     "this database belongs to a different build" from "this database is older
+     than we support", which have different remedies. */
+  "database_mismatch",
+  "database_below_floor",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -114,6 +120,10 @@ export const operationalActions = [
   "restore_backup",
   "run_recovery",
   "contact_operator",
+  /* Neither of these is "restart": both sides of the disagreement survive a
+     restart, so restarting loops forever (#437). */
+  "attach_matching_database",
+  "upgrade_from_supported_version",
 ] as const;
 export type OperationalAction = typeof operationalActions[number];
 
@@ -173,6 +183,7 @@ export const operationalEvents = {
   "document.scanner": "scanner",
   "document.scan": "scanner",
   "document.inspection": "document",
+  "document.preview": "document",
   "document.parse": "parser",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",

@@ -1,0 +1,151 @@
+<script>
+  import "./relay.css";
+
+
+  /**
+   * Your relay — the per-user mail-in address (CON-9: "settings-mail =
+   * relay"). Forward a document to your own private address and it lands in
+   * your review queue; nothing is created without you seeing it first.
+   *
+   * The dish is the whole idea: three rings breathing outward on a 3s stagger
+   * say "listening" without a word of status copy.
+   *
+   * Built from design/family/settings-mail.html and owned here from that point
+   * on. The four values read through the seam (readRelay in
+   * $lib/data/workspace.js) and are live since #432; the gate still renders the
+   * mockup's own via the ORBIT_FIXTURES stand-in route. "rotate address" and
+   * "pause ingest" are still inert — the machinery exists, the user-facing
+   * commands do not, and #432 put both out of scope.
+   */
+  let { data } = $props();
+  const relay = $derived(data.relay);
+  const failures = $derived(data.failures ?? []);
+  const shortDate = (value) =>
+    new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /* §14 (#471): back to the opener; a deep link with no history goes home. */
+  const dismissRelay = () => {
+    if (history.length > 1) history.back();
+    else location.href = "/home";
+  };
+</script>
+
+<svelte:head>
+  <link rel="stylesheet" href="/screens/family.css" />
+  <title>Orbit — your relay</title>
+</svelte:head>
+
+<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<g fill="var(--star-far, #e9edf8)"><circle cx="123.4" cy="819.8" r="0.82" opacity="0.2"/>
+      <circle cx="1462.0" cy="182.1" r="0.84" opacity="0.2"/>
+      <circle cx="168.5" cy="128.9" r="0.42" opacity="0.14"/>
+      <circle cx="1243.1" cy="478.3" r="0.43" opacity="0.2"/>
+      <circle cx="1556.9" cy="787.2" r="0.58" opacity="0.2"/>
+      <circle cx="587.2" cy="231.2" r="0.79" opacity="0.1"/>
+      <circle cx="757.1" cy="927.7" r="0.85" opacity="0.23"/>
+      <circle cx="1330.9" cy="952.0" r="0.56" opacity="0.29"/>
+      <circle cx="1430.0" cy="494.2" r="0.48" opacity="0.21"/>
+      <circle cx="794.8" cy="996.2" r="0.55" opacity="0.24"/>
+      <circle cx="1214.4" cy="601.1" r="0.57" opacity="0.28"/>
+      <circle cx="408.3" cy="858.1" r="0.93" opacity="0.21"/>
+      <circle cx="83.3" cy="272.4" r="0.44" opacity="0.14"/>
+      <circle cx="569.5" cy="573.9" r="0.88" opacity="0.11"/>
+      <circle cx="1191.1" cy="109.9" r="0.83" opacity="0.1"/>
+      <circle cx="570.4" cy="927.4" r="0.92" opacity="0.11"/>
+      <circle cx="621.0" cy="914.2" r="0.51" opacity="0.19"/>
+      <circle cx="418.2" cy="296.1" r="0.69" opacity="0.13"/>
+      <circle cx="246.7" cy="975.2" r="0.86" opacity="0.22"/>
+      <circle cx="217.4" cy="132.7" r="0.77" opacity="0.22"/>
+      <circle cx="16.4" cy="963.9" r="0.63" opacity="0.15"/>
+      <circle cx="1016.6" cy="914.2" r="0.61" opacity="0.2"/>
+      <circle cx="78.3" cy="466.9" r="0.94" opacity="0.29"/>
+      <circle cx="559.9" cy="860.8" r="1.0" opacity="0.16"/>
+      <circle cx="1368.7" cy="280.7" r="0.98" opacity="0.28"/>
+      <circle cx="1553.4" cy="407.8" r="0.81" opacity="0.24"/>
+      <circle cx="931.9" cy="51.6" r="0.8" opacity="0.26"/>
+      <circle cx="1027.9" cy="902.9" r="0.98" opacity="0.23"/>
+      <circle cx="570.3" cy="507.3" r="0.51" opacity="0.14"/>
+      <circle cx="1566.1" cy="441.7" r="0.68" opacity="0.28"/>
+      <circle cx="1275.5" cy="44.6" r="0.65" opacity="0.21"/>
+      <circle cx="379.4" cy="764.8" r="0.77" opacity="0.27"/>
+      <circle cx="215.6" cy="187.4" r="0.58" opacity="0.2"/>
+      <circle cx="407.2" cy="514.0" r="0.61" opacity="0.11"/>
+      <circle cx="1321.8" cy="541.7" r="0.94" opacity="0.2"/>
+      <circle cx="1375.8" cy="609.4" r="0.7" opacity="0.29"/>
+      <circle cx="577.7" cy="977.3" r="0.75" opacity="0.29"/>
+      <circle cx="149.4" cy="539.5" r="0.59" opacity="0.26"/>
+      <circle cx="1457.4" cy="859.8" r="0.63" opacity="0.11"/>
+      <circle cx="1558.8" cy="206.5" r="0.9" opacity="0.22"/>
+      <circle cx="1170.1" cy="706.9" r="0.54" opacity="0.18"/>
+      <circle cx="615.0" cy="703.2" r="0.81" opacity="0.3"/>
+      <circle cx="860.2" cy="350.0" r="0.47" opacity="0.19"/>
+      <circle cx="952.7" cy="688.0" r="0.42" opacity="0.14"/>
+      <circle cx="1018.1" cy="785.3" r="0.97" opacity="0.13"/>
+      <circle cx="1165.0" cy="448.6" r="0.75" opacity="0.24"/>
+      <circle cx="650.8" cy="606.7" r="0.98" opacity="0.1"/>
+      <circle cx="881.3" cy="999.8" r="0.93" opacity="0.15"/>
+      <circle cx="1252.0" cy="913.7" r="0.65" opacity="0.21"/>
+      <circle cx="471.9" cy="997.3" r="0.51" opacity="0.24"/>
+      <circle cx="1583.9" cy="974.9" r="0.91" opacity="0.19"/>
+      <circle cx="1501.3" cy="857.5" r="0.65" opacity="0.17"/>
+      <circle cx="525.8" cy="324.2" r="0.74" opacity="0.18"/>
+      <circle cx="1533.8" cy="0.9" r="0.76" opacity="0.19"/>
+      <circle cx="1596.7" cy="995.7" r="0.83" opacity="0.25"/>
+      <circle cx="607.5" cy="698.2" r="0.55" opacity="0.26"/>
+      <circle cx="919.6" cy="231.2" r="0.53" opacity="0.18"/>
+      <circle cx="552.9" cy="664.6" r="0.68" opacity="0.11"/>
+      <circle cx="521.1" cy="453.3" r="0.99" opacity="0.29"/>
+      <circle cx="985.5" cy="964.4" r="0.49" opacity="0.14"/>
+      <circle cx="241.5" cy="256.3" r="0.57" opacity="0.21"/>
+      <circle cx="1419.5" cy="353.2" r="0.59" opacity="0.19"/>
+      <circle cx="1517.9" cy="506.5" r="0.99" opacity="0.16"/>
+      <circle cx="883.4" cy="629.5" r="0.83" opacity="0.27"/>
+      <circle cx="190.7" cy="206.1" r="0.46" opacity="0.25"/>
+      <circle cx="790.2" cy="493.6" r="0.42" opacity="0.26"/>
+      <circle cx="1553.2" cy="14.0" r="0.99" opacity="0.2"/>
+      <circle cx="188.4" cy="29.3" r="0.82" opacity="0.26"/>
+      <circle cx="656.2" cy="869.0" r="0.4" opacity="0.27"/>
+      <circle cx="253.5" cy="186.3" r="0.6" opacity="0.17"/>
+      <circle cx="1437.6" cy="504.5" r="0.66" opacity="0.26"/>
+      <circle cx="690.9" cy="311.4" r="0.61" opacity="0.22"/>
+      <circle cx="1455.5" cy="925.3" r="0.41" opacity="0.17"/>
+      <circle cx="1116.1" cy="495.9" r="0.84" opacity="0.29"/>
+      <circle cx="73.2" cy="696.4" r="0.54" opacity="0.23"/>
+      <circle cx="304.1" cy="140.5" r="0.91" opacity="0.23"/>
+      <circle cx="1022.4" cy="429.6" r="0.55" opacity="0.11"/>
+      <circle cx="1518.3" cy="793.0" r="0.85" opacity="0.12"/>
+      <circle cx="19.3" cy="467.0" r="0.46" opacity="0.22"/>
+      <circle cx="492.2" cy="777.9" r="0.5" opacity="0.2"/>
+      <circle cx="658.7" cy="232.9" r="0.6" opacity="0.14"/>
+      <circle cx="484.1" cy="442.2" r="0.64" opacity="0.23"/>
+      <circle cx="1406.7" cy="504.9" r="0.52" opacity="0.2"/>
+      <circle cx="241.0" cy="841.1" r="0.41" opacity="0.16"/>
+      <circle cx="1483.3" cy="581.7" r="0.61" opacity="0.11"/>
+      <circle cx="286.7" cy="837.1" r="0.45" opacity="0.24"/>
+      <circle cx="260.5" cy="757.5" r="0.47" opacity="0.13"/>
+      <circle cx="313.5" cy="951.1" r="0.41" opacity="0.2"/>
+      <circle cx="1453.3" cy="675.7" r="0.41" opacity="0.23"/>
+      <circle cx="494.9" cy="221.4" r="0.48" opacity="0.12"/></g></svg></div>
+<!-- §14 (#471): clicking off the card returns to wherever the reader came
+     from — the inbox, settings, or home as the deep-link fallback. -->
+<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
+  <div class="dish"><span></span><span></span><span></span><i></i></div>
+  <h2 style="text-align:center">Your relay</h2>
+  <div class="sub" style="text-align:center">forward documents to your private address<br>and they arrive in your review queue</div>
+  <div class="alias">{relay.address}</div>
+  <div class="kv"><span>status</span><b>{relay.status}</b></div>
+  <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
+  <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
+  <div class="btns"><button class="pri">rotate address</button><button>pause ingest</button></div>
+  {#if failures.length}
+    <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
+    <div class="failures">
+      <h4>arrived, but could not be read</h4>
+      {#each failures as failure (failure.id)}
+        <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{failure.message}</span></div>
+      {/each}
+    </div>
+  {/if}
+  <div class="note">every user gets their own relay &middot; nothing is created without your review<br>
+  outbound reminder email remains configured by your administrator</div>
+</div></div>
+<div class="vignette"></div>

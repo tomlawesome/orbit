@@ -66,6 +66,15 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
+
+    /* 0028 seeds the inactive maintenance singleton unconditionally
+       (orbit#522): unlike 0027's primary administrator, there is no
+       existing-installation ambiguity to resolve, so every fresh database
+       gets exactly one inactive row and no audit event. */
+    // postgres.js returns bigint columns as strings by default (precision
+    // safety), unlike drizzle's mapped reads elsewhere in this suite.
+    const maintenanceRows = await database.client.unsafe(`SELECT "singleton", "active", "version" FROM "instance_maintenance"`);
+    expect(maintenanceRows).toEqual([{ singleton: true, active: false, version: "1" }]);
   });
 
   it("fails closed below the supported floor and on checksum drift", async () => {
@@ -115,6 +124,18 @@ describe("PostgreSQL migration evidence", () => {
     if (!migratedUnresolvedReceipt) throw new Error("The unresolved legacy receipt must survive migration");
     expect(migratedUnresolvedReceipt.updated_at).not.toBe(unresolvedReceipt.updated_at);
     unresolvedReceipt.updated_at = migratedUnresolvedReceipt.updated_at;
+    /* 0027 seats the earliest-created active administrator as primary and
+       audits the establishment (#263). The row's id and timestamp are the
+       database's own, so the observed row is verified for content — the
+       deterministic rule chose the fixture's first administrator — and then
+       folded into the expectation at its id-ordered position. */
+    const establishment = afterUpgrade.audit_log.find((row) => row.action === "primary_administrator_established");
+    if (!establishment) throw new Error("The upgrade must seat a primary administrator (#263)");
+    expect(establishment.entity_id).toBe("10000000-0000-4000-8000-000000000001");
+    expect(establishment.actor_user_id).toBeNull();
+    expect(establishment.changes).toEqual({ rule: "earliest_created_active_administrator", migration: "0027_instance_authority" });
+    expectedAfterUpgrade.audit_log = [...expectedAfterUpgrade.audit_log, establishment]
+      .sort((first, second) => String(first.id).localeCompare(String(second.id)));
     expect(afterUpgrade).toEqual(expectedAfterUpgrade);
     const legacyContract = await database.client.unsafe(`
       SELECT id, status, failure_code, approved_item_id

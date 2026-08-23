@@ -1,0 +1,118 @@
+/*
+ * THE RETIRED SUNSET — kept as the record, referenced by nothing.
+ *
+ * CON-17's logout was the limb performing the day ending well, and it was this
+ * screen from #399 until 2026-08-17, when the owner re-confirmed that the
+ * descent is the default logout and retired it: /logout now serves the
+ * flight's dusk goodbye (see +page.svelte, $lib/flight/Dusk.svelte). This file
+ * and sky.js stay in the tree the way every superseded design in this
+ * repository stays — as the record of what was there — and are imported by
+ * nothing.
+ */
+
+/* seamless starfield drift — near layer reads clearly within a few seconds */
+.drift.far{animation:driftf 640s linear infinite}
+.drift.near{animation:driftn 205s linear infinite}
+.tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.15}to{opacity:.8}}
+.world{position:fixed;inset:0;z-index:1}
+.world svg{width:100%;height:100%}
+.sky{opacity:0;transition:opacity 4s ease-in 2.4s}
+body.set .sky{opacity:1}
+
+/* the sun sinks and fades into the limb */
+.sunpt{transform-origin:800px 860px;opacity:1;transform:translateY(0) scaleY(1);
+       transition:opacity 3.2s ease-in .1s,transform 3.4s ease-in .1s}
+body.set .sunpt{opacity:0;transform:translateY(150px) scaleY(.45)}
+.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
+@keyframes breathe-sun{from{opacity:.82}to{opacity:1}}
+
+/* crepuscular rays retract as the light source drops */
+.rays{transform-origin:800px 920px;opacity:1;transform:scale(1,1);
+      transition:opacity 2.8s ease-in .15s,transform 3s cubic-bezier(.4,0,.7,1) .15s;
+      mix-blend-mode:screen}
+body.set .rays{opacity:0;transform:scale(1,.12)}
+.rays .sway1{transform-origin:800px 920px;animation:sway1 41s ease-in-out infinite alternate}
+.rays .sway2{transform-origin:800px 920px;animation:sway2 63s ease-in-out infinite alternate}
+@keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
+@keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
+
+/* zodiacal cone fades with the day */
+.zodiacal-wrap{opacity:1;transition:opacity 3s ease .4s}
+body.set .zodiacal-wrap{opacity:0}
+.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+@keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
+
+/* amber scattering fades as the day ends — this is the slowest-lingering day layer.
+   (opacity-only: a CSS scale transform on these giant radius-3000+ blurred rings hits a
+   filter/texture seam bug in Chromium, so the compression toward the horizon is carried
+   by the sun sinking and rays retracting instead) */
+.scatter-day{opacity:1;transition:opacity 5.4s ease-in .3s}
+body.set .scatter-day{opacity:0}
+.scatter-day-breathe{animation:breathe-band 9s ease-in-out infinite alternate}
+@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+
+.skywash-day{opacity:1;transition:opacity 5s ease-in .2s}
+body.set .skywash-day{opacity:0}
+
+.rim-day{opacity:1;transition:opacity 3s ease-in .2s}
+body.set .rim-day{opacity:0}
+
+/* ember scattering settles in and lingers as the after-glow — held back with ease-in so it
+   stays subdued through the middle of the sunset and only swings to full near the end,
+   overlapping and cooling against the day layer rather than snapping over it */
+.scatter-night{opacity:0;transition:opacity 4.8s ease-in 1.7s}
+body.set .scatter-night{opacity:1}
+.scatter-night-breathe{animation:breathe-ember 12s ease-in-out infinite alternate}
+@keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
+
+.skywash-night{opacity:0;transition:opacity 5.2s ease-in 1.3s}
+body.set .skywash-night{opacity:1}
+
+.rim-ember{opacity:0;transition:opacity 4s ease-in 2.1s}
+body.set .rim-ember{opacity:1}
+
+.shimmer-ember{stroke-dasharray:3 97;animation:sweep 34s linear infinite;opacity:0;
+               transition:opacity 3.2s ease-in 2.3s}
+body.set .shimmer-ember{opacity:.7}
+@keyframes sweep{to{stroke-dashoffset:-100}}
+
+/* The same hero lockup as the sign-in: the ring large, the name set plain
+   inside it, the ask beneath. Both ends of a session wear the same face
+   (CON-19, amended 2026-08-14 for the sign-in hero and applied here too).
+   The glyph and the name share one grid cell, so the word is centred on the
+   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+.lockup{position:relative;z-index:3;text-align:center;
+        display:inline-grid;place-items:center}
+.lockup .glyph{grid-area:1/1;line-height:0}
+.lockup .name{grid-area:1/1;font:600 72px var(--display);letter-spacing:.015em;line-height:1}
+/* The planet drifts the other way here: the day winds one way and the evening
+   unwinds it (owner, 2026-08-14). Same 40s period as the sign-in — the only
+   motion CON-19 permits the mark anywhere. */
+.glyph .tr{animation:spinforth 40s linear infinite;transform-origin:100px 100px}
+@keyframes spinforth{to{transform:rotate(-360deg)}}
+/* Inside the ring, directly under the name — 36px is half the name's line box,
+   20px the gap, 18px half the button. The offset lives here and the entrance
+   on .gate, so the two transforms never fight over one element. */
+.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
+           transform:translateY(74px)}
+/* Smaller than the mockup's original: at hero scale the full-size pill crowds
+   the ring (owner, 2026-08-14). Dark ink on the accent, never white — every
+   pack fails white-on-accent, worst case 1.66:1. */
+.gate{font:600 12px var(--display);color:var(--bg);background:var(--accent);
+      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;display:inline-block;
+      text-decoration:none;letter-spacing:.04em;box-shadow:0 0 28px rgba(216,180,90,.22);
+      opacity:0;transform:translateY(10px);
+      transition:opacity 1.8s ease 2.6s,transform 1.8s ease 2.6s,filter .35s ease}
+body.set .gate{opacity:1;transform:none}
+.gate:hover{filter:brightness(1.08)}
+.below{position:fixed;bottom:4.5vh;left:0;right:0;text-align:center;z-index:3;
+       font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.16em}
+@media (prefers-reduced-motion: reduce){
+  .sunpt,.rays,.zodiacal-wrap,.scatter-day,.skywash-day,.rim-day{
+    opacity:0!important;transform:none!important;transition:none}
+  /* .gate, not .gate-wrap: the wrapper's transform is layout, not motion, and
+     clearing it would drop the button back on top of the name. */
+  .sky,.scatter-night,.skywash-night,.rim-ember,.shimmer-ember,.gate{
+    opacity:1!important;transform:none!important;transition:none}
+}

@@ -3,6 +3,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { requireSession } from "@/lib/auth/session";
 import { readDocumentDownload } from "@/server/document-repository";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,6 +19,7 @@ function contentDisposition(filename: string): string {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const session = await requireSession(request, getAuthConfig());
     const { documentId } = await context.params;
     const document = await readDocumentDownload(session.user.id, documentId);
