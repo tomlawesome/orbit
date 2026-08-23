@@ -66,6 +66,15 @@ describe("PostgreSQL migration evidence", () => {
     expect((await readSchemaContract(database.client)).tables).toEqual(EXPECTED_TABLE_COLUMNS);
     expect((await readSchemaContract(database.client)).constraints).toEqual(EXPECTED_CONSTRAINTS);
     expect((await readSchemaContract(database.client)).indexes).toEqual(EXPECTED_INDEXES);
+
+    /* 0028 seeds the inactive maintenance singleton unconditionally
+       (orbit#522): unlike 0027's primary administrator, there is no
+       existing-installation ambiguity to resolve, so every fresh database
+       gets exactly one inactive row and no audit event. */
+    // postgres.js returns bigint columns as strings by default (precision
+    // safety), unlike drizzle's mapped reads elsewhere in this suite.
+    const maintenanceRows = await database.client.unsafe(`SELECT "singleton", "active", "version" FROM "instance_maintenance"`);
+    expect(maintenanceRows).toEqual([{ singleton: true, active: false, version: "1" }]);
   });
 
   it("fails closed below the supported floor and on checksum drift", async () => {
