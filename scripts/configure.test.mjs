@@ -838,6 +838,108 @@ describe("configure.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
+  // --check-rollback (issue #529, ADR-0014 decision 7): identical --check
+  // semantics run against configuration.sh's own rollback copy at its
+  // conventional location (.env-orbit.orbit-config.rollback) instead of the
+  // live file. No path argument exists for this mode; every fixture below
+  // relies on the fixed literal name.
+  describe("--check-rollback", () => {
+    const goodFileBackedEnv = [
+      "APP_URL=https://orbit.configure-test.internal",
+      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
+      "OIDC_CLIENT_ID=test-client-id",
+      "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+      "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "",
+    ].join("\n");
+
+    function writeRollback(targetDir, content) {
+      writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), content);
+      chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    }
+
+    it("passes on a good rollback copy and resolves .orbit-secrets from the real installation directory (file-backed OIDC secret)", () => {
+      const targetDir = makeFixture(undefined);
+      mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+      writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
+      chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+      writeRollback(targetDir, goodFileBackedEnv);
+
+      const result = runConfigure(targetDir, ["--check-rollback"]);
+
+      expect(result.status).toBe(0);
+      const lines = result.stdout.split("\n").filter(Boolean);
+      expect(lines).toContain("ready APP_URL");
+      expect(lines).toContain("ready OIDC_CLIENT_SECRET");
+      expect(result.stdout).not.toContain("configured-secret-value");
+    });
+
+    it("fails cleanly, non-zero, without inventing a result, when the rollback copy is missing", () => {
+      const targetDir = makeFixture(undefined);
+
+      const result = runConfigure(targetDir, ["--check-rollback"]);
+
+      expect(result.status).not.toBe(0);
+      const lines = result.stdout.split("\n").filter(Boolean);
+      expect(lines).toContain("missing APP_URL");
+      expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+    });
+
+    it("fails when the rollback copy is a symlink", () => {
+      const targetDir = makeFixture(undefined);
+      writeFileSync(join(targetDir, ".env-orbit.real-rollback"), goodFileBackedEnv);
+      chmodSync(join(targetDir, ".env-orbit.real-rollback"), 0o600);
+      symlinkSync(join(targetDir, ".env-orbit.real-rollback"), join(targetDir, ".env-orbit.orbit-config.rollback"));
+
+      const result = runConfigure(targetDir, ["--check-rollback"]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Refusing to use");
+    });
+
+    it("fails when the rollback copy's permissions are broader than mode 600", () => {
+      const targetDir = makeFixture(undefined);
+      writeRollback(targetDir, goodFileBackedEnv);
+      chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o644);
+
+      const result = runConfigure(targetDir, ["--check-rollback"]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Refusing to check");
+    });
+
+    it("checks only the rollback copy, never the live .env-orbit", () => {
+      const targetDir = makeFixture(
+        "APP_URL=https://orbit.configure-test.internal\n" +
+          "ORBIT_IMAGE=orbit-local:abcdef123456\n" +
+          "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/\n" +
+          "OIDC_CLIENT_ID=test-client-id\n" +
+          "OIDC_CLIENT_SECRET=live-direct-secret\n" +
+          "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback\n",
+      );
+      // A minimal, incomplete rollback: --check-rollback must fail even
+      // though the live file above is fully ready.
+      writeRollback(targetDir, "APP_URL=https://orbit.configure-test.internal\n");
+
+      expect(runConfigure(targetDir, ["--check"]).status).toBe(0);
+
+      const rollbackResult = runConfigure(targetDir, ["--check-rollback"]);
+      expect(rollbackResult.status).not.toBe(0);
+      expect(rollbackResult.stdout.split("\n").filter(Boolean)).toContain("missing OIDC_CLIENT_SECRET");
+    });
+
+    it("rejects an extra argument the same way --check does", () => {
+      const targetDir = makeFixture(undefined);
+      writeRollback(targetDir, goodFileBackedEnv);
+
+      const result = runConfigure(targetDir, ["--check-rollback", "extra"]);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("Usage:");
+    });
+  });
+
   describe("--set-oidc-secret", () => {
     it("reads the secret from standard input, persists it atomically with mode 0600, and switches to the canonical file-backed path without printing it", () => {
       const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");

@@ -1158,7 +1158,6 @@ cleanup() {
 trap cleanup EXIT
 
 readonly environment_file=".env-orbit"
-readonly environment_example=".env-orbit.example"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
 # configuration.sh's own rollback_suffix constant (scripts/configuration.sh
@@ -1417,59 +1416,29 @@ read_environment_value() {
 #
 # repair.sh validates the live .env-orbit by running `bash scripts/
 # configure.sh --check` as a subprocess (Step 5 below) rather than
-# reimplementing configure.sh's readiness rules. That same subprocess is the
-# only deterministic way to validate the `.orbit-config.rollback` candidate
-# with identical semantics, but configure.sh has no `--file` flag: it always
-# forces its own cwd to `dirname "$0"/..` and reads a hardcoded relative
-# `.env-orbit`, so it cannot be pointed at an arbitrary path directly. The
-# least-invasive way to reuse it unmodified is to run it from a disposable,
-# private staging directory (outside the installation directory, matching
-# the existing $TMPDIR-based `configure_check_stderr` precedent below —
-# `--check`/`--plan` remain read-only with respect to the installation
-# directory itself) holding a fresh copy of the candidate content named
-# `.env-orbit`, plus copies of the two other inputs configure.sh's own
-# `run_check` requires to be present as real, non-symlink files:
-# scripts/configure.sh itself and .env-orbit.example.
-#
-# The staged directory deliberately does NOT reproduce .orbit-secrets: run_
-# check only consults it for file-backed secret readiness (e.g.
-# OIDC_CLIENT_SECRET_FILE), and copying secret material into a second
-# on-disk location purely to answer a diagnosis-time readiness question is
-# not worth the exposure. The one-sided consequence is intentional and safe:
-# a rollback candidate that depends on a file-backed secret reads back as
-# configuration-incomplete (not "passes") in this isolated check, so
-# configuration-migration-interrupted simply never fires for that
-# deployment shape and diagnosis falls back to today's plain
-# configuration-invalid/manual — never an incorrectly-approved restore.
-run_isolated_configure_check() {
-  local candidate="$1" stage status=0
-  stage="$(mktemp -d "${TMPDIR:-/tmp}/orbit-repair-configuration-rollback.XXXXXX")" || return 2
-  chmod 700 -- "$stage" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
-  mkdir -p -- "$stage/scripts" || { rm -rf -- "$stage"; return 2; }
-  cp -- scripts/configure.sh "$stage/scripts/configure.sh" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
-  cp -- "$environment_example" "$stage/.env-orbit.example" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
-  cp -- "$candidate" "$stage/.env-orbit" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
-  chmod 600 -- "$stage/.env-orbit" 2>/dev/null || { rm -rf -- "$stage"; return 2; }
-  bash "$stage/scripts/configure.sh" --check >/dev/null 2>/dev/null || status=$?
-  rm -rf -- "$stage"
-  return "$status"
-}
-
-# The deterministic, no-guessing gate for configuration-migration-interrupted
-# (ADR-0014 decision 7): true only when the rollback copy exists, is a
-# regular non-symlink file restricted to mode 600 (configuration.sh's own
-# migrate_file() always creates it this way — see scripts/configuration.sh
-# lines 243-248), and itself passes the same configure.sh --check semantics
-# the live file just failed. Any other outcome (missing, symlink, wrong
-# mode, unreadable, or a failing check) returns false and leaves diagnosis
-# exactly as it was before this class existed.
+# reimplementing configure.sh's readiness rules. `configure.sh --check-
+# rollback` is the identical subprocess pattern pointed at configuration.sh's
+# own `.orbit-config.rollback` copy instead: no path is ever passed on the
+# command line (configure.sh derives the checked filename itself from its
+# own hardcoded `.env-orbit` + rollback-suffix constants, at its own
+# conventional cwd — see configure.sh's own top-of-file comment), so this
+# never introduces untrusted path input, and every other input
+# (.orbit-secrets included) still resolves to the real installation
+# directory exactly like plain --check. An earlier revision of this function
+# ran a hand-staged copy of configure.sh under $TMPDIR instead; that staging
+# area deliberately omitted .orbit-secrets to avoid duplicating secret
+# material, which made the isolated check silently unable to pass for the
+# file-backed OIDC_CLIENT_SECRET_FILE shape install.sh always produces — the
+# class could never fire on a normally-installed deployment. --check-
+# rollback avoids the entire problem: there is no second directory, so
+# nothing needs to be reproduced in it.
 configuration_migration_rollback_recoverable() {
   local rollback_path="${environment_file}${configuration_rollback_suffix}"
   is_regular_non_symlink_file "$rollback_path" || return 1
   has_mode "$rollback_path" 600 || return 1
-  is_regular_non_symlink_file "$environment_example" || return 1
+  is_regular_non_symlink_file scripts/configure.sh || return 1
   local status=0
-  run_isolated_configure_check "$rollback_path" || status=$?
+  bash scripts/configure.sh --check-rollback >/dev/null 2>/dev/null || status=$?
   [[ "$status" == 0 ]]
 }
 
