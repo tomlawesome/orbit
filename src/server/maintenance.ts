@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, instanceMaintenance, maintenanceNotices, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
+import { AppError, MaintenanceActiveError } from "@/lib/app-error";
+import { readSession } from "@/lib/auth/session";
+import { getAuthConfig } from "@/lib/env";
 
 const uuidSchema = z.uuid();
 
@@ -128,6 +131,61 @@ async function updateSingletonVersion(
     );
   }
   return updated.id;
+}
+
+export interface EffectiveMaintenance {
+  effectivelyActive: boolean;
+  /** Where Retry-After comes from: the singleton's end when active, the due notice's otherwise. */
+  expectedEndAt: Date | null;
+}
+
+/**
+ * The per-request read the guard pays (ADR-0013 decision 2): the singleton
+ * primary-key read plus the due-notice probe on the partial index, and
+ * nothing else. readMaintenanceState also lists every notice, which a guard
+ * decision has no use for.
+ */
+export async function readEffectiveMaintenance(): Promise<EffectiveMaintenance> {
+  const db = getDb();
+  const [row] = await db
+    .select({ active: instanceMaintenance.active, expectedEndAt: instanceMaintenance.expectedEndAt })
+    .from(instanceMaintenance)
+    .limit(1);
+  if (!row) {
+    throw new AppError("maintenance_state_missing", "Maintenance state has not been initialized", 500);
+  }
+  if (row.active) return { effectivelyActive: true, expectedEndAt: row.expectedEndAt };
+  const [dueNotice] = await db
+    .select({ expectedEndAt: maintenanceNotices.expectedEndAt })
+    .from(maintenanceNotices)
+    .where(and(
+      isNull(maintenanceNotices.activatedAt),
+      isNull(maintenanceNotices.cancelledAt),
+      lte(maintenanceNotices.startsAt, new Date()),
+    ))
+    .orderBy(asc(maintenanceNotices.startsAt), asc(maintenanceNotices.id))
+    .limit(1);
+  if (dueNotice) return { effectivelyActive: true, expectedEndAt: dueNotice.expectedEndAt };
+  return { effectivelyActive: false, expectedEndAt: null };
+}
+
+/**
+ * The request guard (ADR-0013 decisions 2 and 3): a request passes if
+ * maintenance is not effectively active, or if it carries a valid session
+ * whose user is an active instance administrator. Uncached and per-request,
+ * like the session read; the session itself is only read once maintenance is
+ * active, so the quiet-path cost is the two reads above. Enforcement binds to
+ * the route module that calls this — never to the URL — which is what leaves
+ * prefix and normalisation tricks with no place to work.
+ */
+export async function assertOutsideMaintenance(request: NextRequest): Promise<void> {
+  const { effectivelyActive, expectedEndAt } = await readEffectiveMaintenance();
+  if (!effectivelyActive) return;
+  // readSession answers null for a disabled user, so a surviving session with
+  // the administrator flag is exactly "an active instance administrator".
+  const session = await readSession(request, getAuthConfig());
+  if (session?.user.isInstanceAdmin) return;
+  throw new MaintenanceActiveError(expectedEndAt);
 }
 
 /** The effective-state read (ADR-0013 decisions 1 and 5). No actor required. */

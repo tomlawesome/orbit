@@ -4,6 +4,7 @@ import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { transferPrimaryAdministrator } from "@/server/admin-repository";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ const transferSchema = z.object({
 /** Transfers primary administrator authority (#263). */
 export async function POST(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

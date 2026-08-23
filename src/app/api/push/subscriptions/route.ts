@@ -6,6 +6,7 @@ import { pushSubscriptions } from "@/db/schema";
 import { getAuthConfig } from "@/lib/env";
 import { AppError, appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ const removeSchema = z.object({ endpoint: z.url().max(2_048) });
 
 export async function POST(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
@@ -54,6 +56,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
