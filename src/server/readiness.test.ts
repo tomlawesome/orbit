@@ -22,9 +22,30 @@ describe("public readiness", () => {
 
   it("reports ready only after the required database dependency responds", async () => {
     mocks.checkDatabase.mockResolvedValueOnce([]);
+    setReadinessDependenciesForTests({ readMaintenance: async () => ({ effectivelyActive: false }) });
     await expect(getPublicReadiness()).resolves.toEqual({ status: "ready" });
     expect(mocks.checkDatabase).toHaveBeenCalledTimes(1);
     expect(mocks.log.info).toHaveBeenCalledWith({ event: "application.startup", state: "ready", action: "none" });
+  });
+
+  it("reports maintenance as its own healthy category (#523)", async () => {
+    mocks.checkDatabase.mockResolvedValueOnce([]);
+    setReadinessDependenciesForTests({ readMaintenance: async () => ({ effectivelyActive: true }) });
+    await expect(getPublicReadiness()).resolves.toEqual({ status: "maintenance" });
+    expect(mocks.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("degrades rather than guessing when the maintenance state is unreadable", async () => {
+    mocks.checkDatabase.mockResolvedValueOnce([]);
+    setReadinessDependenciesForTests({ readMaintenance: async () => { throw new Error("relation missing"); } });
+    await expect(getPublicReadiness()).resolves.toEqual({ status: "degraded" });
+    expect(mocks.log.warn).toHaveBeenCalledWith({
+      event: "application.startup",
+      state: "degraded",
+      reason: "dependency_unavailable",
+      action: "check_migrations",
+      impact: "application_degraded",
+    });
   });
 
   it("fails closed without exposing a dependency error", async () => {
