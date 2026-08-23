@@ -56,8 +56,9 @@ set -Eeuo pipefail
 # Under `--check` and `--plan` this script must never write, create, chmod,
 # start, stop, or delete anything. It never uses mktemp inside the
 # installation directory. Every `docker` invocation is one of: `docker
-# inspect`, `docker ps`, `docker volume ls`/`inspect`, `docker compose
-# config` — never a command that mutates containers, volumes, or images.
+# inspect`, `docker image inspect`, `docker ps`, `docker volume ls`/
+# `inspect`, `docker compose config` — never a command that mutates
+# containers, volumes, or images.
 # Each docker read is optional: if the `docker` CLI is unavailable or the
 # daemon cannot be reached, the affected checks are reported as
 # `class=docker-unavailable` and diagnosis continues with everything else
@@ -181,11 +182,30 @@ set -Eeuo pipefail
 #   database-below-floor            — the application refused to start because
 #                                   the database predates the supported
 #                                   migration floor. Also not restartable.
+#   migration-failed                 — the migrator (drizzle) threw applying a
+#                                   migration and rolled it back, leaving no
+#                                   applied journal row: detected primarily by
+#                                   extending the existing #437 app-log
+#                                   sentinel scan to also match
+#                                   `reason=migration_failed` (works on a
+#                                   stopped/crash-looping container), with a
+#                                   backstop single fixed-literal `SELECT` of
+#                                   the migrator's own outcome bookkeeping row
+#                                   over the already-authenticated probe path
+#                                   for when logs have rotated or the
+#                                   container is gone (issue #528).
+#   image-identity-mismatch          — this deployment's orbit-app container's
+#                                   actual running image ID does not match the
+#                                   locally-present image for the
+#                                   digest-pinned `ORBIT_IMAGE` reference —
+#                                   distinct from stale-container, which only
+#                                   compares the `Config.Image` string (issue
+#                                   #528).
 #
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 19 reason classes, the same optional docker probes, the same
+# same 23 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -362,15 +382,6 @@ set -Eeuo pipefail
 #     classification completeness (what they WOULD map to if a future
 #     change ever raised either to warn/fail), not because either produces
 #     a `plan action=manual` line under the current diagnosis.
-#
-# RESERVED CLASSES (explicitly out of scope for this slice — next slice)
-# --------------------------------------------------------------------------
-#   unsupported-schema, migration-failed, image-identity-mismatch
-# This slice still never inspects schema/migration state or a container's
-# registry-side image identity (as opposed to the locally pinned
-# `ORBIT_IMAGE` value, which stale-container above does check); those
-# remain reserved for a later executor slice that can safely pair them with
-# repair actions.
 #
 # Stage-two dangerous-step iterator (recorded owner intention, 2026-08-13
 # comment on issue #261) — RESERVED SHAPE
@@ -1115,7 +1126,7 @@ readonly secrets_directory=".orbit-secrets"
 readonly database_volume_key="orbit-db-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=15
+readonly total_checks=16
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
@@ -1187,9 +1198,11 @@ readonly -a class_order=(
   database-unreachable
   database-credential-mismatch
   stale-container
+  image-identity-mismatch
   application-unhealthy
   database-schema-mismatch
   database-below-floor
+  migration-failed
 )
 
 # Reason class -> action class for --plan (see the "Action-class mapping
@@ -1213,6 +1226,16 @@ readonly -A action_for_class=(
   # matching database, or upgrade from a supported version.
   [database-schema-mismatch]=manual
   [database-below-floor]=manual
+  # A failed, rolled-back migration leaves no applied row and no safe
+  # automatic remedy: the migrator's own idempotent retry already happens on
+  # any restart (issue #528 decision), so repair must not invent a competing
+  # path. ADR-0004's recovery point is the operator's actual rollback
+  # boundary.
+  [migration-failed]=manual
+  # A mismatched running image is not restart-services (that would leave the
+  # same wrong image running); recreating a container from a different image
+  # is outside repair's safe, reversible action set.
+  [image-identity-mismatch]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
   [managed-file-symlink]=manual
@@ -1262,12 +1285,25 @@ readonly -A manual_guidance=(
   # a database on the operator's behalf.
   [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
   [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
+  # ADR-0004's recovery point is the actual rollback boundary here; repair
+  # itself never applies, retries, or reverses a migration.
+  [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
+  [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
 )
 
 declare -a findings=()
 declare -A secret_status=()
 checked=0
 diagnosis_early=0
+
+# issue #528: true once a migration-failed finding has been added by either
+# detection channel (app-log sentinel scan or the SQL backstop), so the other
+# channel never adds a second one for the same run. $app_identity_* are set
+# by check_application_container so Step 13 (check_image_identity) can tell
+# "no eligible container" from "not yet run".
+migration_failed_reported=0
+app_identity_container_id=""
+app_identity_pinned_image=""
 
 # execute-mode state (unused under --check/--plan).
 declare -a plan_entries=()
@@ -1818,14 +1854,33 @@ run_diagnosis() {
   # locally pinned ORBIT_IMAGE (stale-container) and reads Docker's own
   # computed health status (application-unhealthy, from the HEALTHCHECK baked
   # into the published image). Both reads are `docker inspect` only; neither
-  # execs into the container nor touches the registry (that registry-side
-  # comparison is the still-reserved image-identity-mismatch class).
+  # execs into the container nor touches the registry.
   if [[ "$resource_check_eligible" == 1 ]]; then
     if [[ "$docker_available" == 1 ]]; then
       checked=$((checked + 1))
       check_application_container
     else
       add_finding docker-unavailable application info
+    fi
+  fi
+
+  # --- Step 13: application container image IDENTITY (issue #528) -----------
+  #
+  # Distinct from Step 12's stale-container comparison, which only compares
+  # the `Config.Image` reference string. This compares content-addressable
+  # image IDs: the running container's actual `docker inspect .Image` against
+  # `docker image inspect <pinned ORBIT_IMAGE>`'s `.Id` for the
+  # already-digest-validated pinned reference — entirely local reads, no
+  # registry call. Set by check_application_container above
+  # ($app_identity_container_id / $app_identity_pinned_image); only
+  # meaningful once that check has run, so this step is always sequenced
+  # after it.
+  if [[ "$resource_check_eligible" == 1 ]]; then
+    if [[ "$docker_available" == 1 ]]; then
+      checked=$((checked + 1))
+      check_image_identity
+    else
+      add_finding docker-unavailable image info
     fi
   fi
 }
@@ -1903,8 +1958,46 @@ check_database_reachability() {
     else
       add_finding database-unreachable database fail
     fi
+  else
+    check_migration_failed_backstop "$pg_user" "$pg_db" "$db_id"
   fi
   psql_output=""
+}
+
+# migration-failed backstop (issue #528 decision, 2026-08-23 comment): only
+# ever called after the SELECT 1 probe above has already succeeded, i.e. over
+# the identical already-authenticated connection path — no new docker verb,
+# no new exec target. Exactly one additional fixed-literal query, byte for
+# byte, zero interpolation: reads the migrator's own outcome bookkeeping row
+# (never a journal comparison this script would have to interpret). The
+# response is untrusted: bounded to 256 bytes and accepted only if it matches
+# a strict `[a-z_]{1,32}` enum shape for both columns; a missing table, a
+# database error, or any other non-matching byte sequence is treated
+# identically — skip, never guess. Never reported alongside a sentinel-scan
+# finding for the same run: see $migration_failed_reported.
+check_migration_failed_backstop() {
+  local mig_pg_user="$1" mig_pg_db="$2" mig_db_id="$3"
+  local mig_pg_password="" mig_output=""
+  local -r mig_pattern='^([a-z_]{1,32})\|([a-z_]{0,32})$'
+
+  [[ "$migration_failed_reported" == 0 ]] || return 0
+  [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
+
+  mig_pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
+  mig_output="$(
+    { PGPASSWORD="$mig_pg_password" timeout "$docker_probe_timeout" \
+      docker exec -e PGPASSWORD -T "$mig_db_id" \
+      psql -h 127.0.0.1 -U "$mig_pg_user" -d "$mig_pg_db" -t -A -F'|' \
+      -c 'SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ORDER BY "id" DESC LIMIT 1' \
+      2>&1 || true; } | head -c 256
+  )"
+  mig_pg_password=""
+
+  [[ "$mig_output" =~ $mig_pattern ]] || return 0
+  if [[ "${BASH_REMATCH[1]}" == failed ]]; then
+    add_finding migration-failed database fail
+    migration_failed_reported=1
+  fi
 }
 
 check_application_container() {
@@ -1915,6 +2008,9 @@ check_application_container() {
     pinned_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
     [[ "$pinned_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || pinned_image=""
   fi
+  # Recorded globally for Step 13 (check_image_identity) regardless of how
+  # this function returns below — see its declaration near $findings.
+  app_identity_pinned_image="$pinned_image"
 
   app_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
@@ -1924,6 +2020,7 @@ check_application_container() {
   if [[ -n "$app_ids" && "$app_ids" != *$'\n'* && "$app_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
     app_id="$app_ids"
   fi
+  app_identity_container_id="$app_id"
   # Every early exit below is an explicit `return 0`, never a bare `return`:
   # a bare `return` propagates the preceding failed test's exit status as
   # this function's own return value, which would trip `set -e` at the
@@ -1951,10 +2048,51 @@ check_application_container() {
       add_finding database-schema-mismatch application fail
     elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
       add_finding database-below-floor application fail
+    elif [[ "$app_log" == *"reason=migration_failed"* ]]; then
+      # issue #528: the migrator's own wrapper (src/instrumentation-node.ts)
+      # writes this sentinel before the crash-looping/exited container's
+      # process exits, exactly like the two #437 sentinels above — same
+      # bounded `docker logs` read, same fixed-token match, no new docker
+      # verb. Primary migration-failed detection path; see
+      # check_migration_failed_backstop for the rotated-logs/no-container
+      # fallback and $migration_failed_reported for why only one of the two
+      # channels ever adds this finding.
+      if [[ "$migration_failed_reported" == 0 ]]; then
+        add_finding migration-failed application fail
+        migration_failed_reported=1
+      fi
     else
       add_finding application-unhealthy application fail
     fi
   fi
+}
+
+# Step 13 (issue #528): compares content-addressable image IDs, distinct from
+# Step 12's stale-container comparison (Config.Image reference string only).
+# Reads $app_identity_pinned_image / $app_identity_container_id, both set by
+# check_application_container above (empty when ORBIT_IMAGE isn't
+# digest-pinned, or when no app container was found) — this function never
+# re-derives them itself, so it never issues a second `docker ps -a` probe.
+# Every early exit is skip-only: an absent pinned image, an absent container,
+# a locally-absent pinned image, or any malformed probe output all mean
+# "nothing safe to compare", never a guessed mismatch.
+check_image_identity() {
+  local running_image_id="" pinned_image_id=""
+  local -r image_id_pattern='^sha256:[0-9a-f]{64}$'
+
+  [[ -n "$app_identity_pinned_image" && -n "$app_identity_container_id" ]] || return 0
+
+  pinned_image_id="$(timeout "$docker_probe_timeout" docker image inspect \
+    --format '{{.Id}}' "$app_identity_pinned_image" 2>/dev/null || true)"
+  # The pinned reference's image is not present in this host's local image
+  # store (e.g. never pulled, or pruned) — skip, never guess.
+  [[ "$pinned_image_id" =~ $image_id_pattern ]] || return 0
+
+  running_image_id="$(timeout "$docker_probe_timeout" docker inspect \
+    --format '{{.Image}}' "$app_identity_container_id" 2>/dev/null || true)"
+  [[ "$running_image_id" =~ $image_id_pattern ]] || return 0
+
+  [[ "$running_image_id" == "$pinned_image_id" ]] || add_finding image-identity-mismatch image fail
 }
 
 # --- fix-permissions -------------------------------------------------------
