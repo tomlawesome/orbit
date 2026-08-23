@@ -1,0 +1,355 @@
+import { randomUUID } from "node:crypto";
+import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
+import { z } from "zod";
+import { getDb } from "@/db";
+import { auditLog, instanceMaintenance, maintenanceNotices, users } from "@/db/schema";
+import { AppError } from "@/lib/app-error";
+
+const uuidSchema = z.uuid();
+
+/**
+ * Application-level message bounds (#522, ADR-0013 decision 1). The 500
+ * character bound is also a database CHECK (drizzle/0028); the line count and
+ * control-character bounds are not, because they would need a function-based
+ * constraint for no benefit a single writer path doesn't already give them.
+ */
+const MESSAGE_MAX_LENGTH = 500;
+const MESSAGE_MAX_LINES = 8;
+const MAX_PENDING_NOTICES = 12;
+// Every C0 control character and DEL except the newline itself, which the
+// line-count bound already governs.
+const FORBIDDEN_MESSAGE_CHARACTERS = /[\u0000-\u0009\u000B-\u001F\u007F]/u;
+
+type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+
+export interface MaintenanceNotice {
+  id: string;
+  message: string;
+  startsAt: Date;
+  expectedEndAt: Date | null;
+  activatedAt: Date | null;
+  cancelledAt: Date | null;
+  createdAt: Date;
+}
+
+export interface MaintenanceState {
+  /** The stable id `audit_log.entity_id` points at (#522); not the row's key. */
+  id: string;
+  active: boolean;
+  message: string | null;
+  messagePublishedAt: Date | null;
+  expectedEndAt: Date | null;
+  activatedAt: Date | null;
+  version: number;
+  updatedAt: Date;
+  /**
+   * `active`, or a due, unclaimed, uncancelled notice exists (ADR-0013
+   * decision 5). This slice computes it on every read; the scheduled-worker
+   * tick that also copies a due notice into the singleton is #525.
+   */
+  effectivelyActive: boolean;
+  /** All notices, retained rows and all, ordered `starts_at ASC, id ASC`. */
+  notices: MaintenanceNotice[];
+}
+
+function requireUuid(value: string, label: string): string {
+  if (!uuidSchema.safeParse(value).success) {
+    throw new AppError("invalid_identifier", `${label} is not a valid identifier`, 422);
+  }
+  return value;
+}
+
+/** Trims and bounds a maintenance message; never logs or echoes the text itself. */
+function requireMaintenanceMessage(raw: string): string {
+  const message = raw.trim();
+  if (message.length < 1 || message.length > MESSAGE_MAX_LENGTH) {
+    throw new AppError(
+      "maintenance_message_invalid",
+      `Message must be between 1 and ${MESSAGE_MAX_LENGTH} characters`,
+      422,
+    );
+  }
+  if (FORBIDDEN_MESSAGE_CHARACTERS.test(message)) {
+    throw new AppError("maintenance_message_invalid", "Message must not contain control characters", 422);
+  }
+  if (message.split("\n").length > MESSAGE_MAX_LINES) {
+    throw new AppError("maintenance_message_invalid", `Message must be at most ${MESSAGE_MAX_LINES} lines`, 422);
+  }
+  return message;
+}
+
+function requireVersion(expectedVersion: number): number {
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new AppError("maintenance_version_invalid", "Version must be a positive integer", 422);
+  }
+  return expectedVersion;
+}
+
+/** Mirrors admin-repository.ts's inline actor checks: administrator, and not disabled. */
+async function requireActiveAdministrator(transaction: Transaction, actorUserId: string): Promise<void> {
+  const [actor] = await transaction
+    .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
+    .from(users)
+    .where(eq(users.id, actorUserId))
+    .limit(1);
+  if (!actor?.administrator || actor.disabledAt) {
+    throw new AppError("administrator_required", "Orbit administrator access is required", 403);
+  }
+}
+
+/**
+ * The compare-and-swap at the center of every mutation (ADR-0013 decision 1):
+ * `version` gates the whole maintenance configuration - this singleton row
+ * and every notice - so a zero-row update means the state moved underneath
+ * the caller. The transaction that contains this call rolls back on the
+ * thrown error, so a stale write never reaches the audit log.
+ */
+async function updateSingletonVersion(
+  transaction: Transaction,
+  expectedVersion: number,
+  changes: Partial<{
+    active: boolean;
+    message: string | null;
+    messagePublishedAt: Date | null;
+    expectedEndAt: Date | null;
+    activatedAt: Date | null;
+  }>,
+  now: Date,
+): Promise<string> {
+  const [updated] = await transaction.update(instanceMaintenance)
+    .set({ ...changes, version: sql`${instanceMaintenance.version} + 1`, updatedAt: now })
+    .where(and(eq(instanceMaintenance.singleton, true), eq(instanceMaintenance.version, expectedVersion)))
+    .returning({ id: instanceMaintenance.id });
+  if (!updated) {
+    throw new AppError(
+      "maintenance_state_stale",
+      "Maintenance state changed since it was read; refresh and try again",
+      409,
+    );
+  }
+  return updated.id;
+}
+
+/** The effective-state read (ADR-0013 decisions 1 and 5). No actor required. */
+export async function readMaintenanceState(): Promise<MaintenanceState> {
+  const db = getDb();
+  const [row] = await db.select().from(instanceMaintenance).limit(1);
+  if (!row) {
+    // The 0028 migration seeds this row unconditionally; its absence means
+    // the database predates that migration or was tampered with, not a
+    // caller error worth a 4xx.
+    throw new AppError("maintenance_state_missing", "Maintenance state has not been initialized", 500);
+  }
+  const notices = await db.select().from(maintenanceNotices)
+    .orderBy(asc(maintenanceNotices.startsAt), asc(maintenanceNotices.id))
+    .limit(500);
+  const [dueNotice] = await db.select({ id: maintenanceNotices.id }).from(maintenanceNotices)
+    .where(and(
+      isNull(maintenanceNotices.activatedAt),
+      isNull(maintenanceNotices.cancelledAt),
+      lte(maintenanceNotices.startsAt, new Date()),
+    ))
+    .limit(1);
+  return {
+    id: row.id,
+    active: row.active,
+    message: row.message,
+    messagePublishedAt: row.messagePublishedAt,
+    expectedEndAt: row.expectedEndAt,
+    activatedAt: row.activatedAt,
+    version: row.version,
+    updatedAt: row.updatedAt,
+    effectivelyActive: row.active || Boolean(dueNotice),
+    notices,
+  };
+}
+
+/** Activates maintenance immediately with a published message. */
+export async function activateMaintenance(
+  actorUserId: string,
+  expectedVersion: number,
+  params: { message: string; expectedEndAt: Date | null },
+): Promise<MaintenanceState> {
+  requireUuid(actorUserId, "Actor");
+  requireVersion(expectedVersion);
+  const message = requireMaintenanceMessage(params.message);
+
+  await getDb().transaction(async (transaction) => {
+    await requireActiveAdministrator(transaction, actorUserId);
+    const now = new Date();
+    const entityId = await updateSingletonVersion(transaction, expectedVersion, {
+      active: true,
+      message,
+      messagePublishedAt: now,
+      expectedEndAt: params.expectedEndAt,
+      activatedAt: now,
+    }, now);
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "instance_maintenance",
+      entityId,
+      action: "maintenance_activated",
+      changes: { active: true, message, expectedEndAt: params.expectedEndAt?.toISOString() ?? null },
+    });
+  });
+
+  return readMaintenanceState();
+}
+
+/** Replaces the published message of currently active maintenance. */
+export async function editMaintenanceMessage(
+  actorUserId: string,
+  expectedVersion: number,
+  rawMessage: string,
+): Promise<MaintenanceState> {
+  requireUuid(actorUserId, "Actor");
+  requireVersion(expectedVersion);
+  const message = requireMaintenanceMessage(rawMessage);
+
+  await getDb().transaction(async (transaction) => {
+    await requireActiveAdministrator(transaction, actorUserId);
+    const [current] = await transaction.select({ active: instanceMaintenance.active }).from(instanceMaintenance).limit(1);
+    if (!current?.active) {
+      throw new AppError("maintenance_not_active", "Maintenance is not currently active", 409);
+    }
+    const now = new Date();
+    const entityId = await updateSingletonVersion(transaction, expectedVersion, {
+      message,
+      messagePublishedAt: now,
+    }, now);
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "instance_maintenance",
+      entityId,
+      action: "maintenance_message_edited",
+      changes: { message },
+    });
+  });
+
+  return readMaintenanceState();
+}
+
+/** Ends currently active maintenance, clearing the published message. */
+export async function endMaintenance(actorUserId: string, expectedVersion: number): Promise<MaintenanceState> {
+  requireUuid(actorUserId, "Actor");
+  requireVersion(expectedVersion);
+
+  await getDb().transaction(async (transaction) => {
+    await requireActiveAdministrator(transaction, actorUserId);
+    const [current] = await transaction.select({ active: instanceMaintenance.active }).from(instanceMaintenance).limit(1);
+    if (!current?.active) {
+      throw new AppError("maintenance_not_active", "Maintenance is not currently active", 409);
+    }
+    const now = new Date();
+    const entityId = await updateSingletonVersion(transaction, expectedVersion, {
+      active: false,
+      message: null,
+      messagePublishedAt: null,
+      expectedEndAt: null,
+      activatedAt: null,
+    }, now);
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "instance_maintenance",
+      entityId,
+      action: "maintenance_ended",
+      changes: { active: false },
+    });
+  });
+
+  return readMaintenanceState();
+}
+
+/** Schedules a future notice. Bounded to 12 pending notices (#522). */
+export async function scheduleMaintenanceNotice(
+  actorUserId: string,
+  expectedVersion: number,
+  params: { message: string; startsAt: Date; expectedEndAt: Date | null },
+): Promise<MaintenanceState> {
+  requireUuid(actorUserId, "Actor");
+  requireVersion(expectedVersion);
+  const message = requireMaintenanceMessage(params.message);
+
+  await getDb().transaction(async (transaction) => {
+    await requireActiveAdministrator(transaction, actorUserId);
+    const now = new Date();
+    // The version gate above locks the singleton row, so this count is
+    // consistent with every other concurrent mutation: a second scheduling
+    // transaction blocks on that row lock and re-reads a version that no
+    // longer matches, and is rejected before it ever counts notices.
+    await updateSingletonVersion(transaction, expectedVersion, {}, now);
+    const [{ pending }] = await transaction
+      .select({ pending: sql<number>`count(*)::int` })
+      .from(maintenanceNotices)
+      .where(and(isNull(maintenanceNotices.activatedAt), isNull(maintenanceNotices.cancelledAt)));
+    if (pending >= MAX_PENDING_NOTICES) {
+      throw new AppError(
+        "maintenance_notice_limit_reached",
+        "Cancel an existing notice before scheduling another",
+        409,
+      );
+    }
+    const noticeId = randomUUID();
+    await transaction.insert(maintenanceNotices).values({
+      id: noticeId,
+      message,
+      startsAt: params.startsAt,
+      expectedEndAt: params.expectedEndAt,
+    });
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "instance_maintenance",
+      entityId: noticeId,
+      action: "maintenance_notice_scheduled",
+      changes: {
+        message,
+        startsAt: params.startsAt.toISOString(),
+        expectedEndAt: params.expectedEndAt?.toISOString() ?? null,
+      },
+    });
+  });
+
+  return readMaintenanceState();
+}
+
+/** Cancels a pending notice. Rows are retained; cancellation never deletes. */
+export async function cancelMaintenanceNotice(
+  actorUserId: string,
+  expectedVersion: number,
+  noticeId: string,
+): Promise<MaintenanceState> {
+  requireUuid(actorUserId, "Actor");
+  requireUuid(noticeId, "Notice");
+  requireVersion(expectedVersion);
+
+  await getDb().transaction(async (transaction) => {
+    await requireActiveAdministrator(transaction, actorUserId);
+    const now = new Date();
+    await updateSingletonVersion(transaction, expectedVersion, {}, now);
+    const [cancelled] = await transaction.update(maintenanceNotices)
+      .set({ cancelledAt: now })
+      .where(and(
+        eq(maintenanceNotices.id, noticeId),
+        isNull(maintenanceNotices.activatedAt),
+        isNull(maintenanceNotices.cancelledAt),
+      ))
+      .returning({ id: maintenanceNotices.id });
+    if (!cancelled) {
+      throw new AppError("maintenance_notice_not_pending", "That notice is not available to cancel", 404);
+    }
+    await transaction.insert(auditLog).values({
+      householdId: null,
+      actorUserId,
+      entityType: "instance_maintenance",
+      entityId: noticeId,
+      action: "maintenance_notice_cancelled",
+      changes: { cancelledAt: now.toISOString() },
+    });
+  });
+
+  return readMaintenanceState();
+}
