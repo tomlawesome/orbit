@@ -40,6 +40,9 @@ function queryStub(rows: unknown[]): Record<string, unknown> {
   return chain;
 }
 
+/* The guard has its own contract and integration tests (#523); these
+   tests pin the route's own behaviour, so it always passes here. */
+vi.mock("@/server/maintenance", () => ({ assertOutsideMaintenance: vi.fn(async () => {}) }));
 vi.mock("@/db", () => ({
   getDb: () => ({
     select: () => queryStub(mocks.rows.shift() ?? []),
