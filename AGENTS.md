@@ -18,12 +18,20 @@ design itself — screen and component design, layout, motion, colour and
 typography decisions, mockup work, judgement against the ratified designs or
 the fidelity gate — and macro system-design choices of the kind ADRs record.
 
-Issues whose substance is that judgement carry the `model: fable` label. An
-orchestrating agent on another model hands the judgement itself to Fable — a
-Fable sub-agent producing the artefact (the design proposal, the ADR draft,
-the trade-off call), or the issue parked for a Fable session — and integrates
-the result without altering the call. If unlabelled work turns out to conceal
-such a call mid-implementation, stop and escalate rather than make it.
+Issues whose substance is that judgement carry `fable: subagent` or
+`fable: dialogue`. The pair records how the call is routed, not just that it
+is Fable's:
+
+- `fable: subagent` — a Fable sub-agent produces the artefact (the design
+  proposal, the ADR draft, the trade-off call) and the orchestrator integrates
+  it without altering the call. Use where the artefact stands or falls whole.
+- `fable: dialogue` — the owner works with Fable directly. Never delegate one;
+  hand the issue back with a starting prompt. Use where finishing depends on
+  the owner ratifying rounds, or where they are liable to accept one part of a
+  proposal and reject another.
+
+If unlabelled work turns out to conceal such a call mid-implementation, stop
+and escalate rather than make it.
 
 Other models implement, test and deliver ratified judgement, and do the rest
 of the engineering: orchestration, integration, tests, CI.
