@@ -190,45 +190,52 @@ recovery path.
 
 ### 5. Scheduled activation: lease and idempotency contract
 
-Effective maintenance state is `active` **or** the existence of a due,
-unclaimed, uncancelled scheduled window (`scheduled_start_at <= now()`,
-`status = 'scheduled'`, via the partial index). Activation therefore takes
+Effective maintenance state is `active` **or** the existence of a due
+scheduled window (`status = 'scheduled'`, `scheduled_start_at <= now()`, via
+the partial index — the status alone carries what the retired notice model
+spelled out as unclaimed and uncancelled). Activation therefore takes
 effect at the scheduled instant on every process simultaneously, regardless of
 worker timing or restarts — the clock, not a tick, is the trigger.
 
 A maintenance worker tick (in-process interval started from
 `instrumentation-node.ts` like the other workers, every 30 seconds) performs
-the durable transition in **one transaction**: claim the due window with
-`UPDATE maintenance_windows SET status = 'open', started_at = now() WHERE id =
-$1 AND status = 'scheduled' AND scheduled_start_at <= now()`; if zero rows,
-another process already did it — stop, no duplicate audit. What happens next
-depends on whether another window is already open (amended 2026-08-23, see
-Amendments, following #580's ratified absorb rule and the #525 finding that
-motivated it).
+the durable transition in **one transaction**. It takes the singleton row lock
+every administrator mutation already takes, which serialises it against a
+concurrent edit and against a second worker, and reads whether a window is
+currently open. It then claims the due window conditionally — `UPDATE
+maintenance_windows SET status = $2, started_at = $3 WHERE id = $1 AND status =
+'scheduled' AND scheduled_start_at <= now()`; if zero rows, another process
+already did it — stop, no duplicate audit. Whether `$2` is `open` or `absorbed`
+follows from that read (amended 2026-08-23, see Amendments, following #580's
+ratified absorb rule and the #525 finding that motivated it).
 
-If no window is open, the claimed window becomes the open window: its
-`scheduled` update becomes a `started` entry, `instance_maintenance` is updated
-to `active = true` with `current_window_id` set and `expected_end_at`
-denormalised from it, `version` is incremented, and one audit event is inserted
-(`maintenance_activated_scheduled`, actor null, window id) — the same shape as
-before, notice replaced by window.
+If no window is open, the claimed window opens: `started_at` is set, a
+`started` entry is appended to its timeline — its original `scheduled` entry is
+retained, because decision 8 makes an entry's `kind` immutable —
+`instance_maintenance` is updated to `active = true` with `current_window_id`
+set and `expected_end_at` denormalised from it, `version` is incremented, and
+one audit event is inserted (`maintenance_activated_scheduled`, actor null,
+window id): the same shape as before, notice replaced by window.
 
-If a window is already open, the due window is **absorbed** rather than
-activated: its text is appended to the open window as an `update` entry, its
-own row moves to `absorbed` with `absorbed_into_id` set to the open window's
-id, and the open window's `expected_end_at` becomes the later of the two —
+If a window is already open, the due window is **absorbed** rather than opened:
+it moves to `absorbed` with `absorbed_into_id` set to the open window's id and
+`started_at` left null, its text is appended to the open window as an `update`
+entry, and the open window's `expected_end_at` becomes the later of the two —
 never the earlier. `expected_end_at` does not shorten automatically under any
 circumstance; an administrator's stated `Retry-After` is never silently cut
-short by a scheduled window coming due. This is the one audit event for that
-case too, recording the absorption against the open window's id.
+short by a scheduled window coming due. `version` is incremented and one audit
+event records the absorption (`maintenance_window_absorbed`, actor null, the
+open window's id). Because an absorbed window never enters `open`, the partial
+unique index on open windows is never even momentarily contended.
 
 Either way, the claim and the completion are the same transaction, so a crash
-before commit leaves nothing durable and the next tick retries, and duplicate
-workers are excluded by the conditional update alone; the house worker
-invariant of an owner token and expiry exists for long-running claims and is
-not needed here. The worker does not use `expected version`: its authority is
-the window claim, and a concurrent administrator edit either serializes behind
-the row locks or finds its own token stale and re-reads.
+before commit leaves nothing durable and the next tick retries; duplicate
+workers are excluded by the conditional claim, and the singleton row lock keeps
+the open-window read consistent with it. The house worker invariant of an owner
+token and expiry exists for long-running claims and is not needed here. The
+worker does not use `expected version`: its authority is the window claim, and
+a concurrent administrator edit either serializes behind the row locks or finds
+its own token stale and re-reads.
 
 ### 6. Public health semantics
 
@@ -260,6 +267,9 @@ correct experience. Startup, backup, restore and migration flows do not
 auto-enter maintenance; the tables travel in backups like any others.
 
 ### 8. Editability and the timeline/audit boundary
+
+This decision was added 2026-08-23 (see Amendments); the model it governs is
+decision 1's.
 
 An update's `published_at`, `kind` and `window_id` are immutable, as are the
 system-set `started_at` and `ended_at` on a window. Re-dating an entry, or
@@ -299,8 +309,6 @@ so a resolved window has no audience. There is no public status-history surface
 and no pruning job; both remain available to propose later, and neither is
 needed for this decision.
 
-*(Decision 8 added 2026-08-23, see Amendments.)*
-
 ## Consequences
 
 - Every guarded request pays one singleton read and one partial-index probe,
@@ -332,8 +340,8 @@ exact exemption set and the repository-wide route-contract test, plus the
 health change, all negative-tested; (3) the administrator API and control UI,
 the recovery drill and the emergency script; (4) scheduled notices, the worker
 tick and duplicate-worker tests; (5) the window/update data model (decisions
-1, 5 and 8, amended 2026-08-23): migration 0029, the absorb-on-collision
-worker path, the editability rules and the new audit actions, with their own
+1, 5 and 8, amended 2026-08-23): its migration, the absorb-on-collision worker
+path, the editability rules and the new audit actions, with their own
 stale-token, restart-persistence and duplicate-worker tests; (6) page
 presentation — the interim shell on Next, and the `hooks.server.ts` wiring of
 the built `/maintenance` screen with Playwright/axe evidence, landing with
