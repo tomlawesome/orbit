@@ -543,6 +543,16 @@ ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.acceptance.yml down --volumes --remove-orphans
 ```
 
+`bash scripts/test-e2e-local.sh` does all of the above -- plus the mail
+overlay, an isolated Compose project so it can never collide with a real
+deployment on the same host, a health wait, and guaranteed teardown -- in one
+command, mirroring the acceptance stage of the container-validation workflow:
+
+```sh
+bash scripts/test-e2e-local.sh
+bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
+```
+
 Install Playwright's local Chromium build once, then repeat browser tests
 without using an AI service:
 
@@ -643,6 +653,7 @@ and add a matching read-only secret mount to the Compose service.
 | `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
 | `VAPID_PRIVATE_KEY_FILE` | Worker | File containing the private VAPID key. | `/run/secrets/orbit-vapid-private-key` |
 | `WORKER_POLL_SECONDS` | Worker | Interval between notification queue scans. | `60` |
+| `MAINTENANCE_TICK_SECONDS` | Worker | Interval between checks for a due scheduled maintenance notice. Scheduled maintenance begins on the clock, not on this tick; the tick only records the change durably. | `30` |
 | `NOTIFICATION_MAX_ATTEMPTS` | Worker | Delivery attempts before a notification is marked failed. | `5` |
 | `MIGRATE_ON_START` | Orbit | Applies pending Drizzle migrations during application startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |

@@ -15,7 +15,10 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
  */
 const RECIPIENT_DOMAIN = "in.orbit.test";
 const ALIAS_GENERATION = 1;
-const SMTP_PORT = 3025;
+// Must match docker-compose.acceptance.yml's GreenMail host-port binding
+// exactly -- both read TEST_SMTP_PORT so the test and the compose
+// host-binding can never diverge. Defaults to 3025 (CI's fixed value).
+const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
 
 function deriveAlias(userId: string, secret: string): string {
   const input = `orbit:imap-recipient-alias:v1\0${RECIPIENT_DOMAIN}\0${ALIAS_GENERATION}\0${userId}`;

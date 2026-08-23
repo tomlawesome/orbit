@@ -1,0 +1,20 @@
+# Local-only overlay for scripts/test-e2e-local.sh. Never used by CI and
+# never part of a real deployment's file set.
+#
+# docker-compose.yml pins container_name on orbit-app/orbit-db/orbit-clamav
+# (AGENTS.md "Traps when running things locally"), so a disposable run and a
+# real deployment on the same host cannot coexist under those fixed names no
+# matter what Compose project name the disposable run uses. This overlay
+# renames them to the disposable project's own name so the two can coexist.
+# Internal service discovery (SMTP_HOST, IMAP_HOST, OIDC_ISSUER's
+# "orbit-oidc" host, `docker compose exec`/`logs`/`ps`) all address services
+# by Compose *service* name, which is unaffected by container_name, so this
+# rename is cosmetic to Docker's global container namespace only and changes
+# no behaviour under test.
+services:
+  orbit-app:
+    container_name: ${COMPOSE_PROJECT_NAME}-app
+  orbit-db:
+    container_name: ${COMPOSE_PROJECT_NAME}-db
+  orbit-clamav:
+    container_name: ${COMPOSE_PROJECT_NAME}-clamav
