@@ -63,6 +63,14 @@ anything disposable, confirm isolation with
 before trusting it, and never run `docker compose down --volumes` against a
 project you did not create. See #536.
 
+## The demo stack is disposable
+
+The demo deployment (`docker-compose.demo.yml`) carries only test data, so
+nothing in it is worth preserving. Do not spend time or tokens keeping an old
+demo image or its database alive: if it will not start, rebuild it from current
+`dev` and current versions of everything it depends on, rather than repairing
+it.
+
 ## Sources of truth
 
 - `docs/v1-charter.md`: supported product and release contract.
