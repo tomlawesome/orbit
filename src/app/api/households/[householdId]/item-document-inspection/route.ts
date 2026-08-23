@@ -3,6 +3,7 @@ import { AppError, appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { inspectItemDocument } from "@/server/item-document-inspection";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,6 +12,7 @@ interface RouteContext { params: Promise<{ householdId: string }> }
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);

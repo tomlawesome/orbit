@@ -3,6 +3,7 @@ import { appErrorResponse, AppError } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
 import { listItemDocuments, requestDocumentDeletion, uploadItemDocument } from "@/server/document-repository";
+import { assertOutsideMaintenance } from "@/server/maintenance";
 import { authorizeDirectReviewedUpload, completeDirectReviewedUpload, markDirectReviewedUploadRecoverable, recordDirectReviewedUploadPending } from "@/server/reviewed-intake";
 import { z } from "zod";
 
@@ -15,6 +16,7 @@ interface RouteContext {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    await assertOutsideMaintenance(request);
     const session = await requireSession(request, getAuthConfig());
     const { householdId, itemId } = await context.params;
     const itemDocuments = await listItemDocuments(session.user.id, householdId, itemId);
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   let reviewedOperationUserId: string | undefined;
   let uploadAttempted = false;
   try {
+    await assertOutsideMaintenance(request);
     const config = getAuthConfig();
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
