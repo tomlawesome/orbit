@@ -293,3 +293,97 @@ describe("maintenance state, versioned mutations and audit (#522)", () => {
     await fixture.cleanup();
   });
 });
+
+/* ADR-0015 decision 5 (#524): ending maintenance ends *effective* maintenance.
+   Before this, `end` cleared the singleton and left due notices standing, so a
+   due notice pinned the instance closed — and once #525's worker exists it
+   would claim that stale notice and reopen maintenance seconds after an
+   administrator ended it. */
+describe("ending maintenance ends effective maintenance (#524)", () => {
+  it("ends maintenance that only a due notice is holding open, cancelling that notice", async () => {
+    const fixture = await createIntegrationFixture("end-cancels-due-notice");
+    const admin = fixture.users.admin;
+
+    await scheduleMaintenanceNotice(admin.id, 1, {
+      message: "A window that has already come due.",
+      startsAt: new Date(Date.now() - 60_000),
+      expectedEndAt: null,
+    });
+    const pinned = await readMaintenanceState();
+    expect(pinned.active).toBe(false);
+    expect(pinned.effectivelyActive).toBe(true);
+
+    const ended = await endMaintenance(admin.id, pinned.version);
+    expect(ended.effectivelyActive).toBe(false);
+    expect(ended.notices).toHaveLength(1);
+    expect(ended.notices[0].cancelledAt).not.toBeNull();
+
+    await fixture.cleanup();
+  });
+
+  it("leaves a notice that is not yet due standing", async () => {
+    const fixture = await createIntegrationFixture("end-keeps-future-notice");
+    const admin = fixture.users.admin;
+
+    const activated = await activateMaintenance(admin.id, 1, {
+      message: "Today's window.",
+      expectedEndAt: null,
+    });
+    const scheduled = await scheduleMaintenanceNotice(admin.id, activated.version, {
+      message: "Next week's window.",
+      startsAt: new Date(Date.now() + 604_800_000),
+      expectedEndAt: null,
+    });
+
+    const ended = await endMaintenance(admin.id, scheduled.version);
+    expect(ended.active).toBe(false);
+    expect(ended.effectivelyActive).toBe(false);
+    // Ending today's maintenance is not a decision about next week.
+    expect(ended.notices).toHaveLength(1);
+    expect(ended.notices[0].cancelledAt).toBeNull();
+
+    await fixture.cleanup();
+  });
+
+  it("records how many notices the ending cancelled", async () => {
+    const fixture = await createIntegrationFixture("end-audits-cancelled-count");
+    const admin = fixture.users.admin;
+
+    await scheduleMaintenanceNotice(admin.id, 1, {
+      message: "Due window one.",
+      startsAt: new Date(Date.now() - 120_000),
+      expectedEndAt: null,
+    });
+    const state = await readMaintenanceState();
+    await endMaintenance(admin.id, state.version);
+
+    const [ending] = await getDb()
+      .select({ changes: auditLog.changes })
+      .from(auditLog)
+      .where(eq(auditLog.action, "maintenance_ended"));
+    expect(ending.changes).toMatchObject({ active: false, cancelledNotices: 1 });
+
+    await fixture.cleanup();
+  });
+
+  it("still answers a stale version with 409, cancelling nothing", async () => {
+    const fixture = await createIntegrationFixture("end-stale-with-due-notice");
+    const admin = fixture.users.admin;
+
+    await scheduleMaintenanceNotice(admin.id, 1, {
+      message: "Due, and about to be raced.",
+      startsAt: new Date(Date.now() - 60_000),
+      expectedEndAt: null,
+    });
+
+    await expect(endMaintenance(admin.id, 1)).rejects.toMatchObject({
+      code: "maintenance_state_stale",
+      status: 409,
+    });
+    const state = await readMaintenanceState();
+    expect(state.effectivelyActive).toBe(true);
+    expect(state.notices[0].cancelledAt).toBeNull();
+
+    await fixture.cleanup();
+  });
+});
