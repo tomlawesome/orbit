@@ -1,31 +1,14 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
+import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
 
-export class AppError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly status = 400,
-  ) {
-    super(message);
-    this.name = "AppError";
-  }
-}
-
-/**
- * The bounded blocked-request contract of ADR-0013 decision 2 (#523).
- * Deliberately outside the `{ error: { code, message } }` envelope: the body
- * is the fixed `{"error":"maintenance_active"}` and never carries the
- * message, schedule or configuration.
- */
-export class MaintenanceActiveError extends Error {
-  constructor(public readonly expectedEndAt: Date | null) {
-    super("Orbit is in maintenance");
-    this.name = "MaintenanceActiveError";
-  }
-}
+/* The classes live in the framework-free `@/lib/errors` (ADR-0015 decision
+   1) so operator artifacts can bundle domain code without linking Next.
+   They are re-exported here because this is where the rest of the codebase
+   already imports them from, and that should keep working. */
+export { AppError, MaintenanceActiveError };
 
 /** Converts expected API failures into a consistent, non-cacheable response. */
 export function appErrorResponse(error: unknown): NextResponse {
