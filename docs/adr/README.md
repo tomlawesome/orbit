@@ -28,3 +28,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0011: Operator experience as product, single-reviewer governance](0011-operator-experience-as-product.md)
 - [ADR-0012: The front end leaves React for SvelteKit](0012-front-end-leaves-react.md)
 - [ADR-0013: Maintenance mode state, interception and 503 semantics](0013-maintenance-mode-state-and-interception.md)
+- [ADR-0014: Repair mode — diagnosis, planning and safe execution](0014-repair-mode-diagnosis-planning-and-execution.md)
