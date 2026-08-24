@@ -164,9 +164,20 @@ set -Eeuo pipefail
 #                                   password secret file is missing — the
 #                                   SQLSTATE 28P01 precursor, detected
 #                                   without ever touching the database.
-#   unrelated-resource-present      — a database volume matching Orbit's
-#                                   naming pattern exists under a different
-#                                   Compose project than this deployment's.
+#   document-volume-retained-without-key — ADR-0014 decision 5's second
+#                                   retention guard: the retained
+#                                   `orbit-documents-data` volume for this
+#                                   project exists while document-kek is
+#                                   missing. Mirrors
+#                                   volume-retained-without-credentials
+#                                   exactly (volume-name match plus the local
+#                                   absence of the secret file); unlike that
+#                                   class there is no rotate equivalent, so
+#                                   it plans as manual, never a guessed fix.
+#   unrelated-resource-present      — a database or document volume matching
+#                                   Orbit's naming pattern exists under a
+#                                   different Compose project than this
+#                                   deployment's.
 #   database-unreachable            — this deployment's orbit-db container is
 #                                   absent/not running, or is running but
 #                                   `pg_isready` did not succeed within the
@@ -216,7 +227,7 @@ set -Eeuo pipefail
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 24 reason classes, the same optional docker probes, the same
+# same 25 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -311,16 +322,17 @@ set -Eeuo pipefail
 #   regenerate-secret           <- secret-missing, ONLY for a generated
 #                                   non-user secret whose regeneration
 #                                   cannot invalidate retained encrypted
-#                                   state (session-secret, document-kek,
-#                                   oidc-client-secret; also
-#                                   postgres-password itself when no
-#                                   retained database volume is present —
-#                                   see the exception immediately below).
+#                                   state (session-secret, oidc-client-secret;
+#                                   also postgres-password when no retained
+#                                   database volume is present, and
+#                                   document-kek when no retained document
+#                                   volume is present — see the two
+#                                   exceptions immediately below).
 #     mutation=reversible backup=not-required. The finding fires only when
 #     the secret file is absent/empty, so there is no valid prior secret
 #     content to lose or back up.
 #
-#     EXCEPTION — postgres-password is explicitly EXCLUDED from
+#     EXCEPTION 1 — postgres-password is explicitly EXCLUDED from
 #     regenerate-secret whenever a `volume-retained-without-credentials`
 #     finding is also present in the same diagnosis (the #261 fixed-project
 #     collision: a retained `orbit-db-data` volume still holds the OLD
@@ -330,17 +342,31 @@ set -Eeuo pipefail
 #     as rotate-database-credential, below, so a retained-volume postgres
 #     password is NEVER auto-regenerated.
 #
-#     NOTE (stage one, this slice): despite being classified
+#     EXCEPTION 2 — document-kek is explicitly EXCLUDED from
+#     regenerate-secret whenever a `document-volume-retained-without-key`
+#     finding is also present (ADR-0014 decision 5's second retention guard):
+#     a retained `orbit-documents-data` volume holds documents encrypted
+#     under the OLD key, and minting a new one would leave them permanently
+#     unreadable. Unlike EXCEPTION 1, there is no rotate equivalent to route
+#     to — that specific secret-missing finding is instead planned as
+#     `manual`, below the action-class table, so a retained-volume
+#     document-kek is NEVER auto-regenerated either.
+#
+#     NOTE (stage two, since this slice): despite being classified
 #     mutation=reversible above, regenerate-secret is NOT in stage one's
-#     executable safe set — see "EXECUTE MODE" below. The owner's 2026-08-13
-#     slice 4 decision names the stage-one safe set explicitly by action
-#     class (fix-permissions, restore-transaction, restart-services); that
-#     enumerated list, not this table's own mutation=reversible tag, is
-#     authoritative for what `--execute --safe-only` may act on. A newly
-#     minted secret is live credential material other processes may already
-#     be holding open, which is a materially different risk than a mode-only
-#     chmod or a container restart, so it stays out of stage one even though
-#     it is filesystem-reversible in principle.
+#     executable safe set — see "EXECUTE MODE (--execute --safe-only)" below.
+#     The owner's 2026-08-13 slice 4 decision names the stage-one safe set
+#     explicitly by action class (fix-permissions, restore-transaction,
+#     restart-services); that enumerated list, not this table's own
+#     mutation=reversible tag, is authoritative for what
+#     `--execute --safe-only` may act on. A newly minted secret is live
+#     credential material other processes may already be holding open, which
+#     is a materially different risk than a mode-only chmod or a container
+#     restart, so it stays out of stage one even though it is
+#     filesystem-reversible in principle. It IS executed in stage two, behind
+#     the same typed-word/never-automatable approval model as
+#     rotate-database-credential — see "EXECUTE MODE (--execute
+#     --dangerous)" below.
 #
 #   rotate-database-credential  <- database-credential-mismatch,
 #                                   volume-retained-without-credentials,
@@ -740,20 +766,27 @@ set -Eeuo pipefail
 # ============================================================================
 #
 # `--execute --dangerous` runs the identical diagnosis and planning
-# `--execute --safe-only` does, and additionally makes the single stage-two
-# action class — `rotate-database-credential` — executable, subject to the
-# approval model below. It may be combined with `--safe-only` in the same
-# invocation (each batch is independently planned, approved and executed;
-# see "Confirmation model" above for how the two batches coexist) or used on
-# its own. `rotate-database-credential` resolves database-credential-mismatch,
+# `--execute --safe-only` does, and additionally makes the two stage-two
+# action classes — `rotate-database-credential` and (#530 slice, ADR-0014
+# decision 5) `regenerate-secret` — executable, subject to the approval
+# model below. It may be combined with `--safe-only` in the same invocation
+# (each batch is independently planned, approved and executed; see
+# "Confirmation model" above for how the two batches coexist) or used on its
+# own. `rotate-database-credential` resolves database-credential-mismatch,
 # volume-retained-without-credentials, and (per the exception in the
-# action-class table above) a postgres-password secret-missing finding paired
-# with a retained volume — see that table for the full rationale. Every plan
-# entry resolving to `rotate-database-credential` is coalesced into ONE
-# execution instance (mirroring `restart-services`'s own once-per-run
+# action-class table above) a postgres-password secret-missing finding
+# paired with a retained database volume. `regenerate-secret` resolves every
+# OTHER secret-missing finding — session-secret, oidc-client-secret, and
+# postgres-password/document-kek when their own retained-volume guard is NOT
+# present — see that table for the full rationale of both. Every plan entry
+# resolving to `rotate-database-credential` is coalesced into ONE execution
+# instance (mirroring `restart-services`'s own once-per-run
 # `service_restart_result` dedup above): the credential is rotated at most
 # once per `--execute` run, and every matching plan entry reports the same
-# shared outcome.
+# shared outcome. `regenerate-secret` runs once PER DISTINCT missing-secret
+# target (a broken deployment can have more than one secret missing at
+# once); see "Step iterator" below for how the two classes are sequenced
+# together when a single run's dangerous batch contains both.
 #
 # Never automatable — this is the entire point of stage two
 # --------------------------------------------------------------------------
@@ -771,25 +804,36 @@ set -Eeuo pipefail
 # touched. This is a structural refusal, not a declined confirmation: no
 # prompt is ever printed in this path (there is nothing to answer).
 #
-# Approval model — typed action word (owner decision, 2026-08-13)
+# Approval model — typed action word (owner decision, 2026-08-13; extended
+# to regenerate-secret in the #530 slice, ADR-0014 decision 5)
 # --------------------------------------------------------------------------
 # Unlike the safe batch's `y`/`Y` confirmation, the dangerous batch requires
-# the operator to TYPE THE LITERAL ACTION WORD `rotate` — a non-standard
-# input specifically so muscle-memory Enter, a blank line, or any other text
-# can never fire it. The plan preview for the dangerous batch (the same
-# `plan action=... resolves=... mutation=credential-rotation backup=required`
-# line grammar --plan uses, on stdout, enum-only) is printed first. Then:
+# the operator to TYPE THE LITERAL ACTION WORD for the class being confirmed
+# — `rotate` for rotate-database-credential, `regenerate` for
+# regenerate-secret — a non-standard input specifically so muscle-memory
+# Enter, a blank line, or any other text can never fire either. The plan
+# preview for the dangerous batch (the same
+# `plan action=... resolves=... mutation=... backup=...` line grammar
+# --plan uses, on stdout, enum-only, covering every deferred entry
+# regardless of class) is printed first. Then, for EACH distinct dangerous
+# action class actually present in this run's dangerous batch, in turn
+# (rotate-database-credential before regenerate-secret when a single run
+# happens to contain both — see confirm_dangerous_action/execute_dangerous_
+# batch): the operator confirms that class's own word before this script
+# moves to the next one; refusing any one of them refuses the WHOLE
+# dangerous batch (nothing has mutated yet either way).
 #
-#   - Interactively: `Orbit repair: type 'rotate' to proceed (anything else
+#   - Interactively: `Orbit repair: type '<word>' to proceed (anything else
 #     cancels): ` is printed to stderr (not an enum) and one answer line is
-#     read from stdin. An exact `rotate` proceeds; a blank Enter, any other
+#     read from stdin. An exact match proceeds; a blank Enter, any other
 #     text, or EOF re-prompts, up to 3 attempts total; the 3rd rejected
 #     attempt (or an EOF at any attempt) refuses with
 #     `dangerous result=refused ... reason=refused-by-operator` and exit 6.
 #   - Under `ORBIT_REPAIR_PROMPTS=machine`: the repair-specific
 #     `field=action-word kind=typed-word` prompt (see "Machine prompts"
-#     below) is emitted instead, with the same exact-`rotate` acceptance
-#     rule and the same 3-attempt bound.
+#     below) is emitted instead, with the same exact-word acceptance rule
+#     and the same 3-attempt bound (re-emitted, attempt reset to 1, for a
+#     second class's own word when a run's dangerous batch spans both).
 #
 # Passphrase — the checkpoint, in the existing ORBKEK01 format (owner
 # decision, 2026-08-13; no new formats)
@@ -938,28 +982,55 @@ set -Eeuo pipefail
 #                          end of the `--execute` invocation regardless of
 #                          how either batch concluded.
 #
+# regenerate-secret's own step model (#530 slice, ADR-0014 decision 5)
+# --------------------------------------------------------------------------
+# Simpler than the four-step rotate-database-credential iterator above:
+# once approved, `do_regenerate_secret_step` runs once per distinct
+# deferred missing-secret target (`run_regenerate_secret_steps`, straight
+# through in Step 3's own scan order, stopping at the first failure). No
+# checkpoint step exists or is needed — the finding only ever fires when
+# the secret file is absent/empty (see backup=not-required's comment on
+# backup_for_action), so there is no prior content to preserve. Each
+# target's own step re-proves the secrets directory is still real,
+# non-symlink, mode 700, and that the target itself is still genuinely
+# missing (the same TOCTOU re-check `fix-permissions` performs), then
+# writes the new secret exactly like `configure.sh`'s own
+# `ensure_secret_file` (scripts/configure.sh:777-802): `mktemp`ped under
+# the secrets directory (mode 600 from creation, before any content lands
+# in it), content written, mode 600 set again defensively, then an atomic
+# same-directory `mv` onto the live secret path — never a different
+# discipline invented here. When this run's dangerous batch ALSO contains
+# rotate-database-credential, regenerate-secret's targets run AFTER the
+# rotate sequence completes successfully (see execute_dangerous_batch),
+# never before and never if rotation itself failed.
+#
 # Any step failure: stop, guidance, stable non-zero exit
 # --------------------------------------------------------------------------
-# If ANY of steps 1-4 fails, the remaining steps in the sequence are never
-# attempted — the iterator stops at the first failure. `dangerous_failure_
-# reason` is set to `checkpoint-failed` (step 1) or `step-failed` (steps
-# 2-4), and recovery guidance is printed to stderr: for a post-checkpoint
-# failure, the checkpoint bundle's path (decrypt with
-# `docker compose ... run --rm --no-deps -T --entrypoint node orbit-app
-# /opt/orbit/scripts/recovery-crypto.mjs decrypt <path-inside-container>`
-# after bind-mounting it, exactly as this script itself does to verify it)
-# is named so the pre-rotation credential can be recovered by hand; if the
-# failure is at or after step 3 (i.e. step 2 already staged a new
-# credential), the staged file's fixed path is ALSO named, since the
-# database may already be expecting that value. Every planned entry
-# resolving to `rotate-database-credential` is then reported
-# `execute action=rotate-database-credential resolves=<class> result=failed`
-# and the run's exit code is 4 — the identical exit code stage one's own
-# `failed` terminal result uses, deliberately: `execution`'s exit-code
-# vocabulary already means "at least one attempted mutation failed" and
-# stage two does not need a second failure exit code, only its own `reason`
-# enum (see "Output contract" below) to distinguish which kind of failure it
-# was.
+# If ANY step in this run's combined ordered sequence fails — any of
+# rotate-database-credential's own steps 1-4, or any regenerate-secret
+# target's step — every later step, of either class, is never attempted:
+# the iterator stops at the first failure. `dangerous_failure_reason` is set
+# to `checkpoint-failed` (rotate step 1 only) or `step-failed` (every other
+# failure, rotate or regenerate), and recovery guidance is printed to
+# stderr: for a post-checkpoint rotate failure, the checkpoint bundle's path
+# (decrypt with `docker compose ... run --rm --no-deps -T --entrypoint node
+# orbit-app /opt/orbit/scripts/recovery-crypto.mjs decrypt
+# <path-inside-container>` after bind-mounting it, exactly as this script
+# itself does to verify it) is named so the pre-rotation credential can be
+# recovered by hand; if the failure is at or after rotate step 3 (i.e. step
+# 2 already staged a new credential), the staged file's fixed path is ALSO
+# named, since the database may already be expecting that value. A
+# regenerate-secret step failure needs no such guidance — `mktemp` + `mv` is
+# all-or-nothing, so a failed target has written nothing recoverable or
+# stale to point at. EVERY dangerous-class plan entry deferred to this run
+# — including a regenerate-secret target never reached because rotation
+# failed first, or vice versa — is then reported
+# `execute action=<class> resolves=<reason-class> result=failed`, and the
+# run's exit code is 4 — the identical exit code stage one's own `failed`
+# terminal result uses, deliberately: `execution`'s exit-code vocabulary
+# already means "at least one attempted mutation failed" and stage two does
+# not need a second failure exit code, only its own `reason` enum (see
+# "Output contract" below) to distinguish which kind of failure it was.
 #
 # Machine prompts (repair --execute --dangerous)
 # --------------------------------------------------------------------------
@@ -971,9 +1042,11 @@ set -Eeuo pipefail
 #   prompt field=checkpoint-passphrase kind=secret required=true attempt=<1..3>
 #   prompt field=checkpoint-passphrase-confirm kind=secret required=true attempt=<1..3>
 #
-# `action-word` accepts only the exact single-line answer `rotate`;
-# `reason=mismatch` on any other non-empty answer, `reason=empty` on a blank
-# line. `checkpoint-passphrase` accepts any answer of at least
+# `action-word` accepts only the exact single-line answer for the class
+# currently being confirmed (`rotate` or `regenerate` — see "Approval
+# model" above); `reason=mismatch` on any other non-empty answer,
+# `reason=empty` on a blank line. `checkpoint-passphrase` accepts any answer
+# of at least
 # `MIN_RECOVERY_PASSPHRASE_LENGTH` (12) characters; `reason=empty` for a
 # blank line, `reason=too-short` otherwise. `checkpoint-passphrase-confirm`
 # accepts only an answer identical to the just-accepted
@@ -989,23 +1062,26 @@ set -Eeuo pipefail
 # Output contract (--execute --dangerous)
 # --------------------------------------------------------------------------
 # The dangerous batch adds exactly one new terminal line, printed once,
-# after every `execute action=rotate-database-credential ...` line the
-# dangerous batch itself produced (if any), and always after the safe
-# batch's own `execution result=...` line when both batches ran:
+# after every `execute action=<rotate-database-credential|regenerate-secret>
+# ...` line the dangerous batch itself produced (if any, covering both
+# classes when a single run's dangerous batch contains both), and always
+# after the safe batch's own `execution result=...` line when both batches
+# ran:
 #
 #   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
-# contained no `rotate-database-credential` entry; no prompt is shown.
-# `result=complete` (reason=none) — the credential was rotated and every
-# step succeeded. `result=refused` — the approval gate itself was never
-# passed (`reason=non-interactive` or `reason=refused-by-operator`); zero
-# mutation occurred. `result=failed` — approval was granted but a step
-# failed (`reason=checkpoint-failed` or `reason=step-failed`); see "Any step
-# failure" above. Like every other line in this script, no path, configured
-# value, or secret ever appears in this line or in any `execute action=
-# rotate-database-credential ...` line — enums only, exactly like
-# `--check`/`--plan`/`--execute --safe-only`.
+# contained no dangerous-class entry of either kind; no prompt is shown.
+# `result=complete` (reason=none) — every approved dangerous-class entry's
+# own mutation succeeded (the credential rotated, every deferred secret
+# regenerated). `result=refused` — the approval gate itself was never fully
+# passed for every class present (`reason=non-interactive` or
+# `reason=refused-by-operator`); zero mutation occurred. `result=failed` —
+# approval was granted but a step failed, of either class (`reason=
+# checkpoint-failed` or `reason=step-failed`); see "Any step failure" above.
+# Like every other line in this script, no path, configured value, or
+# secret ever appears in this line or in any `execute action=... ...` line
+# — enums only, exactly like `--check`/`--plan`/`--execute --safe-only`.
 #
 # EXIT CODES (--execute --dangerous)
 # --------------------------------------------------------------------------
@@ -1035,9 +1111,9 @@ usage() {
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
-  printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential action,\n' >&2
-  printf 'Orbit repair: which always requires interactive or machine-prompt approval —\n' >&2
-  printf 'Orbit repair: there is no flag that runs it unattended.\n' >&2
+  printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
+  printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
+  printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
 }
 
 plain_mode=0
@@ -1167,9 +1243,14 @@ readonly secrets_directory=".orbit-secrets"
 # migration was NOT already running inside install's own transaction.
 readonly configuration_rollback_suffix=".orbit-config.rollback"
 readonly database_volume_key="orbit-db-data"
+# ADR-0014 decision 5's second retention guard (document-kek): mirrors
+# database_volume_key exactly, matched the same way against
+# `${project}_orbit-documents-data` (see docker-compose.yml's own
+# `orbit-documents-data` volume declaration).
+readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=16
+readonly total_checks=17
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
@@ -1187,11 +1268,14 @@ readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgr
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services)
 
-# Stage-two dangerous set (issue #261, owner decision 2026-08-13) — only
-# ever executed under `--execute --dangerous`, subject to the typed-word/
-# checkpoint approval model. See "EXECUTE MODE (--execute --dangerous)"
-# above.
-readonly -a dangerous_action_classes=(rotate-database-credential)
+# Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
+# regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
+# executed under `--execute --dangerous`, subject to the typed-word/
+# never-automatable approval model. See "EXECUTE MODE (--execute
+# --dangerous)" above. Order here is the order confirm_dangerous_batch below
+# asks for each class's own typed word (rotate before regenerate) when a
+# single run's dangerous batch happens to contain both.
+readonly -a dangerous_action_classes=(rotate-database-credential regenerate-secret)
 
 # The step ITERATOR for rotate-database-credential — see the "Stage-two
 # dangerous-step iterator" note near RESERVED CLASSES above and "Step
@@ -1238,6 +1322,7 @@ readonly -a class_order=(
   docker-unavailable
   container-foreign-owner
   volume-retained-without-credentials
+  document-volume-retained-without-key
   unrelated-resource-present
   database-unreachable
   database-credential-mismatch
@@ -1269,6 +1354,14 @@ readonly -A action_for_class=(
   [configuration-migration-interrupted]=restore-transaction
   [staging-evidence-present]=restore-transaction
   [volume-retained-without-credentials]=rotate-database-credential
+  # ADR-0014 decision 5's second retention guard. Unlike the database case
+  # immediately above, there is no rotate equivalent for document-kek — a
+  # retained document volume was encrypted under whatever key it already
+  # holds, and there is no local-socket-trust operation analogous to
+  # `ALTER ROLE` that can re-derive access to it. The honest outcome is
+  # manual: an operator decision (restore the original key, or knowingly
+  # accept the retained documents are unreadable), never a guess.
+  [document-volume-retained-without-key]=manual
   [database-credential-mismatch]=rotate-database-credential
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
@@ -1308,7 +1401,14 @@ readonly -A mutation_for_action=(
   [manual]=none
 )
 
-# Action class -> backup requirement for --plan.
+# Action class -> backup requirement for --plan. regenerate-secret's
+# backup=not-required is only defensible because it is never planned where
+# it could invalidate retained state: the postgres-password/database-volume
+# guard (resolve_secret_missing_action) and the document-kek/document-volume
+# guard (also resolve_secret_missing_action, ADR-0014 decision 5) are what
+# make "no valid prior content exists to lose" true for every finding that
+# ever reaches this action. If either guard were ever weakened or removed,
+# this field would become wrong at the same moment.
 readonly -A backup_for_action=(
   [restore-transaction]=required
   [fix-permissions]=not-required
@@ -1340,6 +1440,17 @@ readonly -A manual_guidance=(
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
+  [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
+  # Keyed by the reason class (secret-missing), not by target, like every
+  # other entry here — but this one only ever fires for one specific target:
+  # resolve_secret_missing_action resolves secret-missing to `manual` ONLY
+  # for document-kek when document-volume-retained-without-key is also
+  # present (mirroring the postgres-password/rotate-database-credential
+  # exception, which never reaches `manual` at all). Every other secret-
+  # missing finding resolves to regenerate-secret or rotate-database-
+  # credential, never manual, so this entry is unambiguous despite the
+  # generic key.
+  [secret-missing]="the missing document-kek cannot be safely regenerated while a document volume is retained; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
 )
 
 declare -a findings=()
@@ -1495,19 +1606,27 @@ print_check_output_and_exit() {
 }
 
 # secret-missing's action class depends on which secret is missing: every
-# generated non-user secret regenerates safely, EXCEPT postgres-password
-# when a volume-retained-without-credentials finding is also present in
-# this same diagnosis (the #261 fixed-project collision) — that specific
-# finding must route to rotate-database-credential instead, so a
-# retained-volume postgres password is never auto-regenerated. See the
-# "regenerate-secret" / "rotate-database-credential" entries in the
+# generated non-user secret regenerates safely, EXCEPT
+#   - postgres-password when a volume-retained-without-credentials finding
+#     is also present in this same diagnosis (the #261 fixed-project
+#     collision) — that specific finding must route to
+#     rotate-database-credential instead, so a retained-volume postgres
+#     password is never auto-regenerated.
+#   - document-kek when a document-volume-retained-without-key finding is
+#     also present (ADR-0014 decision 5's second retention guard) — there is
+#     no rotate equivalent for a document volume, so the honest outcome is
+#     `manual` rather than a guessed fix.
+# See the "regenerate-secret" / "rotate-database-credential" entries in the
 # header's action-class mapping table for the full rationale. Relies on
 # bash's dynamic scoping: every caller declares its own local
-# `volume_retained_without_credentials` before calling this.
+# `volume_retained_without_credentials` and `document_volume_retained`
+# before calling this.
 resolve_secret_missing_action() {
   local target="$1"
   if [[ "$target" == postgres-password && "$volume_retained_without_credentials" == 1 ]]; then
     printf 'rotate-database-credential'
+  elif [[ "$target" == document-kek && "$document_volume_retained" == 1 ]]; then
+    printf 'manual'
   else
     printf 'regenerate-secret'
   fi
@@ -1518,11 +1637,13 @@ print_plan_output_and_exit() {
   local class entry fclass ftarget fseverity action
   local actions=0 manual=0 result
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1588,6 +1709,7 @@ print_plan_output_and_exit() {
 compute_plan_entries() {
   local class entry fclass ftarget fseverity action
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
@@ -1596,6 +1718,7 @@ compute_plan_entries() {
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1900,6 +2023,47 @@ run_diagnosis() {
       fi
     else
       add_finding docker-unavailable database-volume info
+    fi
+  fi
+
+  # --- Step 9b: retained document volume vs. document-kek (ADR-0014 decision
+  # 5's second retention guard) ------------------------------------------------
+  #
+  # Identical shape to Step 9 immediately above, against
+  # $document_volume_key/document-kek instead of
+  # $database_volume_key/postgres-password: a volume-name match plus the
+  # local absence of the document-kek secret file. Never opens a database
+  # connection, never execs into a container, never reads a document or a
+  # secret's contents — this is exactly as read-only as Step 9, and exists
+  # so a `document-kek` regeneration can never be planned while a document
+  # volume encrypted under the OLD (possibly now-unrecoverable) key is still
+  # retained — see resolve_secret_missing_action.
+
+  if [[ "$resource_check_eligible" == 1 ]]; then
+    if [[ "$docker_available" == 1 ]]; then
+      checked=$((checked + 1))
+      volume_list="$(timeout "$docker_probe_timeout" docker volume ls \
+        --filter "name=$document_volume_key" --format '{{.Name}}' 2>/dev/null || true)"
+      our_volume="${project}_${document_volume_key}"
+      found_ours=0
+      found_other=0
+      while IFS= read -r volume || [[ -n "$volume" ]]; do
+        [[ -z "$volume" ]] && continue
+        [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-documents-data$ ]] || continue
+        if [[ "$volume" == "$our_volume" ]]; then
+          found_ours=1
+        else
+          found_other=1
+        fi
+      done <<< "$volume_list"
+      [[ "$found_other" == 1 ]] && add_finding unrelated-resource-present document-volume info
+      if [[ "$found_ours" == 1 ]]; then
+        if [[ "$secrets_status" != ok || "${secret_status[document-kek]:-missing}" == missing ]]; then
+          add_finding document-volume-retained-without-key document-volume fail
+        fi
+      fi
+    else
+      add_finding docker-unavailable document-volume info
     fi
   fi
 
@@ -2889,13 +3053,93 @@ run_rotate_database_credential_steps() {
   return 0
 }
 
+# Dangerous-batch step for regenerate-secret: mints a fresh secret for one
+# target. Only ever reached for a target whose secret-missing finding
+# resolved to regenerate-secret at diagnosis time — never postgres-password
+# with a retained database volume, never document-kek with a retained
+# document volume (resolve_secret_missing_action and its two EXCEPTIONs in
+# the header route those to rotate-database-credential / manual instead).
+#
+# Ownership re-proof immediately before mutating (ADR-0014 decision 4),
+# mirroring fix-permissions' own TOCTOU re-check: the secrets directory must
+# still be real/non-symlink/mode 700, and the target must still be
+# genuinely missing (absent, or present but empty — exactly Step 3's own
+# secret-missing precondition) — this NEVER overwrites a secret that
+# appeared in the confirmation gap.
+#
+# The write itself mirrors configure.sh's ensure_secret_file discipline
+# (scripts/configure.sh:777-802) exactly, not a different one invented here:
+# staged under the secrets directory via mktemp (which creates the file at
+# mode 600 atomically, before any content is written), content written,
+# mode 600 set again defensively, then an atomic same-directory rename onto
+# the live secret path. No checkpoint step: the finding only ever fires when
+# the secret file is absent/empty, so there is no valid prior content to
+# preserve — see backup=not-required's own comment on backup_for_action.
+do_regenerate_secret_step() {
+  local target="$1"
+  local path="$secrets_directory/$target"
+  local new_secret="" tmp_path=""
+
+  is_real_non_symlink_directory "$secrets_directory" || return 1
+  has_mode "$secrets_directory" 700 || return 1
+  if [[ -e "$path" ]]; then
+    [[ ! -L "$path" && -f "$path" && ! -s "$path" ]] || return 1
+  fi
+
+  new_secret="$(generate_hex_secret)" || return 1
+  tmp_path="$(mktemp "$secrets_directory/.installing.XXXXXX")" || {
+    new_secret=""
+    return 1
+  }
+  printf '%s\n' "$new_secret" > "$tmp_path" || {
+    new_secret=""
+    rm -f -- "$tmp_path"
+    return 1
+  }
+  chmod 600 -- "$tmp_path" || {
+    new_secret=""
+    rm -f -- "$tmp_path"
+    return 1
+  }
+  new_secret=""
+  mv -- "$tmp_path" "$path"
+}
+
+# The straight-through cadence over every deferred regenerate-secret target,
+# one do_regenerate_secret_step call per target, in the same order the
+# targets were deferred (session-secret, postgres-password, document-kek,
+# oidc-client-secret — Step 3's own scan order). Stops at the first failing
+# target, exactly like run_rotate_database_credential_steps above (ADR-0014
+# decision 8: "the iterator... stops at the first failed step; nothing
+# later runs"). No checkpoint bundle to name in failure guidance here —
+# unlike rotate-credential, a failed regenerate step has written nothing
+# (mktemp + rename is all-or-nothing), so there is no half-applied state to
+# recover, only a target that still needs a secret.
+run_regenerate_secret_steps() {
+  local target
+  dangerous_failure_reason=none
+  for target in "$@"; do
+    if ! do_regenerate_secret_step "$target"; then
+      dangerous_failure_reason="step-failed"
+      printf "Orbit repair: stage two regenerate-secret step for '%s' failed.\n" "$target" >&2
+      printf 'Orbit repair: no new secret material was written for this target; the deployment is unchanged here.\n' >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Approval gate for stage two: the operator must type the literal action
-# word "rotate" — see "Approval model" above. Bounded at 3 attempts.
-# Returns 0 (typed correctly) or 1 (refused: wrong word on the final
-# attempt, empty input, or EOF). The non-interactive/non-machine case is
-# never routed here at all — see execute_dangerous_batch below.
+# word for the class(es) being confirmed — "rotate" for
+# rotate-database-credential, "regenerate" for regenerate-secret (ADR-0014
+# decision 5; see "Approval model" above and confirm_dangerous_batch below
+# for how the two are sequenced when a single run's dangerous batch contains
+# both). Bounded at 3 attempts. Returns 0 (typed correctly) or 1 (refused:
+# wrong word on the final attempt, empty input, or EOF). The
+# non-interactive/non-machine case is never routed here at all — see
+# execute_dangerous_batch below.
 confirm_dangerous_action() {
-  local count="$1" attempt answer remaining
+  local count="$1" word="$2" attempt answer remaining
 
   if [[ "$machine_prompts" == 1 ]]; then
     attempt=1
@@ -2905,7 +3149,7 @@ confirm_dangerous_action() {
         printf 'prompt-abort field=action-word\n'
         return 1
       fi
-      if [[ "$answer" == rotate ]]; then
+      if [[ "$answer" == "$word" ]]; then
         printf 'prompt-accept field=action-word\n'
         return 0
       fi
@@ -2921,16 +3165,16 @@ confirm_dangerous_action() {
   fi
 
   if [[ "$interactive" == 1 ]]; then
-    printf 'Orbit repair: stage two — %d dangerous action(s) proposed above (mutation=credential-rotation).\n' \
+    printf 'Orbit repair: stage two — %d dangerous action(s) proposed above.\n' \
       "$count" >&2
     attempt=1
     while ((attempt <= 3)); do
-      printf "Orbit repair: type 'rotate' to proceed (anything else cancels): " >&2
+      printf "Orbit repair: type '%s' to proceed (anything else cancels): " "$word" >&2
       if ! IFS= read -r answer; then
         printf 'Orbit repair: no confirmation received; refusing the dangerous action.\n' >&2
         return 1
       fi
-      if [[ "$answer" == rotate ]]; then
+      if [[ "$answer" == "$word" ]]; then
         return 0
       fi
       remaining=$((3 - attempt))
@@ -2982,7 +3226,38 @@ execute_dangerous_batch() {
 
   print_entries_preview "${dangerous_entries[@]}"
 
-  if ! confirm_dangerous_action "${#dangerous_entries[@]}"; then
+  # ADR-0014 decision 5: each dangerous action class keeps its own typed
+  # word. When a single run's dangerous batch spans both classes (e.g. a
+  # retained database volume alongside an unrelated missing session-secret),
+  # each is confirmed in turn, in dangerous_action_classes order — a single
+  # yes must never cover both a credential rotation and live secret minting,
+  # the same principle the ADR already applies between the safe and
+  # dangerous batches (see "Alternatives rejected"). Refusing either word
+  # refuses the WHOLE dangerous batch; nothing has mutated yet at this
+  # point, for either class.
+  local has_rotate=0 has_regenerate=0 rotate_count=0 regenerate_count=0
+  local -a regenerate_targets=()
+  for entry in "${dangerous_entries[@]}"; do
+    IFS='|' read -r action fclass ftarget <<< "$entry"
+    if [[ "$action" == rotate-database-credential ]]; then
+      has_rotate=1
+      rotate_count=$((rotate_count + 1))
+    elif [[ "$action" == regenerate-secret ]]; then
+      has_regenerate=1
+      regenerate_count=$((regenerate_count + 1))
+      regenerate_targets+=("$ftarget")
+    fi
+  done
+
+  local approved=1
+  if [[ "$has_rotate" == 1 ]] && ! confirm_dangerous_action "$rotate_count" rotate; then
+    approved=0
+  fi
+  if [[ "$approved" == 1 && "$has_regenerate" == 1 ]] && ! confirm_dangerous_action "$regenerate_count" regenerate; then
+    approved=0
+  fi
+
+  if [[ "$approved" != 1 ]]; then
     for entry in "${dangerous_entries[@]}"; do
       IFS='|' read -r action fclass ftarget <<< "$entry"
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
@@ -2992,16 +3267,28 @@ execute_dangerous_batch() {
     return 0
   fi
 
-  # Approved: rotate-database-credential is currently the only dangerous
-  # action class, so every deferred entry shares one execution instance and
-  # outcome (mirrors do_restart_services's own once-per-run dedup above).
-  # $dangerous_batch_in_progress brackets the call so the EXIT trap (see
-  # "cleanup" above the argument-parsing block) knows whether an abrupt
-  # termination happened mid-rotation and owes the operator the same
+  # Approved. rotate-database-credential's own entries always share one
+  # execution instance and outcome (mirrors do_restart_services's own
+  # once-per-run dedup above). regenerate-secret runs once per distinct
+  # missing-secret target. Both run straight through as ONE combined ordered
+  # sequence — rotate first, then regenerate — stopping at the first
+  # failure (ADR-0014 decision 8: "the iterator... stops at the first failed
+  # step; nothing later runs"): every dangerous-class entry in this run,
+  # including a regenerate-secret target never reached because rotation
+  # failed first, reports the SAME shared outcome below, exactly like the
+  # existing rotate-only case already does for its own multiple entries.
+  # $dangerous_batch_in_progress brackets the whole sequence so the EXIT
+  # trap (see "cleanup" above the argument-parsing block) knows whether an
+  # abrupt termination happened mid-mutation and owes the operator the same
   # recovery guidance a synchronous step failure already prints.
   local step_status=0
   dangerous_batch_in_progress=1
-  run_rotate_database_credential_steps || step_status=$?
+  if [[ "$has_rotate" == 1 ]]; then
+    run_rotate_database_credential_steps || step_status=$?
+  fi
+  if [[ "$step_status" == 0 && "$has_regenerate" == 1 ]]; then
+    run_regenerate_secret_steps "${regenerate_targets[@]}" || step_status=$?
+  fi
   dangerous_batch_in_progress=0
 
   local line_result done_count=0 failed_count=0
