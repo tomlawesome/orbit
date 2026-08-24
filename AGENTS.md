@@ -27,6 +27,28 @@ they are routed is global; it is not repeated here.
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
 
+## Harnesses that already exist
+
+Check the list before building a test rig or handing a check to the owner.
+
+- `scripts/test-all.sh` — backend suite then e2e (`ORBIT_SKIP_E2E` skips e2e)
+- `scripts/test-backend.sh` — static analysis and the fast Vitest suite
+- `scripts/test-frontend.sh` — Playwright against a running instance
+- `scripts/test-integration.mjs` — integration suite against a real database
+- `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
+  sidecars, then Playwright
+- `scripts/test-install-acceptance.sh` — real fresh install to a healthy
+  `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
+  fixture, so no provider credentials are needed
+- `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-malware-scanner.sh` — ClamAV detection
+- `scripts/test-tika-processor.mjs` — Tika document extraction
+- `scripts/installer-simulation.sh` — installer command-centre UI only, no Docker
+- `scripts/install-test-browser.sh` — one-time headless browser download
+- `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
+- `scripts/validate-compose-config.sh` — Compose configuration validation
+- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a given digest
+
 ## Traps when running things locally
 
 Three known ways to lose an afternoon, or worse. The first two have open
