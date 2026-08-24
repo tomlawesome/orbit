@@ -30,15 +30,26 @@ set -Eeuo pipefail
 #                                                           — execution of the
 #                                                           rotate-database-
 #                                                           credential action)
+#   bash scripts/repair.sh --export-diagnostics [--plain]  (issue #531, ADR-0014
+#                                                           decision 10: preview
+#                                                           then confirm then
+#                                                           write the exact
+#                                                           --check/--plan
+#                                                           deterministic stream
+#                                                           plus one identity
+#                                                           line — see "EXPORT
+#                                                           MODE
+#                                                           (--export-
+#                                                           diagnostics)" below)
 # `--safe-only` and `--dangerous` may be combined in one `--execute`
 # invocation (each batch keeps its own independent approval and outcome); at
 # least one of the two is REQUIRED alongside `--execute`, so a bare
 # `--execute` is refused with a usage error rather than silently running only
 # part of a repair. `--plain` is tolerated anywhere in the argument list;
 # output is unconditionally plain regardless of it. Exactly one of
-# `--check`/`--plan`/`--execute` is required. `--safe-only`/`--dangerous` are
-# accepted only alongside `--execute`. Any other combination, flag, or
-# positional argument is a usage error.
+# `--check`/`--plan`/`--execute`/`--export-diagnostics` is required.
+# `--safe-only`/`--dangerous` are accepted only alongside `--execute`. Any
+# other combination, flag, or positional argument is a usage error.
 #
 # This script is deliberately standalone and source-less: it never sources
 # install.sh, configure.sh or installer-ui.sh, and it copies only the
@@ -1106,14 +1117,83 @@ set -Eeuo pipefail
 #      either a structural non-interactive refusal or an exhausted bounded
 #      retry.
 
+# ============================================================================
+# EXPORT MODE (--export-diagnostics) — issue #531, ADR-0014 decision 10
+# ============================================================================
+# Exports diagnostics for support: the exact `--check` line grammar (finding
+# lines + the terminal `diagnosis` line) immediately followed by the exact
+# `--plan` line grammar (plan lines + the terminal `plan` line) — byte-for-
+# byte the same output those two modes would themselves print, produced by
+# the same `print_check_lines`/`print_plan_lines` functions rather than a
+# third reimplementation of either — plus exactly one further line:
+#
+#   identity schema_version=<value|unknown> applied_version=<value|unknown> image=<value|unknown>
+#
+# `schema_version`/`applied_version`/`image` are read directly from the live
+# `.env-orbit` (never via `configure.sh`, per decision 2's source-less rule)
+# and are ADR-0008 public, already-safe values: the configuration schema
+# version, the applied configuration version, and the digest-pinned
+# `ORBIT_IMAGE` reference. This is a bounded, deliberate exception to "no
+# configured value ever reaches stdout" — exactly these three fields, and
+# nothing else, ever. Each value is independently format-validated before
+# being trusted (the same bounded patterns `check_application_container`
+# already uses for `ORBIT_IMAGE`, mirrored rather than shared per decision 2);
+# a missing or malformed value is rendered as the fixed placeholder `unknown`
+# — the same convention docs/engine-events.md already uses for an
+# unrecognised enum value — never the raw value, and never a shorter line.
+# Allowlisting is inherited entirely from `--check`/`--plan`'s own enum-only
+# output contract: this mode adds no second redaction layer that could drift
+# from it.
+#
+# Preview, then confirm, then write — in that order, and only in that order.
+# The full content above (identical for the terminal preview and the written
+# file — assembled once, printed twice) is always printed to stdout first,
+# regardless of confirmation channel. Confirmation then follows the same
+# machine-prompt/interactive priority `confirm_safe_batch` already uses
+# (`field=export-diagnostics kind=confirm`), with one deliberate difference:
+# there is no non-interactive automation path. Decision 10 requires the
+# content to be "explicitly confirmed before any file is written", so a run
+# with no controlling terminal and no `ORBIT_REPAIR_PROMPTS=machine` opt-in
+# declines — fail-closed — rather than guessing at consent. Declining (by
+# either channel, or by reaching this fail-closed default) writes nothing at
+# all: no `mktemp` call is ever made before confirmation succeeds, so a
+# decline leaves no temporary file behind either.
+#
+# The write mirrors the discipline already in this script (see the checkpoint
+# bundle and the config-rollback restore above): `mktemp` under the
+# installation directory (mode 600 from creation), the full content written,
+# mode 600 set again defensively, then an atomic same-directory rename onto a
+# second, equally random `mktemp`-derived final name — so a reader can never
+# observe a partially-written file at the path this run ultimately reports.
+# That path is reported on stderr only, exactly like the checkpoint bundle
+# path above — never on stdout. No encryption: these are public values under
+# ADR-0008, and `recovery-crypto.mjs`/the recovery-bundle envelope are
+# deliberately not reused here for a file that never carries a secret.
+#
+# EXIT CODES (--export-diagnostics)
+# --------------------------------------------------------------------------
+#   0  the file was written.
+#   1  declined — an explicit interactive/machine-prompt "no", or no
+#      confirmation channel was available at all (see above); zero mutation
+#      either way.
+#   2  usage error.
+#   4  failed — the file could not be created/written (e.g. `mktemp`/`mv`
+#      failure); zero mutation.
+#   5  not-an-orbit-installation — identical trigger/meaning to every other
+#      mode; the check/plan content is still printed (matching `--check`/
+#      `--plan`'s own early-exit behavior), but no identity line, preview,
+#      confirmation, or write is ever attempted.
+
 usage() {
-  printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)) [--plain]\n' "$0" >&2
+  printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)|--export-diagnostics) [--plain]\n' "$0" >&2
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
   printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
   printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
   printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
+  printf 'Orbit repair: --export-diagnostics previews, then requires explicit confirmation for,\n' >&2
+  printf 'Orbit repair: writing the exact --check/--plan stream plus one identity line to a file.\n' >&2
 }
 
 plain_mode=0
@@ -1122,10 +1202,10 @@ dangerous=0
 mode=""
 for arg in "$@"; do
   case "$arg" in
-    --check|--plan|--execute)
-      # Exactly one of --check/--plan/--execute is accepted; a second (of
-      # any of the three) is a usage error rather than a silent
-      # last-flag-wins override.
+    --check|--plan|--execute|--export-diagnostics)
+      # Exactly one of --check/--plan/--execute/--export-diagnostics is
+      # accepted; a second (of any of the four) is a usage error rather
+      # than a silent last-flag-wins override.
       [[ -z "$mode" ]] || {
         usage
         exit 2
@@ -1632,10 +1712,14 @@ resolve_secret_missing_action() {
   fi
 }
 
-print_plan_output_and_exit() {
-  local forced_exit="$1"
+# Prints the --plan line grammar (plan lines + the terminal plan line)
+# without exiting, and records the plan result into $plan_result. Used both
+# by --plan itself and by --export-diagnostics, which must include this
+# exact byte-for-byte stream (same function, not a third reimplementation)
+# in its exported content — see "EXPORT MODE (--export-diagnostics)" above.
+print_plan_lines() {
   local class entry fclass ftarget fseverity action
-  local actions=0 manual=0 result
+  local actions=0 manual=0
   local volume_retained_without_credentials=0
   local document_volume_retained=0
 
@@ -1680,18 +1764,23 @@ print_plan_output_and_exit() {
   done
 
   if [[ "$actions" -gt 0 ]]; then
-    result=ready
+    plan_result=ready
   elif [[ "$manual" -gt 0 ]]; then
-    result="manual-required"
+    plan_result="manual-required"
   else
-    result=empty
+    plan_result=empty
   fi
-  printf 'plan result=%s actions=%s manual=%s\n' "$result" "$actions" "$manual"
+  printf 'plan result=%s actions=%s manual=%s\n' "$plan_result" "$actions" "$manual"
+}
+
+print_plan_output_and_exit() {
+  local forced_exit="$1"
+  print_plan_lines
 
   if [[ "$forced_exit" == early ]]; then
     exit 5
   fi
-  case "$result" in
+  case "$plan_result" in
     empty) exit 0 ;;
     ready) exit 3 ;;
     manual-required) exit 4 ;;
@@ -3482,9 +3571,137 @@ execute_repair() {
   exit 0
 }
 
+# --- export-diagnostics (issue #531, ADR-0014 decision 10) ------------------
+#
+# Builds the fixed-format identity line described in "EXPORT MODE
+# (--export-diagnostics)" above. Reads directly from the live .env-orbit
+# (never via configure.sh — decision 2's source-less rule) and only when
+# $env_status == ok, exactly like check_application_container's own
+# ORBIT_IMAGE read: an untrustworthy managed file (missing, a symlink, wrong
+# mode) means every field falls back to the fixed placeholder rather than
+# reading content this script has not already proven safe to read. Each
+# field is independently format-validated before being trusted; the
+# ORBIT_IMAGE pattern is the exact one check_application_container already
+# uses, duplicated here rather than shared across functions for the same
+# reason repair.sh duplicates it from configuration.sh's own validators —
+# small recognition primitives are mirrored, not linked, by design.
+build_identity_line() {
+  local schema="unknown" applied="unknown" image="unknown"
+  local raw=""
+
+  if [[ "$env_status" == ok ]]; then
+    raw="$(read_environment_value ORBIT_CONFIG_SCHEMA_VERSION 2>/dev/null || true)"
+    [[ "$raw" =~ ^[0-9]{1,10}$ ]] && schema="$raw"
+
+    raw="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
+    [[ "$raw" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && applied="$raw"
+
+    raw="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
+    [[ "$raw" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] && image="$raw"
+  fi
+
+  printf 'identity schema_version=%s applied_version=%s image=%s' "$schema" "$applied" "$image"
+}
+
+# --- confirmation (--export-diagnostics) -------------------------------------
+#
+# Returns 0 (proceed) or 1 (declined). Mirrors confirm_safe_batch's machine-
+# prompt/interactive priority, with one deliberate difference: there is no
+# non-interactive automation path here (contrast run_safe_batch's own
+# "reaching here already means unattended is the intended contract" case).
+# Decision 10 requires the exported content to be "explicitly confirmed
+# before any file is written", so a run with no controlling terminal and no
+# ORBIT_REPAIR_PROMPTS=machine opt-in declines rather than guessing at
+# consent. The content itself is already on stdout by the time this is
+# called (export_diagnostics_repair prints it first); this function only
+# ever prints the prompt/answer exchange.
+confirm_export_diagnostics() {
+  local answer=""
+
+  if [[ "$machine_prompts" == 1 ]]; then
+    printf 'prompt field=export-diagnostics kind=confirm required=true attempt=1\n'
+    if IFS= read -r answer && [[ "$answer" == y ]]; then
+      printf 'prompt-accept field=export-diagnostics\n'
+      return 0
+    fi
+    printf 'prompt-abort field=export-diagnostics\n'
+    return 1
+  fi
+
+  if [[ "$interactive" == 1 ]]; then
+    printf 'Orbit repair: write the diagnostics above to a file? [y/N] ' >&2
+    if IFS= read -r answer && [[ "$answer" == y || "$answer" == Y ]]; then
+      return 0
+    fi
+    return 1
+  fi
+
+  return 1
+}
+
+# Writes $1 (the already-previewed, already-confirmed export content) to a
+# freshly created file, mirroring the checkpoint bundle's own discipline:
+# mktemp (mode 600 from creation) under the installation directory, content
+# written, mode 600 set again defensively, then an atomic same-directory
+# rename onto a second, equally random final name — so a reader can never
+# observe a partially-written file at the path this run ultimately reports.
+# Returns 0 and prints the final path on stderr only (never stdout, matching
+# the checkpoint bundle path above) on success; returns 1, with any partial
+# temp file removed, on any failure.
+write_export_diagnostics() {
+  local content="$1" tmp_path="" final_path=""
+
+  tmp_path="$(mktemp "./.orbit-repair-diagnostics.XXXXXX")" || return 1
+  chmod 600 -- "$tmp_path" 2>/dev/null || true
+  if ! printf '%s\n' "$content" > "$tmp_path" 2>/dev/null; then
+    rm -f -- "$tmp_path"
+    return 1
+  fi
+  chmod 600 -- "$tmp_path" 2>/dev/null || true
+
+  final_path="${tmp_path}.txt"
+  if ! mv -- "$tmp_path" "$final_path" 2>/dev/null; then
+    rm -f -- "$tmp_path"
+    return 1
+  fi
+
+  printf 'Orbit repair: diagnostics exported to %s\n' "$final_path" >&2
+  printf 'Orbit repair: (plain text, mode 600 — no encryption; these are public values under ADR-0008.)\n' >&2
+  return 0
+}
+
+export_diagnostics_repair() {
+  run_diagnosis
+
+  if [[ "$diagnosis_early" == 1 ]]; then
+    print_check_lines
+    print_plan_lines
+    exit 5
+  fi
+
+  local export_content=""
+  export_content="$(print_check_lines; print_plan_lines; printf '%s\n' "$(build_identity_line)")"
+
+  printf '%s\n' "$export_content"
+
+  if ! confirm_export_diagnostics; then
+    exit 1
+  fi
+
+  if ! write_export_diagnostics "$export_content"; then
+    printf 'Orbit repair: could not write the diagnostics export file.\n' >&2
+    exit 4
+  fi
+
+  exit 0
+}
+
 case "$mode" in
   execute)
     execute_repair
+    ;;
+  export-diagnostics)
+    export_diagnostics_repair
     ;;
   *)
     run_diagnosis
