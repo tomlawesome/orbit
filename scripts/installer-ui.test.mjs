@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
 /*
@@ -103,24 +105,32 @@ function runPtyInterrupted(body, marker, env = {}) {
       }
     });
     child.on("error", reject);
-    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
       clearTimeout(timer);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyInterrupted", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+        return;
+      }
       resolve({ status, stdout, signalled });
     });
   });
 }
 
 function runPty(body, input, env = {}, transcript = "/dev/null") {
-  return spawnSync(
+  const result = spawnSync(
     "script",
     ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, transcript],
     {
       encoding: "utf8",
       input,
+      timeout: PTY_DEADLINE_MS,
+      killSignal: "SIGKILL",
       env: { ...process.env, TERM: "xterm", ...env },
     },
   );
+  return failOnPtyDeadline(result, { label: "runPty", deadlineMs: PTY_DEADLINE_MS });
 }
 
 function runPtyTimed(body, input, env = {}) {
@@ -137,13 +147,18 @@ function runPtyTimed(body, input, env = {}) {
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     setTimeout(() => {
       child.stdin.write(input);
       child.stdin.end();
     }, 200);
     child.on("close", (status, signal) => {
       clearTimeout(timeout);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyTimed", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout, stderr }));
+        return;
+      }
       resolve({ status, signal, stdout, stderr });
     });
   });
@@ -418,7 +433,7 @@ describe("installer semantic UI", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("REJECTED=1");
     expect(result.stdout).not.toContain("VALUE=partial");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("keeps secret input out of terminal output and supports editing", () => {
     const secret = "private-widget-secret";
@@ -450,7 +465,7 @@ describe("installer semantic UI", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=1 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("restores terminal state when text entry is interrupted by a signal", async () => {
     const result = await runPtyInterrupted(
@@ -462,7 +477,7 @@ describe("installer semantic UI", () => {
 
     expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("cancels the raw single-key menu with a lone Escape and restores the terminal", () => {
     const result = runPty(
@@ -484,7 +499,7 @@ describe("installer semantic UI", () => {
 
     expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("preserves a caller's own INT trap after a widget restores it", () => {
     const result = runPty(
