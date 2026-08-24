@@ -3890,3 +3890,289 @@ describe("scripts/repair.sh EXIT trap (issue #383 finding 4)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// --export-diagnostics (issue #531, ADR-0014 decision 10)
+// ---------------------------------------------------------------------------
+//
+// Decision 10: exported diagnostics are the deterministic --check/--plan
+// stream and nothing else, plus exactly one identity line of already-safe
+// metadata (configuration schema version, applied version, the digest-
+// pinned image reference — public values under ADR-0008). The full content
+// is printed to the terminal and explicitly confirmed before any file is
+// written; allowlisting is inherited entirely from --check/--plan's own
+// enum-only contract, never a second redaction layer.
+
+const IDENTITY_DIGEST = "b".repeat(64);
+const IDENTITY_APPLIED_DIGEST = `sha256:${IDENTITY_DIGEST}`;
+const IDENTITY_IMAGE = `ghcr.io/tomlawesome/orbit@${IDENTITY_APPLIED_DIGEST}`;
+const IDENTITY_LINE_PATTERN =
+  /^identity schema_version=(?:\d{1,10}|unknown) applied_version=(?:v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)|unknown) image=(?:[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}|unknown)$/;
+
+// Overwrites .env-orbit with the three ADR-0014 decision 10 identity fields
+// set to well-formed values by default — the exact shapes
+// configuration.sh's own is_valid_applied_version/is_valid_applied_digest/
+// is_valid_immutable_image validators require (configuration.sh:93-103;
+// repair.sh mirrors rather than shares these per decision 2) — plus a
+// representative spread of the OTHER configured values a real deployment
+// carries (APP_URL, OIDC settings, a project name), so the leak test below
+// has real non-identity values to prove absent. Pass `null` for
+// schemaVersion/appliedVersion/image to omit that key entirely (the
+// "missing" case); pass any other string to test the "malformed" case.
+function writeIdentityEnv(targetDir, overrides = {}) {
+  const schemaVersion = "schemaVersion" in overrides ? overrides.schemaVersion : "1";
+  const appliedVersion = "appliedVersion" in overrides ? overrides.appliedVersion : "v1.2.0";
+  const image = "image" in overrides ? overrides.image : IDENTITY_IMAGE;
+
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    ...(image === null ? [] : [`ORBIT_IMAGE=${image}`]),
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET=repair-test-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    ...(schemaVersion === null ? [] : [`ORBIT_CONFIG_SCHEMA_VERSION=${schemaVersion}`]),
+    ...(appliedVersion === null ? [] : [`ORBIT_CONFIG_APPLIED_VERSION=${appliedVersion}`]),
+    `ORBIT_CONFIG_APPLIED_DIGEST=${IDENTITY_APPLIED_DIGEST}`,
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
+describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 10)", () => {
+  // The docker shim's own `app.image` must match ORBIT_IMAGE or the
+  // unrelated stale-container check fires a warn finding, which would make
+  // the preview/byte-identical tests below depend on an incidental finding
+  // instead of the export-diagnostics contract itself.
+  const HEALTHY_APP_OPTIONS = { app: { image: IDENTITY_IMAGE, health: "healthy" } };
+  const DECLINE = { input: "n\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } };
+  const ACCEPT = { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } };
+
+  // --- flag surface -----------------------------------------------------
+
+  it("rejects a bare invocation with no mode", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, []);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --export-diagnostics combined with --check", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--export-diagnostics", "--check"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --export-diagnostics combined with --plan", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--plan", "--export-diagnostics"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --export-diagnostics combined with --execute", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--execute", "--export-diagnostics"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --safe-only alongside --export-diagnostics", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--export-diagnostics", "--safe-only"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("rejects --dangerous alongside --export-diagnostics", () => {
+    const targetDir = makeFixture();
+    const result = runRepair(targetDir, ["--export-diagnostics", "--dangerous"]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Usage:");
+  });
+
+  it("tolerates --plain in either order around --export-diagnostics", () => {
+    const targetDir = makeFixture();
+    const first = runRepair(targetDir, ["--export-diagnostics", "--plain"], {}, DECLINE);
+    const second = runRepair(targetDir, ["--plain", "--export-diagnostics"], {}, DECLINE);
+    expect(first.status).toBe(1);
+    expect(second.status).toBe(1);
+    expect(first.stdout).toBe(second.stdout);
+  });
+
+  it("exits 5 for a directory with no Orbit fingerprint: prints exactly the --check + --plan early content, never an identity line, a prompt, or a file", () => {
+    const targetDir = scratchDir();
+    mkdirSync(join(targetDir, "scripts"));
+    writeFileSync(join(targetDir, "scripts", "repair.sh"), repairScriptSource);
+    chmodSync(join(targetDir, "scripts", "repair.sh"), 0o755);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"]);
+
+    expect(result.status).toBe(5);
+    expect(lines(result.stdout)).toEqual([
+      "finding class=not-orbit-directory target=directory severity=fail",
+      "diagnosis result=failed checked=1 skipped=16",
+      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required",
+      "plan result=manual-required actions=0 manual=1",
+    ]);
+    expect(result.stdout).not.toContain("identity ");
+    expect(result.stderr).not.toContain("[y/N]");
+    expect(readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-diagnostics."))).toBe(false);
+  });
+
+  // --- preview content -------------------------------------------------
+
+  it("previews the exact --check + --plan content plus the identity line, on stdout, before any confirmation prompt", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+
+    const checkResult = runRepair(targetDir, ["--check"], HEALTHY_APP_OPTIONS);
+    const planResult = runRepair(targetDir, ["--plan"], HEALTHY_APP_OPTIONS);
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
+
+    const expectedIdentity = `identity schema_version=1 applied_version=v1.2.0 image=${IDENTITY_IMAGE}`;
+    expect(result.stdout).toBe(`${checkResult.stdout}${planResult.stdout}${expectedIdentity}\n`);
+    expect(result.stderr).toContain("write the diagnostics above to a file? [y/N]");
+  });
+
+  // --- decline -----------------------------------------------------------
+
+  it("declining writes nothing at all: no file, no temporary file left behind, exit 1, zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
+
+    expect(result.status).toBe(1);
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-diagnostics."))).toBe(false);
+  });
+
+  it("declines with no confirmation channel at all (fully non-interactive), without a prompt or a file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("[y/N]");
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-diagnostics."))).toBe(false);
+  });
+
+  // --- accept --------------------------------------------------------------
+
+  it("accepting writes a mode-600 file whose content matches the preview, reporting the path on stderr only", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, ACCEPT);
+
+    expect(result.status).toBe(0);
+    const written = readdirSync(targetDir).find((name) => name.startsWith(".orbit-repair-diagnostics."));
+    expect(written).toBeDefined();
+    const writtenPath = join(targetDir, written);
+    expect(mode(writtenPath)).toBe("600");
+    expect(readFileSync(writtenPath, "utf8")).toBe(result.stdout);
+    expect(result.stdout).not.toContain(written);
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stderr).toContain(written);
+    expect(result.stderr).toContain("diagnostics exported to");
+  });
+
+  // --- identity line grammar ------------------------------------------------
+
+  it("the identity line carries exactly three named fields matching a fixed grammar", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
+
+    const identityLines = lines(result.stdout).filter((line) => line.startsWith("identity"));
+    expect(identityLines).toHaveLength(1);
+    expect(identityLines[0]).toMatch(IDENTITY_LINE_PATTERN);
+    // "identity" + exactly 3 "key=value" tokens: a 4th field appended
+    // anywhere would fail this even if it happened to look field-shaped.
+    expect(identityLines[0].split(" ")).toHaveLength(4);
+  });
+
+  // --- the leak test: nothing but the three identity fields ever appears ---
+
+  it("never contains any other configured value from .env-orbit — only the three identity fields, ever", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+
+    const result = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, ACCEPT);
+    expect(result.status).toBe(0);
+    const written = readdirSync(targetDir).find((name) => name.startsWith(".orbit-repair-diagnostics."));
+    const fileContent = readFileSync(join(targetDir, written), "utf8");
+
+    const otherConfiguredValues = [
+      "https://orbit.repair-test.internal", // APP_URL
+      "https://auth.repair-test.internal/application/o/orbit/", // OIDC_ISSUER
+      "repair-test-client", // OIDC_CLIENT_ID
+      "repair-test-secret", // OIDC_CLIENT_SECRET
+      "https://orbit.repair-test.internal/api/auth/callback", // OIDC_CALLBACK_URL
+      "repairtest", // COMPOSE_PROJECT_NAME
+      "a".repeat(64), // every .orbit-secrets file's raw value
+    ];
+    for (const value of otherConfiguredValues) {
+      expect(result.stdout).not.toContain(value);
+      expect(fileContent).not.toContain(value);
+    }
+
+    // The bounded exception: exactly the identity line's three fields.
+    const expectedIdentity = `identity schema_version=1 applied_version=v1.2.0 image=${IDENTITY_IMAGE}`;
+    expect(fileContent).toContain(expectedIdentity);
+  });
+
+  // --- missing/malformed identity fields -> placeholder, never the raw value
+
+  describe("a missing or malformed identity field falls back to the fixed placeholder", () => {
+    const scenarios = [
+      { label: "missing schema_version", overrides: { schemaVersion: null }, field: "schema_version" },
+      { label: "malformed schema_version (non-numeric)", overrides: { schemaVersion: "not-a-number" }, field: "schema_version" },
+      { label: "missing applied_version", overrides: { appliedVersion: null }, field: "applied_version" },
+      { label: "malformed applied_version (missing v prefix)", overrides: { appliedVersion: "1.2.0" }, field: "applied_version" },
+      { label: "missing image (ORBIT_IMAGE)", overrides: { image: null }, field: "image" },
+      { label: "malformed image (not digest-pinned)", overrides: { image: "orbit-local:abcdef123456" }, field: "image" },
+    ];
+
+    for (const { label, overrides, field } of scenarios) {
+      it(`${label} -> placeholder "unknown" for ${field}, raw value never appears, still exactly three fields`, () => {
+        const targetDir = makeFixture({ withConfigure: false });
+        writeIdentityEnv(targetDir, overrides);
+
+        const result = runRepair(targetDir, ["--export-diagnostics"], {}, DECLINE);
+
+        const identity = lines(result.stdout).find((line) => line.startsWith("identity"));
+        expect(identity).toMatch(IDENTITY_LINE_PATTERN);
+        expect(identity).toContain(`${field}=unknown`);
+        expect(identity.split(" ")).toHaveLength(4);
+
+        const rawValue = overrides[Object.keys(overrides)[0]];
+        if (rawValue) {
+          expect(result.stdout).not.toContain(rawValue);
+        }
+      });
+    }
+  });
+
+  // --- determinism -----------------------------------------------------
+
+  it("produces byte-identical output across two runs against identical state", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    writeIdentityEnv(targetDir);
+
+    const first = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
+    const second = runRepair(targetDir, ["--export-diagnostics"], HEALTHY_APP_OPTIONS, DECLINE);
+
+    expect(first.status).toBe(second.status);
+    expect(first.stdout).toBe(second.stdout);
+  });
+});
