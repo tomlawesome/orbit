@@ -1,0 +1,167 @@
+name: Launcher install compatibility
+
+# orbit-launcher (github.com/tomlawesome/orbit-launcher) fetches
+# scripts/install.sh live from this repository at runtime rather than
+# vendoring a copy. That makes the installer on `main` a production API:
+# the moment a promotion lands there, every launcher user gets the new
+# script with no launcher release in between and nothing having tested
+# the pairing. This job is the gate that API never had — it installs
+# Orbit *through the launcher*, against this pull request's own
+# install.sh, so a promotion cannot ship an installer the launcher can no
+# longer drive. See issue #596 and orbit-launcher#119.
+#
+# It supersedes notify-launcher-on-installer-change.yml as the release
+# gate. That workflow only ever warned *after* a change reached a branch,
+# and could not fire on the push that matters at all: it triggers on
+# pushes to dev, preview and main, but exists only on dev and preview,
+# and a push-triggered workflow runs the copy on the branch pushed.
+#
+# Scope, deliberately uneven:
+#   - every pull request into `main`, because that is the promotion, and
+#     because a required status check must return a terminal result on
+#     every pull request it gates;
+#   - pull requests into `dev` or `preview` only when an installer script
+#     actually changed, so ordinary work is not taxed with a Docker run.
+#
+# The suite needs no secrets. It drives the guided configuration with
+# obvious placeholder credentials and uses a real public OIDC discovery
+# endpoint, which install.sh validates for shape only — so this is safe
+# to run on pull requests.
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - preview
+      - main
+  workflow_dispatch:
+    inputs:
+      launcher_ref:
+        description: "orbit-launcher ref to build the launcher from"
+        required: false
+        default: dev
+
+permissions:
+  contents: read
+
+jobs:
+  launcher-install-compat:
+    name: Launcher install compatibility
+    runs-on: ubuntu-latest
+    # The suite itself measured 63s on a clean runner; the rest is image
+    # pulls and a real first boot. Well above that, so a genuine hang
+    # fails with the suite's own diagnosis rather than a job kill.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # Both pull request endpoints must be present to diff them.
+          fetch-depth: 0
+
+      - name: Decide whether this pull request needs the check
+        id: scope
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT" != "pull_request" ]]; then
+            echo "Manual run — always checked."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+          # A promotion is gated whether or not its own diff happens to
+          # touch the installer: what reaches main is what launcher users
+          # get, and this check has to report on every such pull request
+          # to be usable as a required one.
+          if [[ "$BASE_REF" == "main" ]]; then
+            echo "Pull request into main — this is the promotion gate."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # This workflow watches itself as well as the installer, so a
+          # change to the gate runs the gate. Without that the only way
+          # to exercise it would be workflow_dispatch, which GitHub only
+          # offers for workflows already on the default branch — the very
+          # trap that left the previous compatibility watch unable to fire
+          # (orbit-launcher#119).
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
+            scripts/install.sh scripts/installer-ui.sh scripts/installer-simulation.sh \
+            .github/workflows/launcher-install-compat.yml)"
+          if [[ -n "$changed" ]]; then
+            echo "Installer scripts changed:"
+            echo "$changed"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No installer script changed on a non-promotion pull request — nothing to check."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out orbit-launcher
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: tomlawesome/orbit-launcher
+          # Explicit ref: this builds and runs a second repository's code
+          # in this repository's CI, so it does not float on that repo's
+          # default branch.
+          ref: ${{ github.event.inputs.launcher_ref || 'dev' }}
+          path: launcher
+
+      - name: Set up Go
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: launcher/go.mod
+
+      - name: Build orbit-launcher from source
+        if: steps.scope.outputs.run == 'true'
+        working-directory: launcher
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/orbit-launcher" ./cmd/orbit-launcher
+
+      - name: Install Orbit through the launcher, against this revision's installer
+        if: steps.scope.outputs.run == 'true'
+        working-directory: launcher
+        env:
+          ORBIT_LAUNCHER_LIVE_BINARY: ${{ runner.temp }}/orbit-launcher
+          ORBIT_LAUNCHER_LIVE_RAW_LOG: ${{ runner.temp }}/live-raw.log
+          # The candidate installer, by exact commit, rather than whatever
+          # the launcher would fetch from main in production.
+          ORBIT_LAUNCHER_INSTALL_SCRIPT_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.scope.outputs.sha }}/scripts/install.sh
+          # install.sh and the image it verifies are one generation and
+          # must be tested as one. This installer has not been promoted,
+          # so the image that matches it is the pre-release one; pairing a
+          # pre-release script with the promoted `latest` image fails on
+          # identity checks that image predates, which would be a mismatch
+          # this job invented rather than a real incompatibility.
+          ORBIT_CHANNEL: preview
+        run: go test -tags live -count=1 -v -timeout 30m ./test/live/...
+
+      - name: Docker state (always, for debugging)
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          docker ps -a || true
+          docker volume ls || true
+
+      - name: Upload raw pty transcript (always, for debugging)
+        if: always() && steps.scope.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: launcher-compat-live-raw-log
+          path: ${{ runner.temp }}/live-raw.log.*
+          if-no-files-found: ignore
+          retention-days: 7
