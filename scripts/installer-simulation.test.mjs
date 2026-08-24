@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, ptyDeadlineError } from "./pty-deadline.mjs";
+
 const simulationScript = fileURLToPath(new URL("./installer-simulation.sh", import.meta.url));
 const uiScript = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
@@ -95,11 +97,11 @@ function runPty(cwd, input, args = []) {
     child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
     child.stdin.write(input);
 
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, 10000);
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
       clearTimeout(timer);
       if (timedOut) {
-        reject(new Error(`runPty timed out after 10s; stdout so far:\n${stdout}`));
+        reject(ptyDeadlineError({ label: "runPty", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
         return;
       }
       resolve({ status, stdout });
@@ -197,7 +199,7 @@ describe("scripts/installer-simulation.sh", () => {
     expect(result.status).toBe(130);
     expect(result.stdout).toContain("Simulation: Greetings");
     expect(readdirSync(cwd)).toEqual(before);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("exits cleanly from the top-level Exit choice", async () => {
     const cwd = scratchDir();
@@ -205,7 +207,7 @@ describe("scripts/installer-simulation.sh", () => {
     const result = await runPty(cwd, "\x1b[B\x1b[B\x1b[B\r");
 
     expect(result.status).toBe(130);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("keeps Repair presentation-only", async () => {
     const cwd = scratchDir();
@@ -217,7 +219,7 @@ describe("scripts/installer-simulation.sh", () => {
     expect(result.stdout).toContain("repair_unavailable");
     expect(result.stdout).toContain("No deployment occurred.");
     expect(readdirSync(cwd)).toEqual(before);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("never echoes or persists the synthetic hidden-input exercise", async () => {
     const cwd = scratchDir();
@@ -231,7 +233,7 @@ describe("scripts/installer-simulation.sh", () => {
     expect(result.stdout).not.toContain(secret);
     expect(result.stdout).toContain("discarded");
     expect(readdirSync(cwd)).toEqual(before);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("rejects a hostile bracketed-paste payload during the text exercise without any side effect", async () => {
     const cwd = scratchDir();
@@ -242,7 +244,7 @@ describe("scripts/installer-simulation.sh", () => {
     expect(result.status).toBe(2);
     expect(result.stdout).not.toContain("first");
     expect(readdirSync(cwd)).toEqual(before);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("presents every fixed representative failure scenario without a real error", async () => {
     const cwd = scratchDir();
@@ -258,5 +260,5 @@ describe("scripts/installer-simulation.sh", () => {
       expect(result.stdout).toContain(expectedReason);
       expect(result.stdout).toContain("No deployment occurred.");
     }
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 });
