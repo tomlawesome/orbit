@@ -10,11 +10,12 @@ name: Launcher install compatibility
 # install.sh, so a promotion cannot ship an installer the launcher can no
 # longer drive. See issue #596 and orbit-launcher#119.
 #
-# It supersedes notify-launcher-on-installer-change.yml as the release
-# gate. That workflow only ever warned *after* a change reached a branch,
-# and could not fire on the push that matters at all: it triggers on
-# pushes to dev, preview and main, but exists only on dev and preview,
-# and a push-triggered workflow runs the copy on the branch pushed.
+# It replaced notify-launcher-on-installer-change.yml, since removed
+# (#601). That workflow only ever warned *after* a change reached a
+# branch, and could not fire on the push that matters at all: it
+# triggered on pushes to dev, preview and main, but existed only on dev
+# and preview, and a push-triggered workflow runs the copy on the branch
+# pushed.
 #
 # Scope, deliberately uneven:
 #   - every pull request into `main`, because that is the promotion, and
