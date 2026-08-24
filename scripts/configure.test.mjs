@@ -16,6 +16,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { PTY_DEADLINE_MS, failOnPtyDeadline } from "./pty-deadline.mjs";
+
 // This suite runs configure.sh from copied fixtures in temporary directories:
 // the script always cds to its own containing checkout, so it must never be
 // pointed at the real repository. Fake `openssl` and `docker` executables are
@@ -113,10 +115,12 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
 function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides = {}, input = "") {
   const binDir = makeFakeBin();
   const command = `exec </dev/null; bash ${join(targetDir, "scripts", "configure.sh")} ${args.join(" ")}`;
-  return spawnSync("script", ["-qeE", "never", "-c", command, "/dev/null"], {
+  const result = spawnSync("script", ["-qeE", "never", "-c", command, "/dev/null"], {
     cwd: targetDir,
     encoding: "utf8",
     input,
+    timeout: PTY_DEADLINE_MS,
+    killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
@@ -124,6 +128,7 @@ function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides 
       ...envOverrides,
     },
   });
+  return failOnPtyDeadline(result, { label: "runConfigureWithControllingTerminal", deadlineMs: PTY_DEADLINE_MS });
 }
 
 function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input = "") {
