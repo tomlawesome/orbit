@@ -3486,6 +3486,352 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
   });
 });
 
+// ---------------------------------------------------------------------------
+// --execute --dangerous: regenerate-secret (#530 slice, ADR-0014 decision 5)
+// ---------------------------------------------------------------------------
+
+function secretsDirEntries(targetDir) {
+  return readdirSync(join(targetDir, ".orbit-secrets"));
+}
+
+describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice)", () => {
+  // --- never automatable / typed-word approval gate -----------------------
+
+  it("refuses the dangerous batch under a genuinely non-interactive invocation, exit 6, zero mutation, no prompt shown", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(targetDir, ["--execute", "--dangerous"]);
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=skipped");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=non-interactive");
+    expect(result.stdout).not.toContain("prompt field=");
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+  });
+
+  it("a bare Enter (empty input) refuses, exit 6, zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("EOF during the typed-word prompt refuses, exit 6, zero mutation", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
+  it("any word other than the exact literal 'regenerate' refuses (case-sensitive), 3 attempts then exit 6, zero mutation", () => {
+    for (const word of ["Regenerate", "REGENERATE", "y", "rotate"]) {
+      const targetDir = makeFixture({ withConfigure: false });
+      rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+      const result = runRepair(
+        targetDir,
+        ["--execute", "--dangerous"],
+        {},
+        { input: `${word}\n${word}\n${word}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+      );
+
+      expect(result.status).toBe(6);
+      expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+      expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+    }
+  });
+
+  it("bounded re-prompt: a wrong word on attempt 1, then the correct word on attempt 2, proceeds", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "nope\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stderr).toContain("attempt(s) remaining");
+  });
+
+  it("machine prompts: the typed-word field is bounded at exactly 3 attempts, then prompt-abort, using the word 'regenerate'", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "no\nno\nno\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(6);
+    const promptLines = lines(result.stdout).filter((line) => line.startsWith("prompt field=action-word"));
+    expect(promptLines).toEqual([
+      "prompt field=action-word kind=typed-word required=true attempt=1",
+      "prompt field=action-word kind=typed-word required=true attempt=2",
+      "prompt field=action-word kind=typed-word required=true attempt=3",
+    ]);
+    expect(result.stdout).toContain("prompt-abort field=action-word");
+    expect(result.stdout).not.toContain("prompt-accept field=action-word");
+  });
+
+  it("machine prompts: the correct word 'regenerate' is accepted and mutates the secret", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "regenerate\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("prompt-accept field=action-word");
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stdout).not.toContain("regenerate\n"); // the typed word itself is never echoed as a value
+  });
+
+  // --- successful regeneration: write discipline ---------------------------
+
+  it("the successful regeneration writes a fresh 64-hex secret at mode 600, with no leftover staging temp file", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+
+    const secretPath = join(targetDir, ".orbit-secrets", "session-secret");
+    const content = readFileSync(secretPath, "utf8").trim();
+    expect(content).toMatch(HEX_SECRET_PATTERN);
+    expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+
+    // No leftover `.installing.*` staging temp file — the rename onto the
+    // live path is the last thing the write discipline does.
+    const leftoverStaging = secretsDirEntries(targetDir).filter((name) => name.startsWith(".installing."));
+    expect(leftoverStaging).toHaveLength(0);
+  });
+
+  it("regenerates a real zero-byte placeholder secret (install.sh's own OIDC_CLIENT_SECRET_FILE shape) — the old empty placeholder is gone, replaced by real content", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    // Mirrors ensure_oidc_client_secret_placeholder in configure.sh: a real,
+    // zero-byte, mode-0600 file — not simply removed — is exactly what a
+    // real install.sh deployment produces before an operator ever runs
+    // --set-oidc-secret.
+    writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "");
+    chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
+
+    const secretPath = join(targetDir, ".orbit-secrets", "oidc-client-secret");
+    const content = readFileSync(secretPath, "utf8").trim();
+    expect(content).toMatch(HEX_SECRET_PATTERN);
+    expect(content.length).toBeGreaterThan(0);
+    expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("regenerates every distinct missing-secret target deferred in the same run", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    rmSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {},
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    const doneLines = lines(result.stdout).filter(
+      (line) => line === "execute action=regenerate-secret resolves=secret-missing result=done",
+    );
+    expect(doneLines).toHaveLength(2);
+    expect(result.stdout).toContain("dangerous result=complete done=2 failed=0 reason=none");
+
+    const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
+    const oidcSecret = readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8").trim();
+    expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
+    expect(oidcSecret).toMatch(HEX_SECRET_PATTERN);
+    expect(sessionSecret).not.toBe(oidcSecret);
+  });
+
+  // --- step failure: TOCTOU re-proof catches a change during the approval
+  // window, leaving the secret recoverable (still absent, never corrupted) --
+
+  it("a permissions change on the secrets directory during the approval window fails the step cleanly: reason=step-failed, exit 4, secret still absent and recoverable on retry", async () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const spawned = spawnRepair(targetDir, ["--execute", "--dangerous"], {}, { env: { ORBIT_REPAIR_TTY_INPUT: "1" } });
+
+    try {
+      await waitForStderr(spawned, (text) => text.includes("type 'regenerate'"));
+      // Simulates a concurrent process/operator narrowing the secrets
+      // directory's permissions in the window between the plan preview and
+      // the operator's typed confirmation — exactly the TOCTOU gap
+      // do_regenerate_secret_step's own re-proof (mirroring
+      // fix-permissions') exists to catch.
+      chmodSync(join(targetDir, ".orbit-secrets"), 0o500);
+      spawned.child.stdin.write("regenerate\n");
+      spawned.child.stdin.end();
+
+      const result = await spawned.exited;
+
+      expect(result.status).toBe(4);
+      expect(result.stdoutText()).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+      expect(result.stdoutText()).toContain(
+        "execute action=regenerate-secret resolves=secret-missing result=failed",
+      );
+      expect(result.stderrText()).toContain("stage two regenerate-secret step");
+
+      // Recoverable: nothing was written. Restore the directory mode an
+      // operator would fix, and confirm a plain retry still works.
+      chmodSync(join(targetDir, ".orbit-secrets"), 0o700);
+      expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+      const leftoverStaging = secretsDirEntries(targetDir).filter((name) => name.startsWith(".installing."));
+      expect(leftoverStaging).toHaveLength(0);
+
+      const retry = runRepair(
+        targetDir,
+        ["--execute", "--dangerous"],
+        {},
+        { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+      );
+      expect(retry.status).toBe(0);
+      expect(
+        readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim(),
+      ).toMatch(HEX_SECRET_PATTERN);
+    } finally {
+      chmodSync(join(targetDir, ".orbit-secrets"), 0o700);
+    }
+  });
+
+  // --- mixed dangerous batch: rotate-database-credential AND
+  // regenerate-secret together in one run --------------------------------
+
+  it("a mixed dangerous batch (retained-volume rotation + an unrelated missing secret) requires BOTH typed words in turn, then executes both", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { volumes: ["repairtest_orbit-db-data"] },
+      { input: "rotate\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=secret-missing result=done",
+    );
+    expect(result.stdout).toContain(
+      "execute action=rotate-database-credential resolves=volume-retained-without-credentials result=done",
+    );
+    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
+    expect(result.stdout).toContain("dangerous result=complete done=3 failed=0 reason=none");
+
+    expect(
+      readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim(),
+    ).toMatch(HEX_SECRET_PATTERN);
+    expect(
+      readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim(),
+    ).toMatch(HEX_SECRET_PATTERN);
+  });
+
+  it("in a mixed batch, refusing the SECOND word (regenerate) refuses the WHOLE batch — the credential is never rotated either, even though 'rotate' was typed correctly", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const argvLogPath = join(scratchDir(), "argv.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { volumes: ["repairtest_orbit-db-data"], argvLogPath },
+      { input: "rotate\nwrong\nwrong\nwrong\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+    expect(findCheckpointDir(targetDir)).toBeNull();
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toContain("ALTER ROLE");
+  });
+
+  // --- output hygiene: no path, secret value or raw error anywhere --------
+
+  it("never discloses the generated secret value, a path, or a raw error on stdout, stderr, argv or logs", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const argvLogPath = join(scratchDir(), "argv.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { argvLogPath },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    const newSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
+    expect(result.stdout).not.toContain(newSecret);
+    expect(result.stderr).not.toContain(newSecret);
+    expect(result.stdout).not.toContain(targetDir);
+    expect(result.stderr).not.toContain(targetDir);
+    expect(result.stdout).not.toContain(".orbit-secrets");
+    expectStdoutIsEnumOnly(result.stdout);
+    const argvLog = existsSync(argvLogPath) ? readFileSync(argvLogPath, "utf8") : "";
+    expect(argvLog).not.toContain(newSecret);
+  });
+});
+
 // issue #383 finding 4: unlike install.sh/restore.sh/backup.sh/configure.sh
 // (all `trap cleanup EXIT`), repair.sh registered no trap at all, so an
 // abrupt termination (Ctrl-C, SIGTERM) mid-`--execute` left this run's own
