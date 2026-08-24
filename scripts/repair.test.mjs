@@ -124,6 +124,13 @@ function dockerShimScript({
   // assert the rotation SQL genuinely arrived via stdin (not argv, and not
   // simply absent because the call never happened).
   execStdinLogPath = "",
+  // When set, the shim's `exec)` branch appends its full argument list (one
+  // invocation per line) to this path — lets a test assert exactly which
+  // host the authenticated database probe dialed (e.g. the compose service
+  // name `orbit-db`, never a loopback literal — see #610) without having to
+  // pick the exec call out of every other `docker` invocation logged to
+  // `argvLogPath`.
+  execArgvLogPath = "",
   // issue #528 migration-failed backstop support: the single fixed-literal
   // `SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ...`
   // repair.sh issues over the already-authenticated probe path, fingerprinted
@@ -261,6 +268,7 @@ function dockerShimScript({
     "    exit 1",
     "    ;;",
     "  exec)",
+    execArgvLogPath ? `    printf '%s\\n' "$*" >> '${execArgvLogPath}' 2>/dev/null || true` : "    true",
     // Real `docker exec` refuses a flag it does not know, with exit 125 and
     // this message. The shim used to accept anything, so `docker exec -T` --
     // a `docker compose exec` flag that plain `docker exec` has never had --
@@ -312,6 +320,17 @@ function dockerShimScript({
     '    if [[ "$joined" == *"orbit_migration_runs"* ]]; then',
     `      ${migrationRunLine}`,
     `      exit ${migrationRunExit}`,
+    "    fi",
+    // issue #610: the official Postgres image's pg_hba.conf trusts loopback
+    // unconditionally (`host all all 127.0.0.1/32 trust`), so a probe that
+    // dials 127.0.0.1/::1/localhost would be accepted no matter what
+    // password it supplied — `database-credential-mismatch` could never
+    // fire on a real deployment. This mirrors that trust rule here so a
+    // repair.sh regression back to dialing loopback (instead of the
+    // compose service name) makes every credential-mismatch fixture below
+    // report healthy, and those tests fail (#610).
+    '    if [[ "$joined" == *"127.0.0.1"* || "$joined" == *"::1"* || "$joined" == *"localhost"* ]]; then',
+    "      exit 0",
     "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
     dbAuthMarkerPath
@@ -1054,6 +1073,21 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain(distinctPassword);
     expect(result.stderr).not.toContain(distinctPassword);
+  });
+
+  it("dials the compose service name for the authenticated probe, never loopback — #610", () => {
+    const targetDir = makeFixture();
+    const execArgvLogPath = join(scratchDir(), "exec-argv.log");
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      execArgvLogPath,
+    });
+
+    const execArgvLog = readFileSync(execArgvLogPath, "utf8");
+    expect(execArgvLog).toContain("orbit-db");
+    expect(execArgvLog).not.toContain("127.0.0.1");
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
   });
 
   it("reports no database finding when pg_isready and authentication both succeed", () => {
