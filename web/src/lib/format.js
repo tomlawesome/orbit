@@ -1,3 +1,4 @@
+/* Evidence for #620: a web/ change that must trigger the fidelity gate and pass it. */
 /**
  * The manifest's vocabulary, shared (#445): a date, its distance in days, a
  * cost in minor units. One place, so T−161d means the same thing on every
