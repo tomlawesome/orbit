@@ -319,9 +319,13 @@ needed for this decision.
   `handle` hook calling the same module. The domain module survives the cut
   unchanged.
 - The ratified v19 totality screen is the product maintenance experience and
-  it lives in `web/`. Before the cut, blocked page requests on the Next
-  surface receive a minimal bounded shell, not the artwork — a named cost,
-  since retyping the screen into React is exactly what ADR-0012 forbids.
+  it lives in `web/`. This originally accepted a named cost: before the cut,
+  blocked page requests on the Next surface would receive a minimal bounded
+  shell rather than the artwork, since retyping the screen into React is
+  exactly what ADR-0012 forbids. That shell was dropped on 2026-08-24 (see
+  Amendments) — it would never have served a real request, and no enforcement
+  depends on it, because decision 2 makes the page layer presentation only
+  and the API guard independent.
 - Administrators can mutate data while maintenance is active. That is the
   point — the operator is working — but it means maintenance never implies
   "nothing changed during the window".
@@ -343,9 +347,10 @@ tick and duplicate-worker tests; (5) the window/update data model (decisions
 1, 5 and 8, amended 2026-08-23): its migration, the absorb-on-collision worker
 path, the editability rules and the new audit actions, with their own
 stale-token, restart-persistence and duplicate-worker tests; (6) page
-presentation — the interim shell on Next, and the `hooks.server.ts` wiring of
-the built `/maintenance` screen with Playwright/axe evidence, landing with
-#411's cut and consuming the timeline built in (5).
+presentation — the `hooks.server.ts` wiring of the built `/maintenance`
+screen with Playwright/axe evidence, landing with #411's cut and consuming
+the timeline built in (5). The interim Next shell this slice originally
+carried was dropped on 2026-08-24; see Amendments.
 
 ## Alternatives rejected
 
@@ -381,6 +386,18 @@ the built `/maintenance` screen with Playwright/axe evidence, landing with
   queue they were defending.
 
 ## Amendments
+
+**2026-08-24 — the interim Next shell is dropped (issue #526).** Consequences
+and slice (6) accepted a named cost: until the ADR-0012 cut, blocked page
+requests on the Next surface would receive a minimal bounded shell instead of
+the artwork. It was never going to be reached. Maintenance mode becomes
+available to an operator at v1.3, v1.3 requires milestone M2 (#547), and M2
+contains #411 — so the cut precedes any release in which maintenance can be
+turned on, and the shell would have served no real request. Nothing is
+weakened by removing it: decision 2 makes the page layer presentation only
+and keeps the API guard independent, so a blocked page before the cut is
+merely unstyled, never permissive. Slice (6) is now the `hooks.server.ts`
+wiring alone.
 
 **2026-08-23 — window/update data model, absorb-on-collision and timeline
 editability (issue #580).** Decisions 1 and 5 originally modelled maintenance
