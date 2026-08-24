@@ -51,7 +51,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Three known ways to lose an afternoon, or worse. The first two have open
+Four known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -80,6 +80,14 @@ either races or silently never exercises what it claims. Keep stdin open for
 the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
 and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
 has been diagnosed twice: #510/#512, then again in #552.
+
+**A pty driver's deadline belongs to `scripts/pty-deadline.mjs`.** A child
+killed for running out of time has no exit status, so a driver that hands the
+result to an exit-code assertion fails with `expected null to be 130` and names
+the wrong fault — the child never exited at all. Take the deadline and the
+failure from that module rather than writing another timer; a `spawn`-based
+driver must reject rather than resolve, and its tests declare
+`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
 
 ## The demo stack is disposable
 
