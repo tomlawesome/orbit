@@ -61,7 +61,7 @@
  * companions are tokens rather than a hunt through the stylesheets.
  */
 [data-theme=starchart]{
-  --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+  --bg:#7d0b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
   --line:#243259; --line-soft:#17203f;
   /*
    * THE FAINT TIER, LIFTED (#500, owner ruling 2026-08-17: the
