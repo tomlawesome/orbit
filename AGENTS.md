@@ -27,6 +27,26 @@ they are routed is global; it is not repeated here.
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
 
+## Harnesses that already exist
+
+Check here before building a test rig, or before telling the owner a check
+needs their hands.
+
+- `scripts/test-install-acceptance.sh` — a real fresh install: unmocked
+  `install.sh`, real Docker/PostgreSQL/ClamAV, through to a healthy
+  `/api/health`, asserting `docs/installer-guarantees.md` entries. OIDC
+  discovery is a fixture, so no provider credentials are needed. `--lifecycle`
+  adds the interruption and update cases. It cleans up after itself.
+- `scripts/test-e2e-local.sh` — the acceptance stack with disposable OIDC and
+  GreenMail sidecars under an isolated Compose project, then Playwright,
+  rather than promoting to `preview` to find out.
+- `scripts/installer-simulation.sh` — the command-centre UI only, no Docker.
+  Not a substitute for the first.
+
+Both real harnesses build their own image, so the published bootstrap
+(`ORBIT_CHANNEL=preview` resolving `ghcr.io/tomlawesome/orbit:preview` to a
+digest) stays untested by them.
+
 ## Traps when running things locally
 
 Three known ways to lose an afternoon, or worse. The first two have open
