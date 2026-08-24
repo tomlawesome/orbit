@@ -85,7 +85,11 @@ test.describe("maintenance recovery drill (#524)", () => {
     await signIn(page);
     await page.goto("/admin");
     const maintenance = page.locator(".admin-page #maintenance");
-    await expect(maintenance.getByRole("heading", { name: "Maintenance" })).toBeVisible();
+    // exact: true, because Playwright matches an accessible name by substring
+    // otherwise and this section now carries a nested "Scheduled maintenance"
+    // heading too (#613). Without it the locator resolves to two elements and
+    // strict mode fails the drill before it has started.
+    await expect(maintenance.getByRole("heading", { name: "Maintenance", exact: true })).toBeVisible();
     await expect(maintenance.getByText("Orbit is open to users.", { exact: true })).toBeVisible();
     await expect(page.locator(".maintenance-banner")).toHaveCount(0);
 
