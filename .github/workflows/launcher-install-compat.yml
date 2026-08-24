@@ -24,6 +24,22 @@ name: Launcher install compatibility
 #   - pull requests into `dev` or `preview` only when an installer script
 #     actually changed, so ordinary work is not taxed with a Docker run.
 #
+# What a green result here does and does not mean. This tests the pull
+# request's own install.sh, and only that. Every other script the
+# installer runs — configure.sh, installer-ui.sh and the rest of
+# deployment_assets — is fetched at runtime from the resolved image's
+# source revision, not from the commit under test (see the asset_base
+# block below the image identity check), so a pull request changing one
+# of those is invisible here. Two of the three surfaces orbit-launcher
+# actually depends on live in those files: the phase=... event stream it
+# parses, and configure.sh --check's readiness lines. What this job
+# genuinely covers is install.sh's own contract with the launcher — the
+# --plain and --install|--update|--repair flags it is invoked with.
+# Proven by deliberately breaking that flag parsing and watching this
+# check fail; a rename of an installer *prompt* passes, because the
+# launcher renders its own menus. Do not read green as "the launcher can
+# still install Orbit". Whether that should change is #606.
+#
 # The suite needs no secrets. It drives the guided configuration with
 # obvious placeholder credentials and uses a real public OIDC discovery
 # endpoint, which install.sh validates for shape only — so this is safe
