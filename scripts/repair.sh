@@ -164,9 +164,20 @@ set -Eeuo pipefail
 #                                   password secret file is missing — the
 #                                   SQLSTATE 28P01 precursor, detected
 #                                   without ever touching the database.
-#   unrelated-resource-present      — a database volume matching Orbit's
-#                                   naming pattern exists under a different
-#                                   Compose project than this deployment's.
+#   document-volume-retained-without-key — ADR-0014 decision 5's second
+#                                   retention guard: the retained
+#                                   `orbit-documents-data` volume for this
+#                                   project exists while document-kek is
+#                                   missing. Mirrors
+#                                   volume-retained-without-credentials
+#                                   exactly (volume-name match plus the local
+#                                   absence of the secret file); unlike that
+#                                   class there is no rotate equivalent, so
+#                                   it plans as manual, never a guessed fix.
+#   unrelated-resource-present      — a database or document volume matching
+#                                   Orbit's naming pattern exists under a
+#                                   different Compose project than this
+#                                   deployment's.
 #   database-unreachable            — this deployment's orbit-db container is
 #                                   absent/not running, or is running but
 #                                   `pg_isready` did not succeed within the
@@ -216,7 +227,7 @@ set -Eeuo pipefail
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 24 reason classes, the same optional docker probes, the same
+# same 25 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -311,16 +322,17 @@ set -Eeuo pipefail
 #   regenerate-secret           <- secret-missing, ONLY for a generated
 #                                   non-user secret whose regeneration
 #                                   cannot invalidate retained encrypted
-#                                   state (session-secret, document-kek,
-#                                   oidc-client-secret; also
-#                                   postgres-password itself when no
-#                                   retained database volume is present —
-#                                   see the exception immediately below).
+#                                   state (session-secret, oidc-client-secret;
+#                                   also postgres-password when no retained
+#                                   database volume is present, and
+#                                   document-kek when no retained document
+#                                   volume is present — see the two
+#                                   exceptions immediately below).
 #     mutation=reversible backup=not-required. The finding fires only when
 #     the secret file is absent/empty, so there is no valid prior secret
 #     content to lose or back up.
 #
-#     EXCEPTION — postgres-password is explicitly EXCLUDED from
+#     EXCEPTION 1 — postgres-password is explicitly EXCLUDED from
 #     regenerate-secret whenever a `volume-retained-without-credentials`
 #     finding is also present in the same diagnosis (the #261 fixed-project
 #     collision: a retained `orbit-db-data` volume still holds the OLD
@@ -330,17 +342,31 @@ set -Eeuo pipefail
 #     as rotate-database-credential, below, so a retained-volume postgres
 #     password is NEVER auto-regenerated.
 #
-#     NOTE (stage one, this slice): despite being classified
+#     EXCEPTION 2 — document-kek is explicitly EXCLUDED from
+#     regenerate-secret whenever a `document-volume-retained-without-key`
+#     finding is also present (ADR-0014 decision 5's second retention guard):
+#     a retained `orbit-documents-data` volume holds documents encrypted
+#     under the OLD key, and minting a new one would leave them permanently
+#     unreadable. Unlike EXCEPTION 1, there is no rotate equivalent to route
+#     to — that specific secret-missing finding is instead planned as
+#     `manual`, below the action-class table, so a retained-volume
+#     document-kek is NEVER auto-regenerated either.
+#
+#     NOTE (stage two, since this slice): despite being classified
 #     mutation=reversible above, regenerate-secret is NOT in stage one's
-#     executable safe set — see "EXECUTE MODE" below. The owner's 2026-08-13
-#     slice 4 decision names the stage-one safe set explicitly by action
-#     class (fix-permissions, restore-transaction, restart-services); that
-#     enumerated list, not this table's own mutation=reversible tag, is
-#     authoritative for what `--execute --safe-only` may act on. A newly
-#     minted secret is live credential material other processes may already
-#     be holding open, which is a materially different risk than a mode-only
-#     chmod or a container restart, so it stays out of stage one even though
-#     it is filesystem-reversible in principle.
+#     executable safe set — see "EXECUTE MODE (--execute --safe-only)" below.
+#     The owner's 2026-08-13 slice 4 decision names the stage-one safe set
+#     explicitly by action class (fix-permissions, restore-transaction,
+#     restart-services); that enumerated list, not this table's own
+#     mutation=reversible tag, is authoritative for what
+#     `--execute --safe-only` may act on. A newly minted secret is live
+#     credential material other processes may already be holding open, which
+#     is a materially different risk than a mode-only chmod or a container
+#     restart, so it stays out of stage one even though it is
+#     filesystem-reversible in principle. It IS executed in stage two, behind
+#     the same typed-word/never-automatable approval model as
+#     rotate-database-credential — see "EXECUTE MODE (--execute
+#     --dangerous)" below.
 #
 #   rotate-database-credential  <- database-credential-mismatch,
 #                                   volume-retained-without-credentials,
@@ -1167,9 +1193,14 @@ readonly secrets_directory=".orbit-secrets"
 # migration was NOT already running inside install's own transaction.
 readonly configuration_rollback_suffix=".orbit-config.rollback"
 readonly database_volume_key="orbit-db-data"
+# ADR-0014 decision 5's second retention guard (document-kek): mirrors
+# database_volume_key exactly, matched the same way against
+# `${project}_orbit-documents-data` (see docker-compose.yml's own
+# `orbit-documents-data` volume declaration).
+readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=16
+readonly total_checks=17
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
@@ -1238,6 +1269,7 @@ readonly -a class_order=(
   docker-unavailable
   container-foreign-owner
   volume-retained-without-credentials
+  document-volume-retained-without-key
   unrelated-resource-present
   database-unreachable
   database-credential-mismatch
@@ -1269,6 +1301,14 @@ readonly -A action_for_class=(
   [configuration-migration-interrupted]=restore-transaction
   [staging-evidence-present]=restore-transaction
   [volume-retained-without-credentials]=rotate-database-credential
+  # ADR-0014 decision 5's second retention guard. Unlike the database case
+  # immediately above, there is no rotate equivalent for document-kek — a
+  # retained document volume was encrypted under whatever key it already
+  # holds, and there is no local-socket-trust operation analogous to
+  # `ALTER ROLE` that can re-derive access to it. The honest outcome is
+  # manual: an operator decision (restore the original key, or knowingly
+  # accept the retained documents are unreadable), never a guess.
+  [document-volume-retained-without-key]=manual
   [database-credential-mismatch]=rotate-database-credential
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
@@ -1308,7 +1348,14 @@ readonly -A mutation_for_action=(
   [manual]=none
 )
 
-# Action class -> backup requirement for --plan.
+# Action class -> backup requirement for --plan. regenerate-secret's
+# backup=not-required is only defensible because it is never planned where
+# it could invalidate retained state: the postgres-password/database-volume
+# guard (resolve_secret_missing_action) and the document-kek/document-volume
+# guard (also resolve_secret_missing_action, ADR-0014 decision 5) are what
+# make "no valid prior content exists to lose" true for every finding that
+# ever reaches this action. If either guard were ever weakened or removed,
+# this field would become wrong at the same moment.
 readonly -A backup_for_action=(
   [restore-transaction]=required
   [fix-permissions]=not-required
@@ -1340,6 +1387,17 @@ readonly -A manual_guidance=(
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
+  [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
+  # Keyed by the reason class (secret-missing), not by target, like every
+  # other entry here — but this one only ever fires for one specific target:
+  # resolve_secret_missing_action resolves secret-missing to `manual` ONLY
+  # for document-kek when document-volume-retained-without-key is also
+  # present (mirroring the postgres-password/rotate-database-credential
+  # exception, which never reaches `manual` at all). Every other secret-
+  # missing finding resolves to regenerate-secret or rotate-database-
+  # credential, never manual, so this entry is unambiguous despite the
+  # generic key.
+  [secret-missing]="the missing document-kek cannot be safely regenerated while a document volume is retained; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
 )
 
 declare -a findings=()
@@ -1495,19 +1553,27 @@ print_check_output_and_exit() {
 }
 
 # secret-missing's action class depends on which secret is missing: every
-# generated non-user secret regenerates safely, EXCEPT postgres-password
-# when a volume-retained-without-credentials finding is also present in
-# this same diagnosis (the #261 fixed-project collision) — that specific
-# finding must route to rotate-database-credential instead, so a
-# retained-volume postgres password is never auto-regenerated. See the
-# "regenerate-secret" / "rotate-database-credential" entries in the
+# generated non-user secret regenerates safely, EXCEPT
+#   - postgres-password when a volume-retained-without-credentials finding
+#     is also present in this same diagnosis (the #261 fixed-project
+#     collision) — that specific finding must route to
+#     rotate-database-credential instead, so a retained-volume postgres
+#     password is never auto-regenerated.
+#   - document-kek when a document-volume-retained-without-key finding is
+#     also present (ADR-0014 decision 5's second retention guard) — there is
+#     no rotate equivalent for a document volume, so the honest outcome is
+#     `manual` rather than a guessed fix.
+# See the "regenerate-secret" / "rotate-database-credential" entries in the
 # header's action-class mapping table for the full rationale. Relies on
 # bash's dynamic scoping: every caller declares its own local
-# `volume_retained_without_credentials` before calling this.
+# `volume_retained_without_credentials` and `document_volume_retained`
+# before calling this.
 resolve_secret_missing_action() {
   local target="$1"
   if [[ "$target" == postgres-password && "$volume_retained_without_credentials" == 1 ]]; then
     printf 'rotate-database-credential'
+  elif [[ "$target" == document-kek && "$document_volume_retained" == 1 ]]; then
+    printf 'manual'
   else
     printf 'regenerate-secret'
   fi
@@ -1518,11 +1584,13 @@ print_plan_output_and_exit() {
   local class entry fclass ftarget fseverity action
   local actions=0 manual=0 result
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1588,6 +1656,7 @@ print_plan_output_and_exit() {
 compute_plan_entries() {
   local class entry fclass ftarget fseverity action
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
@@ -1596,6 +1665,7 @@ compute_plan_entries() {
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1900,6 +1970,47 @@ run_diagnosis() {
       fi
     else
       add_finding docker-unavailable database-volume info
+    fi
+  fi
+
+  # --- Step 9b: retained document volume vs. document-kek (ADR-0014 decision
+  # 5's second retention guard) ------------------------------------------------
+  #
+  # Identical shape to Step 9 immediately above, against
+  # $document_volume_key/document-kek instead of
+  # $database_volume_key/postgres-password: a volume-name match plus the
+  # local absence of the document-kek secret file. Never opens a database
+  # connection, never execs into a container, never reads a document or a
+  # secret's contents — this is exactly as read-only as Step 9, and exists
+  # so a `document-kek` regeneration can never be planned while a document
+  # volume encrypted under the OLD (possibly now-unrecoverable) key is still
+  # retained — see resolve_secret_missing_action.
+
+  if [[ "$resource_check_eligible" == 1 ]]; then
+    if [[ "$docker_available" == 1 ]]; then
+      checked=$((checked + 1))
+      volume_list="$(timeout "$docker_probe_timeout" docker volume ls \
+        --filter "name=$document_volume_key" --format '{{.Name}}' 2>/dev/null || true)"
+      our_volume="${project}_${document_volume_key}"
+      found_ours=0
+      found_other=0
+      while IFS= read -r volume || [[ -n "$volume" ]]; do
+        [[ -z "$volume" ]] && continue
+        [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-documents-data$ ]] || continue
+        if [[ "$volume" == "$our_volume" ]]; then
+          found_ours=1
+        else
+          found_other=1
+        fi
+      done <<< "$volume_list"
+      [[ "$found_other" == 1 ]] && add_finding unrelated-resource-present document-volume info
+      if [[ "$found_ours" == 1 ]]; then
+        if [[ "$secrets_status" != ok || "${secret_status[document-kek]:-missing}" == missing ]]; then
+          add_finding document-volume-retained-without-key document-volume fail
+        fi
+      fi
+    else
+      add_finding docker-unavailable document-volume info
     fi
   fi
 

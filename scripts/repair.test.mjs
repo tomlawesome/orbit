@@ -539,7 +539,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=16 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=17 skipped=0"]);
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -578,7 +578,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=15",
+      "diagnosis result=failed checked=1 skipped=16",
     ]);
   });
 
@@ -691,7 +691,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=16 skipped=0",
+      "diagnosis result=attention checked=17 skipped=0",
     ]);
   });
 
@@ -807,7 +807,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=16 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=17 skipped=0"]);
   });
 
   it("the .orbit-config.rollback suffix literal agrees across configuration.sh (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
@@ -858,6 +858,51 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("volume-retained-without-credentials");
   });
 
+  // --- ADR-0014 decision 5's second retention guard: document-kek --------
+
+  it("reports document-volume-retained-without-key when a document volume is retained without document-kek", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-documents-data"] });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
+    expect(result.stdout).toContain(
+      "finding class=document-volume-retained-without-key target=document-volume severity=fail",
+    );
+  });
+
+  it("does not report document-volume-retained-without-key when document-kek is present", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-documents-data"] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("document-volume-retained-without-key");
+  });
+
+  it("does not cross-wire the two retention guards: a retained database volume alone never reports document-volume-retained-without-key, and vice versa", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["repairtest_orbit-db-data"] });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=volume-retained-without-credentials target=database-volume severity=fail");
+    expect(result.stdout).not.toContain("document-volume-retained-without-key");
+  });
+
+  it("reports unrelated-resource-present for a document volume belonging to a different Compose project", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumes: ["someother_orbit-documents-data"] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("finding class=unrelated-resource-present target=document-volume severity=info");
+  });
+
   it("reports unrelated-resource-present for a volume belonging to a different Compose project", () => {
     const targetDir = makeFixture();
 
@@ -897,11 +942,12 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("finding class=docker-unavailable target=compose severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=database-volume severity=info");
+    expect(result.stdout).toContain("finding class=docker-unavailable target=document-volume severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=container severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=6");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=7");
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
@@ -1583,6 +1629,76 @@ describe("scripts/repair.sh --plan", () => {
     );
   });
 
+  // --- ADR-0014 decision 5's second retention guard: document-kek plans as
+  // manual, never regenerate-secret, when a document volume is retained ----
+
+  it("plans a missing document-kek as manual (never regenerate-secret) when a document volume is retained", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--plan"], { volumes: ["repairtest_orbit-documents-data"] });
+
+    expect(result.status).toBe(4);
+    const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
+    expect(planLines).toEqual([
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required",
+      "plan action=manual resolves=document-volume-retained-without-key mutation=none backup=not-required",
+    ]);
+    expect(result.stdout).not.toContain("regenerate-secret");
+    expect(result.stderr).toContain("manual step:");
+    expect(result.stderr).toContain("document-kek");
+    expect(lines(result.stdout).at(-1)).toBe("plan result=manual-required actions=0 manual=2");
+  });
+
+  it("plans a missing document-kek as regenerate-secret when no document volume is retained", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    // No `volumes` option passed to the docker shim: nothing is retained.
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+    );
+    expect(result.stdout).not.toContain("document-volume-retained-without-key");
+    expect(result.stdout).not.toContain("action=manual");
+  });
+
+  it("does not cross-wire the two retention guards in planning: a retained document volume never routes postgres-password away from regenerate-secret, and a retained database volume never routes document-kek to manual", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--plan"], {
+      volumes: ["repairtest_orbit-documents-data"],
+    });
+
+    expect(result.stdout).toContain(
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+    );
+    expect(result.stdout).not.toContain("rotate-database-credential");
+
+    const targetDir2 = makeFixture();
+    rmSync(join(targetDir2, ".orbit-secrets", "postgres-password"));
+    rmSync(join(targetDir2, ".orbit-secrets", "document-kek"));
+
+    const result2 = runRepair(targetDir2, ["--plan"], {
+      volumes: ["repairtest_orbit-db-data"],
+    });
+
+    expect(result2.stdout).toContain(
+      "plan action=rotate-database-credential resolves=secret-missing mutation=credential-rotation backup=required",
+    );
+    const planLines2 = lines(result2.stdout).filter((line) => line.startsWith("plan action="));
+    // document-kek is still missing but no document volume is retained, so it
+    // still regenerates safely — never manual.
+    expect(planLines2).toContain(
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+    );
+    expect(result2.stdout).not.toContain("action=manual");
+  });
+
   it("plans database-credential-mismatch as rotate-database-credential — the motivating #261 failure", () => {
     const targetDir = makeFixture();
     const result = runRepair(targetDir, ["--plan"], { db: { present: true, ready: true, authResult: "mismatch" } });
@@ -2006,7 +2122,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=15",
+      "diagnosis result=failed checked=1 skipped=16",
     ]);
   });
 
@@ -2019,7 +2135,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
-      "diagnosis result=healthy checked=16 skipped=0",
+      "diagnosis result=healthy checked=17 skipped=0",
     ]);
   });
 
@@ -2899,7 +3015,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // resolved it), and the trailing diagnosis is the very last thing
     // printed, reporting the deployment healthy.
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=15 skipped=1");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=16 skipped=1");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
 
     // The local secret was actually rotated to a fresh 64-hex value, distinct
