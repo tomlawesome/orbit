@@ -78,8 +78,8 @@ set -Eeuo pipefail
 # fixed safe action set documented below — see "EXECUTE MODE" further down.
 #
 # This slice adds exactly two more read-only primitives, both narrowly
-# scoped: `docker exec -T <this deployment's orbit-db container> pg_isready`
-# and `docker exec -T <same container> psql -c 'SELECT 1'`. Neither mutates
+# scoped: `docker exec <this deployment's orbit-db container> pg_isready`
+# and `docker exec <same container> psql -c 'SELECT 1'`. Neither mutates
 # anything server-side (`pg_isready` opens and immediately closes a
 # connection; `SELECT 1` reads no table and touches no data) and both only
 # ever target the orbit-db container whose Compose project/service labels
@@ -2292,7 +2292,7 @@ check_database_reachability() {
     db_id="$db_ids"
   fi
 
-  if [[ -z "$db_id" ]] || ! timeout "$docker_probe_timeout" docker exec -T "$db_id" \
+  if [[ -z "$db_id" ]] || ! timeout "$docker_probe_timeout" docker exec "$db_id" \
     pg_isready -U "$pg_user" -d "$pg_db" >/dev/null 2>&1; then
     add_finding database-unreachable database fail
     return 0
@@ -2312,7 +2312,7 @@ check_database_reachability() {
   # would use "trust" auth inside the official postgres image and could
   # never observe a credential mismatch.
   psql_output="$(PGPASSWORD="$pg_password" timeout "$docker_probe_timeout" \
-    docker exec -e PGPASSWORD -T "$db_id" \
+    docker exec -e PGPASSWORD "$db_id" \
     psql -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c 'SELECT 1' 2>&1)" || psql_status=$?
   pg_password=""
   if [[ "$psql_status" != 0 ]]; then
@@ -2362,7 +2362,7 @@ check_migration_failed_backstop() {
   mig_pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
   mig_output="$(
     { PGPASSWORD="$mig_pg_password" timeout "$docker_probe_timeout" \
-      docker exec -e PGPASSWORD -T "$migration_backstop_db_id" \
+      docker exec -e PGPASSWORD "$migration_backstop_db_id" \
       psql -h 127.0.0.1 -U "$migration_backstop_pg_user" -d "$migration_backstop_pg_db" -t -A -F'|' \
       -c 'SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ORDER BY "id" DESC LIMIT 1' \
       2>&1 || true; } | head -c 256
