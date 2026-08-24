@@ -132,7 +132,10 @@ EOF
 # URL fails closed, so an unexpected network dependency surfaces as a failure
 # rather than as a silent fetch from the internet.
 set -Eeuo pipefail
-asset_base="https://raw.githubusercontent.com/$repository/$revision"
+# Any revision, not just this checkout's HEAD: install.sh fetches the
+# revision stamped into the image it pulled, which differs from HEAD whenever
+# a prebuilt image is supplied. The working tree is the answer either way.
+asset_prefix="https://raw.githubusercontent.com/$repository/"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
 args=("\$@")
@@ -150,8 +153,9 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_base"/*)
-    asset="\${url#"\$asset_base"/}"
+  "\$asset_prefix"*)
+    asset="\${url#"\$asset_prefix"}"
+    asset="\${asset#*/}"
     [[ -f "$repo_root/\$asset" ]] || { [[ -z "\$write_out" ]] || printf '404'; exit 0; }
     serve "$repo_root/\$asset"
     ;;
