@@ -13,7 +13,9 @@ import {
   documents,
   externalIdentities,
   households,
+  imapIngestionMessages,
   imapRecipientRotationState,
+  instanceAuthority,
   items,
   memberships,
   portableArchives,
@@ -94,7 +96,27 @@ export function requestWithoutSession(
 export async function cleanupIntegrationEnvironment(): Promise<void> {
   resetAuthConfigForTests();
   resetDocumentConfigForTests();
-  await getDb().delete(imapRecipientRotationState);
+  const db = getDb();
+  // Fixture rows must not accumulate across the run (#593): the whole
+  // integration suite shares one database with fileParallelism disabled, so
+  // every createIntegrationFixture() call was leaving its users, households
+  // and everything cascaded from them behind for the life of the run. This
+  // must run before closeDatabase() below, and in dependency order:
+  //  - instance_authority.primary_user_id is ON DELETE RESTRICT, and
+  //    audit_log.actor_user_id and due_events.completed_by_user_id carry no
+  //    ON DELETE rule at all, so each would block a user delete outright.
+  //  - Deleting households before users clears due_events (and everything
+  //    else that cascades from a household) by cascade first, so the later
+  //    user delete never meets that block.
+  //  - imap_ingestion_messages.user_id/household_id are ON DELETE SET NULL,
+  //    so they would not block anything, but would survive as disconnected
+  //    rows; delete them explicitly rather than leave that residue.
+  await db.delete(instanceAuthority);
+  await db.delete(auditLog);
+  await db.delete(imapIngestionMessages);
+  await db.delete(households);
+  await db.delete(users);
+  await db.delete(imapRecipientRotationState);
   await closeDatabase();
   await Promise.all([
     rm(storageRoot, { recursive: true, force: true }),
