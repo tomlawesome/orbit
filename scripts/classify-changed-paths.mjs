@@ -26,6 +26,12 @@ const riskRank = new Map([
 
 const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"]);
 
+// The v19 front end and the two things that decide what its visual gate
+// builds and compares. Narrower than system risk on purpose: fidelity is the
+// only automatic check that layer has (#620), and it should run whenever that
+// layer moves without charging every system-risk change for it.
+const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
+
 const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
@@ -109,6 +115,15 @@ export function classifyCiRisk(changedPaths, options = {}) {
   return selected;
 }
 
+/**
+ * True when a change can move what the v19 fidelity gate photographs. Fails
+ * safe: no usable list of changed paths means run it.
+ */
+export function touchesWeb(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => matchesAny(normalizePath(path), webPatterns));
+}
+
 export function ciRequirements(changedPaths, options = {}) {
   const risk = classifyCiRisk(changedPaths, options);
   const dependencySnapshotChanged = Array.isArray(changedPaths)
@@ -118,6 +133,7 @@ export function ciRequirements(changedPaths, options = {}) {
     build: risk !== CI_RISK.FAST || dependencySnapshotChanged,
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
     system: risk === CI_RISK.SYSTEM,
+    web: touchesWeb(changedPaths),
   };
 }
 
@@ -240,8 +256,9 @@ function main() {
   const build = risk === CI_RISK.SYSTEM || requirements.build;
   const integration = risk === CI_RISK.SYSTEM || requirements.integration;
   const system = risk === CI_RISK.SYSTEM || requirements.system;
+  const web = requirements.web;
   console.log(
-    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} (${reason}).`,
+    `CI risk classification: risk=${risk} build=${build} integration=${integration} system=${system} web=${web} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -252,6 +269,7 @@ function main() {
     appendFileSync(process.env.GITHUB_OUTPUT, `build=${build}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
   }
 }
 
