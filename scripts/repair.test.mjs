@@ -27,6 +27,7 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const repairScriptSource = readFileSync(join(scriptsDir, "repair.sh"), "utf8");
 const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
+const configurationScriptSource = readFileSync(join(scriptsDir, "configuration.sh"), "utf8");
 const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
 
@@ -415,6 +416,32 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
   chmodSync(join(targetDir, ".env-orbit"), 0o600);
 }
 
+// Overwrites .env-orbit with a file-backed OIDC_CLIENT_SECRET_FILE instead
+// of makeFixture()'s default direct OIDC_CLIENT_SECRET value — the shape
+// every real install.sh deployment actually produces. Backed by the
+// .orbit-secrets/oidc-client-secret file makeFixture() already writes, so
+// no other setup is needed. A targeted overwrite (mirroring
+// writeDigestPinnedEnv above), not a makeFixture() option: makeFixture() is
+// shared by ~170 other tests that rely on its direct-secret default, and
+// this shape is only relevant to the configuration-migration-interrupted
+// tests below (issue #529 follow-up — the staged-directory validation this
+// replaced could never see this shape, since it deliberately omitted
+// .orbit-secrets).
+function writeFileBackedOidcSecretEnv(targetDir) {
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    "ORBIT_IMAGE=orbit-local:abcdef123456",
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
 function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
@@ -690,6 +717,115 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.status).toBe(4);
     expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+  });
+
+  // --- configuration-migration-interrupted (ADR-0014 decision 7, issue #529) -
+
+  it("reports configuration-migration-interrupted instead of configuration-invalid when a valid .orbit-config.rollback copy exists", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // live fails validation
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "finding class=configuration-migration-interrupted target=configuration severity=fail",
+    );
+    expect(result.stdout).not.toContain("configuration-invalid");
+    expect(result.stdout).not.toContain("configuration-incomplete");
+  });
+
+  it("fires on the file-backed OIDC_CLIENT_SECRET_FILE shape a real install produces (issue #529 follow-up)", () => {
+    const targetDir = makeFixture();
+    writeFileBackedOidcSecretEnv(targetDir);
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    // Live fails validation (content-incomplete, not mode-644, so this
+    // exercises the same file-backed-secret shape on both sides without a
+    // managed-file-permissions finding also firing).
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "finding class=configuration-migration-interrupted target=configuration severity=fail",
+    );
+  });
+
+  it("reports plain configuration-invalid, unchanged, when the live file fails validation and no rollback copy exists", () => {
+    const targetDir = makeFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("configuration-migration-interrupted");
+  });
+
+  it("does not report configuration-migration-interrupted when the rollback copy also fails validation", () => {
+    const targetDir = makeFixture();
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("configuration-migration-interrupted");
+  });
+
+  it("does not report configuration-migration-interrupted when the rollback copy is a symlink", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.real-rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.real-rollback"), 0o600);
+    symlinkSync(join(targetDir, ".env-orbit.real-rollback"), join(targetDir, ".env-orbit.orbit-config.rollback"));
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
+    expect(result.stdout).not.toContain("configuration-migration-interrupted");
+  });
+
+  it("a stale rollback copy next to an already-healthy live .env-orbit produces no finding", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(0);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=16 skipped=0"]);
+  });
+
+  it("the .orbit-config.rollback suffix literal agrees across configuration.sh (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
+    const extractReadonlyString = (source, varName) => {
+      const match = source.match(new RegExp(`readonly ${varName}=("[^"]*")`));
+      if (!match) {
+        throw new Error(`Could not find "readonly ${varName}=" in the given source`);
+      }
+      return JSON.parse(match[1]);
+    };
+
+    const fromConfiguration = extractReadonlyString(configurationScriptSource, "rollback_suffix");
+    const fromRepair = extractReadonlyString(repairScriptSource, "configuration_rollback_suffix");
+    const fromConfigure = extractReadonlyString(configureScriptSource, "configuration_rollback_suffix");
+
+    expect(fromConfiguration).toBe(".orbit-config.rollback");
+    expect(fromRepair).toBe(fromConfiguration);
+    expect(fromConfigure).toBe(fromConfiguration);
   });
 
   it("reports compose-interpolation-failed when docker compose config fails", () => {
@@ -1506,6 +1642,22 @@ describe("scripts/repair.sh --plan", () => {
     );
   });
 
+  it("plans configuration-migration-interrupted as the safe restore-transaction batch (ADR-0014 decision 7, issue #529)", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain(
+      "plan action=restore-transaction resolves=configuration-migration-interrupted mutation=reversible backup=required",
+    );
+    expect(result.stdout).not.toContain("rerun-configuration");
+  });
+
   // --- manual-class findings: no safe automatic action -----------------
 
   const manualScenarios = [
@@ -2116,6 +2268,83 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(
       "APP_URL=https://orbit.old-good-state.internal",
     );
+  });
+
+  // --- restore-transaction (configuration-migration-interrupted boundary, ---
+  // --- ADR-0014 decision 7, issue #529) ---------------------------------------
+
+  it("restores the .orbit-config.rollback copy into .env-orbit, removes the rollback file, and ends healthy", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=done",
+    );
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(goodEnv);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
+    expect(result.stdout).toContain("diagnosis result=healthy");
+  });
+
+  it("injected failure mid-restore: self-restores .env-orbit and reports failed (exit 4), leaving the rollback copy in place", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    // Content-incomplete rather than mode-644: mode 644 would ALSO trigger
+    // managed-file-permissions/fix-permissions in the same safe batch, which
+    // only touches the mode (not the content) and would confound this
+    // test's done/failed count with an unrelated successful action.
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    const beforeBrokenEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    // A failing `mv` ahead of the real one on PATH injects a failure at the
+    // final same-filesystem rename step, after the live .env-orbit has
+    // already been backed up into the private recovery directory — this
+    // exercises the self-restore path, not a refusal before anything is
+    // touched.
+    const binDir = makeFakeBin({});
+    writeFileSync(join(binDir, "mv"), "#!/usr/bin/env bash\nexit 1\n");
+    chmodSync(join(binDir, "mv"), 0o755);
+    const result = spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), "--execute", "--safe-only"], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir() },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain(
+      "execute action=restore-transaction resolves=configuration-migration-interrupted result=failed",
+    );
+    expect(result.stdout).toContain("execution result=failed done=0 failed=1");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(beforeBrokenEnv);
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+    expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(true);
+  });
+
+  it("output hygiene: restoring the rollback copy never prints the target directory path or a configured value", () => {
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    const combined = `${result.stdout}\n${result.stderr}`;
+    expect(combined).not.toContain(targetDir);
+    expect(combined).not.toContain("orbit-repair-configuration-rollback");
+    expect(combined).not.toContain(".orbit-config.rollback");
+    expect(combined).not.toContain("APP_URL=");
+    expect(combined).not.toContain("repair-test-secret");
+    expect(combined).not.toContain("repairtest");
   });
 
   // --- restart-services -------------------------------------------------------
