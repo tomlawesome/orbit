@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
@@ -19,6 +19,7 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import {
+  cleanupIntegrationEnvironment,
   createIntegrationFixture,
   requestForSession,
   sessionHeaders,
@@ -29,6 +30,13 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
 }));
+
+// This file never cleans up its own fixtures per-test; without this backstop
+// its ~30 fixtures (#593) leak users, households and everything cascaded
+// from them for the rest of the run.
+afterAll(async () => {
+  await cleanupIntegrationEnvironment();
+});
 
 afterEach(() => {
   vi.mocked(scanFileWithClamAv).mockReset();
