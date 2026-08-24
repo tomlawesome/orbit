@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { GET as getReceipt } from "@/app/api/imap-inbox/[receiptId]/route";
 import { GET as getInbox } from "@/app/api/imap-inbox/route";
 import { getDb } from "@/db";
@@ -9,8 +9,15 @@ import { assignImapReceiptHousehold, discardImapReviewItem, getImapReview, listI
 import { scanAndHoldImapAttachment, setImapHoldingPurgeImplementationForTests } from "@/server/imap-attachment-holding";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
 import { requestHouseholdDeletion } from "@/server/household-lifecycle";
-import { requestForSession, requestWithoutSession, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, requestForSession, requestWithoutSession, createIntegrationFixture } from "./support/fixtures";
 import { syntheticPdf } from "../support/synthetic-documents";
+
+// The first two cases below never call fixture.cleanup() (#593); this
+// backstop, matching the rest of the suite, deletes whatever they left
+// behind at file end.
+afterAll(async () => {
+  await cleanupIntegrationEnvironment();
+});
 
 describe("authenticated mailbox review read boundary", () => {
   it("bounds a malformed receipt id to 404 instead of a driver-error 500 (#383)", async () => {
