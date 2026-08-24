@@ -229,6 +229,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json, which
+      # `svelte-kit sync` generates and which is gitignored -- so it exists on
+      # any machine that has built once, and on no fresh checkout. Playwright
+      # reads that tsconfig while LOADING its config, before the webServer
+      # command it would have been built by ever runs, so without this the job
+      # dies in 45s on "Failed to load tsconfig file".
+      - name: Generate the SvelteKit type scaffolding
+        run: pnpm --filter orbit-web exec svelte-kit sync
+
       # playwright.config.js stands up both servers itself: the adapter-node
       # build of the app, and the static host for the ratified mockups. CI is
       # set by Actions, so neither reuses a stray server.
