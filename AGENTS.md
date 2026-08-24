@@ -51,7 +51,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Three known ways to lose an afternoon, or worse. The first two have open
+Five known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -80,6 +80,14 @@ either races or silently never exercises what it claims. Keep stdin open for
 the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
 and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
 has been diagnosed twice: #510/#512, then again in #552.
+
+**Add `ci: acceptance` to a pull request touching schema, migrations or server
+code.** Without it the integration and compose jobs skip and the pull request
+still reports green.
+
+**`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
+else drives it.** A dropped column passes every unit and integration check and
+fails only the compose smoke test — grep it before changing a schema.
 
 ## The demo stack is disposable
 
