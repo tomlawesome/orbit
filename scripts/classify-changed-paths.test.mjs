@@ -83,6 +83,24 @@ describe("changed-path CI risk classification", () => {
     }
   });
 
+  it("puts the v19 front end in the system lane by rule, not by fallback", () => {
+    /*
+     * These already reached CI_RISK.SYSTEM through the catch-all default for
+     * unmatched paths, so this pins the intent rather than changing behaviour:
+     * web/ ships and the e2e suite drives it, so if the default is ever
+     * softened, web/ must not soften with it (#620).
+     */
+    for (const path of [
+      "web/src/routes/home/+page.svelte",
+      "web/src/lib/flight/engine.js",
+      "web/package.json",
+      "web/playwright.config.js",
+      "web/tests/fidelity/baselines/home.png",
+    ]) {
+      expect(pathRisk(path)).toBe(CI_RISK.SYSTEM);
+    }
+  });
+
   it("treats unit-only test changes as fast and integration fixtures as integration", () => {
     expect(pathRisk("src/server/workspace-repository.test.ts")).toBe(CI_RISK.FAST);
     expect(pathRisk("src/lib/workspace.test.ts")).toBe(CI_RISK.FAST);
