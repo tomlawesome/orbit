@@ -731,7 +731,7 @@ choose_deployment_profile() {
   printf 'OIDC is the only supported authentication path today; these choices do not add local-only sign-in.\n' >&"$terminal_fd"
   printf 'Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n\n' >&"$terminal_fd"
   choice="$(installer_ui_select "$terminal_fd" \
-    'Choose a deployment profile' standard \
+    'Select a deployment profile' standard \
     standard 'Standard Orbit - required core and private scanning; standard relative resources' \
     processing 'Document processing - optional local Tika; medium relative resources' \
     full 'Full local stack - optional Tika and local Ollama; high relative resources' \
