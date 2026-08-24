@@ -15,6 +15,7 @@ if command -v pnpm >/dev/null 2>&1; then
   pnpm typecheck
   pnpm lint
   pnpm --filter orbit-web build
+  node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     pnpm test:coverage
   else
@@ -29,6 +30,7 @@ elif command -v node >/dev/null 2>&1 && [[ -d node_modules ]]; then
   # static/licenses, which the SvelteKit build then bundles.
   (cd web && node scripts/collect-font-licences.mjs \
     && node ../node_modules/vite/bin/vite.js build)
+  node scripts/check-v19-types.mjs
   if [[ "${ORBIT_TEST_COVERAGE:-false}" == "true" ]]; then
     node node_modules/vitest/vitest.mjs run --coverage
   else

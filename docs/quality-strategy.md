@@ -83,6 +83,40 @@ fail on a global percentage.
 Coverage cannot prove authorization, concurrency, provider behaviour,
 accessibility, or recoverability. Those require the appropriate layer above.
 
+## The v19 type ledger
+
+The SvelteKit front end in `web/` is outside `pnpm typecheck`: the root
+`tsconfig.json` sets `"allowJs": false` and includes only `**/*.ts` and
+`**/*.tsx`, and `web/src` holds no TypeScript. Its own checker, `svelte-check`,
+had no caller in CI until #620, so 1,644 errors accumulated across 52 files --
+overwhelmingly implicit `any` and DOM narrowing rather than defects.
+
+Gating on zero would fail every pull request from day one; leaving it off lets
+the pile grow unseen. So `web/svelte-check-ceiling.json` records what each file
+is allowed today and `scripts/check-v19-types.mjs` enforces it from the fast
+job, on the same ratchet principle as the coverage floors above and with one
+addition:
+
+1. A file that gets worse fails.
+2. A file that gets **better** also fails, asking for its number to be lowered.
+   Exact match is what walks the ledger down to nothing rather than leaving
+   slack nobody reclaims. `svelte-check` is deterministic against a frozen
+   lockfile, so this cannot flap.
+3. A file with no entry may have no errors, so everything M2 writes fresh is
+   held at zero automatically.
+4. Entries are never added and never raised. Lowering one and deleting one are
+   the only edits that move this forward.
+
+This is a holding position for the duration of the v19 rebuild, not a standard.
+**M2 does not close while the ledger has entries in it** (#624): the rebuild is
+what makes the tolerance removable, so each screen it rewrites should land
+clean and drop its entry in the same pull request. When the ledger is empty the
+gate becomes a plain zero-error check and both files go.
+
+The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
+seconds). Before that, a `.svelte` file that did not compile could merge green
+and first fail at the container build on the `preview` push.
+
 ## CI target
 
 ```mermaid
