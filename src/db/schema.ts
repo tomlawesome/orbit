@@ -101,47 +101,101 @@ export const instanceAuthority = pgTable("instance_authority", {
 ]);
 
 /**
+ * One maintenance episode (#585, ADR-0013 decision 1 as amended 2026-08-23).
+ * A window covers all three tenses at once: `scheduled` before it starts,
+ * `open` while the instance is closed, then `resolved`, or `cancelled` if it
+ * never opened, or `absorbed` if it came due while another was already open
+ * (decision 5). Rows are retained indefinitely and never deleted.
+ *
+ * Two partial indexes carry the invariants that matter. The unique one is
+ * what actually permits at most one `open` window — application logic never
+ * decides it. The scheduled one serves the effective-state probe the guard
+ * pays on every request, exactly as the retired notice index did.
+ */
+export const maintenanceWindows = pgTable("maintenance_windows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status").notNull(),
+  scheduledStartAt: timestamp("scheduled_start_at", { withTimezone: true }),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  expectedEndAt: timestamp("expected_end_at", { withTimezone: true }),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  absorbedIntoId: uuid("absorbed_into_id"),
+  ...auditColumns,
+}, (table) => [
+  foreignKey({
+    name: "maintenance_window_absorbed_into_id_fk",
+    columns: [table.absorbedIntoId],
+    foreignColumns: [table.id],
+  }),
+  check("maintenance_window_status_valid", sql`${table.status} IN ('scheduled', 'open', 'resolved', 'cancelled', 'absorbed')`),
+  uniqueIndex("maintenance_window_open_unique").on(table.status).where(sql`${table.status} = 'open'`),
+  index("maintenance_window_scheduled_start_idx").on(table.scheduledStartAt).where(sql`${table.status} = 'scheduled'`),
+]);
+
+/**
+ * The ordered narrative entries within a window (#585, ADR-0013 decisions 1
+ * and 8). Display order is `published_at ASC, id ASC` — the same
+ * deterministic tiebreak the retired notice index used.
+ *
+ * `body` carries the same 500-character database bound the retired singleton
+ * message had; the 8-line and no-control-character bounds stay in
+ * src/server/maintenance.ts, where a single writer path already enforces
+ * them and a function-based constraint would buy nothing. `kind`,
+ * `window_id` and `published_at` are immutable by decision 8; `body` is
+ * editable and stamps `edited_at`, with the prior text written to audit.
+ */
+export const maintenanceUpdates = pgTable("maintenance_updates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  windowId: uuid("window_id").notNull(),
+  kind: text("kind").notNull(),
+  body: text("body").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  editedAt: timestamp("edited_at", { withTimezone: true }),
+}, (table) => [
+  foreignKey({
+    name: "maintenance_updates_window_id_fk",
+    columns: [table.windowId],
+    foreignColumns: [maintenanceWindows.id],
+  }).onDelete("cascade"),
+  check("maintenance_update_kind_valid", sql`${table.kind} IN ('scheduled', 'started', 'update', 'resolved')`),
+  check("maintenance_update_body_length", sql`char_length(${table.body}) <= 500`),
+  index("maintenance_update_window_published_idx").on(table.windowId, table.publishedAt, table.id),
+]);
+
+/**
  * The instance's one maintenance configuration (#235, ADR-0013 decision 1):
- * the `instance_authority` singleton shape, but with no foreign key, so
- * unlike that table the 0028 migration seeds the inactive row
+ * the `instance_authority` singleton shape, but with no foreign key of its
+ * own, so unlike that table the 0028 migration seeds the inactive row
  * unconditionally and the guard read is always a plain primary-key lookup.
  * `id` exists solely to give `audit_log.entity_id` something stable to
- * point at. `version` versions the whole maintenance configuration —
- * this row and `maintenanceNotices` together — and every administrator
+ * point at.
+ *
+ * Slimmed to the guard's closure record and concurrency token by #585: the
+ * narrative moved to `maintenanceUpdates` and `started_at` to the window.
+ * `expected_end_at` is denormalised from the open window and written in the
+ * same transaction as any change to it, so the per-request guard read stays
+ * one primary-key lookup plus one partial-index probe; the window row is the
+ * source of truth. `version` versions the *whole* maintenance configuration
+ * — this row, windows and updates together — and every administrator
  * mutation is a single transaction gated on it (src/server/maintenance.ts).
  */
 export const instanceMaintenance = pgTable("instance_maintenance", {
   singleton: boolean("singleton").primaryKey().default(true),
   id: uuid("id").notNull().defaultRandom(),
   active: boolean("active").notNull().default(false),
-  message: text("message"),
-  messagePublishedAt: timestamp("message_published_at", { withTimezone: true }),
+  currentWindowId: uuid("current_window_id"),
   expectedEndAt: timestamp("expected_end_at", { withTimezone: true }),
-  activatedAt: timestamp("activated_at", { withTimezone: true }),
   version: bigint("version", { mode: "number" }).notNull().default(1),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  foreignKey({
+    name: "instance_maintenance_current_window_id_fk",
+    columns: [table.currentWindowId],
+    foreignColumns: [maintenanceWindows.id],
+  }),
   check("instance_maintenance_singleton", sql`${table.singleton}`),
-  check("instance_maintenance_message_length", sql`${table.message} IS NULL OR char_length(${table.message}) <= 500`),
-]);
-
-/**
- * Scheduled future maintenance notices (#235, ADR-0013 decision 1). Rows are
- * retained, never deleted: cancellation sets `cancelledAt`. The partial index
- * matches the "due, unclaimed, uncancelled" predicate the effective-state
- * read and the future scheduled-activation worker (#525) both use.
- */
-export const maintenanceNotices = pgTable("maintenance_notices", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  message: text("message").notNull(),
-  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-  expectedEndAt: timestamp("expected_end_at", { withTimezone: true }),
-  activatedAt: timestamp("activated_at", { withTimezone: true }),
-  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [
-  check("maintenance_notice_message_length", sql`char_length(${table.message}) <= 500`),
-  index("maintenance_notice_pending_starts_idx").on(table.startsAt).where(sql`${table.activatedAt} IS NULL AND ${table.cancelledAt} IS NULL`),
 ]);
 
 export const externalIdentities = pgTable("external_identities", {
