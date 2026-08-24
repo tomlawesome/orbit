@@ -1,15 +1,15 @@
 import { z } from "zod";
-import { activateDueMaintenanceNotice } from "@/server/maintenance";
+import { activateDueMaintenanceWindow, type MaintenanceTickResult } from "@/server/maintenance";
 import { log } from "@/lib/logger";
 
 /**
- * The maintenance tick (ADR-0013 decision 5, #525).
+ * The maintenance tick (ADR-0013 decision 5 as amended, #525 then #585).
  *
  * The tick is not what makes scheduled maintenance take effect: effective
- * state already counts a due, unclaimed notice as active, so the scheduled
+ * state already counts a due scheduled window as active, so the scheduled
  * instant itself closes the instance on every process at once. This worker
- * exists to make that transition durable — claiming the notice and copying it
- * into the singleton — so the state survives the notice being claimed and
+ * exists to make that transition durable — opening the due window, or
+ * absorbing it into one already open — so the state survives the claim and
  * shows up in the audit log exactly once.
  *
  * Interval is separate from the shared WORKER_POLL_SECONDS, following the
@@ -39,13 +39,13 @@ export interface MaintenanceWorkerHealth {
 }
 
 /**
- * One cycle. Claims at most one due notice, so a backlog of several drains
+ * One cycle. Claims at most one due window, so a backlog of several drains
  * one tick at a time — bounded work per cycle, and the effective-state read
  * already has the instance closed regardless of how far the backlog has
  * drained.
  */
-export async function runMaintenanceCycle(): Promise<{ activatedNoticeId: string | null }> {
-  return activateDueMaintenanceNotice();
+export async function runMaintenanceCycle(): Promise<MaintenanceTickResult> {
+  return activateDueMaintenanceWindow();
 }
 
 const workerState = globalThis as typeof globalThis & {
@@ -67,9 +67,9 @@ export function getMaintenanceWorkerHealth(): MaintenanceWorkerHealth {
 
 /**
  * Starts one scheduler per application process. Running several is safe: the
- * conditional claim in activateDueMaintenanceNotice is what excludes
- * duplicates, not this flag, which only guards against a hot-reload double
- * start within one process.
+ * singleton row lock and the conditional claim in
+ * activateDueMaintenanceWindow are what exclude duplicates, not this flag,
+ * which only guards against a hot-reload double start within one process.
  */
 export function startMaintenanceWorker(config = getMaintenanceWorkerConfig()): void {
   if (workerState.__orbitMaintenanceWorkerStarted) return;
@@ -78,12 +78,12 @@ export function startMaintenanceWorker(config = getMaintenanceWorkerConfig()): v
   const poll = async () => {
     workerState.__orbitMaintenanceWorkerRunning = true;
     try {
-      const { activatedNoticeId } = await runMaintenanceCycle();
+      const { openedWindowId, absorbedWindowId } = await runMaintenanceCycle();
       workerState.__orbitMaintenanceWorkerLastSuccessAt = new Date().toISOString();
       // Only the transition is worth a line. A quiet tick every 30 seconds
       // would be thousands of entries a day saying nothing happened, and the
-      // message text is never logged either way.
-      if (activatedNoticeId !== null) {
+      // published text is never logged either way.
+      if (openedWindowId !== null || absorbedWindowId !== null) {
         log.info({ event: "maintenance.worker", state: "ready", action: "none" });
       }
     } catch {
