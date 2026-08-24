@@ -62,7 +62,7 @@ simulate_mode=0
 requested_action=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plain)
+    --quiet)
       plain_mode=1
       shift
       ;;
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install|--update|--repair)
       [[ -z "$requested_action" ]] || {
-        printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+        printf 'Usage: %s [--quiet] [--install|--update|--repair] | [--quiet] --simulate\n' "$0" >&2
         exit 2
       }
       requested_action="${1#--}"
@@ -83,17 +83,17 @@ while [[ $# -gt 0 ]]; do
       break
       ;;
     *)
-      printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+      printf 'Usage: %s [--quiet] [--install|--update|--repair] | [--quiet] --simulate\n' "$0" >&2
       exit 2
       ;;
   esac
 done
 [[ $# -eq 0 ]] || {
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--quiet] [--install|--update|--repair] | [--quiet] --simulate\n' "$0" >&2
   exit 2
 }
 if [[ "$simulate_mode" == 1 && -n "$requested_action" ]]; then
-  printf 'Usage: %s [--plain] [--install|--update|--repair] | [--plain] --simulate\n' "$0" >&2
+  printf 'Usage: %s [--quiet] [--install|--update|--repair] | [--quiet] --simulate\n' "$0" >&2
   printf 'Orbit installer: --simulate cannot be combined with --install, --update or --repair.\n' >&2
   exit 2
 fi
@@ -731,7 +731,7 @@ choose_deployment_profile() {
   printf 'OIDC is the only supported authentication path today; these choices do not add local-only sign-in.\n' >&"$terminal_fd"
   printf 'Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n\n' >&"$terminal_fd"
   choice="$(installer_ui_select "$terminal_fd" \
-    'Select a deployment profile' standard \
+    'Choose a deployment profile' standard \
     standard 'Standard Orbit - required core and private scanning; standard relative resources' \
     processing 'Document processing - optional local Tika; medium relative resources' \
     full 'Full local stack - optional Tika and local Ollama; high relative resources' \
