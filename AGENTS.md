@@ -43,11 +43,11 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-malware-scanner.sh` — ClamAV detection
 - `scripts/test-tika-processor.mjs` — Tika document extraction
-- `scripts/installer-simulation.sh` — installer command-centre UI only, no Docker
+- `scripts/installer-simulation.sh` — installer command centre UI only, no Docker
 - `scripts/install-test-browser.sh` — one-time headless browser download
 - `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
 - `scripts/validate-compose-config.sh` — Compose configuration validation
-- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a given digest
+- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
 
 ## Traps when running things locally
 
