@@ -261,6 +261,34 @@ function dockerShimScript({
     "    exit 1",
     "    ;;",
     "  exec)",
+    // Real `docker exec` refuses a flag it does not know, with exit 125 and
+    // this message. The shim used to accept anything, so `docker exec -T` --
+    // a `docker compose exec` flag that plain `docker exec` has never had --
+    // passed every test here and failed on every real deployment (#607). A
+    // fake producer that is more permissive than the real one cannot catch
+    // the code drifting away from it, so this branch is deliberately strict.
+    '    exec_args=("${@:2}")',
+    "    exec_idx=0",
+    '    while (( exec_idx < ${#exec_args[@]} )); do',
+    '      exec_arg="${exec_args[exec_idx]}"',
+    '      case "$exec_arg" in',
+    "        --env|--user|--workdir|--env-file|--detach-keys) exec_idx=$((exec_idx + 2)) ;;",
+    "        --detach|--interactive|--tty|--privileged) exec_idx=$((exec_idx + 1)) ;;",
+    '        --*) printf "unknown flag: %s\\n" "$exec_arg" >&2; exit 125 ;;',
+    "        -e|-u|-w) exec_idx=$((exec_idx + 2)) ;;",
+    "        -*)",
+    '          exec_rest="${exec_arg#-}"',
+    '          for (( exec_c = 0; exec_c < ${#exec_rest}; exec_c++ )); do',
+    '            case "${exec_rest:exec_c:1}" in',
+    "              d|i|t) ;;",
+    '              *) printf "unknown shorthand flag: \x27%s\x27 in -%s\\n" "${exec_rest:exec_c:1}" "${exec_rest:exec_c:1}" >&2; exit 125 ;;',
+    "            esac",
+    "          done",
+    "          exec_idx=$((exec_idx + 1))",
+    "          ;;",
+    "        *) break ;;",
+    "      esac",
+    "    done",
     '    joined="$*"',
     '    if [[ "$joined" == *"pg_isready"* ]]; then',
     `      exit ${dbReadyExit}`,
