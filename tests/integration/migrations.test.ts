@@ -7,6 +7,8 @@ import {
   EXPECTED_INDEXES,
   EXPECTED_POSTGRES_MAJOR,
   EXPECTED_TABLE_COLUMNS,
+  PRE_WINDOW_MIGRATION_TAG,
+  seedPreWindowMaintenance,
   createBaselineMigrationDirectory,
   createInvalidMigrationDirectory,
   createMigrationDirectoryThroughTag,
@@ -75,6 +77,89 @@ describe("PostgreSQL migration evidence", () => {
     // safety), unlike drizzle's mapped reads elsewhere in this suite.
     const maintenanceRows = await database.client.unsafe(`SELECT "singleton", "active", "version" FROM "instance_maintenance"`);
     expect(maintenanceRows).toEqual([{ singleton: true, active: false, version: "1" }]);
+  });
+
+  it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {
+    const database = await createMigrationTestDatabase("maintenance-windows");
+    databases.push(database);
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", PRE_WINDOW_MIGRATION_TAG);
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    const pending = "aa000000-0000-4000-8000-000000000001";
+    const alsoPending = "aa000000-0000-4000-8000-000000000002";
+    const claimed = "aa000000-0000-4000-8000-000000000003";
+    const cancelled = "aa000000-0000-4000-8000-000000000004";
+    const activatedAt = "2026-08-23T09:00:00.000Z";
+    const expectedEndAt = "2026-08-23T13:00:00.000Z";
+    await seedPreWindowMaintenance(database.client, {
+      active: { message: "Upgrading the database.", expectedEndAt, activatedAt },
+      notices: [
+        { id: alsoPending, message: "Second window next week.", startsAt: "2026-08-30T22:00:00.000Z", expectedEndAt: null },
+        { id: pending, message: "First window tomorrow.", startsAt: "2026-08-24T22:00:00.000Z", expectedEndAt: "2026-08-25T02:00:00.000Z" },
+        { id: claimed, message: "The window that is now live.", startsAt: activatedAt, expectedEndAt, activatedAt },
+        { id: cancelled, message: "Called off.", startsAt: "2026-08-26T22:00:00.000Z", expectedEndAt: null, cancelledAt: activatedAt },
+      ],
+    });
+
+    await runMigrations(database.url, "drizzle");
+
+    /* The live window survives as the one open window, carrying the message
+       it had already published as a `started` entry, and the singleton's
+       denormalised expected end is untouched — the guard's Retry-After does
+       not change across the upgrade (ADR-0013 decision 1 as amended). */
+    const [singletonRow] = await database.client.unsafe(
+      `SELECT "active", "current_window_id", "expected_end_at" FROM "instance_maintenance"`,
+    );
+    expect(singletonRow.active).toBe(true);
+    expect(singletonRow.current_window_id).not.toBeNull();
+    expect((singletonRow.expected_end_at as Date).toISOString()).toBe(expectedEndAt);
+
+    const openWindows = await database.client.unsafe(
+      `SELECT "id", "status", "scheduled_start_at", "started_at", "expected_end_at" FROM "maintenance_windows" WHERE "status" = 'open'`,
+    );
+    expect(openWindows).toHaveLength(1);
+    expect(openWindows[0].id).toBe(singletonRow.current_window_id);
+    expect(openWindows[0].scheduled_start_at).toBeNull();
+    expect((openWindows[0].started_at as Date).toISOString()).toBe(activatedAt);
+    expect((openWindows[0].expected_end_at as Date).toISOString()).toBe(expectedEndAt);
+    expect(await database.client.unsafe(
+      `SELECT "kind", "body" FROM "maintenance_updates" WHERE "window_id" = $1`,
+      [String(openWindows[0].id)],
+    )).toEqual([{ kind: "started", body: "Upgrading the database." }]);
+
+    /* Pending notices become scheduled windows, keeping their own ids so the
+       audit rows already pointing at them still resolve. Claimed and
+       cancelled notices were history, not state, and go with the table. */
+    const scheduled = await database.client.unsafe(`
+      SELECT w."id", w."status", w."scheduled_start_at", w."expected_end_at", u."kind", u."body"
+        FROM "maintenance_windows" w
+        JOIN "maintenance_updates" u ON u."window_id" = w."id"
+       WHERE w."status" = 'scheduled'
+       ORDER BY w."scheduled_start_at"
+    `);
+    expect(scheduled.map((row) => [row.id, row.kind, row.body])).toEqual([
+      [pending, "scheduled", "First window tomorrow."],
+      [alsoPending, "scheduled", "Second window next week."],
+    ]);
+    expect((scheduled[0].expected_end_at as Date).toISOString()).toBe("2026-08-25T02:00:00.000Z");
+    expect(scheduled[1].expected_end_at).toBeNull();
+    const converted = await database.client.unsafe(
+      `SELECT "id" FROM "maintenance_windows" WHERE "id" IN ($1, $2)`,
+      [claimed, cancelled],
+    );
+    expect(converted).toEqual([]);
+
+    /* The retired table is gone, and the audit rows that recorded those
+       notices - message text included - are untouched by the upgrade. */
+    const [retired] = await database.client.unsafe(
+      `SELECT to_regclass('public.maintenance_notices') AS present`,
+    );
+    expect(retired.present).toBeNull();
+    const noticeAudits = await database.client.unsafe(
+      `SELECT "entity_id" FROM "audit_log" WHERE "action" = 'maintenance_notice_scheduled' ORDER BY "entity_id"`,
+    );
+    expect(noticeAudits.map((row) => row.entity_id)).toEqual([pending, alsoPending, claimed, cancelled].sort());
   });
 
   it("fails closed below the supported floor and on checksum drift", async () => {

@@ -76,8 +76,9 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "status", "active_until", "created_at", "updated_at"],
   imap_recipient_rotation_state: ["id", "current_generation", "current_commitment", "previous_generation", "previous_expires_at", "previous_commitment", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
-  instance_maintenance: ["singleton", "id", "active", "message", "message_published_at", "expected_end_at", "activated_at", "version", "updated_at"],
-  maintenance_notices: ["id", "message", "starts_at", "expected_end_at", "activated_at", "cancelled_at", "created_at"],
+  instance_maintenance: ["singleton", "id", "active", "current_window_id", "expected_end_at", "version", "updated_at"],
+  maintenance_windows: ["id", "status", "scheduled_start_at", "started_at", "expected_end_at", "ended_at", "cancelled_at", "absorbed_into_id", "created_at", "updated_at"],
+  maintenance_updates: ["id", "window_id", "kind", "body", "published_at", "created_at", "edited_at"],
   reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
@@ -125,7 +126,11 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_recipient_alias_active_digest_unique: { table: "imap_recipient_aliases", columns: ["generation", "alias_sha256"], unique: true },
   imap_recipient_alias_user_generation_unique: { table: "imap_recipient_aliases", columns: ["user_id", "generation"], unique: true },
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
-  maintenance_notice_pending_starts_idx: { table: "maintenance_notices", columns: ["starts_at"], unique: false },
+  // Partial: at most one open window, enforced by the database (orbit#585).
+  maintenance_window_open_unique: { table: "maintenance_windows", columns: ["status"], unique: true },
+  // Partial: the effective-state probe the guard pays on every request.
+  maintenance_window_scheduled_start_idx: { table: "maintenance_windows", columns: ["scheduled_start_at"], unique: false },
+  maintenance_update_window_published_idx: { table: "maintenance_updates", columns: ["window_id", "published_at", "id"], unique: false },
   reviewed_intake_operation_result_unique: { table: "reviewed_intake_operations", columns: ["result_id"], unique: true },
   reviewed_intake_operation_actor_idx: { table: "reviewed_intake_operations", columns: ["actor_user_id", "created_at"], unique: false },
   reviewed_intake_operation_item_idx: { table: "reviewed_intake_operations", columns: ["item_id"], unique: false },
@@ -199,7 +204,11 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   instance_authority_pkey: primary("instance_authority", ["singleton"]),
   instance_authority_primary_user_id_users_id_fk: foreign("instance_authority", ["primary_user_id"], "users", ["id"], "restrict"),
   instance_maintenance_pkey: primary("instance_maintenance", ["singleton"]),
-  maintenance_notices_pkey: primary("maintenance_notices", ["id"]),
+  instance_maintenance_current_window_id_fk: foreign("instance_maintenance", ["current_window_id"], "maintenance_windows", ["id"], "no_action"),
+  maintenance_windows_pkey: primary("maintenance_windows", ["id"]),
+  maintenance_window_absorbed_into_id_fk: foreign("maintenance_windows", ["absorbed_into_id"], "maintenance_windows", ["id"], "no_action"),
+  maintenance_updates_pkey: primary("maintenance_updates", ["id"]),
+  maintenance_updates_window_id_fk: foreign("maintenance_updates", ["window_id"], "maintenance_windows", ["id"], "cascade"),
   household_join_requests_household_id_households_id_fk: foreign("household_join_requests", ["household_id"], "households", ["id"], "cascade"),
   household_join_requests_pkey: primary("household_join_requests", ["id"]),
   household_join_requests_user_id_users_id_fk: foreign("household_join_requests", ["user_id"], "users", ["id"], "cascade"),
@@ -440,6 +449,88 @@ export async function createInvalidMigrationDirectory(migrationsFolder: string):
     failedTag,
     cleanup: () => rm(targetFolder, { recursive: true, force: true }),
   };
+}
+
+/** The last migration before the window/update model (orbit#585). */
+export const PRE_WINDOW_MIGRATION_TAG = "0028_instance_maintenance";
+
+export interface PreWindowNoticeSeed {
+  id: string;
+  message: string;
+  startsAt: string;
+  expectedEndAt: string | null;
+  /** Set by the #525 worker when it claimed the notice. */
+  activatedAt?: string | null;
+  /** Set by cancelMaintenanceNotice, which retained rather than deleted. */
+  cancelledAt?: string | null;
+}
+
+export interface PreWindowMaintenanceSeed {
+  active: { message: string; expectedEndAt: string | null; activatedAt: string } | null;
+  notices: PreWindowNoticeSeed[];
+}
+
+/**
+ * Writes the maintenance state a 0028 database actually holds, in the exact
+ * shape the retired writers in src/server/maintenance.ts produced: the
+ * singleton carrying one overwritable message with `message_published_at` and
+ * `activated_at` set together, notices inserted with their scheduled instant,
+ * `version` incremented once per mutation, and an audit row per mutation
+ * against the singleton's stable id (notices against their own).
+ *
+ * The shape matters more than the values. A fixture that invents a row the
+ * application could never have written proves nothing about the upgrade
+ * (#529 in this same session), so this reproduces the writers rather than
+ * describing them.
+ */
+export async function seedPreWindowMaintenance(
+  client: PostgresClient,
+  seed: PreWindowMaintenanceSeed,
+): Promise<void> {
+  const [singleton] = await client.unsafe(`SELECT "id" FROM "instance_maintenance" WHERE "singleton"`);
+  if (!singleton) throw new Error("0028 must have seeded the maintenance singleton before this fixture runs");
+  const singletonId = String(singleton.id);
+  let version = 1;
+
+  for (const notice of seed.notices) {
+    version += 1;
+    await client.unsafe(
+      `INSERT INTO "maintenance_notices" ("id", "message", "starts_at", "expected_end_at", "activated_at", "cancelled_at")
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [notice.id, notice.message, notice.startsAt, notice.expectedEndAt, notice.activatedAt ?? null, notice.cancelledAt ?? null],
+    );
+    await client.unsafe(
+      `INSERT INTO "audit_log" ("entity_type", "entity_id", "action", "changes")
+       VALUES ('instance_maintenance', $1, 'maintenance_notice_scheduled', $2)`,
+      [notice.id, JSON.stringify({
+        message: notice.message,
+        startsAt: notice.startsAt,
+        expectedEndAt: notice.expectedEndAt,
+      })],
+    );
+  }
+
+  if (seed.active) {
+    version += 1;
+    await client.unsafe(
+      `UPDATE "instance_maintenance"
+          SET "active" = true, "message" = $1, "message_published_at" = $2,
+              "expected_end_at" = $3, "activated_at" = $2, "version" = $4, "updated_at" = $2
+        WHERE "singleton"`,
+      [seed.active.message, seed.active.activatedAt, seed.active.expectedEndAt, version],
+    );
+    await client.unsafe(
+      `INSERT INTO "audit_log" ("entity_type", "entity_id", "action", "changes")
+       VALUES ('instance_maintenance', $1, 'maintenance_activated', $2)`,
+      [singletonId, JSON.stringify({
+        active: true,
+        message: seed.active.message,
+        expectedEndAt: seed.active.expectedEndAt,
+      })],
+    );
+  } else if (seed.notices.length > 0) {
+    await client.unsafe(`UPDATE "instance_maintenance" SET "version" = $1 WHERE "singleton"`, [version]);
+  }
 }
 
 export async function runMigrations(databaseUrl: string, migrationsFolder: string): Promise<void> {
