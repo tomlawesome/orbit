@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { POST as inspectRoute } from "@/app/api/households/[householdId]/item-document-inspection/route";
 import { getDb } from "@/db";
 import { auditLog, documents, items } from "@/db/schema";
-import { requestForSession, createIntegrationFixture } from "./support/fixtures";
+import { cleanupIntegrationEnvironment, requestForSession, createIntegrationFixture } from "./support/fixtures";
 import { readFileSync } from "node:fs";
 
 const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-object-stream.pdf", import.meta.url));
@@ -11,6 +11,12 @@ const qpdfObjectStreamPdf = readFileSync(new URL("../support/fixtures/qpdf-objec
 function context(householdId: string) {
   return { params: Promise.resolve({ householdId }) };
 }
+
+// This file never cleans up its own fixtures per-test (#593); this backstop
+// deletes them, and everything cascaded from them, at file end.
+afterAll(async () => {
+  await cleanupIntegrationEnvironment();
+});
 
 describe("document-assisted item inspection boundary", () => {
   it("authorizes inspection and creates no durable item, document, or audit before explicit submit", async () => {
