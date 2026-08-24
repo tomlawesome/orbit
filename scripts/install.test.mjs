@@ -22,6 +22,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+
 // This suite is fully mocked: fake `docker` and `curl` executables are placed
 // ahead of the real ones on PATH, so no test needs Docker, a registry,
 // network access, Git or a TTY.
@@ -676,12 +678,8 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     cwd: targetDir,
     encoding: "utf8",
     input,
-    // 90s, not 10s: under parallel CI load with coverage instrumentation the
-    // PTY session can exceed even 30s (observed at 10s on PRs #368/#372 and
-    // again at 30s on PR #390), and the SIGKILL surfaces as status null
-    // instead of the asserted exit code. A genuine hang still fails — load
-    // contention never should.
-    timeout: 90000,
+    // Deadline and its justification: pty-deadline.mjs (#595).
+    timeout: PTY_DEADLINE_MS,
     killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
@@ -702,7 +700,10 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     },
   });
   const calls = readOptionalFile(logPath);
-  return { ...result, calls };
+  return failOnPtyDeadline(
+    { ...result, calls },
+    { label: "runInstallWithControllingTerminal", deadlineMs: PTY_DEADLINE_MS },
+  );
 }
 
 function runInstallWithPromptedTerminalInput(
@@ -756,11 +757,21 @@ function runInstallWithPromptedTerminalInput(
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (timedOut) {
+        reject(ptyDeadlineError({
+          label: "runInstallWithPromptedTerminalInput",
+          deadlineMs: PTY_ASYNC_DEADLINE_MS,
+          stdout,
+          stderr,
+        }));
+        return;
+      }
       resolve({
         status,
         signal,
@@ -891,7 +902,7 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("config --quiet");
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("guides and persists the document-processing profile after final review", () => {
     const targetDir = makeTarget();
