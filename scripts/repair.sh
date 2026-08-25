@@ -1549,6 +1549,10 @@ diagnosis_early=0
 # (check_image_identity) can tell "no eligible container" from "not yet run".
 migration_failed_reported=0
 migration_backstop_db_id=""
+# The container the authenticated probe drew its credential from, and the
+# program it used, so the backstop reuses that identical path (#632).
+migration_backstop_reader_id=""
+migration_backstop_reader_script=""
 migration_backstop_pg_user=""
 migration_backstop_pg_db=""
 app_identity_container_id=""
@@ -2306,12 +2310,51 @@ check_database_reachability() {
   # call site below, so every early exit here is an explicit `return 0`.)
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
-  psql_output="$(timeout "$docker_probe_timeout" docker exec "$db_id" \
-    sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db" 2>&1)" || psql_status=$?
+  # The application container holds the credential under test (#632). Resolve
+  # it here rather than depending on check_application_container's ordering:
+  # this step must not become sensitive to where it sits in the diagnosis.
+  local app_probe_ids app_probe_id=""
+  app_probe_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=orbit-app" \
+    --format '{{.ID}}' 2>/dev/null || true)"
+  if [[ -n "$app_probe_ids" && "$app_probe_ids" != *$'\n'* && "$app_probe_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
+    app_probe_id="$app_probe_ids"
+  fi
+  # Which container the credential comes from, and whether the result may
+  # raise a finding. With an application container that can name its own
+  # secret file, the credential under test is the one it presents, and a
+  # failure IS a credential mismatch. Without one there is no application
+  # credential to be wrong -- so the database's own copy is used purely to
+  # reach the database for the migration backstop, and never classified.
+  local reader_id="$app_probe_id" reader_script="$app_credential_reader"
+  local classify_credentials=1
+  # shellcheck disable=SC2016  # expanded by the container's shell, not this one
+  if [[ -z "$app_probe_id" ]] || ! timeout "$docker_probe_timeout" docker exec "$app_probe_id" \
+    sh -c 'f="${POSTGRES_PASSWORD_FILE:-}"; [ -n "$f" ] && [ -r "$f" ]' >/dev/null 2>&1; then
+    reader_id="$db_id"
+    reader_script="$db_credential_reader"
+    classify_credentials=0
+  fi
+
+  # The credential crosses from one container to the other as bytes in a pipe.
+  # No host process holds it: not argv, not an environment variable, not a
+  # shell variable (#610's property, kept). The pipeline's exit status is
+  # psql's, which is the one being classified below.
+  psql_output="$( { timeout "$docker_probe_timeout" docker exec "$reader_id" \
+      sh -c "$reader_script" sh \
+    | timeout "$docker_probe_timeout" docker exec -i "$db_id" \
+      sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db"; } 2>&1)" || psql_status=$?
   # The container could not tell us which file holds the password, so there
   # is nothing to authenticate with and nothing to report: no finding, rather
   # than a guess dressed up as one.
   [[ "$psql_status" != "$PROBE_NO_SECRET_STATUS" ]] || { psql_output=""; return 0; }
+  # A probe that borrowed the database's own copy proves nothing about the
+  # application's credential, so it may record coordinates but never a finding.
+  if [[ "$classify_credentials" == 0 && "$psql_status" != 0 ]]; then
+    psql_output=""
+    return 0
+  fi
   if [[ "$psql_status" != 0 ]]; then
     if [[ "${psql_output,,}" == *"password authentication failed"* ]]; then
       add_finding database-credential-mismatch database fail
@@ -2326,6 +2369,8 @@ check_database_reachability() {
     # it in run_diagnosis so the SQL only ever runs when that scan
     # found nothing (rotated logs, or the container removed entirely).
     migration_backstop_db_id="$db_id"
+    migration_backstop_reader_id="$reader_id"
+    migration_backstop_reader_script="$reader_script"
     migration_backstop_pg_user="$pg_user"
     migration_backstop_pg_db="$pg_db"
   fi
@@ -2348,11 +2393,30 @@ check_database_reachability() {
 #      application uses and lands on the scram-sha-256 rule instead. SCRAM is
 #      challenge-response, so the password itself never crosses the wire.
 #
-#   2. They read the password inside the container, from the secret Compose
-#      already mounts there, so no process on the host ever holds it — not in
-#      argv, and not in an environment variable either. The path comes from
-#      the container's own POSTGRES_PASSWORD_FILE rather than a hardcoded
-#      one; a deployment that does not set it exits PROBE_NO_SECRET_STATUS,
+#   2. They test the credential the APPLICATION is actually using, read from
+#      inside the application container and piped straight into psql inside
+#      the database container. No process on the host ever holds it — not in
+#      argv, not in an environment variable, and not in a shell variable
+#      either; it exists only as bytes in a pipe between two containers.
+#
+#      Reading it from the DATABASE container instead was wrong, and wrong in
+#      both directions (#629, #632). That container's copy is a bind mount of
+#      the secret file's inode, frozen at its last start, and Postgres itself
+#      stops caring the moment initdb has run — it authenticates from its own
+#      catalogue afterwards. So after any replacement of the secret file the
+#      database container's copy is neither what Orbit is configured with nor
+#      what the database checks against. It reported a successful rotation as
+#      failed (#629) and, worse, reported a deployment whose application could
+#      not authenticate at all as merely unhealthy (#632).
+#
+#      The application container's copy is the one that matters, because it is
+#      definitionally the credential the running application presents. It is
+#      taken from $POSTGRES_PASSWORD_FILE inside that container — the runtime
+#      copy container-entrypoint.sh makes, not the mount — so a container that
+#      has not restarted is tested on what it is really using, which is the
+#      truth this check exists to establish.
+#
+#      A deployment where that file cannot be read exits PROBE_NO_SECRET_STATUS,
 #      which the callers treat as "cannot classify" and report nothing.
 #
 # The user, database and host are positional arguments, never interpolated
@@ -2362,20 +2426,44 @@ check_database_reachability() {
 # the two cannot drift apart.
 readonly db_service_host="orbit-db"
 readonly PROBE_NO_SECRET_STATUS=97
+# Run in the APPLICATION container: emits the credential that container is
+# actually using, and nothing else. Read-only, no network, no database.
 # shellcheck disable=SC2016  # expanded by the container's shell, not this one
-readonly authenticated_probe='
+readonly app_credential_reader='
   secret_file="${POSTGRES_PASSWORD_FILE:-}"
   [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
-  PGPASSWORD="$(cat -- "$secret_file")" \
-    exec psql -h "$1" -U "$2" -d "$3" -c "SELECT 1"
+  exec cat -- "$secret_file"
+'
+# Run in the DATABASE container: its own mounted copy of the secret. This is
+# NOT a valid source for judging the application's credential (#629, #632) and
+# is never used for that. It exists only so the migration-failed backstop can
+# still reach the database when there is no application container to borrow a
+# credential from -- the case that backstop was written for. A finding is never
+# raised from a probe that used it.
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly db_credential_reader='
+  secret_file="${POSTGRES_PASSWORD_FILE:-}"
+  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
+  exec cat -- "$secret_file"
+'
+# Run in the DATABASE container, with that credential arriving on stdin. The
+# assignment is a command substitution rather than a variable the shell keeps:
+# `$(cat)` also strips the secret file's trailing newline, which a password
+# must not carry.
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly authenticated_probe='
+  PGPASSWORD="$(cat)"
+  [ -n "$PGPASSWORD" ] || exit 97
+  export PGPASSWORD
+  exec psql -h "$1" -U "$2" -d "$3" -c "SELECT 1"
 '
 # shellcheck disable=SC2016  # expanded by the container's shell, not this one
 readonly migration_backstop_probe='
-  secret_file="${POSTGRES_PASSWORD_FILE:-}"
-  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
-  PGPASSWORD="$(cat -- "$secret_file")" \
-    exec psql -h "$1" -U "$2" -d "$3" -t -A -F"|" \
-      -c "SELECT \"outcome\", \"reason\" FROM \"drizzle\".\"orbit_migration_runs\" ORDER BY \"id\" DESC LIMIT 1"
+  PGPASSWORD="$(cat)"
+  [ -n "$PGPASSWORD" ] || exit 97
+  export PGPASSWORD
+  exec psql -h "$1" -U "$2" -d "$3" -t -A -F"|" \
+    -c "SELECT \"outcome\", \"reason\" FROM \"drizzle\".\"orbit_migration_runs\" ORDER BY \"id\" DESC LIMIT 1"
 '
 
 # migration-failed backstop (issue #528 decision, 2026-08-23 comment): the
@@ -2400,10 +2488,15 @@ check_migration_failed_backstop() {
 
   [[ "$migration_failed_reported" == 0 ]] || return 0
   [[ -n "$migration_backstop_db_id" ]] || return 0
+  [[ -n "$migration_backstop_reader_id" ]] || return 0
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
+  # Same two containers, same pipe, same credential as the SELECT 1 that
+  # already succeeded — no new exec target and no new way to obtain a secret.
   mig_output="$(
-    { timeout "$docker_probe_timeout" docker exec "$migration_backstop_db_id" \
+    { timeout "$docker_probe_timeout" docker exec "$migration_backstop_reader_id" \
+      sh -c "$migration_backstop_reader_script" sh \
+    | timeout "$docker_probe_timeout" docker exec -i "$migration_backstop_db_id" \
       sh -c "$migration_backstop_probe" sh "$db_service_host" \
       "$migration_backstop_pg_user" "$migration_backstop_pg_db" \
       2>&1 || true; } | head -c 256
