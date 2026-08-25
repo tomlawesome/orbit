@@ -59,7 +59,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Four known ways to lose an afternoon, or worse. The first two have open
+Five known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -96,6 +96,16 @@ the wrong fault — the child never exited at all. Take the deadline and the
 failure from that module rather than writing another timer; a `spawn`-based
 driver must reject rather than resolve, and its tests declare
 `PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
+
+**A Compose `file:` secret is a bind mount of an inode, not of a path.** Edit
+the file in place and every running container sees it at once; *replace* it --
+`mktemp` + `mv`, `tar -x`, `rsync` -- and each container keeps reading the old
+file for as long as it keeps running. A plain `docker restart` re-resolves the
+mount. This is not academic: repair's rotation lands the new password by rename
+precisely so a half-written secret is impossible, which left the database
+container reading a spent copy and made repair diagnose its own successful
+rotation as failed. Postgres itself never notices, because it reads that file
+once at initdb and authenticates from its own catalogue afterwards. See #629.
 
 ## The demo stack is disposable
 
