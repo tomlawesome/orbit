@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { goto, invalidateAll, replaceState } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money } from "$lib/format.js";
   import { applyCommand } from "$lib/data/workspace.js";
@@ -143,7 +144,7 @@
     if (!routerReady || !itemId || itemId === addressId) return;
     addressId = itemId;
     try {
-      replaceState(`/item/${encodeURIComponent(itemId)}`, {});
+      replaceState(resolve("/item/[id]", { id: encodeURIComponent(itemId) }), {});
     } catch {
       /* No router (a direct render, a test harness): the belt still works. */
     }
@@ -270,7 +271,7 @@
       await applyCommand(build());
       panel = null;
       armed = null;
-      if (leave) await goto("/home");
+      if (leave) await goto(resolve("/home"));
       else await invalidateAll();
     } catch (error) {
       problem = error?.message ?? String(error);
@@ -352,10 +353,10 @@
           something to carry.</div>
         <h4>start</h4>
         <div class="acts" role="group" aria-label="Actions">
-          <button style="--act:var(--accent)" onclick={() => goto("/create")}>add an item</button>
-          <button style="--act:var(--upcoming)" onclick={() => goto("/inbox")}>mail something in</button>
+          <button style="--act:var(--accent)" onclick={() => goto(resolve("/create"))}>add an item</button>
+          <button style="--act:var(--upcoming)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
-        <a class="back" href="/home">← back to your orbit</a>
+        <a class="back" href={resolve("/home")}>← back to your orbit</a>
       </article>
     {:else if cardBody?.kind === "doc"}
       <!-- A document shows what Orbit honestly holds: what the file is, when
@@ -373,7 +374,7 @@
               {#if cardBody.doc.clean}<b class="clean">scanned clean</b>
               {:else}<b>{cardBody.doc.scan ?? "not scanned"}</b>{/if}</div>
             <div class="getrow">
-              <a class="btn-primary" href={cardBody.doc.href} download>download the original</a>
+              <a class="btn-primary" href={resolve(cardBody.doc.href)} download>download the original</a>
             </div>
           </div>
         </div>
@@ -562,7 +563,7 @@
           <div class="note">no documents yet — anything you attach, or mail in to your
             relay, takes a seat in the belt beside this item.</div>
         {/if}
-        <a class="back" href="/home#{row.id}">← back to your orbit</a>
+        <a class="back" href={resolve(`/home#${row.id}`)}>← back to your orbit</a>
       </article>
     {/if}
   </div>

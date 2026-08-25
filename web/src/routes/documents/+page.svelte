@@ -6,6 +6,7 @@
    * to the belt (#458).
    */
   import { onMount } from "svelte";
+  import { resolve } from "$app/paths";
   import { readDocumentsScreen } from "$lib/data/workspace.js";
   import { archiveOf } from "$lib/data/documents.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -98,7 +99,7 @@
       <div class="group">
         <h3>{group.label}</h3>
         {#each group.rows as row (row.id)}
-          <a class="doc" href="/item/{row.loose ? row.receiptId : row.item.id}">
+          <a class="doc" href={resolve("/item/[id]", { id: row.loose ? row.receiptId : row.item.id })}>
             <span class="thumb" aria-hidden="true"><small>PDF</small></span>
             <div class="body">
               <b>{row.name}</b>
