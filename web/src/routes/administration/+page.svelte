@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { resolve } from "$app/paths";
   import { addMember, readAdminScreen } from "$lib/data/workspace.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -152,7 +153,7 @@
         </div>
 
         <div class="half">
-          <div class="cardhead"><h3>Operations</h3><a href="/admin">open operations →</a></div>
+          <div class="cardhead"><h3>Operations</h3><a href={resolve("/admin")}>open operations →</a></div>
           {#each view.services as [tone, name, detail] (name)}
             <div class="svc"><i style="background:var(--{tone})"></i><b>{name}</b><small>{detail}</small></div>
           {/each}

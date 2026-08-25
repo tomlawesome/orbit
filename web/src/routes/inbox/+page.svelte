@@ -5,6 +5,8 @@
   import { daysUntil } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { resolve } from "$app/paths";
+  import { SvelteMap } from "svelte/reactivity";
   import "./inbox.css";
 
   /**
@@ -21,7 +23,7 @@
   let armed = $state({ id: null, act: null });
   let busy = $state(null);
   let problem = $state(null);
-  const operationIds = new Map();
+  const operationIds = new SvelteMap();
 
   async function tap(receipt, act) {
     problem = null;
@@ -113,7 +115,7 @@
       <div class="group">
         <h3>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h3>
         {#each view.filed as entry (entry.itemId)}
-          <a class="item" href="/item/{entry.itemId}">
+          <a class="item" href={resolve("/item/[id]", { id: entry.itemId })}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(entry.filedAt)}</span></div>
           </a>
@@ -160,7 +162,7 @@
                 {armed.id === receipt.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
-              <a href="/item/{receipt.id}">review &amp; amend →</a>
+              <a href={resolve("/item/[id]", { id: receipt.id })}>review &amp; amend →</a>
             </div>
             {#if problem && armed.id === receipt.id}
               <div class="mail-problem">{problem}</div>
@@ -225,7 +227,7 @@
             <b>{view.relay.address}</b>
             <span><span class="live">{view.relay.status}</span>{view.lastCaught ? ` · last caught ${ago(view.lastCaught, view.now)}` : ""}</span>
           </div>
-          <a href="/settings/mail">your relay →</a>
+          <a href={resolve("/settings/mail")}>your relay →</a>
         </div>
       </div>
     {/if}

@@ -5,7 +5,7 @@
   "files": {
     "src/lib/arrival/Arrival.svelte": 15,
     "src/lib/arrival/CreateSystem.svelte": 1,
-    "src/lib/arrival/Newcomer.svelte": 9,
+    "src/lib/arrival/Newcomer.svelte": 6,
     "src/lib/arrival/stage.js": 13,
     "src/lib/Chrome.svelte": 4,
     "src/lib/data/belt.js": 17,
