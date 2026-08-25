@@ -105,6 +105,20 @@ function dockerShimScript({
   // the application's (#629), and "which containers were restarted, in what
   // order" is the only way to assert that without real containers.
   restartLogPath = "",
+  // #632: the credential under test now comes from the APPLICATION container,
+  // piped into psql in the database container, because that is the credential
+  // the running application actually presents. The shim therefore models three
+  // separate values, which is what lets a test reproduce the two mounts and
+  // the catalogue disagreeing without real containers:
+  //   appSecret  - what `cat $POSTGRES_PASSWORD_FILE` yields in the app container
+  //   catalogue  - what the database will actually accept; when set, the psql
+  //                branch decides ok/mismatch by comparing the two rather than
+  //                by the canned `db.authResult`
+  // appSecretReadable=false models an app container that cannot say which file
+  // holds its password, which repair must treat as "cannot classify".
+  appSecret = "credential-in-use",
+  appSecretReadable = true,
+  catalogue = "",
   // --execute --dangerous's rotate-database-credential support:
   // `alterRoleFails` makes every script-mode `psql -f -` exec'd for the
   // rotate-credential step fail (exit 1), simulating that step itself
@@ -379,6 +393,16 @@ function dockerShimScript({
     "      esac",
     "    done",
     '    joined="$*"',
+    // #632: repair first asks the app container whether it can name its own
+    // secret file, then reads it. Two calls, distinguished by the `exec cat`
+    // the reader carries and the precondition does not.
+    '    if [[ "$joined" == *"POSTGRES_PASSWORD_FILE"* && "$joined" == *"exec cat"* ]]; then',
+    appSecretReadable ? `      printf '%s\\n' '${appSecret}'` : "      exit 97",
+    appSecretReadable ? "      exit 0" : "",
+    "    fi",
+    '    if [[ "$joined" == *"POSTGRES_PASSWORD_FILE"* ]]; then',
+    appSecretReadable ? "      exit 0" : "      exit 1",
+    "    fi",
     '    if [[ "$joined" == *"pg_isready"* ]]; then',
     `      exit ${dbReadyExit}`,
     "    fi",
@@ -399,6 +423,9 @@ function dockerShimScript({
     // would otherwise also match this call and answer with the unrelated
     // SELECT-1 authResult instead).
     '    if [[ "$joined" == *"orbit_migration_runs"* ]]; then',
+    // The credential arrives on stdin now (#632); consume it so the writer
+    // never takes a SIGPIPE.
+    '      probe_password="$(cat)"; : "$probe_password"',
     `      ${migrationRunLine}`,
     `      exit ${migrationRunExit}`,
     "    fi",
@@ -414,16 +441,24 @@ function dockerShimScript({
     "      exit 0",
     "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
+    '      probe_password="$(cat)"',
     dbAuthMarkerPath
       ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
       : `      effective_auth_result="${authResult}"`,
+    // When a catalogue value is supplied the outcome is decided by comparing
+    // the credential that actually arrived against what the database would
+    // accept — the only way to reproduce #629/#632, where the wrong copy of
+    // the password was tested and the canned answer could not tell.
+    catalogue
+      ? `      if [[ "$probe_password" == '${catalogue}' ]]; then effective_auth_result=ok; else effective_auth_result=mismatch; fi`
+      : "      true",
     '      case "$effective_auth_result" in',
     "        ok) exit 0 ;;",
     "        mismatch)",
     // Deliberately echoes the (env-forwarded) PGPASSWORD value into stderr,
     // as a hostile/leaky client might, so tests can prove repair.sh never
     // re-emits captured subprocess output even in the worst case.
-    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"orbit\" (shim-saw-password=%s)\\n' \"${PGPASSWORD:-}\" >&2",
+    "          printf 'psql: error: connection to server at \"127.0.0.1\", port 5432 failed: FATAL:  password authentication failed for user \"orbit\" (shim-saw-password=%s)\\n' \"${probe_password:-}\" >&2",
     "          exit 2",
     "          ;;",
     "        *)",
@@ -716,6 +751,53 @@ function treeSnapshot(targetDir) {
 function lines(stdout) {
   return stdout.split("\n").filter(Boolean);
 }
+
+describe("scripts/repair.sh: what it is allowed to do to a deployment", () => {
+  /*
+   * Owner constraint, 2026-08-25: repair must never recreate the database
+   * container in an automated way. Recreating is how an instance gets rebuilt
+   * out from under someone, and no diagnosis is worth that risk.
+   *
+   * `docker restart` is the sanctioned mechanism and is not the same thing: it
+   * stops and starts the SAME container, leaving the container, its volumes
+   * and its data untouched. The rotation depends on it (#629) to refresh a
+   * bind-mounted secret.
+   *
+   * These are source assertions rather than behavioural ones on purpose. A
+   * behavioural test only covers the paths it happens to walk; the constraint
+   * is that these verbs appear NOWHERE, including in a branch no fixture
+   * reaches. The fake docker shim is the second line of defence -- it exits 1
+   * on any subcommand it does not implement -- but nothing there states the
+   * intent, and a future change could teach it a new verb without anyone
+   * noticing what was licensed.
+   */
+  const FORBIDDEN = [
+    ["docker rm", "removes a container outright"],
+    ["docker compose down", "tears the deployment down, and with --volumes destroys data"],
+    ["docker compose up", "recreates containers, which is what must never be automated here"],
+    ["docker volume rm", "destroys a user's data directly"],
+    ["docker volume prune", "destroys a user's data directly"],
+    ["--force-recreate", "recreates containers"],
+    ["docker stop", "leaves the deployment down; restart is the sanctioned cycle"],
+    ["docker kill", "leaves the deployment down; restart is the sanctioned cycle"],
+  ];
+
+  it.each(FORBIDDEN)("never issues %s (%s)", (verb) => {
+    expect(repairScriptSource).not.toContain(verb);
+  });
+
+  it("cycles a container only by restarting the one that is already there", () => {
+    // The one compose invocation that creates anything is the checkpoint's
+    // throwaway encrypt/decrypt helper: the APP image, --no-deps so it starts
+    // nothing else, --rm so it is gone immediately. It never touches the
+    // database container or any volume.
+    for (const composeRun of repairScriptSource.match(/docker compose[\s\S]{0,200}?run[^\n]*/gu) ?? []) {
+      expect(composeRun).toContain("--rm");
+      expect(composeRun).toContain("--no-deps");
+    }
+    expect(repairScriptSource).toContain("docker restart");
+  });
+});
 
 describe("scripts/repair.sh --check", () => {
   it("rejects an invocation without --check", () => {
