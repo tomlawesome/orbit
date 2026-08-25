@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+
 const helper = fileURLToPath(new URL("./installer-ui.sh", import.meta.url));
 
 /*
@@ -103,24 +105,82 @@ function runPtyInterrupted(body, marker, env = {}) {
       }
     });
     child.on("error", reject);
-    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status) => {
       clearTimeout(timer);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyInterrupted", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+        return;
+      }
       resolve({ status, stdout, signalled });
     });
   });
 }
 
+/*
+ * Like runPty, but stdin is written once and then left open (#611).
+ *
+ * runPty hands spawnSync an `input` string, which closes stdin as soon as it
+ * has been written; under `script` that tears down the pty master. Wherever
+ * the *end* of the input carries meaning, that is a race rather than a
+ * setup detail: installer_ui_read_key reads the first byte of an Escape and
+ * then does a short second read to tell a lone Escape from an arrow
+ * sequence, so whether the teardown beats that second read decides which
+ * branch the widget takes. On a loaded CI runner it went the other way, the
+ * widget waited for a key that was never coming, and the run hung until the
+ * deadline killed it (#611, seen on a pull request that could not touch
+ * these tests).
+ *
+ * Holding stdin open makes silence read as idleness, which is what a real
+ * terminal does, so the widget leaves through its own logic instead. This is
+ * the same shape scripts/installer-simulation.test.mjs was moved onto for
+ * the identical fault (#512); this file's driver was never brought across.
+ *
+ * Only the tests whose input ends without a terminator need it. A test that
+ * sends a trailing carriage return terminates on its own and keeps the
+ * simpler spawnSync driver.
+ */
+function runPtyOpenStdin(body, input, env = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+      { env: { ...process.env, TERM: "xterm", ...env } },
+    );
+    let stdout = "";
+    let timedOut = false;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.on("error", reject);
+    // Written once, then left open: never child.stdin.end().
+    child.stdin.on("error", () => { /* child exited first; nothing to write to */ });
+    child.stdin.write(input);
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyOpenStdin", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+        return;
+      }
+      resolve({ status, stdout });
+    });
+  });
+}
+
 function runPty(body, input, env = {}, transcript = "/dev/null") {
-  return spawnSync(
+  const result = spawnSync(
     "script",
     ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, transcript],
     {
       encoding: "utf8",
       input,
+      timeout: PTY_DEADLINE_MS,
+      killSignal: "SIGKILL",
       env: { ...process.env, TERM: "xterm", ...env },
     },
   );
+  return failOnPtyDeadline(result, { label: "runPty", deadlineMs: PTY_DEADLINE_MS });
 }
 
 function runPtyTimed(body, input, env = {}) {
@@ -137,13 +197,18 @@ function runPtyTimed(body, input, env = {}) {
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     setTimeout(() => {
       child.stdin.write(input);
       child.stdin.end();
     }, 200);
     child.on("close", (status, signal) => {
       clearTimeout(timeout);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyTimed", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout, stderr }));
+        return;
+      }
       resolve({ status, signal, stdout, stderr });
     });
   });
@@ -418,7 +483,7 @@ describe("installer semantic UI", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("REJECTED=1");
     expect(result.stdout).not.toContain("VALUE=partial");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("keeps secret input out of terminal output and supports editing", () => {
     const secret = "private-widget-secret";
@@ -432,15 +497,15 @@ describe("installer semantic UI", () => {
     expect(result.stdout).toContain(`LENGTH=${secret.length}`);
   });
 
-  it("restores terminal state when text entry is cancelled with Escape", () => {
-    const result = runPty(
+  it("restores terminal state when text entry is cancelled with Escape", async () => {
+    const result = await runPtyOpenStdin(
       'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if value="$(installer_ui_read_text 3 "Value: " 64)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"',
       "\x1b",
     );
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("restores terminal state when text entry reaches EOF", async () => {
     const result = await runPtyTimed(
@@ -450,7 +515,7 @@ describe("installer semantic UI", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=1 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("restores terminal state when text entry is interrupted by a signal", async () => {
     const result = await runPtyInterrupted(
@@ -462,17 +527,17 @@ describe("installer semantic UI", () => {
 
     expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
-  it("cancels the raw single-key menu with a lone Escape and restores the terminal", () => {
-    const result = runPty(
+  it("cancels the raw single-key menu with a lone Escape and restores the terminal", async () => {
+    const result = await runPtyOpenStdin(
       'source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; if choice="$(installer_ui_select 3 "Choose" install install Install update Update)"; then status=0; else status=$?; fi; after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s CHOICE=%s\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)" "${choice:-none}"',
       "\x1b",
     );
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes CHOICE=none");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("restores terminal state when the raw single-key menu is interrupted by a signal", async () => {
     const result = await runPtyInterrupted(
@@ -484,7 +549,7 @@ describe("installer semantic UI", () => {
 
     expect(result.signalled).toBe(true);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("preserves a caller's own INT trap after a widget restores it", () => {
     const result = runPty(

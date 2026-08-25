@@ -6,6 +6,7 @@ import {
   isNonExecutablePath,
   pathRisk,
   requiresExecutableValidation,
+  touchesWeb,
 } from "./classify-changed-paths.mjs";
 
 describe("changed-path CI risk classification", () => {
@@ -83,6 +84,56 @@ describe("changed-path CI risk classification", () => {
     }
   });
 
+  /*
+   * The fidelity gate's own trigger (#620). Narrower than system risk on
+   * purpose: it is the only automatic check the v19 presentation layer has, so
+   * it must run whenever that layer moves, and should not be charged to every
+   * unrelated system-risk change.
+   */
+  it("runs the fidelity gate for the v19 front end and its dependency snapshots", () => {
+    expect(touchesWeb(["web/src/routes/home/+page.svelte"])).toBe(true);
+    expect(touchesWeb(["web/tests/fidelity/baselines/home.png"])).toBe(true);
+    expect(touchesWeb(["pnpm-lock.yaml"])).toBe(true);
+    expect(touchesWeb(["pnpm-workspace.yaml"])).toBe(true);
+    expect(touchesWeb(["docs/architecture.md", "web/package.json"])).toBe(true);
+  });
+
+  it("does not run the fidelity gate for changes that cannot reach the v19 build", () => {
+    expect(touchesWeb(["docs/architecture.md"])).toBe(false);
+    expect(touchesWeb(["src/server/documents/scanner.ts"])).toBe(false);
+    expect(touchesWeb(["Dockerfile"])).toBe(false);
+    expect(touchesWeb(["scripts/repair.sh", "README.md"])).toBe(false);
+  });
+
+  it("fails safe to running the fidelity gate without a usable comparison", () => {
+    expect(touchesWeb([])).toBe(true);
+    expect(touchesWeb(undefined)).toBe(true);
+    expect(touchesWeb(null)).toBe(true);
+  });
+
+  it("exposes the fidelity trigger alongside the other lane requirements", () => {
+    expect(ciRequirements(["web/src/lib/Chrome.svelte"]).web).toBe(true);
+    expect(ciRequirements(["docs/architecture.md"]).web).toBe(false);
+  });
+
+  it("puts the v19 front end in the system lane by rule, not by fallback", () => {
+    /*
+     * These already reached CI_RISK.SYSTEM through the catch-all default for
+     * unmatched paths, so this pins the intent rather than changing behaviour:
+     * web/ ships and the e2e suite drives it, so if the default is ever
+     * softened, web/ must not soften with it (#620).
+     */
+    for (const path of [
+      "web/src/routes/home/+page.svelte",
+      "web/src/lib/flight/engine.js",
+      "web/package.json",
+      "web/playwright.config.js",
+      "web/tests/fidelity/baselines/home.png",
+    ]) {
+      expect(pathRisk(path)).toBe(CI_RISK.SYSTEM);
+    }
+  });
+
   it("treats unit-only test changes as fast and integration fixtures as integration", () => {
     expect(pathRisk("src/server/workspace-repository.test.ts")).toBe(CI_RISK.FAST);
     expect(pathRisk("src/lib/workspace.test.ts")).toBe(CI_RISK.FAST);
@@ -102,6 +153,9 @@ describe("changed-path CI risk classification", () => {
       build: true,
       integration: false,
       system: false,
+      // A lockfile change can move what the v19 build resolves, so the
+      // fidelity gate runs even when the lane stays fast.
+      web: true,
     });
   });
 
