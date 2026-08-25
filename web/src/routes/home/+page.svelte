@@ -3,7 +3,8 @@
   import { browser } from "$app/environment";
   import { afterNavigate, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
-  import { mountEmptySky, mountHome, sunHref } from "./home.behaviour.js";
+  import { resolve } from "$app/paths";
+  import { mountEmptySky, mountHome } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
@@ -16,6 +17,7 @@
   import { every, longDate, money, tminus } from "$lib/format.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
+  import { SvelteMap } from "svelte/reactivity";
   import "./home.css";
 
   /**
@@ -278,9 +280,9 @@
     if (expanded === id) return collapseRow();
     if (expanded === null) {
       pushedEntry = true;
-      pushState(addressOf(id), { orbitItem: id });
+      pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     } else {
-      replaceState(addressOf(id), { orbitItem: id });
+      replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     }
   }
 
@@ -290,7 +292,7 @@
       pushedEntry = false;
       history.back();
     } else {
-      replaceState("/home", {});
+      replaceState(resolve("/home"), {});
     }
   }
 
@@ -324,7 +326,7 @@
     const id = page.url.searchParams.get("item");
     if (!id || page.state.orbitItem === id) return;
     revealTarget = id;
-    replaceState(addressOf(id), { orbitItem: id });
+    replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     await tick();
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
   }
@@ -332,7 +334,7 @@
   const detailDue = (one) =>
     one.dueDate ? `${tminus(one.dueDate, one.today)} · ${longDate(one.dueDate)}` : "unscheduled";
 
-  const operationIds = new Map();
+  const operationIds = new SvelteMap();
   async function tapReceipt(suggestion, act) {
     mailProblem = null;
     if (!suggestion.receiptId) return; // a #454 fixture suggestion has no mail behind it yet
@@ -548,7 +550,11 @@
 {#if launching}<Dawn />{/if}
 {#if leaving}
   <Dusk>
-    {#snippet children()}<a class="again" href={backIn}>Sign back in</a>{/snippet}
+    <!-- `backIn` is the identity provider's own end-session URL as often as
+         it is "/": genuinely external, not a route this app can resolve(),
+         which is what `rel="external"` tells the lint rule (and anyone
+         reading the markup) rather than a suppression. -->
+    <a class="again" rel="external" href={backIn}>Sign back in</a>
   </Dusk>
 {/if}
 {#if launching || leaving}
@@ -702,7 +708,7 @@
 
 <!-- §14/#472 (owner-approved): the inbox one click from home — the colour
      change IS the notification, and the count is real (§12). -->
-<a class="orb inbox-orb" class:waiting={mailWaiting > 0} href="/inbox"
+<a class="orb inbox-orb" class:waiting={mailWaiting > 0} href={resolve("/inbox")}
    title={mailWaiting > 0 ? `Inbox — ${mailWaiting} waiting` : "Inbox"}
    aria-label={mailWaiting > 0 ? `Inbox — ${mailWaiting} waiting` : "Inbox"}>
   <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -717,9 +723,9 @@
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[view.primary]?.role ?? "member"}` : ""}</span></div>
   <nav>
-    <a href="/inbox">Inbox</a>
-    <a href="/settings">Settings</a>
-    <a href="/administration">Administration</a>
+    <a href={resolve("/inbox")}>Inbox</a>
+    <a href={resolve("/settings")}>Settings</a>
+    <a href={resolve("/administration")}>Administration</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
@@ -757,7 +763,7 @@
     </div>
     <div class="crow">
       <div class="cdrop">drop a document here — we'll read what we can</div>
-      <a class="cfull" href="/create">open the full form →</a>
+      <a class="cfull" href={resolve("/create")}>open the full form →</a>
     </div>
   </div>
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
@@ -982,7 +988,7 @@
            came, so the sun says which door it is as the reader steps through.
            A one-shot marker, read and deleted on arrival (door.js) — an <a>
            keeps every behaviour it has, because this only writes. -->
-      <a class="sun-link" href={view?.primary ? sunHref(view.primary) : undefined}
+      <a class="sun-link" href={view?.primary ? resolve("/household/[id]", { id: encodeURIComponent(view.primary) }) : undefined}
          onclick={() => markDoor("sky")}
          aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
         <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
@@ -1094,7 +1100,7 @@
                kept so a modified click can still open it in its own tab — and
                a plain click expands the row here instead of leaving home. -->
           <a class="item" class:open={expanded === row.id} id={row.id}
-             href={addressOf(row.id)} aria-expanded={expanded === row.id}
+             href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
              aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
             <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
                   style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
@@ -1165,7 +1171,7 @@
             {/if}
             <div class="ivfoot">
               <button class="ivcopy" onclick={copyAddress}>{copied ? "link copied" : "copy link"}</button>
-              <a class="ivfull" href="/item/{row.id}">manage this item →</a>
+              <a class="ivfull" href={resolve("/item/[id]", { id: row.id })}>manage this item →</a>
             </div>
           {/if}
         </div>

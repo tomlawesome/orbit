@@ -112,11 +112,11 @@
   </nav>
   <main class="pane glass">
     <h3>Operational state</h3>
-    {#each operations.state as line}
+    {#each operations.state as line (line.name)}
       <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
     {/each}
     <h3 style="margin-top:22px">Recent deliveries</h3>
-    {#each operations.deliveries as line}
+    {#each operations.deliveries as line, index (index)}
       <div class="row"><i style="background:var(--{line.tone})"></i><b>{line.name}</b><small>{line.detail}</small></div>
     {/each}
   </main>
