@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
 
@@ -117,7 +118,7 @@
       <circle cx="880.6" cy="672.9" r="0.76" opacity="0.14"/></g></svg></div>
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->
-<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) goto("/home"); }}>
+<div class="stage" onclick={(event) => { if (event.target === event.currentTarget) goto(resolve("/home")); }}>
   <form class="glass card" id="card">
     <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
@@ -205,7 +206,7 @@
 
         <div class="save-row">
           <button type="submit" class="btn-primary">Add to orbit</button>
-          <a href="/home" class="cancel-link">cancel</a>
+          <a href={resolve("/home")} class="cancel-link">cancel</a>
         </div>
 
       </div></div>
