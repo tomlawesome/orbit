@@ -28,7 +28,8 @@ function jobBlock(job, nextJob) {
  * key can change freely; its `name:` changes only alongside the protection
  * rule, which no agent on this host can edit (#620).
  *
- * This list declares what protection requires — it cannot read the rule, and
+ * This list declares what protection requires, or is being made to require —
+ * it cannot read the rule, and
  * CI holds no credential that could. It therefore catches drift on the
  * workflow side, which is the side that changes. A check added to protection
  * without being added here is not covered.
@@ -40,6 +41,11 @@ const REQUIRED_CHECK_NAMES = [
   "PostgreSQL service and API integration",
   "Compose smoke test",
   "v19 visual fidelity",
+  // Owner decision, 2026-08-25: required, because nothing else tests the real
+  // recovery path. repair.test.mjs has 227 tests against a fake docker shim
+  // and stayed green through #607, #629 and #632 — a fake cannot disagree
+  // with reality.
+  "Repair journey acceptance",
 ];
 
 describe("exact-image publication workflow", () => {
@@ -202,7 +208,21 @@ describe("exact-image publication workflow", () => {
   });
 
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
-    expect(workflow.match(/docker\/build-push-action@/gu)).toHaveLength(1);
+    /*
+     * The invariant is that the PUBLICATION path builds once and pushes the
+     * image it validated — not that the workflow contains exactly one build
+     * anywhere in the file. The repair-journey acceptance job (#532) builds a
+     * second, disposable image that is loaded locally and never pushed, and a
+     * file-wide count cannot tell the two apart. Both builds set `push: false`
+     * (the exact-image flow pushes in a later step), so the flag cannot
+     * separate them either — the job boundary is what does.
+     */
+    const journeysJob = jobBlock("repair_journeys", "verify_preview");
+    expect(workflow.replace(journeysJob, "").match(/docker\/build-push-action@/gu)).toHaveLength(1);
+    // And the disposable one stays disposable: never pushed, and never writing
+    // a layer cache that would compete with the publication build's own.
+    expect(journeysJob).toContain("push: false");
+    expect(journeysJob).not.toContain("cache-to:");
     expect(workflow).toContain("platforms: linux/amd64");
     expect(workflow).toContain("Stable Git tags are the version calculator's durable baseline.");
     expect(workflow).toContain("load: true");
