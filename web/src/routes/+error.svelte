@@ -2,6 +2,7 @@
   import Grain from "$lib/Grain.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/state";
+  import { resolve } from "$app/paths";
   import { mountGravityWell } from "./gravity-well.js";
 
   /**
@@ -175,7 +176,7 @@
 </svg></div>
 
 <div class="line-a">This page fell into a gravity well.</div>
-<div class="line-b"><a href="/">plot a course home &rarr;</a></div>
+<div class="line-b"><a href={resolve("/")}>plot a course home &rarr;</a></div>
 
 <Grain slope={0.09} />
 
@@ -184,7 +185,7 @@
   <div class="stage">
     <div class="lockup">
       <div class="name mono">{page.status}</div>
-      <p><a href="/">return home</a></p>
+      <p><a href={resolve("/")}>return home</a></p>
     </div>
   </div>
 {/if}

@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { resolve } from "$app/paths";
   import { readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -188,8 +189,8 @@
       <h3>Your relay</h3>
       <div class="kv"><span>address</span><b style="color:var(--accent)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
-      <div class="kv"><span>waiting for review</span><a href="/inbox">{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
-      <div class="kv"><span>rotate · pause · details</span><a href="/settings/mail">open the relay →</a></div>
+      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
+      <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>
     </div>
 
     <div class="card">
@@ -201,7 +202,7 @@
            in its own way. Drawn exactly as the ratified row, because a row
            becoming reachable must not become a different row. -->
       {#each view.memberships as membership (membership.id)}
-        <a class="memb" href="/household/{membership.id}">
+        <a class="memb" href={resolve("/household/[id]", { id: membership.id })}>
           <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var({membership.primary ? "--sun" : "--ink-mid"})"/></svg>
           <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
         </a>
