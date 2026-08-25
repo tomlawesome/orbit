@@ -51,15 +51,15 @@ Check the list before building a test rig or handing a check to the owner.
   journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
 - `scripts/test-tika-processor.mjs` — Tika document extraction
-- `scripts/installer-simulation.sh` — installer command-centre UI only, no Docker
+- `scripts/installer-simulation.sh` — installer command centre UI, no Docker
 - `scripts/install-test-browser.sh` — one-time headless browser download
 - `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
 - `scripts/validate-compose-config.sh` — Compose configuration validation
-- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a given digest
+- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
 
 ## Traps when running things locally
 
-Five known ways to lose an afternoon, or worse. The first two have open
+Seven known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -106,6 +106,14 @@ precisely so a half-written secret is impossible, which left the database
 container reading a spent copy and made repair diagnose its own successful
 rotation as failed. Postgres itself never notices, because it reads that file
 once at initdb and authenticates from its own catalogue afterwards. See #629.
+
+**Add `ci: acceptance` to a pull request touching schema, migrations or server
+code.** Without it the integration and compose jobs skip and the pull request
+still reports green.
+
+**`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
+else drives it.** A dropped column passes every unit and integration check and
+fails only the compose smoke test — grep it before changing a schema.
 
 ## The demo stack is disposable
 
