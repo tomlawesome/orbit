@@ -1236,6 +1236,54 @@ jobs:
             printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  repair_journeys:
+    name: Repair journey acceptance
+    needs:
+      - changes
+      - fast
+      - supply_chain_source
+      - integration
+    # Gated exactly as the Compose smoke test is, but with a timeout of its
+    # own: live repair evidence should not fail because install acceptance ran
+    # long (#532).
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Build and load the image under repair
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: orbit-repair-journeys:ci
+          build-args: |
+            ORBIT_VERSION=v0.0.0
+            ORBIT_REVISION=${{ github.sha }}
+            ORBIT_CHANNEL=ci
+          # Read the smoke job's layer cache; never write a competing one.
+          cache-from: type=gha
+
+      - name: Prove the repair journeys against a live deployment
+        env:
+          ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
+        run: bash scripts/test-repair-journeys.sh
+
   verify_preview:
     name: Verify tested preview for stable merge
     needs:
