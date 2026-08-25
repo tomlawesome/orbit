@@ -39,7 +39,11 @@
   const rows = $derived(belongRowsOf(galaxy));
   const discovered = $derived(discoveredCountOf(visibleHouseholds));
 
-  const SVG = "http://www.w3.org/2000/svg";
+  /* The household cards on the sky, as plain descriptors — the layout maths
+     is unchanged, it just lands in state instead of DOM nodes so the markup
+     below can draw it declaratively (#620: imperative appendChild here
+     tripped svelte/no-dom-manipulating). */
+  let cards = $state([]);
 
   /**
    * The labelled sky, drawn the way mountEmptySky draws it, with the sheet's
@@ -53,70 +57,49 @@
    *     real middle. Nothing about the bearings changes; the usable sky is
    *     simply inset.
    */
-  function render() {
-    if (!hero) return;
-    for (const old of hero.querySelectorAll(".minisys")) old.remove();
+  function computeCards() {
+    if (!hero) return [];
     const w = hero.clientWidth, h = hero.clientHeight;
-    const card = hero.parentElement?.querySelector(".belong");
-    const keepOut = Math.max(200, (card ? card.offsetWidth : 430) / 2 + 118);
+    const panel = hero.parentElement?.querySelector(".belong");
+    const keepOut = Math.max(200, (panel ? panel.offsetWidth : 430) / 2 + 118);
     const sky = Math.max(640, w - 220);
-    for (const { household, ox, oy, dim } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
+    const placed = [];
+    for (const { id, household, ox, oy, dim } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
       const away = ox > 0;
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
-      const div = document.createElement("div");
-      div.className = "minisys";
-      div.style.left = (w / 2 + ox - ringX) + "px";
-      div.style.top = (h / 2 + oy - 95) + "px";
-      div.style.opacity = dim;
       const label = household.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
-      const svg = document.createElementNS(SVG, "svg");
-      svg.setAttribute("width", "210");
-      svg.setAttribute("height", "160");
-      svg.setAttribute("viewBox", "0 0 210 160");
-      const put = (tag, attrs, text) => {
-        const el = document.createElementNS(SVG, tag);
-        for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
-        if (text !== undefined) el.textContent = text;
-        svg.appendChild(el);
-        return el;
-      };
-      const name = put("text", {
-        x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em",
-        style: "fill:var(--accent)", opacity: ".85",
-      }, label);
-      if (away) name.setAttribute("text-anchor", "end");
-      if (household.requested) {
-        const asked = put("text", {
-          x: mx(6), y: 30, "font-size": "8.5", "letter-spacing": ".14em",
-          style: "fill:var(--ink-faint)",
-        }, "ASKED TO JOIN · WAITING");
-        if (away) asked.setAttribute("text-anchor", "end");
-      }
-      put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
-      put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
-      put("circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
-      /* A newcomer's sky carries no planets: §11's labelled sky is "id and name
-         and nothing else", and labelledSkyOf hands over an empty list. The
-         drawing keeps the loop the mockup has, so a sky that ever does carry
-         them draws them the same way. */
-      for (const [px, py, pr, token] of household.planets ?? []) {
-        put("circle", { cx: ringX + px, cy: 95 + py, r: pr, style: `fill:var(${token})`, opacity: ".55" });
-      }
-      div.appendChild(svg);
-      hero.appendChild(div);
+      placed.push({
+        id,
+        left: w / 2 + ox - ringX,
+        top: h / 2 + oy - 95,
+        opacity: dim,
+        away,
+        nameX: mx(6),
+        label,
+        requested: Boolean(household.requested),
+        veer,
+        ringX,
+        /* A newcomer's sky carries no planets: §11's labelled sky is "id and
+           name and nothing else", and labelledSkyOf hands over an empty
+           list. The descriptor keeps the field the mockup has, so a sky that
+           ever does carry them draws them the same way. */
+        planets: household.planets ?? [],
+      });
     }
+    return placed;
+  }
+
+  function render() {
+    cards = computeCards();
   }
 
   onMount(() => {
     const onResize = () => render();
     addEventListener("resize", onResize);
-    return () => {
-      removeEventListener("resize", onResize);
-      if (hero) for (const old of hero.querySelectorAll(".minisys")) old.remove();
-    };
+    return () => removeEventListener("resize", onResize);
   });
 
   /* Drawn once the frame exists, and redrawn when the systems in it change — a
@@ -154,7 +137,29 @@
       </g>
     </svg><span>create</span>
   </button>
-  <div class="hero" bind:this={hero} aria-hidden="true"></div>
+  <div class="hero" bind:this={hero} aria-hidden="true">
+    {#each cards as c (c.id)}
+      <div class="minisys" style="left:{c.left}px;top:{c.top}px;opacity:{c.opacity}">
+        <svg width="210" height="160" viewBox="0 0 210 160">
+          <text x={c.nameX} y="14" font-size="9.5" letter-spacing=".14em"
+                style="fill:var(--accent)" opacity=".85"
+                text-anchor={c.away ? "end" : undefined}>{c.label}</text>
+          {#if c.requested}
+            <text x={c.nameX} y="30" font-size="8.5" letter-spacing=".14em"
+                  style="fill:var(--ink-faint)"
+                  text-anchor={c.away ? "end" : undefined}>ASKED TO JOIN · WAITING</text>
+          {/if}
+          <path d={c.veer} fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55" />
+          <circle class="msring" cx={c.ringX} cy="95" r="40" fill="none"
+                  style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1" />
+          <circle cx={c.ringX} cy="95" r="3" style="fill:var(--ink)" opacity=".8" />
+          {#each c.planets as [px, py, pr, token], i (i)}
+            <circle cx={c.ringX + px} cy={95 + py} r={pr} style={`fill:var(${token})`} opacity=".55" />
+          {/each}
+        </svg>
+      </div>
+    {/each}
+  </div>
   <!-- the count: a beat between the settled sky and the question. No box, no
        border, no panel — the number and the words on the sky itself. -->
   <div class="disc" aria-hidden="true">

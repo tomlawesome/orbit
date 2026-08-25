@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { mountItemSky } from "./sky.js";
   import { approveReceipt, dismissReceipt, readWorkspace } from "$lib/data/workspace.js";
   import "./item.css";
@@ -73,7 +74,7 @@
       }
       acceptOpId = null;
       /* Accepted: it is an item now, so it has a seat in the belt. */
-      await goto(result.itemId ? `/item/${result.itemId}` : "/home");
+      await goto(result.itemId ? resolve("/item/[id]", { id: result.itemId }) : resolve("/home"));
     } catch (error) {
       problem = error?.message ?? String(error);
     } finally {
@@ -90,7 +91,7 @@
     problem = null;
     try {
       await dismissReceipt(item.receiptId);
-      await goto("/home");
+      await goto(resolve("/home"));
     } catch (error) {
       problem = error?.message ?? String(error);
       acceptArmedDismiss = false;
@@ -147,7 +148,7 @@
         <button class="btn-quiet" style="--act:var(--overdue)" disabled={busy} onclick={dismissSuggestion}>
           {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
         </button>
-        <a class="back" style="margin-top:0" href="/home">← back to your orbit</a>
+        <a class="back" style="margin-top:0" href={resolve("/home")}>← back to your orbit</a>
       </div>
       {#if problem}
         <div class="problem" role="alert">{problem}</div>

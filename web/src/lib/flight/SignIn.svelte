@@ -103,17 +103,15 @@
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
 <Dawn shown={dawnShown}>
-  {#snippet children()}
-    <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
-         pill was reworded to match. The sheet's longer
-         "Continue with your identity provider" belonged to the v18 chrome
-         struck on 2026-08-17 — and would not fit inside the ring in any case.
-         What it said is still true and is still said, out loud, one screen
-         later: pressing this leaves for the identity provider.
+  <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
+       pill was reworded to match. The sheet's longer
+       "Continue with your identity provider" belonged to the v18 chrome
+       struck on 2026-08-17 — and would not fit inside the ring in any case.
+       What it said is still true and is still said, out loud, one screen
+       later: pressing this leaves for the identity provider.
 
-         Left off entirely on the create path, where the reader is already
-         through it (§15, fourth pass). -->
-    {#if gate}<button class="gate" id="gate" onclick={press}>Sign in</button>{/if}
-  {/snippet}
+       Left off entirely on the create path, where the reader is already
+       through it (§15, fourth pass). -->
+  {#if gate}<button class="gate" id="gate" onclick={press}>Sign in</button>{/if}
 </Dawn>
 <Grain slope={0.08} />
