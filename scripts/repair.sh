@@ -2736,7 +2736,15 @@ do_restore_configuration_rollback() {
 # so the service name is fixed here; $1 is accepted only for call-site
 # symmetry with the other do_* functions and documentation purposes.
 do_restart_services() {
-  local service="orbit-app"
+  restart_compose_service orbit-app
+}
+
+# Restarts one Compose service of this deployment by container id, memoised
+# per service. Split out of do_restart_services so the rotation can also
+# restart the database (see do_restart_services_after_rotation, #629);
+# do_restart_services keeps its own contract unchanged.
+restart_compose_service() {
+  local service="$1"
   local container_ids="" container_id=""
 
   if [[ -n "${service_restart_result[$service]:-}" ]]; then
@@ -3113,6 +3121,29 @@ do_update_config_step() {
   mv -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
 }
 
+# Step 4 of the rotation, and the reason it is not do_restart_services itself.
+#
+# update-config lands the new secret with `mktemp` + `mv` (:3113), which is
+# what makes a half-written secret impossible -- and which necessarily gives
+# the path a NEW inode. A Compose `file:` secret is a bind mount of an inode,
+# not of a path, so any container that keeps running across that rename holds
+# the old file indefinitely. A plain `docker restart` re-resolves it.
+#
+# Postgres itself does not care: it read that file once, at initdb, and
+# authenticates from its own catalogue thereafter. Repair's credential probe
+# does care, because it reads the file through the database container -- so
+# without this the rotation would complete correctly and then be diagnosed as
+# failed by the very check meant to confirm it (#629).
+#
+# The database restarts first, so the application comes back against a
+# database that has already finished restarting. Both must succeed: a rotation
+# that cannot be verified afterwards is not a rotation that can be reported
+# done.
+do_restart_services_after_rotation() {
+  restart_compose_service orbit-db || return 1
+  restart_compose_service orbit-app
+}
+
 # Step 4 reuses do_restart_services verbatim (it already ignores its own
 # unused positional argument, and its target is unconditionally orbit-app —
 # see that function above).
@@ -3121,7 +3152,7 @@ declare -A dangerous_step_fn=(
   [checkpoint]=do_checkpoint_step
   [rotate-credential]=do_rotate_credential_step
   [update-config]=do_update_config_step
-  [restart-services]=do_restart_services
+  [restart-services]=do_restart_services_after_rotation
 )
 
 # Independently callable per step — see the "Stage-two dangerous-step
@@ -3143,6 +3174,11 @@ run_dangerous_step() {
   fn="${dangerous_step_fn[$step]:-}"
   [[ -n "$fn" ]] || return 1
   if [[ "$step" == restart-services ]]; then
+    # Both services the rotation restarts (#629), for the same reason: a memo
+    # left by anything earlier in this run would make the post-rotation
+    # restart a silent no-op, and a container that never restarts keeps the
+    # pre-rotation secret file.
+    unset 'service_restart_result[orbit-db]'
     unset 'service_restart_result[orbit-app]'
   fi
   "$fn"

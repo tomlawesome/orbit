@@ -19,7 +19,40 @@ function jobBlock(job, nextJob) {
   return workflow.slice(start, end);
 }
 
+/*
+ * Branch protection matches a required check by its exact display name, so
+ * these strings are identifiers rather than descriptions. Rename one and the
+ * protected branch waits for a check that will never report again: the pull
+ * request sits on "Expected — waiting for status to be reported", the merge
+ * button stays disabled, and nothing anywhere says the name moved. A job's
+ * key can change freely; its `name:` changes only alongside the protection
+ * rule, which no agent on this host can edit (#620).
+ *
+ * This list declares what protection requires — it cannot read the rule, and
+ * CI holds no credential that could. It therefore catches drift on the
+ * workflow side, which is the side that changes. A check added to protection
+ * without being added here is not covered.
+ */
+const REQUIRED_CHECK_NAMES = [
+  "Classify changed paths",
+  "Static and unit checks",
+  "Source dependency and secret policy",
+  "PostgreSQL service and API integration",
+  "Compose smoke test",
+  "v19 visual fidelity",
+];
+
 describe("exact-image publication workflow", () => {
+  it("keeps every required check reporting under the name protection expects", () => {
+    for (const name of REQUIRED_CHECK_NAMES) {
+      expect(
+        workflow,
+        `No job reports as "${name}". If this job was renamed, the protected `
+        + `branch will wait for it forever — rename the protection rule first.`,
+      ).toContain(`    name: ${name}\n`);
+    }
+  });
+
   it("can be dispatched on demand and re-evaluates when a label is applied (#572)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
 
