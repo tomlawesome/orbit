@@ -2274,7 +2274,7 @@ check_managed_file() {
 
 check_database_reachability() {
   local db_ids db_id pg_user=orbit pg_db=orbit candidate
-  local pg_password="" psql_output="" psql_status=0
+  local psql_output="" psql_status=0
 
   if [[ "$env_status" == ok ]]; then
     candidate="$(read_environment_value POSTGRES_USER 2>/dev/null || true)"
@@ -2285,7 +2285,7 @@ check_database_reachability() {
 
   db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.service=orbit-db" \
+    --filter "label=com.docker.compose.service=$db_service_host" \
     --format '{{.ID}}' 2>/dev/null || true)"
   db_id=""
   if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
@@ -2306,15 +2306,12 @@ check_database_reachability() {
   # call site below, so every early exit here is an explicit `return 0`.)
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
-  pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
-  # -h forces a host (TCP) connection so PostgreSQL's password-based
-  # authentication is actually exercised; a bare local-socket connection
-  # would use "trust" auth inside the official postgres image and could
-  # never observe a credential mismatch.
-  psql_output="$(PGPASSWORD="$pg_password" timeout "$docker_probe_timeout" \
-    docker exec -e PGPASSWORD "$db_id" \
-    psql -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c 'SELECT 1' 2>&1)" || psql_status=$?
-  pg_password=""
+  psql_output="$(timeout "$docker_probe_timeout" docker exec "$db_id" \
+    sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db" 2>&1)" || psql_status=$?
+  # The container could not tell us which file holds the password, so there
+  # is nothing to authenticate with and nothing to report: no finding, rather
+  # than a guess dressed up as one.
+  [[ "$psql_status" != "$PROBE_NO_SECRET_STATUS" ]] || { psql_output=""; return 0; }
   if [[ "$psql_status" != 0 ]]; then
     if [[ "${psql_output,,}" == *"password authentication failed"* ]]; then
       add_finding database-credential-mismatch database fail
@@ -2335,6 +2332,52 @@ check_database_reachability() {
   psql_output=""
 }
 
+# The two programs the database probes run *inside* the database container,
+# and the two properties they are built around (#610).
+#
+#   1. They connect to the compose service name, never to 127.0.0.1. The
+#      official Postgres image ships a pg_hba.conf that trusts loopback
+#      outright:
+#
+#        host all all 127.0.0.1/32  trust
+#        host all all all           scram-sha-256
+#
+#      so a loopback connection is accepted whatever password is supplied,
+#      and the probe that exists to detect a wrong password could never
+#      detect one. The service name is the same network identity the
+#      application uses and lands on the scram-sha-256 rule instead. SCRAM is
+#      challenge-response, so the password itself never crosses the wire.
+#
+#   2. They read the password inside the container, from the secret Compose
+#      already mounts there, so no process on the host ever holds it — not in
+#      argv, and not in an environment variable either. The path comes from
+#      the container's own POSTGRES_PASSWORD_FILE rather than a hardcoded
+#      one; a deployment that does not set it exits PROBE_NO_SECRET_STATUS,
+#      which the callers treat as "cannot classify" and report nothing.
+#
+# The user, database and host are positional arguments, never interpolated
+# into the shell text, and both queries stay fixed literals.
+# The compose service name of the database: both the label this script
+# discovers the container by and the host its probes dial. One name, so
+# the two cannot drift apart.
+readonly db_service_host="orbit-db"
+readonly PROBE_NO_SECRET_STATUS=97
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly authenticated_probe='
+  secret_file="${POSTGRES_PASSWORD_FILE:-}"
+  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
+  PGPASSWORD="$(cat -- "$secret_file")" \
+    exec psql -h "$1" -U "$2" -d "$3" -c "SELECT 1"
+'
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly migration_backstop_probe='
+  secret_file="${POSTGRES_PASSWORD_FILE:-}"
+  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
+  PGPASSWORD="$(cat -- "$secret_file")" \
+    exec psql -h "$1" -U "$2" -d "$3" -t -A -F"|" \
+      -c "SELECT \"outcome\", \"reason\" FROM \"drizzle\".\"orbit_migration_runs\" ORDER BY \"id\" DESC LIMIT 1"
+'
+
 # migration-failed backstop (issue #528 decision, 2026-08-23 comment): the
 # SECONDARY channel, called from run_diagnosis after Step 12's app-log
 # sentinel scan (the primary channel) and skipping itself whenever that scan
@@ -2352,22 +2395,19 @@ check_database_reachability() {
 # for both columns; a missing table, a database error, or any other
 # non-matching byte sequence is treated identically — skip, never guess.
 check_migration_failed_backstop() {
-  local mig_pg_password="" mig_output=""
+  local mig_output=""
   local -r mig_pattern='^([a-z_]{1,32})\|([a-z_]{0,32})$'
 
   [[ "$migration_failed_reported" == 0 ]] || return 0
   [[ -n "$migration_backstop_db_id" ]] || return 0
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
-  mig_pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
   mig_output="$(
-    { PGPASSWORD="$mig_pg_password" timeout "$docker_probe_timeout" \
-      docker exec -e PGPASSWORD "$migration_backstop_db_id" \
-      psql -h 127.0.0.1 -U "$migration_backstop_pg_user" -d "$migration_backstop_pg_db" -t -A -F'|' \
-      -c 'SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ORDER BY "id" DESC LIMIT 1' \
+    { timeout "$docker_probe_timeout" docker exec "$migration_backstop_db_id" \
+      sh -c "$migration_backstop_probe" sh "$db_service_host" \
+      "$migration_backstop_pg_user" "$migration_backstop_pg_db" \
       2>&1 || true; } | head -c 256
   )"
-  mig_pg_password=""
 
   [[ "$mig_output" =~ $mig_pattern ]] || return 0
   if [[ "${BASH_REMATCH[1]}" == failed ]]; then
@@ -2805,7 +2845,7 @@ resolve_rotate_db_identity() {
 
   db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.service=orbit-db" \
+    --filter "label=com.docker.compose.service=$db_service_host" \
     --format '{{.ID}}' 2>/dev/null || true)"
   if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
     rotate_db_id="$db_ids"
