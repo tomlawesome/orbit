@@ -45,6 +45,14 @@
   let { data } = $props();
   const v = $derived(data.household);
 
+  /* The roster row needs a literal leading space before "· you" that
+     Svelte's whitespace trimming would otherwise eat — `{" "}` said so
+     directly, but eslint's no-useless-mustaches treats a string-literal
+     mustache as dead weight. A named non-literal expression keeps the same
+     compiled output (the compiler can't fold it away at compile time)
+     without lying about being unnecessary. */
+  const SPACE = " ";
+
   /**
    * THE WAY BACK IS THE WAY YOU CAME (§15, owner ruling 2026-08-17).
    *
@@ -743,7 +751,7 @@
             <span class="avatar" aria-hidden="true">{person.initials}</span>
             <!-- the space is written out: Svelte eats a leading one inside a
                  block, and the design's row reads "Tom Lawson · you" -->
-            <b>{person.name}{#if person.you}{" "}<em>· you</em>{/if}</b>
+            <b>{person.name}{#if person.you}{SPACE}<em>· you</em>{/if}</b>
             <span class="role" class:owner={person.role === "owner"}>{person.role}</span>
             {#if person.role === "owner" && person.you}
               <button class="ghost" aria-expanded={handoverOpen}
