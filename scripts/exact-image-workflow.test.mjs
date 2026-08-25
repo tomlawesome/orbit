@@ -39,27 +39,22 @@ function jobBlock(job, nextJob) {
  * requiring the same four. An agent here cannot EDIT a ruleset, but it can
  * read one, so a claim like this never has to be guessed at again.
  *
- * Verified against both rulesets on 2026-08-25.
+ * Verified against both rulesets on 2026-08-25. `Protect dev` requires all
+ * six; `Protect preview` requires the first four. The list is the union,
+ * because the property being defended is that a name some rule depends on
+ * keeps reporting -- which rule it is does not change what a rename breaks.
  */
 const REQUIRED_CHECK_NAMES = [
   "Static and unit checks",
   "Dependency change and licence policy",
   "CodeQL (actions)",
   "CodeQL (javascript-typescript)",
-];
-
-/*
- * Decided to be required, and pinned ahead of the change so a rename cannot
- * land in the gap: adding a required check is a rule edit only the owner can
- * make (handover on #620). Move these up when they are in the rulesets.
- */
-const REQUIRED_CHECK_NAMES_PENDING = [
-  // Owner decision, 2026-08-25: the only automatic check the v19 presentation
-  // layer has (#620).
+  // Added to `Protect dev` by the owner, 2026-08-25. Fidelity is path-gated,
+  // so it bites on every pull request touching web/. The journey check is
+  // gated on the `ci: acceptance` label, so until #617 makes that trigger
+  // path-based it is real protection on a labelled pull request and none on
+  // an unlabelled one.
   "v19 visual fidelity",
-  // Owner decision, 2026-08-25: nothing else tests the real recovery path.
-  // repair.test.mjs has 227 tests against a fake docker shim and stayed green
-  // through #607, #629 and #632 — a fake cannot disagree with reality.
   "Repair journey acceptance",
 ];
 
@@ -82,7 +77,7 @@ describe("exact-image publication workflow", () => {
     return Boolean(codeql) && new RegExp(`^\\s*-\\s*${matrixed[1]}\\s*$`, "mu").test(codeql);
   }
 
-  it.each([...REQUIRED_CHECK_NAMES, ...REQUIRED_CHECK_NAMES_PENDING])(
+  it.each(REQUIRED_CHECK_NAMES)(
     'still reports under the name the rules expect: "%s"',
     (name) => {
       expect(
