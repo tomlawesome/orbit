@@ -34,6 +34,11 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-all.sh` — backend suite then e2e (`ORBIT_SKIP_E2E` skips e2e)
 - `scripts/test-backend.sh` — static analysis and the fast Vitest suite
 - `scripts/test-frontend.sh` — Playwright against a running instance
+- `pnpm --filter orbit-web fidelity` — the v19 visual gate: stands up the
+  adapter-node build and the mockup host, compares 17 screens against the
+  committed baselines. In CI it runs pinned to the Playwright image the
+  baselines were proven against; run it locally the same way if a diff
+  disagrees
 - `scripts/test-integration.mjs` — integration suite against a real database
 - `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
   sidecars, then Playwright
