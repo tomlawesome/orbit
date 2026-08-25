@@ -34,6 +34,11 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-all.sh` — backend suite then e2e (`ORBIT_SKIP_E2E` skips e2e)
 - `scripts/test-backend.sh` — static analysis and the fast Vitest suite
 - `scripts/test-frontend.sh` — Playwright against a running instance
+- `pnpm --filter orbit-web fidelity` — the v19 visual gate: stands up the
+  adapter-node build and the mockup host, compares 17 screens against the
+  committed baselines. In CI it runs pinned to the Playwright image the
+  baselines were proven against; run it locally the same way if a diff
+  disagrees
 - `scripts/test-integration.mjs` — integration suite against a real database
 - `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
   sidecars, then Playwright
@@ -41,6 +46,9 @@ Check the list before building a test rig or handing a check to the owner.
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
+  stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
+  journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
 - `scripts/test-tika-processor.mjs` — Tika document extraction
 - `scripts/installer-simulation.sh` — installer command centre UI, no Docker
@@ -51,7 +59,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Five known ways to lose an afternoon, or worse. The first two have open
+Seven known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -80,6 +88,24 @@ either races or silently never exercises what it claims. Keep stdin open for
 the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
 and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
 has been diagnosed twice: #510/#512, then again in #552.
+
+**A pty driver's deadline belongs to `scripts/pty-deadline.mjs`.** A child
+killed for running out of time has no exit status, so a driver that hands the
+result to an exit-code assertion fails with `expected null to be 130` and names
+the wrong fault — the child never exited at all. Take the deadline and the
+failure from that module rather than writing another timer; a `spawn`-based
+driver must reject rather than resolve, and its tests declare
+`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
+
+**A Compose `file:` secret is a bind mount of an inode, not of a path.** Edit
+the file in place and every running container sees it at once; *replace* it --
+`mktemp` + `mv`, `tar -x`, `rsync` -- and each container keeps reading the old
+file for as long as it keeps running. A plain `docker restart` re-resolves the
+mount. This is not academic: repair's rotation lands the new password by rename
+precisely so a half-written secret is impossible, which left the database
+container reading a spent copy and made repair diagnose its own successful
+rotation as failed. Postgres itself never notices, because it reads that file
+once at initdb and authenticates from its own catalogue afterwards. See #629.
 
 **Add `ci: acceptance` to a pull request touching schema, migrations or server
 code.** Without it the integration and compose jobs skip and the pull request
