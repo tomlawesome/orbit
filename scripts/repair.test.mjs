@@ -99,6 +99,12 @@ function dockerShimScript({
   // answer.
   restartFails = false,
   healthMarkerPath = "",
+  // `restartLogPath`, when set, appends the container id of every successful
+  // `docker restart` to that file, one per line, in call order. A rotation
+  // must refresh the database container's view of the secret file as well as
+  // the application's (#629), and "which containers were restarted, in what
+  // order" is the only way to assert that without real containers.
+  restartLogPath = "",
   // --execute --dangerous's rotate-database-credential support:
   // `alterRoleFails` makes every script-mode `psql -f -` exec'd for the
   // rotate-credential step fail (exit 1), simulating that step itself
@@ -538,6 +544,7 @@ function dockerShimScript({
     "      printf \"docker: 'docker restart' requires at least 1 argument\\n\" >&2",
     "      exit 1",
     "    fi",
+    restartLogPath ? `    printf '%s\\n' "$restart_target" >> '${restartLogPath}'` : "",
     restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
     healthMarkerPath && !restartFails ? "    exit 0" : "",
     "    ;;",
@@ -3207,6 +3214,39 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
   // "Checkpoints are passphrase-encrypted recovery bundles... write the
   // checkpoint in the ORBKEK01 recovery-bundle format... no new formats") --
 
+  /*
+   * #629. The rotation replaces the secret file by rename (update-config's
+   * `mktemp` + `mv`, which is what keeps a half-written secret impossible).
+   * A Compose `file:` secret is a bind mount of an inode, not of a path, so a
+   * container that keeps running through that rename holds the OLD file
+   * forever. The application is restarted and re-resolves; the database
+   * container was not, so repair's own credential probe then read a spent
+   * copy and reported a rotation it had just completed as failed.
+   *
+   * Restarting the database is the whole fix: it is the only place in Orbit
+   * that swaps that file while a container keeps running. Asserting the order
+   * matters too — the application must come back against a database that has
+   * already restarted.
+   */
+  it("restarts the database as well as the application, so neither is left holding the pre-rotation secret file — #629", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
+    const restartLogPath = join(scratchDir(), "restart.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, dbAuthMarkerPath, restartLogPath },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=done");
+
+    const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(restarted).toEqual(["1111aaaa2222", "3333bbbb4444"]);
+  });
+
   it("the happy path: typed word + matching passphrase rotates the credential, and proves checkpoint-before-rotation ordering end to end", () => {
     const targetDir = makeCredentialMismatchFixture();
     const dbAuthMarkerPath = join(scratchDir(), "db-auth-marker");
@@ -3692,13 +3732,19 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
 
     // The bug reproduced with exactly one restart, issued BEFORE the ALTER
     // ROLE (the safe batch's own restart, with the dangerous batch's step 4
-    // silently skipped by the stale memo). The fix requires two restarts:
-    // the safe batch's, then a second one strictly AFTER the credential
-    // rotation, so the container actually picks up the new password.
-    expect(restartIndexes).toHaveLength(2);
+    // silently skipped by the stale memo). The fix requires the safe batch's
+    // restart, then further restarts strictly AFTER the credential rotation,
+    // so the containers actually pick up the new password.
+    //
+    // Three since #629: the safe batch's orbit-app, then the rotation's
+    // orbit-db and orbit-app. The database is in that list because the
+    // rotation replaces the secret file by rename, and a container running
+    // across a rename keeps the old inode.
+    expect(restartIndexes).toHaveLength(3);
     expect(alterRoleIndex).toBeGreaterThan(-1);
     expect(restartIndexes[0]).toBeLessThan(alterRoleIndex);
     expect(restartIndexes[1]).toBeGreaterThan(alterRoleIndex);
+    expect(restartIndexes[2]).toBeGreaterThan(alterRoleIndex);
   });
 });
 
