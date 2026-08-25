@@ -51,6 +51,7 @@ jobs:
       build: ${{ steps.classify.outputs.build }}
       integration: ${{ steps.classify.outputs.integration }}
       system: ${{ steps.classify.outputs.system }}
+      web: ${{ steps.classify.outputs.web }}
 
     steps:
       - name: Check out repository
@@ -187,6 +188,70 @@ jobs:
             .orbit-supply-chain/source-evidence.json
             .orbit-supply-chain/trivy-version.json
           if-no-files-found: warn
+          retention-days: 14
+
+  # The only automatic check the v19 presentation layer has (#620). Its 28
+  # Svelte components are not type-checked at zero, not linted, and until this
+  # job existed the 17 committed baselines were compared by hand or not at all.
+  fidelity:
+    name: v19 visual fidelity
+    needs:
+      - changes
+      - fast
+    # Skipped rather than filtered out, so the check reports a terminal result.
+    # Deliberately NOT behind the `ci: acceptance` label that gates the jobs
+    # below: a label nobody remembers is how #613 reached `dev`, and a visual
+    # regression that is only caught on the preview push is caught too late.
+    # A pull request that moves web/ pays for this; one that does not never
+    # sees it.
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Pinned by digest to the image the baselines were proven against: all 17
+    # reproduced at *zero* differing pixels inside it, against a budget of
+    # 0.1%. Any other browser build is a different rasteriser, and then the
+    # comparison stops measuring the design and starts measuring the runner.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # The image ships its own Node and the browser build that matches it, so
+      # neither is installed here: replacing either would defeat the pinning
+      # above. Only pnpm is missing.
+      - name: Install pnpm
+        run: npm install --global pnpm@11.9.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json, which
+      # `svelte-kit sync` generates and which is gitignored -- so it exists on
+      # any machine that has built once, and on no fresh checkout. Playwright
+      # reads that tsconfig while LOADING its config, before the webServer
+      # command it would have been built by ever runs, so without this the job
+      # dies in 45s on "Failed to load tsconfig file".
+      - name: Generate the SvelteKit type scaffolding
+        run: pnpm --filter orbit-web exec svelte-kit sync
+
+      # playwright.config.js stands up both servers itself: the adapter-node
+      # build of the app, and the static host for the ratified mockups. CI is
+      # set by Actions, so neither reuses a stray server.
+      - name: Run the v19 fidelity gate
+        run: pnpm --filter orbit-web fidelity
+
+      # The spec writes expected/actual/diff triplets on failure only (#448).
+      # Without them a red tick says a screen changed and not how.
+      - name: Upload fidelity diffs
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-fidelity-diffs
+          path: web/test-results/fidelity/
           retention-days: 14
 
   integration:
