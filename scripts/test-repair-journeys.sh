@@ -318,8 +318,20 @@ drift_the_credential() {
   # Real drift, not a simulated one: the database volume keeps the password it
   # was initialised with, and only the Orbit side moves. This is what an
   # operator produces by restoring a secrets directory over a retained volume.
-  printf 'drifted-password-%s\n' "$RANDOM" > "$target/.orbit-secrets/postgres-password"
-  chmod 600 "$target/.orbit-secrets/postgres-password"
+  #
+  # The write REPLACES the file rather than truncating it, because that is what
+  # a restore actually does -- `tar -x`, `rsync` and `mv` all leave a new inode
+  # at the path, and a Compose `file:` secret is a bind mount of an inode. An
+  # in-place `>` keeps every running container in step and so cannot exercise
+  # the stale-mount path at all, which is exactly why this harness missed #629
+  # on its first run. Only orbit-app is restarted afterwards, deliberately: the
+  # database container carries on with the file it started with, as it would
+  # for an operator who restored secrets without stopping the stack.
+  local staged="$target/.orbit-secrets/.drift.XXXXXX"
+  staged="$(mktemp "$target/.orbit-secrets/.drift.XXXXXX")"
+  printf 'drifted-password-%s\n' "$RANDOM" > "$staged"
+  chmod 600 "$staged"
+  mv -- "$staged" "$target/.orbit-secrets/postgres-password"
   compose restart orbit-app >/dev/null 2>&1 || true
   wait_for_unhealthy
 }
