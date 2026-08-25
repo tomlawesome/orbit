@@ -124,6 +124,13 @@ function dockerShimScript({
   // assert the rotation SQL genuinely arrived via stdin (not argv, and not
   // simply absent because the call never happened).
   execStdinLogPath = "",
+  // When set, the shim's `exec)` branch appends its full argument list (one
+  // invocation per line) to this path — lets a test assert exactly which
+  // host the authenticated database probe dialed (e.g. the compose service
+  // name `orbit-db`, never a loopback literal — see #610) without having to
+  // pick the exec call out of every other `docker` invocation logged to
+  // `argvLogPath`.
+  execArgvLogPath = "",
   // issue #528 migration-failed backstop support: the single fixed-literal
   // `SELECT "outcome", "reason" FROM "drizzle"."orbit_migration_runs" ...`
   // repair.sh issues over the already-authenticated probe path, fingerprinted
@@ -233,6 +240,20 @@ function dockerShimScript({
     logLine,
     'case "${1:-}" in',
     "  ps)",
+    // Real `docker ps` refuses a flag it does not know, with exit 125 (see
+    // the `exec)` branch's comment for why this shim is deliberately
+    // strict: a fake that accepts anything real Docker rejects lets the
+    // caller's argv drift away from reality unnoticed).
+    "    ps_args=(\"${@:2}\")",
+    "    ps_idx=0",
+    '    while (( ps_idx < ${#ps_args[@]} )); do',
+    '      ps_arg="${ps_args[ps_idx]}"',
+    '      case "$ps_arg" in',
+    "        -a|--all|-l|--latest|--no-trunc|-q|--quiet|-s|--size) ps_idx=$((ps_idx + 1)) ;;",
+    "        -f|--filter|--format|-n|--last) ps_idx=$((ps_idx + 2)) ;;",
+    '        *) printf "unknown flag: %s\\n" "$ps_arg" >&2; exit 125 ;;',
+    "      esac",
+    "    done",
     "    filter_count=0",
     '    for a in "$@"; do [[ "$a" == "--filter" ]] && filter_count=$((filter_count + 1)); done',
     '    joined="$*"',
@@ -250,17 +271,79 @@ function dockerShimScript({
     "    exit 0",
     "    ;;",
     "  compose)",
+    // Real `docker compose` refuses an unknown flag or an unrecognised
+    // subcommand with exit 1 (the compose plugin, unlike plain `docker`,
+    // never uses 125 for this). repair.sh issues exactly two shapes:
+    // `compose --project-name X --env-file Y config --quiet` and
+    // `compose --project-name X --env-file Y run --rm --no-deps -T
+    // [--volume V] --entrypoint node orbit-app <script> <args...>` — this
+    // allowlists only those two subcommands and their flags, then stops
+    // validating at the first positional token (the service name / command
+    // for `run`), exactly like the `exec)` branch's flag parser above.
+    "    compose_args=(\"${@:2}\")",
+    '    if (( ${#compose_args[@]} == 0 )); then',
+    "      exit 0",
+    "    fi",
+    "    compose_idx=0",
+    "    compose_subcommand=''",
+    '    while (( compose_idx < ${#compose_args[@]} )); do',
+    '      compose_arg="${compose_args[compose_idx]}"',
+    '      case "$compose_arg" in',
+    "        --project-name|-p|--env-file) compose_idx=$((compose_idx + 2)) ;;",
+    '        --*) printf "unknown flag: %s\\n" "$compose_arg" >&2; exit 1 ;;',
+    '        *) compose_subcommand="$compose_arg"; compose_idx=$((compose_idx + 1)); break ;;',
+    "      esac",
+    "    done",
+    '    case "$compose_subcommand" in',
+    "      config)",
+    '        while (( compose_idx < ${#compose_args[@]} )); do',
+    '          compose_arg="${compose_args[compose_idx]}"',
+    '          case "$compose_arg" in',
+    "            -q|--quiet) compose_idx=$((compose_idx + 1)) ;;",
+    '            *) printf "unknown flag: %s\\n" "$compose_arg" >&2; exit 1 ;;',
+    "          esac",
+    "        done",
+    "        ;;",
+    "      run)",
+    '        while (( compose_idx < ${#compose_args[@]} )); do',
+    '          compose_arg="${compose_args[compose_idx]}"',
+    '          case "$compose_arg" in',
+    "            --rm|--no-deps|-T|--no-tty) compose_idx=$((compose_idx + 1)) ;;",
+    "            --entrypoint|--volume|-v) compose_idx=$((compose_idx + 2)) ;;",
+    '            --*) printf "unknown flag: %s\\n" "$compose_arg" >&2; exit 1 ;;',
+    "            *) break ;;",
+    "          esac",
+    "        done",
+    "        ;;",
+    "      *)",
+    '        printf "unknown docker command: \\"compose %s\\"\\n" "$compose_subcommand" >&2',
+    "        exit 1",
+    "        ;;",
+    "    esac",
     composeRunLines,
     composeFails ? "    exit 1" : "    exit 0",
     "    ;;",
     "  volume)",
     '    if [[ "${2:-}" == "ls" ]]; then',
+    // Real `docker volume ls` refuses an unknown flag with exit 125, same
+    // rationale as `ps)` above.
+    "      volume_args=(\"${@:3}\")",
+    "      volume_idx=0",
+    '      while (( volume_idx < ${#volume_args[@]} )); do',
+    '        volume_arg="${volume_args[volume_idx]}"',
+    '        case "$volume_arg" in',
+    "          -q|--quiet) volume_idx=$((volume_idx + 1)) ;;",
+    "          -f|--filter|--format) volume_idx=$((volume_idx + 2)) ;;",
+    '          *) printf "unknown flag: %s\\n" "$volume_arg" >&2; exit 125 ;;',
+    "        esac",
+    "      done",
     volumeLines || "      true",
     "      exit 0",
     "    fi",
     "    exit 1",
     "    ;;",
     "  exec)",
+    execArgvLogPath ? `    printf '%s\\n' "$*" >> '${execArgvLogPath}' 2>/dev/null || true` : "    true",
     // Real `docker exec` refuses a flag it does not know, with exit 125 and
     // this message. The shim used to accept anything, so `docker exec -T` --
     // a `docker compose exec` flag that plain `docker exec` has never had --
@@ -313,6 +396,17 @@ function dockerShimScript({
     `      ${migrationRunLine}`,
     `      exit ${migrationRunExit}`,
     "    fi",
+    // issue #610: the official Postgres image's pg_hba.conf trusts loopback
+    // unconditionally (`host all all 127.0.0.1/32 trust`), so a probe that
+    // dials 127.0.0.1/::1/localhost would be accepted no matter what
+    // password it supplied — `database-credential-mismatch` could never
+    // fire on a real deployment. This mirrors that trust rule here so a
+    // repair.sh regression back to dialing loopback (instead of the
+    // compose service name) makes every credential-mismatch fixture below
+    // report healthy, and those tests fail (#610).
+    '    if [[ "$joined" == *"127.0.0.1"* || "$joined" == *"::1"* || "$joined" == *"localhost"* ]]; then',
+    "      exit 0",
+    "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
     dbAuthMarkerPath
       ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
@@ -335,17 +429,59 @@ function dockerShimScript({
     "    exit 1",
     "    ;;",
     "  logs)",
+    // Real `docker logs` refuses an unknown flag with exit 125, and refuses
+    // a call naming no container with exit 1 ("requires 1 argument").
+    "    logs_args=(\"${@:2}\")",
+    "    logs_idx=0",
+    "    logs_target=''",
+    '    while (( logs_idx < ${#logs_args[@]} )); do',
+    '      logs_arg="${logs_args[logs_idx]}"',
+    '      case "$logs_arg" in',
+    "        --details|-f|--follow|-t|--timestamps) logs_idx=$((logs_idx + 1)) ;;",
+    "        --since|-n|--tail|--until) logs_idx=$((logs_idx + 2)) ;;",
+    '        --*) printf "unknown flag: %s\\n" "$logs_arg" >&2; exit 125 ;;',
+    '        *) logs_target="$logs_arg"; logs_idx=$((logs_idx + 1)) ;;',
+    "      esac",
+    "    done",
+    '    if [[ -z "$logs_target" ]]; then',
+    "      printf 'docker: '\"'\"'docker logs'\"'\"' requires 1 argument\\n' >&2",
+    "      exit 1",
+    "    fi",
     // The app's own operational log, so a refusal to start over the database
     // can be told apart from a generic unhealthy container (#437).
     `    printf '%s\\n' '${appLog}'`,
     "    exit 0",
     "    ;;",
     "  inspect)",
+    // Real `docker inspect` refuses an unknown flag with exit 125, and a
+    // call naming no object with exit 1 ("requires at least 1 argument").
     // issue #528 Step 13: `docker inspect --format '{{.Image}}' <id>` — the
     // running container's actual image ID — is a distinct call from Step
-    // 12's combined Config.Image/Health format just below, so it must be
-    // routed first.
-    '    if [[ "${3:-}" == "{{.Image}}" ]]; then',
+    // 12's combined Config.Image/Health format, dispatched on the parsed
+    // `--format` value below rather than a fixed argv position.
+    "    inspect_args=(\"${@:2}\")",
+    "    inspect_idx=0",
+    "    inspect_format=''",
+    "    inspect_target=''",
+    '    while (( inspect_idx < ${#inspect_args[@]} )); do',
+    '      inspect_arg="${inspect_args[inspect_idx]}"',
+    '      case "$inspect_arg" in',
+    "        -s|--size) inspect_idx=$((inspect_idx + 1)) ;;",
+    "        -f|--format)",
+    "          inspect_idx=$((inspect_idx + 1))",
+    '          inspect_format="${inspect_args[inspect_idx]:-}"',
+    "          inspect_idx=$((inspect_idx + 1))",
+    "          ;;",
+    "        --type) inspect_idx=$((inspect_idx + 2)) ;;",
+    '        --*) printf "unknown flag: %s\\n" "$inspect_arg" >&2; exit 125 ;;',
+    '        *) inspect_target="$inspect_arg"; inspect_idx=$((inspect_idx + 1)) ;;',
+    "      esac",
+    "    done",
+    '    if [[ -z "$inspect_target" ]]; then',
+    "      printf \"docker: 'docker inspect' requires at least 1 argument\\n\" >&2",
+    "      exit 1",
+    "    fi",
+    '    if [[ "$inspect_format" == "{{.Image}}" ]]; then',
     `      printf '%s\\n' '${appImageId}'`,
     "      exit 0",
     "    fi",
@@ -358,13 +494,50 @@ function dockerShimScript({
     // the locally-present image for the pinned reference. Absent by default
     // (imageInspectPresent=false), simulating a pinned image never pulled
     // locally, so Step 13 skips (never guesses) unless a test opts in.
+    // Real `docker image inspect` refuses an unknown flag with exit 125 and
+    // a call naming no image with exit 1; an unknown `docker image`
+    // subcommand is refused outright (exit 1), same as real Docker.
     '    if [[ "${2:-}" == "inspect" ]]; then',
+    "      image_args=(\"${@:3}\")",
+    "      image_idx=0",
+    "      image_target=''",
+    '      while (( image_idx < ${#image_args[@]} )); do',
+    '        image_arg="${image_args[image_idx]}"',
+    '        case "$image_arg" in',
+    "          -f|--format|--platform) image_idx=$((image_idx + 2)) ;;",
+    '          --*) printf "unknown flag: %s\\n" "$image_arg" >&2; exit 125 ;;',
+    '          *) image_target="$image_arg"; image_idx=$((image_idx + 1)) ;;',
+    "        esac",
+    "      done",
+    '      if [[ -z "$image_target" ]]; then',
+    "        printf \"docker: 'docker image inspect' requires at least 1 argument\\n\" >&2",
+    "        exit 1",
+    "      fi",
     imageInspectPresent ? `      printf '%s\\n' '${imageInspectId}'` : "      true",
     imageInspectPresent ? "      exit 0" : "      exit 1",
     "    fi",
+    "    printf \"docker: unknown command: 'docker image %s'\\\\n\" \"${2:-}\" >&2",
     "    exit 1",
     "    ;;",
     "  restart)",
+    // Real `docker restart` refuses an unknown flag with exit 125, and a
+    // call naming no container with exit 1 ("requires at least 1
+    // argument"). repair.sh never passes a flag here, only a container ID.
+    "    restart_args=(\"${@:2}\")",
+    "    restart_idx=0",
+    "    restart_target=''",
+    '    while (( restart_idx < ${#restart_args[@]} )); do',
+    '      restart_arg="${restart_args[restart_idx]}"',
+    '      case "$restart_arg" in',
+    "        -s|--signal|-t|--timeout) restart_idx=$((restart_idx + 2)) ;;",
+    '        --*) printf "unknown flag: %s\\n" "$restart_arg" >&2; exit 125 ;;',
+    '        *) restart_target="$restart_arg"; restart_idx=$((restart_idx + 1)) ;;',
+    "      esac",
+    "    done",
+    '    if [[ -z "$restart_target" ]]; then',
+    "      printf \"docker: 'docker restart' requires at least 1 argument\\n\" >&2",
+    "      exit 1",
+    "    fi",
     restartFails ? "    exit 1" : healthMarkerPath ? `    : > '${healthMarkerPath}'` : "    exit 0",
     healthMarkerPath && !restartFails ? "    exit 0" : "",
     "    ;;",
@@ -1054,6 +1227,21 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("database-unreachable");
     expect(result.stdout).not.toContain(distinctPassword);
     expect(result.stderr).not.toContain(distinctPassword);
+  });
+
+  it("dials the compose service name for the authenticated probe, never loopback — #610", () => {
+    const targetDir = makeFixture();
+    const execArgvLogPath = join(scratchDir(), "exec-argv.log");
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      execArgvLogPath,
+    });
+
+    const execArgvLog = readFileSync(execArgvLogPath, "utf8");
+    expect(execArgvLog).toContain("orbit-db");
+    expect(execArgvLog).not.toContain("127.0.0.1");
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
   });
 
   it("reports no database finding when pg_isready and authentication both succeed", () => {
