@@ -49,11 +49,11 @@ const REQUIRED_CHECK_NAMES = [
   "Dependency change and licence policy",
   "CodeQL (actions)",
   "CodeQL (javascript-typescript)",
-  // Added to `Protect dev` by the owner, 2026-08-25. Fidelity is path-gated,
-  // so it bites on every pull request touching web/. The journey check is
-  // gated on the `ci: acceptance` label, so until #617 makes that trigger
-  // path-based it is real protection on a labelled pull request and none on
-  // an unlabelled one.
+  // Added to `Protect dev` and `Protect preview` by the owner, 2026-08-25,
+  // read back from the rulesets API on both. Fidelity is path-gated, so it
+  // bites on every pull request touching web/. The journey check now follows
+  // the classifier too (#617), so a system-risk pull request runs it whether
+  // or not anyone applied `ci: acceptance`.
   "v19 visual fidelity",
   "Repair journey acceptance",
 ];
@@ -548,5 +548,17 @@ describe("exact-image publication workflow", () => {
     expect(cleanupSection).toContain('docker rm --force "${REGISTRY_ID}"');
     expect(cleanupSection).toContain("current_registry_id=");
     expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
+  });
+
+  it("gates acceptance jobs on system-risk paths, not only dispatch or the label (#617)", () => {
+    const supplyChain = jobBlock("supply_chain_source", "fidelity");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "repair_journeys");
+    const journeys = jobBlock("repair_journeys", "verify_preview");
+
+    for (const block of [supplyChain, integration, smoke, journeys]) {
+      expect(block).toContain("needs.changes.outputs.system == 'true'");
+      expect(block).toContain("ci: acceptance");
+    }
   });
 });
