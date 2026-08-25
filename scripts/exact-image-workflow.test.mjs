@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+const workflowsDir = dirname(fileURLToPath(new URL("../.github/workflows/publish-container.yml", import.meta.url)));
 
 const workflow = readFileSync(
   new URL("../.github/workflows/publish-container.yml", import.meta.url),
@@ -20,44 +24,75 @@ function jobBlock(job, nextJob) {
 }
 
 /*
- * Branch protection matches a required check by its exact display name, so
- * these strings are identifiers rather than descriptions. Rename one and the
- * protected branch waits for a check that will never report again: the pull
- * request sits on "Expected — waiting for status to be reported", the merge
- * button stays disabled, and nothing anywhere says the name moved. A job's
- * key can change freely; its `name:` changes only alongside the protection
- * rule, which no agent on this host can edit (#620).
+ * The checks that must pass before a pull request can merge. Branch rules
+ * match a check by its exact display name, so these strings are identifiers
+ * rather than descriptions. Rename one and the protected branch waits for a
+ * check that will never report again: the pull request sits on "Expected —
+ * waiting for status to be reported", the merge button stays disabled, and
+ * nothing anywhere says the name moved. A job's key can change freely; its
+ * `name:` changes only alongside the rule.
  *
- * This list declares what protection requires, or is being made to require —
- * it cannot read the rule, and
- * CI holds no credential that could. It therefore catches drift on the
- * workflow side, which is the side that changes. A check added to protection
- * without being added here is not covered.
+ * This list was first written from assumption and was wrong in both
+ * directions (#630). It is now taken from the rules themselves, which this
+ * repository keeps as **rulesets** rather than classic branch protection --
+ * `repos/OWNER/REPO/rulesets`, "Protect dev" and "Protect preview", both
+ * requiring the same four. An agent here cannot EDIT a ruleset, but it can
+ * read one, so a claim like this never has to be guessed at again.
+ *
+ * Verified against both rulesets on 2026-08-25.
  */
 const REQUIRED_CHECK_NAMES = [
-  "Classify changed paths",
   "Static and unit checks",
-  "Source dependency and secret policy",
-  "PostgreSQL service and API integration",
-  "Compose smoke test",
+  "Dependency change and licence policy",
+  "CodeQL (actions)",
+  "CodeQL (javascript-typescript)",
+];
+
+/*
+ * Decided to be required, and pinned ahead of the change so a rename cannot
+ * land in the gap: adding a required check is a rule edit only the owner can
+ * make (handover on #620). Move these up when they are in the rulesets.
+ */
+const REQUIRED_CHECK_NAMES_PENDING = [
+  // Owner decision, 2026-08-25: the only automatic check the v19 presentation
+  // layer has (#620).
   "v19 visual fidelity",
-  // Owner decision, 2026-08-25: required, because nothing else tests the real
-  // recovery path. repair.test.mjs has 227 tests against a fake docker shim
-  // and stayed green through #607, #629 and #632 — a fake cannot disagree
-  // with reality.
+  // Owner decision, 2026-08-25: nothing else tests the real recovery path.
+  // repair.test.mjs has 227 tests against a fake docker shim and stayed green
+  // through #607, #629 and #632 — a fake cannot disagree with reality.
   "Repair journey acceptance",
 ];
 
 describe("exact-image publication workflow", () => {
-  it("keeps every required check reporting under the name protection expects", () => {
-    for (const name of REQUIRED_CHECK_NAMES) {
+  /*
+   * Resolved across every workflow, not just this one: two of the four
+   * required checks are reported by codeql.yml and dependency-review.yml. The
+   * CodeQL names are composed from a matrix, so the literal string appears
+   * nowhere -- checking only for it would have made this list unsatisfiable,
+   * which is how the first version of it came to be wrong.
+   */
+  function reportsCheck(name) {
+    const files = readdirSync(workflowsDir)
+      .filter((entry) => entry.endsWith(".yml"))
+      .map((entry) => readFileSync(join(workflowsDir, entry), "utf8").replaceAll("\r\n", "\n"));
+    if (files.some((file) => file.includes(`    name: ${name}\n`))) return true;
+    const matrixed = /^CodeQL \((.+)\)$/u.exec(name);
+    if (!matrixed) return false;
+    const codeql = files.find((file) => file.includes("name: CodeQL (${{ matrix.language }})"));
+    return Boolean(codeql) && new RegExp(`^\\s*-\\s*${matrixed[1]}\\s*$`, "mu").test(codeql);
+  }
+
+  it.each([...REQUIRED_CHECK_NAMES, ...REQUIRED_CHECK_NAMES_PENDING])(
+    'still reports under the name the rules expect: "%s"',
+    (name) => {
       expect(
-        workflow,
-        `No job reports as "${name}". If this job was renamed, the protected `
-        + `branch will wait for it forever — rename the protection rule first.`,
-      ).toContain(`    name: ${name}\n`);
-    }
-  });
+        reportsCheck(name),
+        `No job reports as "${name}". Renaming it leaves the protected branch `
+        + "waiting for a check that will never report again — change the "
+        + "ruleset in the same breath, or not at all.",
+      ).toBe(true);
+    },
+  );
 
   it("can be dispatched on demand and re-evaluates when a label is applied (#572)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
