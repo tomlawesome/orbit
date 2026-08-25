@@ -46,6 +46,9 @@ Check the list before building a test rig or handing a check to the owner.
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
+  stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
+  journeys are live and which are still absent)
 - `scripts/test-malware-scanner.sh` — ClamAV detection
 - `scripts/test-tika-processor.mjs` — Tika document extraction
 - `scripts/installer-simulation.sh` — installer command-centre UI only, no Docker
