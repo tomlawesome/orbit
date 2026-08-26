@@ -545,7 +545,21 @@
               a pack can lift the floor without losing the gradient. The
               .flying and .dissolve rules below still override it. */
            opacity:var(--dim, 1);
-           transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s}
+           transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity 1.25s;
+           /* #638: the box is 210x160 but only the ring (r 40) and the label
+              are ever drawn on — the rest was blank and still took pointer
+              events, so a neighbouring card's box could swallow a click aimed
+              at this one. pointer-events is inherited, so this disables the
+              whole subtree, and .mshit/text below opt the real hit target
+              back in. A click event dispatched at a pointer-events:auto
+              descendant still bubbles to this div's own listener regardless
+              of this div's pointer-events value — bubbling and hit-testing
+              are separate steps — so the handler below needs no change. */
+           pointer-events:none}
+  /* the transparent hit circle (.mshit, added alongside .msring at the same
+     cx/cy/r by home.behaviour.js) and the label text are the only parts of
+     the card a click can land on */
+  .minisys .mshit,.minisys text{pointer-events:auto}
   .minisys:hover .msring{stroke-opacity:.9}
   .msring{transition:stroke-opacity .3s}
   .dialwrap{transition:transform 1.25s cubic-bezier(.5,.4,.15,1),opacity .9s ease}
