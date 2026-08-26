@@ -21,6 +21,10 @@ they are routed is global; it is not repeated here.
   security considerations, test plan, operational impact, and closure evidence.
 - Write a failing test first for defects and testable new behaviour. Add
   characterization tests before refactors.
+- Reproduce a defect before fixing it. Where a fix ships without that -- #638
+  was diagnosed from one CI log and never reproduced -- say so on the issue
+  and carry the debt on a follow-up (#641), because a test that has never
+  failed proves nothing about the behaviour it names.
 - Run fast checks before container and browser checks.
 - Do not close an issue until its acceptance evidence is linked.
 - Publish previews only after required checks pass on the protected `preview`
