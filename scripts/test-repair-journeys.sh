@@ -27,16 +27,19 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 # Journeys proven live by this script, in the order they run. The order is
 # load-bearing: cancelled-repair refuses the very drift that credential-drift
-# then repairs, which is what proves the refusal mutated nothing, and
-# idempotent-rerun re-runs the repair credential-drift just completed.
-readonly journeys=(cancelled-repair credential-drift idempotent-rerun)
+# then repairs, which is what proves the refusal mutated nothing;
+# signal-cleanup runs next, while the drift is still unrepaired, because it
+# needs a real --execute --dangerous run to interrupt mid-flight, and its own
+# contract requires leaving the drift untouched, so credential-drift (which
+# repairs it) and idempotent-rerun (which re-runs that completed repair) still
+# see exactly the deployment they see today.
+readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
 readonly absent=(
   "retained-volume-new-target"
   "interrupted-configuration-migration"
-  "signal-cleanup"
   "hostile-value-privacy-negatives"
   "exact-image-prior-version"
 )
@@ -360,6 +363,118 @@ journey_cancelled_repair() {
   }
   health_check && fail 'a cancelled repair silently fixed the drift'
   result_line cancelled-repair pass
+}
+
+# Proves the EXIT trap documented above scripts/repair.sh's cleanup()
+# (~line 1266): a real --execute run, interrupted while it holds a private
+# mode-700 copy of live secrets, removes that copy and is never silent.
+#
+# An earlier version of this journey interrupted the credential rotation and
+# asserted no `.orbit-repair-recovery.*` was left behind. It passed -- and it
+# passed just as happily with cleanup_recovery_dir deliberately removed from
+# repair.sh, because on that path no recovery directory is ever created:
+# ensure_recovery_dir is called only by do_restore_transaction (repair.sh:2692)
+# and do_restore_configuration_rollback (:2794). The assertion searched for
+# something that never existed. So this journey seeds the finding that does
+# open one.
+#
+# The fixture is a leftover installer staging directory, which is
+# staging-evidence-present -> restore-transaction. It must satisfy every
+# precondition do_restore_transaction re-verifies (real non-symlink dirs,
+# rollback and rollback/original both mode 700) and must NOT carry the
+# `committed` marker, which repair.sh refuses on sight. The staged backup of
+# .env-orbit is byte-identical to the live file, so if the restore does get
+# partway before the signal lands it is a no-op on content.
+#
+# The run is --execute --safe-only, so the credential rotation is not selected
+# at all and the drift survives untouched for credential-drift and
+# idempotent-rerun.
+#
+# The interrupt is landed on the recovery directory's own existence rather
+# than on a log line: poll until `.orbit-repair-recovery.*` is really there,
+# then signal. That makes the precondition the trigger, so this journey can
+# never again assert the absence of something that was never created.
+#
+# `exec` inside the backgrounded subshell replaces its own process image with
+# repair.sh, so $! is repair.sh's real PID and the signal lands on the process
+# that owns the trap, not on a throwaway parent shell.
+journey_signal_cleanup() {
+  local before after out infile staging pid status=0 found=0 leftover
+
+  before="$(deployment_manifest)"
+
+  staging="$(mktemp -d "$target/.orbit-install-staging.XXXXXX")"
+  chmod 700 -- "$staging"
+  mkdir -p -- "$staging/rollback/original"
+  chmod 700 -- "$staging/rollback" "$staging/rollback/original"
+  cp -a -- "$target/.env-orbit" "$staging/rollback/original/.env-orbit"
+
+  out="$workdir/signal-cleanup.out"
+  infile="$workdir/signal-cleanup.in"
+  : > "$out"
+  # --safe-only, not --dangerous: repair.sh's flags are selectors, not
+  # modifiers (its usage at :1188), so --dangerous alone selects stage two
+  # and would skip restore-transaction entirely -- which is the only action
+  # here that opens a recovery directory. `y` approves the safe batch
+  # (confirm_safe_batch, machine prompts). The credential drift is left
+  # untouched by this invocation, so the journeys after this one are
+  # unaffected by construction rather than by luck of the class order.
+  printf 'y\n' > "$infile"
+
+  (
+    cd "$target"
+    exec env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" --execute --safe-only
+  ) <"$infile" >"$out" 2>&1 &
+  pid=$!
+
+  local deadline=$((SECONDS + 60))
+  while :; do
+    if compgen -G "$target/.orbit-repair-recovery.*" >/dev/null 2>&1; then found=1; break; fi
+    kill -0 "$pid" 2>/dev/null || break
+    ((SECONDS < deadline)) || break
+    sleep 0.005
+  done
+
+  if [[ "$found" != 1 ]]; then
+    wait "$pid" 2>/dev/null || true
+    rm -rf -- "$staging"
+    cat "$out" >&2
+    fail 'signal-cleanup: never observed a private recovery directory to interrupt'
+  fi
+
+  kill -TERM "$pid" 2>/dev/null || true
+  # `wait` reports the signalled child's 128+15, and this script runs under
+  # `set -e`: an unguarded `wait` here kills the harness itself with 143
+  # instead of the journey observing the interruption it just caused.
+  status=0
+  wait "$pid" 2>/dev/null || status=$?
+  [[ "$status" != 0 ]] || fail 'an interrupted repair exited 0'
+
+  # The contract, and the assertion that now genuinely fails when the trap
+  # stops removing the recovery copy.
+  leftover="$(find "$target" -maxdepth 1 -name '.orbit-repair-recovery.*' -print 2>/dev/null)"
+  [[ -z "$leftover" ]] ||
+    fail "signal-cleanup: an interrupted repair orphaned a private recovery copy: $leftover"
+
+  grep -q 'interrupted before completion' "$out" ||
+    { cat "$out" >&2; fail 'signal-cleanup: the interrupted run printed no recovery guidance'; }
+
+  # Teardown: the seeded staging directory is this journey's own fixture, and
+  # repair.sh deliberately leaves it in place for a retry. Remove it so the
+  # journeys after this one see the deployment they expect.
+  rm -rf -- "$staging"
+  find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -exec rm -rf -- {} + 2>/dev/null || true
+
+  after="$(deployment_manifest)"
+  [[ "$before" == "$after" ]] || {
+    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    fail 'an interrupted repair left the deployment changed'
+  }
+
+  [[ "$(household_name)" == 'repair-journeys-household' ]] ||
+    fail 'an interrupted repair disturbed the fixture data'
+  health_check && fail 'an interrupted repair silently fixed the drift'
+  result_line signal-cleanup pass
 }
 
 journey_credential_drift() {
