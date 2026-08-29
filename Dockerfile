@@ -1,4 +1,16 @@
 FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS base
+
+# Alpine patches its OpenSSL packages faster than the Node official images are
+# rebuilt, so a digest-pinned base is routinely a few package revisions behind
+# its own Alpine release. That is not hypothetical: the pin above carries
+# libcrypto3/libssl3 3.5.7-r0 while Alpine 3.24 has shipped 3.5.8-r0, which
+# fixes CVE-2026-14456, and no node:22/24/26-alpine build carries the fix yet
+# (#646). Upgrading from the pinned base's own Alpine branch closes that gap at
+# build time instead of waiting on an upstream rebuild. The digest still fixes
+# what this image starts from; this line only moves its packages forward to the
+# current patch level of that same Alpine release.
+RUN apk upgrade --no-cache
+
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -50,6 +62,11 @@ COPY . .
 RUN pnpm run build:cli
 
 FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS runner
+
+# The runtime stage starts from the base image again rather than from `base`,
+# so it needs the same package upgrade for the same reason (see the base stage).
+RUN apk upgrade --no-cache
+
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
 ARG ORBIT_CHANNEL
