@@ -192,7 +192,7 @@ export function validateSupplyChainPolicy(policy, now = new Date().toISOString()
   };
 }
 
-function validateReport(report) {
+export function validateReport(report) {
   if (report?.SchemaVersion !== 2 || !Array.isArray(report.Results)) {
     throw new Error("Trivy report schema is missing or unsupported.");
   }
@@ -216,7 +216,7 @@ function matchingException(policy, finding, scope) {
   );
 }
 
-function vulnerabilityFinding(vulnerability, target) {
+export function vulnerabilityFinding(vulnerability, target) {
   return {
     kind: "vulnerability",
     id: requiredString(vulnerability?.VulnerabilityID, "Vulnerability id"),
@@ -244,7 +244,7 @@ function secretFinding(secret, target) {
   };
 }
 
-function summarizeFindings(findings, thresholdKey, policy, scope) {
+export function summarizeFindings(findings, thresholdKey, policy, scope) {
   let blocked = 0;
   let excepted = 0;
   const thresholds = new Set(policy.thresholds[thresholdKey]);
