@@ -74,6 +74,34 @@ jobs:
           ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/classify-changed-paths.mjs
 
+  base_image:
+    name: Base image freshness
+    needs:
+      - changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # Reporting-only until Orbit pins the base image built by
+    # gitlab.tomlawson.io/ai/orbit-base-image (#651). It is correct today and
+    # it fails today: node:22-alpine's packages are behind its own Alpine
+    # release, which is exactly #646, and #648 works around that at build time
+    # rather than fixing the base. Making it blocking now would stop all
+    # delivery for a condition already mitigated.
+    #
+    # This is deliberately time-boxed, not a soft-fail habit. When Orbit's
+    # Dockerfile pins our own base, delete `continue-on-error` and add
+    # `base_image` to the `needs:` of `smoke` and `publish_preview`. Until
+    # then it earns its place by proving the check works against a real stale
+    # base rather than only against a green one.
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Refuse a stale base image
+        run: bash scripts/check-base-image-current.sh
+
   fast:
     name: Static and unit checks
     needs:
