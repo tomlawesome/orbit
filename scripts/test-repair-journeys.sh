@@ -33,14 +33,14 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # contract requires leaving the drift untouched, so credential-drift (which
 # repairs it) and idempotent-rerun (which re-runs that completed repair) still
 # see exactly the deployment they see today.
-readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun)
+readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun
+                   hostile-value-privacy-negatives)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
 readonly absent=(
   "retained-volume-new-target"
   "interrupted-configuration-migration"
-  "hostile-value-privacy-negatives"
   "exact-image-prior-version"
 )
 
@@ -523,6 +523,79 @@ journey_idempotent_rerun() {
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 're-running a completed repair disturbed the fixture data'
   result_line idempotent-rerun pass
+}
+
+# Proves the "Privacy" contract above scripts/repair.sh:765 against values an
+# attacker chooses: hostile configuration, filenames and container labels
+# never reach output.
+#
+# An absence assertion is worthless unless the hostile value was actually
+# handled, so each of the three vectors is paired with the finding class that
+# only fires if repair.sh really did read it. If a class is missing the
+# journey fails rather than quietly asserting nothing:
+#
+#   filename       .orbit-install-staging.<canary>/  -> staging-evidence-present
+#   configuration  ORBIT_PORT=<canary> in .env-orbit -> compose-interpolation-failed
+#   container      a container labelled into this project with a hostile
+#                  compose service label            -> container-foreign-owner
+#
+# The configuration vector was written expecting configuration-invalid and
+# observed compose-interpolation-failed: a non-numeric port breaks Compose's
+# own interpolation before configure.sh --check is ever reached. That is the
+# sharper vector of the two, because `docker compose config` quotes the
+# offending value back in its error text and repair.sh captures that stderr
+# wholesale. The contract says none of it may be reprinted.
+journey_hostile_value_privacy_negatives() {
+  local canary before after output status=0 missing=()
+  canary="h0stile-$RANDOM-$$-canary"
+  before="$(deployment_manifest)"
+
+  local staging="$target/.orbit-install-staging.$canary"
+  mkdir -p -- "$staging/rollback/original"
+  chmod 700 -- "$staging" "$staging/rollback" "$staging/rollback/original"
+
+  cp -a -- "$target/.env-orbit" "$workdir/env-orbit.orig"
+  printf 'ORBIT_PORT=%s\n' "$canary" >> "$target/.env-orbit"
+
+  docker run -d --name "orbit-journeys-$canary" \
+    --label "com.docker.compose.project=$project" \
+    --label "com.docker.compose.service=$canary" \
+    --label "com.docker.compose.container-number=1" \
+    busybox:stable sleep 600 >/dev/null 2>&1 ||
+    fail 'hostile-value: could not start the labelled container vector'
+
+  output="$(repair --check 2>&1)" || status=$?
+
+  # Each vector must have been processed, or its absence from the output
+  # proves nothing about privacy.
+  grep -q 'finding class=staging-evidence-present' <<<"$output" || missing+=(staging-evidence-present)
+  grep -q 'finding class=compose-interpolation-failed' <<<"$output" || missing+=(compose-interpolation-failed)
+  grep -q 'finding class=container-foreign-owner' <<<"$output" || missing+=(container-foreign-owner)
+
+  local leaked=0
+  grep -q -- "$canary" <<<"$output" && leaked=1
+
+  # Teardown before any assertion can exit, so a failure here never strands
+  # the shared deployment for the journeys that follow.
+  docker rm -f "orbit-journeys-$canary" >/dev/null 2>&1 || true
+  rm -rf -- "$staging"
+  cp -a -- "$workdir/env-orbit.orig" "$target/.env-orbit"
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    printf '%s\n' "$output" >&2
+    fail "hostile-value: repair never reported ${missing[*]}, so the vector was not exercised"
+  fi
+  if [[ "$leaked" == 1 ]]; then
+    grep -n -- "$canary" <<<"$output" >&2 || true
+    fail 'hostile-value: an operator-chosen value reached repair output'
+  fi
+
+  after="$(deployment_manifest)"
+  [[ "$before" == "$after" ]] || {
+    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    fail 'hostile-value: the journey did not restore the deployment it borrowed'
+  }
+  result_line hostile-value-privacy-negatives pass
 }
 
 # --- run ------------------------------------------------------------------
