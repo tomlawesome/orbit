@@ -119,6 +119,54 @@ function runPtyInterrupted(body, marker, env = {}) {
 }
 
 /*
+ * Like runPtyInterrupted, but instead of one signal it storms SIGTERM across
+ * live menu redraws: every millisecond it sends a signal and a down-arrow, so
+ * the widget keeps re-rendering while signals land (#625). The storm only
+ * starts once the marker is on screen, so the trap is known to be armed and
+ * every signal is trapped rather than fatal.
+ */
+function runPtyStorm(body, marker, signals) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qefE", "never", "-c", `bash -c '${body}' _ '${helper}'`, "/dev/null"],
+      { env: { ...process.env, TERM: "xterm" } },
+    );
+    let stdout = "";
+    let stormed = false;
+    let remaining = signals;
+    let innerPid = null;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      const pid = stdout.match(/PID=(\d+)/u);
+      if (pid) innerPid = Number(pid[1]);
+      if (!stormed && innerPid && stdout.includes(marker)) {
+        stormed = true;
+        const burst = setInterval(() => {
+          if (remaining <= 0) { clearInterval(burst); return; }
+          remaining -= 1;
+          try { process.kill(innerPid, "SIGTERM"); } catch { clearInterval(burst); return; }
+          child.stdin.write("\x1b[B");
+        }, 1);
+      }
+    });
+    child.on("error", reject);
+    child.stdin.on("error", () => {});
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        reject(ptyDeadlineError({ label: "runPtyStorm", deadlineMs: PTY_ASYNC_DEADLINE_MS, stdout }));
+        return;
+      }
+      resolve({ status, stdout, stormed });
+    });
+  });
+}
+
+/*
  * Like runPty, but stdin is written once and then left open (#611).
  *
  * runPty hands spawnSync an `input` string, which closes stdin as soon as it
@@ -548,6 +596,31 @@ describe("installer semantic UI", () => {
     );
 
     expect(result.signalled).toBe(true);
+    expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
+  }, PTY_TEST_TIMEOUT_MS);
+
+  it("survives a signal storm across live menu redraws without a parse error (#625)", async () => {
+    // A wide menu makes the vulnerable window wide: before the fix, every
+    // render and redraw forked one command substitution per label while the
+    // INT/TERM/HUP trap was armed, and a signal landing inside one corrupted
+    // bash's trap re-parse ("trap: line 2: unexpected EOF while looking for
+    // matching `)'"), aborted the sourced context past the stty restore, and
+    // left the terminal raw. The storm reproduced that in most runs on bash
+    // 5.2.21 and 5.2.37; with fitting hoisted out of the armed window it must
+    // never happen.
+    const items = [...Array(40).keys()]
+      .map((i) => `id${i + 1} "Menu entry number ${i + 1} long enough to need fitting"`)
+      .join(" ");
+    const result = await runPtyStorm(
+      `source "$1"; exec 3<>/dev/tty; before="$(stty -g <&3)"; printf "PID=%s\\n" "$BASHPID"; `
+      + `if installer_ui_select 3 "Choose" id1 ${items} >/dev/null; then status=0; else status=$?; fi; `
+      + `after="$(stty -g <&3)"; printf "STATUS=%s RESTORED=%s\\n" "$status" "$([[ "$before" == "$after" ]] && printf yes || printf no)"`,
+      "40)",
+      150,
+    );
+
+    expect(result.stormed).toBe(true);
+    expect(result.stdout).not.toMatch(/unexpected EOF|syntax error/u);
     expect(result.stdout).toContain("STATUS=130 RESTORED=yes");
   }, PTY_TEST_TIMEOUT_MS);
 
