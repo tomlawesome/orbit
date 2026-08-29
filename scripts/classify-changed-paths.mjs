@@ -56,7 +56,7 @@ const systemPatterns = [
   /^public\//u,
   /^drizzle\//u,
   /^tests\/e2e\//u,
-  // The v19 front end ships (Dockerfile:45 builds it, :119 copies it in) and
+  // The v19 front end ships (Dockerfile:57 builds it, :136 copies it in) and
   // the e2e suite drives it through the composite entry, so a change here
   // carries system risk. It reached the same lane through the catch-all
   // default below, which was right by accident: this states it (#620).
