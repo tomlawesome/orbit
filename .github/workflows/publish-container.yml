@@ -222,6 +222,94 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Scans every image pinned in `.github/supply-chain-policy.json`, not just
+  # the one Orbit builds: an operator's deployment runs the sidecars too, and
+  # Postgres shipped the OpenSSL flaw #646 fixed in Orbit's own image with
+  # nothing in CI able to say so (#647).
+  #
+  # `--ignore-unfixed` because these are upstream images Orbit pulls rather
+  # than builds: a fixable HIGH is actionable (re-pin), an unfixable one is
+  # not, and a check that is red whatever anyone does is worse than no check.
+  #
+  # Reporting-only for now: every pinned sidecar currently has fixable HIGH
+  # findings and no clean upstream digest exists to re-pin to — the evidence
+  # is on #647. When the pins scan clean, delete `continue-on-error` so a
+  # newly published advisory against a pinned digest fails the job.
+  sidecar_images:
+    name: Pinned sidecar image scan
+    needs:
+      - changes
+    # Same reach as the source policy job: a push, an on-demand dispatch, an
+    # opted-in pull request, or one touching a system-risk path. Nothing here
+    # publishes; the job only reads registries.
+    if: >-
+      ${{
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+        needs.changes.outputs.system == 'true'
+      }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate supply-chain policy
+        run: node scripts/supply-chain-policy.mjs validate
+
+      - name: Scan every pinned image
+        run: |
+          mkdir -p .orbit-supply-chain/sidecar-scans "${RUNNER_TEMP}/trivy-cache"
+          node scripts/sidecar-image-evidence.mjs --list-references \
+            --policy .github/supply-chain-policy.json \
+            | while read -r slug reference; do
+                echo "scanning ${reference}"
+                docker run --rm \
+                  --volume "${GITHUB_WORKSPACE}:/workspace" \
+                  --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+                  "${TRIVY_IMAGE}" image \
+                  --scanners vuln \
+                  --ignore-unfixed \
+                  --format json \
+                  --output "/workspace/.orbit-supply-chain/sidecar-scans/${slug}.json" \
+                  "${reference}"
+              done
+          docker run --rm \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" version --format json \
+            > .orbit-supply-chain/trivy-version.json
+
+      - name: Enforce sidecar image policy
+        run: |
+          set +e
+          node scripts/sidecar-image-evidence.mjs evaluate \
+            --policy .github/supply-chain-policy.json \
+            --scans .orbit-supply-chain/sidecar-scans \
+            --output .orbit-supply-chain/sidecar-evidence.json \
+            --revision "${GITHUB_SHA}"
+          policy_status=$?
+          set -e
+          rm -rf .orbit-supply-chain/sidecar-scans
+          exit "${policy_status}"
+
+      - name: Upload sidecar supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-supply-chain-sidecars
+          path: |
+            .orbit-supply-chain/sidecar-evidence.json
+            .orbit-supply-chain/trivy-version.json
+          if-no-files-found: warn
+          retention-days: 14
+
   # The only automatic check the v19 presentation layer has (#620). Its 28
   # Svelte components are not type-checked at zero, not linted, and until this
   # job existed the 17 committed baselines were compared by hand or not at all.
