@@ -267,7 +267,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       callout.classList.toggle("has-docs", Boolean(docs));
       if (docs) {
         const chip = callout.querySelector(".chip");
-        chip.textContent = "◆ " + docs + " documents";
+        chip.textContent = "◆ " + docs + (docs === "1" ? " document" : " documents");
         chip.onclick = () => openDocsByTitle(link.dataset.title);
       }
       callout.classList.add("show");
