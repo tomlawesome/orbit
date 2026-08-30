@@ -366,9 +366,13 @@ describe("exact-image publication workflow", () => {
   });
 
   it("removes build-only package managers from the production image", () => {
-    const runnerStart = dockerfile.search(
-      /^FROM node:22-alpine@sha256:[0-9a-f]{64} AS runner$/mu,
-    );
+    // Matches whichever image the runner stage starts from, so long as it is
+    // digest-pinned. Naming the upstream tag here made this assertion fail the
+    // moment Orbit pinned its own base (#651) — and what it is actually
+    // guarding is the package-manager removal below, not the base's identity.
+    // The base is pinned and policed by .github/supply-chain-policy.json and
+    // scripts/check-base-image-current.sh.
+    const runnerStart = dockerfile.search(/^FROM \S+@sha256:[0-9a-f]{64} AS runner$/mu);
     expect(runnerStart).toBeGreaterThanOrEqual(0);
     const runner = dockerfile.slice(runnerStart);
 
