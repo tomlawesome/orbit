@@ -2210,6 +2210,67 @@ describe("install.sh", () => {
   });
 });
 
+describe("install.sh version-tag identity (#676)", () => {
+  it("installs a version tag whose image embeds that same version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "v1.3.0", FAKE_DOCKER_VERSION: "v1.3.0" },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("up -d");
+    expect(result.stdout).toContain("Version: v1.3.0");
+    expect(result.stdout).toContain("Channel: v1.3.0");
+  });
+
+  it("refuses a version tag whose image embeds a different version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ORBIT_CHANNEL: "v1.3.0",
+      FAKE_DOCKER_VERSION: "v1.2.0",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does not match the requested version tag");
+    expect(result.calls).not.toContain("up -d");
+  });
+
+  it("leaves a moving channel tag unbound to any particular version", () => {
+    // `latest` legitimately carries whatever build it points at; only a
+    // version tag makes a claim about which release it is.
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "latest", FAKE_DOCKER_VERSION: "v1.2.0" },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Version: v1.2.0");
+  });
+
+  it("still refuses a label that is not a semantic version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_VERSION: "preview-release-v1.0.0-30597511059-1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does not record a valid semantic version");
+    expect(result.calls).not.toContain("up -d");
+  });
+});
+
 describe("install.sh --simulate", () => {
   it("rejects --simulate combined with an installer action before any external action", () => {
     const targetDir = makeTarget();
