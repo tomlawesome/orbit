@@ -587,7 +587,7 @@ and a separate `--recover` manual-recovery mode for crash safety.
    `restore.sh:334-353` — category: transactional/rollback — criticality: HIGH
 8. Staged database dump is applied with `pg_restore --single-transaction --exit-on-error`, so a bad dump cannot partially apply.
    `restore.sh:178-185,345` — category: transactional/rollback — criticality: HIGH
-9. `validate_correspondence` cross-checks every document/attachment/staging-object DB row against the actual on-disk blob (existence, non-symlink, exact byte size, no duplicate storage-key reuse, no orphaned on-disk objects) and refuses the restore if any in-flight ("transient") document lifecycle rows exist that a point-in-time backup can't safely represent.
+9. `validate_correspondence` cross-checks every document/attachment/staging-object DB row against the actual on-disk blob (existence, non-symlink, exact byte size, no duplicate storage-key reuse, no orphaned on-disk objects) and refuses the restore if any in-flight ("transient") document lifecycle rows exist that a point-in-time backup can't safely represent. Each of its six reports must end with a terminator the database itself emits, so a query that failed or was truncated mid-stream is refused as an incomplete check — named, and reported separately from a correspondence violation, since a check that never ran says nothing about the operator's bundle — rather than accepted as an empty report or blamed on the backup (#678).
    `restore.sh:205-332` — category: recovery / input-validation — criticality: HIGH
 10. Staging database is always dropped once the preflight correspondence check finishes.
     `restore.sh:351-352` — category: idempotency — criticality: LOW
