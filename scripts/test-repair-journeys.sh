@@ -34,12 +34,12 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # repairs it) and idempotent-rerun (which re-runs that completed repair) still
 # see exactly the deployment they see today.
 readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun
-                   hostile-value-privacy-negatives retained-volume-new-target)
+                   hostile-value-privacy-negatives retained-volume-new-target
+                   interrupted-configuration-migration)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
 readonly absent=(
-  "interrupted-configuration-migration"
   "exact-image-prior-version"
 )
 
@@ -649,6 +649,161 @@ journey_retained_volume_new_target() {
 
   rm -rf -- "$newtarget"
   result_line retained-volume-new-target pass
+}
+
+# Live evidence for #532's "interrupted configuration migration, recovered via
+# slice 2's boundary" (ADR-0014 decision 7).
+#
+# configuration.sh's migrate_file() writes a new .env-orbit by assembling it
+# elsewhere and renaming it into place, keeping the previous content beside it
+# at `.env-orbit.orbit-config.rollback`. An interruption between those two
+# steps is the case this journey builds: a live file that no longer validates,
+# next to a rollback copy that does.
+#
+# repair.sh only raises configuration-migration-interrupted where BOTH halves
+# hold -- `configure.sh --check` fails AND `--check-rollback` passes on a
+# mode-600 regular file. Where the rollback is not recoverable the class
+# degrades to configuration-invalid/-incomplete, whose action is
+# rerun-configuration, not a restore. That distinction is the whole point, so
+# this journey asserts the negative first: it proves the class can be absent
+# for the right reason before believing the run where it is present.
+#
+# It works on a copy of the live deployment rather than on the deployment
+# itself, like retained-volume-new-target above, because unlike every other
+# journey here it has to run --execute and actually mutate what it diagnoses.
+journey_interrupted_configuration_migration() {
+  local newtarget rollback live before expected status output plan
+  before="$(deployment_manifest)"
+  newtarget="$workdir/interrupted-migration"
+  rm -rf -- "$newtarget"
+
+  # A whole-directory copy rather than a hand-picked file list: repair.sh
+  # checks fourteen managed paths (repair.sh's restore_transaction_paths), and
+  # a copy missing any of them raises managed-file-missing findings that have
+  # nothing to do with what this journey tests.
+  cp -a -- "$target" "$newtarget"
+
+  live="$newtarget/.env-orbit"
+  rollback="$newtarget/.env-orbit.orbit-config.rollback"
+
+  # The rollback copy, exactly as migrate_file() leaves it: byte-identical to
+  # the good file, mode 600.
+  cp -a -- "$live" "$rollback"
+  chmod 600 -- "$rollback"
+  expected="$(sha256sum "$rollback" | awk '{print $1}')"
+
+  # The interruption itself -- a half-written live file. Truncating to the
+  # first few lines is what a rename that never happened leaves behind: valid
+  # syntax, missing required keys.
+  head -n 4 -- "$rollback" > "$live"
+  chmod 600 -- "$live"
+
+  # Prove the precondition rather than assuming it. If --check were to pass
+  # here, or --check-rollback to fail, every assertion below would be about
+  # some other code path and would still look like a pass.
+  status=0
+  (cd "$newtarget" && bash scripts/configure.sh --check >/dev/null 2>&1) || status=$?
+  [[ "$status" != 0 ]] ||
+    fail 'interrupted-configuration-migration: the truncated .env-orbit still passes --check, so the fixture is wrong'
+  status=0
+  (cd "$newtarget" && bash scripts/configure.sh --check-rollback >/dev/null 2>&1) || status=$?
+  [[ "$status" == 0 ]] ||
+    fail 'interrupted-configuration-migration: the rollback copy does not pass --check-rollback, so the class cannot fire'
+
+  # --- the negative: an unrecoverable rollback must NOT reach this class ----
+  # 644 is what a careless `cp` without -a leaves, and it must degrade to
+  # configuration-invalid/-incomplete, whose action is rerun-configuration
+  # rather than a restore.
+  #
+  # What this proves, precisely: the SYSTEM refuses an unrecoverable rollback.
+  # It does not attribute the refusal to repair.sh's own guard, and cannot --
+  # `configure.sh --check-rollback` enforces the identical two conditions at
+  # configure.sh:956-960 (regular non-symlink file, mode 600), so
+  # configuration_migration_rollback_recoverable's first two lines are
+  # redundant with the subprocess it then runs. Established by mutation:
+  # deleting repair.sh's `has_mode` line leaves this journey passing, because
+  # --check-rollback had already failed the copy. A symlinked rollback was
+  # tried as a fixture that might separate them and does not -- configure.sh
+  # refuses that too.
+  #
+  # The criterion is about the boundary's behaviour, not about which of two
+  # layers enforces it, so this is the honest form of the assertion. The
+  # journey's ability to fail rests on the positive path below, where removing
+  # the rollback-copy deletion from do_restore_configuration_rollback does
+  # break it.
+  chmod 644 -- "$rollback"
+  status=0
+  output="$( (cd "$newtarget" && bash scripts/repair.sh --check) 2>&1 )" || status=$?
+  grep -q 'finding class=configuration-migration-interrupted' <<<"$output" &&
+    { printf '%s\n' "$output" >&2
+      fail 'interrupted-configuration-migration: the class fired on a mode-644 rollback, so the recoverability guard is not being consulted'; }
+  grep -qE 'finding class=configuration-(invalid|incomplete)' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      fail 'interrupted-configuration-migration: an unrecoverable rollback produced neither configuration-invalid nor configuration-incomplete'; }
+
+  chmod 600 -- "$rollback"
+
+  # --- the positive -------------------------------------------------------
+  status=0
+  output="$( (cd "$newtarget" && bash scripts/repair.sh --check) 2>&1 )" || status=$?
+  [[ "$status" == 4 ]] ||
+    { printf '%s\n' "$output" >&2; fail "interrupted-configuration-migration: --check exited $status, expected 4"; }
+  grep -q 'finding class=configuration-migration-interrupted target=configuration severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      fail 'interrupted-configuration-migration: --check did not report configuration-migration-interrupted'; }
+
+  status=0
+  plan="$( (cd "$newtarget" && bash scripts/repair.sh --plan) 2>&1 )" || status=$?
+  grep -q 'plan action=restore-transaction resolves=configuration-migration-interrupted mutation=reversible backup=required' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2
+      fail 'interrupted-configuration-migration: the interruption was not planned as a reversible, backed-up restore-transaction'; }
+
+  # --execute --safe-only runs every planned action that is not
+  # rotate-database-credential or regenerate-secret -- restart-services and
+  # fix-permissions included, and restart-services would restart the LIVE
+  # containers this copy still names. Refuse to execute unless the restore is
+  # the only thing in the batch, rather than discovering that afterwards.
+  # Captured into a variable rather than tested through a pipeline: under
+  # `set -o pipefail` a `grep -v` that matches nothing exits 1, which is the
+  # success case here, and the pipeline's status would report a failure the
+  # final command never had.
+  local unexpected
+  unexpected="$(grep -E '^plan action=' <<<"$plan" |
+    grep -vE '^plan action=(restore-transaction|manual) ' || true)"
+  [[ -z "$unexpected" ]] ||
+    { printf '%s\n' "$plan" >&2
+      fail "interrupted-configuration-migration: the plan carries executable actions beyond the restore, refusing to execute: $unexpected"; }
+
+  status=0
+  output="$( (cd "$newtarget" && bash scripts/repair.sh --execute --safe-only) 2>&1 )" || status=$?
+  [[ "$status" == 0 ]] ||
+    { printf '%s\n' "$output" >&2; fail "interrupted-configuration-migration: --execute exited $status, expected 0"; }
+  grep -q 'execute action=restore-transaction resolves=configuration-migration-interrupted result=done' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      fail 'interrupted-configuration-migration: the restore did not report done'; }
+
+  # The boundary's actual promise: the live file is the rollback's content,
+  # byte for byte, at mode 600 -- and the rollback copy is consumed, so a
+  # second run has nothing left to restore.
+  [[ "$(sha256sum "$live" | awk '{print $1}')" == "$expected" ]] ||
+    fail 'interrupted-configuration-migration: .env-orbit was not restored to the rollback content'
+  [[ "$(stat -c '%a' "$live")" == 600 ]] ||
+    fail 'interrupted-configuration-migration: the restored .env-orbit is not mode 600'
+  [[ ! -e "$rollback" ]] ||
+    fail 'interrupted-configuration-migration: the rollback copy survived a completed restore'
+
+  # And the repaired copy now diagnoses its configuration as clean.
+  status=0
+  output="$( (cd "$newtarget" && bash scripts/repair.sh --check) 2>&1 )" || status=$?
+  grep -qE 'finding class=configuration-' <<<"$output" &&
+    { printf '%s\n' "$output" >&2
+      fail 'interrupted-configuration-migration: a configuration finding survived the restore'; }
+
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'interrupted-configuration-migration: repairing a copy changed the live deployment'
+
+  rm -rf -- "$newtarget"
+  result_line interrupted-configuration-migration pass
 }
 
 # Proves the "Privacy" contract above scripts/repair.sh:765 against values an
