@@ -828,8 +828,18 @@ resolve_installer_action() {
       }
       ;;
     repair)
+      # Signposts repair; never dispatches into it. The two scripts' exit-code
+      # vocabularies collide — install's 3 is "blocked", repair's 3 is
+      # "attention" (docs/engine-events.md, "Repair stream") — so a caller that
+      # received one script's code through the other would misread the outcome
+      # precisely when it matters. The operator runs repair themselves (#533).
+      # The reason enum stays `repair-unavailable`: it is an allowlisted value
+      # in installer-ui.sh and part of the interface consumers pin to, so
+      # renaming it belongs in its own documented change, not here. What
+      # changes is the prose, which was a dead end — it named an issue number
+      # rather than the command that does the job.
       installer_ui_emit rollback installer blocked repair-unavailable repair || true
-      printf 'Orbit installer: repair_unavailable; issue #261 supplies repair execution. No deployment files or services were changed.\n' >&2
+      printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
       [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
       return 3
       ;;
@@ -1269,7 +1279,7 @@ case "$requested_action" in
   repair)
     printf 'phase=rollback component=installer state=blocked reason=repair-unavailable action=repair elapsed=%ss\n' \
       "$((SECONDS - installer_process_started_at))"
-    printf 'Orbit installer: repair_unavailable; issue #261 supplies repair execution. No deployment files or services were changed.\n' >&2
+    printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
     exit 3
     ;;
 esac
