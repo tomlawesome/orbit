@@ -2931,6 +2931,89 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(treeSnapshot(targetDir)).toBe(before);
   });
 
+  // #533's second criterion: "a bare terminal gets the same lines plus fixed
+  // stderr guidance, with no launcher present". The machine-prompt tests above
+  // prove what the launcher sees; nothing proved the two agree. A consumer's
+  // whole reason to trust this stream is that repair does not have a launcher
+  // dialect and a human dialect -- so the machine-prompt opt-in must only ever
+  // ADD prompt lines, never alter, reorder or withhold a state line.
+  //
+  // "Bare terminal" is an operator at a real TTY with no launcher attached --
+  // repair.sh's `interactive` path, reached here through the same
+  // ORBIT_REPAIR_TTY_INPUT=1 hook the interactive tests below use. It is not
+  // the unattended path: that one skips the plan preview altogether, which is
+  // a different contract and is asserted separately.
+  it("machine prompts add prompt lines and change nothing else about stdout", () => {
+    const promptLine = /^prompt(-accept|-abort)? /u;
+
+    const machineDir = makeFixture({ withConfigure: false });
+    chmodSync(join(machineDir, ".env-orbit"), 0o644);
+    const machine = runRepair(
+      machineDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    const bareDir = makeFixture({ withConfigure: false });
+    chmodSync(join(bareDir, ".env-orbit"), 0o644);
+    const bare = runRepair(
+      bareDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    // The prompt grammar is the entire difference on stdout.
+    expect(lines(machine.stdout).some((line) => promptLine.test(line))).toBe(true);
+    expect(lines(bare.stdout).filter((line) => promptLine.test(line))).toEqual([]);
+    expect(lines(machine.stdout).filter((line) => !promptLine.test(line))).toEqual(
+      lines(bare.stdout),
+    );
+
+    // Same decision, same exit code, and both stay enum-only.
+    expect(bare.status).toBe(machine.status);
+    expectStdoutIsEnumOnly(bare.stdout);
+    expectStdoutIsEnumOnly(machine.stdout);
+
+    // Both actually did the work, so this is parity between two runs that
+    // repaired, not between two that refused -- a pair of no-ops would match
+    // trivially and prove nothing.
+    expect(bare.stdout).toContain(
+      "execute action=fix-permissions resolves=managed-file-permissions result=done",
+    );
+    expect(mode(join(bareDir, ".env-orbit"))).toBe("600");
+    expect(mode(join(machineDir, ".env-orbit"))).toBe("600");
+
+    // The bare run's guidance is fixed prose on stderr, and stays off the
+    // stream a consumer parses. The launcher, having asked in the grammar,
+    // is not given it at all.
+    expect(bare.stderr).toContain("Proceed?");
+    expect(machine.stderr).not.toContain("Proceed?");
+  });
+  // The other half of the parity claim above, and the reason it is scoped to a
+  // bare TTY rather than to "no launcher": with neither a terminal nor the
+  // machine opt-in there is nobody to ask, so confirm_safe_batch takes its
+  // final `return 0` and the plan preview -- which exists only to show an
+  // operator what they are approving -- is never printed. A consumer that
+  // waits for a `plan` line before reading `execute` lines hangs on this path,
+  // so the contract documents it and this pins it.
+  it("unattended: the safe batch proceeds, and previews nothing it did not ask about", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { input: "" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "execute action=fix-permissions resolves=managed-file-permissions result=done",
+    );
+    expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+
+    expect(lines(result.stdout).filter((line) => line.startsWith("plan "))).toEqual([]);
+    expect(lines(result.stdout).filter((line) => line.startsWith("prompt"))).toEqual([]);
+    expectStdoutIsEnumOnly(result.stdout);
+  });
   // --- confirmation model: interactive TTY (ORBIT_REPAIR_TTY_INPUT=1 test hook) --
 
   it("interactive prompt: accepting with 'y' executes the safe batch", () => {
