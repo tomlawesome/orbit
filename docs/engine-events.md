@@ -557,3 +557,137 @@ can never touch Docker itself (see "Fail-closed guard" above). See
 `docs/adr-notes/294-configure-write-port-plan.md` for the full design and
 its flags. No existing script's *default* observable behavior changes;
 `install.sh` and `repair.sh` are unmodified by this slice.
+
+## Repair stream (v0)
+
+`scripts/repair.sh` writes its own line grammar, separate from the installer
+event stream above: no `installer_ui_emit`, no `phase`/`component` vocabulary.
+It is documented here as a versioned machine interface because the launcher
+consumes it (#533), and a consumer that has to guess is a consumer that breaks
+silently when the wording changes.
+
+**stdout is unconditionally plain**, deterministic and ANSI-free, regardless of
+terminal or of `--plain` — which is accepted anywhere in the argument list and
+is inert, kept only so a caller may pass it without special-casing repair.
+Human guidance goes to **stderr**, never stdout. A consumer therefore reads
+stdout for state and stderr for nothing at all.
+
+The rule that makes this safe to depend on: **parse enums, exit codes and the
+prompt grammar; never parse prose.** Prose on stderr is deliberately unstable.
+
+### Line grammar
+
+```
+finding class=<class> target=<target> severity=info|warn|fail
+diagnosis result=<result> checked=<n> skipped=<n>
+plan action=<action> resolves=<class> mutation=<mutation> backup=<backup>
+plan result=<result> actions=<n> manual=<n>
+execute action=<action> resolves=<class> result=done|failed|skipped
+execution result=<result> done=<n> failed=<n>
+dangerous result=<result> done=<n> failed=<n> reason=<reason>
+```
+
+Unknown keys are ignored by consumers; unknown enum values are renderable but
+unstyled, exactly as for the installer stream.
+
+### result vocabularies
+
+Each line form has its own closed set. They are not interchangeable — a
+consumer must not, for example, expect `failed` on a `plan` line.
+
+```
+diagnosis result=  healthy | attention | failed
+plan result=       empty | ready | manual-required
+execute result=    done | failed | skipped
+execution result=  empty | complete | unactionable | declined | failed
+dangerous result=  empty | complete | refused | failed
+dangerous reason=  none | non-interactive | refused-by-operator
+                   | checkpoint-failed | step-failed
+```
+
+`refused` is not a failure: the dangerous batch was never attempted, and
+`reason` says why. Treating it as a failure reports a problem where the
+operator simply declined, or where no terminal was available to ask.
+
+### finding class
+
+```
+application-unhealthy               configuration-migration-interrupted
+compose-interpolation-failed        container-foreign-owner
+configuration-incomplete            database-below-floor
+configuration-invalid               database-credential-mismatch
+database-schema-mismatch            database-unreachable
+docker-unavailable                  document-volume-retained-without-key
+image-identity-mismatch             migration-failed
+not-orbit-directory                 secrets-directory-invalid
+staging-evidence-present            stale-container
+unrelated-resource-present          volume-retained-without-credentials
+```
+
+### action, mutation and backup
+
+Every planned action declares what it may change and whether it takes a
+content backup first. `mutation` is the field a consumer keys destructiveness
+off — never the action's name.
+
+| action | mutation | backup |
+| --- | --- | --- |
+| `restore-transaction` | `reversible` | `required` |
+| `fix-permissions` | `reversible` | `not-required` |
+| `regenerate-secret` | `reversible` | `not-required` |
+| `rotate-database-credential` | `credential-rotation` | `required` |
+| `restart-services` | `service-restart` | `not-required` |
+| `rerun-configuration` | `none` | `not-required` |
+| `manual` | `none` | `not-required` |
+
+`manual` is not an action repair performs: it marks a finding a human must
+resolve, and carries one value-free guidance line on stderr.
+
+### Exit codes
+
+Repair's exit vocabulary is its own and **collides with `install.sh`'s** —
+install's `3` is "blocked", repair's `3` is "attention". A consumer must never
+route one script's exit code through the other's table.
+
+| Mode | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `--check` | healthy | — | usage | attention (warn only) | failed (any fail) | not-an-orbit-installation | — |
+| `--plan` | empty | — | usage | plan-available | unplannable-failures-present | not-an-orbit-installation | — |
+| `--execute --safe-only` | succeeded | declined | usage | — | failed | not-an-orbit-installation | — |
+| `--execute --dangerous` | empty or complete | safe batch declined | usage | — | failed in either batch | not-an-orbit-installation | dangerous batch refused |
+| `--export-diagnostics` | written | declined | usage | — | could not write | not-an-orbit-installation | — |
+
+`5` (`not-an-orbit-installation`) has the identical trigger and meaning in
+every mode: the target directory carries no Orbit fingerprint at all. A
+consumer that treats it as a generic failure will tell an operator their
+deployment is broken when in fact they are standing in the wrong directory.
+
+`6` exists only under `--execute --dangerous` and means the dangerous batch
+was refused — non-interactive, or declined by the operator. It is not a
+failure: nothing was attempted.
+
+`130` is the interrupted-by-signal case, as everywhere else.
+
+### Machine prompts
+
+`ORBIT_REPAIR_PROMPTS=machine` extends the #297 prompt grammar to repair,
+regardless of TTY-ness. Prompt lines on stdout, one answer line per prompt on
+stdin:
+
+```
+prompt field=safe-batch                    kind=confirm    required=true attempt=1
+prompt field=action-word                   kind=typed-word required=true attempt=<n>
+prompt field=checkpoint-passphrase         kind=secret     required=true attempt=<n>
+prompt field=checkpoint-passphrase-confirm kind=secret     required=true attempt=<n>
+prompt field=export-diagnostics            kind=confirm    required=true attempt=1
+```
+
+With neither a controlling terminal nor this opt-in, repair declines rather
+than guessing — it never executes unattended.
+
+### Changing this vocabulary
+
+Any change to the enums, fields or exit codes above lands **in the same pull
+request as its update here**. A consumer pinned to v0 is entitled to assume
+that a value it has never seen is new rather than renamed; splitting the change
+from its documentation is what breaks that.
