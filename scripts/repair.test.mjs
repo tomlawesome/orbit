@@ -618,6 +618,9 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
     const envLines = [
       "APP_URL=https://orbit.repair-test.internal",
       "ORBIT_IMAGE=orbit-local:abcdef123456",
+      // Every supported install writes this key (ADR-0016 gate, #681); the
+      // floor itself is the representative supported value.
+      "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
       "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=repair-test-client",
       "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -648,6 +651,7 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     `ORBIT_IMAGE=${orbitImage}`,
+    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -674,6 +678,7 @@ function writeFileBackedOidcSecretEnv(targetDir) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     "ORBIT_IMAGE=orbit-local:abcdef123456",
+    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
@@ -829,7 +834,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=17 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -837,6 +842,42 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
     expect(result.stdout).not.toMatch(/\x1b/u);
     expect(result.stderr).not.toMatch(/\x1b/u);
+  });
+
+  // Criterion 29 (#261): the honest form of the NO_COLOR contract for a
+  // script that never emits ANSI in the first place is byte-identity — the
+  // variable must change nothing, on a run that produces findings as well as
+  // the identity/diagnosis lines, not just on the empty healthy case.
+  it("output is byte-identical with and without NO_COLOR, and still free of ANSI", () => {
+    const targetDir = makeFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const plain = runRepair(targetDir, ["--check"]);
+    const noColor = runRepair(targetDir, ["--check"], {}, { env: { NO_COLOR: "1" } });
+
+    expect(plain.stdout).toContain("finding class=managed-file-permissions");
+    expect(noColor.stdout).toBe(plain.stdout);
+    expect(noColor.stderr).toBe(plain.stderr);
+    expect(noColor.status).toBe(plain.status);
+    expect(noColor.stdout).not.toMatch(/\x1b/u);
+    expect(noColor.stderr).not.toMatch(/\x1b/u);
+  });
+
+  // Criterion 29 (#261), narrow terminals: repair.sh writes whole lines and
+  // never reads the terminal width, so a narrow COLUMNS must not reflow,
+  // truncate or otherwise vary the output. Byte-identity is the assertion;
+  // wrapping on display is the terminal's business, not the script's.
+  it("output is byte-identical under a narrow COLUMNS", () => {
+    const targetDir = makeFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const plain = runRepair(targetDir, ["--check"]);
+    const narrow = runRepair(targetDir, ["--check"], {}, { env: { COLUMNS: "20" } });
+
+    expect(plain.stdout).toContain("finding class=managed-file-permissions");
+    expect(narrow.stdout).toBe(plain.stdout);
+    expect(narrow.stderr).toBe(plain.stderr);
+    expect(narrow.status).toBe(plain.status);
   });
 
   it("produces byte-identical output across repeated runs", () => {
@@ -868,7 +909,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=16",
+      "diagnosis result=failed checked=1 skipped=17",
     ]);
   });
 
@@ -981,7 +1022,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(3);
     expect(lines(result.stdout)).toEqual([
       "finding class=staging-evidence-present target=staging severity=warn",
-      "diagnosis result=attention checked=17 skipped=0",
+      "diagnosis result=attention checked=18 skipped=0",
     ]);
   });
 
@@ -1097,7 +1138,7 @@ describe("scripts/repair.sh --check", () => {
     const result = runRepair(targetDir, ["--check"]);
 
     expect(result.status).toBe(0);
-    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=17 skipped=0"]);
+    expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
   });
 
   it("the .orbit-config.rollback suffix literal agrees across configuration.sh (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
@@ -1237,7 +1278,7 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).toContain("finding class=docker-unavailable target=database severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=application severity=info");
     expect(result.stdout).toContain("finding class=docker-unavailable target=image severity=info");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=10 skipped=7");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=11 skipped=7");
   });
 
   it("groups findings by the fixed class order regardless of discovery order", () => {
@@ -1741,6 +1782,151 @@ describe("scripts/repair.sh --check", () => {
   });
 });
 
+// --- #681 criterion 9: the ADR-0016 supported-version gate ----------------
+//
+// ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
+// supported install, so a readable .env-orbit without it is the signature
+// of a pre-floor (v1.0.0-era) or hand-assembled deployment — both fail
+// closed. Major version 0 is the development era and exempt. While the
+// finding is present, --execute refuses the whole batch: even the safe
+// executors must not mutate a layout repair was never proven against.
+
+// Rewrites makeFixture()'s .env-orbit with the given
+// ORBIT_CONFIG_APPLIED_VERSION line (or no such line when null), keeping
+// every other field identical to the fixture default.
+function writeVersionedEnv(targetDir, versionLine) {
+  const envLines = [
+    "APP_URL=https://orbit.repair-test.internal",
+    "ORBIT_IMAGE=orbit-local:abcdef123456",
+    ...(versionLine === null ? [] : [versionLine]),
+    "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
+    "OIDC_CLIENT_ID=repair-test-client",
+    "OIDC_CLIENT_SECRET=repair-test-secret",
+    "OIDC_CALLBACK_URL=https://orbit.repair-test.internal/api/auth/callback",
+    "COMPOSE_PROJECT_NAME=repairtest",
+    "",
+  ].join("\n");
+  writeFileSync(join(targetDir, ".env-orbit"), envLines);
+  chmodSync(join(targetDir, ".env-orbit"), 0o600);
+}
+
+describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion 9)", () => {
+  it.each([
+    ["v1.2.0", "a published release below the floor"],
+    ["v1.0.0", "the pre-configuration.sh era"],
+    ["v0.9", "a malformed (two-component) version"],
+    ["v1.3.0-rc1", "a malformed (pre-release-suffixed) version"],
+    ["1.3.0", "a malformed (unprefixed) version"],
+  ])("reports deployment-version-unsupported for %s (%s)", (version) => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, `ORBIT_CONFIG_APPLIED_VERSION=${version}`);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
+  });
+
+  it("fails closed when ORBIT_CONFIG_APPLIED_VERSION is absent from a readable .env-orbit", () => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, null);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
+  });
+
+  it.each([["v0.0.0"], ["v1.3.0"], ["v1.3.1"], ["v1.4.0"], ["v2.0.0"]])(
+    "accepts %s with no version finding",
+    (version) => {
+      const targetDir = makeFixture();
+      writeVersionedEnv(targetDir, `ORBIT_CONFIG_APPLIED_VERSION=${version}`);
+
+      const result = runRepair(targetDir, ["--check"]);
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain("deployment-version-unsupported");
+    },
+  );
+
+  it("skips the version check while a configuration finding is present, so the restore that repairs a half-written .env-orbit is never refused by it", () => {
+    // The interrupted-migration shape: a truncated live file (which
+    // legitimately lacks ORBIT_CONFIG_APPLIED_VERSION) beside a recoverable
+    // rollback copy. The gate must yield to the configuration diagnosis —
+    // fail-closed on the absent key here would refuse the very
+    // restore-transaction that makes the file believable again.
+    const targetDir = makeFixture();
+    const goodEnv = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+    writeFileSync(join(targetDir, ".env-orbit.orbit-config.rollback"), goodEnv);
+    chmodSync(join(targetDir, ".env-orbit.orbit-config.rollback"), 0o600);
+    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stdout).toContain("finding class=configuration-migration-interrupted target=configuration severity=fail");
+    expect(result.stdout).not.toContain("deployment-version-unsupported");
+  });
+
+  it("skips the version check, rather than refusing, while .env-orbit itself is untrustworthy", () => {
+    // A wrong-mode .env-orbit already has its own finding, and fixing it is
+    // exactly what repair is for — a version refusal here would turn repair
+    // off for the states it exists to repair. The version re-evaluates on
+    // the next run, once the file can be believed.
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+    chmodSync(join(targetDir, ".env-orbit"), 0o644);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.stdout).toContain("finding class=managed-file-permissions target=environment-file severity=fail");
+    expect(result.stdout).not.toContain("deployment-version-unsupported");
+  });
+
+  it("plans the finding as manual, with value-free guidance and criterion 6's preview fields", () => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+
+    const result = runRepair(targetDir, ["--plan"]);
+
+    expect(result.stdout).toContain(
+      "plan action=manual resolves=deployment-version-unsupported mutation=none backup=not-required target=deployment rollback=not-required expect=operator-action",
+    );
+    expect(result.stderr).toContain("supported floor");
+    expect(result.stderr).not.toContain("v1.2.0");
+  });
+
+  it("--execute --safe-only refuses the entire batch, exit 6, mutating nothing", () => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+    // A genuinely executable safe action must be on the table, or this test
+    // proves refusal of an empty batch — which nothing distinguishes from
+    // the ordinary empty path.
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o644);
+
+    const before = treeSnapshot(targetDir);
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
+    expect(result.stdout).not.toContain("execute action=");
+    expect(treeSnapshot(targetDir)).toBe(before);
+    expect(result.stdout).toContain("finding class=secret-permissions target=postgres-password severity=fail");
+  });
+
+  it("--execute --dangerous reports the dangerous batch refused for the same reason", () => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, "ORBIT_CONFIG_APPLIED_VERSION=v1.2.0");
+
+    const result = runRepair(targetDir, ["--execute", "--dangerous"], {}, { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain("execution result=refused done=0 failed=0 reason=deployment-version-unsupported");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported");
+  });
+});
+
 // --- Slice 3 (issue #261): --plan — a proposed, classified repair plan ----
 //
 // --plan runs the identical read-only diagnosis as --check (same shims,
@@ -1820,7 +2006,7 @@ describe("scripts/repair.sh --plan", () => {
 
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
-      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required",
+      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required target=directory rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);
     expect(result.stderr).toContain("resolves=not-orbit-directory");
@@ -1910,8 +2096,8 @@ describe("scripts/repair.sh --plan", () => {
     expect(result.status).toBe(3);
     const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
     expect(planLines).toEqual([
-      "plan action=rotate-database-credential resolves=secret-missing mutation=credential-rotation backup=required",
-      "plan action=rotate-database-credential resolves=volume-retained-without-credentials mutation=credential-rotation backup=required",
+      "plan action=rotate-database-credential resolves=secret-missing mutation=credential-rotation backup=required target=postgres-password rollback=credential-checkpoint expect=authentication-restored",
+      "plan action=rotate-database-credential resolves=volume-retained-without-credentials mutation=credential-rotation backup=required target=database-volume rollback=credential-checkpoint expect=authentication-restored",
     ]);
     expect(result.stdout).not.toContain("regenerate-secret");
     expect(lines(result.stdout).at(-1)).toBe("plan result=ready actions=2 manual=0");
@@ -1946,8 +2132,8 @@ describe("scripts/repair.sh --plan", () => {
     expect(result.status).toBe(4);
     const planLines = lines(result.stdout).filter((line) => line.startsWith("plan action="));
     expect(planLines).toEqual([
-      "plan action=manual resolves=secret-missing mutation=none backup=not-required",
-      "plan action=manual resolves=document-volume-retained-without-key mutation=none backup=not-required",
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required target=document-kek rollback=not-required expect=operator-action",
+      "plan action=manual resolves=document-volume-retained-without-key mutation=none backup=not-required target=document-volume rollback=not-required expect=operator-action",
     ]);
     expect(result.stdout).not.toContain("regenerate-secret");
     expect(result.stderr).toContain("manual step:");
@@ -1999,7 +2185,7 @@ describe("scripts/repair.sh --plan", () => {
     // document-kek is still missing but no document volume is retained, so it
     // still regenerates safely — never manual.
     expect(planLines2).toContain(
-      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required",
+      "plan action=regenerate-secret resolves=secret-missing mutation=reversible backup=not-required target=document-kek rollback=not-required expect=secret-recreated",
     );
     expect(result2.stdout).not.toContain("action=manual");
   });
@@ -2258,7 +2444,7 @@ describe("scripts/repair.sh --plan", () => {
 
     expect(result.status).toBe(4);
     expect(lines(result.stdout)).toEqual([
-      "plan action=manual resolves=database-unreachable mutation=none backup=not-required",
+      "plan action=manual resolves=database-unreachable mutation=none backup=not-required target=database rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);
     expect(result.stdout).not.toContain("unrelated-resource-present");
@@ -2287,7 +2473,7 @@ describe("scripts/repair.sh --plan", () => {
 
     expect(result.status).toBe(4);
     expect(lines(result.stdout)).toEqual([
-      "plan action=manual resolves=database-unreachable mutation=none backup=not-required",
+      "plan action=manual resolves=database-unreachable mutation=none backup=not-required target=database rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);
   });
@@ -2427,7 +2613,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=manual resolves=not-orbit-directory result=skipped",
       "execution result=empty done=0 failed=0",
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=16",
+      "diagnosis result=failed checked=1 skipped=17",
     ]);
   });
 
@@ -2440,7 +2626,7 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual([
       "execution result=empty done=0 failed=0",
-      "diagnosis result=healthy checked=17 skipped=0",
+      "diagnosis result=healthy checked=18 skipped=0",
     ]);
   });
 
@@ -3139,7 +3325,7 @@ const HEX_SECRET_PATTERN = /^[0-9a-f]{64}$/;
 const STDOUT_LINE_PATTERNS = [
   /^finding class=[a-z-]+ target=[a-z-]+ severity=(info|warn|fail)$/,
   /^diagnosis result=(healthy|attention|failed) checked=\d+ skipped=\d+$/,
-  /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart) backup=(required|not-required)$/,
+  /^plan action=[a-z-]+ resolves=[a-z-]+ mutation=(none|reversible|credential-rotation|service-restart) backup=(required|not-required) target=[a-z0-9-]+ rollback=(recovery-directory|prior-mode|not-required|credential-checkpoint) expect=(files-restored|permissions-safe|secret-recreated|authentication-restored|services-healthy|configuration-valid|operator-action)$/,
   /^execute action=[a-z-]+ resolves=[a-z-]+ result=(done|failed|skipped)$/,
   /^execution result=(empty|complete|unactionable|declined|failed) done=\d+ failed=\d+$/,
   /^dangerous result=(empty|complete|refused|failed) done=\d+ failed=\d+ reason=(none|non-interactive|refused-by-operator|checkpoint-failed|step-failed)$/,
@@ -3436,7 +3622,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // resolved it), and the trailing diagnosis is the very last thing
     // printed, reporting the deployment healthy.
     expect(result.stdout).not.toContain("finding class=database-credential-mismatch");
-    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=16 skipped=1");
+    expect(lines(result.stdout).at(-1)).toBe("diagnosis result=healthy checked=17 skipped=1");
     expect(existsSync(dbAuthMarkerPath)).toBe(true);
 
     // The local secret was actually rotated to a fresh 64-hex value, distinct
@@ -4519,8 +4705,8 @@ describe("scripts/repair.sh --export-diagnostics (issue #531, ADR-0014 decision 
     expect(result.status).toBe(5);
     expect(lines(result.stdout)).toEqual([
       "finding class=not-orbit-directory target=directory severity=fail",
-      "diagnosis result=failed checked=1 skipped=16",
-      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required",
+      "diagnosis result=failed checked=1 skipped=17",
+      "plan action=manual resolves=not-orbit-directory mutation=none backup=not-required target=directory rollback=not-required expect=operator-action",
       "plan result=manual-required actions=0 manual=1",
     ]);
     expect(result.stdout).not.toContain("identity ");
