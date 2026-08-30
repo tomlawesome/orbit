@@ -882,9 +882,9 @@
     {:else}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
-      <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="img"
+      <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
          aria-label="Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below">
-      <defs>
+      <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
         </filter>
@@ -914,7 +914,7 @@
         </radialGradient>
       </defs>
 
-      <g class="chrome">
+      <g class="chrome" aria-hidden="true">
       <g class="celestial rotor">
         <g stroke="var(--chart-line-soft)" stroke-width=".5">
           <line x1="190" y1="14" x2="190" y2="34"/><line x1="314.5" y1="65.5" x2="300" y2="80"/>
@@ -1003,7 +1003,8 @@
       {#each bodies as b (b.id)}
         {#if b.suggestion}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
-             data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"><g
+             data-cost={money(b.costMinor, b.currency, true)} href="#{b.id}"
+             aria-label={`suggested: ${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, true)}`}><g
             ><circle cx={b.placement.x} cy={b.placement.y} r={b.size + 1.2}
                      style="fill:none;stroke:var(--accent);stroke-width:1.8"
             /><circle cx={b.placement.x} cy={b.placement.y} r={b.size - 1.3}
@@ -1011,7 +1012,8 @@
         {:else}
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
-             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"><g
+             data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
+             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} documents` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
             {#if b.paint === "ruby" || b.paint === "amber"}
