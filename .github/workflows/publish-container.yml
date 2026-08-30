@@ -82,19 +82,12 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    # Reporting-only until Orbit pins the base image built by
-    # gitlab.tomlawson.io/ai/orbit-base-image (#651). It is correct today and
-    # it fails today: node:22-alpine's packages are behind its own Alpine
-    # release, which is exactly #646, and #648 works around that at build time
-    # rather than fixing the base. Making it blocking now would stop all
-    # delivery for a condition already mitigated.
-    #
-    # This is deliberately time-boxed, not a soft-fail habit. When Orbit's
-    # Dockerfile pins our own base, delete `continue-on-error` and add
-    # `base_image` to the `needs:` of `smoke` and `publish_preview`. Until
-    # then it earns its place by proving the check works against a real stale
-    # base rather than only against a green one.
-    continue-on-error: true
+    # Blocking since #651: Orbit now pins its own base image, so a stale base
+    # is a fixable condition rather than an upstream one we can only wait on.
+    # The time-boxed `continue-on-error` this replaces existed because the
+    # check was correct and red at the same time — node:22-alpine's packages
+    # trailed its own Alpine release (#646), and #648 patched that at build
+    # time instead of fixing the base. Both of those are gone with the pin.
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -440,6 +433,7 @@ jobs:
       - fast
       - supply_chain_source
       - integration
+      - base_image
     # Retain the existing check identity for branch protection, but defer the
     # expensive exact-image path until the protected preview merge, except when
     # evidence was explicitly requested on demand or via the acceptance label.
@@ -1524,6 +1518,7 @@ jobs:
       - fast
       - supply_chain_source
       - integration
+      - base_image
     if: >-
       ${{
         github.event_name == 'push' &&
