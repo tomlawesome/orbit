@@ -15,6 +15,9 @@ rules reserve for the top model are Fable's (owner decision, 2026-08-22).
 Everything else about who makes those calls, how they are labelled and how
 they are routed is global; it is not repeated here.
 
+`ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
+authorisation to raise issues and make changes there (owner, 2026-08-30).
+
 ## Delivery workflow
 
 - Start from an issue with a user outcome, acceptance criteria, non-goals,
