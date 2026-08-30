@@ -1013,7 +1013,7 @@
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
              data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
-             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} documents` : ""}`}><g
+             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
             {#if b.paint === "ruby" || b.paint === "amber"}
