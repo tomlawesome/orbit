@@ -32,10 +32,14 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # needs a real --execute --dangerous run to interrupt mid-flight, and its own
 # contract requires leaving the drift untouched, so credential-drift (which
 # repairs it) and idempotent-rerun (which re-runs that completed repair) still
-# see exactly the deployment they see today.
+# see exactly the deployment they see today. The last five (#681) each start
+# from, and hand back, the healthy repaired deployment, so their internal
+# order is free.
 readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun
                    hostile-value-privacy-negatives retained-volume-new-target
-                   interrupted-configuration-migration)
+                   interrupted-configuration-migration
+                   unsafe-permissions missing-files failed-db-migration
+                   unhealthy-app successful-rollback)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
@@ -877,6 +881,276 @@ journey_hostile_value_privacy_negatives() {
     fail 'hostile-value: the journey did not restore the deployment it borrowed'
   }
   result_line hostile-value-privacy-negatives pass
+}
+
+# The five journeys below (#681, criterion 27) run after the shared
+# deployment is healthy again — credential-drift has repaired the drift and
+# idempotent-rerun has proven the rerun empty — so each starts from, and
+# must hand back, a healthy deployment with an unchanged manifest. That
+# also means `--journey <one-of-these>` cannot work alone: the global
+# setup drifts the credential unconditionally, and only the earlier
+# journeys repair it, so a standalone tail journey sees an unhealthy
+# deployment and fails on its own preconditions. successful-rollback stays
+# last: its completed restore replaces every managed file's inode, and a
+# Compose file: secret is a bind mount of an inode (#629), so running
+# containers keep the pre-restore secret files — identical in content, but
+# a journey relying on inode identity after it would be misled.
+
+journey_unsafe_permissions() {
+  local before output status=0
+  before="$(deployment_manifest)"
+
+  chmod 644 -- "$target/.env-orbit"
+  chmod 644 -- "$target/.orbit-secrets/postgres-password"
+
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "unsafe-permissions: --check exited $status, expected 4"; }
+  grep -q 'finding class=managed-file-permissions target=environment-file severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'unsafe-permissions: --check did not report managed-file-permissions'; }
+  grep -q 'finding class=secret-permissions target=postgres-password severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'unsafe-permissions: --check did not report secret-permissions'; }
+
+  status=0
+  output="$(printf 'y\n' | repair --execute --safe-only 2>&1)" || status=$?
+  [[ "$status" == 0 ]] ||
+    { printf '%s\n' "$output" >&2; fail "unsafe-permissions: --execute exited $status, expected 0"; }
+  grep -q 'execute action=fix-permissions resolves=managed-file-permissions result=done' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'unsafe-permissions: the environment-file fix did not report done'; }
+  grep -q 'execute action=fix-permissions resolves=secret-permissions result=done' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'unsafe-permissions: the secret-file fix did not report done'; }
+
+  [[ "$(stat -c '%a' "$target/.env-orbit")" == 600 ]] ||
+    fail 'unsafe-permissions: .env-orbit was not restored to mode 600'
+  [[ "$(stat -c '%a' "$target/.orbit-secrets/postgres-password")" == 600 ]] ||
+    fail 'unsafe-permissions: postgres-password was not restored to mode 600'
+
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'unsafe-permissions: the repaired deployment does not match its pre-breakage manifest'
+  health_check || fail 'unsafe-permissions: the deployment is unhealthy after a permissions repair'
+  result_line unsafe-permissions pass
+}
+
+# managed-file-missing routes to `manual` by design — repair never
+# fabricates a managed file's content — so this journey is read-only like
+# retained-volume-new-target: it proves the diagnosis and the routing, and
+# proves repair left the gap for the operator rather than papering over it.
+journey_missing_files() {
+  local before output plan status=0
+  before="$(deployment_manifest)"
+
+  cp -a -- "$target/docker-compose.yml" "$workdir/docker-compose.yml.orig"
+  rm -f -- "$target/docker-compose.yml"
+
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "missing-files: --check exited $status, expected 4"; }
+  grep -q 'finding class=managed-file-missing target=compose-file severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'missing-files: --check did not report managed-file-missing'; }
+
+  status=0
+  plan="$(repair --plan 2>&1)" || status=$?
+  grep -q 'plan action=manual resolves=managed-file-missing' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2; fail 'missing-files: the missing file was not routed to manual'; }
+  grep -q 'manual step: recreate the missing managed file' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2; fail 'missing-files: no manual guidance was printed for the missing file'; }
+  [[ ! -e "$target/docker-compose.yml" ]] ||
+    fail 'missing-files: something recreated the managed file; repair must never fabricate one'
+
+  cp -a -- "$workdir/docker-compose.yml.orig" "$target/docker-compose.yml"
+
+  status=0
+  repair --check >/dev/null 2>&1 || status=$?
+  [[ "$status" == 0 ]] || fail "missing-files: --check after restoring the file exited $status, expected 0"
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'missing-files: the restored deployment does not match its pre-breakage manifest'
+  result_line missing-files pass
+}
+
+# migration-failed routes to `manual` by design (ADR-0004's recovery point
+# is the operator's rollback boundary), so this journey too is read-only on
+# the deployment: what it proves live is the SQL backstop against a real
+# PostgreSQL — the row a genuinely failed migration leaves behind is
+# exactly what it seeds. The negative runs first: the class must be absent
+# on the healthy deployment before its presence after seeding means
+# anything.
+journey_failed_db_migration() {
+  local before output plan status=0
+  before="$(deployment_manifest)"
+
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 0 ]] ||
+    { printf '%s\n' "$output" >&2; fail "failed-db-migration: the deployment is not healthy before seeding (exit $status)"; }
+  grep -q 'migration-failed' <<<"$output" &&
+    fail 'failed-db-migration: the class fired before a failure was seeded, so the fixture proves nothing'
+
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      insert into drizzle.orbit_migration_runs (started_at, finished_at, outcome, reason)
+        values (now(), now(), '\''failed'\'', '\''migration_failed'\'');"' >/dev/null ||
+    fail 'failed-db-migration: could not seed the failed migration run'
+
+  status=0
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "failed-db-migration: --check exited $status, expected 4"; }
+  grep -q 'finding class=migration-failed target=database severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'failed-db-migration: --check did not report migration-failed'; }
+
+  status=0
+  plan="$(repair --plan 2>&1)" || status=$?
+  grep -q 'plan action=manual resolves=migration-failed' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2; fail 'failed-db-migration: the failed migration was not routed to manual'; }
+  grep -q 'recovery point' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2; fail 'failed-db-migration: the manual guidance does not name the recovery point'; }
+
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      delete from drizzle.orbit_migration_runs where outcome = '\''failed'\'';"' >/dev/null ||
+    fail 'failed-db-migration: could not remove the seeded failure row'
+
+  status=0
+  repair --check >/dev/null 2>&1 || status=$?
+  [[ "$status" == 0 ]] || fail "failed-db-migration: --check after cleanup exited $status, expected 0"
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'failed-db-migration: diagnosing a database state changed the deployment files'
+  result_line failed-db-migration pass
+}
+
+# A genuinely wedged application: SIGSTOP freezes the app's PID 1, so the
+# health endpoint stops answering while the container keeps running, and
+# Docker's own healthcheck (interval 10s, retries 10) eventually marks it
+# unhealthy — the exact state an operator sees from a hung app. A restart
+# genuinely fixes it, which is what makes restart-services the honest
+# routing to prove here. The docker-status wait is the long pole: the flip
+# needs ten consecutive probe failures, so the deadline is generous.
+journey_unhealthy_app() {
+  local before output status=0 health deadline
+  before="$(deployment_manifest)"
+
+  docker kill --signal=STOP orbit >/dev/null 2>&1 ||
+    fail 'unhealthy-app: could not freeze the app container'
+
+  deadline=$((SECONDS + 240))
+  while :; do
+    health="$(docker inspect orbit --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
+    [[ "$health" == unhealthy ]] && break
+    ((SECONDS < deadline)) || { docker kill --signal=CONT orbit >/dev/null 2>&1 || true
+      fail 'unhealthy-app: the frozen app never reached docker health status unhealthy'; }
+    sleep 5
+  done
+
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2
+    docker kill --signal=CONT orbit >/dev/null 2>&1 || true
+    fail "unhealthy-app: --check exited $status, expected 4"; }
+  grep -q 'finding class=application-unhealthy target=application severity=fail' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      docker kill --signal=CONT orbit >/dev/null 2>&1 || true
+      fail 'unhealthy-app: --check did not report application-unhealthy'; }
+
+  status=0
+  output="$(printf 'y\n' | repair --execute --safe-only 2>&1)" || status=$?
+  [[ "$status" == 0 ]] ||
+    { printf '%s\n' "$output" >&2
+      docker kill --signal=CONT orbit >/dev/null 2>&1 || true
+      fail "unhealthy-app: --execute exited $status, expected 0"; }
+  grep -q 'execute action=restart-services resolves=application-unhealthy result=done' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'unhealthy-app: restart-services did not report done'; }
+
+  wait_for_health
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'unhealthy-app: a service restart changed the deployment files'
+  [[ "$(household_name)" == 'repair-journeys-household' ]] ||
+    fail 'unhealthy-app: the restart disturbed the fixture data'
+  result_line unhealthy-app pass
+}
+
+# Criterion 27's "successful rollback": a recognized installer transaction
+# is rolled back to completion. The staged backup deliberately differs from
+# the live file — signal-cleanup's byte-identical fixture proves an
+# interrupted restore mutates nothing, so this journey must prove the
+# complement: a completed restore really moves the deployment back to the
+# rollback content, byte for byte, and consumes the staging evidence so a
+# rerun has nothing left to restore.
+journey_successful_rollback() {
+  local before staging expected live output plan status=0
+  before="$(deployment_manifest)"
+  live="$target/.env-orbit"
+
+  staging="$(mktemp -d "$target/.orbit-install-staging.XXXXXX")"
+  chmod 700 -- "$staging"
+  mkdir -p -- "$staging/rollback/original"
+  chmod 700 -- "$staging/rollback" "$staging/rollback/original"
+
+  # Stage a backup of EVERY managed path that exists, exactly as
+  # install.sh's prepare_rollback_area does before touching anything. The
+  # restore treats a managed path with no staged original as one the
+  # interrupted transaction created and REMOVES it — the first version of
+  # this fixture staged only .env-orbit, and the completed rollback duly
+  # rolled the deployment's own scripts out of existence (exit 127 on the
+  # next repair invocation). The list mirrors repair.sh's
+  # restore_transaction_paths, the same way interrupted-configuration-
+  # migration's whole-directory copy already leans on it.
+  local managed
+  for managed in docker-compose.yml docker-compose.mail.yml \
+      docker-compose.mail-alias-rotation.yml .env-orbit.example \
+      config/tika-config.xml scripts/configure.sh scripts/installer-ui.sh \
+      scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
+      scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do
+    [[ -e "$target/$managed" ]] || continue
+    mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"
+    cp -a -- "$target/$managed" "$staging/rollback/original/$managed"
+  done
+  expected="$(sha256sum "$staging/rollback/original/.env-orbit" | awk '{print $1}')"
+
+  # The interrupted install's half-applied change: a live value that moved
+  # after the backup was staged. ORBIT_PORT keeps the file valid — APP_URL
+  # was tried first and fails configure.sh's readiness, because its host no
+  # longer matches OIDC_CALLBACK_URL's — so the only finding is the staging
+  # evidence and the restore is the only executable action. The running
+  # container keeps its published port either way; only the file moves.
+  sed -i 's|^ORBIT_PORT=.*|ORBIT_PORT=3212|' "$live"
+  [[ "$(sha256sum "$live" | awk '{print $1}')" != "$expected" ]] ||
+    fail 'successful-rollback: the drifted live file still matches the backup, so the fixture proves nothing'
+
+  status=0
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 3 ]] || { printf '%s\n' "$output" >&2; fail "successful-rollback: --check exited $status, expected 3 (attention)"; }
+  grep -q 'finding class=staging-evidence-present target=staging severity=warn' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'successful-rollback: --check did not report the staging evidence'; }
+
+  status=0
+  plan="$(repair --plan 2>&1)" || status=$?
+  grep -q 'plan action=restore-transaction resolves=staging-evidence-present mutation=reversible backup=required' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2; fail 'successful-rollback: the staging evidence was not planned as a backed-up restore-transaction'; }
+  local unexpected
+  unexpected="$(grep -E '^plan action=' <<<"$plan" |
+    grep -vE '^plan action=(restore-transaction|manual|rerun-configuration) ' || true)"
+  [[ -z "$unexpected" ]] ||
+    { printf '%s\n' "$plan" >&2
+      fail "successful-rollback: the plan carries executable actions beyond the restore, refusing to execute: $unexpected"; }
+
+  status=0
+  output="$(printf 'y\n' | repair --execute --safe-only 2>&1)" || status=$?
+  [[ "$status" == 0 ]] ||
+    { printf '%s\n' "$output" >&2; fail "successful-rollback: --execute exited $status, expected 0"; }
+  grep -q 'execute action=restore-transaction resolves=staging-evidence-present result=done' <<<"$output" ||
+    { printf '%s\n' "$output" >&2; fail 'successful-rollback: the restore did not report done'; }
+
+  [[ "$(sha256sum "$live" | awk '{print $1}')" == "$expected" ]] ||
+    fail 'successful-rollback: .env-orbit was not rolled back to the staged content'
+  [[ "$(stat -c '%a' "$live")" == 600 ]] ||
+    fail 'successful-rollback: the rolled-back .env-orbit is not mode 600'
+  compgen -G "$target/.orbit-install-staging.*" >/dev/null 2>&1 &&
+    fail 'successful-rollback: the staging evidence survived a completed rollback'
+
+  status=0
+  repair --check >/dev/null 2>&1 || status=$?
+  [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
+  health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
+  [[ "$(household_name)" == 'repair-journeys-household' ]] ||
+    fail 'successful-rollback: the rollback disturbed the fixture data'
+  result_line successful-rollback pass
 }
 
 # --- run ------------------------------------------------------------------
