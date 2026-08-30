@@ -98,9 +98,24 @@ test("names the household link and every rendered body, and hides the decorative
 
     // Criterion 1: a labelled group, not a subtree-pruning image, keeping
     // its existing label exactly.
+    //
+    // The name is asserted on its own rather than inside the snapshot
+    // below. An aria snapshot is YAML, and this name contains ": " (as
+    // written at web/src/routes/home/+page.svelte:886), which YAML reads as
+    // a nested mapping and rejects with "Nested mappings are not allowed in
+    // compact mappings" -- quoting does not help, and nor does a regex,
+    // because the entry still ends in the colon that opens the child list.
+    // toHaveAccessibleName takes the string whole, and asserts the name the
+    // user is actually read rather than the attribute carrying it.
     await expect(dial).toHaveAttribute("role", "group");
+    await expect(dial).toHaveAccessibleName(
+      "Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below",
+    );
+    // What the snapshot is for: proving the subtree survives. Under the old
+    // role="img" the group's children were pruned from the accessibility
+    // tree entirely, so this fails if that regresses.
     await expect(dial).toMatchAriaSnapshot(`
-      - group "Gravity well: items orbit by due date; distance from the household is time remaining, body size is typical cost; details in the manifest below":
+      - group:
         - link /^Open /
     `);
 
