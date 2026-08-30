@@ -185,7 +185,11 @@
   .body-link{cursor:pointer}
   .body-link :is(circle,path){pointer-events:all}
   .body-link :is(circle,path){transition:transform .25s;transform-origin:center;transform-box:fill-box}
-  .body-link:hover circle{transform:scale(1.5)}
+  .body-link:is(:hover,:focus-visible) circle{transform:scale(1.5)}
+  /* Keyboard only, same treatment as .sun-link below: the outline sits on
+     the <a> itself, not the transform-box:fill-box circle, so it isn't
+     clipped by the hover/focus scale above. */
+  .body-link:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
   /* §15 (08-17): the sun is the way into this household's own screen. The
      affordance is the pointer and the ink the sun ALREADY has, brightened —
      the same acknowledgement a constellation gives (.minisys:hover .msring
