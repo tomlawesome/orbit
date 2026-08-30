@@ -51,13 +51,29 @@
   "exceptions": [],
   "containerImages": [
     {
+      "name": "Orbit base image (Alpine plus Node from official signed source)",
+      "tag": "ghcr.io/tomlawesome/orbit-base-image:node-111",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:node-111@sha256:98f8d69e3f4417cda885678fc95a46b9e9b85722f6c8ad0c003bd8d7eca076a2",
+      "indexDigest": "sha256:fa2559fbc3fec1aa1513ddb9aca8e7dcba41409fbf0ea2c0721c2aed52187a1c",
+      "platform": "linux/amd64",
+      "locations": [
+        "Dockerfile"
+      ],
+      "source": "https://gitlab.tomlawson.io/ai/orbit-base-image",
+      "registry": "https://github.com/tomlawesome/orbit/pkgs/container/orbit-base-image",
+      "license": "MIT",
+      "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
+      "updateOwner": "Orbit maintainers",
+      "resolvedOn": "2026-08-30",
+      "reviewBy": "2026-11-30"
+    },
+    {
       "name": "Node.js build and runtime",
       "tag": "node:22-alpine",
       "reference": "node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c",
       "indexDigest": "sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32",
       "platform": "linux/amd64",
       "locations": [
-        "Dockerfile",
         "tests/oidc/Dockerfile"
       ],
       "source": "https://github.com/nodejs/docker-node",
