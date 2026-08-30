@@ -30,6 +30,21 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  # The vulnerability database comes from the vendor's own registry, not from
+  # Trivy's built-in default of mirror.gcr.io -- a public Google mirror with no
+  # availability commitment to us, whose 403 failed this security gate on an
+  # unrelated pull request (#673).
+  #
+  # Deliberately ONE repository, not a list. Trivy 0.72 accepts a
+  # comma-separated value but does not fall back: given a failing primary and a
+  # working secondary it exits fatally on the first, reporting "1 error
+  # occurred". Verified against this exact image pin. Resilience here is the
+  # retry in the scanning steps, never a second repository.
+  #
+  # The organisation is `aquasecurity`, not the `aquasec` of the Docker Hub
+  # image above. The wrong one does not 404 -- ghcr denies the token request,
+  # which reads like a credentials fault rather than a typo.
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
 
 jobs:
   # Selects the cheapest pull-request lane that still exercises every changed
@@ -180,7 +195,8 @@ jobs:
       - name: Scan repository dependencies and secrets
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
             "${TRIVY_IMAGE}" fs \
@@ -264,7 +280,8 @@ jobs:
             --policy .github/supply-chain-policy.json \
             | while read -r slug reference; do
                 echo "scanning ${reference}"
-                docker run --rm \
+                bash scripts/trivy-db-retry.sh docker run --rm \
+                  --env TRIVY_DB_REPOSITORY \
                   --volume "${GITHUB_WORKSPACE}:/workspace" \
                   --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
                   "${TRIVY_IMAGE}" image \
@@ -636,7 +653,8 @@ jobs:
           TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -645,7 +663,8 @@ jobs:
             --format json \
             --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
             "${TESTED_IMAGE_TAG}"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
