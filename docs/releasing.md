@@ -83,5 +83,18 @@ in the release notes.
 Historic `preview-*` and `rc-*` tags remain immutable audit evidence. Do not
 relabel, replace, or promote them.
 
+## Installing published versions
+
+Promotion never rebuilds, so a promoted image keeps the version label its
+candidate build wrote: `vX.Y.Z` under the current lane, and the historic
+candidate form `preview-release-vX.Y.Z-<run>-<attempt>` on the v1.0.0-era
+artifact. `install.sh` accepts exactly those two forms, derives the semantic
+version, and refuses a version-tag install whose embedded version does not
+name the requested tag ([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)).
+It fetches era assets (compose files, config) from the image's stamped
+revision and its own helper scripts from `main`, the same source the operator
+fetched `install.sh` from — so prior-version deployments carry current
+operational tooling.
+
 Tags can move; digests cannot. Compose does not default to either discovery
 tag. Always set `ORBIT_IMAGE` to and record the accepted digest.

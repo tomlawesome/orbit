@@ -35,12 +35,18 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # see exactly the deployment they see today.
 readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun
                    hostile-value-privacy-negatives retained-volume-new-target
-                   interrupted-configuration-migration)
+                   interrupted-configuration-migration exact-image-prior-version)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
 readonly absent=(
-  "exact-image-prior-version"
+  # The fourth leg of exact-image-prior-version. The first three run live
+  # below; this one is blocked by a real defect the journey found (#678):
+  # current restore.sh's correspondence preflight queries a table the
+  # v1.0.0-era schema does not have, and reports the failed query as a
+  # correspondence violation. Declared absent rather than skipped quietly,
+  # and rather than asserting the broken behaviour as if it were correct.
+  "exact-image-prior-version/backup-restore-round-trip"
 )
 
 keep_mode=0 only_journey="" list_mode=0
@@ -56,7 +62,7 @@ done
 
 if [[ "$list_mode" == 1 ]]; then
   printf 'live %s\n' "${journeys[@]}"
-  printf 'absent %s\n' "${absent[@]}"
+  ((${#absent[@]})) && printf 'absent %s\n' "${absent[@]}"
   exit 0
 fi
 
@@ -155,9 +161,27 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_prefix"*)
-    asset="\${url#"\$asset_prefix"}"
-    asset="\${asset#*/}"
+  https://raw.githubusercontent.com/*)
+    # Any owner/repo, not just the local-registry one: the exact-image
+    # journey installs from the published repository, whose raw URLs carry
+    # a different repo path than the shim's own \$asset_prefix.
+    rest="\${url#https://raw.githubusercontent.com/}"
+    rest="\${rest#*/}"
+    rest="\${rest#*/}"
+    ref="\${rest%%/*}"
+    asset="\${rest#*/}"
+    # The exact-image journey records the prior image's stamped revision
+    # here; that revision's era assets are served from the git object store
+    # so the deployment is that era's, not this working tree's. Helper
+    # scripts arrive under .../main/ and always come from the working tree.
+    if [[ -s "$workdir/prior-revision" && "\$ref" == "\$(cat "$workdir/prior-revision")" ]]; then
+      staged="\$(mktemp)"
+      if git -C "$repo_root" show "\$ref:\$asset" > "\$staged" 2>/dev/null; then
+        serve "\$staged"
+      fi
+      rm -f -- "\$staged"
+      exit 0
+    fi
     [[ -f "$repo_root/\$asset" ]] || { [[ -z "\$write_out" ]] || printf '404'; exit 0; }
     serve "$repo_root/\$asset"
     ;;
@@ -877,6 +901,118 @@ journey_hostile_value_privacy_negatives() {
     fail 'hostile-value: the journey did not restore the deployment it borrowed'
   }
   result_line hostile-value-privacy-negatives pass
+}
+
+# Runs LAST, deliberately: fixed container names mean only one Orbit stack
+# can exist per machine (#536), so this journey cannot borrow the shared
+# deployment like the seven before it — it tears that stack down and installs
+# the published prior version in its place (owner decision 2026-08-30,
+# option (b): an already-published image, never a rebuild from an old
+# checkout).
+#
+# What it proves, in order:
+#   1. install.sh installs the exact published prior-version image by its
+#      version tag — the #676 identity gate against the real artifact, with
+#      era assets (compose files, config) served from the image's stamped
+#      revision out of the git object store, and installer helpers from this
+#      working tree, exactly the split ADR-0016 records.
+#   2. The prior-version deployment reaches a healthy /api/health, pinned in
+#      .env-orbit to the immutable digest the tag resolved to (exact-image).
+#   3. Current repair.sh, which the prior version predates entirely,
+#      diagnoses and repairs a real credential drift against it.
+#   4. A backup taken with current backup.sh restores with current
+#      restore.sh, and data written before the backup survives — the
+#      backup/restore compatibility half of the criterion.
+journey_exact_image_prior_version() {
+  local prior_channel="${ORBIT_PRIOR_VERSION_CHANNEL:-v1.0.0}"
+  local prior_repository="${ORBIT_PRIOR_VERSION_REPOSITORY:-tomlawesome/orbit}"
+  local prior_image="ghcr.io/$prior_repository:$prior_channel"
+  local prior_revision expected_digest output status=0
+
+  note "replacing the shared deployment with the published $prior_channel"
+  (cd "$target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) ||
+    fail 'exact-image: could not tear down the shared deployment'
+
+  docker pull --quiet "$prior_image" >/dev/null ||
+    fail "exact-image: could not pull $prior_image; this journey needs the published artifact"
+  prior_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$prior_image")" ||
+    fail 'exact-image: could not read the prior image revision label'
+  [[ "$prior_revision" =~ ^[0-9a-f]{40}$ ]] ||
+    fail "exact-image: the prior image's revision label is not a commit: '$prior_revision'"
+  if ! git -C "$repo_root" cat-file -e "$prior_revision" 2>/dev/null; then
+    git -C "$repo_root" fetch --depth 1 origin "$prior_revision" >/dev/null 2>&1 ||
+      fail "exact-image: revision $prior_revision is not in the object store and could not be fetched"
+  fi
+  printf '%s\n' "$prior_revision" > "$workdir/prior-revision"
+
+  make_target
+  note "installing the published $prior_channel (revision ${prior_revision:0:12})"
+  (cd "$target" && env PATH="$workdir/shim:$PATH" \
+      ORBIT_REGISTRY=ghcr.io ORBIT_REPOSITORY="$prior_repository" ORBIT_CHANNEL="$prior_channel" \
+      bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install-prior.log" 2>&1 ||
+    { sed -n '$p' "$workdir/install-prior.log" >&2
+      fail "exact-image: install.sh failed for $prior_channel; log: $workdir/install-prior.log"; }
+  rm -f -- "$workdir/prior-revision"
+
+  local owner
+  owner="$(docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  [[ "$owner" == "$project" ]] ||
+    fail "exact-image: the prior-version stack is not owned by $project (got '${owner:-none}')"
+
+  # Exact image: .env-orbit pins the immutable digest the version tag
+  # resolved to, never the tag itself.
+  expected_digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$prior_image" |
+    grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+  [[ -n "$expected_digest" ]] || fail 'exact-image: could not resolve the published digest'
+  grep -q "^ORBIT_IMAGE=ghcr.io/$prior_repository@$expected_digest$" "$target/.env-orbit" ||
+    fail "exact-image: .env-orbit does not pin ghcr.io/$prior_repository@$expected_digest"
+
+  wait_for_health
+  status=0
+  repair --check >/dev/null 2>&1 || status=$?
+  [[ "$status" == 0 ]] ||
+    fail "exact-image: repair --check on the fresh prior-version deployment exited $status, expected 0"
+  note "the published $prior_channel is healthy and diagnoses clean under current repair.sh"
+
+  # Current repair against a deployment that predates repair mode: a real
+  # credential drift, diagnosed and rotated back to health.
+  seed_household
+  drift_the_credential
+  status=0
+  output="$(repair --check 2>&1)" || status=$?
+  [[ "$status" == 4 ]] ||
+    fail "exact-image: --check on the drifted prior version exited $status, expected 4"
+  grep -q 'finding class=database-credential-mismatch' <<<"$output" ||
+    fail 'exact-image: --check did not report database-credential-mismatch'
+  status=0
+  output="$(printf 'rotate\nrepair-journeys-passphrase\nrepair-journeys-passphrase\n' |
+    repair --execute --dangerous 2>&1)" || status=$?
+  [[ "$status" == 0 ]] || {
+    printf '%s\n' "$output" >&2
+    fail "exact-image: the dangerous batch exited $status, expected 0"
+  }
+  wait_for_health
+  [[ "$(household_name)" == 'repair-journeys-household' ]] ||
+    fail 'exact-image: data written under the original password did not survive rotation'
+  note 'current repair.sh rotated a drifted credential on the prior version'
+
+  # Backup half only. Current backup.sh does produce a bundle from the
+  # prior-version deployment; current restore.sh cannot consume it, because
+  # its correspondence preflight queries document_staging_objects, which the
+  # v1.0.0-era schema does not have, and reports the failed query as a
+  # correspondence violation (#678 — found by this journey). The round trip
+  # is therefore declared absent above rather than asserted here: asserting
+  # the current behaviour would freeze the defect into the harness as if it
+  # were the contract.
+  local backup_output backup_path
+  backup_output="$(cd "$target" && bash scripts/backup.sh)" ||
+    fail 'exact-image: backup.sh failed against the prior-version deployment'
+  backup_path="${backup_output#Orbit backup created: }"
+  [[ -f "$backup_path" ]] ||
+    fail "exact-image: backup.sh did not return a bundle path (got: $backup_output)"
+  note 'current backup.sh produced a bundle from the prior version; restore blocked by #678'
+
+  result_line exact-image-prior-version pass
 }
 
 # --- run ------------------------------------------------------------------

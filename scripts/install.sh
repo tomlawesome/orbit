@@ -1326,18 +1326,54 @@ fi
 if ! image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect the published image for its semantic version."
 fi
-[[ "$image_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+# Promotion retags a tested digest and never rebuilds (docs/releasing.md), so
+# the version label inside the digest is whatever the candidate build wrote.
+# Since v1.2.0 that is the calculated final version; the v1.0.0-era lane wrote
+# the candidate form "preview-release-vX.Y.Z-<run>-<attempt>", which is
+# therefore permanent on that artifact (#676, ADR-0016). Accept exactly those
+# two producer forms, derive the semantic version, and — the actual guarantee —
+# refuse a version-tag install whose embedded version names a different
+# release than the tag the operator pinned.
+semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+image_label_era=current
+if [[ "$image_version" =~ $semver_pattern ]]; then
+  :
+elif [[ "$image_version" =~ ^preview-release-(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))-[0-9]+-[0-9]+$ ]]; then
+  image_version="${BASH_REMATCH[1]}"
+  image_label_era=candidate
+else
   fail "The published image does not record a valid semantic version."
+fi
+if [[ "$channel" =~ $semver_pattern && "$image_version" != "$channel" ]]; then
+  fail "The published image's embedded version (${image_version}) does not match the requested version tag (${channel})."
+fi
 readonly applied_digest="${resolved_reference##*@}"
 
 installer_ui_event identity image running image-identity inspect
 if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
   "$resolved_reference" --banner; then
-  fail "The resolved Orbit image could not render its canonical banner."
+  # The canonical banner postdates the candidate-label era: v1.0.0's
+  # entrypoint has no --banner and exits into its startup refusal instead.
+  # For exactly that era, identity rests on the digest resolution plus the
+  # revision and version binding above (ADR-0016). Modern images must render
+  # it.
+  if [[ "$image_label_era" == candidate ]]; then
+    printf 'Orbit installer: the %s-era image predates the canonical banner; proceeding on its digest, revision and version binding.\n' "$image_version"
+  else
+    fail "The resolved Orbit image could not render its canonical banner."
+  fi
 fi
 installer_ui_event identity image completed image-identity verify
 
 readonly asset_base="https://raw.githubusercontent.com/${repository}/${revision}"
+# The helper scripts below are invoked by THIS installer with THIS
+# installer's flags, so they come from the same source the operator fetched
+# install.sh from (README: raw main), never from the image's revision — a
+# prior-version image predates them (#676, ADR-0016). Era assets — the
+# compose files and config the image actually runs with — still come from
+# the image's stamped revision, so a compose file cannot drift from the
+# image it configures.
+readonly installer_asset_base="https://raw.githubusercontent.com/${repository}/main"
 readonly deployment_assets=(
   "docker-compose.yml"
   "docker-compose.mail.yml"
@@ -1433,10 +1469,19 @@ chmod 700 "$staging_dir" || fail "Could not restrict the staging directory."
 installer_ui_phase=assets
 installer_ui_component=assets
 installer_ui_event assets assets starting assets-verified fetch
+declare -A installer_helper_set=()
+for script in "${deployment_scripts[@]}"; do
+  installer_helper_set["$script"]=1
+done
 for asset in "${deployment_assets[@]}"; do
   staged_path="$staging_dir/$asset"
   mkdir -p -- "$(dirname "$staged_path")"
-  curl --fail --silent --show-error --location --output "$staged_path" "${asset_base}/${asset}" 2>/dev/null ||
+  if [[ -n "${installer_helper_set[$asset]:-}" ]]; then
+    source_base="$installer_asset_base"
+  else
+    source_base="$asset_base"
+  fi
+  curl --fail --silent --show-error --location --output "$staged_path" "${source_base}/${asset}" 2>/dev/null ||
     fail "Could not fetch ${asset} from the published revision."
   is_regular_non_symlink_file "$staged_path" ||
     fail "Fetched ${asset} is not a regular file."
