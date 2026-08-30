@@ -13,6 +13,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // One temporary root per test file, removed when the file ends (#654).
+    // The suites leaked every mkdtemp they made: ~88k directories filled this
+    // host's /tmp and started failing runs with ENOSPC.
+    setupFiles: ["./tests/support/temp-root.ts"],
     // Diagnose stalls instead of letting them die silently on the CI job
     // timeout (#572). "default" is the normal pass/fail report; the other
     // two only add output when something is actually stuck:
