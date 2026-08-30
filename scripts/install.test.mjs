@@ -41,6 +41,7 @@ const digest = "a".repeat(64);
 const revision = "b".repeat(40);
 const resolvedReference = `${imageRepository}@sha256:${digest}`;
 const assetBase = `https://raw.githubusercontent.com/${repository}/${revision}`;
+const helperBase = `https://raw.githubusercontent.com/${repository}/main`;
 const preflightSuccessLine =
   "Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.";
 const deploymentAssets = [
@@ -172,6 +173,10 @@ const fakeDockerScript = [
   "  run)",
   "    args=(\"$@\")",
   '    if [[ "$*" == *"--entrypoint /opt/orbit/scripts/container-entrypoint.sh"* ]]; then',
+  '      if [[ "${FAKE_BANNER_FAIL:-0}" == "1" ]]; then',
+  "      printf 'fake startup refusal, no banner\\n' >&2",
+  "      exit 1",
+  "      fi",
   "      printf 'FAKE_CANONICAL_BANNER\\n'",
   "      exit 0",
   "    fi",
@@ -258,6 +263,11 @@ const fakeCurlScript = [
   "done",
   'prefix="${FAKE_ASSET_BASE:?}/"',
   'asset="${url#"$prefix"}"',
+  'asset_source="era"',
+  'if [[ "$asset" == "$url" && -n "${FAKE_HELPER_BASE:-}" && "$url" == "${FAKE_HELPER_BASE}/"* ]]; then',
+  '  asset="${url#"${FAKE_HELPER_BASE}/"}"',
+  '  asset_source="helper"',
+  "fi",
   'if [[ "$url" == https://*"/.well-known/openid-configuration" ]]; then',
   '  if [[ "${FAKE_OIDC_NETWORK_FAIL:-}" == "1" ]]; then exit 7; fi',
   '  discovery_issuer="${url%/.well-known/openid-configuration}"',
@@ -272,7 +282,7 @@ const fakeCurlScript = [
   "  exit 0",
   "fi",
   'if [[ -n "${FAKE_CALL_LOG:-}" ]]; then',
-  "  printf 'curl %s\\n' \"$asset\" >> \"$FAKE_CALL_LOG\"",
+  "  printf 'curl %s %s\\n' \"$asset_source\" \"$asset\" >> \"$FAKE_CALL_LOG\"",
   "fi",
   'if [[ -n "${FAKE_CURL_FAIL_ASSET:-}" && "$asset" == "${FAKE_CURL_FAIL_ASSET}" ]]; then',
   "  exit 22",
@@ -657,6 +667,7 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       FAKE_DOCKER_CONFIG_HASH: "f".repeat(64),
       FAKE_DOCKER_RUNNING_CONFIG_HASH: "f".repeat(64),
       FAKE_ASSET_BASE: assetBase,
+      FAKE_HELPER_BASE: helperBase,
       FAKE_CALL_LOG: logPath,
       FAKE_PROBE_COUNTER_DIR: logDir,
       FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
@@ -692,6 +703,7 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
       FAKE_DOCKER_REVISION: revision,
       FAKE_DOCKER_VERSION: "v1.2.0",
       FAKE_ASSET_BASE: assetBase,
+      FAKE_HELPER_BASE: helperBase,
       FAKE_CALL_LOG: logPath,
       FAKE_PROBE_COUNTER_DIR: logDir,
       FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
@@ -732,6 +744,7 @@ function runInstallWithPromptedTerminalInput(
           FAKE_DOCKER_REVISION: revision,
           FAKE_DOCKER_VERSION: "v1.2.0",
           FAKE_ASSET_BASE: assetBase,
+      FAKE_HELPER_BASE: helperBase,
           FAKE_CALL_LOG: logPath,
           FAKE_PROBE_COUNTER_DIR: logDir,
           FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
@@ -806,6 +819,7 @@ function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args =
           FAKE_DOCKER_VERSION: "v1.2.0",
           FAKE_DOCKER_APP_IMAGE: resolvedReference,
           FAKE_ASSET_BASE: assetBase,
+      FAKE_HELPER_BASE: helperBase,
           FAKE_CALL_LOG: logPath,
           FAKE_PROBE_COUNTER_DIR: logDir,
           FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
@@ -2207,6 +2221,128 @@ describe("install.sh", () => {
     expect(result.status).not.toBe(0);
     expect(output).not.toContain("provider-body-secret");
     expect(output).not.toContain("auth.install-test.internal");
+  });
+});
+
+describe("install.sh release identity gate (#676)", () => {
+  // The exact label the published v1.0.0 digest carries: the candidate form
+  // the v1.0.0-era release lane wrote before labels moved to the calculated
+  // final version. Promotion never rebuilds, so this form is permanent on
+  // that artifact.
+  const legacyLabel = "preview-release-v1.0.0-30597511059-1";
+
+  it("installs a version tag whose legacy candidate label names the same version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "v1.0.0", FAKE_DOCKER_VERSION: legacyLabel },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("up -d");
+    // The deployment's version is the derived semantic version, never the
+    // raw candidate label.
+    expect(result.stdout).toContain("Version: v1.0.0");
+    expect(result.stdout).toContain("Channel: v1.0.0");
+    expect(result.stdout).not.toContain(legacyLabel);
+  });
+
+  it("refuses a version tag whose label names a different version, either form", () => {
+    for (const label of ["preview-release-v1.1.0-30597511059-1", "v1.2.0"]) {
+      const targetDir = makeTarget();
+      makePreprovisionedDeployment(targetDir);
+
+      const result = runInstall(targetDir, {
+        ORBIT_CHANNEL: "v1.0.0",
+        FAKE_DOCKER_VERSION: label,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "does not match the requested version tag",
+      );
+      expect(result.calls).not.toContain("up -d");
+    }
+  });
+
+  it("still refuses a label that is neither a version nor a candidate", () => {
+    for (const label of [
+      "not-a-version",
+      "preview-release-v1.0.0",
+      "preview-release-1.0.0-1-1",
+      "v1.0.0-rc1",
+    ]) {
+      const targetDir = makeTarget();
+      makePreprovisionedDeployment(targetDir);
+
+      const result = runInstall(targetDir, {
+        ORBIT_CHANNEL: "v1.0.0",
+        FAKE_DOCKER_VERSION: label,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "does not record a valid semantic version",
+      );
+      expect(result.calls).not.toContain("up -d");
+    }
+  });
+
+  it("tolerates a missing banner only for the candidate-label era", () => {
+    // v1.0.0's entrypoint predates --banner; its identity rests on digest,
+    // revision and version binding. A modern image must still render it.
+    const legacyTarget = makeTarget();
+    makePreprovisionedDeployment(legacyTarget);
+    const legacy = runInstall(legacyTarget, {
+      ORBIT_CHANNEL: "v1.0.0",
+      FAKE_DOCKER_VERSION: legacyLabel,
+      FAKE_BANNER_FAIL: "1",
+    });
+    expect(legacy.status).toBe(0);
+    expect(legacy.stdout).toContain("predates the canonical banner");
+
+    const modernTarget = makeTarget();
+    makePreprovisionedDeployment(modernTarget);
+    const modern = runInstall(modernTarget, { FAKE_BANNER_FAIL: "1" });
+    expect(modern.status).not.toBe(0);
+    expect(modern.stderr).toContain("could not render its canonical banner");
+    expect(modern.calls).not.toContain("up -d");
+  });
+
+  it("fetches installer helpers from the installer's source and era assets from the image revision", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    // Era assets must match the image; helper scripts must match this
+    // installer's own call sites — a prior-version image predates them.
+    expect(result.calls).toContain("curl era docker-compose.yml");
+    expect(result.calls).toContain("curl era .env-orbit.example");
+    expect(result.calls).toContain("curl helper scripts/repair.sh");
+    expect(result.calls).toContain("curl helper scripts/configuration.sh");
+    expect(result.calls).not.toContain("curl era scripts/");
+  });
+
+  it("accepts the candidate form on a non-version channel and derives its version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      {
+        ORBIT_CHANNEL: "preview-release-v1.0.0-30597511059-1",
+        FAKE_DOCKER_VERSION: legacyLabel,
+      },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Version: v1.0.0");
   });
 });
 
