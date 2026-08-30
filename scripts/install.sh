@@ -1326,8 +1326,16 @@ fi
 if ! image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect the published image for its semantic version."
 fi
-[[ "$image_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+[[ "$image_version" =~ $semver_pattern ]] ||
   fail "The published image does not record a valid semantic version."
+# A tag can be moved; the label inside a digest cannot. So when the operator
+# pins a version tag, require the image's own embedded version to name that
+# same release — an image parked at a version tag is not evidence that it is
+# that version (ADR-0016).
+if [[ "$channel" =~ $semver_pattern && "$image_version" != "$channel" ]]; then
+  fail "The published image's embedded version (${image_version}) does not match the requested version tag (${channel})."
+fi
 readonly applied_digest="${resolved_reference##*@}"
 
 installer_ui_event identity image running image-identity inspect
