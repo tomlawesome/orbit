@@ -172,11 +172,6 @@ EOF
 # network dependency surfaces as a test failure.
 set -Eeuo pipefail
 asset_base="https://raw.githubusercontent.com/$repository/$revision"
-# install.sh takes its own helper scripts from main and era assets from the
-# image's revision (ADR-0016), so the shim must serve both bases. Both come
-# from this working tree: in a real install the two differ only by the window
-# between fetching install.sh and it fetching its helpers.
-helper_base="https://raw.githubusercontent.com/$repository/main"
 discovery_url="${issuer}.well-known/openid-configuration"
 output="" write_out="" url=""
 args=("\$@")
@@ -194,9 +189,8 @@ serve() {
   [[ -z "\$write_out" ]] || printf '200'
 }
 case "\$url" in
-  "\$asset_base"/*|"\$helper_base"/*)
+  "\$asset_base"/*)
     asset="\${url#"\$asset_base"/}"
-    asset="\${asset#"\$helper_base"/}"
     [[ -f "$repo_root/\$asset" ]] || exit 22
     serve "$repo_root/\$asset"
     ;;
