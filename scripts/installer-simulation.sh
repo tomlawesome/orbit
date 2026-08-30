@@ -103,7 +103,7 @@ fi
 
 if [[ "$top_choice" == repair ]]; then
   installer_ui_emit rollback installer blocked repair-unavailable repair
-  printf 'Orbit installer simulation: repair_unavailable; issue #261 supplies repair execution. Nothing was changed.\n'
+  printf 'Orbit installer simulation: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from the deployment directory to diagnose, then "--plan" to see what it would do. Nothing was changed.\n'
   printf 'No deployment occurred.\n'
   close_terminal
   exit 0
