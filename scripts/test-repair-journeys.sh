@@ -34,12 +34,11 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # repairs it) and idempotent-rerun (which re-runs that completed repair) still
 # see exactly the deployment they see today.
 readonly journeys=(cancelled-repair signal-cleanup credential-drift idempotent-rerun
-                   hostile-value-privacy-negatives)
+                   hostile-value-privacy-negatives retained-volume-new-target)
 
 # Acceptance criteria of #532 with no live evidence yet. Printed on every run
 # so the gap is visible in the log rather than implied by a green tick.
 readonly absent=(
-  "retained-volume-new-target"
   "interrupted-configuration-migration"
   "exact-image-prior-version"
 )
@@ -556,6 +555,100 @@ journey_idempotent_rerun() {
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 're-running a completed repair disturbed the fixture data'
   result_line idempotent-rerun pass
+}
+
+# Proves the #261 fixed-project collision guard: a retained database volume
+# paired with a NEW target directory must never have a fresh password minted
+# against it.
+#
+# This is the failure that motivated repair mode in the first place. An
+# operator points a new install at a directory whose named volume survived
+# (`docker compose down` without `--volumes`, a moved checkout, a restored
+# host). The volume still holds the OLD role's password hash. The obvious
+# automatic fix -- "the secret file is missing, mint one" -- produces a
+# SECOND broken credential and buries the original failure under a new one.
+# repair.sh routes that specific secret-missing to rotate-database-credential
+# instead, and routes a retained document volume to `manual`, because a new
+# document key would make retained documents permanently unreadable
+# (repair.sh's EXCEPTION 1 and EXCEPTION 2, ADR-0014 decision 5).
+#
+# The journey is read-only by construction: only --check and --plan run
+# against the new target, never --execute. That matters twice over -- it is
+# what the guard is about, and it means this journey cannot disturb the live
+# deployment whose volume it borrows.
+#
+# The new target deliberately carries the SAME COMPOSE_PROJECT_NAME, because
+# the collision only exists when the retained volume belongs to the project
+# the new directory names. `${project}_orbit-db-data` is the exact volume
+# repair.sh looks for (repair.sh:2115).
+journey_retained_volume_new_target() {
+  local newtarget output status=0 plan before
+  before="$(deployment_manifest)"
+  newtarget="$workdir/new-target"
+  rm -rf -- "$newtarget"
+  mkdir -p -- "$newtarget/scripts"
+
+  cp -a -- "$target/.env-orbit" "$newtarget/.env-orbit"
+  cp -a -- "$target/docker-compose.yml" "$newtarget/docker-compose.yml"
+  cp -a -- "$target/scripts/repair.sh" "$newtarget/scripts/repair.sh"
+  for helper in configuration.sh recovery-crypto.mjs release-metadata-patterns.sh; do
+    [[ -f "$target/scripts/$helper" ]] && cp -a -- "$target/scripts/$helper" "$newtarget/scripts/$helper"
+  done
+
+  # The secrets directory is present and VALID, holding every secret except
+  # postgres-password. That precise shape is what reaches the guard, and the
+  # first version of this journey got it wrong: with no .orbit-secrets at all,
+  # no `secret-missing` finding is raised, `resolve_secret_missing_action` is
+  # never consulted, and the plan line the journey asserted came from the
+  # unconditional `volume-retained-without-credentials -> rotate-database-
+  # credential` class mapping instead. It passed with the guard deliberately
+  # disabled, which is to say it proved nothing about the guard. Verified by
+  # mutation both ways -- see the journey's evidence on #532.
+  cp -a -- "$target/.orbit-secrets" "$newtarget/.orbit-secrets"
+  rm -f -- "$newtarget/.orbit-secrets/postgres-password"
+  chmod 700 -- "$newtarget/.orbit-secrets"
+
+  docker volume inspect "${project}_orbit-db-data" >/dev/null 2>&1 ||
+    fail 'retained-volume-new-target: the database volume this journey needs does not exist'
+
+  status=0
+  output="$( (cd "$newtarget" && env ORBIT_REPAIR_PROMPTS=machine bash ./scripts/repair.sh --check) 2>&1 )" || status=$?
+  [[ "$status" == 4 ]] ||
+    { printf '%s\n' "$output" >&2; fail "retained-volume-new-target: --check exited $status, expected 4"; }
+  grep -q 'finding class=volume-retained-without-credentials' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      fail 'retained-volume-new-target: --check did not report volume-retained-without-credentials'; }
+  # Both findings must be present, or the guard below is not the thing under
+  # test: it only fires where a missing postgres-password and a retained
+  # volume coincide.
+  grep -q 'finding class=secret-missing target=postgres-password' <<<"$output" ||
+    { printf '%s\n' "$output" >&2
+      fail 'retained-volume-new-target: --check did not report the missing postgres-password'; }
+
+  status=0
+  plan="$( (cd "$newtarget" && env ORBIT_REPAIR_PROMPTS=machine bash ./scripts/repair.sh --plan) 2>&1 )" || status=$?
+
+  # The guard itself. regenerate-secret against a retained volume is the
+  # wrong fix, and its absence here is the whole point of the journey -- so
+  # it is asserted alongside the positive routing, never on its own.
+  grep -q 'plan action=rotate-database-credential' <<<"$plan" ||
+    { printf '%s\n' "$plan" >&2
+      fail 'retained-volume-new-target: the retained-volume password was not planned as rotate-database-credential'; }
+  grep -q 'plan action=regenerate-secret' <<<"$plan" &&
+    { printf '%s\n' "$plan" >&2
+      fail 'retained-volume-new-target: a fresh secret was planned against a retained volume'; }
+
+  # Neither read-only mode may touch the live deployment it borrowed from.
+  # Asserted as "unchanged", not as "healthy": whether the live stack is
+  # healthy at this point depends on which journeys ran before this one, and
+  # a health check would make this journey pass or fail for reasons that have
+  # nothing to do with what it tests. The manifest is the honest question --
+  # did diagnosing a second directory alter the first one.
+  [[ "$(deployment_manifest)" == "$before" ]] ||
+    fail 'retained-volume-new-target: diagnosing a new target changed the live deployment'
+
+  rm -rf -- "$newtarget"
+  result_line retained-volume-new-target pass
 }
 
 # Proves the "Privacy" contract above scripts/repair.sh:765 against values an
