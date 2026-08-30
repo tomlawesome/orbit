@@ -395,6 +395,19 @@ journey_cancelled_repair() {
 # then signal. That makes the precondition the trigger, so this journey can
 # never again assert the absence of something that was never created.
 #
+# The signal deliberately lands inside the creation window, every run. The
+# poll notices the directory the moment it exists on disk, which can be
+# before repair.sh itself knows its name: the shape #655 caught on CI was
+# recovery_dir="$(mktemp -d ...)" killed after mktemp's mkdir but before the
+# assignment, leaving the EXIT trap holding an empty variable and the copy
+# orphaned. That window is microseconds wide, so CI hit it once in many
+# runs. The PATH shims below stretch whichever command creates the directory
+# (mktemp for the old shape, mkdir for the current assign-first shape) by
+# 300ms after creation, so the TERM sent on first sight of the directory
+# arrives while creation is still in flight — the worst legal moment, made
+# deterministic. A regression to name-after-creation fails this journey
+# every run instead of one run in hundreds.
+#
 # `exec` inside the backgrounded subshell replaces its own process image with
 # repair.sh, so $! is repair.sh's real PID and the signal lands on the process
 # that owns the trap, not on a throwaway parent shell.
@@ -421,9 +434,29 @@ journey_signal_cleanup() {
   # unaffected by construction rather than by luck of the class order.
   printf 'y\n' > "$infile"
 
+  # Window-stretching shims — see the journey comment above. Absolute paths
+  # inside, because the shim directory itself is on PATH.
+  local shimdir
+  shimdir="$workdir/signal-cleanup-shims"
+  mkdir -p -- "$shimdir"
+  cat > "$shimdir/mktemp" <<'SHIM'
+#!/usr/bin/env bash
+created="$(/usr/bin/mktemp "$@")" || exit
+printf '%s\n' "$created"
+sleep 0.3
+SHIM
+  cat > "$shimdir/mkdir" <<'SHIM'
+#!/usr/bin/env bash
+/bin/mkdir "$@"; rc=$?
+sleep 0.3
+exit "$rc"
+SHIM
+  chmod 755 -- "$shimdir/mktemp" "$shimdir/mkdir"
+
   (
     cd "$target"
-    exec env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" --execute --safe-only
+    exec env ORBIT_REPAIR_PROMPTS=machine PATH="$shimdir:$PATH" \
+      bash "$target/scripts/repair.sh" --execute --safe-only
   ) <"$infile" >"$out" 2>&1 &
   pid=$!
 

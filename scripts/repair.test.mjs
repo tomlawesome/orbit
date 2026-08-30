@@ -4233,6 +4233,84 @@ describe("scripts/repair.sh EXIT trap (issue #383 finding 4)", () => {
       }
     }
   });
+
+  // The test above kills at a safe moment: repair.sh is parked at a prompt,
+  // long after the recovery directory was both created and named. That
+  // proves the trap removes what it knows about, and it passed throughout
+  // #655 — during which CI twice caught a real orphan.
+  //
+  // The gap was the creation itself. `recovery_dir="$(mktemp -d ...)"` is
+  // two events, not one: mktemp's mkdir, then the assignment. A fatal
+  // signal in between kills the shell with the directory on disk and
+  // $recovery_dir still empty, so the trap removes nothing. The window is
+  // microseconds wide, which is why CI hit it roughly one run in a hundred
+  // rather than never or always.
+  //
+  // Stretching the window makes it deterministic: a mkdir shim that sleeps
+  // after creating the directory holds repair.sh inside creation while the
+  // TERM lands. Under the old shape this test fails every run; under
+  // assign-the-name-first it passes every run, because there is no moment
+  // at which the directory exists and the trap cannot name it.
+  it("removes the recovery directory even when killed during its creation, not only afterwards", async () => {
+    const targetDir = makeCredentialMismatchFixture();
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+
+    // Shims both commands that can create the directory: mkdir for the
+    // current shape, mktemp for the shape #655 fixed, so this test keeps
+    // its teeth if that construction ever comes back.
+    const shimDir = mkdtempSync(join(tmpdir(), "orbit-repair-window-"));
+    writeFileSync(
+      join(shimDir, "mkdir"),
+      ['#!/usr/bin/env bash', '/bin/mkdir "$@"; rc=$?', "sleep 0.3", 'exit "$rc"'].join("\n"),
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(shimDir, "mktemp"),
+      ['#!/usr/bin/env bash', 'created="$(/usr/bin/mktemp "$@")" || exit', "printf '%s\\n' \"$created\"", "sleep 0.3"].join("\n"),
+      { mode: 0o755 },
+    );
+
+    const spawned = spawnRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      { env: { ORBIT_REPAIR_TTY_INPUT: "1", PATH: `${shimDir}:${process.env.PATH}` } },
+    );
+
+    try {
+      await waitForStderr(spawned, (text) => text.includes("Proceed? [y/N]"));
+      spawned.child.stdin.write("y\n");
+
+      // Signal on the directory's first appearance on disk — which, with
+      // the shim holding creation open, is while repair.sh is still inside
+      // it. Polling the filesystem rather than a log line keeps the trigger
+      // the precondition itself.
+      const deadline = Date.now() + 10_000;
+      let appeared = false;
+      while (Date.now() < deadline) {
+        if (readdirSync(targetDir).some((name) => name.startsWith(".orbit-repair-recovery."))) {
+          appeared = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(appeared).toBe(true);
+
+      spawned.child.kill("SIGTERM");
+      const result = await spawned.exited;
+      expect(result.signal).toBe("SIGTERM");
+
+      const afterKill = readdirSync(targetDir).filter((name) => name.startsWith(".orbit-repair-recovery."));
+      expect(afterKill).toEqual([]);
+    } finally {
+      if (!spawned.child.killed) {
+        spawned.child.kill("SIGKILL");
+      }
+      rmSync(shimDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
