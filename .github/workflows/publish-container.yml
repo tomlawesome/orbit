@@ -195,7 +195,7 @@ jobs:
       - name: Scan repository dependencies and secrets
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
             --env TRIVY_DB_REPOSITORY \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -280,7 +280,7 @@ jobs:
             --policy .github/supply-chain-policy.json \
             | while read -r slug reference; do
                 echo "scanning ${reference}"
-                docker run --rm \
+                bash scripts/trivy-db-retry.sh docker run --rm \
                   --env TRIVY_DB_REPOSITORY \
                   --volume "${GITHUB_WORKSPACE}:/workspace" \
                   --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -653,7 +653,7 @@ jobs:
           TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
             --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
@@ -663,7 +663,7 @@ jobs:
             --format json \
             --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
             "${TESTED_IMAGE_TAG}"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
             --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
