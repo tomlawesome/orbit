@@ -580,12 +580,23 @@ prompt grammar; never parse prose.** Prose on stderr is deliberately unstable.
 ```
 finding class=<class> target=<target> severity=info|warn|fail
 diagnosis result=<result> checked=<n> skipped=<n>
-plan action=<action> resolves=<class> mutation=<mutation> backup=<backup>
+plan action=<action> resolves=<class> mutation=<mutation> backup=<backup> target=<target> rollback=<rollback> expect=<expect>
 plan result=<result> actions=<n> manual=<n>
 execute action=<action> resolves=<class> result=done|failed|skipped
-execution result=<result> done=<n> failed=<n>
+execution result=<result> done=<n> failed=<n> [reason=<reason>]
 dangerous result=<result> done=<n> failed=<n> reason=<reason>
 ```
+
+The `plan action=` line's trailing three fields are #681's preview contract:
+`target` repeats the resolved finding's own target enum, `rollback` names
+the rollback point (`recovery-directory | credential-checkpoint |
+prior-mode | not-required`), and `expect` names the expected result of the
+action succeeding (`files-restored | permissions-safe | secret-recreated |
+authentication-restored | services-healthy | configuration-valid |
+operator-action`). All three are closed enums; unknown-key tolerance means
+a pre-#681 consumer keeps working unchanged. `execution result=refused`
+carries a `reason=` key (currently only `deployment-version-unsupported`);
+no other execution result does.
 
 Unknown keys are ignored by consumers; unknown enum values are renderable but
 unstyled, exactly as for the installer stream.
@@ -600,6 +611,7 @@ diagnosis result=  healthy | attention | failed
 plan result=       empty | ready | manual-required
 execute result=    done | failed | skipped
 execution result=  empty | complete | unactionable | declined | failed
+                   | refused
 dangerous result=  empty | complete | refused | failed
 dangerous reason=  none | non-interactive | refused-by-operator
                    | checkpoint-failed | step-failed
@@ -612,19 +624,19 @@ operator simply declined, or where no terminal was available to ask.
 ### finding class
 
 ```
-application-unhealthy                   managed-file-missing
-compose-interpolation-failed            managed-file-permissions
-configuration-incomplete                managed-file-symlink
-configuration-invalid                   migration-failed
-configuration-migration-interrupted     not-orbit-directory
-container-foreign-owner                 secret-missing
-database-below-floor                    secret-permissions
-database-credential-mismatch            secrets-directory-invalid
-database-schema-mismatch                staging-evidence-present
-database-unreachable                    stale-container
+application-unhealthy                   image-identity-mismatch
+compose-interpolation-failed            managed-file-missing
+configuration-incomplete                managed-file-permissions
+configuration-invalid                   managed-file-symlink
+configuration-migration-interrupted     migration-failed
+container-foreign-owner                 not-orbit-directory
+database-below-floor                    secret-missing
+database-credential-mismatch            secret-permissions
+database-schema-mismatch                secrets-directory-invalid
+database-unreachable                    staging-evidence-present
+deployment-version-unsupported          stale-container
 docker-unavailable                      unrelated-resource-present
 document-volume-retained-without-key    volume-retained-without-credentials
-image-identity-mismatch
 ```
 
 ### action, mutation and backup
@@ -656,8 +668,8 @@ route one script's exit code through the other's table.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `--check` | healthy | — | usage | attention (warn only) | failed (any fail) | not-an-orbit-installation | — |
 | `--plan` | empty | — | usage | plan-available | unplannable-failures-present | not-an-orbit-installation | — |
-| `--execute --safe-only` | succeeded | declined | usage | — | failed | not-an-orbit-installation | — |
-| `--execute --dangerous` | empty or complete | safe batch declined | usage | — | failed in either batch | not-an-orbit-installation | dangerous batch refused |
+| `--execute --safe-only` | succeeded | declined | usage | — | failed | not-an-orbit-installation | execution refused |
+| `--execute --dangerous` | empty or complete | safe batch declined | usage | — | failed in either batch | not-an-orbit-installation | refused (either gate) |
 | `--export-diagnostics` | written | declined | usage | — | could not write | not-an-orbit-installation | — |
 
 `5` (`not-an-orbit-installation`) has the identical trigger and meaning in
@@ -665,9 +677,12 @@ every mode: the target directory carries no Orbit fingerprint at all. A
 consumer that treats it as a generic failure will tell an operator their
 deployment is broken when in fact they are standing in the wrong directory.
 
-`6` exists only under `--execute --dangerous` and means the dangerous batch
-was refused — non-interactive, or declined by the operator. It is not a
-failure: nothing was attempted.
+`6` uniformly means "refused, unmutated" — nothing was attempted. Under
+`--execute --dangerous` that is the dangerous batch's own refusal
+(non-interactive, or declined by the operator). Under either `--execute`
+form it is also the whole-execution refusal on an unsupported deployment
+version (`execution result=refused reason=deployment-version-unsupported`,
+ADR-0016/#681). It is not a failure.
 
 `130` is the interrupted-by-signal case, as everywhere else.
 
