@@ -69,9 +69,9 @@
     },
     {
       "name": "Node.js build and runtime",
-      "tag": "node:22-alpine",
-      "reference": "node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c",
-      "indexDigest": "sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32",
+      "tag": "node:24-alpine",
+      "reference": "node:24-alpine@sha256:4caaaf42195bcd6f6f3559a413b20cb8f8ad089e231ee874cf7701643966689f",
+      "indexDigest": "sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -81,7 +81,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     },
     {
@@ -104,9 +104,9 @@
     },
     {
       "name": "ClamAV malware scanner",
-      "tag": "clamav/clamav:1.4.5-debian",
-      "reference": "clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6",
-      "indexDigest": "sha256:50296b62b23764b474be18310521f64a720524d69334ea5236aab5fac44ff993",
+      "tag": "clamav/clamav:1.5.4-debian",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446",
+      "indexDigest": "sha256:967334b92d1782e4d1314ddf903ae537d26792d21c9a39adecb8ac9757980514",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -116,7 +116,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     },
     {
@@ -138,9 +138,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.32.2",
-      "reference": "ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7",
-      "indexDigest": "sha256:c3886c198155aa7d45a29851100cc16f5d6ea6777d635ddd0597fe95874161af",
+      "tag": "ollama/ollama:0.33.2",
+      "reference": "ollama/ollama:0.33.2@sha256:9e7d782e99880c70f9563c51633da875ca605518a8f8d95c2532bda70a027b7a",
+      "indexDigest": "sha256:020e4134285e2ef4d8fd801234176de3b4faadc992a3eb06c8e66a2f9d4c4ba2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -150,7 +150,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     }
   ],
