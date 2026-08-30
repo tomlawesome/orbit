@@ -11,6 +11,12 @@ readonly journal_path="$restore_root/restore.journal"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
 readonly bundle_format_version="1"
+# An empty report means either "no rows" or "the query never ran", and only the
+# second is a reason to stop. The database emits this as the last line of every
+# report so execution is proven positively, independently of psql's exit code,
+# which also catches a report truncated mid-stream. See #678.
+readonly report_terminator='ORBIT_REPORT_END'
+readonly report_terminator_query="SELECT '${report_terminator}';"
 
 noninteractive=false
 recover_mode=false
@@ -24,6 +30,8 @@ documents_replaced=false
 completed=false
 manual_recovery_required=false
 restore_id=""
+incomplete_check=""
+correspondence_status=0
 checkpoint_database_sha256=""
 checkpoint_documents_sha256=""
 checkpoint_document_kek_sha256=""
@@ -184,22 +192,50 @@ restore_dump_to_database() {
   fi
 }
 
-query_report() {
-  local database_name="$1" query="$2" report_path="$3"
-  if ! compose exec -T orbit-db sh -c \
-    'exec psql --username="$POSTGRES_USER" --dbname="$1" --tuples-only --no-align --field-separator="|" --command="$2"' \
-    sh "$database_name" "$query" > "$report_path" 2>/dev/null; then
-    return 1
+# Returns 2, never 1, when a report cannot be trusted to have run: callers
+# distinguish that from a correspondence violation, which is 1.
+accept_report() {
+  local report_path="$1" check_name="$2" stripped="$1.complete"
+  if [[ ! -s "$report_path" ]] || [[ "$(tail -n 1 -- "$report_path")" != "$report_terminator" ]]; then
+    incomplete_check="$check_name"
+    return 2
   fi
+  head -n -1 -- "$report_path" > "$stripped" || { incomplete_check="$check_name"; return 2; }
+  mv -- "$stripped" "$report_path" || { incomplete_check="$check_name"; return 2; }
+}
+
+query_report() {
+  local database_name="$1" query="$2" report_path="$3" check_name="$4"
+  if ! compose exec -T orbit-db sh -c \
+    'exec psql --username="$POSTGRES_USER" --dbname="$1" --tuples-only --no-align --field-separator="|" --set=ON_ERROR_STOP=1 --command="$2" --command="$3"' \
+    sh "$database_name" "$query" "$report_terminator_query" > "$report_path" 2>/dev/null; then
+    incomplete_check="$check_name"
+    return 2
+  fi
+  accept_report "$report_path" "$check_name"
 }
 
 query_active_report() {
-  local query="$1" report_path="$2"
+  local query="$1" report_path="$2" check_name="$3"
   if ! compose exec -T orbit-db sh -c \
-    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --field-separator="|" --command="$1"' \
-    sh "$query" > "$report_path" 2>/dev/null; then
-    return 1
+    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --field-separator="|" --set=ON_ERROR_STOP=1 --command="$1" --command="$2"' \
+    sh "$query" "$report_terminator_query" > "$report_path" 2>/dev/null; then
+    incomplete_check="$check_name"
+    return 2
   fi
+  accept_report "$report_path" "$check_name"
+}
+
+# Correspondence stops a restore for two unrelated reasons and they must not be
+# reported alike: status 2 means a check never completed, so nothing has been
+# learned about the operator's bundle; anything else is a real violation.
+fail_correspondence() {
+  local status="$1" stage="$2" violation_message="$3"
+  (( status != 0 )) || return 0
+  if (( status == 2 )); then
+    fail "${stage}/correspondence-incomplete failed; the ${incomplete_check} check did not run to completion, so correspondence could not be verified. This is not a verdict on the backup; retry, and capture the restore output if it recurs."
+  fi
+  fail "$violation_message"
 }
 
 validate_correspondence() {
@@ -218,22 +254,22 @@ validate_correspondence() {
   mkdir -p "$report_directory"
   query_report "$database_name" \
     'SELECT c.document_id::text, c.storage_key, c.ciphertext_size::text, COALESCE(d.lifecycle::text, '\''<missing-document>'\'') FROM document_crypto c LEFT JOIN documents d ON d.id = c.document_id ORDER BY c.storage_key;' \
-    "$crypto_report" || return 1
+    "$crypto_report" crypto || return $?
   query_report "$database_name" \
     'SELECT d.id::text, d.lifecycle::text, COALESCE(c.storage_key, '\'''\''), COALESCE(c.ciphertext_size::text, '\'''\'') FROM documents d LEFT JOIN document_crypto c ON c.document_id = d.id WHERE d.lifecycle IN ('\''available'\'', '\''pending_deletion'\'') ORDER BY d.id;' \
-    "$visible_report" || return 1
+    "$visible_report" visible || return $?
   query_report "$database_name" \
     'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' OR (a.status = '\''assigned'\'' AND a.purge_pending = true) ORDER BY a.storage_key;' \
-    "$attachment_report" || return 1
+    "$attachment_report" attachments || return $?
   query_report "$database_name" \
     'SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
-    "$staging_report" || return 1
+    "$staging_report" staging || return $?
   query_report "$database_name" \
     'SELECT s.document_id::text, s.storage_key, s.status, s.ciphertext_size::text FROM document_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
-    "$document_stage_report" || return 1
+    "$document_stage_report" document-stage || return $?
   query_report "$database_name" \
     'SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''encrypting'\'') OR (d.lifecycle = '\''scanning'\'' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));' \
-    "$transient_report" || return 1
+    "$transient_report" transient || return $?
   [[ "$(tr -d '[:space:]' < "$transient_report")" == "0" ]] ||
     return 1
 
@@ -345,9 +381,10 @@ prepare_staged_bundle() {
   if ! restore_dump_to_database "$stage_database" "$extracted/database.dump"; then
     fail 'preflight/database-stage failed; the PostgreSQL archive could not be restored transactionally.'
   fi
-  if ! validate_correspondence "$stage_database" "$staged_documents" preflight; then
-    fail 'preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.'
-  fi
+  correspondence_status=0
+  validate_correspondence "$stage_database" "$staged_documents" preflight || correspondence_status=$?
+  fail_correspondence "$correspondence_status" preflight \
+    'preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.'
   drop_stage_database "$stage_database"
   stage_database=""
 }
@@ -551,9 +588,10 @@ create_checkpoint() {
   if ! tar -xf "$checkpoint_documents" -C "$temporary_directory/checkpoint-documents" 2>/dev/null; then
     fail 'checkpoint/verification failed; the captured document tree could not be staged.'
   fi
-  if ! validate_correspondence "$checkpoint_stage" "$temporary_directory/checkpoint-documents" checkpoint; then
-    fail 'checkpoint/verification failed; the rollback database and document tree do not correspond.'
-  fi
+  correspondence_status=0
+  validate_correspondence "$checkpoint_stage" "$temporary_directory/checkpoint-documents" checkpoint || correspondence_status=$?
+  fail_correspondence "$correspondence_status" checkpoint \
+    'checkpoint/verification failed; the rollback database and document tree do not correspond.'
   drop_stage_database "$checkpoint_stage"
   stage_database=""
   compute_checkpoint_digests ||
@@ -620,36 +658,24 @@ validate_active_correspondence() {
   local staging_report="$report_directory/staging.tsv"
   local document_stage_report="$report_directory/document-stage.tsv"
   local transient_report="$report_directory/transient"
-  if ! query_active_report \
+  query_active_report \
     'SELECT c.document_id::text, c.storage_key, c.ciphertext_size::text, COALESCE(d.lifecycle::text, '\''<missing-document>'\'') FROM document_crypto c LEFT JOIN documents d ON d.id = c.document_id ORDER BY c.storage_key;' \
-    "$crypto_report"; then
-    return 1
-  fi
-  if ! query_active_report \
+    "$crypto_report" crypto || return $?
+  query_active_report \
     'SELECT d.id::text, d.lifecycle::text, COALESCE(c.storage_key, '\'''\''), COALESCE(c.ciphertext_size::text, '\'''\'') FROM documents d LEFT JOIN document_crypto c ON c.document_id = d.id WHERE d.lifecycle IN ('\''available'\'', '\''pending_deletion'\'') ORDER BY d.id;' \
-    "$visible_report"; then
-    return 1
-  fi
-  if ! query_active_report \
+    "$visible_report" visible || return $?
+  query_active_report \
     'SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = '\''stored'\'' OR (a.status = '\''assigned'\'' AND a.purge_pending = true) ORDER BY a.storage_key;' \
-    "$attachment_report"; then
-    return 1
-  fi
-  if ! query_active_report \
+    "$attachment_report" attachments || return $?
+  query_active_report \
     'SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
-    "$staging_report"; then
-    return 1
-  fi
-  if ! query_active_report \
+    "$staging_report" staging || return $?
+  query_active_report \
     'SELECT s.document_id::text, s.storage_key, s.status, s.ciphertext_size::text FROM document_staging_objects s WHERE s.status IN ('\''pending'\'', '\''purge_pending'\'') ORDER BY s.storage_key;' \
-    "$document_stage_report"; then
-    return 1
-  fi
-  if ! query_active_report \
+    "$document_stage_report" document-stage || return $?
+  query_active_report \
     'SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('\''receiving'\'', '\''validating'\'', '\''quarantined'\'', '\''encrypting'\'') OR (d.lifecycle = '\''scanning'\'' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));' \
-    "$transient_report"; then
-    return 1
-  fi
+    "$transient_report" transient || return $?
   if ! validate_correspondence_reports "$temporary_directory/active-documents" "$crypto_report" "$visible_report" "$attachment_report" "$staging_report" "$document_stage_report" "$transient_report" active; then
     return 1
   fi
@@ -836,9 +862,10 @@ recover_restore() {
   create_stage_database "$checkpoint_stage"
   restore_dump_to_database "$checkpoint_stage" "$checkpoint_directory/database.dump" ||
     fail 'recovery/checkpoint failed; the durable database checkpoint is invalid.'
-  if ! validate_correspondence "$checkpoint_stage" "$temporary_directory/checkpoint-documents" recovery; then
-    fail 'recovery/checkpoint failed; the durable rollback database and document tree do not correspond.'
-  fi
+  correspondence_status=0
+  validate_correspondence "$checkpoint_stage" "$temporary_directory/checkpoint-documents" recovery || correspondence_status=$?
+  fail_correspondence "$correspondence_status" recovery \
+    'recovery/checkpoint failed; the durable rollback database and document tree do not correspond.'
   drop_stage_database "$checkpoint_stage"
   stage_database=""
   checkpoint_verified=true
@@ -948,7 +975,10 @@ fi
 restore_active_database "$extracted_directory/database.dump" || fail 'cutover/database failed; the staged PostgreSQL archive was rejected transactionally.'
 reset_scan_recovery_leases || fail 'cutover/recovery-jobs failed; recoverable scanner jobs could not be safely requeued.'
 write_journal database-restored || fail 'cutover/journal failed; the database-restored recovery state could not be durably published.'
-validate_active_correspondence || fail 'cutover/correspondence failed; active database and documents do not correspond.'
+correspondence_status=0
+validate_active_correspondence || correspondence_status=$?
+fail_correspondence "$correspondence_status" cutover \
+  'cutover/correspondence failed; active database and documents do not correspond.'
 start_and_wait_for_health || fail 'cutover/health failed; Orbit did not become healthy after restore.'
 
 completed=true

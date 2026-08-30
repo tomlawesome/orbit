@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -43,6 +43,31 @@ function extractFunction(name) {
 
 const healthProbeUrlSource = extractFunction("health_probe_url");
 const waitForHealthSource = extractFunction("wait_for_health");
+
+// Issue #678: the same two constants and four functions the live script uses,
+// extracted rather than retyped, so this suite cannot pass against a copy that
+// has drifted from scripts/restore.sh.
+function extractReadonly(name) {
+  const pattern = new RegExp(`^readonly ${name}=.*$`, "m");
+  const match = restoreScriptSource.match(pattern);
+  if (!match) {
+    throw new Error(`Could not find "readonly ${name}=" in scripts/restore.sh`);
+  }
+  return match[0];
+}
+
+const reportTerminatorSource = extractReadonly("report_terminator");
+const reportTerminatorQuerySource = extractReadonly("report_terminator_query");
+const acceptReportSource = extractFunction("accept_report");
+const queryReportSource = extractFunction("query_report");
+const queryActiveReportSource = extractFunction("query_active_report");
+const failCorrespondenceSource = extractFunction("fail_correspondence");
+
+// The operator-facing verdict this fix exists to stop emitting for a query
+// that never ran. Pinned as a literal so the test states the exact sentence an
+// operator would otherwise be sent away with.
+const corruptBackupMessage =
+  "preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.";
 
 const scratchDirs = [];
 const servers = [];
@@ -244,5 +269,217 @@ describe("scripts/restore.sh wait_for_health (issue #383 finding 3)", () => {
     ].join("\n");
     const result = await runBashAsync(scopedHarness, 10000);
     expect(result.status).not.toBe(0);
+  });
+});
+
+// Issue #678: a correspondence report that never ran was reported to the
+// operator as a verdict on their backup. An empty report is ambiguous on its
+// own -- "no rows, all good" or "the query never executed" -- so execution is
+// now proven positively by a terminator the database emits as the last line,
+// independently of psql's exit code. That independence is the point: a report
+// truncated mid-stream by a killed process or a full disk exits 0 and parses
+// as "fewer referenced objects", which is the direction that could wrongly
+// pass validation.
+//
+// The stub below stands in for `compose exec ... psql`, reproducing the four
+// behaviours confirmed against a real PostgreSQL 17 on the issue, and echoes
+// the terminator it was actually handed rather than a hardcoded string, so a
+// script that stopped passing the terminator command fails these tests.
+function composeStub(mode, scriptCapturePath) {
+  return [
+    "compose() {",
+    `  printf '%s' "$6" > ${JSON.stringify(scriptCapturePath)}`,
+    '  local terminator_command="${!#}"',
+    "  local emitted",
+    '  emitted="$(sed -E "s/^SELECT .(.*).;/\\1/" <<< "$terminator_command")"',
+    `  case ${JSON.stringify(mode)} in`,
+    "    rows) printf 'aaa|1\\nbbb|2\\n'; printf '%s\\n' \"$emitted\" ;;",
+    "    zero-rows) printf '%s\\n' \"$emitted\" ;;",
+    "    failed) return 1 ;;",
+    "    truncated) printf 'aaa|1\\n' ;;",
+    "    silent-success) : ;;",
+    `    *) printf 'unknown stub mode\\n' >&2; return 99 ;;`,
+    "  esac",
+    "}",
+  ].join("\n");
+}
+
+function runQueryReport({ mode, variant = "stage", checkName = "crypto" }) {
+  const dir = makeFixture();
+  const reportPath = join(dir, "report.tsv");
+  const scriptCapturePath = join(dir, "psql-script");
+  const call =
+    variant === "stage"
+      ? `query_report stage-db 'SELECT 1;' ${JSON.stringify(reportPath)} ${checkName}`
+      : `query_active_report 'SELECT 1;' ${JSON.stringify(reportPath)} ${checkName}`;
+  const harness = [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    reportTerminatorSource,
+    reportTerminatorQuerySource,
+    'incomplete_check=""',
+    composeStub(mode, scriptCapturePath),
+    acceptReportSource,
+    queryReportSource,
+    queryActiveReportSource,
+    "status=0",
+    `${call} || status=$?`,
+    'printf "status=%s check=%s\\n" "$status" "$incomplete_check"',
+  ].join("\n");
+  const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+  return {
+    result,
+    status: /status=(\d+)/.exec(result.stdout)?.[1],
+    incompleteCheck: /check=(\S*)/.exec(result.stdout)?.[1] ?? "",
+    report: existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null,
+    psqlScript: existsSync(scriptCapturePath) ? readFileSync(scriptCapturePath, "utf8") : "",
+  };
+}
+
+describe.each([
+  ["query_report (staged bundle)", "stage"],
+  ["query_active_report (live database)", "active"],
+])("scripts/restore.sh %s proves its report ran (issue #678)", (_label, variant) => {
+  it("accepts a report that ends with the terminator, and strips it before parsing", () => {
+    const { status, report } = runQueryReport({ mode: "rows", variant });
+    expect(status).toBe("0");
+    expect(report).toBe("aaa|1\nbbb|2\n");
+    expect(report).not.toContain("ORBIT_REPORT_END");
+  });
+
+  it("accepts a legitimate zero-row report, leaving the parsed report empty", () => {
+    const { status, report } = runQueryReport({ mode: "zero-rows", variant });
+    expect(status).toBe("0");
+    expect(report).toBe("");
+  });
+
+  it("refuses a failed query as an incomplete check, not a correspondence violation", () => {
+    const { status, incompleteCheck } = runQueryReport({ mode: "failed", variant, checkName: "attachments" });
+    expect(status).toBe("2");
+    expect(incompleteCheck).toBe("attachments");
+  });
+
+  it("refuses a report truncated mid-stream even though psql exited 0 -- the case an exit code cannot see", () => {
+    const { status, incompleteCheck } = runQueryReport({ mode: "truncated", variant, checkName: "staging" });
+    expect(status).toBe("2");
+    expect(incompleteCheck).toBe("staging");
+  });
+
+  it("refuses an empty report that exited 0, which is otherwise indistinguishable from no rows", () => {
+    const { status, incompleteCheck } = runQueryReport({ mode: "silent-success", variant, checkName: "visible" });
+    expect(status).toBe("2");
+    expect(incompleteCheck).toBe("visible");
+  });
+
+  it("asks psql to stop on error and to run the report and the terminator as two separate commands", () => {
+    const { psqlScript } = runQueryReport({ mode: "rows", variant });
+    expect(psqlScript).toContain("--set=ON_ERROR_STOP=1");
+    expect(psqlScript.match(/--command=/g)).toHaveLength(2);
+  });
+});
+
+describe("scripts/restore.sh report acceptance, against the pre-fix query (issue #678)", () => {
+  // The exact body scripts/restore.sh's query_report had before this fix,
+  // pinned here rather than read from git history, following the same
+  // discipline as preFixHardcodedProbeUrl above. Running it against the same
+  // stub the tests above use is what makes the two defects concrete: a query
+  // that failed is indistinguishable from a correspondence violation, and a
+  // query that never ran at all is accepted as "no rows".
+  const preFixQueryReportSource = [
+    "pre_fix_query_report() {",
+    '  local database_name="$1" query="$2" report_path="$3"',
+    "  if ! compose exec -T orbit-db sh -c \\",
+    "    'exec psql --username=\"$POSTGRES_USER\" --dbname=\"$1\" --tuples-only --no-align --field-separator=\"|\" --command=\"$2\"' \\",
+    '    sh "$database_name" "$query" > "$report_path" 2>/dev/null; then',
+    "    return 1",
+    "  fi",
+    "}",
+  ].join("\n");
+
+  function runPreFix(mode) {
+    const dir = makeFixture();
+    const reportPath = join(dir, "report.tsv");
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      composeStub(mode, join(dir, "psql-script")),
+      preFixQueryReportSource,
+      "status=0",
+      `pre_fix_query_report db 'SELECT 1;' ${JSON.stringify(reportPath)} || status=$?`,
+      'printf "status=%s\\n" "$status"',
+    ].join("\n");
+    const result = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    return { status: /status=(\d+)/.exec(result.stdout)?.[1], report: readFileSync(reportPath, "utf8") };
+  }
+
+  it("pre-fix, a failed query returned 1 -- the same status a correspondence violation returns, which is how the operator came to be told their backup was corrupt", () => {
+    expect(runPreFix("failed").status).toBe("1");
+    expect(runQueryReport({ mode: "failed" }).status).toBe("2");
+  });
+
+  it("pre-fix, a query that produced nothing and exited 0 was accepted as an empty report; it is now refused", () => {
+    const preFix = runPreFix("silent-success");
+    expect(preFix.status).toBe("0");
+    expect(preFix.report).toBe("");
+    expect(runQueryReport({ mode: "silent-success" }).status).toBe("2");
+  });
+});
+
+describe("scripts/restore.sh fail_correspondence (issue #678)", () => {
+  function runFailCorrespondence(status) {
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      'incomplete_check="attachments"',
+      extractFunction("fail"),
+      failCorrespondenceSource,
+      `fail_correspondence ${status} preflight ${JSON.stringify(corruptBackupMessage)}`,
+      'printf "returned-cleanly\\n"',
+    ].join("\n");
+    return spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+  }
+
+  it("tells the operator which check could not be completed, and does not call their backup corrupt", () => {
+    const result = runFailCorrespondence(2);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("preflight/correspondence-incomplete failed");
+    expect(result.stderr).toContain("the attachments check did not run to completion");
+    expect(result.stderr).not.toContain("do not correspond");
+    expect(result.stderr).not.toContain("use a complete backup and retry");
+  });
+
+  it("still reports a genuine correspondence violation with its original message", () => {
+    const result = runFailCorrespondence(1);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(corruptBackupMessage);
+  });
+
+  it("fails closed: an incomplete check refuses the restore rather than proceeding", () => {
+    expect(runFailCorrespondence(2).stdout).not.toContain("returned-cleanly");
+  });
+
+  it("passes a healthy correspondence check through without failing", () => {
+    const result = runFailCorrespondence(0);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+});
+
+describe("scripts/restore.sh correspondence call sites (issue #678)", () => {
+  // Guards the fix's completeness rather than one function's behaviour: a
+  // report query added later without a check name, or one that collapses the
+  // incomplete status back to 1, would restore the original defect silently.
+  const callLines = restoreScriptSource
+    .split("\n")
+    .filter((line) => /^\s+"\$\w+_report"\s/.test(line));
+
+  it("covers every report query in both the staged and the live path", () => {
+    expect(callLines).toHaveLength(12);
+  });
+
+  it("names a check and propagates the incomplete status at every call site", () => {
+    for (const line of callLines) {
+      expect(line).toMatch(/"\$\w+_report" [a-z-]+ \|\| return \$\?$/);
+    }
   });
 });
