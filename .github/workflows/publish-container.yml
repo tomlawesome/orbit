@@ -30,6 +30,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  # Vendor's own registry first; the Google mirror is a fallback, not the
+  # default. A 403 from one must not fail a security gate (#673).
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasec/trivy-db:2,mirror.gcr.io/aquasec/trivy-db:2
 
 jobs:
   # Selects the cheapest pull-request lane that still exercises every changed
@@ -181,6 +184,7 @@ jobs:
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
           docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
             "${TRIVY_IMAGE}" fs \
@@ -265,6 +269,7 @@ jobs:
             | while read -r slug reference; do
                 echo "scanning ${reference}"
                 docker run --rm \
+                  --env TRIVY_DB_REPOSITORY \
                   --volume "${GITHUB_WORKSPACE}:/workspace" \
                   --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
                   "${TRIVY_IMAGE}" image \
@@ -637,6 +642,7 @@ jobs:
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
           docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -646,6 +652,7 @@ jobs:
             --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
             "${TESTED_IMAGE_TAG}"
           docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
