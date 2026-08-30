@@ -607,7 +607,7 @@ set -Eeuo pipefail
 # `restore-transaction` is the only action class in this slice that needs a
 # content-level backup (`backup=required` in the plan). Before it touches
 # any path, this script lazily creates one private, mode-0700 recovery
-# directory for the whole `--execute` run (`.orbit-repair-recovery.XXXXXX`,
+# directory for the whole `--execute` run (`.orbit-repair-recovery.*`,
 # a sibling naming convention to install.sh's own
 # `.orbit-install-staging.XXXXXX`, but with a distinct prefix so it can
 # never be mistaken for leftover installer staging evidence by a later
@@ -913,7 +913,7 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
 # (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
-# existing `.orbit-repair-recovery.XXXXXX`/`.orbit-install-staging.XXXXXX`
+# existing `.orbit-repair-recovery.*`/`.orbit-install-staging.XXXXXX`
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
 # directory (`cleanup_recovery_dir`, always removed at the end of every
@@ -1889,9 +1889,25 @@ print_entries_preview() {
 
 ensure_recovery_dir() {
   [[ -n "$recovery_dir" ]] && return 0
-  recovery_dir="$(mktemp -d "./.orbit-repair-recovery.XXXXXX")" || return 1
-  chmod 700 -- "$recovery_dir" || return 1
-  return 0
+  # The name is assigned BEFORE the directory exists, never after. The old
+  # shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
+  # a fatal signal landing while the command substitution is in flight kills
+  # this shell after mktemp has created the directory but before the
+  # assignment completes, so the EXIT trap finds $recovery_dir empty and the
+  # mode-700 copy of live secrets is orphaned. With the name assigned first,
+  # every interruption point leaves the trap knowing exactly what to remove:
+  # before mkdir there is nothing to remove and `rm -rf` of a missing path is
+  # a no-op; from mkdir onwards the directory is removable by name. mkdir
+  # itself refuses an existing path (symlinks included), so a predictable
+  # name cannot be redirected the way a reused one could; a collision just
+  # burns one attempt.
+  local attempt
+  for attempt in 1 2 3; do
+    recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
+    mkdir -m 700 -- "$recovery_dir" 2>/dev/null && return 0
+  done
+  recovery_dir=""
+  return 1
 }
 
 cleanup_recovery_dir() {
