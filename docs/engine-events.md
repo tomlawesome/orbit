@@ -590,6 +590,25 @@ dangerous result=<result> done=<n> failed=<n> reason=<reason>
 Unknown keys are ignored by consumers; unknown enum values are renderable but
 unstyled, exactly as for the installer stream.
 
+### result vocabularies
+
+Each line form has its own closed set. They are not interchangeable — a
+consumer must not, for example, expect `failed` on a `plan` line.
+
+```
+diagnosis result=  healthy | attention | failed
+plan result=       empty | ready | manual-required
+execute result=    done | failed | skipped
+execution result=  empty | complete | unactionable | declined | failed
+dangerous result=  empty | complete | refused | failed
+dangerous reason=  none | non-interactive | refused-by-operator
+                   | checkpoint-failed | step-failed
+```
+
+`refused` is not a failure: the dangerous batch was never attempted, and
+`reason` says why. Treating it as a failure reports a problem where the
+operator simply declined, or where no terminal was available to ask.
+
 ### finding class
 
 ```
@@ -630,11 +649,22 @@ Repair's exit vocabulary is its own and **collides with `install.sh`'s** —
 install's `3` is "blocked", repair's `3` is "attention". A consumer must never
 route one script's exit code through the other's table.
 
-| Mode | 0 | 1 | 2 | 3 | 4 |
-| --- | --- | --- | --- | --- | --- |
-| `--check` | healthy | — | usage | attention (warn only) | failed (any fail) |
-| `--plan` | empty | — | usage | plan-available | unplannable-failures-present |
-| `--execute` | succeeded | declined | usage | — | failed |
+| Mode | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `--check` | healthy | — | usage | attention (warn only) | failed (any fail) | not-an-orbit-installation | — |
+| `--plan` | empty | — | usage | plan-available | unplannable-failures-present | not-an-orbit-installation | — |
+| `--execute --safe-only` | succeeded | declined | usage | — | failed | not-an-orbit-installation | — |
+| `--execute --dangerous` | empty or complete | safe batch declined | usage | — | failed in either batch | not-an-orbit-installation | dangerous batch refused |
+| `--export-diagnostics` | written | declined | usage | — | could not write | not-an-orbit-installation | — |
+
+`5` (`not-an-orbit-installation`) has the identical trigger and meaning in
+every mode: the target directory carries no Orbit fingerprint at all. A
+consumer that treats it as a generic failure will tell an operator their
+deployment is broken when in fact they are standing in the wrong directory.
+
+`6` exists only under `--execute --dangerous` and means the dangerous batch
+was refused — non-interactive, or declined by the operator. It is not a
+failure: nothing was attempted.
 
 `130` is the interrupted-by-signal case, as everywhere else.
 
