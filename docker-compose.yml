@@ -58,7 +58,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6
+    image: clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
@@ -113,7 +113,7 @@ services:
   # explicit operator action rather than a deployment requirement.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7
+    image: ollama/ollama:0.33.2@sha256:9e7d782e99880c70f9563c51633da875ca605518a8f8d95c2532bda70a027b7a
     profiles: ["ai"]
     restart: unless-stopped
     environment:
