@@ -159,6 +159,25 @@ set -Eeuo pipefail
 #                                   configure.sh --check semantics — a
 #                                   deterministically recoverable interrupted
 #                                   `configuration.sh --migrate` run.
+#   deployment-version-unsupported — .env-orbit is readable but its
+#                                   ORBIT_CONFIG_APPLIED_VERSION is absent,
+#                                   malformed, or names a published release
+#                                   below ADR-0016's supported-install floor
+#                                   (v1.3.0). Absence fails closed: every
+#                                   supported install writes the key, so a
+#                                   readable file without it is the
+#                                   signature of a pre-floor or
+#                                   hand-assembled deployment. Major
+#                                   version 0 (development builds) is
+#                                   exempt, and the check is skipped (never
+#                                   failed) while a configuration finding
+#                                   is present this run — a half-written
+#                                   .env-orbit legitimately lacks the key,
+#                                   and the restore that repairs it must
+#                                   not be refused by it. While this
+#                                   finding is present, --execute refuses
+#                                   the entire batch — see EXIT CODES
+#                                   (--execute).
 #   staging-evidence-present       — a leftover `.orbit-install-staging.*`
 #                                   directory from an interrupted installer
 #                                   transaction (see issue #291 comment on #261).
@@ -265,9 +284,14 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#   The trailing three fields are criterion 6's preview contract (#681):
+#   the affected target (the finding's own enum-only target field), the
+#   named rollback point (rollback_for_action), and the expected result if
+#   the action succeeds (expected_for_action). All enum-only, never a path
+#   or a value.
 #   A finding with no safe automatic action instead emits:
-#     plan action=manual resolves=<reason-class> mutation=none backup=not-required
+#     plan action=manual resolves=<reason-class> mutation=none backup=not-required target=<finding-target> rollback=not-required expect=operator-action
 #   paired with one human-readable line on STDERR naming the exact safe
 #   manual step or evidence to collect for that reason class — field names
 #   only (e.g. "the target managed file", "the flagged container's
@@ -754,6 +778,15 @@ set -Eeuo pipefail
 #      re-diagnosed, and this exit code is then forced regardless of that
 #      terminal line's own result — exactly like `--check`/`--plan`'s own
 #      forced-5 precedent.
+#   6  refused — a deployment-version-unsupported finding is present
+#      (ADR-0016, #681), so the ENTIRE execution is refused before any
+#      batch runs: nothing is executed, nothing is mutated, and the run
+#      prints `execution result=refused done=0 failed=0
+#      reason=deployment-version-unsupported` (plus the matching
+#      `dangerous result=refused ...` line when --dangerous was requested)
+#      followed by the unchanged diagnosis. This is the same exit code the
+#      dangerous batch's own refusal uses — 6 uniformly means "refused,
+#      unmutated" whichever gate refused.
 #
 # The exit code always reflects THIS RUN's execution outcome, never the
 # post-execution re-diagnosis's own severity (analogous to how `--plan`'s
@@ -1322,6 +1355,13 @@ readonly secrets_directory=".orbit-secrets"
 # suffix (migrate_file(), non-transaction path), and only when the
 # migration was NOT already running inside install's own transaction.
 readonly configuration_rollback_suffix=".orbit-config.rollback"
+
+# ADR-0016's supported-install floor, as comparable components. repair.sh is
+# deliberately source-less, so the floor is mirrored here rather than shared
+# — the authoritative statement is docs/adr/0016.
+readonly supported_floor_major=1
+readonly supported_floor_minor=3
+readonly supported_floor_patch=0
 readonly database_volume_key="orbit-db-data"
 # ADR-0014 decision 5's second retention guard (document-kek): mirrors
 # database_volume_key exactly, matched the same way against
@@ -1330,7 +1370,7 @@ readonly database_volume_key="orbit-db-data"
 readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=17
+readonly total_checks=18
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
@@ -1397,6 +1437,7 @@ readonly -a class_order=(
   configuration-incomplete
   configuration-invalid
   configuration-migration-interrupted
+  deployment-version-unsupported
   staging-evidence-present
   compose-interpolation-failed
   docker-unavailable
@@ -1460,6 +1501,12 @@ readonly -A action_for_class=(
   # same wrong image running); recreating a container from a different image
   # is outside repair's safe, reversible action set.
   [image-identity-mismatch]=manual
+  # ADR-0016: a deployment installed by a release below the supported floor
+  # is not a supported repair target. Nothing here is executable — and
+  # execute_repair additionally refuses the ENTIRE batch when this finding
+  # is present, because running even the safe executors against a pre-floor
+  # layout would mutate files this script was never proven against.
+  [deployment-version-unsupported]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
   [managed-file-symlink]=manual
@@ -1499,6 +1546,41 @@ readonly -A backup_for_action=(
   [manual]=not-required
 )
 
+# Action class -> named rollback point for the plan line (criterion 6, #681).
+# Enum-only like every other plan field: the name says where the undo lives,
+# never a path.
+#   recovery-directory     the private mode-700 recovery copy taken before
+#                          the action mutates anything (ensure_recovery_dir)
+#   credential-checkpoint  the verified checkpoint bundle stage two creates
+#                          before rotating (see EXECUTE MODE, stage two)
+#   prior-mode             the action is a mode change; the undo is the mode
+#                          the file had before
+#   not-required           the action leaves nothing to roll back —
+#                          regenerate-secret belongs here for the same
+#                          reason its backup is not-required (see
+#                          backup_for_action's comment above)
+readonly -A rollback_for_action=(
+  [restore-transaction]=recovery-directory
+  [fix-permissions]=prior-mode
+  [regenerate-secret]=not-required
+  [rotate-database-credential]=credential-checkpoint
+  [restart-services]=not-required
+  [rerun-configuration]=not-required
+  [manual]=not-required
+)
+
+# Action class -> expected result for the plan line (criterion 6, #681):
+# what the deployment looks like if the action succeeds, as an enum.
+readonly -A expected_for_action=(
+  [restore-transaction]=files-restored
+  [fix-permissions]=permissions-safe
+  [regenerate-secret]=secret-recreated
+  [rotate-database-credential]=authentication-restored
+  [restart-services]=services-healthy
+  [rerun-configuration]=configuration-valid
+  [manual]=operator-action
+)
+
 # One human-readable, value-free manual-step line per manual-class reason
 # class, printed to stderr alongside its `plan action=manual ...` line.
 readonly -A manual_guidance=(
@@ -1520,6 +1602,7 @@ readonly -A manual_guidance=(
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
+  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here"
   [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
   # Keyed by the reason class (secret-missing), not by target, like every
   # other entry here — but this one only ever fires for one specific target:
@@ -1753,8 +1836,9 @@ print_plan_lines() {
         action="${action_for_class[$fclass]:-manual}"
       fi
 
-      printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-        "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+      printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+        "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+        "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
 
       if [[ "$action" == manual ]]; then
         manual=$((manual + 1))
@@ -1869,8 +1953,9 @@ print_plan_preview() {
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r action fclass ftarget <<< "$entry"
-    printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+    printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+      "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
   done
 }
 
@@ -1882,8 +1967,9 @@ print_entries_preview() {
   local entry action fclass ftarget
   for entry in "$@"; do
     IFS='|' read -r action fclass ftarget <<< "$entry"
-    printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+    printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+      "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
   done
 }
 
@@ -2034,6 +2120,7 @@ run_diagnosis() {
   #     configuration_migration_rollback_recoverable above), in which case
   #     configuration-migration-interrupted (ADR-0014 decision 7) replaces
   #     it: exactly one configuration finding is ever recorded per run.
+  configuration_finding=0
   if is_regular_non_symlink_file scripts/configure.sh; then
     checked=$((checked + 1))
     configure_check_stderr="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-configure-check.XXXXXX")"
@@ -2043,6 +2130,7 @@ run_diagnosis() {
     [[ -s "$configure_check_stderr" ]] && configure_check_had_stderr=1
     rm -f -- "$configure_check_stderr"
     if [[ "$configure_check_status" != 0 ]]; then
+      configuration_finding=1
       if configuration_migration_rollback_recoverable; then
         add_finding configuration-migration-interrupted configuration fail
       elif [[ "$configure_check_had_stderr" == 1 ]]; then
@@ -2051,6 +2139,46 @@ run_diagnosis() {
         add_finding configuration-incomplete configuration fail
       fi
     fi
+  fi
+
+  # --- Step 5b: deployment version vs the supported-install floor (ADR-0016) -
+  #
+  # ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
+  # supported install, so its absence from a readable .env-orbit is not a
+  # gap to shrug at: it is the signature of a deployment installed before
+  # the floor existed (a v1.0.0-era install carries no configuration.sh at
+  # all), or of a hand-assembled file this script has no business mutating.
+  # Both refuse — fail closed. Major version 0 is the development era
+  # (working-tree and CI builds stamp v0.0.0) and is exempt: it is not a
+  # published release, and ADR-0016's floor is about published releases.
+  # When .env-orbit itself is untrustworthy (missing, symlink, wrong mode)
+  # this check is skipped rather than failed: those states are findings of
+  # their own, fixing them is exactly what repair is for, and the version
+  # re-evaluates on the next run once the file can be believed. The same
+  # skip applies while a configuration finding is present this run: an
+  # interrupted or invalid configuration means the live file's content is
+  # not believable either — a half-written .env-orbit legitimately lacks
+  # the version key, and refusing here would block the very restore
+  # (ADR-0014 decision 7) that makes the file believable again.
+  if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then
+    checked=$((checked + 1))
+    applied_version="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
+    version_supported=0
+    if [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+      version_major="${BASH_REMATCH[1]}"
+      version_minor="${BASH_REMATCH[2]}"
+      version_patch="${BASH_REMATCH[3]}"
+      if ((version_major == 0)); then
+        version_supported=1
+      elif ((version_major > supported_floor_major)); then
+        version_supported=1
+      elif ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
+        version_supported=1
+      elif ((version_major == supported_floor_major && version_minor == supported_floor_minor && version_patch >= supported_floor_patch)); then
+        version_supported=1
+      fi
+    fi
+    [[ "$version_supported" == 1 ]] || add_finding deployment-version-unsupported deployment fail
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------
@@ -3727,6 +3855,26 @@ execute_repair() {
   fi
 
   compute_plan_entries
+
+  # ADR-0016 refusal (criterion 9, #681): an unsupported deployment version
+  # refuses the whole execution, not just its own (manual) plan entry.
+  # Running even the safe executors against a pre-floor deployment would
+  # mutate a layout this script was never proven against, so nothing is
+  # allowed to run — mirroring the dangerous batch's own refusal grammar,
+  # with the reason carried on the line.
+  local version_unsupported=0
+  for entry in "${findings[@]:-}"; do
+    [[ "$entry" == "deployment-version-unsupported|"* ]] && version_unsupported=1
+  done
+  if [[ "$version_unsupported" == 1 ]]; then
+    printf 'execution result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
+    if [[ "$dangerous" == 1 ]]; then
+      printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
+    fi
+    print_check_lines
+    exit 6
+  fi
+
   run_safe_batch
 
   if [[ "$dangerous" == 1 ]]; then
