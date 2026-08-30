@@ -27,7 +27,12 @@ dockerfile="${1:-$repo_dir/Dockerfile}"
 
 fail() { printf 'base image: %s\n' "$1" >&2; }
 
-pinned_reference="$(sed -n '1s/^FROM \([^ ]*\).*/\1/p' "$dockerfile")"
+# The first FROM, wherever it sits. This used to read line 1 literally, which
+# held only while the Dockerfile opened with its FROM; a comment block above it
+# made the check report an unpinned base and refuse to run (#651). A Dockerfile
+# may legally open with comments, so find the directive rather than assume its
+# line number.
+pinned_reference="$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p' "$dockerfile" | head -1)"
 if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* ]]; then
   fail "the first FROM in $dockerfile is not a digest-pinned reference: '${pinned_reference:-<none>}'"
   fail "this check cannot verify an unpinned base, and an unpinned base must not ship."
