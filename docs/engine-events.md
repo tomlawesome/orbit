@@ -612,16 +612,19 @@ operator simply declined, or where no terminal was available to ask.
 ### finding class
 
 ```
-application-unhealthy               configuration-migration-interrupted
-compose-interpolation-failed        container-foreign-owner
-configuration-incomplete            database-below-floor
-configuration-invalid               database-credential-mismatch
-database-schema-mismatch            database-unreachable
-docker-unavailable                  document-volume-retained-without-key
-image-identity-mismatch             migration-failed
-not-orbit-directory                 secrets-directory-invalid
-staging-evidence-present            stale-container
-unrelated-resource-present          volume-retained-without-credentials
+application-unhealthy                   managed-file-missing
+compose-interpolation-failed            managed-file-permissions
+configuration-incomplete                managed-file-symlink
+configuration-invalid                   migration-failed
+configuration-migration-interrupted     not-orbit-directory
+container-foreign-owner                 secret-missing
+database-below-floor                    secret-permissions
+database-credential-mismatch            secrets-directory-invalid
+database-schema-mismatch                staging-evidence-present
+database-unreachable                    stale-container
+docker-unavailable                      unrelated-resource-present
+document-volume-retained-without-key    volume-retained-without-credentials
+image-identity-mismatch
 ```
 
 ### action, mutation and backup
@@ -682,8 +685,25 @@ prompt field=checkpoint-passphrase-confirm kind=secret     required=true attempt
 prompt field=export-diagnostics            kind=confirm    required=true attempt=1
 ```
 
-With neither a controlling terminal nor this opt-in, repair declines rather
-than guessing — it never executes unattended.
+With neither a controlling terminal nor this opt-in, there is nobody to ask, and
+each confirmation resolves on its own terms rather than by one blanket rule:
+
+| Confirmation | Unattended outcome |
+| --- | --- |
+| safe batch (`--execute --safe-only`) | **proceeds** |
+| dangerous batch (`--execute --dangerous`) | refused: `dangerous result=refused … reason=non-interactive`, exit `6` |
+| `--export-diagnostics` | declines, exit `1` |
+
+The safe batch proceeds because `--safe-only` is mandatory alongside `--execute`
+in v0, so reaching that point is already the automation contract's intended
+unattended path — every action in the batch is reversible and none of them mints
+or rotates a credential. Nothing dangerous ever runs unattended.
+
+One consequence a consumer has to handle: **the unattended safe batch emits no
+`plan` lines.** The plan preview exists to show an operator what they are
+approving, so where nothing is asked, nothing is previewed. A consumer that
+waits for a `plan` line before reading `execute` lines will wait forever on this
+path.
 
 ### Changing this vocabulary
 
