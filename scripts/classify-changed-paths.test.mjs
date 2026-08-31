@@ -58,7 +58,7 @@ describe("changed-path CI risk classification", () => {
       ".github/workflows/publish-container.yml",
       "Dockerfile",
       "docker-compose.yml",
-      "config/tika-config.xml",
+      "config/tika-config.json",
       "package.json",
       "playwright.config.ts",
       "public/favicon.svg",
