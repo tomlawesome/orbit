@@ -1,0 +1,16 @@
+{
+  "server": {},
+  "parsers": [
+    {
+      "default-parser": {
+        "exclude": ["tesseract-ocr-parser"]
+      }
+    }
+  ],
+  "parse-context": {
+    "embedded-limits": {
+      "maxDepth": 0,
+      "maxCount": 0
+    }
+  }
+}

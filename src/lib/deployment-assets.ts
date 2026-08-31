@@ -24,7 +24,7 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.mail.yml",
   "docker-compose.mail-alias-rotation.yml",
   ".env-orbit.example",
-  "config/tika-config.xml",
+  "config/tika-config.json",
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
   "scripts/configuration.sh",
@@ -55,7 +55,7 @@ export const SECRETS_DIRECTORY = ".orbit-secrets";
  * whatever the ambient umask allows a plain `curl --output`-created file
  * (typically 0644) — never InstallTransaction's SECURE_FILE_MODE (0600),
  * which is reserved for genuinely secret-bearing writes (the staged
- * environment file and secrets directory tree). Notably, `config/tika-config.xml`
+ * environment file and secrets directory tree). Notably, `config/tika-config.json`
  * is bind-mounted into the non-root orbit-tika container (docker-compose.yml's
  * `user: "35002:35002"`), so installing it at 0600 leaves it unreadable and
  * breaks Tika startup for the processing/full profiles (issue #383).

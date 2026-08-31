@@ -83,17 +83,21 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8
+    image: apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
     read_only: true
     environment:
-      TIKA_CONFIG: /etc/orbit/tika-config.xml
-    command: ["-c", "/etc/orbit/tika-config.xml"]
+      TIKA_CONFIG: /etc/orbit/tika-config.json
+    # Tika 4 takes JSON, not the XML of Tika 3. The exclusion in that file is
+    # the only thing holding the Tesseract OCR parser out of the parser set,
+    # and it only binds in the array form under a registered component name:
+    # the object form parses, loads nothing and reports no error (#687).
+    command: ["-c", "/etc/orbit/tika-config.json"]
     configs:
       - source: orbit-tika-config
-        target: /etc/orbit/tika-config.xml
+        target: /etc/orbit/tika-config.json
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -161,7 +165,7 @@ volumes:
 
 configs:
   orbit-tika-config:
-    file: ./config/tika-config.xml
+    file: ./config/tika-config.json
 
 secrets:
   orbit-postgres-password:

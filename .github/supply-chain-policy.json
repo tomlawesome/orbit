@@ -121,9 +121,9 @@
     },
     {
       "name": "Apache Tika parser",
-      "tag": "apache/tika:3.2.2.0-full",
-      "reference": "apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8",
-      "indexDigest": "sha256:ffab324253edc54706e8882dd28190b1e6559c344b5315ae8a74b9efda9e7291",
+      "tag": "apache/tika:4.0.0-full",
+      "reference": "apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
+      "indexDigest": "sha256:80072bb73dd320a9de9709beb0b16d14dd6d2680376f8d31e498f55b633ba593",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -133,7 +133,7 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-31",
       "reviewBy": "2026-10-30"
     },
     {

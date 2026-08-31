@@ -1092,7 +1092,7 @@ journey_successful_rollback() {
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
       docker-compose.mail-alias-rotation.yml .env-orbit.example \
-      config/tika-config.xml scripts/configure.sh scripts/installer-ui.sh \
+      config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
       scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
