@@ -29,6 +29,11 @@ authorisation to raise issues and make changes there (owner, 2026-08-30).
 - Publish previews only after required checks pass on the protected `preview`
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
+- Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
+  `main` stays at v1.2.0 and is expected to be far behind. A Dependabot alert
+  or stale pin on `main` is not work: check `dev` first, and if `dev` is
+  already fixed the alert clears when v1.3.0 ships. Do not propose a promotion
+  as available work.
 
 ## Harnesses that already exist
 
