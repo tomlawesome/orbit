@@ -11,7 +11,7 @@ flowchart LR
     user["Browser or installed PWA"]
     oidc["External OIDC provider"]
     orbit["Orbit application container"]
-    db[("PostgreSQL 17")]
+    db[("PostgreSQL 18")]
     files[("Encrypted document volume")]
     clamav["Private ClamAV"]
     tika["Optional private Tika"]
