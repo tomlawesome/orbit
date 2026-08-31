@@ -182,3 +182,30 @@ jobs:
           path: ${{ runner.temp }}/live-raw.log.*
           if-no-files-found: ignore
           retention-days: 7
+
+      # A required check that gates the promotion has to be readable as
+      # evidence. This one is deliberately conditional, so a green tick
+      # usually means "this pull request touched no installer script" and
+      # not "the launcher can still install Orbit" — three of the four runs
+      # before #694 passed without ever building the launcher, and nothing
+      # in the run said so. GitHub has no neutral result for a job, so the
+      # skip is stated in the summary instead.
+      - name: Record what this run examined
+        if: always()
+        env:
+          RAN: ${{ steps.scope.outputs.run }}
+          SHA: ${{ steps.scope.outputs.sha }}
+        run: |
+          {
+            printf '## Launcher install compatibility\n\n'
+            if [[ "${RAN}" == "true" ]]; then
+              printf 'Examined: Orbit was installed through orbit-launcher against `%s`.\n' "${SHA}"
+            else
+              printf 'Not examined: no installer script changed on this pull request, so\n'
+              printf 'the launcher was never built or run.\n\n'
+              printf 'A pass here means only that `scripts/install.sh`,\n'
+              printf '`scripts/installer-ui.sh`, `scripts/installer-simulation.sh` and this\n'
+              printf 'workflow are untouched. It is not evidence that the launcher can\n'
+              printf 'install Orbit.\n'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
