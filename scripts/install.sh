@@ -1351,7 +1351,7 @@ readonly deployment_assets=(
   "docker-compose.mail.yml"
   "docker-compose.mail-alias-rotation.yml"
   ".env-orbit.example"
-  "config/tika-config.xml"
+  "config/tika-config.json"
   "scripts/configure.sh"
   "scripts/installer-ui.sh"
   "scripts/configuration.sh"

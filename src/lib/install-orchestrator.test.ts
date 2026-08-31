@@ -419,7 +419,7 @@ describe("runInstall — success paths", () => {
     // regression coverage for install-orchestrator.ts's own per-asset mkdir
     // fix (install.sh:1406-1407): fakeFetchAsset never creates its
     // destination's parent directory itself.
-    expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
+    expect(existsSync(join(targetDir, "config", "tika-config.json"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "configure.sh"))).toBe(true);
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${RESOLVED_REFERENCE}`);
     // The .orbit-install-scratch.* working directory is always removed,
@@ -665,14 +665,14 @@ describe("runInstall — image identity resolution (guarantees #41-44)", () => {
 });
 
 describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
-  it("fails closed when a nested asset (config/tika-config.xml) cannot be fetched", async () => {
+  it("fails closed when a nested asset (config/tika-config.json) cannot be fetched", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { fetchAsset: { failFor: "config/tika-config.xml" } });
+    const scenario = buildScenario(targetDir, { fetchAsset: { failFor: "config/tika-config.json" } });
 
     const outcome = await scenario.run();
     expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Could not fetch config/tika-config.xml");
+    if (outcome.status === "failed") expect(outcome.message).toContain("Could not fetch config/tika-config.json");
   });
 
   it("fails closed when a fetched asset is empty", async () => {
@@ -697,7 +697,7 @@ describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
     if (outcome.status === "failed") expect(outcome.message).toContain("failed a syntax check");
   });
 
-  it("installs deployment assets at mode 0644, not the secret-file 0600 default (issue #383: Compose-mounted config/tika-config.xml must stay readable by the non-root orbit-tika container)", async () => {
+  it("installs deployment assets at mode 0644, not the secret-file 0600 default (issue #383: Compose-mounted config/tika-config.json must stay readable by the non-root orbit-tika container)", async () => {
     const targetDir = newTarget();
     writePreprovisionedTarget(targetDir);
     const scenario = buildScenario(targetDir);
@@ -705,7 +705,7 @@ describe("runInstall — asset fetch and syntax check (guarantee #45)", () => {
     const outcome = await scenario.run();
 
     expect(outcome.status).toBe("ok");
-    for (const asset of ["docker-compose.yml", "config/tika-config.xml", "scripts/configure.sh", "scripts/backup.sh"]) {
+    for (const asset of ["docker-compose.yml", "config/tika-config.json", "scripts/configure.sh", "scripts/backup.sh"]) {
       const mode = statSync(join(targetDir, asset)).mode & 0o777;
       expect(mode, `${asset} mode`).toBe(0o644);
     }
@@ -871,7 +871,7 @@ describe("runInstall — transactional commit (guarantee #56) and rollback safet
     const targetDir = newTarget();
     writeRecognizedDeploymentTarget(targetDir);
     // config/ as a symlink both refuses ensureManagedDirectory (the original
-    // failure) and, because config/tika-config.xml's managedWasPresent is
+    // failure) and, because config/tika-config.json's managedWasPresent is
     // false, makes rollback's own first pass find a symlinked parent for
     // that same path — a genuine rollback failure, not just the initial
     // refusal (install-transaction.ts:371-373's own "symlinked-parent").
@@ -888,7 +888,7 @@ describe("runInstall — transactional commit (guarantee #56) and rollback safet
       expect(preservedLine).toMatch(/\.orbit-install-staging\./);
       // The path it points to must actually exist as recovery evidence —
       // rollback partially succeeded (every managed path other than
-      // config/tika-config.xml was restored), but the one genuine failure
+      // config/tika-config.json was restored), but the one genuine failure
       // is exactly why dispose() refused to delete the staging directory,
       // so it must still be there for an operator to inspect.
       const match = /recovery staging preserved at (.+)\.$/.exec(preservedLine!);

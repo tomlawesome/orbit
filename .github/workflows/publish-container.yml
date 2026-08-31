@@ -707,7 +707,7 @@ jobs:
           cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
           cp .env-orbit "${deployment}/"
           mkdir -p "${deployment}/config"
-          cp config/tika-config.xml "${deployment}/config/"
+          cp config/tika-config.json "${deployment}/config/"
           [[ ! -e "${deployment}/Dockerfile" ]] || {
             printf 'The deployment asset set must not contain a Dockerfile.\n' >&2
             exit 1
@@ -751,9 +751,9 @@ jobs:
             and (.services["orbit-tika"].networks | keys == ["orbit-document-processing"])
             and .services["orbit-tika"].user == "35002:35002"
             and .services["orbit-tika"].read_only == true
-            and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.xml"]
+            and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.json"]
             and (.services["orbit-tika"].cap_drop == ["ALL"])
-            and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.xml"))
+            and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.json"))
             and ((.services["orbit-tika"].volumes // []) | length == 0)
             and ((.services["orbit-tika"].secrets // []) | length == 0)
             and (.services["orbit-app"].networks | has("default") and has("orbit-document-processing"))
@@ -767,7 +767,7 @@ jobs:
         run: |
           if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
              git diff --quiet HEAD^ HEAD -- \
-               config/tika-config.xml \
+               config/tika-config.json \
                docker-compose.yml \
                src/server/document-drafts.ts \
                src/server/documents \
@@ -798,11 +798,11 @@ jobs:
           docker inspect "${tika_id}" | jq --exit-status '
             .[0].Mounts
             | length >= 1
-            and any(.Destination == "/etc/orbit/tika-config.xml" and .RW == false)
-            and all(.Destination == "/etc/orbit/tika-config.xml" or .Destination == "/tmp")
+            and any(.Destination == "/etc/orbit/tika-config.json" and .RW == false)
+            and all(.Destination == "/etc/orbit/tika-config.json" or .Destination == "/tmp")
           '
           docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
-            sh -c 'test -r /etc/orbit/tika-config.xml && test -w /tmp'
+            sh -c 'test -r /etc/orbit/tika-config.json && test -w /tmp'
           tika_uid="$(docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
             sh -c "awk '/^Uid:/{print \$2}' /proc/1/status")"
           test "${tika_uid}" = "35002"

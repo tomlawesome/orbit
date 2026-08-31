@@ -251,10 +251,10 @@ describe("rollback (guarantees #8, #9, #10)", () => {
     // config/ is itself the newly-created thing being tracked; nest one
     // level deeper so its parent can be swapped for a symlink mid-flight.
     mkdirSync(join(targetDir, "config"));
-    const nested: ManagedPath = { path: "config/tika-config.xml", type: "file" };
+    const nested: ManagedPath = { path: "config/tika-config.json", type: "file" };
     const tx = InstallTransaction.begin(targetDir, [nested]);
-    tx.writeStagedFile("config/tika-config.xml", "<config/>", 0o644);
-    tx.commitMove("config/tika-config.xml", "file");
+    tx.writeStagedFile("config/tika-config.json", "{}", 0o644);
+    tx.commitMove("config/tika-config.json", "file");
     // Replace config/ with a symlink to another directory between the move
     // and rollback, exactly the untrusted-parent scenario install.sh guards.
     rmSync(join(targetDir, "config"), { recursive: true, force: true });
@@ -263,23 +263,23 @@ describe("rollback (guarantees #8, #9, #10)", () => {
     symlinkSync(elsewhere, join(targetDir, "config"));
     const result = tx.rollback();
     expect(result.ok).toBe(false);
-    expect(result.failures).toEqual([{ path: "config/tika-config.xml", reason: "symlinked-parent" }]);
+    expect(result.failures).toEqual([{ path: "config/tika-config.json", reason: "symlinked-parent" }]);
     // The symlink itself, and its target, must be untouched.
     expect(lstatSync(join(targetDir, "config")).isSymbolicLink()).toBe(true);
-    expect(existsSync(join(elsewhere, "tika-config.xml"))).toBe(false);
+    expect(existsSync(join(elsewhere, "tika-config.json"))).toBe(false);
   });
 
   it("reports (not throws) a restore failure when a to-be-restored path's parent is missing", () => {
     mkdirSync(join(targetDir, "config"));
-    const nested: ManagedPath = { path: "config/tika-config.xml", type: "file" };
-    writeFileSync(join(targetDir, "config", "tika-config.xml"), "<original/>", { mode: 0o644 });
+    const nested: ManagedPath = { path: "config/tika-config.json", type: "file" };
+    writeFileSync(join(targetDir, "config", "tika-config.json"), "{}", { mode: 0o644 });
     const tx = InstallTransaction.begin(targetDir, [nested]);
-    tx.writeStagedFile("config/tika-config.xml", "<replaced/>", 0o644);
-    tx.commitMove("config/tika-config.xml", "file");
+    tx.writeStagedFile("config/tika-config.json", "{\"replaced\":true}", 0o644);
+    tx.commitMove("config/tika-config.json", "file");
     rmSync(join(targetDir, "config"), { recursive: true, force: true });
     const result = tx.rollback();
     expect(result.ok).toBe(false);
-    expect(result.failures).toEqual([{ path: "config/tika-config.xml", reason: "unsafe-parent" }]);
+    expect(result.failures).toEqual([{ path: "config/tika-config.json", reason: "unsafe-parent" }]);
   });
 });
 
@@ -306,11 +306,11 @@ describe("dispose() cleanup semantics (guarantee #11, the EXIT trap)", () => {
 
   it("preserves staging evidence and reports its path when rollback fails, rather than deleting it", () => {
     mkdirSync(join(targetDir, "config"));
-    writeFileSync(join(targetDir, "config", "tika-config.xml"), "<original/>", { mode: 0o644 });
-    const nested: ManagedPath = { path: "config/tika-config.xml", type: "file" };
+    writeFileSync(join(targetDir, "config", "tika-config.json"), "{}", { mode: 0o644 });
+    const nested: ManagedPath = { path: "config/tika-config.json", type: "file" };
     const tx = InstallTransaction.begin(targetDir, [nested]);
-    tx.writeStagedFile("config/tika-config.xml", "<replaced/>", 0o644);
-    tx.commitMove("config/tika-config.xml", "file");
+    tx.writeStagedFile("config/tika-config.json", "{\"replaced\":true}", 0o644);
+    tx.commitMove("config/tika-config.json", "file");
     rmSync(join(targetDir, "config"), { recursive: true, force: true }); // parent goes missing
     const result = tx.dispose();
     expect(result.rollbackAttempted).toBe(true);
