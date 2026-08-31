@@ -16,7 +16,7 @@ may exist inside that instance. Managed SaaS tenancy is not part of v1.
 The supported core topology is:
 
 - one Orbit application container;
-- one standard PostgreSQL 17 service;
+- one standard PostgreSQL 18 service;
 - one private encrypted document volume;
 - an external, standards-compliant OIDC provider;
 - the isolated ClamAV service when document scanning is enabled.
