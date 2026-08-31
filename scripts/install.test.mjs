@@ -48,7 +48,7 @@ const deploymentAssets = [
   "docker-compose.mail.yml",
   "docker-compose.mail-alias-rotation.yml",
   ".env-orbit.example",
-  "config/tika-config.xml",
+  "config/tika-config.json",
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
   "scripts/configuration.sh",
@@ -1399,7 +1399,7 @@ describe("install.sh", () => {
       `ORBIT_IMAGE=${resolvedReference}`,
     );
     expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
-    expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
+    expect(existsSync(join(targetDir, "config", "tika-config.json"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
     // issue #383 shipping gap: repair.sh and engine-check.sh must be fetched
@@ -1501,10 +1501,10 @@ describe("install.sh", () => {
     const targetDir = makeTarget();
     makeExistingDeployment(targetDir);
 
-    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "config/tika-config.xml" });
+    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "config/tika-config.json" });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Could not fetch config/tika-config.xml");
+    expect(result.stderr).toContain("Could not fetch config/tika-config.json");
     expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
       "PRIOR-COMPOSE-CONTENT\n",
     );
@@ -1960,7 +1960,7 @@ describe("install.sh", () => {
     const markerDir = mkdtempSync(join(tmpdir(), "orbit-install-mv-failure-"));
 
     const result = runInstall(targetDir, {
-      FAKE_MV_FAIL_DEST: "config/tika-config.xml",
+      FAKE_MV_FAIL_DEST: "config/tika-config.json",
       FAKE_MV_FAIL_MARKER: join(markerDir, "failed"),
     });
 
