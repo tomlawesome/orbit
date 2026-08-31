@@ -98,3 +98,21 @@ describe("stable promotion workflow", () => {
     expect(releaseGuide).toContain("relabel, replace, or promote them.");
   });
 });
+
+describe("promotion workflow token scope", () => {
+  it("defaults the whole workflow to read-only, with the promote job still explicit (#508)", () => {
+    const header = workflow.slice(0, workflow.indexOf("\njobs:\n"));
+    expect(header).toMatch(/\npermissions:\n(?:.*\n)*? {2}contents: read\n/);
+
+    // promote widens upward for what a release genuinely needs; the
+    // workflow-level default covers anything added beside it later.
+    const jobsSection = workflow.slice(workflow.indexOf("\njobs:\n"));
+    const jobNames = [...jobsSection.matchAll(/^ {2}([a-z_]+):$/gm)].map((match) => match[1]);
+    const jobPermissions = [...jobsSection.matchAll(/^ {4}permissions:$/gm)];
+
+    expect(jobNames).toEqual(["promote"]);
+    expect(jobPermissions).toHaveLength(1);
+    expect(workflow).toContain("contents: write");
+    expect(workflow).toContain("packages: write");
+  });
+});
