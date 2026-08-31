@@ -57,7 +57,7 @@ Check the list before building a test rig or handing a check to the owner.
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
-  sidecar. Non-interactive path only
+  sidecar. Non-interactive path only; `--red` proves the digest assertion fires
 - `scripts/test-backup-restore.sh` — backup and restore acceptance drill
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
