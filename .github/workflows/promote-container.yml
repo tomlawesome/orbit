@@ -12,6 +12,13 @@ concurrency:
   group: orbit-stable-promotion
   cancel-in-progress: false
 
+permissions:
+  # Least-privilege default for anything added later: every job below already
+  # declares its own block, so this changes nothing today. Without it a job
+  # added without a permissions block would silently inherit the repository's
+  # default token scope instead of read-only access (#508).
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
