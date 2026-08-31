@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 describe("PostgreSQL migration evidence", () => {
-  it("migrates every current migration into a fresh PostgreSQL 17 database", async () => {
+  it("migrates every current migration into a fresh PostgreSQL 18 database", async () => {
     const database = await createMigrationTestDatabase("fresh");
     databases.push(database);
 
