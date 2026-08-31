@@ -566,3 +566,20 @@ describe("exact-image publication workflow", () => {
     }
   });
 });
+
+describe("publication workflow token scope", () => {
+  it("defaults the whole workflow to read-only, with every job still explicit (#508)", () => {
+    const header = workflow.slice(0, workflow.indexOf("\njobs:\n"));
+    expect(header).toMatch(/\npermissions:\n(?:.*\n)*? {2}contents: read\n/);
+
+    // The default is a backstop for a job added later, not something the
+    // current jobs lean on: each one still declares what it needs, so the
+    // count of job-level blocks matches the count of jobs.
+    const jobsSection = workflow.slice(workflow.indexOf("\njobs:\n"));
+    const jobNames = [...jobsSection.matchAll(/^ {2}([a-z_]+):$/gm)].map((match) => match[1]);
+    const jobPermissions = [...jobsSection.matchAll(/^ {4}permissions:$/gm)];
+
+    expect(jobNames.length).toBeGreaterThan(0);
+    expect(jobPermissions).toHaveLength(jobNames.length);
+  });
+});
