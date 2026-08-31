@@ -7,22 +7,26 @@ import {
   CONFIRM_END,
   MAINTENANCE_MESSAGE_MAX_LENGTH,
   characterCountLabel,
-  confirmCancelNotice,
+  confirmCancelWindow,
   confirmSchedule,
   controlMode,
   formatWhen,
   localInputToIso,
   maintenanceFacts,
   messageProblem,
-  pendingNotices,
+  pendingWindows,
   type MaintenanceStateView,
 } from "@/lib/maintenance-view";
 
-/* The administrator's maintenance control (#524, Fable's ruling 1). It
-   renders as the first section of the administration page, above
-   Operations, and the banner links here by the id. */
+/* The administrator's maintenance control (#524, Fable's ruling 1), on the
+   rolling-timeline model of #585. It renders as the first section of the
+   administration page, above Operations, and the banner links here by the id.
 
-type OpenForm = "none" | "activate" | "schedule" | "edit";
+   The one behavioural change users will notice: publishing during a window
+   appends to the timeline instead of replacing what was published before it,
+   so "we are running late, here is why" reads as a follow-on. */
+
+type OpenForm = "none" | "activate" | "schedule" | "publish" | "expected-end";
 
 async function responseError(response: Response, fallback: string): Promise<Error> {
   const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -30,6 +34,13 @@ async function responseError(response: Response, fallback: string): Promise<Erro
 }
 
 export const MAINTENANCE_CHANGED_EVENT = "orbit:maintenance-changed";
+
+const ENTRY_LABELS: Record<string, string> = {
+  scheduled: "Scheduled",
+  started: "Started",
+  update: "Update",
+  resolved: "Resolved",
+};
 
 export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
   const [state, setState] = useState<MaintenanceStateView | null>(null);
@@ -41,6 +52,7 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [openForm, setOpenForm] = useState<OpenForm>("none");
+  const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
   const [expectedEndDraft, setExpectedEndDraft] = useState("");
   const [startsAtDraft, setStartsAtDraft] = useState("");
@@ -94,6 +106,7 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
       if (response.status === 409) {
         reload();
         setOpenForm("none");
+        setEditingUpdateId(null);
         setActionError("Maintenance settings changed elsewhere. The view has been refreshed — review and try again.");
         return;
       }
@@ -103,6 +116,7 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
       setState(payload.maintenance);
       setLoadedAt(new Date());
       setOpenForm("none");
+      setEditingUpdateId(null);
       setMessage(success);
       announceChange();
     } catch (cause) {
@@ -113,10 +127,25 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
   }
 
   function disclose(form: OpenForm) {
-    setMessage(""); setActionError("");
-    if (form === "edit") setMessageDraft(state?.message ?? "");
-    else if (form !== "none") { setMessageDraft(""); setExpectedEndDraft(""); setStartsAtDraft(""); }
+    setMessage(""); setActionError(""); setEditingUpdateId(null);
+    if (form !== "none") { setMessageDraft(""); setExpectedEndDraft(""); setStartsAtDraft(""); }
     setOpenForm(form);
+  }
+
+  function discloseEdit(updateId: string, body: string) {
+    setMessage(""); setActionError("");
+    setOpenForm("none");
+    setEditingUpdateId((current) => (current === updateId ? null : updateId));
+    setMessageDraft(body);
+  }
+
+  function discloseExpectedEnd(current: string | null) {
+    setMessage(""); setActionError(""); setEditingUpdateId(null);
+    /* datetime-local wants a local wall-clock value, and the stored one is
+       UTC; trimming the offset-adjusted ISO string is the inverse of
+       localInputToIso. */
+    setExpectedEndDraft(current ? new Date(new Date(current).getTime() - new Date(current).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : "");
+    setOpenForm(openForm === "expected-end" ? "none" : "expected-end");
   }
 
   async function submitActivate(event: React.FormEvent) {
@@ -139,22 +168,42 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
     if (!startsAt) { setActionError("Choose when maintenance should start."); return; }
     if (!window.confirm(confirmSchedule(startsAt))) return;
     await mutate(
-      { action: "schedule_notice", message: messageDraft, startsAt, expectedEndAt: localInputToIso(expectedEndDraft) },
-      "Notice scheduled.",
-      "The maintenance notice could not be scheduled",
+      { action: "schedule_window", message: messageDraft, startsAt, expectedEndAt: localInputToIso(expectedEndDraft) },
+      "Maintenance scheduled.",
+      "The maintenance window could not be scheduled",
     );
   }
 
-  /* Publishing a new message is low-consequence and reversible, so it
-     carries no confirmation (ruling 1). */
-  async function submitEdit(event: React.FormEvent) {
+  /* Publishing a follow-on update is additive and low-consequence — nothing
+     already published is touched — so it carries no confirmation (ruling 1). */
+  async function submitPublish(event: React.FormEvent) {
     event.preventDefault();
     const problem = messageProblem(messageDraft);
     if (problem) { setActionError(problem); return; }
     await mutate(
-      { action: "edit_message", message: messageDraft },
-      "New message published.",
-      "The message could not be published",
+      { action: "publish_update", message: messageDraft },
+      "Update published.",
+      "The update could not be published",
+    );
+  }
+
+  async function submitEdit(event: React.FormEvent, updateId: string) {
+    event.preventDefault();
+    const problem = messageProblem(messageDraft);
+    if (problem) { setActionError(problem); return; }
+    await mutate(
+      { action: "edit_update", updateId, message: messageDraft },
+      "Entry corrected.",
+      "The entry could not be corrected",
+    );
+  }
+
+  async function submitExpectedEnd(event: React.FormEvent) {
+    event.preventDefault();
+    await mutate(
+      { action: "revise_expected_end", expectedEndAt: localInputToIso(expectedEndDraft) },
+      "Expected end updated.",
+      "The expected end could not be updated",
     );
   }
 
@@ -163,15 +212,15 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
     await mutate({ action: "end" }, "Maintenance ended.", "Maintenance could not be ended");
   }
 
-  async function cancelNotice(noticeId: string, startsAt: string) {
-    if (!window.confirm(confirmCancelNotice(startsAt))) return;
-    await mutate({ action: "cancel_notice", noticeId }, "Notice cancelled.", "The notice could not be cancelled");
+  async function cancelWindow(windowId: string, startsAt: string) {
+    if (!window.confirm(confirmCancelWindow(startsAt))) return;
+    await mutate({ action: "cancel_window", windowId }, "Scheduled maintenance cancelled.", "The scheduled maintenance could not be cancelled");
   }
 
   const shownError = actionError || loadError;
   const mode = state ? controlMode(state, loadedAt) : "open";
   const facts = state ? maintenanceFacts(state, loadedAt) : null;
-  const pending = state ? pendingNotices(state) : [];
+  const pending = state ? pendingWindows(state) : [];
 
   const messageField = <label className="maintenance-field">
     <span>Message shown on the maintenance screen</span>
@@ -219,30 +268,48 @@ export function MaintenanceControl({ session }: { session: WorkspaceSession }) {
       </> : <>
         <p className="admin-health-warning" role="alert">Maintenance is active. Users see the maintenance screen; administrators keep full access.</p>
         <div className="admin-health-grid">
-          <article><span>Started</span><strong>{formatWhen(facts?.activatedAt ?? null)}</strong></article>
-          <article><span>Message published</span><strong>{formatWhen(facts?.messagePublishedAt ?? null)}</strong></article>
+          <article><span>Started</span><strong>{formatWhen(facts?.startedAt ?? null)}</strong></article>
+          <article><span>Last published</span><strong>{formatWhen(facts?.lastPublishedAt ?? null)}</strong></article>
           <article><span>Expected end</span><strong>{formatWhen(facts?.expectedEndAt ?? null)}</strong></article>
         </div>
-        {facts?.message && <p className="maintenance-published-message">{facts.message}</p>}
+        {/* Newest first, and only this window's entries (ADR-0013 decision 8). */}
+        <ul className="admin-job-list maintenance-timeline">{(facts?.timeline ?? []).map((entry) => <li key={entry.id}>
+          <span>
+            <strong>{ENTRY_LABELS[entry.kind] ?? "Update"} · {formatWhen(entry.publishedAt)}{entry.editedAt ? " · edited" : ""}</strong>
+            <p className="maintenance-published-message">{entry.body}</p>
+          </span>
+          {mode === "active" && <span className="admin-job-actions">
+            <button type="button" onClick={() => discloseEdit(entry.id, entry.body)} disabled={busy}>Correct</button>
+          </span>}
+          {editingUpdateId === entry.id && <form className="maintenance-form" onSubmit={(event) => void submitEdit(event, entry.id)}>
+            {messageField}
+            <div className="admin-operation-actions"><button type="submit" disabled={busy}>{busy ? "Correcting…" : "Save correction"}</button><button type="button" onClick={() => setEditingUpdateId(null)} disabled={busy}>Cancel</button></div>
+          </form>}
+        </li>)}</ul>
         <div className="admin-operation-actions">
-          {/* A due notice holds the instance closed without publishing a
-              singleton message, so there is nothing to edit in that mode. */}
-          {mode === "active" && <button type="button" onClick={() => disclose(openForm === "edit" ? "none" : "edit")} disabled={busy}>Edit message</button>}
+          {/* A due scheduled window holds the instance closed before the
+              worker opens it, so there is no timeline to publish into yet. */}
+          {mode === "active" && <button type="button" onClick={() => disclose(openForm === "publish" ? "none" : "publish")} disabled={busy}>Publish update</button>}
+          {mode === "active" && <button type="button" onClick={() => discloseExpectedEnd(facts?.expectedEndAt ?? null)} disabled={busy}>Revise expected end</button>}
           <button type="button" onClick={() => void endMaintenance()} disabled={busy}>{busy ? "Working…" : "End maintenance"}</button>
         </div>
-        {openForm === "edit" && <form className="maintenance-form" onSubmit={(event) => void submitEdit(event)}>
+        {openForm === "publish" && <form className="maintenance-form" onSubmit={(event) => void submitPublish(event)}>
           {messageField}
-          <div className="admin-operation-actions"><button type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish new message"}</button><button type="button" onClick={() => disclose("none")} disabled={busy}>Cancel</button></div>
+          <div className="admin-operation-actions"><button type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish update"}</button><button type="button" onClick={() => disclose("none")} disabled={busy}>Cancel</button></div>
+        </form>}
+        {openForm === "expected-end" && <form className="maintenance-form" onSubmit={(event) => void submitExpectedEnd(event)}>
+          {expectedEndField}
+          <div className="admin-operation-actions"><button type="submit" disabled={busy}>{busy ? "Saving…" : "Save expected end"}</button><button type="button" onClick={() => disclose("none")} disabled={busy}>Cancel</button></div>
         </form>}
       </>}
       <div className="admin-job-group">
         <h4>Scheduled maintenance</h4>
         {pending.length ? <ul className="admin-job-list maintenance-notice-list">{pending.map((entry) => <li key={entry.id}>
           <span>
-            <strong>{formatWhen(entry.startsAt)} → {formatWhen(entry.expectedEndAt)}</strong>
-            <small>{entry.message}</small>
+            <strong>{formatWhen(entry.scheduledStartAt)} → {formatWhen(entry.expectedEndAt)}</strong>
+            <small>{entry.updates[0]?.body ?? ""}</small>
           </span>
-          <span className="admin-job-actions"><button type="button" onClick={() => void cancelNotice(entry.id, entry.startsAt)} disabled={busy}>Cancel</button></span>
+          <span className="admin-job-actions"><button type="button" onClick={() => void cancelWindow(entry.id, entry.scheduledStartAt ?? "")} disabled={busy}>Cancel</button></span>
         </li>)}</ul> : <p className="member-message">No maintenance is scheduled.</p>}
       </div>
       {message && <p className="member-message" role="status" aria-live="polite">{message}</p>}

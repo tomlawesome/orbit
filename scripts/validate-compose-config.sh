@@ -48,9 +48,9 @@ jq --exit-status '
   and (.services["orbit-tika"].networks | keys == ["orbit-document-processing"])
   and .services["orbit-tika"].user == "35002:35002"
   and .services["orbit-tika"].read_only == true
-  and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.xml"]
+  and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.json"]
   and (.services["orbit-tika"].cap_drop == ["ALL"])
-  and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.xml"))
+  and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.json"))
   and ((.services["orbit-tika"].volumes // []) | length == 0)
   and ((.services["orbit-tika"].secrets // []) | length == 0)
   and (.services["orbit-app"].networks | has("default") and has("orbit-document-processing"))

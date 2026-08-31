@@ -828,8 +828,18 @@ resolve_installer_action() {
       }
       ;;
     repair)
+      # Signposts repair; never dispatches into it. The two scripts' exit-code
+      # vocabularies collide — install's 3 is "blocked", repair's 3 is
+      # "attention" (docs/engine-events.md, "Repair stream") — so a caller that
+      # received one script's code through the other would misread the outcome
+      # precisely when it matters. The operator runs repair themselves (#533).
+      # The reason enum stays `repair-unavailable`: it is an allowlisted value
+      # in installer-ui.sh and part of the interface consumers pin to, so
+      # renaming it belongs in its own documented change, not here. What
+      # changes is the prose, which was a dead end — it named an issue number
+      # rather than the command that does the job.
       installer_ui_emit rollback installer blocked repair-unavailable repair || true
-      printf 'Orbit installer: repair_unavailable; issue #261 supplies repair execution. No deployment files or services were changed.\n' >&2
+      printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
       [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
       return 3
       ;;
@@ -1269,7 +1279,7 @@ case "$requested_action" in
   repair)
     printf 'phase=rollback component=installer state=blocked reason=repair-unavailable action=repair elapsed=%ss\n' \
       "$((SECONDS - installer_process_started_at))"
-    printf 'Orbit installer: repair_unavailable; issue #261 supplies repair execution. No deployment files or services were changed.\n' >&2
+    printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
     exit 3
     ;;
 esac
@@ -1316,8 +1326,16 @@ fi
 if ! image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$resolved_reference" 2>/dev/null)"; then
   fail "Could not inspect the published image for its semantic version."
 fi
-[[ "$image_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+semver_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+[[ "$image_version" =~ $semver_pattern ]] ||
   fail "The published image does not record a valid semantic version."
+# A tag can be moved; the label inside a digest cannot. So when the operator
+# pins a version tag, require the image's own embedded version to name that
+# same release — an image parked at a version tag is not evidence that it is
+# that version (ADR-0016).
+if [[ "$channel" =~ $semver_pattern && "$image_version" != "$channel" ]]; then
+  fail "The published image's embedded version (${image_version}) does not match the requested version tag (${channel})."
+fi
 readonly applied_digest="${resolved_reference##*@}"
 
 installer_ui_event identity image running image-identity inspect
@@ -1333,7 +1351,7 @@ readonly deployment_assets=(
   "docker-compose.mail.yml"
   "docker-compose.mail-alias-rotation.yml"
   ".env-orbit.example"
-  "config/tika-config.xml"
+  "config/tika-config.json"
   "scripts/configure.sh"
   "scripts/installer-ui.sh"
   "scripts/configuration.sh"
@@ -1524,6 +1542,12 @@ is_real_non_symlink_directory "$secrets_directory" ||
 # repeats persistence as defence in depth: scripts/configure.sh already
 # persists ORBIT_IMAGE from the environment above.
 orbit_image_line="ORBIT_IMAGE=${resolved_reference}"
+# An env file that already carried the key twice would otherwise come out
+# still carrying it twice, both rewritten to the same value: harmless to
+# docker compose, which takes the last, but it leaves a duplicated managed
+# key behind for every later reader to disagree about. Emit the resolved
+# line once, at the position of the first occurrence, and drop the rest.
+orbit_image_line_written=0
 tmp_environment="$(mktemp "$staging_dir/.env-orbit.persist.XXXXXX")" ||
   fail "Could not create the staged environment file."
 chmod 600 "$tmp_environment" || fail "Could not restrict the staged environment file."
@@ -1531,7 +1555,10 @@ if grep -q '^ORBIT_IMAGE=' "$environment_file"; then
   if ! {
     while IFS= read -r line || [[ -n "$line" ]]; do
       if [[ "$line" == ORBIT_IMAGE=* ]]; then
-        printf '%s\n' "$orbit_image_line"
+        if [[ "$orbit_image_line_written" == 0 ]]; then
+          printf '%s\n' "$orbit_image_line"
+          orbit_image_line_written=1
+        fi
       else
         printf '%s\n' "$line"
       fi

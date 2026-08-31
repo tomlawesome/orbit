@@ -1,4 +1,18 @@
-FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS base
+# Orbit's own base image: Alpine plus Node built from the official signed
+# source, rebuilt on a schedule we control. It replaces node:22-alpine for two
+# reasons recorded on orbit#650 — provenance (docker-node's Alpine variant
+# installs an unofficial musl build with no signature chain to Node's release
+# keys) and freshness (node:22-alpine is rebuilt only when a new Node 22.x
+# ships, so it inherits and compounds Alpine's staleness; #646 left Orbit
+# shipping a fixed-in-Alpine OpenSSL flaw for a month).
+#
+# The image already carries current Alpine packages, npm and yarn removed, and
+# proves `corepack enable && pnpm --version` at build time — so the
+# `apk upgrade` this replaces is no longer needed here. #649 also stops
+# applying: that upgrade froze behind the layer cache, and there is no upgrade
+# layer left to freeze.
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS base
+
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -49,7 +63,10 @@ COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY . .
 RUN pnpm run build:cli
 
-FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS runner
+# The runtime stage starts from the base image again rather than from `base`,
+# so it pins the same digest for the same reasons (see the base stage).
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS runner
+
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
 ARG ORBIT_CHANNEL

@@ -49,7 +49,7 @@ from `src/lib/errors.ts` directly.
 ### 2. The recovery command ships in the bundled CLI
 
 `end-maintenance` joins the existing commands in `src/cli/orbit.ts`. It calls
-`endMaintenanceFromOperatorShell`, reports `changed` and `cancelledNotices`,
+`endMaintenanceFromOperatorShell`, reports `changed` and `cancelledWindows`,
 and is idempotent — exit 0 whether or not anything changed, so an operator may
 safely run it twice. It connects with the application's own driver via
 `src/db`, reading `DATABASE_URL`/`POSTGRES_*` from the service environment the

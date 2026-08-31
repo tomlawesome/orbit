@@ -20,7 +20,7 @@
 <p align="center">
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-15162b?style=flat-square&logo=nextdotjs&logoColor=white" />
   <img alt="React 19" src="https://img.shields.io/badge/React-19-715cff?style=flat-square&logo=react&logoColor=white" />
-  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-22b8a9?style=flat-square&logo=postgresql&logoColor=white" />
+  <img alt="PostgreSQL 18" src="https://img.shields.io/badge/PostgreSQL-18-22b8a9?style=flat-square&logo=postgresql&logoColor=white" />
   <img alt="Docker ready" src="https://img.shields.io/badge/Docker-ready-2496ed?style=flat-square&logo=docker&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-ff4fa3?style=flat-square&logo=typescript&logoColor=white" />
 </p>
@@ -236,7 +236,7 @@ flowchart LR
 - `orbit` is the complete Orbit application: interface, authenticated
   APIs, versioned migrations, and notification scheduler. It can be built from
   source or pulled only when `ORBIT_IMAGE` names an exact registry digest.
-- `orbit-postgres` is the digest-pinned official PostgreSQL 17 Alpine image
+- `orbit-postgres` is the digest-pinned official PostgreSQL 18 Alpine image
   with a persistent volume.
 - `orbit-clamav` is the official scanner image. It receives only quarantined
   file streams over the private Compose network and has no published host port,
@@ -498,7 +498,7 @@ household items or seeded fake records.
 
 - Node.js 22 or later
 - pnpm 11
-- PostgreSQL 17, or Docker for the database only
+- PostgreSQL 18, or Docker for the database only
 
 ### Start the development stack
 

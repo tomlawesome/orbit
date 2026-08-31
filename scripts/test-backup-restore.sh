@@ -372,8 +372,15 @@ maintenance_active() {
   maintenance_sql 'select active from instance_maintenance where singleton;'
 }
 
+# Maintenance narrative lives in maintenance_windows/maintenance_updates since
+# orbit#585 (ADR-0013 decision 1, amended 2026-08-23); the singleton keeps only
+# the closure state the guard reads. Closing the instance therefore means an
+# open window carrying a `started` entry, with the singleton pointing at it —
+# the shape end-maintenance.sh's domain function expects to find. Any window
+# left open by an earlier call is resolved first, so this stays safe to call
+# more than once against the partial unique index on open windows.
 close_instance_for_maintenance() {
-  maintenance_sql "insert into instance_maintenance (singleton, active, message, message_published_at, activated_at) values (true, true, 'Restore drill.', now(), now()) on conflict (singleton) do update set active = true, message = 'Restore drill.', message_published_at = now(), activated_at = now(), version = instance_maintenance.version + 1, updated_at = now();" >/dev/null
+  maintenance_sql "update maintenance_windows set status = 'resolved', ended_at = now(), updated_at = now() where status = 'open'; with opened as (insert into maintenance_windows (status, started_at) values ('open', now()) returning id), published as (insert into maintenance_updates (window_id, kind, body) select id, 'started', 'Restore drill.' from opened returning window_id) update instance_maintenance set active = true, current_window_id = (select id from opened), version = instance_maintenance.version + 1, updated_at = now() where singleton;" >/dev/null
 }
 
 # The restore-during-maintenance check (#524, ADR-0013 decision 4). Two claims
@@ -448,6 +455,34 @@ test_missing_crypto_metadata() {
   cp -- "$bad_dump" "$variant_directory/database.dump"
   package_variant "$test_directory/missing-crypto.tar"
   expect_preflight_rejection "$test_directory/missing-crypto.tar" 'missing crypto metadata'
+}
+
+# Issue #678: a report query that cannot run must be reported as an incomplete
+# check naming itself, never as a verdict on the operator's bundle. Dumping
+# without document_staging_objects reproduces what was observed live -- psql
+# failing with `relation "document_staging_objects" does not exist` -- against
+# a real database, and without mutating live state to do it.
+test_incomplete_correspondence_query() {
+  local bad_dump="$test_directory/absent-relation.dump" output=""
+  compose exec -T orbit-db sh -c \
+    'exec pg_dump --format=custom --compress=6 --no-owner --no-acl --exclude-table=document_staging_objects --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
+    > "$bad_dump"
+  prepare_variant absent-relation
+  cp -- "$bad_dump" "$variant_directory/database.dump"
+  package_variant "$test_directory/absent-relation.tar"
+  if output="$(ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$test_directory/absent-relation.tar" 2>&1)"; then
+    fail 'Restore accepted a bundle whose correspondence query could not run.'
+  fi
+  grep -q 'preflight/correspondence-incomplete failed' <<< "$output" ||
+    fail "A correspondence query that could not run was not reported as an incomplete check: ${output}"
+  grep -q 'the document-stage check did not run to completion' <<< "$output" ||
+    fail "The incomplete correspondence failure did not name the check that stopped: ${output}"
+  if grep -q 'use a complete backup and retry' <<< "$output"; then
+    fail 'A correspondence query that could not run was still reported to the operator as a corrupt backup.'
+  fi
+  health_check || fail 'Orbit was not healthy after the incomplete correspondence rejection.'
+  assert_fixture_present
+  assert_staging_fixture_present
 }
 
 test_journal_publication_failures() {
@@ -679,6 +714,7 @@ expect_preflight_rejection "$test_directory/invalid-database.tar" 'invalid datab
 test_local_key_rejections
 test_missing_crypto_metadata available
 test_missing_crypto_metadata pending_deletion
+test_incomplete_correspondence_query
 test_journal_publication_failures
 test_ordinary_rollback
 test_checkpoint_failure_recovery

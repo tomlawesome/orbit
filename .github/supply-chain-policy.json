@@ -51,13 +51,29 @@
   "exceptions": [],
   "containerImages": [
     {
-      "name": "Node.js build and runtime",
-      "tag": "node:22-alpine",
-      "reference": "node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c",
-      "indexDigest": "sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32",
+      "name": "Orbit base image (Alpine plus Node from official signed source)",
+      "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866",
+      "indexDigest": "sha256:d3675331cae309dd45bd3625b4e3212f599b3180cd89f486d30749277954f7ce",
       "platform": "linux/amd64",
       "locations": [
-        "Dockerfile",
+        "Dockerfile"
+      ],
+      "source": "https://gitlab.tomlawson.io/ai/orbit-base-image",
+      "registry": "https://github.com/tomlawesome/orbit/pkgs/container/orbit-base-image",
+      "license": "MIT",
+      "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
+      "updateOwner": "Orbit maintainers",
+      "resolvedOn": "2026-08-30",
+      "reviewBy": "2026-11-30"
+    },
+    {
+      "name": "Node.js build and runtime",
+      "tag": "node:24-alpine",
+      "reference": "node:24-alpine@sha256:4caaaf42195bcd6f6f3559a413b20cb8f8ad089e231ee874cf7701643966689f",
+      "indexDigest": "sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf",
+      "platform": "linux/amd64",
+      "locations": [
         "tests/oidc/Dockerfile"
       ],
       "source": "https://github.com/nodejs/docker-node",
@@ -65,14 +81,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "PostgreSQL database",
-      "tag": "postgres:17-alpine",
-      "reference": "postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a",
-      "indexDigest": "sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193",
+      "tag": "postgres:18-alpine",
+      "reference": "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
+      "indexDigest": "sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
@@ -83,14 +99,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-31",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "ClamAV malware scanner",
-      "tag": "clamav/clamav:1.4.5-debian",
-      "reference": "clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6",
-      "indexDigest": "sha256:50296b62b23764b474be18310521f64a720524d69334ea5236aab5fac44ff993",
+      "tag": "clamav/clamav:1.5.4-debian",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446",
+      "indexDigest": "sha256:967334b92d1782e4d1314ddf903ae537d26792d21c9a39adecb8ac9757980514",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -100,14 +116,14 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "Apache Tika parser",
-      "tag": "apache/tika:3.2.2.0-full",
-      "reference": "apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8",
-      "indexDigest": "sha256:ffab324253edc54706e8882dd28190b1e6559c344b5315ae8a74b9efda9e7291",
+      "tag": "apache/tika:4.0.0-full",
+      "reference": "apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
+      "indexDigest": "sha256:80072bb73dd320a9de9709beb0b16d14dd6d2680376f8d31e498f55b633ba593",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -117,14 +133,14 @@
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-31",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.32.2",
-      "reference": "ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7",
-      "indexDigest": "sha256:c3886c198155aa7d45a29851100cc16f5d6ea6777d635ddd0597fe95874161af",
+      "tag": "ollama/ollama:0.33.2",
+      "reference": "ollama/ollama:0.33.2@sha256:9e7d782e99880c70f9563c51633da875ca605518a8f8d95c2532bda70a027b7a",
+      "indexDigest": "sha256:020e4134285e2ef4d8fd801234176de3b4faadc992a3eb06c8e66a2f9d4c4ba2",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -134,7 +150,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-07-30",
+      "resolvedOn": "2026-08-30",
       "reviewBy": "2026-10-30"
     }
   ],
