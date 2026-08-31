@@ -1,6 +1,6 @@
 {
   "baselineCommit": "8a8e37e2bbef770de9a203e86a674f70834e2a18",
-  "postgresMajor": 17,
+  "postgresMajor": 18,
   "finalMigrationTag": "0017_imap_recipient_alias_index",
   "migrationPrefix": [
     { "tag": "0000_initial_orbit", "sha256": "0355fd54a1435a411fcab5fca7f03d856baa37c1a2c62f0d66abd3c822ff1713" },

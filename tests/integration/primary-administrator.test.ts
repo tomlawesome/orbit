@@ -57,10 +57,15 @@ describe("primary administrator authority (#263)", () => {
     // user alone so the assertion proves the authority constraint itself.
     await getDb().delete(auditLog).where(eq(auditLog.entityId, primary.id));
     await getDb().execute(sql`delete from audit_log where actor_user_id = ${primary.id}`);
+    // 23001 is restrict_violation. PostgreSQL 18 separated it from plain
+    // foreign_key_violation (23503), which 17 raised for both RESTRICT and
+    // NO ACTION; the constraint and the refusal are unchanged. Pinned rather
+    // than loosened because the database image is pinned by digest, so a
+    // future change to this code should stop and be looked at.
     await expect(
       getDb().delete(users).where(eq(users.id, primary.id)),
     ).rejects.toMatchObject({
-      cause: { code: "23503", constraint_name: "instance_authority_primary_user_id_users_id_fk" },
+      cause: { code: "23001", constraint_name: "instance_authority_primary_user_id_users_id_fk" },
     });
 
     // The singleton check refuses a second seat of authority.
