@@ -15,6 +15,9 @@ rules reserve for the top model are Fable's (owner decision, 2026-08-22).
 Everything else about who makes those calls, how they are labelled and how
 they are routed is global; it is not repeated here.
 
+`ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
+authorisation to raise issues and make changes there (owner, 2026-08-30).
+
 ## Delivery workflow
 
 - Start from an issue with a user outcome, acceptance criteria, non-goals,
@@ -26,10 +29,45 @@ they are routed is global; it is not repeated here.
 - Publish previews only after required checks pass on the protected `preview`
   lane. Test immutable image digests, verify the exact preview source through
   `main`, and promote only the accepted digest without rebuilding it.
+- Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
+  `main` stays at v1.2.0 and is expected to be far behind. A Dependabot alert
+  or stale pin on `main` is not work: check `dev` first, and if `dev` is
+  already fixed the alert clears when v1.3.0 ships. Do not propose a promotion
+  as available work.
+
+## Harnesses that already exist
+
+Check the list before building a test rig or handing a check to the owner.
+
+- `scripts/test-all.sh` — backend suite then e2e (`ORBIT_SKIP_E2E` skips e2e)
+- `scripts/test-backend.sh` — static analysis and the fast Vitest suite
+- `scripts/test-frontend.sh` — Playwright against a running instance
+- `pnpm --filter orbit-web fidelity` — the v19 visual gate: stands up the
+  adapter-node build and the mockup host, compares 17 screens against the
+  committed baselines. In CI it runs pinned to the Playwright image the
+  baselines were proven against; run it locally the same way if a diff
+  disagrees
+- `scripts/test-integration.mjs` — integration suite against a real database
+- `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
+  sidecars, then Playwright
+- `scripts/test-install-acceptance.sh` — real fresh install to a healthy
+  `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
+  fixture, so no provider credentials are needed
+- `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
+  stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
+  journeys are live and which are still absent)
+- `scripts/test-malware-scanner.sh` — ClamAV detection
+- `scripts/test-tika-processor.mjs` — Tika document extraction
+- `scripts/installer-simulation.sh` — installer command centre UI, no Docker
+- `scripts/install-test-browser.sh` — one-time headless browser download
+- `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
+- `scripts/validate-compose-config.sh` — Compose configuration validation
+- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
 
 ## Traps when running things locally
 
-Three known ways to lose an afternoon, or worse. The first two have open
+Seven known ways to lose an afternoon, or worse. The first two have open
 issues; until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
@@ -59,6 +97,32 @@ the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
 and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
 has been diagnosed twice: #510/#512, then again in #552.
 
+**A pty driver's deadline belongs to `scripts/pty-deadline.mjs`.** A child
+killed for running out of time has no exit status, so a driver that hands the
+result to an exit-code assertion fails with `expected null to be 130` and names
+the wrong fault — the child never exited at all. Take the deadline and the
+failure from that module rather than writing another timer; a `spawn`-based
+driver must reject rather than resolve, and its tests declare
+`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
+
+**A Compose `file:` secret is a bind mount of an inode, not of a path.** Edit
+the file in place and every running container sees it at once; *replace* it --
+`mktemp` + `mv`, `tar -x`, `rsync` -- and each container keeps reading the old
+file for as long as it keeps running. A plain `docker restart` re-resolves the
+mount. This is not academic: repair's rotation lands the new password by rename
+precisely so a half-written secret is impossible, which left the database
+container reading a spent copy and made repair diagnose its own successful
+rotation as failed. Postgres itself never notices, because it reads that file
+once at initdb and authenticates from its own catalogue afterwards. See #629.
+
+**Add `ci: acceptance` to a pull request touching schema, migrations or server
+code.** Without it the integration and compose jobs skip and the pull request
+still reports green.
+
+**`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
+else drives it.** A dropped column passes every unit and integration check and
+fails only the compose smoke test — grep it before changing a schema.
+
 ## The demo stack is disposable
 
 The demo deployment (`docker-compose.demo.yml`) carries only test data, so
@@ -79,7 +143,12 @@ it.
   a coherent outcome with a definition of done, mirrored by the board's Slice
   field. A version release moment gets its own milestone holding only its
   promote-to-main issue, and an issue with no milestone is not scheduled (owner
-  decision, 2026-08-23, recorded on issue #502).
+  decision, 2026-08-23, recorded on issue #502). Every open issue reaches the
+  board: the project's auto-add workflow places new ones, so the board is
+  complete and can be read as authoritative rather than as a subset someone
+  curated. Set at least Status when picking work up; closed items are removed
+  rather than left to accumulate. It showed only half the open issues until
+  2026-08-31 (#689), so treat any board reading from before then with suspicion.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not

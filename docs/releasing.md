@@ -83,5 +83,14 @@ in the release notes.
 Historic `preview-*` and `rc-*` tags remain immutable audit evidence. Do not
 relabel, replace, or promote them.
 
+## Supported install targets
+
+The operator tooling supports installing v1.3.0 and later; earlier published
+releases are not supported install targets
+([ADR-0016](adr/0016-release-identity-and-installer-era-boundary.md)). Pinning
+a version tag requires the image's own embedded version to name that release,
+so a moved tag cannot pass an image off as a version it is not. Moving tags
+such as `latest` and `preview` make no version claim and are unaffected.
+
 Tags can move; digests cannot. Compose does not default to either discovery
 tag. Always set `ORBIT_IMAGE` to and record the accepted digest.

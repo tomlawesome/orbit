@@ -22,6 +22,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+
 // This suite is fully mocked: fake `docker` and `curl` executables are placed
 // ahead of the real ones on PATH, so no test needs Docker, a registry,
 // network access, Git or a TTY.
@@ -46,7 +48,7 @@ const deploymentAssets = [
   "docker-compose.mail.yml",
   "docker-compose.mail-alias-rotation.yml",
   ".env-orbit.example",
-  "config/tika-config.xml",
+  "config/tika-config.json",
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
   "scripts/configuration.sh",
@@ -676,12 +678,8 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     cwd: targetDir,
     encoding: "utf8",
     input,
-    // 90s, not 10s: under parallel CI load with coverage instrumentation the
-    // PTY session can exceed even 30s (observed at 10s on PRs #368/#372 and
-    // again at 30s on PR #390), and the SIGKILL surfaces as status null
-    // instead of the asserted exit code. A genuine hang still fails — load
-    // contention never should.
-    timeout: 90000,
+    // Deadline and its justification: pty-deadline.mjs (#595).
+    timeout: PTY_DEADLINE_MS,
     killSignal: "SIGKILL",
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
@@ -702,7 +700,10 @@ function runInstallWithControllingTerminal(targetDir, envOverrides = {}, input =
     },
   });
   const calls = readOptionalFile(logPath);
-  return { ...result, calls };
+  return failOnPtyDeadline(
+    { ...result, calls },
+    { label: "runInstallWithControllingTerminal", deadlineMs: PTY_DEADLINE_MS },
+  );
 }
 
 function runInstallWithPromptedTerminalInput(
@@ -756,11 +757,21 @@ function runInstallWithPromptedTerminalInput(
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
-    const timeout = setTimeout(() => child.kill("SIGKILL"), 10000);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (timedOut) {
+        reject(ptyDeadlineError({
+          label: "runInstallWithPromptedTerminalInput",
+          deadlineMs: PTY_ASYNC_DEADLINE_MS,
+          stdout,
+          stderr,
+        }));
+        return;
+      }
       resolve({
         status,
         signal,
@@ -891,7 +902,7 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("config --quiet");
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("guides and persists the document-processing profile after final review", () => {
     const targetDir = makeTarget();
@@ -1388,7 +1399,7 @@ describe("install.sh", () => {
       `ORBIT_IMAGE=${resolvedReference}`,
     );
     expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
-    expect(existsSync(join(targetDir, "config", "tika-config.xml"))).toBe(true);
+    expect(existsSync(join(targetDir, "config", "tika-config.json"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
     // issue #383 shipping gap: repair.sh and engine-check.sh must be fetched
@@ -1490,10 +1501,10 @@ describe("install.sh", () => {
     const targetDir = makeTarget();
     makeExistingDeployment(targetDir);
 
-    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "config/tika-config.xml" });
+    const result = runInstall(targetDir, { FAKE_CURL_FAIL_ASSET: "config/tika-config.json" });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Could not fetch config/tika-config.xml");
+    expect(result.stderr).toContain("Could not fetch config/tika-config.json");
     expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toBe(
       "PRIOR-COMPOSE-CONTENT\n",
     );
@@ -1949,7 +1960,7 @@ describe("install.sh", () => {
     const markerDir = mkdtempSync(join(tmpdir(), "orbit-install-mv-failure-"));
 
     const result = runInstall(targetDir, {
-      FAKE_MV_FAIL_DEST: "config/tika-config.xml",
+      FAKE_MV_FAIL_DEST: "config/tika-config.json",
       FAKE_MV_FAIL_MARKER: join(markerDir, "failed"),
     });
 
@@ -2042,6 +2053,28 @@ describe("install.sh", () => {
     const environmentLines = readFileSync(join(targetDir, ".env-orbit"), "utf8").split("\n");
     expect(environmentLines).toContain(`ORBIT_IMAGE=${resolvedReference}`);
     expect(environmentLines).not.toContain(`EXISTING_ENV=1ORBIT_IMAGE=${resolvedReference}`);
+  });
+
+  it("collapses a duplicated image assignment to a single resolved line", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+    // An env file that already carries the key twice must not come out still
+    // carrying it twice. docker compose takes the last and is unharmed, but a
+    // duplicated managed key leaves every other reader free to disagree.
+    const doubled = readFileSync(join(targetDir, ".env-orbit"), "utf8").replace(
+      /^ORBIT_IMAGE=.*$/m,
+      (line) => `${line}\n${line}`,
+    );
+    writeFileSync(join(targetDir, ".env-orbit"), doubled);
+    chmodSync(join(targetDir, ".env-orbit"), 0o600);
+    expect(doubled.split("\n").filter((line) => line.startsWith("ORBIT_IMAGE=")).length).toBe(2);
+
+    const result = runInstall(targetDir);
+
+    expect(result.status).toBe(0);
+    const environmentLines = readFileSync(join(targetDir, ".env-orbit"), "utf8").split("\n");
+    const imageLines = environmentLines.filter((line) => line.startsWith("ORBIT_IMAGE="));
+    expect(imageLines).toEqual([`ORBIT_IMAGE=${resolvedReference}`]);
   });
 
   it("refuses an incomplete recognised upgrade without starting Compose", () => {
@@ -2174,6 +2207,67 @@ describe("install.sh", () => {
     expect(result.status).not.toBe(0);
     expect(output).not.toContain("provider-body-secret");
     expect(output).not.toContain("auth.install-test.internal");
+  });
+});
+
+describe("install.sh version-tag identity (#676)", () => {
+  it("installs a version tag whose image embeds that same version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "v1.3.0", FAKE_DOCKER_VERSION: "v1.3.0" },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("up -d");
+    expect(result.stdout).toContain("Version: v1.3.0");
+    expect(result.stdout).toContain("Channel: v1.3.0");
+  });
+
+  it("refuses a version tag whose image embeds a different version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      ORBIT_CHANNEL: "v1.3.0",
+      FAKE_DOCKER_VERSION: "v1.2.0",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does not match the requested version tag");
+    expect(result.calls).not.toContain("up -d");
+  });
+
+  it("leaves a moving channel tag unbound to any particular version", () => {
+    // `latest` legitimately carries whatever build it points at; only a
+    // version tag makes a claim about which release it is.
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "latest", FAKE_DOCKER_VERSION: "v1.2.0" },
+      ["--plain"],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Version: v1.2.0");
+  });
+
+  it("still refuses a label that is not a semantic version", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_VERSION: "preview-release-v1.0.0-30597511059-1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("does not record a valid semantic version");
+    expect(result.calls).not.toContain("up -d");
   });
 });
 

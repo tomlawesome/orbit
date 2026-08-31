@@ -1,5 +1,6 @@
 <script>
   import "./pocket.css";
+  import { resolve } from "$app/paths";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, money } from "$lib/format.js";
 
@@ -161,7 +162,7 @@
         <div class="flex"><b>{hh.name}</b><span>{hh.requested ? "asked to join · waiting" : "tap to ask to join"}</span></div>
       </div>
     {/each}
-    <div class="burnup">the systems around you are labels until someone lets you in<br><a href="/create">— or start your own system →</a></div>
+    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/create")}>— or start your own system →</a></div>
   </div>
   {:else}
   <div class="mdial">
@@ -250,7 +251,7 @@
     <button data-sugg-act="dismiss">Dismiss</button>
     <button data-sheet-close>close</button>
   </div>
-  <a class="amend" id="sh-amend" href="/home" hidden>review &amp; amend →</a>
+  <a class="amend" id="sh-amend" href={resolve("/home")} hidden>review &amp; amend →</a>
 </div>
 {#each view?.suggestions ?? [] as s (s.id)}
   <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the

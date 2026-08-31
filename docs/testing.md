@@ -7,7 +7,7 @@ database and HTTP boundary claims use real services.
 
 - `pnpm test` runs the fast unit/domain suite and does not require Docker.
 - `pnpm test:integration` starts one disposable digest-pinned official
-  PostgreSQL 17 Alpine
+  PostgreSQL 18 Alpine
   container on a random loopback port, applies every migration, runs the
   PostgreSQL/API integration suite, and removes that exact container on success,
   failure or interruption.

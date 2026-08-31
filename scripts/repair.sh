@@ -30,15 +30,26 @@ set -Eeuo pipefail
 #                                                           — execution of the
 #                                                           rotate-database-
 #                                                           credential action)
+#   bash scripts/repair.sh --export-diagnostics [--plain]  (issue #531, ADR-0014
+#                                                           decision 10: preview
+#                                                           then confirm then
+#                                                           write the exact
+#                                                           --check/--plan
+#                                                           deterministic stream
+#                                                           plus one identity
+#                                                           line — see "EXPORT
+#                                                           MODE
+#                                                           (--export-
+#                                                           diagnostics)" below)
 # `--safe-only` and `--dangerous` may be combined in one `--execute`
 # invocation (each batch keeps its own independent approval and outcome); at
 # least one of the two is REQUIRED alongside `--execute`, so a bare
 # `--execute` is refused with a usage error rather than silently running only
 # part of a repair. `--plain` is tolerated anywhere in the argument list;
 # output is unconditionally plain regardless of it. Exactly one of
-# `--check`/`--plan`/`--execute` is required. `--safe-only`/`--dangerous` are
-# accepted only alongside `--execute`. Any other combination, flag, or
-# positional argument is a usage error.
+# `--check`/`--plan`/`--execute`/`--export-diagnostics` is required.
+# `--safe-only`/`--dangerous` are accepted only alongside `--execute`. Any
+# other combination, flag, or positional argument is a usage error.
 #
 # This script is deliberately standalone and source-less: it never sources
 # install.sh, configure.sh or installer-ui.sh, and it copies only the
@@ -56,8 +67,9 @@ set -Eeuo pipefail
 # Under `--check` and `--plan` this script must never write, create, chmod,
 # start, stop, or delete anything. It never uses mktemp inside the
 # installation directory. Every `docker` invocation is one of: `docker
-# inspect`, `docker ps`, `docker volume ls`/`inspect`, `docker compose
-# config` — never a command that mutates containers, volumes, or images.
+# inspect`, `docker image inspect`, `docker ps`, `docker volume ls`/
+# `inspect`, `docker compose config` — never a command that mutates
+# containers, volumes, or images.
 # Each docker read is optional: if the `docker` CLI is unavailable or the
 # daemon cannot be reached, the affected checks are reported as
 # `class=docker-unavailable` and diagnosis continues with everything else
@@ -66,8 +78,8 @@ set -Eeuo pipefail
 # fixed safe action set documented below — see "EXECUTE MODE" further down.
 #
 # This slice adds exactly two more read-only primitives, both narrowly
-# scoped: `docker exec -T <this deployment's orbit-db container> pg_isready`
-# and `docker exec -T <same container> psql -c 'SELECT 1'`. Neither mutates
+# scoped: `docker exec <this deployment's orbit-db container> pg_isready`
+# and `docker exec <same container> psql -c 'SELECT 1'`. Neither mutates
 # anything server-side (`pg_isready` opens and immediately closes a
 # connection; `SELECT 1` reads no table and touches no data) and both only
 # ever target the orbit-db container whose Compose project/service labels
@@ -136,6 +148,36 @@ set -Eeuo pipefail
 #                                   and also wrote to stderr (a structural
 #                                   problem: unreadable/unsafe .env-orbit or
 #                                   a missing .env-orbit.example template).
+#   configuration-migration-interrupted — replaces configuration-invalid/
+#                                   configuration-incomplete for this run
+#                                   (ADR-0014 decision 7): fires only when
+#                                   the live .env-orbit fails validation AND
+#                                   configuration.sh's own
+#                                   `.env-orbit.orbit-config.rollback` copy
+#                                   exists, is a regular non-symlink file
+#                                   mode 600, and itself passes the same
+#                                   configure.sh --check semantics — a
+#                                   deterministically recoverable interrupted
+#                                   `configuration.sh --migrate` run.
+#   deployment-version-unsupported — .env-orbit is readable but its
+#                                   ORBIT_CONFIG_APPLIED_VERSION is absent,
+#                                   malformed, or names a published release
+#                                   below ADR-0016's supported-install floor
+#                                   (v1.3.0). Absence fails closed: every
+#                                   supported install writes the key, so a
+#                                   readable file without it is the
+#                                   signature of a pre-floor or
+#                                   hand-assembled deployment. Major
+#                                   version 0 (development builds) is
+#                                   exempt, and the check is skipped (never
+#                                   failed) while a configuration finding
+#                                   is present this run — a half-written
+#                                   .env-orbit legitimately lacks the key,
+#                                   and the restore that repairs it must
+#                                   not be refused by it. While this
+#                                   finding is present, --execute refuses
+#                                   the entire batch — see EXIT CODES
+#                                   (--execute).
 #   staging-evidence-present       — a leftover `.orbit-install-staging.*`
 #                                   directory from an interrupted installer
 #                                   transaction (see issue #291 comment on #261).
@@ -152,9 +194,20 @@ set -Eeuo pipefail
 #                                   password secret file is missing — the
 #                                   SQLSTATE 28P01 precursor, detected
 #                                   without ever touching the database.
-#   unrelated-resource-present      — a database volume matching Orbit's
-#                                   naming pattern exists under a different
-#                                   Compose project than this deployment's.
+#   document-volume-retained-without-key — ADR-0014 decision 5's second
+#                                   retention guard: the retained
+#                                   `orbit-documents-data` volume for this
+#                                   project exists while document-kek is
+#                                   missing. Mirrors
+#                                   volume-retained-without-credentials
+#                                   exactly (volume-name match plus the local
+#                                   absence of the secret file); unlike that
+#                                   class there is no rotate equivalent, so
+#                                   it plans as manual, never a guessed fix.
+#   unrelated-resource-present      — a database or document volume matching
+#                                   Orbit's naming pattern exists under a
+#                                   different Compose project than this
+#                                   deployment's.
 #   database-unreachable            — this deployment's orbit-db container is
 #                                   absent/not running, or is running but
 #                                   `pg_isready` did not succeed within the
@@ -181,11 +234,30 @@ set -Eeuo pipefail
 #   database-below-floor            — the application refused to start because
 #                                   the database predates the supported
 #                                   migration floor. Also not restartable.
+#   migration-failed                 — the migrator (drizzle) threw applying a
+#                                   migration and rolled it back, leaving no
+#                                   applied journal row: detected primarily by
+#                                   extending the existing #437 app-log
+#                                   sentinel scan to also match
+#                                   `reason=migration_failed` (works on a
+#                                   stopped/crash-looping container), with a
+#                                   backstop single fixed-literal `SELECT` of
+#                                   the migrator's own outcome bookkeeping row
+#                                   over the already-authenticated probe path
+#                                   for when logs have rotated or the
+#                                   container is gone (issue #528).
+#   image-identity-mismatch          — this deployment's orbit-app container's
+#                                   actual running image ID does not match the
+#                                   locally-present image for the
+#                                   digest-pinned `ORBIT_IMAGE` reference —
+#                                   distinct from stale-container, which only
+#                                   compares the `Config.Image` string (issue
+#                                   #528).
 #
 # PLAN MODE (--plan) — issue #261 third slice, STILL ZERO MUTATION
 # --------------------------------------------------------------------------
 # `--plan` runs exactly the same read-only diagnosis as `--check` above (the
-# same 19 reason classes, the same optional docker probes, the same
+# same 25 reason classes, the same optional docker probes, the same
 # read-only-by-construction guarantees) and then, instead of printing
 # `finding`/`diagnosis` lines, prints a PROPOSED, CLASSIFIED plan derived
 # from the findings and exits. It performs no filesystem write, no chmod, no
@@ -212,9 +284,14 @@ set -Eeuo pipefail
 # Output contract (--plan):
 #   One line per warn/fail-severity finding (see the severity gate above),
 #   in the same fixed `class_order`:
-#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required>
+#     plan action=<action-class> resolves=<reason-class> mutation=<none|reversible|credential-rotation|service-restart> backup=<required|not-required> target=<finding-target> rollback=<recovery-directory|credential-checkpoint|prior-mode|not-required> expect=<enum>
+#   The trailing three fields are criterion 6's preview contract (#681):
+#   the affected target (the finding's own enum-only target field), the
+#   named rollback point (rollback_for_action), and the expected result if
+#   the action succeeds (expected_for_action). All enum-only, never a path
+#   or a value.
 #   A finding with no safe automatic action instead emits:
-#     plan action=manual resolves=<reason-class> mutation=none backup=not-required
+#     plan action=manual resolves=<reason-class> mutation=none backup=not-required target=<finding-target> rollback=not-required expect=operator-action
 #   paired with one human-readable line on STDERR naming the exact safe
 #   manual step or evidence to collect for that reason class — field names
 #   only (e.g. "the target managed file", "the flagged container's
@@ -256,13 +333,18 @@ set -Eeuo pipefail
 # Action-class mapping table (reason class -> action class), and the
 # mutation/backup rationale for each action class:
 #
-#   restore-transaction        <- staging-evidence-present
+#   restore-transaction        <- staging-evidence-present,
+#                                   configuration-migration-interrupted
 #     mutation=reversible backup=required. Restoring a recognized prior
 #     managed-file transaction overwrites the *current* (possibly still
 #     valid) live managed files with the staged prior-good copies, so a
 #     fresh backup of the current live state is required before slice 4
 #     may perform this overwrite, even though the staging evidence itself
-#     already holds the content being restored.
+#     already holds the content being restored. ADR-0014 decision 7 extends
+#     this same action class to a second, unrelated boundary —
+#     configuration.sh's own `.orbit-config.rollback` copy of .env-orbit —
+#     with the identical mutation/backup rationale; see
+#     do_restore_configuration_rollback for the implementation.
 #
 #   fix-permissions             <- managed-file-permissions,
 #                                   secret-permissions,
@@ -275,16 +357,17 @@ set -Eeuo pipefail
 #   regenerate-secret           <- secret-missing, ONLY for a generated
 #                                   non-user secret whose regeneration
 #                                   cannot invalidate retained encrypted
-#                                   state (session-secret, document-kek,
-#                                   oidc-client-secret; also
-#                                   postgres-password itself when no
-#                                   retained database volume is present —
-#                                   see the exception immediately below).
+#                                   state (session-secret, oidc-client-secret;
+#                                   also postgres-password when no retained
+#                                   database volume is present, and
+#                                   document-kek when no retained document
+#                                   volume is present — see the two
+#                                   exceptions immediately below).
 #     mutation=reversible backup=not-required. The finding fires only when
 #     the secret file is absent/empty, so there is no valid prior secret
 #     content to lose or back up.
 #
-#     EXCEPTION — postgres-password is explicitly EXCLUDED from
+#     EXCEPTION 1 — postgres-password is explicitly EXCLUDED from
 #     regenerate-secret whenever a `volume-retained-without-credentials`
 #     finding is also present in the same diagnosis (the #261 fixed-project
 #     collision: a retained `orbit-db-data` volume still holds the OLD
@@ -294,17 +377,31 @@ set -Eeuo pipefail
 #     as rotate-database-credential, below, so a retained-volume postgres
 #     password is NEVER auto-regenerated.
 #
-#     NOTE (stage one, this slice): despite being classified
+#     EXCEPTION 2 — document-kek is explicitly EXCLUDED from
+#     regenerate-secret whenever a `document-volume-retained-without-key`
+#     finding is also present (ADR-0014 decision 5's second retention guard):
+#     a retained `orbit-documents-data` volume holds documents encrypted
+#     under the OLD key, and minting a new one would leave them permanently
+#     unreadable. Unlike EXCEPTION 1, there is no rotate equivalent to route
+#     to — that specific secret-missing finding is instead planned as
+#     `manual`, below the action-class table, so a retained-volume
+#     document-kek is NEVER auto-regenerated either.
+#
+#     NOTE (stage two, since this slice): despite being classified
 #     mutation=reversible above, regenerate-secret is NOT in stage one's
-#     executable safe set — see "EXECUTE MODE" below. The owner's 2026-08-13
-#     slice 4 decision names the stage-one safe set explicitly by action
-#     class (fix-permissions, restore-transaction, restart-services); that
-#     enumerated list, not this table's own mutation=reversible tag, is
-#     authoritative for what `--execute --safe-only` may act on. A newly
-#     minted secret is live credential material other processes may already
-#     be holding open, which is a materially different risk than a mode-only
-#     chmod or a container restart, so it stays out of stage one even though
-#     it is filesystem-reversible in principle.
+#     executable safe set — see "EXECUTE MODE (--execute --safe-only)" below.
+#     The owner's 2026-08-13 slice 4 decision names the stage-one safe set
+#     explicitly by action class (fix-permissions, restore-transaction,
+#     restart-services); that enumerated list, not this table's own
+#     mutation=reversible tag, is authoritative for what
+#     `--execute --safe-only` may act on. A newly minted secret is live
+#     credential material other processes may already be holding open, which
+#     is a materially different risk than a mode-only chmod or a container
+#     restart, so it stays out of stage one even though it is
+#     filesystem-reversible in principle. It IS executed in stage two, behind
+#     the same typed-word/never-automatable approval model as
+#     rotate-database-credential — see "EXECUTE MODE (--execute
+#     --dangerous)" below.
 #
 #   rotate-database-credential  <- database-credential-mismatch,
 #                                   volume-retained-without-credentials,
@@ -362,15 +459,6 @@ set -Eeuo pipefail
 #     classification completeness (what they WOULD map to if a future
 #     change ever raised either to warn/fail), not because either produces
 #     a `plan action=manual` line under the current diagnosis.
-#
-# RESERVED CLASSES (explicitly out of scope for this slice — next slice)
-# --------------------------------------------------------------------------
-#   unsupported-schema, migration-failed, image-identity-mismatch
-# This slice still never inspects schema/migration state or a container's
-# registry-side image identity (as opposed to the locally pinned
-# `ORBIT_IMAGE` value, which stale-container above does check); those
-# remain reserved for a later executor slice that can safely pair them with
-# repair actions.
 #
 # Stage-two dangerous-step iterator (recorded owner intention, 2026-08-13
 # comment on issue #261) — RESERVED SHAPE
@@ -482,6 +570,27 @@ set -Eeuo pipefail
 #                         once a transaction concludes) and the action is
 #                         reported `done`.
 #
+#                         For the resolves=configuration-migration-interrupted
+#                         boundary (ADR-0014 decision 7,
+#                         do_restore_configuration_rollback), the shape is
+#                         narrower because there is no staging tree to walk:
+#                         only the single fixed literal path .env-orbit is
+#                         ever touched. The `.orbit-config.rollback` copy and
+#                         .env-orbit's own parent are re-verified (regular,
+#                         non-symlink, mode 600, no symlinked parent) before
+#                         anything is touched; the current live .env-orbit
+#                         (if any) is copied into this run's private recovery
+#                         directory first, then the rollback content is
+#                         written to a same-directory temporary file and
+#                         `mv`d onto .env-orbit — an atomic same-filesystem
+#                         rename, matching configuration.sh's own
+#                         migrate_file() write pattern, rather than
+#                         remove-then-copy. Any failure self-restores
+#                         .env-orbit from the recovery-directory backup and
+#                         reports `failed`, leaving the rollback copy in
+#                         place for a future retry. On success the rollback
+#                         copy is removed and the action is reported `done`.
+#
 #   restart-services      Re-resolves the target container immediately
 #                         before acting, using the identical Compose
 #                         project-label + service-label ownership proof
@@ -522,7 +631,7 @@ set -Eeuo pipefail
 # `restore-transaction` is the only action class in this slice that needs a
 # content-level backup (`backup=required` in the plan). Before it touches
 # any path, this script lazily creates one private, mode-0700 recovery
-# directory for the whole `--execute` run (`.orbit-repair-recovery.XXXXXX`,
+# directory for the whole `--execute` run (`.orbit-repair-recovery.*`,
 # a sibling naming convention to install.sh's own
 # `.orbit-install-staging.XXXXXX`, but with a distinct prefix so it can
 # never be mistaken for leftover installer staging evidence by a later
@@ -669,6 +778,15 @@ set -Eeuo pipefail
 #      re-diagnosed, and this exit code is then forced regardless of that
 #      terminal line's own result — exactly like `--check`/`--plan`'s own
 #      forced-5 precedent.
+#   6  refused — a deployment-version-unsupported finding is present
+#      (ADR-0016, #681), so the ENTIRE execution is refused before any
+#      batch runs: nothing is executed, nothing is mutated, and the run
+#      prints `execution result=refused done=0 failed=0
+#      reason=deployment-version-unsupported` (plus the matching
+#      `dangerous result=refused ...` line when --dangerous was requested)
+#      followed by the unchanged diagnosis. This is the same exit code the
+#      dangerous batch's own refusal uses — 6 uniformly means "refused,
+#      unmutated" whichever gate refused.
 #
 # The exit code always reflects THIS RUN's execution outcome, never the
 # post-execution re-diagnosis's own severity (analogous to how `--plan`'s
@@ -692,20 +810,27 @@ set -Eeuo pipefail
 # ============================================================================
 #
 # `--execute --dangerous` runs the identical diagnosis and planning
-# `--execute --safe-only` does, and additionally makes the single stage-two
-# action class — `rotate-database-credential` — executable, subject to the
-# approval model below. It may be combined with `--safe-only` in the same
-# invocation (each batch is independently planned, approved and executed;
-# see "Confirmation model" above for how the two batches coexist) or used on
-# its own. `rotate-database-credential` resolves database-credential-mismatch,
+# `--execute --safe-only` does, and additionally makes the two stage-two
+# action classes — `rotate-database-credential` and (#530 slice, ADR-0014
+# decision 5) `regenerate-secret` — executable, subject to the approval
+# model below. It may be combined with `--safe-only` in the same invocation
+# (each batch is independently planned, approved and executed; see
+# "Confirmation model" above for how the two batches coexist) or used on its
+# own. `rotate-database-credential` resolves database-credential-mismatch,
 # volume-retained-without-credentials, and (per the exception in the
-# action-class table above) a postgres-password secret-missing finding paired
-# with a retained volume — see that table for the full rationale. Every plan
-# entry resolving to `rotate-database-credential` is coalesced into ONE
-# execution instance (mirroring `restart-services`'s own once-per-run
+# action-class table above) a postgres-password secret-missing finding
+# paired with a retained database volume. `regenerate-secret` resolves every
+# OTHER secret-missing finding — session-secret, oidc-client-secret, and
+# postgres-password/document-kek when their own retained-volume guard is NOT
+# present — see that table for the full rationale of both. Every plan entry
+# resolving to `rotate-database-credential` is coalesced into ONE execution
+# instance (mirroring `restart-services`'s own once-per-run
 # `service_restart_result` dedup above): the credential is rotated at most
 # once per `--execute` run, and every matching plan entry reports the same
-# shared outcome.
+# shared outcome. `regenerate-secret` runs once PER DISTINCT missing-secret
+# target (a broken deployment can have more than one secret missing at
+# once); see "Step iterator" below for how the two classes are sequenced
+# together when a single run's dangerous batch contains both.
 #
 # Never automatable — this is the entire point of stage two
 # --------------------------------------------------------------------------
@@ -723,25 +848,36 @@ set -Eeuo pipefail
 # touched. This is a structural refusal, not a declined confirmation: no
 # prompt is ever printed in this path (there is nothing to answer).
 #
-# Approval model — typed action word (owner decision, 2026-08-13)
+# Approval model — typed action word (owner decision, 2026-08-13; extended
+# to regenerate-secret in the #530 slice, ADR-0014 decision 5)
 # --------------------------------------------------------------------------
 # Unlike the safe batch's `y`/`Y` confirmation, the dangerous batch requires
-# the operator to TYPE THE LITERAL ACTION WORD `rotate` — a non-standard
-# input specifically so muscle-memory Enter, a blank line, or any other text
-# can never fire it. The plan preview for the dangerous batch (the same
-# `plan action=... resolves=... mutation=credential-rotation backup=required`
-# line grammar --plan uses, on stdout, enum-only) is printed first. Then:
+# the operator to TYPE THE LITERAL ACTION WORD for the class being confirmed
+# — `rotate` for rotate-database-credential, `regenerate` for
+# regenerate-secret — a non-standard input specifically so muscle-memory
+# Enter, a blank line, or any other text can never fire either. The plan
+# preview for the dangerous batch (the same
+# `plan action=... resolves=... mutation=... backup=...` line grammar
+# --plan uses, on stdout, enum-only, covering every deferred entry
+# regardless of class) is printed first. Then, for EACH distinct dangerous
+# action class actually present in this run's dangerous batch, in turn
+# (rotate-database-credential before regenerate-secret when a single run
+# happens to contain both — see confirm_dangerous_action/execute_dangerous_
+# batch): the operator confirms that class's own word before this script
+# moves to the next one; refusing any one of them refuses the WHOLE
+# dangerous batch (nothing has mutated yet either way).
 #
-#   - Interactively: `Orbit repair: type 'rotate' to proceed (anything else
+#   - Interactively: `Orbit repair: type '<word>' to proceed (anything else
 #     cancels): ` is printed to stderr (not an enum) and one answer line is
-#     read from stdin. An exact `rotate` proceeds; a blank Enter, any other
+#     read from stdin. An exact match proceeds; a blank Enter, any other
 #     text, or EOF re-prompts, up to 3 attempts total; the 3rd rejected
 #     attempt (or an EOF at any attempt) refuses with
 #     `dangerous result=refused ... reason=refused-by-operator` and exit 6.
 #   - Under `ORBIT_REPAIR_PROMPTS=machine`: the repair-specific
 #     `field=action-word kind=typed-word` prompt (see "Machine prompts"
-#     below) is emitted instead, with the same exact-`rotate` acceptance
-#     rule and the same 3-attempt bound.
+#     below) is emitted instead, with the same exact-word acceptance rule
+#     and the same 3-attempt bound (re-emitted, attempt reset to 1, for a
+#     second class's own word when a run's dangerous batch spans both).
 #
 # Passphrase — the checkpoint, in the existing ORBKEK01 format (owner
 # decision, 2026-08-13; no new formats)
@@ -810,7 +946,7 @@ set -Eeuo pipefail
 # --------------------------------------------------------------------------
 # The bundle is written into a freshly created, mode-0700 directory
 # (`.orbit-repair-checkpoint.XXXXXX`, a sibling naming convention to the
-# existing `.orbit-repair-recovery.XXXXXX`/`.orbit-install-staging.XXXXXX`
+# existing `.orbit-repair-recovery.*`/`.orbit-install-staging.XXXXXX`
 # prefixes, distinct so it is never mistaken for either by a later
 # diagnosis) as a mode-0600 file. Unlike the stage-one private recovery
 # directory (`cleanup_recovery_dir`, always removed at the end of every
@@ -890,28 +1026,55 @@ set -Eeuo pipefail
 #                          end of the `--execute` invocation regardless of
 #                          how either batch concluded.
 #
+# regenerate-secret's own step model (#530 slice, ADR-0014 decision 5)
+# --------------------------------------------------------------------------
+# Simpler than the four-step rotate-database-credential iterator above:
+# once approved, `do_regenerate_secret_step` runs once per distinct
+# deferred missing-secret target (`run_regenerate_secret_steps`, straight
+# through in Step 3's own scan order, stopping at the first failure). No
+# checkpoint step exists or is needed — the finding only ever fires when
+# the secret file is absent/empty (see backup=not-required's comment on
+# backup_for_action), so there is no prior content to preserve. Each
+# target's own step re-proves the secrets directory is still real,
+# non-symlink, mode 700, and that the target itself is still genuinely
+# missing (the same TOCTOU re-check `fix-permissions` performs), then
+# writes the new secret exactly like `configure.sh`'s own
+# `ensure_secret_file` (scripts/configure.sh:777-802): `mktemp`ped under
+# the secrets directory (mode 600 from creation, before any content lands
+# in it), content written, mode 600 set again defensively, then an atomic
+# same-directory `mv` onto the live secret path — never a different
+# discipline invented here. When this run's dangerous batch ALSO contains
+# rotate-database-credential, regenerate-secret's targets run AFTER the
+# rotate sequence completes successfully (see execute_dangerous_batch),
+# never before and never if rotation itself failed.
+#
 # Any step failure: stop, guidance, stable non-zero exit
 # --------------------------------------------------------------------------
-# If ANY of steps 1-4 fails, the remaining steps in the sequence are never
-# attempted — the iterator stops at the first failure. `dangerous_failure_
-# reason` is set to `checkpoint-failed` (step 1) or `step-failed` (steps
-# 2-4), and recovery guidance is printed to stderr: for a post-checkpoint
-# failure, the checkpoint bundle's path (decrypt with
-# `docker compose ... run --rm --no-deps -T --entrypoint node orbit-app
-# /opt/orbit/scripts/recovery-crypto.mjs decrypt <path-inside-container>`
-# after bind-mounting it, exactly as this script itself does to verify it)
-# is named so the pre-rotation credential can be recovered by hand; if the
-# failure is at or after step 3 (i.e. step 2 already staged a new
-# credential), the staged file's fixed path is ALSO named, since the
-# database may already be expecting that value. Every planned entry
-# resolving to `rotate-database-credential` is then reported
-# `execute action=rotate-database-credential resolves=<class> result=failed`
-# and the run's exit code is 4 — the identical exit code stage one's own
-# `failed` terminal result uses, deliberately: `execution`'s exit-code
-# vocabulary already means "at least one attempted mutation failed" and
-# stage two does not need a second failure exit code, only its own `reason`
-# enum (see "Output contract" below) to distinguish which kind of failure it
-# was.
+# If ANY step in this run's combined ordered sequence fails — any of
+# rotate-database-credential's own steps 1-4, or any regenerate-secret
+# target's step — every later step, of either class, is never attempted:
+# the iterator stops at the first failure. `dangerous_failure_reason` is set
+# to `checkpoint-failed` (rotate step 1 only) or `step-failed` (every other
+# failure, rotate or regenerate), and recovery guidance is printed to
+# stderr: for a post-checkpoint rotate failure, the checkpoint bundle's path
+# (decrypt with `docker compose ... run --rm --no-deps -T --entrypoint node
+# orbit-app /opt/orbit/scripts/recovery-crypto.mjs decrypt
+# <path-inside-container>` after bind-mounting it, exactly as this script
+# itself does to verify it) is named so the pre-rotation credential can be
+# recovered by hand; if the failure is at or after rotate step 3 (i.e. step
+# 2 already staged a new credential), the staged file's fixed path is ALSO
+# named, since the database may already be expecting that value. A
+# regenerate-secret step failure needs no such guidance — `mktemp` + `mv` is
+# all-or-nothing, so a failed target has written nothing recoverable or
+# stale to point at. EVERY dangerous-class plan entry deferred to this run
+# — including a regenerate-secret target never reached because rotation
+# failed first, or vice versa — is then reported
+# `execute action=<class> resolves=<reason-class> result=failed`, and the
+# run's exit code is 4 — the identical exit code stage one's own `failed`
+# terminal result uses, deliberately: `execution`'s exit-code vocabulary
+# already means "at least one attempted mutation failed" and stage two does
+# not need a second failure exit code, only its own `reason` enum (see
+# "Output contract" below) to distinguish which kind of failure it was.
 #
 # Machine prompts (repair --execute --dangerous)
 # --------------------------------------------------------------------------
@@ -923,9 +1086,11 @@ set -Eeuo pipefail
 #   prompt field=checkpoint-passphrase kind=secret required=true attempt=<1..3>
 #   prompt field=checkpoint-passphrase-confirm kind=secret required=true attempt=<1..3>
 #
-# `action-word` accepts only the exact single-line answer `rotate`;
-# `reason=mismatch` on any other non-empty answer, `reason=empty` on a blank
-# line. `checkpoint-passphrase` accepts any answer of at least
+# `action-word` accepts only the exact single-line answer for the class
+# currently being confirmed (`rotate` or `regenerate` — see "Approval
+# model" above); `reason=mismatch` on any other non-empty answer,
+# `reason=empty` on a blank line. `checkpoint-passphrase` accepts any answer
+# of at least
 # `MIN_RECOVERY_PASSPHRASE_LENGTH` (12) characters; `reason=empty` for a
 # blank line, `reason=too-short` otherwise. `checkpoint-passphrase-confirm`
 # accepts only an answer identical to the just-accepted
@@ -941,23 +1106,26 @@ set -Eeuo pipefail
 # Output contract (--execute --dangerous)
 # --------------------------------------------------------------------------
 # The dangerous batch adds exactly one new terminal line, printed once,
-# after every `execute action=rotate-database-credential ...` line the
-# dangerous batch itself produced (if any), and always after the safe
-# batch's own `execution result=...` line when both batches ran:
+# after every `execute action=<rotate-database-credential|regenerate-secret>
+# ...` line the dangerous batch itself produced (if any, covering both
+# classes when a single run's dangerous batch contains both), and always
+# after the safe batch's own `execution result=...` line when both batches
+# ran:
 #
 #   dangerous result=<empty|complete|refused|failed> done=<n> failed=<n> reason=<none|non-interactive|refused-by-operator|checkpoint-failed|step-failed>
 #
 # `result=empty` (reason=none) — `--dangerous` was given but the plan
-# contained no `rotate-database-credential` entry; no prompt is shown.
-# `result=complete` (reason=none) — the credential was rotated and every
-# step succeeded. `result=refused` — the approval gate itself was never
-# passed (`reason=non-interactive` or `reason=refused-by-operator`); zero
-# mutation occurred. `result=failed` — approval was granted but a step
-# failed (`reason=checkpoint-failed` or `reason=step-failed`); see "Any step
-# failure" above. Like every other line in this script, no path, configured
-# value, or secret ever appears in this line or in any `execute action=
-# rotate-database-credential ...` line — enums only, exactly like
-# `--check`/`--plan`/`--execute --safe-only`.
+# contained no dangerous-class entry of either kind; no prompt is shown.
+# `result=complete` (reason=none) — every approved dangerous-class entry's
+# own mutation succeeded (the credential rotated, every deferred secret
+# regenerated). `result=refused` — the approval gate itself was never fully
+# passed for every class present (`reason=non-interactive` or
+# `reason=refused-by-operator`); zero mutation occurred. `result=failed` —
+# approval was granted but a step failed, of either class (`reason=
+# checkpoint-failed` or `reason=step-failed`); see "Any step failure" above.
+# Like every other line in this script, no path, configured value, or
+# secret ever appears in this line or in any `execute action=... ...` line
+# — enums only, exactly like `--check`/`--plan`/`--execute --safe-only`.
 #
 # EXIT CODES (--execute --dangerous)
 # --------------------------------------------------------------------------
@@ -982,14 +1150,83 @@ set -Eeuo pipefail
 #      either a structural non-interactive refusal or an exhausted bounded
 #      retry.
 
+# ============================================================================
+# EXPORT MODE (--export-diagnostics) — issue #531, ADR-0014 decision 10
+# ============================================================================
+# Exports diagnostics for support: the exact `--check` line grammar (finding
+# lines + the terminal `diagnosis` line) immediately followed by the exact
+# `--plan` line grammar (plan lines + the terminal `plan` line) — byte-for-
+# byte the same output those two modes would themselves print, produced by
+# the same `print_check_lines`/`print_plan_lines` functions rather than a
+# third reimplementation of either — plus exactly one further line:
+#
+#   identity schema_version=<value|unknown> applied_version=<value|unknown> image=<value|unknown>
+#
+# `schema_version`/`applied_version`/`image` are read directly from the live
+# `.env-orbit` (never via `configure.sh`, per decision 2's source-less rule)
+# and are ADR-0008 public, already-safe values: the configuration schema
+# version, the applied configuration version, and the digest-pinned
+# `ORBIT_IMAGE` reference. This is a bounded, deliberate exception to "no
+# configured value ever reaches stdout" — exactly these three fields, and
+# nothing else, ever. Each value is independently format-validated before
+# being trusted (the same bounded patterns `check_application_container`
+# already uses for `ORBIT_IMAGE`, mirrored rather than shared per decision 2);
+# a missing or malformed value is rendered as the fixed placeholder `unknown`
+# — the same convention docs/engine-events.md already uses for an
+# unrecognised enum value — never the raw value, and never a shorter line.
+# Allowlisting is inherited entirely from `--check`/`--plan`'s own enum-only
+# output contract: this mode adds no second redaction layer that could drift
+# from it.
+#
+# Preview, then confirm, then write — in that order, and only in that order.
+# The full content above (identical for the terminal preview and the written
+# file — assembled once, printed twice) is always printed to stdout first,
+# regardless of confirmation channel. Confirmation then follows the same
+# machine-prompt/interactive priority `confirm_safe_batch` already uses
+# (`field=export-diagnostics kind=confirm`), with one deliberate difference:
+# there is no non-interactive automation path. Decision 10 requires the
+# content to be "explicitly confirmed before any file is written", so a run
+# with no controlling terminal and no `ORBIT_REPAIR_PROMPTS=machine` opt-in
+# declines — fail-closed — rather than guessing at consent. Declining (by
+# either channel, or by reaching this fail-closed default) writes nothing at
+# all: no `mktemp` call is ever made before confirmation succeeds, so a
+# decline leaves no temporary file behind either.
+#
+# The write mirrors the discipline already in this script (see the checkpoint
+# bundle and the config-rollback restore above): `mktemp` under the
+# installation directory (mode 600 from creation), the full content written,
+# mode 600 set again defensively, then an atomic same-directory rename onto a
+# second, equally random `mktemp`-derived final name — so a reader can never
+# observe a partially-written file at the path this run ultimately reports.
+# That path is reported on stderr only, exactly like the checkpoint bundle
+# path above — never on stdout. No encryption: these are public values under
+# ADR-0008, and `recovery-crypto.mjs`/the recovery-bundle envelope are
+# deliberately not reused here for a file that never carries a secret.
+#
+# EXIT CODES (--export-diagnostics)
+# --------------------------------------------------------------------------
+#   0  the file was written.
+#   1  declined — an explicit interactive/machine-prompt "no", or no
+#      confirmation channel was available at all (see above); zero mutation
+#      either way.
+#   2  usage error.
+#   4  failed — the file could not be created/written (e.g. `mktemp`/`mv`
+#      failure); zero mutation.
+#   5  not-an-orbit-installation — identical trigger/meaning to every other
+#      mode; the check/plan content is still printed (matching `--check`/
+#      `--plan`'s own early-exit behavior), but no identity line, preview,
+#      confirmation, or write is ever attempted.
+
 usage() {
-  printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)) [--plain]\n' "$0" >&2
+  printf 'Usage: %s (--check|--plan|--execute (--safe-only|--dangerous|--safe-only --dangerous)|--export-diagnostics) [--plain]\n' "$0" >&2
   printf 'Orbit repair: --execute requires --safe-only and/or --dangerous.\n' >&2
   printf 'Orbit repair: --safe-only executes the stage-one safe/reversible action set\n' >&2
   printf 'Orbit repair: (fix-permissions, restore-transaction, restart-services).\n' >&2
-  printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential action,\n' >&2
-  printf 'Orbit repair: which always requires interactive or machine-prompt approval —\n' >&2
-  printf 'Orbit repair: there is no flag that runs it unattended.\n' >&2
+  printf 'Orbit repair: --dangerous executes the stage-two rotate-database-credential and\n' >&2
+  printf 'Orbit repair: regenerate-secret actions, which always require interactive or\n' >&2
+  printf 'Orbit repair: machine-prompt approval — there is no flag that runs either unattended.\n' >&2
+  printf 'Orbit repair: --export-diagnostics previews, then requires explicit confirmation for,\n' >&2
+  printf 'Orbit repair: writing the exact --check/--plan stream plus one identity line to a file.\n' >&2
 }
 
 plain_mode=0
@@ -998,10 +1235,10 @@ dangerous=0
 mode=""
 for arg in "$@"; do
   case "$arg" in
-    --check|--plan|--execute)
-      # Exactly one of --check/--plan/--execute is accepted; a second (of
-      # any of the three) is a usage error rather than a silent
-      # last-flag-wins override.
+    --check|--plan|--execute|--export-diagnostics)
+      # Exactly one of --check/--plan/--execute/--export-diagnostics is
+      # accepted; a second (of any of the four) is a usage error rather
+      # than a silent last-flag-wins override.
       [[ -z "$mode" ]] || {
         usage
         exit 2
@@ -1112,10 +1349,28 @@ trap cleanup EXIT
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory=".orbit-secrets"
+# configuration.sh's own rollback_suffix constant (scripts/configuration.sh
+# line 9), duplicated here rather than sourced — see the top-of-file
+# source-less rule. Only configuration.sh ever creates a file at this
+# suffix (migrate_file(), non-transaction path), and only when the
+# migration was NOT already running inside install's own transaction.
+readonly configuration_rollback_suffix=".orbit-config.rollback"
+
+# ADR-0016's supported-install floor, as comparable components. repair.sh is
+# deliberately source-less, so the floor is mirrored here rather than shared
+# — the authoritative statement is docs/adr/0016.
+readonly supported_floor_major=1
+readonly supported_floor_minor=3
+readonly supported_floor_patch=0
 readonly database_volume_key="orbit-db-data"
+# ADR-0014 decision 5's second retention guard (document-kek): mirrors
+# database_volume_key exactly, matched the same way against
+# `${project}_orbit-documents-data` (see docker-compose.yml's own
+# `orbit-documents-data` volume declaration).
+readonly document_volume_key="orbit-documents-data"
 readonly -a secret_names=(session-secret postgres-password document-kek oidc-client-secret)
 readonly -a known_orbit_services=(orbit-app orbit-db orbit-clamav orbit-tika orbit-ollama)
-readonly total_checks=15
+readonly total_checks=18
 readonly docker_probe_timeout=5s
 readonly docker_restart_timeout=30s
 readonly docker_rotate_timeout=30s
@@ -1133,11 +1388,14 @@ readonly staged_postgres_password_path="$secrets_directory/.repair-staged-postgr
 # own mutation= classification.
 readonly -a safe_action_classes=(fix-permissions restore-transaction restart-services)
 
-# Stage-two dangerous set (issue #261, owner decision 2026-08-13) — only
-# ever executed under `--execute --dangerous`, subject to the typed-word/
-# checkpoint approval model. See "EXECUTE MODE (--execute --dangerous)"
-# above.
-readonly -a dangerous_action_classes=(rotate-database-credential)
+# Stage-two dangerous set (issue #261, owner decision 2026-08-13; joined by
+# regenerate-secret in the #530 slice, ADR-0014 decision 5) — only ever
+# executed under `--execute --dangerous`, subject to the typed-word/
+# never-automatable approval model. See "EXECUTE MODE (--execute
+# --dangerous)" above. Order here is the order confirm_dangerous_batch below
+# asks for each class's own typed word (rotate before regenerate) when a
+# single run's dangerous batch happens to contain both.
+readonly -a dangerous_action_classes=(rotate-database-credential regenerate-secret)
 
 # The step ITERATOR for rotate-database-credential — see the "Stage-two
 # dangerous-step iterator" note near RESERVED CLASSES above and "Step
@@ -1156,7 +1414,7 @@ readonly -a restore_transaction_paths=(
   docker-compose.mail.yml
   docker-compose.mail-alias-rotation.yml
   .env-orbit.example
-  config/tika-config.xml
+  config/tika-config.json
   scripts/configure.sh
   scripts/installer-ui.sh
   scripts/configuration.sh
@@ -1178,18 +1436,23 @@ readonly -a class_order=(
   secret-permissions
   configuration-incomplete
   configuration-invalid
+  configuration-migration-interrupted
+  deployment-version-unsupported
   staging-evidence-present
   compose-interpolation-failed
   docker-unavailable
   container-foreign-owner
   volume-retained-without-credentials
+  document-volume-retained-without-key
   unrelated-resource-present
   database-unreachable
   database-credential-mismatch
   stale-container
+  image-identity-mismatch
   application-unhealthy
   database-schema-mismatch
   database-below-floor
+  migration-failed
 )
 
 # Reason class -> action class for --plan (see the "Action-class mapping
@@ -1203,8 +1466,23 @@ readonly -A action_for_class=(
   [secret-permissions]=fix-permissions
   [configuration-incomplete]=rerun-configuration
   [configuration-invalid]=rerun-configuration
+  # ADR-0014 decision 7: a deterministically recoverable interrupted
+  # configuration.sh migration — the live file fails validation AND its
+  # `.orbit-config.rollback` copy exists, is a regular non-symlink file, and
+  # itself passes validation — reuses the same restore-transaction action as
+  # the install-transaction boundary, rather than only telling the operator
+  # to re-run configure.sh (rerun-configuration, above).
+  [configuration-migration-interrupted]=restore-transaction
   [staging-evidence-present]=restore-transaction
   [volume-retained-without-credentials]=rotate-database-credential
+  # ADR-0014 decision 5's second retention guard. Unlike the database case
+  # immediately above, there is no rotate equivalent for document-kek — a
+  # retained document volume was encrypted under whatever key it already
+  # holds, and there is no local-socket-trust operation analogous to
+  # `ALTER ROLE` that can re-derive access to it. The honest outcome is
+  # manual: an operator decision (restore the original key, or knowingly
+  # accept the retained documents are unreadable), never a guess.
+  [document-volume-retained-without-key]=manual
   [database-credential-mismatch]=rotate-database-credential
   [stale-container]=restart-services
   [application-unhealthy]=restart-services
@@ -1213,6 +1491,22 @@ readonly -A action_for_class=(
   # matching database, or upgrade from a supported version.
   [database-schema-mismatch]=manual
   [database-below-floor]=manual
+  # A failed, rolled-back migration leaves no applied row and no safe
+  # automatic remedy: the migrator's own idempotent retry already happens on
+  # any restart (issue #528 decision), so repair must not invent a competing
+  # path. ADR-0004's recovery point is the operator's actual rollback
+  # boundary.
+  [migration-failed]=manual
+  # A mismatched running image is not restart-services (that would leave the
+  # same wrong image running); recreating a container from a different image
+  # is outside repair's safe, reversible action set.
+  [image-identity-mismatch]=manual
+  # ADR-0016: a deployment installed by a release below the supported floor
+  # is not a supported repair target. Nothing here is executable — and
+  # execute_repair additionally refuses the ENTIRE batch when this finding
+  # is present, because running even the safe executors against a pre-floor
+  # layout would mutate files this script was never proven against.
+  [deployment-version-unsupported]=manual
   [not-orbit-directory]=manual
   [managed-file-missing]=manual
   [managed-file-symlink]=manual
@@ -1234,7 +1528,14 @@ readonly -A mutation_for_action=(
   [manual]=none
 )
 
-# Action class -> backup requirement for --plan.
+# Action class -> backup requirement for --plan. regenerate-secret's
+# backup=not-required is only defensible because it is never planned where
+# it could invalidate retained state: the postgres-password/database-volume
+# guard (resolve_secret_missing_action) and the document-kek/document-volume
+# guard (also resolve_secret_missing_action, ADR-0014 decision 5) are what
+# make "no valid prior content exists to lose" true for every finding that
+# ever reaches this action. If either guard were ever weakened or removed,
+# this field would become wrong at the same moment.
 readonly -A backup_for_action=(
   [restore-transaction]=required
   [fix-permissions]=not-required
@@ -1243,6 +1544,41 @@ readonly -A backup_for_action=(
   [restart-services]=not-required
   [rerun-configuration]=not-required
   [manual]=not-required
+)
+
+# Action class -> named rollback point for the plan line (criterion 6, #681).
+# Enum-only like every other plan field: the name says where the undo lives,
+# never a path.
+#   recovery-directory     the private mode-700 recovery copy taken before
+#                          the action mutates anything (ensure_recovery_dir)
+#   credential-checkpoint  the verified checkpoint bundle stage two creates
+#                          before rotating (see EXECUTE MODE, stage two)
+#   prior-mode             the action is a mode change; the undo is the mode
+#                          the file had before
+#   not-required           the action leaves nothing to roll back —
+#                          regenerate-secret belongs here for the same
+#                          reason its backup is not-required (see
+#                          backup_for_action's comment above)
+readonly -A rollback_for_action=(
+  [restore-transaction]=recovery-directory
+  [fix-permissions]=prior-mode
+  [regenerate-secret]=not-required
+  [rotate-database-credential]=credential-checkpoint
+  [restart-services]=not-required
+  [rerun-configuration]=not-required
+  [manual]=not-required
+)
+
+# Action class -> expected result for the plan line (criterion 6, #681):
+# what the deployment looks like if the action succeeds, as an enum.
+readonly -A expected_for_action=(
+  [restore-transaction]=files-restored
+  [fix-permissions]=permissions-safe
+  [regenerate-secret]=secret-recreated
+  [rotate-database-credential]=authentication-restored
+  [restart-services]=services-healthy
+  [rerun-configuration]=configuration-valid
+  [manual]=operator-action
 )
 
 # One human-readable, value-free manual-step line per manual-class reason
@@ -1262,12 +1598,48 @@ readonly -A manual_guidance=(
   # a database on the operator's behalf.
   [database-schema-mismatch]="attach the database this build's migrations expect, or restore this deployment to the build that matches the current database, before starting either again"
   [database-below-floor]="this database predates the oldest migration history this build supports; restore it from a backup made by a supported version, or run that version's upgrade path first, before pointing this build at it"
+  # ADR-0004's recovery point is the actual rollback boundary here; repair
+  # itself never applies, retries, or reverses a migration.
+  [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
+  [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
+  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here"
+  [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
+  # Keyed by the reason class (secret-missing), not by target, like every
+  # other entry here — but this one only ever fires for one specific target:
+  # resolve_secret_missing_action resolves secret-missing to `manual` ONLY
+  # for document-kek when document-volume-retained-without-key is also
+  # present (mirroring the postgres-password/rotate-database-credential
+  # exception, which never reaches `manual` at all). Every other secret-
+  # missing finding resolves to regenerate-secret or rotate-database-
+  # credential, never manual, so this entry is unambiguous despite the
+  # generic key.
+  [secret-missing]="the missing document-kek cannot be safely regenerated while a document volume is retained; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
 )
 
 declare -a findings=()
 declare -A secret_status=()
 checked=0
 diagnosis_early=0
+
+# issue #528: true once a migration-failed finding has been added by either
+# detection channel (the primary app-log sentinel scan, or the SQL backstop
+# sequenced after it), so the second channel never adds one for the same run.
+# $migration_backstop_* carry the database coordinates from Step 11
+# (check_database_reachability) to the backstop, which runs after Step 12's
+# sentinel scan; they are set only once the authenticated SELECT 1 probe has
+# succeeded, so empty means "no authenticated path — the backstop must skip".
+# $app_identity_* are set by check_application_container so Step 13
+# (check_image_identity) can tell "no eligible container" from "not yet run".
+migration_failed_reported=0
+migration_backstop_db_id=""
+# The container the authenticated probe drew its credential from, and the
+# program it used, so the backstop reuses that identical path (#632).
+migration_backstop_reader_id=""
+migration_backstop_reader_script=""
+migration_backstop_pg_user=""
+migration_backstop_pg_db=""
+app_identity_container_id=""
+app_identity_pinned_image=""
 
 # execute-mode state (unused under --check/--plan).
 declare -a plan_entries=()
@@ -1316,6 +1688,36 @@ read_environment_value() {
   done < "$environment_file"
   [[ "$found" == 1 ]] || return 1
   printf '%s' "$value"
+}
+
+# --- configuration-migration-interrupted (ADR-0014 decision 7) -------------
+#
+# repair.sh validates the live .env-orbit by running `bash scripts/
+# configure.sh --check` as a subprocess (Step 5 below) rather than
+# reimplementing configure.sh's readiness rules. `configure.sh --check-
+# rollback` is the identical subprocess pattern pointed at configuration.sh's
+# own `.orbit-config.rollback` copy instead: no path is ever passed on the
+# command line (configure.sh derives the checked filename itself from its
+# own hardcoded `.env-orbit` + rollback-suffix constants, at its own
+# conventional cwd — see configure.sh's own top-of-file comment), so this
+# never introduces untrusted path input, and every other input
+# (.orbit-secrets included) still resolves to the real installation
+# directory exactly like plain --check. An earlier revision of this function
+# ran a hand-staged copy of configure.sh under $TMPDIR instead; that staging
+# area deliberately omitted .orbit-secrets to avoid duplicating secret
+# material, which made the isolated check silently unable to pass for the
+# file-backed OIDC_CLIENT_SECRET_FILE shape install.sh always produces — the
+# class could never fire on a normally-installed deployment. --check-
+# rollback avoids the entire problem: there is no second directory, so
+# nothing needs to be reproduced in it.
+configuration_migration_rollback_recoverable() {
+  local rollback_path="${environment_file}${configuration_rollback_suffix}"
+  is_regular_non_symlink_file "$rollback_path" || return 1
+  has_mode "$rollback_path" 600 || return 1
+  is_regular_non_symlink_file scripts/configure.sh || return 1
+  local status=0
+  bash scripts/configure.sh --check-rollback >/dev/null 2>/dev/null || status=$?
+  [[ "$status" == 0 ]]
 }
 
 # $1: "early" forces exit 5 (not-an-orbit-installation) regardless of
@@ -1371,34 +1773,48 @@ print_check_output_and_exit() {
 }
 
 # secret-missing's action class depends on which secret is missing: every
-# generated non-user secret regenerates safely, EXCEPT postgres-password
-# when a volume-retained-without-credentials finding is also present in
-# this same diagnosis (the #261 fixed-project collision) — that specific
-# finding must route to rotate-database-credential instead, so a
-# retained-volume postgres password is never auto-regenerated. See the
-# "regenerate-secret" / "rotate-database-credential" entries in the
+# generated non-user secret regenerates safely, EXCEPT
+#   - postgres-password when a volume-retained-without-credentials finding
+#     is also present in this same diagnosis (the #261 fixed-project
+#     collision) — that specific finding must route to
+#     rotate-database-credential instead, so a retained-volume postgres
+#     password is never auto-regenerated.
+#   - document-kek when a document-volume-retained-without-key finding is
+#     also present (ADR-0014 decision 5's second retention guard) — there is
+#     no rotate equivalent for a document volume, so the honest outcome is
+#     `manual` rather than a guessed fix.
+# See the "regenerate-secret" / "rotate-database-credential" entries in the
 # header's action-class mapping table for the full rationale. Relies on
 # bash's dynamic scoping: every caller declares its own local
-# `volume_retained_without_credentials` before calling this.
+# `volume_retained_without_credentials` and `document_volume_retained`
+# before calling this.
 resolve_secret_missing_action() {
   local target="$1"
   if [[ "$target" == postgres-password && "$volume_retained_without_credentials" == 1 ]]; then
     printf 'rotate-database-credential'
+  elif [[ "$target" == document-kek && "$document_volume_retained" == 1 ]]; then
+    printf 'manual'
   else
     printf 'regenerate-secret'
   fi
 }
 
-print_plan_output_and_exit() {
-  local forced_exit="$1"
+# Prints the --plan line grammar (plan lines + the terminal plan line)
+# without exiting, and records the plan result into $plan_result. Used both
+# by --plan itself and by --export-diagnostics, which must include this
+# exact byte-for-byte stream (same function, not a third reimplementation)
+# in its exported content — see "EXPORT MODE (--export-diagnostics)" above.
+print_plan_lines() {
   local class entry fclass ftarget fseverity action
-  local actions=0 manual=0 result
+  local actions=0 manual=0
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
 
   for entry in "${findings[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1420,8 +1836,9 @@ print_plan_output_and_exit() {
         action="${action_for_class[$fclass]:-manual}"
       fi
 
-      printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-        "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+      printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+        "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+        "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
 
       if [[ "$action" == manual ]]; then
         manual=$((manual + 1))
@@ -1435,18 +1852,23 @@ print_plan_output_and_exit() {
   done
 
   if [[ "$actions" -gt 0 ]]; then
-    result=ready
+    plan_result=ready
   elif [[ "$manual" -gt 0 ]]; then
-    result="manual-required"
+    plan_result="manual-required"
   else
-    result=empty
+    plan_result=empty
   fi
-  printf 'plan result=%s actions=%s manual=%s\n' "$result" "$actions" "$manual"
+  printf 'plan result=%s actions=%s manual=%s\n' "$plan_result" "$actions" "$manual"
+}
+
+print_plan_output_and_exit() {
+  local forced_exit="$1"
+  print_plan_lines
 
   if [[ "$forced_exit" == early ]]; then
     exit 5
   fi
-  case "$result" in
+  case "$plan_result" in
     empty) exit 0 ;;
     ready) exit 3 ;;
     manual-required) exit 4 ;;
@@ -1464,6 +1886,7 @@ print_plan_output_and_exit() {
 compute_plan_entries() {
   local class entry fclass ftarget fseverity action
   local volume_retained_without_credentials=0
+  local document_volume_retained=0
   plan_entries=()
   plan_actions_count=0
   plan_manual_count=0
@@ -1472,6 +1895,7 @@ compute_plan_entries() {
     [[ -n "$entry" ]] || continue
     IFS='|' read -r fclass ftarget fseverity <<< "$entry"
     [[ "$fclass" == volume-retained-without-credentials ]] && volume_retained_without_credentials=1
+    [[ "$fclass" == document-volume-retained-without-key ]] && document_volume_retained=1
   done
 
   for class in "${class_order[@]}"; do
@@ -1529,8 +1953,9 @@ print_plan_preview() {
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r action fclass ftarget <<< "$entry"
-    printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+    printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+      "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
   done
 }
 
@@ -1542,16 +1967,33 @@ print_entries_preview() {
   local entry action fclass ftarget
   for entry in "$@"; do
     IFS='|' read -r action fclass ftarget <<< "$entry"
-    printf 'plan action=%s resolves=%s mutation=%s backup=%s\n' \
-      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}"
+    printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
+      "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
+      "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
   done
 }
 
 ensure_recovery_dir() {
   [[ -n "$recovery_dir" ]] && return 0
-  recovery_dir="$(mktemp -d "./.orbit-repair-recovery.XXXXXX")" || return 1
-  chmod 700 -- "$recovery_dir" || return 1
-  return 0
+  # The name is assigned BEFORE the directory exists, never after. The old
+  # shape — recovery_dir="$(mktemp -d ...)" — had a window #655 caught on CI:
+  # a fatal signal landing while the command substitution is in flight kills
+  # this shell after mktemp has created the directory but before the
+  # assignment completes, so the EXIT trap finds $recovery_dir empty and the
+  # mode-700 copy of live secrets is orphaned. With the name assigned first,
+  # every interruption point leaves the trap knowing exactly what to remove:
+  # before mkdir there is nothing to remove and `rm -rf` of a missing path is
+  # a no-op; from mkdir onwards the directory is removable by name. mkdir
+  # itself refuses an existing path (symlinks included), so a predictable
+  # name cannot be redirected the way a reused one could; a collision just
+  # burns one attempt.
+  local attempt
+  for attempt in 1 2 3; do
+    recovery_dir="./.orbit-repair-recovery.$$.${RANDOM}${RANDOM}"
+    mkdir -m 700 -- "$recovery_dir" 2>/dev/null && return 0
+  done
+  recovery_dir=""
+  return 1
 }
 
 cleanup_recovery_dir() {
@@ -1673,20 +2115,70 @@ run_diagnosis() {
   #     on stdout was involved).
   #   - exit non-zero with stderr output -> configuration-invalid (a
   #     structural problem such as an unreadable/unsafe .env-orbit or a
-  #     missing .env-orbit.example template).
+  #     missing .env-orbit.example template) — UNLESS a recoverable
+  #     `.orbit-config.rollback` copy is present (see
+  #     configuration_migration_rollback_recoverable above), in which case
+  #     configuration-migration-interrupted (ADR-0014 decision 7) replaces
+  #     it: exactly one configuration finding is ever recorded per run.
+  configuration_finding=0
   if is_regular_non_symlink_file scripts/configure.sh; then
     checked=$((checked + 1))
     configure_check_stderr="$(mktemp "${TMPDIR:-/tmp}/orbit-repair-configure-check.XXXXXX")"
     configure_check_status=0
     bash scripts/configure.sh --check >/dev/null 2>"$configure_check_stderr" || configure_check_status=$?
+    configure_check_had_stderr=0
+    [[ -s "$configure_check_stderr" ]] && configure_check_had_stderr=1
+    rm -f -- "$configure_check_stderr"
     if [[ "$configure_check_status" != 0 ]]; then
-      if [[ -s "$configure_check_stderr" ]]; then
+      configuration_finding=1
+      if configuration_migration_rollback_recoverable; then
+        add_finding configuration-migration-interrupted configuration fail
+      elif [[ "$configure_check_had_stderr" == 1 ]]; then
         add_finding configuration-invalid configuration fail
       else
         add_finding configuration-incomplete configuration fail
       fi
     fi
-    rm -f -- "$configure_check_stderr"
+  fi
+
+  # --- Step 5b: deployment version vs the supported-install floor (ADR-0016) -
+  #
+  # ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
+  # supported install, so its absence from a readable .env-orbit is not a
+  # gap to shrug at: it is the signature of a deployment installed before
+  # the floor existed (a v1.0.0-era install carries no configuration.sh at
+  # all), or of a hand-assembled file this script has no business mutating.
+  # Both refuse — fail closed. Major version 0 is the development era
+  # (working-tree and CI builds stamp v0.0.0) and is exempt: it is not a
+  # published release, and ADR-0016's floor is about published releases.
+  # When .env-orbit itself is untrustworthy (missing, symlink, wrong mode)
+  # this check is skipped rather than failed: those states are findings of
+  # their own, fixing them is exactly what repair is for, and the version
+  # re-evaluates on the next run once the file can be believed. The same
+  # skip applies while a configuration finding is present this run: an
+  # interrupted or invalid configuration means the live file's content is
+  # not believable either — a half-written .env-orbit legitimately lacks
+  # the version key, and refusing here would block the very restore
+  # (ADR-0014 decision 7) that makes the file believable again.
+  if [[ "$env_status" == ok && "$configuration_finding" == 0 ]]; then
+    checked=$((checked + 1))
+    applied_version="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
+    version_supported=0
+    if [[ "$applied_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+      version_major="${BASH_REMATCH[1]}"
+      version_minor="${BASH_REMATCH[2]}"
+      version_patch="${BASH_REMATCH[3]}"
+      if ((version_major == 0)); then
+        version_supported=1
+      elif ((version_major > supported_floor_major)); then
+        version_supported=1
+      elif ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
+        version_supported=1
+      elif ((version_major == supported_floor_major && version_minor == supported_floor_minor && version_patch >= supported_floor_patch)); then
+        version_supported=1
+      fi
+    fi
+    [[ "$version_supported" == 1 ]] || add_finding deployment-version-unsupported deployment fail
   fi
 
   # --- Step 6: Compose project name derivation (read-only) -------------------
@@ -1771,6 +2263,47 @@ run_diagnosis() {
     fi
   fi
 
+  # --- Step 9b: retained document volume vs. document-kek (ADR-0014 decision
+  # 5's second retention guard) ------------------------------------------------
+  #
+  # Identical shape to Step 9 immediately above, against
+  # $document_volume_key/document-kek instead of
+  # $database_volume_key/postgres-password: a volume-name match plus the
+  # local absence of the document-kek secret file. Never opens a database
+  # connection, never execs into a container, never reads a document or a
+  # secret's contents — this is exactly as read-only as Step 9, and exists
+  # so a `document-kek` regeneration can never be planned while a document
+  # volume encrypted under the OLD (possibly now-unrecoverable) key is still
+  # retained — see resolve_secret_missing_action.
+
+  if [[ "$resource_check_eligible" == 1 ]]; then
+    if [[ "$docker_available" == 1 ]]; then
+      checked=$((checked + 1))
+      volume_list="$(timeout "$docker_probe_timeout" docker volume ls \
+        --filter "name=$document_volume_key" --format '{{.Name}}' 2>/dev/null || true)"
+      our_volume="${project}_${document_volume_key}"
+      found_ours=0
+      found_other=0
+      while IFS= read -r volume || [[ -n "$volume" ]]; do
+        [[ -z "$volume" ]] && continue
+        [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-documents-data$ ]] || continue
+        if [[ "$volume" == "$our_volume" ]]; then
+          found_ours=1
+        else
+          found_other=1
+        fi
+      done <<< "$volume_list"
+      [[ "$found_other" == 1 ]] && add_finding unrelated-resource-present document-volume info
+      if [[ "$found_ours" == 1 ]]; then
+        if [[ "$secrets_status" != ok || "${secret_status[document-kek]:-missing}" == missing ]]; then
+          add_finding document-volume-retained-without-key document-volume fail
+        fi
+      fi
+    else
+      add_finding docker-unavailable document-volume info
+    fi
+  fi
+
   # --- Step 10: container project-label ownership -----------------------------
 
   if [[ "$resource_check_eligible" == 1 ]]; then
@@ -1818,14 +2351,47 @@ run_diagnosis() {
   # locally pinned ORBIT_IMAGE (stale-container) and reads Docker's own
   # computed health status (application-unhealthy, from the HEALTHCHECK baked
   # into the published image). Both reads are `docker inspect` only; neither
-  # execs into the container nor touches the registry (that registry-side
-  # comparison is the still-reserved image-identity-mismatch class).
+  # execs into the container nor touches the registry.
   if [[ "$resource_check_eligible" == 1 ]]; then
     if [[ "$docker_available" == 1 ]]; then
       checked=$((checked + 1))
       check_application_container
     else
       add_finding docker-unavailable application info
+    fi
+  fi
+
+  # --- migration-failed SQL backstop (issue #528) ----------------------------
+  #
+  # Deliberately sequenced AFTER Step 12: the bounded app-log sentinel scan
+  # inside check_application_container is the PRIMARY migration-failed
+  # channel, and this backstop's one fixed-literal SELECT runs only when that
+  # scan reported nothing — because the logs rotated the sentinel away, or
+  # because the container is gone entirely (check_application_container
+  # returns early with no scan at all in that case). Internally guarded to a
+  # no-op unless Step 11's authenticated SELECT 1 probe already succeeded
+  # ($migration_backstop_* empty otherwise), so it widens nothing on the
+  # common path and never runs unauthenticated. Part of Step 11's database
+  # check rather than a counted step of its own.
+  check_migration_failed_backstop
+
+  # --- Step 13: application container image IDENTITY (issue #528) -----------
+  #
+  # Distinct from Step 12's stale-container comparison, which only compares
+  # the `Config.Image` reference string. This compares content-addressable
+  # image IDs: the running container's actual `docker inspect .Image` against
+  # `docker image inspect <pinned ORBIT_IMAGE>`'s `.Id` for the
+  # already-digest-validated pinned reference — entirely local reads, no
+  # registry call. Set by check_application_container above
+  # ($app_identity_container_id / $app_identity_pinned_image); only
+  # meaningful once that check has run, so this step is always sequenced
+  # after it.
+  if [[ "$resource_check_eligible" == 1 ]]; then
+    if [[ "$docker_available" == 1 ]]; then
+      checked=$((checked + 1))
+      check_image_identity
+    else
+      add_finding docker-unavailable image info
     fi
   fi
 }
@@ -1856,7 +2422,7 @@ check_managed_file() {
 
 check_database_reachability() {
   local db_ids db_id pg_user=orbit pg_db=orbit candidate
-  local pg_password="" psql_output="" psql_status=0
+  local psql_output="" psql_status=0
 
   if [[ "$env_status" == ok ]]; then
     candidate="$(read_environment_value POSTGRES_USER 2>/dev/null || true)"
@@ -1867,14 +2433,14 @@ check_database_reachability() {
 
   db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.service=orbit-db" \
+    --filter "label=com.docker.compose.service=$db_service_host" \
     --format '{{.ID}}' 2>/dev/null || true)"
   db_id=""
   if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
     db_id="$db_ids"
   fi
 
-  if [[ -z "$db_id" ]] || ! timeout "$docker_probe_timeout" docker exec -T "$db_id" \
+  if [[ -z "$db_id" ]] || ! timeout "$docker_probe_timeout" docker exec "$db_id" \
     pg_isready -U "$pg_user" -d "$pg_db" >/dev/null 2>&1; then
     add_finding database-unreachable database fail
     return 0
@@ -1888,23 +2454,203 @@ check_database_reachability() {
   # call site below, so every early exit here is an explicit `return 0`.)
   [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
 
-  pg_password="$(cat -- "$secrets_directory/postgres-password" 2>/dev/null || true)"
-  # -h forces a host (TCP) connection so PostgreSQL's password-based
-  # authentication is actually exercised; a bare local-socket connection
-  # would use "trust" auth inside the official postgres image and could
-  # never observe a credential mismatch.
-  psql_output="$(PGPASSWORD="$pg_password" timeout "$docker_probe_timeout" \
-    docker exec -e PGPASSWORD -T "$db_id" \
-    psql -h 127.0.0.1 -U "$pg_user" -d "$pg_db" -c 'SELECT 1' 2>&1)" || psql_status=$?
-  pg_password=""
+  # The application container holds the credential under test (#632). Resolve
+  # it here rather than depending on check_application_container's ordering:
+  # this step must not become sensitive to where it sits in the diagnosis.
+  local app_probe_ids app_probe_id=""
+  app_probe_ids="$(timeout "$docker_probe_timeout" docker ps -a \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=orbit-app" \
+    --format '{{.ID}}' 2>/dev/null || true)"
+  if [[ -n "$app_probe_ids" && "$app_probe_ids" != *$'\n'* && "$app_probe_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
+    app_probe_id="$app_probe_ids"
+  fi
+  # Which container the credential comes from, and whether the result may
+  # raise a finding. With an application container that can name its own
+  # secret file, the credential under test is the one it presents, and a
+  # failure IS a credential mismatch. Without one there is no application
+  # credential to be wrong -- so the database's own copy is used purely to
+  # reach the database for the migration backstop, and never classified.
+  local reader_id="$app_probe_id" reader_script="$app_credential_reader"
+  local classify_credentials=1
+  # shellcheck disable=SC2016  # expanded by the container's shell, not this one
+  if [[ -z "$app_probe_id" ]] || ! timeout "$docker_probe_timeout" docker exec "$app_probe_id" \
+    sh -c 'f="${POSTGRES_PASSWORD_FILE:-}"; [ -n "$f" ] && [ -r "$f" ]' >/dev/null 2>&1; then
+    reader_id="$db_id"
+    reader_script="$db_credential_reader"
+    classify_credentials=0
+  fi
+
+  # The credential crosses from one container to the other as bytes in a pipe.
+  # No host process holds it: not argv, not an environment variable, not a
+  # shell variable (#610's property, kept). The pipeline's exit status is
+  # psql's, which is the one being classified below.
+  psql_output="$( { timeout "$docker_probe_timeout" docker exec "$reader_id" \
+      sh -c "$reader_script" sh \
+    | timeout "$docker_probe_timeout" docker exec -i "$db_id" \
+      sh -c "$authenticated_probe" sh "$db_service_host" "$pg_user" "$pg_db"; } 2>&1)" || psql_status=$?
+  # The container could not tell us which file holds the password, so there
+  # is nothing to authenticate with and nothing to report: no finding, rather
+  # than a guess dressed up as one.
+  [[ "$psql_status" != "$PROBE_NO_SECRET_STATUS" ]] || { psql_output=""; return 0; }
+  # A probe that borrowed the database's own copy proves nothing about the
+  # application's credential, so it may record coordinates but never a finding.
+  if [[ "$classify_credentials" == 0 && "$psql_status" != 0 ]]; then
+    psql_output=""
+    return 0
+  fi
   if [[ "$psql_status" != 0 ]]; then
     if [[ "${psql_output,,}" == *"password authentication failed"* ]]; then
       add_finding database-credential-mismatch database fail
     else
       add_finding database-unreachable database fail
     fi
+  else
+    # Authenticated probe succeeded: record the coordinates the
+    # migration-failed SQL backstop would need. The backstop itself is
+    # deliberately NOT run here — the primary channel is Step 12's app-log
+    # sentinel scan, and check_migration_failed_backstop is sequenced after
+    # it in run_diagnosis so the SQL only ever runs when that scan
+    # found nothing (rotated logs, or the container removed entirely).
+    migration_backstop_db_id="$db_id"
+    migration_backstop_reader_id="$reader_id"
+    migration_backstop_reader_script="$reader_script"
+    migration_backstop_pg_user="$pg_user"
+    migration_backstop_pg_db="$pg_db"
   fi
   psql_output=""
+}
+
+# The two programs the database probes run *inside* the database container,
+# and the two properties they are built around (#610).
+#
+#   1. They connect to the compose service name, never to 127.0.0.1. The
+#      official Postgres image ships a pg_hba.conf that trusts loopback
+#      outright:
+#
+#        host all all 127.0.0.1/32  trust
+#        host all all all           scram-sha-256
+#
+#      so a loopback connection is accepted whatever password is supplied,
+#      and the probe that exists to detect a wrong password could never
+#      detect one. The service name is the same network identity the
+#      application uses and lands on the scram-sha-256 rule instead. SCRAM is
+#      challenge-response, so the password itself never crosses the wire.
+#
+#   2. They test the credential the APPLICATION is actually using, read from
+#      inside the application container and piped straight into psql inside
+#      the database container. No process on the host ever holds it — not in
+#      argv, not in an environment variable, and not in a shell variable
+#      either; it exists only as bytes in a pipe between two containers.
+#
+#      Reading it from the DATABASE container instead was wrong, and wrong in
+#      both directions (#629, #632). That container's copy is a bind mount of
+#      the secret file's inode, frozen at its last start, and Postgres itself
+#      stops caring the moment initdb has run — it authenticates from its own
+#      catalogue afterwards. So after any replacement of the secret file the
+#      database container's copy is neither what Orbit is configured with nor
+#      what the database checks against. It reported a successful rotation as
+#      failed (#629) and, worse, reported a deployment whose application could
+#      not authenticate at all as merely unhealthy (#632).
+#
+#      The application container's copy is the one that matters, because it is
+#      definitionally the credential the running application presents. It is
+#      taken from $POSTGRES_PASSWORD_FILE inside that container — the runtime
+#      copy container-entrypoint.sh makes, not the mount — so a container that
+#      has not restarted is tested on what it is really using, which is the
+#      truth this check exists to establish.
+#
+#      A deployment where that file cannot be read exits PROBE_NO_SECRET_STATUS,
+#      which the callers treat as "cannot classify" and report nothing.
+#
+# The user, database and host are positional arguments, never interpolated
+# into the shell text, and both queries stay fixed literals.
+# The compose service name of the database: both the label this script
+# discovers the container by and the host its probes dial. One name, so
+# the two cannot drift apart.
+readonly db_service_host="orbit-db"
+readonly PROBE_NO_SECRET_STATUS=97
+# Run in the APPLICATION container: emits the credential that container is
+# actually using, and nothing else. Read-only, no network, no database.
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly app_credential_reader='
+  secret_file="${POSTGRES_PASSWORD_FILE:-}"
+  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
+  exec cat -- "$secret_file"
+'
+# Run in the DATABASE container: its own mounted copy of the secret. This is
+# NOT a valid source for judging the application's credential (#629, #632) and
+# is never used for that. It exists only so the migration-failed backstop can
+# still reach the database when there is no application container to borrow a
+# credential from -- the case that backstop was written for. A finding is never
+# raised from a probe that used it.
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly db_credential_reader='
+  secret_file="${POSTGRES_PASSWORD_FILE:-}"
+  [ -n "$secret_file" ] && [ -r "$secret_file" ] || exit 97
+  exec cat -- "$secret_file"
+'
+# Run in the DATABASE container, with that credential arriving on stdin. The
+# assignment is a command substitution rather than a variable the shell keeps:
+# `$(cat)` also strips the secret file's trailing newline, which a password
+# must not carry.
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly authenticated_probe='
+  PGPASSWORD="$(cat)"
+  [ -n "$PGPASSWORD" ] || exit 97
+  export PGPASSWORD
+  exec psql -h "$1" -U "$2" -d "$3" -c "SELECT 1"
+'
+# shellcheck disable=SC2016  # expanded by the container's shell, not this one
+readonly migration_backstop_probe='
+  PGPASSWORD="$(cat)"
+  [ -n "$PGPASSWORD" ] || exit 97
+  export PGPASSWORD
+  exec psql -h "$1" -U "$2" -d "$3" -t -A -F"|" \
+    -c "SELECT \"outcome\", \"reason\" FROM \"drizzle\".\"orbit_migration_runs\" ORDER BY \"id\" DESC LIMIT 1"
+'
+
+# migration-failed backstop (issue #528 decision, 2026-08-23 comment): the
+# SECONDARY channel, called from run_diagnosis after Step 12's app-log
+# sentinel scan (the primary channel) and skipping itself whenever that scan
+# already reported ($migration_failed_reported). It exists for the two cases
+# the scan cannot answer: the sentinel rotated out of the bounded log window,
+# or the container removed entirely. Reads its database coordinates from
+# $migration_backstop_*, which Step 11 (check_database_reachability) sets
+# only once the authenticated SELECT 1 probe has succeeded — so this runs
+# strictly over that identical already-authenticated connection path, no new
+# docker verb, no new exec target, never unauthenticated. Exactly one
+# additional fixed-literal query, byte for byte, zero interpolation: reads
+# the migrator's own outcome bookkeeping row (never a journal comparison this
+# script would have to interpret). The response is untrusted: bounded to 256
+# bytes and accepted only if it matches a strict `[a-z_]{1,32}` enum shape
+# for both columns; a missing table, a database error, or any other
+# non-matching byte sequence is treated identically — skip, never guess.
+check_migration_failed_backstop() {
+  local mig_output=""
+  local -r mig_pattern='^([a-z_]{1,32})\|([a-z_]{0,32})$'
+
+  [[ "$migration_failed_reported" == 0 ]] || return 0
+  [[ -n "$migration_backstop_db_id" ]] || return 0
+  [[ -n "$migration_backstop_reader_id" ]] || return 0
+  [[ "${secret_status[postgres-password]:-missing}" == ok ]] || return 0
+
+  # Same two containers, same pipe, same credential as the SELECT 1 that
+  # already succeeded — no new exec target and no new way to obtain a secret.
+  mig_output="$(
+    { timeout "$docker_probe_timeout" docker exec "$migration_backstop_reader_id" \
+      sh -c "$migration_backstop_reader_script" sh \
+    | timeout "$docker_probe_timeout" docker exec -i "$migration_backstop_db_id" \
+      sh -c "$migration_backstop_probe" sh "$db_service_host" \
+      "$migration_backstop_pg_user" "$migration_backstop_pg_db" \
+      2>&1 || true; } | head -c 256
+  )"
+
+  [[ "$mig_output" =~ $mig_pattern ]] || return 0
+  if [[ "${BASH_REMATCH[1]}" == failed ]]; then
+    add_finding migration-failed database fail
+    migration_failed_reported=1
+  fi
 }
 
 check_application_container() {
@@ -1915,6 +2661,9 @@ check_application_container() {
     pinned_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
     [[ "$pinned_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || pinned_image=""
   fi
+  # Recorded globally for Step 13 (check_image_identity) regardless of how
+  # this function returns below — see its declaration near $findings.
+  app_identity_pinned_image="$pinned_image"
 
   app_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
@@ -1924,6 +2673,7 @@ check_application_container() {
   if [[ -n "$app_ids" && "$app_ids" != *$'\n'* && "$app_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
     app_id="$app_ids"
   fi
+  app_identity_container_id="$app_id"
   # Every early exit below is an explicit `return 0`, never a bare `return`:
   # a bare `return` propagates the preceding failed test's exit status as
   # this function's own return value, which would trip `set -e` at the
@@ -1951,10 +2701,52 @@ check_application_container() {
       add_finding database-schema-mismatch application fail
     elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
       add_finding database-below-floor application fail
+    elif [[ "$app_log" == *"reason=migration_failed"* ]]; then
+      # issue #528: the migrator's own wrapper (src/instrumentation-node.ts)
+      # writes this sentinel before the crash-looping/exited container's
+      # process exits, exactly like the two #437 sentinels above — same
+      # bounded `docker logs` read, same fixed-token match, no new docker
+      # verb. Primary migration-failed detection path: the SQL backstop
+      # (check_migration_failed_backstop, for the rotated-logs/no-container
+      # cases) runs only after this scan, and skips itself entirely once
+      # $migration_failed_reported is set here — so when this sentinel
+      # matches, the backstop query is never issued at all.
+      if [[ "$migration_failed_reported" == 0 ]]; then
+        add_finding migration-failed application fail
+        migration_failed_reported=1
+      fi
     else
       add_finding application-unhealthy application fail
     fi
   fi
+}
+
+# Step 13 (issue #528): compares content-addressable image IDs, distinct from
+# Step 12's stale-container comparison (Config.Image reference string only).
+# Reads $app_identity_pinned_image / $app_identity_container_id, both set by
+# check_application_container above (empty when ORBIT_IMAGE isn't
+# digest-pinned, or when no app container was found) — this function never
+# re-derives them itself, so it never issues a second `docker ps -a` probe.
+# Every early exit is skip-only: an absent pinned image, an absent container,
+# a locally-absent pinned image, or any malformed probe output all mean
+# "nothing safe to compare", never a guessed mismatch.
+check_image_identity() {
+  local running_image_id="" pinned_image_id=""
+  local -r image_id_pattern='^sha256:[0-9a-f]{64}$'
+
+  [[ -n "$app_identity_pinned_image" && -n "$app_identity_container_id" ]] || return 0
+
+  pinned_image_id="$(timeout "$docker_probe_timeout" docker image inspect \
+    --format '{{.Id}}' "$app_identity_pinned_image" 2>/dev/null || true)"
+  # The pinned reference's image is not present in this host's local image
+  # store (e.g. never pulled, or pruned) — skip, never guess.
+  [[ "$pinned_image_id" =~ $image_id_pattern ]] || return 0
+
+  running_image_id="$(timeout "$docker_probe_timeout" docker inspect \
+    --format '{{.Image}}' "$app_identity_container_id" 2>/dev/null || true)"
+  [[ "$running_image_id" =~ $image_id_pattern ]] || return 0
+
+  [[ "$running_image_id" == "$pinned_image_id" ]] || add_finding image-identity-mismatch image fail
 }
 
 # --- fix-permissions -------------------------------------------------------
@@ -2106,6 +2898,74 @@ do_restore_transaction() {
   return 0
 }
 
+# --- restore-transaction (configuration-migration-interrupted boundary) -----
+#
+# ADR-0014 decision 7: extends restore-transaction to a second, unrelated
+# boundary — configuration.sh's own `.orbit-config.rollback` copy — rather
+# than adding a new action class. A separate function, not a branch inside
+# do_restore_transaction above, because the two boundaries share nothing
+# beyond the action-class name: this one restores exactly one fixed literal
+# path (never anything enumerated from disk), and configuration.sh's own
+# migrate_file() already wrote the rollback content, so there is no staging
+# tree to walk.
+#
+# Discipline mirrors do_restore_transaction exactly: re-verify (TOCTOU-safe)
+# immediately before touching anything; refuse a symlinked parent directory
+# on either side and a symlinked rollback file; back up the current live
+# .env-orbit into this run's private recovery directory before it is
+# touched; on any failure report failed, leaving both .env-orbit and the
+# rollback copy exactly as they were for a future retry; on full success,
+# remove the rollback copy (mirroring do_restore_transaction's own
+# staging-directory removal) and report done.
+#
+# Unlike do_restore_transaction's remove-then-cp replacement, this action
+# writes the new content to a same-directory temporary file first and
+# renames it onto .env-orbit — an atomic same-filesystem rename, matching
+# configuration.sh's own migrate_file() write pattern, so .env-orbit is
+# never observably absent or partially written.
+do_restore_configuration_rollback() {
+  local rollback_path="${environment_file}${configuration_rollback_suffix}"
+  local parent staged
+
+  is_regular_non_symlink_file "$rollback_path" || return 1
+  has_mode "$rollback_path" 600 || return 1
+
+  parent="$(dirname -- "$environment_file")"
+  [[ "$parent" == "." || ! -L "$parent" ]] || return 1
+  parent="$(dirname -- "$rollback_path")"
+  [[ "$parent" == "." || ! -L "$parent" ]] || return 1
+
+  ensure_recovery_dir || return 1
+
+  if [[ -e "$environment_file" || -L "$environment_file" ]]; then
+    mkdir -p -- "$(dirname -- "$recovery_dir/live/$environment_file")" || return 1
+    cp -a -- "$environment_file" "$recovery_dir/live/$environment_file" || return 1
+  fi
+
+  # No branch below calls restore_transaction_self_restore, deliberately.
+  # None of them can have changed .env-orbit: the new content is assembled in
+  # a separate temporary file, and the only write to .env-orbit is a
+  # same-filesystem rename, which either succeeds or leaves the target
+  # exactly as it was. Self-restoring an untouched path is not free — that
+  # helper removes the path first and then copies the backup back, swallowing
+  # a failure of the copy — so calling it here could delete a file this
+  # action never modified. The backup above is still taken: it is the
+  # operator's evidence in the one case that does end with .env-orbit
+  # changed and the action reporting failed, the rollback-copy removal below.
+  staged="$(mktemp "${environment_file}.repair-restore.XXXXXX" 2>/dev/null)" || return 1
+  if ! cp -- "$rollback_path" "$staged" 2>/dev/null || ! chmod 600 -- "$staged" 2>/dev/null; then
+    rm -f -- "$staged"
+    return 1
+  fi
+  if ! mv -f -- "$staged" "$environment_file" 2>/dev/null; then
+    rm -f -- "$staged"
+    return 1
+  fi
+
+  rm -f -- "$rollback_path" || return 1
+  return 0
+}
+
 # --- restart-services --------------------------------------------------------
 #
 # Both finding classes this action resolves only ever target this
@@ -2113,7 +2973,15 @@ do_restore_transaction() {
 # so the service name is fixed here; $1 is accepted only for call-site
 # symmetry with the other do_* functions and documentation purposes.
 do_restart_services() {
-  local service="orbit-app"
+  restart_compose_service orbit-app
+}
+
+# Restarts one Compose service of this deployment by container id, memoised
+# per service. Split out of do_restart_services so the rotation can also
+# restart the database (see do_restart_services_after_rotation, #629);
+# do_restart_services keeps its own contract unchanged.
+restart_compose_service() {
+  local service="$1"
   local container_ids="" container_id=""
 
   if [[ -n "${service_restart_result[$service]:-}" ]]; then
@@ -2222,7 +3090,7 @@ resolve_rotate_db_identity() {
 
   db_ids="$(timeout "$docker_probe_timeout" docker ps -a \
     --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.service=orbit-db" \
+    --filter "label=com.docker.compose.service=$db_service_host" \
     --format '{{.ID}}' 2>/dev/null || true)"
   if [[ -n "$db_ids" && "$db_ids" != *$'\n'* && "$db_ids" =~ ^[0-9a-f]{12,64}$ ]]; then
     rotate_db_id="$db_ids"
@@ -2490,6 +3358,29 @@ do_update_config_step() {
   mv -- "$staged_postgres_password_path" "$secrets_directory/postgres-password"
 }
 
+# Step 4 of the rotation, and the reason it is not do_restart_services itself.
+#
+# update-config lands the new secret with `mktemp` + `mv` (:3113), which is
+# what makes a half-written secret impossible -- and which necessarily gives
+# the path a NEW inode. A Compose `file:` secret is a bind mount of an inode,
+# not of a path, so any container that keeps running across that rename holds
+# the old file indefinitely. A plain `docker restart` re-resolves it.
+#
+# Postgres itself does not care: it read that file once, at initdb, and
+# authenticates from its own catalogue thereafter. Repair's credential probe
+# does care, because it reads the file through the database container -- so
+# without this the rotation would complete correctly and then be diagnosed as
+# failed by the very check meant to confirm it (#629).
+#
+# The database restarts first, so the application comes back against a
+# database that has already finished restarting. Both must succeed: a rotation
+# that cannot be verified afterwards is not a rotation that can be reported
+# done.
+do_restart_services_after_rotation() {
+  restart_compose_service orbit-db || return 1
+  restart_compose_service orbit-app
+}
+
 # Step 4 reuses do_restart_services verbatim (it already ignores its own
 # unused positional argument, and its target is unconditionally orbit-app —
 # see that function above).
@@ -2498,7 +3389,7 @@ declare -A dangerous_step_fn=(
   [checkpoint]=do_checkpoint_step
   [rotate-credential]=do_rotate_credential_step
   [update-config]=do_update_config_step
-  [restart-services]=do_restart_services
+  [restart-services]=do_restart_services_after_rotation
 )
 
 # Independently callable per step — see the "Stage-two dangerous-step
@@ -2520,6 +3411,11 @@ run_dangerous_step() {
   fn="${dangerous_step_fn[$step]:-}"
   [[ -n "$fn" ]] || return 1
   if [[ "$step" == restart-services ]]; then
+    # Both services the rotation restarts (#629), for the same reason: a memo
+    # left by anything earlier in this run would make the post-rotation
+    # restart a silent no-op, and a container that never restarts keeps the
+    # pre-rotation secret file.
+    unset 'service_restart_result[orbit-db]'
     unset 'service_restart_result[orbit-app]'
   fi
   "$fn"
@@ -2559,13 +3455,93 @@ run_rotate_database_credential_steps() {
   return 0
 }
 
+# Dangerous-batch step for regenerate-secret: mints a fresh secret for one
+# target. Only ever reached for a target whose secret-missing finding
+# resolved to regenerate-secret at diagnosis time — never postgres-password
+# with a retained database volume, never document-kek with a retained
+# document volume (resolve_secret_missing_action and its two EXCEPTIONs in
+# the header route those to rotate-database-credential / manual instead).
+#
+# Ownership re-proof immediately before mutating (ADR-0014 decision 4),
+# mirroring fix-permissions' own TOCTOU re-check: the secrets directory must
+# still be real/non-symlink/mode 700, and the target must still be
+# genuinely missing (absent, or present but empty — exactly Step 3's own
+# secret-missing precondition) — this NEVER overwrites a secret that
+# appeared in the confirmation gap.
+#
+# The write itself mirrors configure.sh's ensure_secret_file discipline
+# (scripts/configure.sh:777-802) exactly, not a different one invented here:
+# staged under the secrets directory via mktemp (which creates the file at
+# mode 600 atomically, before any content is written), content written,
+# mode 600 set again defensively, then an atomic same-directory rename onto
+# the live secret path. No checkpoint step: the finding only ever fires when
+# the secret file is absent/empty, so there is no valid prior content to
+# preserve — see backup=not-required's own comment on backup_for_action.
+do_regenerate_secret_step() {
+  local target="$1"
+  local path="$secrets_directory/$target"
+  local new_secret="" tmp_path=""
+
+  is_real_non_symlink_directory "$secrets_directory" || return 1
+  has_mode "$secrets_directory" 700 || return 1
+  if [[ -e "$path" ]]; then
+    [[ ! -L "$path" && -f "$path" && ! -s "$path" ]] || return 1
+  fi
+
+  new_secret="$(generate_hex_secret)" || return 1
+  tmp_path="$(mktemp "$secrets_directory/.installing.XXXXXX")" || {
+    new_secret=""
+    return 1
+  }
+  printf '%s\n' "$new_secret" > "$tmp_path" || {
+    new_secret=""
+    rm -f -- "$tmp_path"
+    return 1
+  }
+  chmod 600 -- "$tmp_path" || {
+    new_secret=""
+    rm -f -- "$tmp_path"
+    return 1
+  }
+  new_secret=""
+  mv -- "$tmp_path" "$path"
+}
+
+# The straight-through cadence over every deferred regenerate-secret target,
+# one do_regenerate_secret_step call per target, in the same order the
+# targets were deferred (session-secret, postgres-password, document-kek,
+# oidc-client-secret — Step 3's own scan order). Stops at the first failing
+# target, exactly like run_rotate_database_credential_steps above (ADR-0014
+# decision 8: "the iterator... stops at the first failed step; nothing
+# later runs"). No checkpoint bundle to name in failure guidance here —
+# unlike rotate-credential, a failed regenerate step has written nothing
+# (mktemp + rename is all-or-nothing), so there is no half-applied state to
+# recover, only a target that still needs a secret.
+run_regenerate_secret_steps() {
+  local target
+  dangerous_failure_reason=none
+  for target in "$@"; do
+    if ! do_regenerate_secret_step "$target"; then
+      dangerous_failure_reason="step-failed"
+      printf "Orbit repair: stage two regenerate-secret step for '%s' failed.\n" "$target" >&2
+      printf 'Orbit repair: no new secret material was written for this target; the deployment is unchanged here.\n' >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Approval gate for stage two: the operator must type the literal action
-# word "rotate" — see "Approval model" above. Bounded at 3 attempts.
-# Returns 0 (typed correctly) or 1 (refused: wrong word on the final
-# attempt, empty input, or EOF). The non-interactive/non-machine case is
-# never routed here at all — see execute_dangerous_batch below.
+# word for the class(es) being confirmed — "rotate" for
+# rotate-database-credential, "regenerate" for regenerate-secret (ADR-0014
+# decision 5; see "Approval model" above and confirm_dangerous_batch below
+# for how the two are sequenced when a single run's dangerous batch contains
+# both). Bounded at 3 attempts. Returns 0 (typed correctly) or 1 (refused:
+# wrong word on the final attempt, empty input, or EOF). The
+# non-interactive/non-machine case is never routed here at all — see
+# execute_dangerous_batch below.
 confirm_dangerous_action() {
-  local count="$1" attempt answer remaining
+  local count="$1" word="$2" attempt answer remaining
 
   if [[ "$machine_prompts" == 1 ]]; then
     attempt=1
@@ -2575,7 +3551,7 @@ confirm_dangerous_action() {
         printf 'prompt-abort field=action-word\n'
         return 1
       fi
-      if [[ "$answer" == rotate ]]; then
+      if [[ "$answer" == "$word" ]]; then
         printf 'prompt-accept field=action-word\n'
         return 0
       fi
@@ -2591,16 +3567,16 @@ confirm_dangerous_action() {
   fi
 
   if [[ "$interactive" == 1 ]]; then
-    printf 'Orbit repair: stage two — %d dangerous action(s) proposed above (mutation=credential-rotation).\n' \
+    printf 'Orbit repair: stage two — %d dangerous action(s) proposed above.\n' \
       "$count" >&2
     attempt=1
     while ((attempt <= 3)); do
-      printf "Orbit repair: type 'rotate' to proceed (anything else cancels): " >&2
+      printf "Orbit repair: type '%s' to proceed (anything else cancels): " "$word" >&2
       if ! IFS= read -r answer; then
         printf 'Orbit repair: no confirmation received; refusing the dangerous action.\n' >&2
         return 1
       fi
-      if [[ "$answer" == rotate ]]; then
+      if [[ "$answer" == "$word" ]]; then
         return 0
       fi
       remaining=$((3 - attempt))
@@ -2652,7 +3628,38 @@ execute_dangerous_batch() {
 
   print_entries_preview "${dangerous_entries[@]}"
 
-  if ! confirm_dangerous_action "${#dangerous_entries[@]}"; then
+  # ADR-0014 decision 5: each dangerous action class keeps its own typed
+  # word. When a single run's dangerous batch spans both classes (e.g. a
+  # retained database volume alongside an unrelated missing session-secret),
+  # each is confirmed in turn, in dangerous_action_classes order — a single
+  # yes must never cover both a credential rotation and live secret minting,
+  # the same principle the ADR already applies between the safe and
+  # dangerous batches (see "Alternatives rejected"). Refusing either word
+  # refuses the WHOLE dangerous batch; nothing has mutated yet at this
+  # point, for either class.
+  local has_rotate=0 has_regenerate=0 rotate_count=0 regenerate_count=0
+  local -a regenerate_targets=()
+  for entry in "${dangerous_entries[@]}"; do
+    IFS='|' read -r action fclass ftarget <<< "$entry"
+    if [[ "$action" == rotate-database-credential ]]; then
+      has_rotate=1
+      rotate_count=$((rotate_count + 1))
+    elif [[ "$action" == regenerate-secret ]]; then
+      has_regenerate=1
+      regenerate_count=$((regenerate_count + 1))
+      regenerate_targets+=("$ftarget")
+    fi
+  done
+
+  local approved=1
+  if [[ "$has_rotate" == 1 ]] && ! confirm_dangerous_action "$rotate_count" rotate; then
+    approved=0
+  fi
+  if [[ "$approved" == 1 && "$has_regenerate" == 1 ]] && ! confirm_dangerous_action "$regenerate_count" regenerate; then
+    approved=0
+  fi
+
+  if [[ "$approved" != 1 ]]; then
     for entry in "${dangerous_entries[@]}"; do
       IFS='|' read -r action fclass ftarget <<< "$entry"
       printf 'execute action=%s resolves=%s result=skipped\n' "$action" "$fclass"
@@ -2662,16 +3669,28 @@ execute_dangerous_batch() {
     return 0
   fi
 
-  # Approved: rotate-database-credential is currently the only dangerous
-  # action class, so every deferred entry shares one execution instance and
-  # outcome (mirrors do_restart_services's own once-per-run dedup above).
-  # $dangerous_batch_in_progress brackets the call so the EXIT trap (see
-  # "cleanup" above the argument-parsing block) knows whether an abrupt
-  # termination happened mid-rotation and owes the operator the same
+  # Approved. rotate-database-credential's own entries always share one
+  # execution instance and outcome (mirrors do_restart_services's own
+  # once-per-run dedup above). regenerate-secret runs once per distinct
+  # missing-secret target. Both run straight through as ONE combined ordered
+  # sequence — rotate first, then regenerate — stopping at the first
+  # failure (ADR-0014 decision 8: "the iterator... stops at the first failed
+  # step; nothing later runs"): every dangerous-class entry in this run,
+  # including a regenerate-secret target never reached because rotation
+  # failed first, reports the SAME shared outcome below, exactly like the
+  # existing rotate-only case already does for its own multiple entries.
+  # $dangerous_batch_in_progress brackets the whole sequence so the EXIT
+  # trap (see "cleanup" above the argument-parsing block) knows whether an
+  # abrupt termination happened mid-mutation and owes the operator the same
   # recovery guidance a synchronous step failure already prints.
   local step_status=0
   dangerous_batch_in_progress=1
-  run_rotate_database_credential_steps || step_status=$?
+  if [[ "$has_rotate" == 1 ]]; then
+    run_rotate_database_credential_steps || step_status=$?
+  fi
+  if [[ "$step_status" == 0 && "$has_regenerate" == 1 ]]; then
+    run_regenerate_secret_steps "${regenerate_targets[@]}" || step_status=$?
+  fi
   dangerous_batch_in_progress=0
 
   local line_result done_count=0 failed_count=0
@@ -2770,7 +3789,17 @@ run_safe_batch() {
     status=0
     case "$action" in
       fix-permissions) do_fix_permissions "$fclass" "$ftarget" || status=$? ;;
-      restore-transaction) do_restore_transaction || status=$? ;;
+      restore-transaction)
+        # Two independent boundaries share the restore-transaction action
+        # class (ADR-0014 decision 7); $fclass tells them apart. See
+        # do_restore_configuration_rollback's own comment for why this is a
+        # separate function rather than a branch inside do_restore_transaction.
+        if [[ "$fclass" == configuration-migration-interrupted ]]; then
+          do_restore_configuration_rollback || status=$?
+        else
+          do_restore_transaction || status=$?
+        fi
+        ;;
       restart-services) do_restart_services "$fclass" || status=$? ;;
     esac
 
@@ -2826,6 +3855,26 @@ execute_repair() {
   fi
 
   compute_plan_entries
+
+  # ADR-0016 refusal (criterion 9, #681): an unsupported deployment version
+  # refuses the whole execution, not just its own (manual) plan entry.
+  # Running even the safe executors against a pre-floor deployment would
+  # mutate a layout this script was never proven against, so nothing is
+  # allowed to run — mirroring the dangerous batch's own refusal grammar,
+  # with the reason carried on the line.
+  local version_unsupported=0
+  for entry in "${findings[@]:-}"; do
+    [[ "$entry" == "deployment-version-unsupported|"* ]] && version_unsupported=1
+  done
+  if [[ "$version_unsupported" == 1 ]]; then
+    printf 'execution result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
+    if [[ "$dangerous" == 1 ]]; then
+      printf 'dangerous result=refused done=0 failed=0 reason=deployment-version-unsupported\n'
+    fi
+    print_check_lines
+    exit 6
+  fi
+
   run_safe_batch
 
   if [[ "$dangerous" == 1 ]]; then
@@ -2855,9 +3904,137 @@ execute_repair() {
   exit 0
 }
 
+# --- export-diagnostics (issue #531, ADR-0014 decision 10) ------------------
+#
+# Builds the fixed-format identity line described in "EXPORT MODE
+# (--export-diagnostics)" above. Reads directly from the live .env-orbit
+# (never via configure.sh — decision 2's source-less rule) and only when
+# $env_status == ok, exactly like check_application_container's own
+# ORBIT_IMAGE read: an untrustworthy managed file (missing, a symlink, wrong
+# mode) means every field falls back to the fixed placeholder rather than
+# reading content this script has not already proven safe to read. Each
+# field is independently format-validated before being trusted; the
+# ORBIT_IMAGE pattern is the exact one check_application_container already
+# uses, duplicated here rather than shared across functions for the same
+# reason repair.sh duplicates it from configuration.sh's own validators —
+# small recognition primitives are mirrored, not linked, by design.
+build_identity_line() {
+  local schema="unknown" applied="unknown" image="unknown"
+  local raw=""
+
+  if [[ "$env_status" == ok ]]; then
+    raw="$(read_environment_value ORBIT_CONFIG_SCHEMA_VERSION 2>/dev/null || true)"
+    [[ "$raw" =~ ^[0-9]{1,10}$ ]] && schema="$raw"
+
+    raw="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
+    [[ "$raw" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && applied="$raw"
+
+    raw="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
+    [[ "$raw" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] && image="$raw"
+  fi
+
+  printf 'identity schema_version=%s applied_version=%s image=%s' "$schema" "$applied" "$image"
+}
+
+# --- confirmation (--export-diagnostics) -------------------------------------
+#
+# Returns 0 (proceed) or 1 (declined). Mirrors confirm_safe_batch's machine-
+# prompt/interactive priority, with one deliberate difference: there is no
+# non-interactive automation path here (contrast run_safe_batch's own
+# "reaching here already means unattended is the intended contract" case).
+# Decision 10 requires the exported content to be "explicitly confirmed
+# before any file is written", so a run with no controlling terminal and no
+# ORBIT_REPAIR_PROMPTS=machine opt-in declines rather than guessing at
+# consent. The content itself is already on stdout by the time this is
+# called (export_diagnostics_repair prints it first); this function only
+# ever prints the prompt/answer exchange.
+confirm_export_diagnostics() {
+  local answer=""
+
+  if [[ "$machine_prompts" == 1 ]]; then
+    printf 'prompt field=export-diagnostics kind=confirm required=true attempt=1\n'
+    if IFS= read -r answer && [[ "$answer" == y ]]; then
+      printf 'prompt-accept field=export-diagnostics\n'
+      return 0
+    fi
+    printf 'prompt-abort field=export-diagnostics\n'
+    return 1
+  fi
+
+  if [[ "$interactive" == 1 ]]; then
+    printf 'Orbit repair: write the diagnostics above to a file? [y/N] ' >&2
+    if IFS= read -r answer && [[ "$answer" == y || "$answer" == Y ]]; then
+      return 0
+    fi
+    return 1
+  fi
+
+  return 1
+}
+
+# Writes $1 (the already-previewed, already-confirmed export content) to a
+# freshly created file, mirroring the checkpoint bundle's own discipline:
+# mktemp (mode 600 from creation) under the installation directory, content
+# written, mode 600 set again defensively, then an atomic same-directory
+# rename onto a second, equally random final name — so a reader can never
+# observe a partially-written file at the path this run ultimately reports.
+# Returns 0 and prints the final path on stderr only (never stdout, matching
+# the checkpoint bundle path above) on success; returns 1, with any partial
+# temp file removed, on any failure.
+write_export_diagnostics() {
+  local content="$1" tmp_path="" final_path=""
+
+  tmp_path="$(mktemp "./.orbit-repair-diagnostics.XXXXXX")" || return 1
+  chmod 600 -- "$tmp_path" 2>/dev/null || true
+  if ! printf '%s\n' "$content" > "$tmp_path" 2>/dev/null; then
+    rm -f -- "$tmp_path"
+    return 1
+  fi
+  chmod 600 -- "$tmp_path" 2>/dev/null || true
+
+  final_path="${tmp_path}.txt"
+  if ! mv -- "$tmp_path" "$final_path" 2>/dev/null; then
+    rm -f -- "$tmp_path"
+    return 1
+  fi
+
+  printf 'Orbit repair: diagnostics exported to %s\n' "$final_path" >&2
+  printf 'Orbit repair: (plain text, mode 600 — no encryption; these are public values under ADR-0008.)\n' >&2
+  return 0
+}
+
+export_diagnostics_repair() {
+  run_diagnosis
+
+  if [[ "$diagnosis_early" == 1 ]]; then
+    print_check_lines
+    print_plan_lines
+    exit 5
+  fi
+
+  local export_content=""
+  export_content="$(print_check_lines; print_plan_lines; printf '%s\n' "$(build_identity_line)")"
+
+  printf '%s\n' "$export_content"
+
+  if ! confirm_export_diagnostics; then
+    exit 1
+  fi
+
+  if ! write_export_diagnostics "$export_content"; then
+    printf 'Orbit repair: could not write the diagnostics export file.\n' >&2
+    exit 4
+  fi
+
+  exit 0
+}
+
 case "$mode" in
   execute)
     execute_repair
+    ;;
+  export-diagnostics)
+    export_diagnostics_repair
     ;;
   *)
     run_diagnosis

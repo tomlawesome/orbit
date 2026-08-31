@@ -30,6 +30,21 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  # The vulnerability database comes from the vendor's own registry, not from
+  # Trivy's built-in default of mirror.gcr.io -- a public Google mirror with no
+  # availability commitment to us, whose 403 failed this security gate on an
+  # unrelated pull request (#673).
+  #
+  # Deliberately ONE repository, not a list. Trivy 0.72 accepts a
+  # comma-separated value but does not fall back: given a failing primary and a
+  # working secondary it exits fatally on the first, reporting "1 error
+  # occurred". Verified against this exact image pin. Resilience here is the
+  # retry in the scanning steps, never a second repository.
+  #
+  # The organisation is `aquasecurity`, not the `aquasec` of the Docker Hub
+  # image above. The wrong one does not 404 -- ghcr denies the token request,
+  # which reads like a credentials fault rather than a typo.
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
 
 jobs:
   # Selects the cheapest pull-request lane that still exercises every changed
@@ -51,6 +66,7 @@ jobs:
       build: ${{ steps.classify.outputs.build }}
       integration: ${{ steps.classify.outputs.integration }}
       system: ${{ steps.classify.outputs.system }}
+      web: ${{ steps.classify.outputs.web }}
 
     steps:
       - name: Check out repository
@@ -72,6 +88,27 @@ jobs:
           ORBIT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           ORBIT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/classify-changed-paths.mjs
+
+  base_image:
+    name: Base image freshness
+    needs:
+      - changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # Blocking since #651: Orbit now pins its own base image, so a stale base
+    # is a fixable condition rather than an upstream one we can only wait on.
+    # The time-boxed `continue-on-error` this replaces existed because the
+    # check was correct and red at the same time — node:22-alpine's packages
+    # trailed its own Alpine release (#646), and #648 patched that at build
+    # time instead of fixing the base. Both of those are gone with the pin.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Refuse a stale base image
+        run: bash scripts/check-base-image-current.sh
 
   fast:
     name: Static and unit checks
@@ -127,15 +164,19 @@ jobs:
 
   supply_chain_source:
     name: Source dependency and secret policy
-    # Runs on a push (existing), an on-demand dispatch, or a pull request
-    # that opted in with the `ci: acceptance` label. Neither new path
-    # publishes anything; only the push branch/ref restriction above
-    # decides that, and this job stays read-only regardless.
+    needs:
+      - changes
+    # Runs on a push (existing), an on-demand dispatch, a pull request
+    # that opted in with the `ci: acceptance` label, or one touching a
+    # system-risk path (#617). None of these new paths publishes anything;
+    # only the push branch/ref restriction above decides that, and this
+    # job stays read-only regardless.
     if: >-
       ${{
         github.event_name == 'push' ||
         github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+        needs.changes.outputs.system == 'true'
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -154,7 +195,8 @@ jobs:
       - name: Scan repository dependencies and secrets
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
             "${TRIVY_IMAGE}" fs \
@@ -189,6 +231,159 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Scans every image pinned in `.github/supply-chain-policy.json`, not just
+  # the one Orbit builds: an operator's deployment runs the sidecars too, and
+  # Postgres shipped the OpenSSL flaw #646 fixed in Orbit's own image with
+  # nothing in CI able to say so (#647).
+  #
+  # `--ignore-unfixed` because these are upstream images Orbit pulls rather
+  # than builds: a fixable HIGH is actionable (re-pin), an unfixable one is
+  # not, and a check that is red whatever anyone does is worse than no check.
+  #
+  # Reporting-only for now: every pinned sidecar currently has fixable HIGH
+  # findings and no clean upstream digest exists to re-pin to — the evidence
+  # is on #647. When the pins scan clean, delete `continue-on-error` so a
+  # newly published advisory against a pinned digest fails the job.
+  sidecar_images:
+    name: Pinned sidecar image scan
+    needs:
+      - changes
+    # Same reach as the source policy job: a push, an on-demand dispatch, an
+    # opted-in pull request, or one touching a system-risk path. Nothing here
+    # publishes; the job only reads registries.
+    if: >-
+      ${{
+        github.event_name == 'push' ||
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+        needs.changes.outputs.system == 'true'
+      }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate supply-chain policy
+        run: node scripts/supply-chain-policy.mjs validate
+
+      - name: Scan every pinned image
+        run: |
+          mkdir -p .orbit-supply-chain/sidecar-scans "${RUNNER_TEMP}/trivy-cache"
+          node scripts/sidecar-image-evidence.mjs --list-references \
+            --policy .github/supply-chain-policy.json \
+            | while read -r slug reference; do
+                echo "scanning ${reference}"
+                bash scripts/trivy-db-retry.sh docker run --rm \
+                  --env TRIVY_DB_REPOSITORY \
+                  --volume "${GITHUB_WORKSPACE}:/workspace" \
+                  --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+                  "${TRIVY_IMAGE}" image \
+                  --scanners vuln \
+                  --ignore-unfixed \
+                  --format json \
+                  --output "/workspace/.orbit-supply-chain/sidecar-scans/${slug}.json" \
+                  "${reference}"
+              done
+          docker run --rm \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" version --format json \
+            > .orbit-supply-chain/trivy-version.json
+
+      - name: Enforce sidecar image policy
+        run: |
+          set +e
+          node scripts/sidecar-image-evidence.mjs evaluate \
+            --policy .github/supply-chain-policy.json \
+            --scans .orbit-supply-chain/sidecar-scans \
+            --output .orbit-supply-chain/sidecar-evidence.json \
+            --revision "${GITHUB_SHA}"
+          policy_status=$?
+          set -e
+          rm -rf .orbit-supply-chain/sidecar-scans
+          exit "${policy_status}"
+
+      - name: Upload sidecar supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-supply-chain-sidecars
+          path: |
+            .orbit-supply-chain/sidecar-evidence.json
+            .orbit-supply-chain/trivy-version.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The only automatic check the v19 presentation layer has (#620). Its 28
+  # Svelte components are not type-checked at zero, not linted, and until this
+  # job existed the 17 committed baselines were compared by hand or not at all.
+  fidelity:
+    name: v19 visual fidelity
+    needs:
+      - changes
+      - fast
+    # Skipped rather than filtered out, so the check reports a terminal result.
+    # Deliberately NOT behind the `ci: acceptance` label that gates the jobs
+    # below: a label nobody remembers is how #613 reached `dev`, and a visual
+    # regression that is only caught on the preview push is caught too late.
+    # A pull request that moves web/ pays for this; one that does not never
+    # sees it.
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Pinned by digest to the image the baselines were proven against: all 17
+    # reproduced at *zero* differing pixels inside it, against a budget of
+    # 0.1%. Any other browser build is a different rasteriser, and then the
+    # comparison stops measuring the design and starts measuring the runner.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # The image ships its own Node and the browser build that matches it, so
+      # neither is installed here: replacing either would defeat the pinning
+      # above. Only pnpm is missing.
+      - name: Install pnpm
+        run: npm install --global pnpm@11.9.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json, which
+      # `svelte-kit sync` generates and which is gitignored -- so it exists on
+      # any machine that has built once, and on no fresh checkout. Playwright
+      # reads that tsconfig while LOADING its config, before the webServer
+      # command it would have been built by ever runs, so without this the job
+      # dies in 45s on "Failed to load tsconfig file".
+      - name: Generate the SvelteKit type scaffolding
+        run: pnpm --filter orbit-web exec svelte-kit sync
+
+      # playwright.config.js stands up both servers itself: the adapter-node
+      # build of the app, and the static host for the ratified mockups. CI is
+      # set by Actions, so neither reuses a stray server.
+      - name: Run the v19 fidelity gate
+        run: pnpm --filter orbit-web fidelity
+
+      # The spec writes expected/actual/diff triplets on failure only (#448).
+      # Without them a red tick says a screen changed and not how.
+      - name: Upload fidelity diffs
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: orbit-fidelity-diffs
+          path: web/test-results/fidelity/
+          retention-days: 14
+
   integration:
     name: PostgreSQL service and API integration
     needs:
@@ -203,7 +398,8 @@ jobs:
         (
           github.event_name == 'push' ||
           github.event_name == 'workflow_dispatch' ||
-          contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+          contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+          needs.changes.outputs.system == 'true'
         ) &&
         needs.changes.outputs.integration == 'true'
       }}
@@ -254,6 +450,7 @@ jobs:
       - fast
       - supply_chain_source
       - integration
+      - base_image
     # Retain the existing check identity for branch protection, but defer the
     # expensive exact-image path until the protected preview merge, except when
     # evidence was explicitly requested on demand or via the acceptance label.
@@ -263,7 +460,8 @@ jobs:
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
-        contains(github.event.pull_request.labels.*.name, 'ci: acceptance')
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+        needs.changes.outputs.system == 'true'
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -455,7 +653,8 @@ jobs:
           TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -464,7 +663,8 @@ jobs:
             --format json \
             --output /workspace/.orbit-supply-chain/image-vulnerabilities.json \
             "${TESTED_IMAGE_TAG}"
-          docker run --rm \
+          bash scripts/trivy-db-retry.sh docker run --rm \
+            --env TRIVY_DB_REPOSITORY \
             --volume /var/run/docker.sock:/var/run/docker.sock \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
@@ -507,7 +707,7 @@ jobs:
           cp docker-compose.yml docker-compose.mail.yml docker-compose.mail-alias-rotation.yml "${deployment}/"
           cp .env-orbit "${deployment}/"
           mkdir -p "${deployment}/config"
-          cp config/tika-config.xml "${deployment}/config/"
+          cp config/tika-config.json "${deployment}/config/"
           [[ ! -e "${deployment}/Dockerfile" ]] || {
             printf 'The deployment asset set must not contain a Dockerfile.\n' >&2
             exit 1
@@ -551,9 +751,9 @@ jobs:
             and (.services["orbit-tika"].networks | keys == ["orbit-document-processing"])
             and .services["orbit-tika"].user == "35002:35002"
             and .services["orbit-tika"].read_only == true
-            and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.xml"]
+            and .services["orbit-tika"].command == ["-c", "/etc/orbit/tika-config.json"]
             and (.services["orbit-tika"].cap_drop == ["ALL"])
-            and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.xml"))
+            and (.services["orbit-tika"].configs | any(.source == "orbit-tika-config" and .target == "/etc/orbit/tika-config.json"))
             and ((.services["orbit-tika"].volumes // []) | length == 0)
             and ((.services["orbit-tika"].secrets // []) | length == 0)
             and (.services["orbit-app"].networks | has("default") and has("orbit-document-processing"))
@@ -567,7 +767,7 @@ jobs:
         run: |
           if git rev-parse --verify HEAD^ >/dev/null 2>&1 &&
              git diff --quiet HEAD^ HEAD -- \
-               config/tika-config.xml \
+               config/tika-config.json \
                docker-compose.yml \
                src/server/document-drafts.ts \
                src/server/documents \
@@ -598,11 +798,11 @@ jobs:
           docker inspect "${tika_id}" | jq --exit-status '
             .[0].Mounts
             | length >= 1
-            and any(.Destination == "/etc/orbit/tika-config.xml" and .RW == false)
-            and all(.Destination == "/etc/orbit/tika-config.xml" or .Destination == "/tmp")
+            and any(.Destination == "/etc/orbit/tika-config.json" and .RW == false)
+            and all(.Destination == "/etc/orbit/tika-config.json" or .Destination == "/tmp")
           '
           docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
-            sh -c 'test -r /etc/orbit/tika-config.xml && test -w /tmp'
+            sh -c 'test -r /etc/orbit/tika-config.json && test -w /tmp'
           tika_uid="$(docker compose --env-file .env-orbit --profile processing exec -T orbit-tika \
             sh -c "awk '/^Uid:/{print \$2}' /proc/1/status")"
           test "${tika_uid}" = "35002"
@@ -1171,6 +1371,55 @@ jobs:
             printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  repair_journeys:
+    name: Repair journey acceptance
+    needs:
+      - changes
+      - fast
+      - supply_chain_source
+      - integration
+    # Gated exactly as the Compose smoke test is, but with a timeout of its
+    # own: live repair evidence should not fail because install acceptance ran
+    # long (#532).
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
+        needs.changes.outputs.system == 'true'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Build and load the image under repair
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: orbit-repair-journeys:ci
+          build-args: |
+            ORBIT_VERSION=v0.0.0
+            ORBIT_REVISION=${{ github.sha }}
+            ORBIT_CHANNEL=ci
+          # Read the smoke job's layer cache; never write a competing one.
+          cache-from: type=gha
+
+      - name: Prove the repair journeys against a live deployment
+        env:
+          ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
+        run: bash scripts/test-repair-journeys.sh
+
   verify_preview:
     name: Verify tested preview for stable merge
     needs:
@@ -1288,6 +1537,7 @@ jobs:
       - fast
       - supply_chain_source
       - integration
+      - base_image
     if: >-
       ${{
         github.event_name == 'push' &&
