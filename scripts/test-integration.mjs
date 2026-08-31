@@ -67,7 +67,7 @@ try {
     `POSTGRES_USER=${databaseUser}`,
     "--env",
     `POSTGRES_PASSWORD=${databasePassword}`,
-    "postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a",
+    "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
   ], "Could not start the disposable PostgreSQL container");
   containerStarted = true;
 
