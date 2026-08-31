@@ -1,4 +1,5 @@
 <script>
+  import { resolve } from "$app/paths";
   import { signOut } from "$lib/data/workspace.js";
 
   /**
@@ -103,14 +104,20 @@
   );
 </script>
 
-<a class="back" href={back}>{backLabel}</a>
+<!-- `back` only ever holds "/settings" or the "/home" default (the two
+     doors in ./household/[id]/door.js) -- resolve() needs a literal to
+     type-check, so it is picked with a plain comparison rather than passed
+     straight through as an opaque string. -->
+<a class="back" href={back === "/settings" ? resolve("/settings") : resolve("/home")}>{backLabel}</a>
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
         onclick={() => (open = !open)}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
-      <a {href} aria-current={key === current ? "page" : undefined}>{label}</a>
+      <a href={href === "/inbox" ? resolve("/inbox")
+          : href === "/settings" ? resolve("/settings")
+          : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
     {/each}
   </nav>
   <div class="swatches" role="group" aria-label="Theme">

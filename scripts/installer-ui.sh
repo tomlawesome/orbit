@@ -338,17 +338,18 @@ installer_ui_fit_menu_label() {
   fi
 }
 
+# Renders labels the caller has already fitted. No command substitution runs
+# here, so the render is safe inside a trap-armed window: a trapped signal
+# delivered while bash is inside a $( ) corrupts the trap's own re-parse
+# ("trap: line 2: unexpected EOF") and aborts the surrounding context (#625).
 installer_ui_menu_render() {
   local terminal_fd="$1" selected="$2"
   shift 2
-  local index=0 label marker fitted
-  while [[ $# -gt 0 ]]; do
-    label="$2"
-    shift 2
-    fitted="$(installer_ui_fit_menu_label "$terminal_fd" "$label")"
+  local index=0 marker label
+  for label in "$@"; do
     marker=" "
     [[ "$index" == "$selected" ]] && marker=">"
-    printf '%s %d) %s\n' "$marker" "$((index + 1))" "$fitted" >&"$terminal_fd"
+    printf '%s %d) %s\n' "$marker" "$((index + 1))" "$label" >&"$terminal_fd"
     index=$((index + 1))
   done
 }
@@ -361,11 +362,23 @@ installer_ui_select() {
   local terminal_fd="$1" prompt="$2" default_id="$3"
   shift 3
   local -a items=("$@")
-  local count selected=0 index key fitted
+  local count selected=0 index key
   count=$((${#items[@]} / 2))
 
   for ((index = 0; index < count; index++)); do
     [[ "${items[index * 2]}" == "$default_id" ]] && selected="$index"
+  done
+
+  # Every label is fitted here, before any trap is armed, and the results are
+  # reused by the initial render and every redraw. Fitting forks a command
+  # substitution per label, and a trapped signal landing while bash is inside
+  # one corrupts the parse and aborts this whole context past the stty
+  # restore, leaving the terminal raw — reproduced at will on bash 5.2.21 and
+  # 5.2.37 (#625). The trade: a terminal resized mid-menu keeps the widths
+  # the menu opened with.
+  local -a fitted=()
+  for ((index = 0; index < count; index++)); do
+    fitted+=("$(installer_ui_fit_menu_label "$terminal_fd" "${items[index * 2 + 1]}")")
   done
 
   printf '%s\n\n' "$prompt" >&"$terminal_fd"
@@ -377,14 +390,18 @@ installer_ui_select() {
     # and any prior INT/TERM/HUP trap across every exit path.
     local saved_state interrupted=0 status=0 restore_status=0 chosen=0
     saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
-    stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || {
-      stty "$saved_state" <&"$terminal_fd" 2>/dev/null
-      return 1
-    }
+    # The trap goes up before the terminal leaves canonical mode: in the old
+    # order a signal landing between stty and trap still had its default
+    # disposition and killed the shell with the terminal unrestored.
     installer_ui_save_traps
     trap 'interrupted=1' INT TERM HUP
+    stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || {
+      stty "$saved_state" <&"$terminal_fd" 2>/dev/null
+      installer_ui_restore_traps
+      return 1
+    }
 
-    installer_ui_menu_render "$terminal_fd" "$selected" "${items[@]}"
+    installer_ui_menu_render "$terminal_fd" "$selected" "${fitted[@]}"
     while true; do
       installer_ui_read_key "$terminal_fd" key || {
         status=1
@@ -421,11 +438,10 @@ installer_ui_select() {
       printf '\033[%dA' "$count" >&"$terminal_fd"
       for ((index = 0; index < count; index++)); do
         printf '\r\033[2K' >&"$terminal_fd"
-        fitted="$(installer_ui_fit_menu_label "$terminal_fd" "${items[index * 2 + 1]}")"
         if [[ "$index" == "$selected" ]]; then
-          printf '> %d) %s\n' "$((index + 1))" "$fitted" >&"$terminal_fd"
+          printf '> %d) %s\n' "$((index + 1))" "${fitted[index]}" >&"$terminal_fd"
         else
-          printf '  %d) %s\n' "$((index + 1))" "$fitted" >&"$terminal_fd"
+          printf '  %d) %s\n' "$((index + 1))" "${fitted[index]}" >&"$terminal_fd"
         fi
       done
     done
@@ -442,7 +458,7 @@ installer_ui_select() {
     return 1
   fi
 
-  installer_ui_menu_render "$terminal_fd" "$selected" "${items[@]}"
+  installer_ui_menu_render "$terminal_fd" "$selected" "${fitted[@]}"
   while true; do
     printf 'Choice [%d]: ' "$((selected + 1))" >&"$terminal_fd"
     IFS= read -r -u "$terminal_fd" key || return 1
@@ -466,9 +482,14 @@ installer_ui_read_value() {
   [[ "${TERM:-}" != dumb && "${ORBIT_INSTALLER_PLAIN:-0}" != 1 ]] || repaint=0
 
   saved_state="$(stty -g <&"$terminal_fd" 2>/dev/null)" || return 1
-  stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || return 1
+  # Trap before raw mode, as in installer_ui_select: a signal landing between
+  # stty and trap otherwise kills the shell with the terminal unrestored.
   installer_ui_save_traps
   trap 'interrupted=1' INT TERM HUP
+  stty -echo -icanon min 1 time 0 <&"$terminal_fd" 2>/dev/null || {
+    installer_ui_restore_traps
+    return 1
+  }
   printf '%s' "$prompt" >&"$terminal_fd"
   while true; do
     installer_ui_read_key "$terminal_fd" key || {

@@ -6,6 +6,7 @@
    * to the belt (#458).
    */
   import { onMount } from "svelte";
+  import { resolve } from "$app/paths";
   import { readDueNext } from "$lib/data/workspace.js";
   import { corridorOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
@@ -120,7 +121,7 @@
 </div>
 
 {#snippet entry(row)}
-  <a class="item" href="/item/{row.id}">
+  <a class="item" href={resolve("/item/[id]", { id: row.id })}>
     <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
           style="color:var({BAND_VAR[row.band]})"><i></i></span>
     <div class="body"><b>{row.title}</b><span><span class="sys" class:away={row.away}

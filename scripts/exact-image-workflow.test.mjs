@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+const workflowsDir = dirname(fileURLToPath(new URL("../.github/workflows/publish-container.yml", import.meta.url)));
 
 const workflow = readFileSync(
   new URL("../.github/workflows/publish-container.yml", import.meta.url),
@@ -19,7 +23,72 @@ function jobBlock(job, nextJob) {
   return workflow.slice(start, end);
 }
 
+/*
+ * The checks that must pass before a pull request can merge. Branch rules
+ * match a check by its exact display name, so these strings are identifiers
+ * rather than descriptions. Rename one and the protected branch waits for a
+ * check that will never report again: the pull request sits on "Expected —
+ * waiting for status to be reported", the merge button stays disabled, and
+ * nothing anywhere says the name moved. A job's key can change freely; its
+ * `name:` changes only alongside the rule.
+ *
+ * This list was first written from assumption and was wrong in both
+ * directions (#630). It is now taken from the rules themselves, which this
+ * repository keeps as **rulesets** rather than classic branch protection --
+ * `repos/OWNER/REPO/rulesets`, "Protect dev" and "Protect preview", both
+ * requiring the same four. An agent here cannot EDIT a ruleset, but it can
+ * read one, so a claim like this never has to be guessed at again.
+ *
+ * Verified against both rulesets on 2026-08-25. `Protect dev` requires all
+ * six; `Protect preview` requires the first four. The list is the union,
+ * because the property being defended is that a name some rule depends on
+ * keeps reporting -- which rule it is does not change what a rename breaks.
+ */
+const REQUIRED_CHECK_NAMES = [
+  "Static and unit checks",
+  "Dependency change and licence policy",
+  "CodeQL (actions)",
+  "CodeQL (javascript-typescript)",
+  // Added to `Protect dev` and `Protect preview` by the owner, 2026-08-25,
+  // read back from the rulesets API on both. Fidelity is path-gated, so it
+  // bites on every pull request touching web/. The journey check now follows
+  // the classifier too (#617), so a system-risk pull request runs it whether
+  // or not anyone applied `ci: acceptance`.
+  "v19 visual fidelity",
+  "Repair journey acceptance",
+];
+
 describe("exact-image publication workflow", () => {
+  /*
+   * Resolved across every workflow, not just this one: two of the four
+   * required checks are reported by codeql.yml and dependency-review.yml. The
+   * CodeQL names are composed from a matrix, so the literal string appears
+   * nowhere -- checking only for it would have made this list unsatisfiable,
+   * which is how the first version of it came to be wrong.
+   */
+  function reportsCheck(name) {
+    const files = readdirSync(workflowsDir)
+      .filter((entry) => entry.endsWith(".yml"))
+      .map((entry) => readFileSync(join(workflowsDir, entry), "utf8").replaceAll("\r\n", "\n"));
+    if (files.some((file) => file.includes(`    name: ${name}\n`))) return true;
+    const matrixed = /^CodeQL \((.+)\)$/u.exec(name);
+    if (!matrixed) return false;
+    const codeql = files.find((file) => file.includes("name: CodeQL (${{ matrix.language }})"));
+    return Boolean(codeql) && new RegExp(`^\\s*-\\s*${matrixed[1]}\\s*$`, "mu").test(codeql);
+  }
+
+  it.each(REQUIRED_CHECK_NAMES)(
+    'still reports under the name the rules expect: "%s"',
+    (name) => {
+      expect(
+        reportsCheck(name),
+        `No job reports as "${name}". Renaming it leaves the protected branch `
+        + "waiting for a check that will never report again — change the "
+        + "ruleset in the same breath, or not at all.",
+      ).toBe(true);
+    },
+  );
+
   it("can be dispatched on demand and re-evaluates when a label is applied (#572)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
 
@@ -169,7 +238,21 @@ describe("exact-image publication workflow", () => {
   });
 
   it("builds once, validates the loaded image, then pushes without rebuilding", () => {
-    expect(workflow.match(/docker\/build-push-action@/gu)).toHaveLength(1);
+    /*
+     * The invariant is that the PUBLICATION path builds once and pushes the
+     * image it validated — not that the workflow contains exactly one build
+     * anywhere in the file. The repair-journey acceptance job (#532) builds a
+     * second, disposable image that is loaded locally and never pushed, and a
+     * file-wide count cannot tell the two apart. Both builds set `push: false`
+     * (the exact-image flow pushes in a later step), so the flag cannot
+     * separate them either — the job boundary is what does.
+     */
+    const journeysJob = jobBlock("repair_journeys", "verify_preview");
+    expect(workflow.replace(journeysJob, "").match(/docker\/build-push-action@/gu)).toHaveLength(1);
+    // And the disposable one stays disposable: never pushed, and never writing
+    // a layer cache that would compete with the publication build's own.
+    expect(journeysJob).toContain("push: false");
+    expect(journeysJob).not.toContain("cache-to:");
     expect(workflow).toContain("platforms: linux/amd64");
     expect(workflow).toContain("Stable Git tags are the version calculator's durable baseline.");
     expect(workflow).toContain("load: true");
@@ -283,9 +366,13 @@ describe("exact-image publication workflow", () => {
   });
 
   it("removes build-only package managers from the production image", () => {
-    const runnerStart = dockerfile.search(
-      /^FROM node:22-alpine@sha256:[0-9a-f]{64} AS runner$/mu,
-    );
+    // Matches whichever image the runner stage starts from, so long as it is
+    // digest-pinned. Naming the upstream tag here made this assertion fail the
+    // moment Orbit pinned its own base (#651) — and what it is actually
+    // guarding is the package-manager removal below, not the base's identity.
+    // The base is pinned and policed by .github/supply-chain-policy.json and
+    // scripts/check-base-image-current.sh.
+    const runnerStart = dockerfile.search(/^FROM \S+@sha256:[0-9a-f]{64} AS runner$/mu);
     expect(runnerStart).toBeGreaterThanOrEqual(0);
     const runner = dockerfile.slice(runnerStart);
 
@@ -465,5 +552,17 @@ describe("exact-image publication workflow", () => {
     expect(cleanupSection).toContain('docker rm --force "${REGISTRY_ID}"');
     expect(cleanupSection).toContain("current_registry_id=");
     expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
+  });
+
+  it("gates acceptance jobs on system-risk paths, not only dispatch or the label (#617)", () => {
+    const supplyChain = jobBlock("supply_chain_source", "fidelity");
+    const integration = jobBlock("integration", "smoke");
+    const smoke = jobBlock("smoke", "repair_journeys");
+    const journeys = jobBlock("repair_journeys", "verify_preview");
+
+    for (const block of [supplyChain, integration, smoke, journeys]) {
+      expect(block).toContain("needs.changes.outputs.system == 'true'");
+      expect(block).toContain("ci: acceptance");
+    }
   });
 });

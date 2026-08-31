@@ -250,9 +250,9 @@ describe("install-transaction parity against the real install.sh staging functio
     // through a symlinked parent" case.
     mkdirSync(join(targetA, "config"));
     mkdirSync(join(targetB, "config"));
-    writeFileSync(join(targetA, "config", "tika-config.xml"), "<original/>", { mode: 0o644 });
-    writeFileSync(join(targetB, "config", "tika-config.xml"), "<original/>", { mode: 0o644 });
-    const nested: ManagedPath[] = [{ path: "config/tika-config.xml", type: "file" }];
+    writeFileSync(join(targetA, "config", "tika-config.json"), "{}", { mode: 0o644 });
+    writeFileSync(join(targetB, "config", "tika-config.json"), "{}", { mode: 0o644 });
+    const nested: ManagedPath[] = [{ path: "config/tika-config.json", type: "file" }];
 
     const swapParentForSymlink = (target: string) => () => {
       rmSync(join(target, "config"), { recursive: true, force: true });
@@ -271,6 +271,6 @@ describe("install-transaction parity against the real install.sh staging functio
     // restore through an unsafe parent; so must InstallTransaction.rollback().
     expect(bashResult.rollbackStatus).not.toBe(0);
     expect(rollback.ok).toBe(false);
-    expect(rollback.failures[0]).toMatchObject({ path: "config/tika-config.xml", reason: "unsafe-parent" });
+    expect(rollback.failures[0]).toMatchObject({ path: "config/tika-config.json", reason: "unsafe-parent" });
   });
 });

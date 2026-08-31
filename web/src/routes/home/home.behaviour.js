@@ -164,6 +164,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
         <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
         <path d="${veerFor(tw)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
         <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
+        <!-- #638: the real hit target — fill="none" above doesn't hit-test,
+             fill="transparent" does. home.css turns off pointer events on the
+             rest of the (blank) 210x160 box. -->
+        <circle class="mshit" cx="${ringX}" cy="95" r="40" fill="transparent"/>
         <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
         ${hh.planets.map(([px, py, pr, tok]) =>
           `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
@@ -263,7 +267,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       callout.classList.toggle("has-docs", Boolean(docs));
       if (docs) {
         const chip = callout.querySelector(".chip");
-        chip.textContent = "◆ " + docs + " documents";
+        chip.textContent = "◆ " + docs + (docs === "1" ? " document" : " documents");
         chip.onclick = () => openDocsByTitle(link.dataset.title);
       }
       callout.classList.add("show");
@@ -649,6 +653,8 @@ export function mountEmptySky({ galaxy, onAsk }) {
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
       put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
+      // #638: the real hit target — see the matching comment in mountHome.
+      put("circle", { class: "mshit", cx: ringX, cy: 95, r: 40, fill: "transparent" });
       put("circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
       if (hh.requested) {
         const asked = put("text", { x: mx(6), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");

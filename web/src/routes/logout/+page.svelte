@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
+  import { resolve } from "$app/paths";
   import "$lib/flight/flight.css";
 
   /**
@@ -67,11 +68,9 @@
      same thing with the same colour. -->
 <div class="signin-stage" aria-hidden="true"></div>
 <Dusk>
-  {#snippet children()}
-    <!-- The LOGIN'S GATE, identical (§15, 2026-08-17). "/" is the front door:
-         signed out it IS the sign-in, so the way back in is one hop and the
-         identity provider asks its question there. -->
-    <a class="gate" href="/">Sign back in</a>
-  {/snippet}
+  <!-- The LOGIN'S GATE, identical (§15, 2026-08-17). "/" is the front door:
+       signed out it IS the sign-in, so the way back in is one hop and the
+       identity provider asks its question there. -->
+  <a class="gate" href={resolve("/")}>Sign back in</a>
 </Dusk>
 <Grain slope={0.08} />

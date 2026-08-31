@@ -1,12 +1,12 @@
 import { inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, instanceMaintenance, maintenanceNotices } from "@/db/schema";
+import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows } from "@/db/schema";
 import { GET as readReminders, PUT as writeReminders } from "@/app/api/settings/reminders/route";
 import { GET as sessionStatus } from "@/app/api/auth/session/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { GET as health } from "@/app/api/health/route";
-import { activateMaintenance, readMaintenanceState } from "@/server/maintenance";
+import { openMaintenanceWindow, readMaintenanceState } from "@/server/maintenance";
 import { setReadinessDependenciesForTests } from "@/server/readiness";
 import { readReminderSettings } from "@/server/reminder-settings";
 import {
@@ -24,20 +24,19 @@ afterAll(async () => {
 
 /* Same singleton-reset rationale as maintenance.test.ts: the 0028 migration
    seeds instance_maintenance once, so every test restores the seeded shape
-   and clears notices and this feature's audit rows. */
+   and clears windows and this feature's audit rows. */
 afterEach(async () => {
   setReadinessDependenciesForTests(undefined);
-  await getDb().delete(maintenanceNotices);
-  await getDb().delete(auditLog).where(inArray(auditLog.entityType, ["instance_maintenance"]));
   await getDb().update(instanceMaintenance).set({
     active: false,
-    message: null,
-    messagePublishedAt: null,
+    currentWindowId: null,
     expectedEndAt: null,
-    activatedAt: null,
     version: 1,
     updatedAt: new Date(),
   });
+  await getDb().delete(maintenanceUpdates);
+  await getDb().delete(maintenanceWindows);
+  await getDb().delete(auditLog).where(inArray(auditLog.entityType, ["instance_maintenance", "maintenance_window"]));
 });
 
 const REMINDERS_URL = "http://127.0.0.1:3000/api/settings/reminders";
@@ -45,8 +44,8 @@ const REMINDER_WRITE = { emailEnabled: false, firstWarningDays: 10, finalWarning
 
 async function activate(fixture: IntegrationFixture, expectedEndAt: Date | null): Promise<void> {
   const state = await readMaintenanceState();
-  await activateMaintenance(fixture.users.admin.id, state.version, {
-    message: "Planned upgrade underway.",
+  await openMaintenanceWindow(fixture.users.admin.id, state.version, {
+    body: "Planned upgrade underway.",
     expectedEndAt,
   });
 }

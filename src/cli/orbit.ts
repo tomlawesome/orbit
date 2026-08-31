@@ -1208,13 +1208,13 @@ function commandEndMaintenance(args: string[]): void {
       import("../db"),
     ]);
     try {
-      const { changed, cancelledNotices } = await endMaintenanceFromOperatorShell();
+      const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
       if (!changed) {
         process.stdout.write("orbit: maintenance was not active; nothing to change\n");
-      } else if (cancelledNotices > 0) {
-        const plural = cancelledNotices === 1 ? "notice" : "notices";
+      } else if (cancelledWindows > 0) {
+        const plural = cancelledWindows === 1 ? "window" : "windows";
         process.stdout.write(
-          `orbit: maintenance ended; cancelled ${cancelledNotices} due ${plural}\n`,
+          `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
         );
       } else {
         process.stdout.write("orbit: maintenance ended\n");

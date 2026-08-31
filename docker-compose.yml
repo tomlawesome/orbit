@@ -3,14 +3,17 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a
+    image: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
       POSTGRES_USER: ${POSTGRES_USER:-orbit}
       POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
     volumes:
-      - orbit-db-data:/var/lib/postgresql/data
+      # PostgreSQL 18 moved PGDATA to /var/lib/postgresql/18/docker and declares
+      # its volume one level up. Mounting the 17 path leaves the cluster outside
+      # the named volume, which the image refuses to do rather than risk it.
+      - orbit-db-data:/var/lib/postgresql
     secrets:
       - orbit-postgres-password
     healthcheck:
@@ -58,7 +61,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.4.5-debian@sha256:01c137e824d33043705cbdc968ac36514a1ca29dde221c873119a5e463f779c6
+    image: clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
@@ -83,17 +86,21 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:3.2.2.0-full@sha256:00604ce6ca877b4c533c1a2c13fd7cd98f031a1eb5b86f05904e85b480f48de8
+    image: apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
     read_only: true
     environment:
-      TIKA_CONFIG: /etc/orbit/tika-config.xml
-    command: ["-c", "/etc/orbit/tika-config.xml"]
+      TIKA_CONFIG: /etc/orbit/tika-config.json
+    # Tika 4 takes JSON, not the XML of Tika 3. The exclusion in that file is
+    # the only thing holding the Tesseract OCR parser out of the parser set,
+    # and it only binds in the array form under a registered component name:
+    # the object form parses, loads nothing and reports no error (#687).
+    command: ["-c", "/etc/orbit/tika-config.json"]
     configs:
       - source: orbit-tika-config
-        target: /etc/orbit/tika-config.xml
+        target: /etc/orbit/tika-config.json
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -113,7 +120,7 @@ services:
   # explicit operator action rather than a deployment requirement.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.32.2@sha256:ebdabd6f617b2a05d723270bda060bdaaee04af47f8bb1a2a259f2bb2f04ddd7
+    image: ollama/ollama:0.33.2@sha256:9e7d782e99880c70f9563c51633da875ca605518a8f8d95c2532bda70a027b7a
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -161,7 +168,7 @@ volumes:
 
 configs:
   orbit-tika-config:
-    file: ./config/tika-config.xml
+    file: ./config/tika-config.json
 
 secrets:
   orbit-postgres-password:
