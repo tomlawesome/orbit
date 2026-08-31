@@ -47,17 +47,22 @@
 #   --branch   branch to fetch install.sh from        (default: preview)
 #   --channel  ORBIT_CHANNEL the installer resolves   (default: preview)
 #   --keep     keep the work directory and containers on exit
+#   --red      corrupt the expected digest and require the comparison to fire,
+#              proving the assertion is not vacuous (as --red does in
+#              scripts/test-install-acceptance.sh)
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 branch="preview"
 channel="preview"
 keep_mode=0
+red_mode=0
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --branch) branch="${2:?--branch needs a value}"; shift 2 ;;
     --channel) channel="${2:?--channel needs a value}"; shift 2 ;;
     --keep) keep_mode=1; shift ;;
+    --red) red_mode=1; shift ;;
     *) printf 'test-install-bootstrap: unknown option %s\n' "$1" >&2; exit 2 ;;
   esac
 done
@@ -82,7 +87,10 @@ workdir="$(mktemp -d /tmp/orbit-bootstrap.XXXXXX)"
 # The target directory name becomes the Compose project the installer
 # persists, so everything this run creates carries a name no other deployment
 # on this host can own. See AGENTS.md on Compose project collisions.
-project_name="orbit-bootstrap-${workdir##*.}"
+# Lowercased: this becomes a Docker image tag as well as the Compose
+# project, and a tag must be lowercase.
+project_suffix="${workdir##*.}"
+project_name="orbit-bootstrap-${project_suffix,,}"
 target="$workdir/$project_name"
 oidc_container="${project_name}-oidc"
 oidc_port="$(free_port)"
@@ -206,6 +214,14 @@ expected_digest="$(registry_digest)"
 [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   fail "the registry did not return a digest for ${registry}/${repository}:${channel}"
 note "registry serves ${channel} as ${expected_digest}"
+if [[ "$red_mode" == 1 ]]; then
+  # Flip the final nibble: still a well-formed digest, still not this one.
+  case "${expected_digest: -1}" in
+    0) expected_digest="${expected_digest%?}1" ;;
+    *) expected_digest="${expected_digest%?}0" ;;
+  esac
+  note "red: expecting the corrupted digest ${expected_digest}"
+fi
 
 start_oidc
 make_shim
@@ -244,6 +260,17 @@ case "$pinned" in
   *@sha256:*) ;;
   *) fail "persisted ORBIT_IMAGE is not digest-pinned: $pinned" ;;
 esac
+if [[ "$red_mode" == 1 ]]; then
+  # The comparison is the point of this harness, so prove it can fail: the
+  # expected digest was corrupted before the install, and a green result here
+  # would mean the assertion never really looked.
+  if [[ "$pinned" == "${registry}/${repository}@${expected_digest}" ]]; then
+    fail "red run: the corrupted digest still compared equal — the assertion is vacuous"
+  fi
+  note "red: the digest comparison fired against $pinned"
+  note "red run complete; no green result is claimed"
+  exit 0
+fi
 [[ "$pinned" == "${registry}/${repository}@${expected_digest}" ]] ||
   fail "persisted ORBIT_IMAGE ($pinned) is not the digest the registry serves for ${channel} (${expected_digest})"
 note "ORBIT_IMAGE pinned to $pinned"
