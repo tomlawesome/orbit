@@ -3,14 +3,17 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a
+    image: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
       POSTGRES_USER: ${POSTGRES_USER:-orbit}
       POSTGRES_PASSWORD_FILE: /run/secrets/orbit-postgres-password
     volumes:
-      - orbit-db-data:/var/lib/postgresql/data
+      # PostgreSQL 18 moved PGDATA to /var/lib/postgresql/18/docker and declares
+      # its volume one level up. Mounting the 17 path leaves the cluster outside
+      # the named volume, which the image refuses to do rather than risk it.
+      - orbit-db-data:/var/lib/postgresql
     secrets:
       - orbit-postgres-password
     healthcheck:
