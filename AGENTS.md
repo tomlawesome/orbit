@@ -138,7 +138,12 @@ it.
   a coherent outcome with a definition of done, mirrored by the board's Slice
   field. A version release moment gets its own milestone holding only its
   promote-to-main issue, and an issue with no milestone is not scheduled (owner
-  decision, 2026-08-23, recorded on issue #502).
+  decision, 2026-08-23, recorded on issue #502). Every open issue reaches the
+  board: the project's auto-add workflow places new ones, so the board is
+  complete and can be read as authoritative rather than as a subset someone
+  curated. Set at least Status when picking work up; closed items are removed
+  rather than left to accumulate. It showed only half the open issues until
+  2026-08-31 (#689), so treat any board reading from before then with suspicion.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
