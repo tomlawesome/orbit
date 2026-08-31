@@ -347,7 +347,7 @@ describe("exact-image publication workflow", () => {
     expect(preview).toContain("id-token: write");
     expect(preview).toContain("attestations: write");
     expect(workflow).toContain(
-      "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+      "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
     );
     expect(workflow).toContain("subject-digest: ${{ steps.publish.outputs.digest }}");
     expect(workflow).toContain("sbom-path: .orbit-supply-chain/image.spdx.json");
