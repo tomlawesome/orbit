@@ -12,10 +12,10 @@
   "attestationActions": [
     {
       "name": "actions/attest",
-      "version": "v4.2.1",
-      "commit": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+      "version": "v4.2.2",
+      "commit": "1e69f48acb82d1966a394da916b4c1698aa569d6",
       "license": "MIT",
-      "source": "https://github.com/actions/attest/releases/tag/v4.2.1",
+      "source": "https://github.com/actions/attest/releases/tag/v4.2.2",
       "updateOwner": "Orbit maintainers",
       "reviewBy": "2026-10-30"
     }
