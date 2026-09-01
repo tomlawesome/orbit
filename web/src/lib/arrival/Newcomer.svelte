@@ -36,7 +36,24 @@
   } = $props();
 
   let hero;
-  const rows = $derived(belongRowsOf(galaxy));
+  /*
+   * The join list is fed from `visibleHouseholds`, NOT from `galaxy` (#670,
+   * owner decision 2026-09-01).
+   *
+   * `labelledSkyOf` now draws at most twelve constellations, because past
+   * that the sky cannot separate them far enough for a click to be sure which
+   * one it hit. That cap is right for the SKY and would be a bug in the LIST:
+   * a thirteenth household drawn nowhere would also be listed nowhere, and a
+   * household you cannot name is a household you cannot ask to join — it
+   * would simply drop out of the instance for every newcomer. So the sky is
+   * capped and the list is not. `visibleHouseholds` already carries the id,
+   * name and requested flag `belongRowsOf` reads, and it keeps the same
+   * id-sorted order, so the rows below are unchanged for every instance small
+   * enough for the cap not to bite.
+   */
+  const rows = $derived(
+    belongRowsOf(Object.fromEntries((visibleHouseholds ?? []).map((household) => [household.id, household]))),
+  );
   const discovered = $derived(discoveredCountOf(visibleHouseholds));
 
   /* The household cards on the sky, as plain descriptors — the layout maths
