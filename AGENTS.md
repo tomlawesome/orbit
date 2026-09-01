@@ -148,7 +148,9 @@ it.
   a coherent outcome with a definition of done, mirrored by the board's Slice
   field. A version release moment gets its own milestone holding only its
   promote-to-main issue, and an issue with no milestone is not scheduled (owner
-  decision, 2026-08-23, recorded on issue #502). Every open issue reaches the
+  decision, 2026-08-23, recorded on issue #502). An empty version milestone is a
+  deliberate placeholder for the next release, not clutter: `v1.4` is one, and
+  is not a hygiene finding (owner, 2026-09-01). Every open issue reaches the
   board: the project's auto-add workflow places new ones, so the board is
   complete and can be read as authoritative rather than as a subset someone
   curated. Set at least Status when picking work up; closed items are removed
