@@ -113,6 +113,18 @@ const EDGE_INSET = 130;
  * alone would not.
  */
 export const HIT_RADIUS = 40;
+/* Two hit circles touch at twice the radius, so this is the closest two
+   constellations may ever be drawn — the floor the last pass guarantees. */
+const FLOOR = HIT_RADIUS * 2;
+/*
+ * The floor the construction below actually builds to. A spread that aims at
+ * exactly `FLOOR` lands a few parts in a quadrillion under it once binary
+ * arithmetic has been through a square root, and "a few parts in a
+ * quadrillion under" is still under: the guarantee would be false for the
+ * sake of rounding. A micron of headroom is invisible on screen and makes the
+ * measurement honest.
+ */
+const FLOOR_FIT = FLOOR + 1e-6;
 
 const SEPARATION_ROUNDS = 8;
 const BAND_ROUNDS = 6;
@@ -141,6 +153,17 @@ export function reachOn(angle, width, height) {
 export function dimFor(distance) {
   return Math.max(0.45, Math.min(0.9, 1.05 - distance / 2600));
 }
+
+/**
+ * One household as the passes below work on it: the bearing and the distance
+ * it came from, and where the sky has so far decided to draw it. Named only
+ * so the floor pass's helpers can say what they take — the rest of this file
+ * predates the type gate and is left as it stands.
+ *
+ * @typedef {{ id: string, household: any, isCamera: boolean, banded: boolean,
+ *             dist: number, angle: number, radius: number, ox: number,
+ *             oy: number, dim: number }} Drawn
+ */
 
 /**
  * The whole sky, placed.
@@ -190,6 +213,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
     return Math.hypot(fitX, Math.min(limit, fitX * Math.abs(Math.tan(angle))));
   };
 
+  /** @type {Drawn[]} */
   const points = [];
   const cameraEntry = [];
   for (const id of ids) {
@@ -372,6 +396,308 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
       }
     }
     if (!crowded) break;
+  }
+
+  /*
+   * THE FLOOR (#670, owner ruling 2026-09-01).
+   *
+   * Everything above expresses separation as a DESIRE, which is the right
+   * shape for it right up to the moment the sky runs out of room. Past that
+   * point the desire is not merely unmet, it is unmeetable. A bearing that
+   * yielded to a band edge has its `oy` pinned and only `ox` left to spend, so
+   * once more constellations yield to one edge than that span holds at
+   * `minSep`, NO arrangement satisfies the constraint: the relaxation shoves
+   * them into the edge bound, the clamp turns every further shove into a
+   * no-op, and they come to rest on the same pixel. Adding rounds cannot help
+   * — a relaxation is asymptotic, and asymptotic is exactly what a floor may
+   * not be.
+   *
+   * The floor is not a matter of taste. Two hit circles that overlap mean a
+   * click aimed at one household lands on another, and that click sends a
+   * JOIN REQUEST to the household it landed on — so a crowded sky can post a
+   * stranger's front door to someone who never chose it.
+   *
+   * So separation keeps its desire and gains a floor underneath it: no two
+   * drawn centres closer than twice the hit radius, met BY CONSTRUCTION. The
+   * relaxation asks "are these two too close, and can I nudge them apart".
+   * This pass asks the only question that can guarantee an answer: "how many
+   * constellations must this edge carry, and where do they ALL go" — capacity
+   * first, then placement.
+   *
+   * It is deliberately the last word, and deliberately a NO-OP whenever it
+   * can be. A sky already clear of the floor is left alone to the pixel:
+   * these are ratified screens, and a fix for a crowded sky has no business
+   * editing skies that were never crowded.
+   */
+  /** @type {(a: Drawn, z: Drawn) => number} */
+  const floorGap = (a, z) => Math.hypot(z.ox - a.ox, z.oy - a.oy);
+  /* Walked in `points` order, which is id order — so which pairs the pass
+     sees, and in which order, cannot depend on how the data arrived. */
+  /** @type {() => Drawn[][]} */
+  const tooClose = () => {
+    /** @type {Drawn[][]} */
+    const pairs = [];
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        if (floorGap(points[i], points[j]) < FLOOR) pairs.push([points[i], points[j]]);
+      }
+    }
+    return pairs;
+  };
+
+  if (tooClose().length) {
+    /*
+     * Which band edge a yielded constellation belongs to: -1 the sky's top,
+     * +1 its bottom. Recorded once, when the pass first sees it, because a
+     * member walked inward to a second rank — or a band that collapsed onto
+     * the equator on a hero shorter than its own furniture — would otherwise
+     * be re-filed onto the other edge halfway through the pass, and an edge
+     * that changes membership mid-flight cannot be laid out at all.
+     */
+    /** @type {Map<Drawn, number>} */
+    const bandEdge = new Map();
+    /** @type {(point: Drawn) => number} */
+    const edgeFor = (point) => Math.sign(point.oy) || Math.sign(Math.sin(point.angle)) || 1;
+    for (const point of points) if (point.banded) bandEdge.set(point, edgeFor(point));
+
+    /*
+     * #428 AC6's yield, granted for the reason AC6 itself gives. A sub-floor
+     * pair of TRUE bearings is pinned between the keep-out it may not enter
+     * and the cap it may not pass: neither has any radius left to spend, so
+     * the radial pass above has already done everything it can and they are
+     * still on top of each other. Sitting on each other is worse than
+     * bending, so exactly one bends — the outer, which has the most sky
+     * behind it to be re-placed into — and it bends the ratified way: keeping
+     * its radius, sliding around its own circle to the band edge on its own
+     * side, and marked `banded` so a caller can still tell a bent bearing
+     * from a true one.
+     */
+    /** @type {(point: Drawn) => void} */
+    const yieldToBand = (point) => {
+      const edge = edgeFor(point);
+      const limit = edge < 0 ? safeTop : safeBottom;
+      point.banded = true;
+      point.oy = edge * Math.max(limit, 0);
+      point.ox = (Math.sign(point.ox) || Math.sign(Math.cos(point.angle)) || 1)
+        * Math.sqrt(Math.max(point.radius * point.radius - point.oy * point.oy, 0));
+      bandEdge.set(point, edge);
+    };
+
+    /* The x one side of a rank line may use: the hero's own margin, tightened
+       by #485's screen bound, with #427's keep-out carved out of the middle.
+       These are the bounds `slide` already applies — the pass divides the
+       sky's existing room differently, it does not invent any. */
+    /** @type {(oy: number) => number[]} */
+    const rankSpan = (oy) => [
+      Math.sqrt(Math.max(keepOut * keepOut - oy * oy, 0)),
+      Math.min(width / 2 - EDGE_MARGIN, fitX),
+    ];
+
+    /*
+     * The free x on one side of one rank, as ascending intervals: that side's
+     * span, minus every x within the floor of a point this pass may not move.
+     * A true bearing is the first such point — #428 forbids moving one to
+     * make room for someone else — so the rank routes AROUND it instead.
+     */
+    /** @type {(side: number, oy: number, obstacles: Drawn[]) => number[][]} */
+    const freeOn = (side, oy, obstacles) => {
+      const [clear, bound] = rankSpan(oy);
+      if (bound <= clear) return [];
+      let spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
+      for (const other of obstacles) {
+        const dy = Math.abs(other.oy - oy);
+        if (dy >= FLOOR_FIT) continue;
+        /* How far along the rank the floor reaches once the vertical
+           distance has already spent part of it. */
+        const half = Math.sqrt(FLOOR_FIT * FLOOR_FIT - dy * dy);
+        const lo = other.ox - half, hi = other.ox + half;
+        /** @type {number[][]} */
+        const kept = [];
+        for (const [from, to] of spans) {
+          if (hi <= from || lo >= to) { kept.push([from, to]); continue; }
+          if (from < lo) kept.push([from, lo]);
+          if (hi < to) kept.push([hi, to]);
+        }
+        spans = kept;
+      }
+      return spans;
+    };
+
+    /** @type {(spans: number[][]) => number} */
+    const freeLength = (spans) => spans.reduce((sum, [from, to]) => sum + (to - from), 0);
+    /* What a free length holds at the floor. The ends are usable, so a bare
+       80px of room holds two constellations rather than one. */
+    /** @type {(spans: number[][]) => number} */
+    const capacityOf = (spans) => (spans.length ? Math.floor(freeLength(spans) / FLOOR_FIT) + 1 : 0);
+
+    /*
+     * Arc length along a rank's free x, measured from its OUTER end inward,
+     * so the constellation the band slide left furthest out stays furthest
+     * out and the pass reads as a tidying rather than a reshuffle.
+     *
+     * Why arc length and not x. The map from arc length to x skips each
+     * forbidden range WHOLE, so it never contracts: two members `FLOOR` apart
+     * in arc length are at least `FLOOR` apart in x. That is what lets an
+     * even spread be a guarantee rather than an estimate, even on a rank cut
+     * into pieces by true bearings.
+     */
+    /** @type {(spans: number[][], side: number, arc: number) => number} */
+    const atArc = (spans, side, arc) => {
+      let left = arc;
+      const order = side < 0 ? spans : [...spans].reverse();
+      for (const [from, to] of order) {
+        const len = to - from;
+        if (left <= len) return side < 0 ? from + left : to - left;
+        left -= len;
+      }
+      const [from, to] = order[order.length - 1];
+      return side < 0 ? to : from;
+    };
+
+    /* A lone member has nobody to be spread against, so it keeps the ox the
+       passes above chose for it and moves the shortest distance that clears
+       the floor. A tie goes OUTWARD, away from the chart. */
+    /** @type {(spans: number[][], ox: number) => number} */
+    const nearestFree = (spans, ox) => {
+      let best = spans[0][0], bestGap = Infinity;
+      for (const [from, to] of spans) {
+        const candidate = Math.min(to, Math.max(from, ox));
+        const gap = Math.abs(candidate - ox);
+        if (gap < bestGap || (gap === bestGap && Math.abs(candidate) > Math.abs(best))) {
+          best = candidate;
+          bestGap = gap;
+        }
+      }
+      return best;
+    };
+
+    /** @type {(members: Drawn[], spans: number[][], side: number, oy: number) => void} */
+    const layOut = (members, spans, side, oy) => {
+      if (!members.length) return;
+      for (const point of members) point.oy = oy;
+      if (!spans.length) {
+        /*
+         * Nothing on this rank clears the floor — the sky is over capacity,
+         * and the last rank has to take what is left anyway. Fall back to the
+         * side's raw span so the members at least spread away from each
+         * other, and keep #427 absolute: the keep-out is a GUARANTEE and the
+         * floor is not, so where even the raw span is empty they sit on the
+         * chart's edge rather than inside it.
+         */
+        const [clear, bound] = rankSpan(oy);
+        if (bound <= clear) {
+          for (const point of members) point.ox = side * clear;
+          return;
+        }
+        spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
+      }
+      if (members.length === 1) {
+        members[0].ox = nearestFree(spans, members[0].ox);
+        return;
+      }
+      /* Endpoints inclusive: the outermost member takes the outer end and the
+         innermost takes the inner one, so the spread uses every pixel the
+         rank actually has. */
+      const step = freeLength(spans) / (members.length - 1);
+      members.forEach((point, index) => { point.ox = atArc(spans, side, index * step); });
+    };
+
+    /** @type {(edge: number, obstacles: Drawn[]) => void} */
+    const relayEdge = (edge, obstacles) => {
+      const members = points.filter((point) => point.banded && bandEdge.get(point) === edge);
+      if (!members.length) return;
+      const edgeOy = edge * Math.max(edge < 0 ? safeTop : safeBottom, 0);
+      /* Members keep their side of the midline. The band slide has never been
+         allowed to carry a constellation across the sky — that would be a
+         bearing change wearing a slide's clothes — and the re-lay inherits
+         the restraint. */
+      let leftward = members.filter((point) => (Math.sign(point.ox) || Math.sign(Math.cos(point.angle)) || 1) < 0);
+      let rightward = members.filter((point) => (Math.sign(point.ox) || Math.sign(Math.cos(point.angle)) || 1) >= 0);
+      /* Outermost first, ties broken by id: never by whichever the walk above
+         happened to reach first. */
+      /** @type {(a: Drawn, b: Drawn) => number} */
+      const outermostFirst = (a, b) => Math.abs(b.ox) - Math.abs(a.ox) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      leftward.sort(outermostFirst);
+      rightward.sort(outermostFirst);
+      const roomLeft = capacityOf(freeOn(-1, edgeOy, obstacles));
+      const roomRight = capacityOf(freeOn(1, edgeOy, obstacles));
+      /*
+       * Overflow spills sideways before it spills inward, because the two
+       * cost different things. Crossing the midline costs one constellation
+       * its side of the sky; wrapping to a second rank costs a whole rank its
+       * place in the band, which is the more visible change. The cheaper
+       * price is paid first, and it is the INNERMOST members that cross,
+       * being the ones already nearest the midline. Only one side can be over
+       * capacity while the other has room, so the two cases cannot both fire.
+       */
+      if (leftward.length > roomLeft && rightward.length < roomRight) {
+        const crossing = Math.min(leftward.length - roomLeft, roomRight - rightward.length);
+        rightward = rightward.concat(leftward.splice(leftward.length - crossing));
+      } else if (rightward.length > roomRight && leftward.length < roomLeft) {
+        const crossing = Math.min(rightward.length - roomRight, roomLeft - leftward.length);
+        leftward = leftward.concat(rightward.splice(rightward.length - crossing));
+      }
+      /*
+       * A member of this edge stops being movable the moment it lands, and
+       * from then on it is exactly the kind of thing later ranks must route
+       * around — so it joins the obstacles. That is not bookkeeping: where
+       * the keep-out is narrower than the floor the two sides' segments MEET
+       * at the midline, and without this the innermost member of each side
+       * settles on the same pixel from opposite directions, which is the very
+       * defect this pass exists to end.
+       */
+      const pinned = obstacles.slice();
+      /** @type {(side: number, waiting: Drawn[]) => void} */
+      const fillRanks = (side, waiting) => {
+        let queue = waiting;
+        for (let rank = 0; queue.length; rank++) {
+          const oy = edgeOy - edge * FLOOR * rank;
+          /* Ranks march toward the equator one floor at a time — a whole
+             floor, so a member of one rank clears every member of the next by
+             the vertical distance alone — and they stop AT the equator: past
+             it is the other edge's half of the sky. */
+          const last = edge * (oy - edge * FLOOR) < 0;
+          const spans = freeOn(side, oy, pinned);
+          /* On the last rank everything left must land, over capacity or not.
+             The sky is then genuinely too small for its constellations, which
+             is what the drawn-constellation cap in `labelledSkyOf` exists to
+             prevent upstream — this pass can divide the sky, it cannot make
+             more of it. */
+          const take = last ? queue.length : Math.min(queue.length, capacityOf(spans));
+          const here = queue.slice(0, take);
+          layOut(here, spans, side, oy);
+          pinned.push(...here);
+          queue = queue.slice(take);
+        }
+      };
+      fillRanks(-1, leftward);
+      fillRanks(1, rightward);
+    };
+
+    /*
+     * To a fixpoint. Each round either clears the sky or bends one more
+     * bearing, and there are only so many bearings to bend, so the round
+     * count is a proof of termination rather than a tuning knob — unlike
+     * SEPARATION_ROUNDS above, which is a budget for an asymptote.
+     */
+    for (let round = 0; round <= points.length + 1; round++) {
+      const offenders = tooClose();
+      if (!offenders.length) break;
+      for (const [a, z] of offenders) {
+        if (a.banded || z.banded) continue;
+        yieldToBand(a.radius > z.radius || (a.radius === z.radius && a.id > z.id) ? a : z);
+      }
+      /** @type {Set<number|undefined>} */
+      const edges = new Set();
+      for (const [a, z] of offenders) {
+        if (a.banded) edges.add(bandEdge.get(a));
+        if (z.banded) edges.add(bandEdge.get(z));
+      }
+      /* Re-read after the yields above, so a bearing bent this round is an
+         edge member rather than an obstacle in its own re-lay. */
+      const obstacles = points.filter((point) => !point.banded);
+      for (const edge of [-1, 1]) if (edges.has(edge)) relayEdge(edge, obstacles);
+    }
   }
 
   /* Back into stable id order with the camera in its place, so the DOM the

@@ -2182,6 +2182,169 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
     }
     if (!crowded) break;
   }
+  // ---- THE FLOOR (#670, owner ruling 2026-09-01) --------------------------
+  // Everything above treats separation as a DESIRE, which is right until the
+  // sky runs out of room. A banded constellation has its oy pinned and only
+  // ox to spend, so once more of them yield to one edge than that span holds
+  // at minSep, NO arrangement satisfies the constraint: the shoves clamp into
+  // the bound and they settle on the same pixel. A relaxation is asymptotic
+  // and cannot promise a floor. In the app that means two .mshit circles
+  // (r 40) overlapping, so a click aimed at one household sends a JOIN
+  // REQUEST to another. So the desire gains a floor beneath it, met BY
+  // CONSTRUCTION: ask not "can I nudge these two apart" but "how many must
+  // this edge carry, and where do they ALL go". A sky already clear of the
+  // floor is left untouched to the pixel.
+  const FLOOR = 80;              // twice the hit circle's r=40
+  const FLOOR_FIT = FLOOR + 1e-6; // a micron of headroom, so binary rounding cannot land just under
+  const tooClose = () => {
+    const pairs = [];
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      const a = points[i], z = points[j];
+      if (Math.hypot(z.ox - a.ox, z.oy - a.oy) < FLOOR) pairs.push([a, z]);
+    }
+    return pairs;
+  };
+  if (tooClose().length) {
+    // which edge a yielded constellation belongs to, recorded once: a member
+    // walked inward to a second rank must not be re-filed onto the other edge
+    // halfway through the pass
+    const bandEdge = new Map();
+    const edgeFor = (p) => Math.sign(p.oy) || Math.sign(Math.sin(p.angle)) || 1;
+    for (const p of points) if (p.banded) bandEdge.set(p, edgeFor(p));
+    // #428 AC6's yield: a sub-floor pair of TRUE bearings is pinned between
+    // the keep-out and the cap, so the radial pass has nothing left to spend.
+    // Sitting on each other is worse than bending, so the outer one bends.
+    const yieldToBand = (p) => {
+      const edge = edgeFor(p), lim = edge < 0 ? safeTop : safeBottom;
+      p.banded = true;
+      p.oy = edge * Math.max(lim, 0);
+      p.ox = (Math.sign(p.ox) || Math.sign(Math.cos(p.angle)) || 1) * Math.sqrt(Math.max(p.radius * p.radius - p.oy * p.oy, 0));
+      bandEdge.set(p, edge);
+    };
+    // the x one side of a rank may use — the same bounds slide() applies, so
+    // the pass divides the sky's existing room and invents none of it
+    const rankSpan = (oy) => [Math.sqrt(Math.max(keepOut * keepOut - oy * oy, 0)), w / 2 - 60];
+    // that span minus every x within the floor of a point this pass may not
+    // move: a true bearing is never shifted to make room, so the rank routes
+    // AROUND it
+    const freeOn = (side, oy, blocks) => {
+      const [clear, bound] = rankSpan(oy);
+      if (bound <= clear) return [];
+      let spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
+      for (const o of blocks) {
+        const dy = Math.abs(o.oy - oy);
+        if (dy >= FLOOR_FIT) continue;
+        const half = Math.sqrt(FLOOR_FIT * FLOOR_FIT - dy * dy), lo = o.ox - half, hi = o.ox + half, kept = [];
+        for (const [from, to] of spans) {
+          if (hi <= from || lo >= to) { kept.push([from, to]); continue; }
+          if (from < lo) kept.push([from, lo]);
+          if (hi < to) kept.push([hi, to]);
+        }
+        spans = kept;
+      }
+      return spans;
+    };
+    const freeLength = (s) => s.reduce((sum, [from, to]) => sum + (to - from), 0);
+    // the ends are usable, so a bare 80px of room holds two
+    const capacityOf = (s) => (s.length ? Math.floor(freeLength(s) / FLOOR_FIT) + 1 : 0);
+    // arc length from the rank's OUTER end inward, so whoever the slide left
+    // furthest out stays furthest out. The map skips each forbidden range
+    // WHOLE and so never contracts: FLOOR apart in arc length is at least
+    // FLOOR apart in x, which is what makes an even spread a guarantee.
+    const atArc = (spans, side, arc) => {
+      let left = arc;
+      const order = side < 0 ? spans : [...spans].reverse();
+      for (const [from, to] of order) {
+        const len = to - from;
+        if (left <= len) return side < 0 ? from + left : to - left;
+        left -= len;
+      }
+      const [from, to] = order[order.length - 1];
+      return side < 0 ? to : from;
+    };
+    // a lone member keeps its ox and moves the shortest distance that clears
+    // the floor; a tie goes outward, away from the chart
+    const nearestFree = (spans, ox) => {
+      let best = null, bestGap = Infinity;
+      for (const [from, to] of spans) {
+        const c = Math.min(to, Math.max(from, ox)), gap = Math.abs(c - ox);
+        if (gap < bestGap || (gap === bestGap && Math.abs(c) > Math.abs(best))) { best = c; bestGap = gap; }
+      }
+      return best;
+    };
+    const layOut = (members, spans, side, oy) => {
+      if (!members.length) return;
+      for (const p of members) p.oy = oy;
+      if (!spans.length) {
+        // over capacity: fall back to the raw span so they at least spread
+        // away from each other, and keep #427 absolute — the keep-out is a
+        // GUARANTEE and the floor is not
+        const [clear, bound] = rankSpan(oy);
+        if (bound <= clear) { for (const p of members) p.ox = side * clear; return; }
+        spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
+      }
+      if (members.length === 1) { members[0].ox = nearestFree(spans, members[0].ox); return; }
+      const step = freeLength(spans) / (members.length - 1); // endpoints inclusive
+      members.forEach((p, i) => { p.ox = atArc(spans, side, i * step); });
+    };
+    const relayEdge = (edge, blocks) => {
+      const members = points.filter((p) => p.banded && bandEdge.get(p) === edge);
+      if (!members.length) return;
+      const edgeOy = edge * Math.max(edge < 0 ? safeTop : safeBottom, 0);
+      // members keep their side of the midline: a slide has never been allowed
+      // to carry a constellation across the sky, and the re-lay inherits that
+      const sides = new Map([[-1, []], [1, []]]);
+      for (const p of members) sides.get(Math.sign(p.ox) || Math.sign(Math.cos(p.angle)) || 1).push(p);
+      // outermost first, ties by id — never by the order the walk reached them
+      for (const list of sides.values()) list.sort((a, b) => Math.abs(b.ox) - Math.abs(a.ox) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const room = new Map([[-1, capacityOf(freeOn(-1, edgeOy, blocks))], [1, capacityOf(freeOn(1, edgeOy, blocks))]]);
+      // overflow spills sideways before inward: crossing the midline costs one
+      // constellation its side, a second rank costs a whole rank its place in
+      // the band, and the cheaper price is paid first. The innermost cross.
+      for (const [from, to] of [[-1, 1], [1, -1]]) {
+        const over = sides.get(from).length - room.get(from), spare = room.get(to) - sides.get(to).length;
+        if (over > 0 && spare > 0) sides.get(to).push(...sides.get(from).splice(sides.get(from).length - Math.min(over, spare)));
+      }
+      // a member stops being movable the moment it lands, so it joins the
+      // blocks — without this the two sides' segments meet at the midline
+      // wherever the keep-out is narrower than the floor, and their innermost
+      // members settle on the same pixel from opposite directions
+      const pinned = blocks.slice();
+      for (const side of [-1, 1]) {
+        let queue = sides.get(side);
+        for (let rank = 0; queue.length; rank++) {
+          const oy = edgeOy - edge * FLOOR * rank;
+          // ranks march toward the equator a whole floor at a time — so one
+          // rank clears the next on the vertical alone — and stop AT it: past
+          // the equator is the other edge's half of the sky
+          const last = edge * (oy - edge * FLOOR) < 0;
+          const spans = freeOn(side, oy, pinned);
+          const take = last ? queue.length : Math.min(queue.length, capacityOf(spans));
+          const here = queue.slice(0, take);
+          layOut(here, spans, side, oy);
+          pinned.push(...here);
+          queue = queue.slice(take);
+        }
+      }
+    };
+    // to a fixpoint: each round either clears the sky or bends one more
+    // bearing, and there are only so many bearings to bend
+    for (let round = 0; round <= points.length + 1; round++) {
+      const offenders = tooClose();
+      if (!offenders.length) break;
+      for (const [a, z] of offenders) {
+        if (a.banded || z.banded) continue;
+        yieldToBand(a.radius > z.radius || (a.radius === z.radius && a.id > z.id) ? a : z);
+      }
+      const edges = new Set();
+      for (const [a, z] of offenders) {
+        if (a.banded) edges.add(bandEdge.get(a));
+        if (z.banded) edges.add(bandEdge.get(z));
+      }
+      const blocks = points.filter((p) => !p.banded);
+      for (const edge of [-1, 1]) if (edges.has(edge)) relayEdge(edge, blocks);
+    }
+  }
   const placed = [...points, ...self].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   placementMemo.set(key, placed);
   return placed;
