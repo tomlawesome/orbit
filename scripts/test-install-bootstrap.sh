@@ -110,6 +110,9 @@ cleanup() {
       down --volumes --remove-orphans >/dev/null 2>&1) || true
   fi
   docker rm -f "$oidc_container" >/dev/null 2>&1 || true
+  # The sidecar image is built per run and tagged with this run's name, so
+  # leaving it behind accumulates a 245MB image every time the harness runs.
+  docker rmi -f "${project_name}-oidc:test" >/dev/null 2>&1 || true
   rm -rf -- "$workdir"
   return "$status"
 }
