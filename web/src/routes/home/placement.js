@@ -102,6 +102,18 @@ const EDGE_MARGIN = 60;
  * air.
  */
 const EDGE_INSET = 130;
+/**
+ * The radius of a constellation's transparent hit circle (`.mshit`), and so
+ * half the closest two constellations may ever be drawn: below twice this,
+ * two hit circles overlap and a click lands on a household the person did not
+ * aim at, which sends a join request to its owner (#670).
+ *
+ * Bound to the `r="40"` written into the markup in `home.behaviour.js`. The
+ * browser hit-test in the e2e suite is what keeps the two honest; a comment
+ * alone would not.
+ */
+export const HIT_RADIUS = 40;
+
 const SEPARATION_ROUNDS = 8;
 const BAND_ROUNDS = 6;
 
