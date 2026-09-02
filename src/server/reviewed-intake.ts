@@ -375,8 +375,14 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       } catch {
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
+        // Only re-flag a purge that is still outstanding (#722). A
+        // concurrent caller may have purged the private copy and cleared the
+        // flag while this attempt was in flight, in which case this failure
+        // is of a delete with nothing left to delete: stamping purgePending
+        // and a failure code here would advertise work already done, and
+        // count an attempt against it.
         await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId)));
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
       }
       continue;
     }
@@ -507,8 +513,14 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         attached.push(attachment.id);
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
+        // Only re-flag a purge that is still outstanding (#722). A
+        // concurrent caller may have purged the private copy and cleared the
+        // flag while this attempt was in flight, in which case this failure
+        // is of a delete with nothing left to delete: stamping purgePending
+        // and a failure code here would advertise work already done, and
+        // count an attempt against it.
         await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id)));
+          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
         continue;
       }
       attached.push(attachment.id);
