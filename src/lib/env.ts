@@ -1,10 +1,17 @@
 import { z } from "zod";
-import { OIDC_CALLBACK_PATH } from "@/lib/config-contract";
+import {
+  OIDC_CALLBACK_PATH,
+  SESSION_SECRET_RUNTIME_MESSAGE,
+  isValidSessionSecret,
+} from "@/lib/config-contract";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
 
 const authEnvironmentSchema = z.object({
   APP_URL: z.url(),
-  SESSION_SECRET: z.string().min(32, "SESSION_SECRET must contain at least 32 characters"),
+  // The same rule scripts/configure.sh and the .env-orbit field schema apply
+  // (issue #578): the runtime used to accept any 32-character string, so an
+  // instance could start on a secret its own configure step refused.
+  SESSION_SECRET: z.string().refine(isValidSessionSecret, { message: SESSION_SECRET_RUNTIME_MESSAGE }),
   SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(2_592_000).default(604_800),
   OIDC_ISSUER: z.url(),
   OIDC_CLIENT_ID: z.string().min(1),
