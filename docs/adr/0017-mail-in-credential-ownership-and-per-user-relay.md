@@ -453,8 +453,12 @@ change in the same pull request as the code, per that document's rule.
    credential active; catalogue and docs match the scripts.
 3. **Per-user relay generations** — `mail_in_relays`; lookup by row; rotate
    and cut-off on `PUT /api/settings/mail-relay`; the relay page's
-   `rotate address` control; retire the singleton and
-   `core/imap-rotation.ts`; administrator `mail_in_alias_key_rotated`.
+   `rotate address` control; the `mail_in_relays` part of decision 6's
+   import (every user's row from the singleton's generations — slice 1
+   imports only the mailbox and secrets, and addresses survive it because
+   the alias key bytes and the singleton are unchanged until here); retire
+   the singleton and `core/imap-rotation.ts`; administrator
+   `mail_in_alias_key_rotated`.
    *Accept:* sibling test from decision 2; previous alias attributes until
    expiry and `recipient_alias_expired` after; generation never reused;
    route still takes no user id.
