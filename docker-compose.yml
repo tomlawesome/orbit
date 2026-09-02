@@ -91,12 +91,12 @@ services:
     restart: unless-stopped
     user: "35002:35002"
     read_only: true
-    environment:
-      TIKA_CONFIG: /etc/orbit/tika-config.json
     # Tika 4 takes JSON, not the XML of Tika 3. The exclusion in that file is
     # the only thing holding the Tesseract OCR parser out of the parser set,
     # and it only binds in the array form under a registered component name:
     # the object form parses, loads nothing and reports no error (#687).
+    # This argument is the only thing that selects the config file: the server
+    # reads no environment variable for it, so change the path here (#692).
     command: ["-c", "/etc/orbit/tika-config.json"]
     configs:
       - source: orbit-tika-config
