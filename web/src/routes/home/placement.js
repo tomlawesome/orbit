@@ -161,8 +161,8 @@ export function dimFor(distance) {
  * predates the type gate and is left as it stands.
  *
  * @typedef {{ id: string, household: any, isCamera: boolean, banded: boolean,
- *             dist: number, angle: number, radius: number, ox: number,
- *             oy: number, dim: number }} Drawn
+ *             undrawn: boolean, dist: number, angle: number, radius: number,
+ *             ox: number, oy: number, dim: number }} Drawn
  */
 
 /**
@@ -184,12 +184,15 @@ export function dimFor(distance) {
  *                                  never from the hero.
  * @returns {Array} every household in the galaxy, in stable id order, each
  *                  with `{ id, household, isCamera, dist, angle, radius, ox,
- *                  oy, dim, banded }`. The camera's own entry is included at
- *                  the origin and marked `isCamera`: you never see your own
- *                  constellation (you are inside it), but the caller filters
- *                  it rather than this function pretending it does not exist.
- *                  `banded` marks the one ratified case where the bearing
- *                  yielded — see the band clamp below.
+ *                  oy, dim, banded, undrawn }`. The camera's own entry is
+ *                  included at the origin and marked `isCamera`: you never
+ *                  see your own constellation (you are inside it), but the
+ *                  caller filters it rather than this function pretending it
+ *                  does not exist. `banded` marks the one ratified case where
+ *                  the bearing yielded — see the band clamp below. `undrawn`
+ *                  marks a household the floor pass could not fit anywhere
+ *                  that meets the floor — the caller must not draw it (see
+ *                  the floor pass below for who and why).
  */
 export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0, screen = width }) {
   const cached = memoised(galaxy, camera, width, height, keepOut, screen);
@@ -220,7 +223,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
     const household = galaxy[id];
     if (id === camera) {
       cameraEntry.push({
-        id, household, isCamera: true, banded: false,
+        id, household, isCamera: true, banded: false, undrawn: false,
         dist: 0, angle: 0, radius: 0, ox: 0, oy: 0, dim: dimFor(0),
       });
       continue;
@@ -229,7 +232,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
     const dy = household.pos[1] - origin[1];
     const dist = Math.hypot(dx, dy);
     points.push({
-      id, household, isCamera: false, banded: false,
+      id, household, isCamera: false, banded: false, undrawn: false,
       dist,
       /* The bearing. Everything below may read it; nothing may write it. */
       angle: Math.atan2(dy, dx),
@@ -432,13 +435,18 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
   /** @type {(a: Drawn, z: Drawn) => number} */
   const floorGap = (a, z) => Math.hypot(z.ox - a.ox, z.oy - a.oy);
   /* Walked in `points` order, which is id order — so which pairs the pass
-     sees, and in which order, cannot depend on how the data arrived. */
+     sees, and in which order, cannot depend on how the data arrived. An
+     undrawn point is not on the sky at all, so it can never be "too close"
+     to anything — skipping it here is what keeps the decision permanent
+     rather than re-litigated every further round. */
   /** @type {() => Drawn[][]} */
   const tooClose = () => {
     /** @type {Drawn[][]} */
     const pairs = [];
     for (let i = 0; i < points.length; i++) {
+      if (points[i].undrawn) continue;
       for (let j = i + 1; j < points.length; j++) {
+        if (points[j].undrawn) continue;
         if (floorGap(points[i], points[j]) < FLOOR) pairs.push([points[i], points[j]]);
       }
     }
@@ -571,26 +579,18 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
       return best;
     };
 
+    /*
+     * `layOut` is only ever handed the members a rank actually has room for
+     * (see `fillRanks` below: `take` is now capacity-capped on every rank,
+     * including the last) — so `spans` is never empty here. Anything a rank
+     * cannot hold is not laid out sub-floor any more; it spills to the next
+     * rank, or, past the last legal one, is marked undrawn (#670, owner
+     * ruling 2026-09-02).
+     */
     /** @type {(members: Drawn[], spans: number[][], side: number, oy: number) => void} */
     const layOut = (members, spans, side, oy) => {
       if (!members.length) return;
       for (const point of members) point.oy = oy;
-      if (!spans.length) {
-        /*
-         * Nothing on this rank clears the floor — the sky is over capacity,
-         * and the last rank has to take what is left anyway. Fall back to the
-         * side's raw span so the members at least spread away from each
-         * other, and keep #427 absolute: the keep-out is a GUARANTEE and the
-         * floor is not, so where even the raw span is empty they sit on the
-         * chart's edge rather than inside it.
-         */
-        const [clear, bound] = rankSpan(oy);
-        if (bound <= clear) {
-          for (const point of members) point.ox = side * clear;
-          return;
-        }
-        spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
-      }
       if (members.length === 1) {
         members[0].ox = nearestFree(spans, members[0].ox);
         return;
@@ -604,7 +604,10 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
 
     /** @type {(edge: number, obstacles: Drawn[]) => void} */
     const relayEdge = (edge, obstacles) => {
-      const members = points.filter((point) => point.banded && bandEdge.get(point) === edge);
+      /* A point already marked undrawn is a settled decision (#670, owner
+         ruling 2026-09-02) — it does not come back for a second re-lay just
+         because another offender on the same edge triggers one. */
+      const members = points.filter((point) => point.banded && !point.undrawn && bandEdge.get(point) === edge);
       if (!members.length) return;
       const edgeOy = edge * Math.max(edge < 0 ? safeTop : safeBottom, 0);
       /* Members keep their side of the midline. The band slide has never been
@@ -658,16 +661,30 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
              it is the other edge's half of the sky. */
           const last = edge * (oy - edge * FLOOR) < 0;
           const spans = freeOn(side, oy, pinned);
-          /* On the last rank everything left must land, over capacity or not.
-             The sky is then genuinely too small for its constellations, which
-             is what the drawn-constellation cap in `labelledSkyOf` exists to
-             prevent upstream — this pass can divide the sky, it cannot make
-             more of it. */
-          const take = last ? queue.length : Math.min(queue.length, capacityOf(spans));
+          /*
+           * Every rank, including the last, takes only what it has capacity
+           * for. Past the last legal rank there is nowhere left that keeps
+           * the floor — never crossing the equator, never entering the
+           * keep-out — so whatever a household this pass still owes a place
+           * to does not fit is marked UNDRAWN rather than forced in sub-floor
+           * (#670, owner ruling 2026-09-02, superseding the interim "the last
+           * rank has to take what is left anyway"). The pass's own spill
+           * order decides who: `queue` is outermost-first throughout, so
+           * whatever is left at the last rank is exactly the innermost
+           * members, dropped innermost-first with ties already broken by id
+           * ascending (`outermostFirst` above). The renderer skips undrawn
+           * points; the join list is unaffected, since it is fed the full
+           * `visibleHouseholds` upstream rather than this galaxy.
+           */
+          const take = Math.min(queue.length, capacityOf(spans));
           const here = queue.slice(0, take);
           layOut(here, spans, side, oy);
           pinned.push(...here);
           queue = queue.slice(take);
+          if (last) {
+            for (const point of queue) point.undrawn = true;
+            queue = [];
+          }
         }
       };
       fillRanks(-1, leftward);

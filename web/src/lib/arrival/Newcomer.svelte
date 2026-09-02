@@ -81,7 +81,12 @@
     const keepOut = Math.max(200, (panel ? panel.offsetWidth : 430) / 2 + 118);
     const sky = Math.max(640, w - 220);
     const placed = [];
-    for (const { id, household, ox, oy, dim } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
+    /* A household the floor pass could not fit anywhere that keeps the 80px
+       floor is marked `undrawn` (#670, owner ruling 2026-09-02) and skipped
+       — the join list below stays complete regardless, since it is fed
+       `visibleHouseholds`, not this sky. */
+    for (const { id, household, ox, oy, dim, undrawn } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
+      if (undrawn) continue;
       const away = ox > 0;
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
