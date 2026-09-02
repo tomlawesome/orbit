@@ -14,7 +14,7 @@ const baseEnvironment = (): NodeJS.ProcessEnv => ({
   NODE_ENV: "test",
   ORBIT_CONFIG_SCHEMA_VERSION: "1",
   APP_URL: "https://orbit.example.invalid",
-  SESSION_SECRET: "s".repeat(32),
+  SESSION_SECRET: "b".repeat(64),
   OIDC_ISSUER: "https://identity.example.invalid/issuer",
   OIDC_CLIENT_ID: "client-id",
   OIDC_CLIENT_SECRET: "client-secret",
