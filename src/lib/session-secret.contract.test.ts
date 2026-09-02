@@ -213,11 +213,11 @@ describe("a valid session secret has exactly one definition", () => {
       message = error instanceof Error ? error.message : String(error);
     }
     expect(message).toContain("openssl rand -hex 32");
-    expect(message).toContain("signs out every active session");
+    expect(message).toContain("active sessions stay signed in");
 
     const { stderr } = runBashConfigure("z".repeat(64));
     expect(stderr).toContain("openssl rand -hex 32");
-    expect(stderr).toContain("signs out every active session");
+    expect(stderr).toContain("active sessions stay signed in");
   });
 
   it("bash and TypeScript word that refusal identically", () => {

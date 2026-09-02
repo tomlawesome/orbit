@@ -152,7 +152,7 @@ export const SECRET_HEX256_REQUIREMENT =
 
 /** Appended wherever the secret at fault is specifically the session secret. */
 export const SESSION_SECRET_ROTATION_WARNING =
-  "Rotating the session secret signs out every active session.";
+  "Rotating the session secret invalidates CSRF tokens issued before it, which recover on the next session read; active sessions stay signed in.";
 
 /**
  * The refusal an operator sees when a secret file holds the wrong shape.

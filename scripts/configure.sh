@@ -17,7 +17,7 @@ readonly maximum_secret_bytes=65536
 # fails if they ever disagree (issue #578).
 readonly secret_hex256_pattern='^[0-9a-fA-F]{64}$'
 readonly secret_hex256_requirement='must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32'
-readonly session_secret_rotation_warning='Rotating the session secret signs out every active session.'
+readonly session_secret_rotation_warning='Rotating the session secret invalidates CSRF tokens issued before it, which recover on the next session read; active sessions stay signed in.'
 # configuration.sh's own rollback_suffix constant (scripts/configuration.sh
 # line 9), duplicated here rather than sourced (this script's own source-less
 # convention). Only configuration.sh ever creates a file at this suffix.
