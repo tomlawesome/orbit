@@ -68,7 +68,7 @@ async function establishInstanceAdmin(browser: Browser) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   await signInAs(page, "Orbit Administrator");
-  await page.waitForURL(/\/(home)?$/);
+  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
   await context.close();
 }
 
@@ -145,7 +145,7 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
   await signInAs(ownerPage, "Orbit Member");
-  await ownerPage.waitForURL(/\/(home)?$/);
+  await expect(ownerPage).toHaveURL(/\/home$/, { timeout: 30_000 });
   const created = await createSystem(ownerPage, HOUSEHOLD);
   expect(created.canManage).toBe(true);
   expect(created.onboardingComplete).toBe(true);
