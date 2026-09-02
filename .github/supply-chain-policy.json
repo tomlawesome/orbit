@@ -105,8 +105,8 @@
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446",
-      "indexDigest": "sha256:967334b92d1782e4d1314ddf903ae537d26792d21c9a39adecb8ac9757980514",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:6c92171e6ab52529cd44452f6443dd05b2fc4d580c190ffc70f45f955cb9f4b9",
+      "indexDigest": "sha256:be3cb41d9833ce9ffb98f3d3e1483c35c0d87060c2bda3624d75fd28bbf0b3bd",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -116,7 +116,7 @@
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-30",
+      "resolvedOn": "2026-09-02",
       "reviewBy": "2026-10-30"
     },
     {
