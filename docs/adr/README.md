@@ -31,3 +31,4 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0014: Repair mode — diagnosis, planning and safe execution](0014-repair-mode-diagnosis-planning-and-execution.md)
 - [ADR-0015: Operator recovery packaging and the meaning of "end"](0015-operator-recovery-packaging-and-end-semantics.md)
 - [ADR-0016: The supported-install floor is v1.3.0](0016-release-identity-and-installer-era-boundary.md)
+- [ADR-0017: Mail-in credential ownership and per-user relays](0017-mail-in-credential-ownership-and-per-user-relay.md)
