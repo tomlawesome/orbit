@@ -81,8 +81,17 @@ async function responseError(response: Response, fallback: string): Promise<Erro
   return new Error(payload?.error?.message || fallback);
 }
 
+/** Shape shared by /api/admin/users, /api/admin/primary and every user-list mutation (#592). */
+interface InstanceUsersPayload {
+  users?: InstanceUser[];
+  totalUsers?: number;
+  truncated?: boolean;
+}
+
 export function AdminManager({ session }: AdminManagerProps) {
   const [users, setUsers] = useState<InstanceUser[]>([]);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [usersTruncated, setUsersTruncated] = useState(false);
   const [message, setMessage] = useState("");
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [documentHealth, setDocumentHealth] = useState<DocumentHealth | null>(null);
@@ -137,9 +146,13 @@ export function AdminManager({ session }: AdminManagerProps) {
     fetch("/api/admin/users", { credentials: "same-origin", cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw await responseError(response, "Users could not be loaded");
-        const payload = await response.json() as { users?: InstanceUser[] };
+        const payload = await response.json() as InstanceUsersPayload;
         if (!payload.users) throw new Error("Users could not be loaded");
-        if (!cancelled) setUsers(payload.users);
+        if (!cancelled) {
+          setUsers(payload.users);
+          setTotalUsers(payload.totalUsers ?? payload.users.length);
+          setUsersTruncated(payload.truncated ?? false);
+        }
       })
       .catch((error) => { if (!cancelled) setMessage(error instanceof Error ? error.message : "Users could not be loaded"); });
     return () => { cancelled = true; };
@@ -181,9 +194,11 @@ export function AdminManager({ session }: AdminManagerProps) {
     try {
       const response = await fetch("/api/admin/users", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken }, body: JSON.stringify({ userId: user.id, administrator: !user.isInstanceAdmin }) });
       if (!response.ok) throw await responseError(response, "Administrator access could not be updated");
-      const payload = await response.json() as { users?: InstanceUser[] };
+      const payload = await response.json() as InstanceUsersPayload;
       if (!payload.users) throw new Error("Administrator access could not be updated");
       setUsers(payload.users);
+      setTotalUsers(payload.totalUsers ?? payload.users.length);
+      setUsersTruncated(payload.truncated ?? false);
       setMessage(`${user.displayName} ${user.isInstanceAdmin ? "is no longer" : "is now"} an Orbit administrator.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Administrator access could not be updated"); }
     finally { setBusyUserId(null); }
@@ -199,9 +214,11 @@ export function AdminManager({ session }: AdminManagerProps) {
     try {
       const response = await fetch("/api/admin/users", { method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken }, body: JSON.stringify({ userId: user.id, disabled: disabling }) });
       if (!response.ok) throw await responseError(response, "Account status could not be updated");
-      const payload = await response.json() as { users?: InstanceUser[] };
+      const payload = await response.json() as InstanceUsersPayload;
       if (!payload.users) throw new Error("Account status could not be updated");
       setUsers(payload.users);
+      setTotalUsers(payload.totalUsers ?? payload.users.length);
+      setUsersTruncated(payload.truncated ?? false);
       setMessage(`${user.displayName}'s account is now ${disabling ? "disabled" : "enabled"}.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Account status could not be updated"); }
     finally { setBusyUserId(null); }
@@ -216,9 +233,11 @@ export function AdminManager({ session }: AdminManagerProps) {
     try {
       const response = await fetch("/api/admin/primary", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRF-Token": session.csrfToken }, body: JSON.stringify({ targetUserId: target.id }) });
       if (!response.ok) throw await responseError(response, "Primary authority could not be transferred");
-      const payload = await response.json() as { users?: InstanceUser[] };
+      const payload = await response.json() as InstanceUsersPayload;
       if (!payload.users) throw new Error("Primary authority could not be transferred");
       setUsers(payload.users);
+      setTotalUsers(payload.totalUsers ?? payload.users.length);
+      setUsersTruncated(payload.truncated ?? false);
       setMessage(`${target.displayName} is now the primary administrator.`);
     } catch (error) { setMessage(error instanceof Error ? error.message : "Primary authority could not be transferred"); }
     finally { setBusyUserId(null); }
@@ -327,6 +346,7 @@ export function AdminManager({ session }: AdminManagerProps) {
 
     <section>
       <div className="setting-heading"><h3>Instance administrators</h3><p>Administrators can manage every user, household, section, and item in this Orbit instance.</p></div>
+      {usersTruncated && <p className="admin-health-warning" role="alert">Showing {users.length} of {totalUsers} users. The primary administrator is always included.</p>}
       <div className="admin-list">{users.map((user) => {
         const self = user.id === session.user.id;
         const viewerIsPrimary = users.some((candidate) => candidate.id === session.user.id && candidate.isPrimaryAdministrator);
