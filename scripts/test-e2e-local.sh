@@ -40,6 +40,10 @@ cd "$repo_dir"
 
 readonly project_name="orbit-e2e-local"
 readonly app_port="13777"
+# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
+# it to build the application's own APP_URL and OIDC callback URL, so every
+# compose call in this script has to agree about the published port.
+export ORBIT_PORT="$app_port"
 readonly base_url="http://127.0.0.1:${app_port}"
 readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
 
