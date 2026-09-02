@@ -24,11 +24,19 @@
  * 1600-wide desk. Between those, a centred 400 column is the better of two
  * imperfect answers, so the boundary sits well above the phone rather than
  * just past it.
+ *
+ * 600px tall (#670, owner ruling 2026-09-02): the desk dial is square,
+ * `min(640px, 100vw - 456px)` (home.css), so at or below 600px of viewport
+ * height it no longer fits inside the hero — no placement law rescues a
+ * chart whose own centrepiece overflows the viewport. Below that height the
+ * pocket strip is the better of two imperfect answers, same as the width
+ * switch above; above it a short-but-wide desk (e.g. 1280x720) still keeps a
+ * workable sky under the floor pass's capacity cap.
  */
 .pocket{display:contents}
 .desk{display:contents}
-@media (min-width:901px){ .pocket{display:none} }
-@media (max-width:900px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
+@media (min-width:901px) and (min-height:601px){ .pocket{display:none} }
+@media (max-width:900px), (max-height:600px){ .desk{display:none} body{overflow-y:auto;overflow-x:hidden} }
 
 /*
  * The mobile dialect — lifted from design/family/mobile-home.html and owned
