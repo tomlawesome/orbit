@@ -221,7 +221,7 @@
           `from ${s.sourceDocument}`,
           burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
         ].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var(--accent)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
+        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
       </div>
     {/each}
     {#each view.mailReading as r (r.id)}
