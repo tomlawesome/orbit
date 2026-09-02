@@ -12,7 +12,13 @@ const mocks = vi.hoisted(() => ({
     error: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
+    debug: vi.fn(),
   },
+  /* What an operator would actually see. Every log call in this file is put
+     through the real renderers as well as the spies, so an assertion cannot
+     pass on a field that never reaches the terminal (#718). */
+  renderedText: [] as string[],
+  renderedJson: [] as string[],
   getConfigurationProblems: vi.fn(() => [] as Array<{
     code: "configuration_optional";
     severity: "warning";
@@ -58,9 +64,18 @@ vi.mock("@/lib/env", () => ({
   getAuthConfig: mocks.getAuthConfig,
 }));
 
-vi.mock("@/lib/logger", () => ({
-  log: mocks.log,
-}));
+vi.mock("@/lib/logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/logger")>();
+  const capture = (level: "error" | "warn" | "info" | "debug") => (event: import("@/lib/logger").OperationalEvent) => {
+    mocks.log[level](event);
+    mocks.renderedText.push(actual.formatRecord(level, event, "2026-01-01T00:00:00.000Z"));
+    mocks.renderedJson.push(actual.formatJsonRecord(level, event, "2026-01-01T00:00:00.000Z"));
+  };
+  return {
+    ...actual,
+    log: { error: capture("error"), warn: capture("warn"), info: capture("info"), debug: capture("debug") },
+  };
+});
 vi.mock("@/lib/configuration-problems", () => ({
   getConfigurationProblems: mocks.getConfigurationProblems,
 }));
@@ -88,6 +103,8 @@ vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mock
 vi.mock("@/server/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
 
 import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
+/* The real helper: the mock above keeps every export except `log`. */
+import { operationalDetail } from "@/lib/logger";
 
 describe("instrumentation runtime boundary", () => {
   beforeEach(() => {
@@ -95,6 +112,8 @@ describe("instrumentation runtime boundary", () => {
     vi.resetModules();
     resetAuthObservabilityForTests();
     mocks.workerCalls.length = 0;
+    mocks.renderedText.length = 0;
+    mocks.renderedJson.length = 0;
     mocks.validateStartupConfiguration.mockReset();
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
@@ -268,20 +287,30 @@ describe("strict startup ordering", () => {
 
   it("names a genuine mismatch precisely, and never tells the operator to restart (#437)", async () => {
     const { registerNode } = await import("./instrumentation-node");
-    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(
-      new mocks.MigrationIntegrityError("migration_integrity", "applied migration 25 of 25 does not match 0026_x"),
-    );
+    mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError(
+      "migration_integrity",
+      operationalDetail`applied migration ${25} of ${25} does not match ${"0026_x"}`,
+    ));
 
     await expect(registerNode()).rejects.toThrow("migration_integrity");
-    expect(mocks.log.error).toHaveBeenCalledWith({
-      event: "startup.migration",
-      state: "exhausted",
+
+    /* Asserted on the rendered line rather than the mock's arguments: the
+       argument was already right while the output silently dropped it, so the
+       old assertion could not tell the two apart (#718). */
+    const line = mocks.renderedText.at(-1) ?? "";
+    expect(line).toContain("orbit migrations startup.migration");
+    expect(line).toContain("state=exhausted");
+    expect(line).toContain("reason=database_mismatch");
+    expect(line).toContain("action=attach_matching_database");
+    expect(line).toContain("impact=migration_blocked");
+    /* The bounded what-disagreed travels to the operator's log (#437) —
+       written at the throw site and previously read nowhere (#448). */
+    expect(line).toContain('detail="applied migration 25 of 25 does not match 0026_x"');
+    expect(line).not.toContain("restart");
+    expect(JSON.parse(mocks.renderedJson.at(-1) ?? "{}")).toMatchObject({
       reason: "database_mismatch",
       action: "attach_matching_database",
-      /* The bounded what-disagreed travels to the operator's log (#437) —
-         written at the throw site and previously read nowhere (#448). */
       detail: "applied migration 25 of 25 does not match 0026_x",
-      impact: "migration_blocked",
     });
   });
 
