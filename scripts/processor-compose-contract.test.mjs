@@ -50,7 +50,10 @@ describe("hostile document processor contract", () => {
     const tika = serviceBlock("orbit-tika");
     expect(tika).toContain('user: "35002:35002"');
     expect(tika).toContain("read_only: true");
-    expect(tika).toContain("TIKA_CONFIG: /etc/orbit/tika-config.json");
+    // Only the `-c` argument selects a config file on Tika 4. A TIKA_CONFIG
+    // variable is read by nothing in the server, so it would misdirect whoever
+    // moves the config path next (#692).
+    expect(tika).not.toContain("TIKA_CONFIG");
     expect(tika).toContain('command: ["-c", "/etc/orbit/tika-config.json"]');
     expect(tika).toContain("cap_drop:\n      - ALL");
     expect(tika).toContain("uid=35002,gid=35002,mode=0700,size=256m");
@@ -77,6 +80,9 @@ describe("hostile document processor contract", () => {
     expect(tikaAdapter).toContain('new URL("/tika", config.tika.url)');
     expect(tikaAdapter).not.toContain("input.url");
     expect(tikaAdapter).not.toContain("input.headers");
+    // Tika 4 reads no X-Tika-* request header, so sending one would advertise a
+    // per-request opt-out the server never honours (#692).
+    expect(tikaAdapter).not.toContain("X-Tika");
   });
 
   it("retains protected exact-image runtime evidence for processor changes", () => {
