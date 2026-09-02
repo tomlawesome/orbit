@@ -1,12 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #455: the item view's writes, for real — a household and item seeded
  * through the same command API the product uses, then completed through the
  * v19 view, with the new orbit visible back on home.
  */
+
+/* #730: each test removes the proving ground it seeded, so neither is left
+   crowding the sky a later spec measures. */
+const HOUSEHOLD = "Actions Proving Ground";
+const households = householdRegister();
+
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
-  return await page.evaluate(async () => {
+  const seeded = await page.evaluate(async (householdName) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
     const command = async (payload: unknown) => {
@@ -24,7 +31,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       type: "household.create",
       household: {
         id: householdId,
-        name: "Actions Proving Ground",
+        name: householdName,
         timezone: "Europe/London",
         currency: "GBP",
         memberCount: 1,
@@ -52,7 +59,9 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId };
-  });
+  }, HOUSEHOLD);
+  households.track({ id: seeded.householdId, name: HOUSEHOLD });
+  return seeded;
 }
 
 test("completing an item from the v19 view moves its orbit", async ({ page }) => {
@@ -62,28 +71,32 @@ test("completing an item from the v19 view moves its orbit", async ({ page }) =>
 
   const { itemId } = await seedHouseholdWithItem(page);
 
-  await page.goto(`/item/${itemId}`);
-  await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
-  // Due in 20 days: needs attention.
-  await expect(page.locator(".item-card")).toContainText("T−20d");
+  try {
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
+    // Due in 20 days: needs attention.
+    await expect(page.locator(".item-card")).toContainText("T−20d");
 
-  await page.locator(".acts button", { hasText: /^complete$/ }).click();
-  // The next orbit defaults to +recurrenceMonths and stays editable.
-  await expect(page.locator("#a-next")).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
-  await page.locator(".panel .btn-primary").click();
+    await page.locator(".acts button", { hasText: /^complete$/ }).click();
+    // The next orbit defaults to +recurrenceMonths and stays editable.
+    await expect(page.locator("#a-next")).toHaveValue(/^\d{4}-\d{2}-\d{2}$/);
+    await page.locator(".panel .btn-primary").click();
 
-  // The view re-reads: a year of lead time now (allow the ±1 day of month arithmetic).
-  await expect(page.locator(".item-card")).toContainText(/T−36[456]d/);
+    // The view re-reads: a year of lead time now (allow the ±1 day of month arithmetic).
+    await expect(page.locator(".item-card")).toContainText(/T−36[456]d/);
 
-  // And home tells the same story. On a desk the row sits in the wide orbit;
-  // in the pocket dialect only attention rows exist, so the truth there is
-  // the item's absence from them.
-  await page.goto("/home");
-  if (test.info().project.name.startsWith("mobile")) {
-    await expect(page.locator(".mdial svg")).toBeVisible();
-    await expect(page.locator(".mitem", { hasText: "Boiler service proving" })).toHaveCount(0);
-  } else {
-    await expect(page.locator(`[id="${itemId}"]`)).toContainText(/T−36[456]d/);
+    // And home tells the same story. On a desk the row sits in the wide orbit;
+    // in the pocket dialect only attention rows exist, so the truth there is
+    // the item's absence from them.
+    await page.goto("/home");
+    if (test.info().project.name.startsWith("mobile")) {
+      await expect(page.locator(".mdial svg")).toBeVisible();
+      await expect(page.locator(".mitem", { hasText: "Boiler service proving" })).toHaveCount(0);
+    } else {
+      await expect(page.locator(`[id="${itemId}"]`)).toContainText(/T−36[456]d/);
+    }
+  } finally {
+    await households.sweep(page);
   }
 });
 
@@ -93,37 +106,42 @@ test("a stale version is refused and the view says so", async ({ page }) => {
   await expect(page).toHaveURL(/\/home$/);
 
   const { itemId, householdId } = await seedHouseholdWithItem(page);
-  await page.goto(`/item/${itemId}`);
-  await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
 
-  // Someone else reschedules while our view is open (same command API,
-  // fresh version) — our copy is now stale.
-  await page.evaluate(async ({ seededHouseholdId, seededItemId }) => {
-    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
-    const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin" })).json()).workspace;
-    const household = workspace.households.find((one: { id: string }) => one.id === seededHouseholdId);
-    const item = household.items.find((one: { id: string }) => one.id === seededItemId);
-    const response = await fetch("/api/workspace/commands", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
-      body: JSON.stringify({
-        type: "item.reschedule",
-        householdId: household.id,
-        itemId: item.id,
-        expectedVersion: item.version,
-        dueDate: "2027-03-03",
-        activity: { id: crypto.randomUUID(), itemId: item.id, kind: "rescheduled", occurredAt: new Date().toISOString(), nextDate: "2027-03-03" },
-      }),
-    });
-    if (!response.ok) throw new Error(`rival reschedule failed: ${response.status}`);
-  }, { seededHouseholdId: householdId, seededItemId: itemId });
+  try {
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
 
-  await page.locator(".acts button", { hasText: /^reschedule$/ }).click();
-  await page.locator("#a-due").fill("2026-12-01");
-  await page.locator(".panel .btn-primary").click();
+    // Someone else reschedules while our view is open (same command API,
+    // fresh version) — our copy is now stale.
+    await page.evaluate(async ({ seededHouseholdId, seededItemId }) => {
+      const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+      const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin" })).json()).workspace;
+      const household = workspace.households.find((one: { id: string }) => one.id === seededHouseholdId);
+      const item = household.items.find((one: { id: string }) => one.id === seededItemId);
+      const response = await fetch("/api/workspace/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+        body: JSON.stringify({
+          type: "item.reschedule",
+          householdId: household.id,
+          itemId: item.id,
+          expectedVersion: item.version,
+          dueDate: "2027-03-03",
+          activity: { id: crypto.randomUUID(), itemId: item.id, kind: "rescheduled", occurredAt: new Date().toISOString(), nextDate: "2027-03-03" },
+        }),
+      });
+      if (!response.ok) throw new Error(`rival reschedule failed: ${response.status}`);
+    }, { seededHouseholdId: householdId, seededItemId: itemId });
 
-  // Refused in the server's own words, and the view re-reads the truth.
-  await expect(page.locator(".problem")).toContainText("changed on another device");
-  await expect(page.locator(".item-card")).toContainText("3 March 2027");
+    await page.locator(".acts button", { hasText: /^reschedule$/ }).click();
+    await page.locator("#a-due").fill("2026-12-01");
+    await page.locator(".panel .btn-primary").click();
+
+    // Refused in the server's own words, and the view re-reads the truth.
+    await expect(page.locator(".problem")).toContainText("changed on another device");
+    await expect(page.locator(".item-card")).toContainText("3 March 2027");
+  } finally {
+    await households.sweep(page);
+  }
 });
