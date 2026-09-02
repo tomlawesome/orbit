@@ -136,6 +136,13 @@ demo image or its database alive: if it will not start, rebuild it from current
 `dev` and current versions of everything it depends on, rather than repairing
 it.
 
+## An issue naming `src/app/` may describe a deleted surface
+
+The v19 rebuild (#411) replaces `src/app/` with `web/` and carries nothing
+over, so check the files an issue names against `web/` before picking it up.
+Where they have no equivalent there, close it as superseded by #411 rather
+than fix a surface that will not ship (#566, #300, 2026-09-01).
+
 ## Sources of truth
 
 - `docs/v1-charter.md`: supported product and release contract.

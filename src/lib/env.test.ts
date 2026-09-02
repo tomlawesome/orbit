@@ -4,7 +4,7 @@ import { getAuthConfig } from "./env";
 const validEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
   APP_URL: "http://127.0.0.1:3000",
-  SESSION_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
+  SESSION_SECRET: "a".repeat(64),
   OIDC_ISSUER: "https://auth.example/application/o/orbit/",
   OIDC_CLIENT_ID: "orbit",
   OIDC_CLIENT_SECRET: "client-secret",
@@ -28,6 +28,9 @@ describe("authentication configuration", () => {
     [{ ...validEnvironment, OIDC_ISSUER: "http://auth.example/application/o/orbit/" }, "OIDC_ISSUER"],
     [{ ...validEnvironment, OIDC_SCOPES: "profile email" }, "openid"],
     [{ ...validEnvironment, SESSION_SECRET: "too-short" }, "SESSION_SECRET"],
+    // Long enough for the old `min(32)` rule, but not the 256-bit hexadecimal
+    // secret configure.sh generates and demands (issue #578).
+    [{ ...validEnvironment, SESSION_SECRET: "z".repeat(64) }, "SESSION_SECRET"],
   ])("rejects unsafe or incomplete configuration", (environment, message) => {
     expect(() => getAuthConfig(environment)).toThrow(message);
   });
