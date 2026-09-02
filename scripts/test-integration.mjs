@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const docker = process.platform === "win32" ? "docker.exe" : "docker";
@@ -102,7 +102,9 @@ try {
     ...process.env,
     APP_URL: "http://127.0.0.1:3000",
     DATABASE_URL: `postgres://${encodeURIComponent(databaseUser)}:${encodeURIComponent(databasePassword)}@127.0.0.1:${hostPort}/${encodeURIComponent(databaseName)}`,
-    SESSION_SECRET: `integration-session-secret-${runId}`,
+    // Per-run but still a valid 256-bit hexadecimal secret: the runtime now
+    // applies the same rule as configure.sh (issue #578).
+    SESSION_SECRET: createHash("sha256").update(`integration-session-secret-${runId}`).digest("hex"),
     SESSION_TTL_SECONDS: "3600",
     OIDC_ISSUER: "https://oidc.invalid.example",
     OIDC_CLIENT_ID: "orbit-integration",

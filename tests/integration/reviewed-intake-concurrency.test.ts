@@ -169,6 +169,76 @@ describe("reviewed intake PostgreSQL idempotency boundaries", () => {
     await fixture.cleanup();
   });
 
+  it("reports the durable attachment linkage when a concurrent approval completes the receipt first", async () => {
+    // #656: the losing caller's outcome is decided by the durable receipt
+    // status, so it reports approved once the winner has completed the receipt.
+    // Its own transfer attempt lost the race and knows nothing about the
+    // linkage, and reporting that local view alongside approved returned an
+    // empty attachedAttachmentIds for an attachment that is durably linked.
+    const fixture = await createIntegrationFixture("reviewed-concurrent-completion");
+    const targetItemId = randomUUID();
+    await getDb().insert(items).values({ id: targetItemId, householdId: fixture.household.id, sectionId: fixture.section.id, title: "Concurrent completion target", currency: "GBP" });
+    const bytes = syntheticPdf("concurrent completion");
+    const receiptId = randomUUID();
+    const held = await scanAndHoldImapAttachment({ bytes, filename: "concurrent-completion.pdf", declaredMediaType: "application/pdf", recipientUserId: fixture.users.member.id, receiptId });
+    // The winning concurrent approval has already uploaded the document and
+    // linked the staged attachment to it, but has not yet purged its private
+    // copy or completed the receipt.
+    const document = await uploadItemDocument({
+      userId: fixture.users.member.id, householdId: fixture.household.id, itemId: targetItemId,
+      filename: "concurrent-completion.pdf", body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+      declaredBytes: bytes.length, documentId: held.id,
+    });
+    const [receipt] = await getDb().insert(imapIngestionMessages).values({
+      id: receiptId,
+      mailbox: "private", mailboxUidValidity: "completion", mailboxUid: 6, contentSha256: randomUUID().replaceAll("-", ""),
+      recipientAliasSha256: "completion", userId: fixture.users.member.id, householdId: fixture.household.id,
+      status: "pending_review", expiresAt: new Date(Date.now() + 86_400_000), receiptStatus: "pending",
+    }).returning({ id: imapIngestionMessages.id });
+    await getDb().insert(imapIngestionAttachments).values({
+      id: held.id, messageId: receipt.id, displayName: held.displayName, mediaType: held.mediaType,
+      sizeBytes: held.sizeBytes, contentSha256: held.contentSha256, storageKey: held.storageKey,
+      ciphertextSize: held.ciphertextSize, ...held.envelope,
+      status: "assigned", assignedDocumentId: document.id, purgePending: true,
+    });
+    const input = {
+      operationId: randomUUID(),
+      source: { kind: "mailbox_draft" as const, receiptId: receipt.id, draftVersion: 1 },
+      householdId: fixture.household.id,
+      sectionId: fixture.section.id,
+      action: "attach_existing" as const,
+      targetItemId,
+      item: { title: "Concurrent completion target", currency: "GBP", status: "active" },
+      attachmentIds: [held.id],
+    };
+    // The purge seam stands in for the winner finishing: it removes the private
+    // copy and completes the receipt while this caller is between its own purge
+    // attempt, which therefore fails, and its final receipt update.
+    setImapHoldingPurgeImplementationForTests(async (storageKey) => {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await purgeHeldImapAttachment(storageKey);
+      await getDb().update(imapIngestionAttachments).set({ purgePending: false, purgeFailureCode: null }).where(eq(imapIngestionAttachments.id, held.id));
+      await getDb().update(imapIngestionMessages).set({ status: "completed", approvedItemId: targetItemId, approvedAt: new Date(), failureCode: null }).where(eq(imapIngestionMessages.id, receipt.id));
+      throw new Error("synthetic concurrent purge loss");
+    });
+    try {
+      const result = await approveReviewedIntake(fixture.users.member.id, input);
+      // Approved is correct — the receipt is durably complete — so the reported
+      // attachment linkage must be the durable one, not this caller's lost race.
+      expect(result.outcome).toBe("approved");
+      expect(result.attachmentState).toBe("attached");
+      expect(result.attachedAttachmentIds).toContain(held.id);
+      expect(result.pendingAttachmentIds).toEqual([]);
+      const [attachment] = await getDb().select({ status: imapIngestionAttachments.status, assignedDocumentId: imapIngestionAttachments.assignedDocumentId })
+        .from(imapIngestionAttachments).where(eq(imapIngestionAttachments.id, held.id));
+      expect(attachment).toMatchObject({ status: "assigned", assignedDocumentId: document.id });
+      expect(await getDb().select({ id: documents.id }).from(documents).where(eq(documents.itemId, targetItemId))).toHaveLength(1);
+    } finally {
+      setImapHoldingPurgeImplementationForTests(undefined);
+      await fixture.cleanup();
+    }
+  });
+
   it("replays a stored attachment against an already available stable document without duplicating it", async () => {
     const fixture = await createIntegrationFixture("reviewed-crash-replay");
     const targetItemId = randomUUID();
