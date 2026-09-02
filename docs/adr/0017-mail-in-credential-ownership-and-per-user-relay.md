@@ -3,7 +3,7 @@
 **Status:** Proposed — for owner acceptance on #336
 **Date:** 2026-09-02
 **Relates to:** issue #336 (per-user inbound mail; owner rulings of
-2026-08-13 are the ratified frame for this record);
+2026-08-13 and 2026-09-02 are the ratified frame for this record);
 [ADR-0005](0005-reviewed-ingestion-and-mailbox-staging.md) (reviewed
 ingestion, alias scheme, rotation contract — amended here);
 [ADR-0004](0004-supported-upgrades-and-recoverable-restore.md) (restore
@@ -19,11 +19,16 @@ admin-owned mailbox; per-user relay addresses are plus-addressed aliases of
 that mailbox under the existing HMAC scheme; Orbit sorts locally by alias into
 each user's private review queue; SMTP stays as it is; providers Mailcow,
 Gmail, Outlook with password auth first and XOAUTH2 later; the degradation
-ladder; and the alias-prefix case-fold. None of that is reopened here. This
-record decides what was left open: how the single credential is stored and
-audited once it leaves the container environment, how alias-generation state
-becomes per-user, whether household-level relays exist, the threat-model
-addendum, the upgrade path, and the delivery slices.
+ladder; and the alias-prefix case-fold. On 2026-09-02 the owner replaced the
+ladder's lower rungs: attribution is by the sender's verified address, the
+only supported use is a member forwarding from their own mailbox, and mail
+that matches nobody is answered and deleted rather than kept for anyone.
+None of that is reopened here. This record decides what was left open: how
+the single credential is stored and audited once it leaves the container
+environment, how alias-generation state becomes per-user, how a message is
+attributed to a member and what happens when it cannot be, whether
+household-level relays exist, the threat-model addendum, the upgrade path,
+and the delivery slices.
 
 Where the code stands today:
 
@@ -209,8 +214,8 @@ fetches and stages them. A `held` receipt expires with the ordinary
 `expires_at` (30 days) and the message then lives only in the provider
 mailbox. Skipping paused mail without a receipt was rejected because the
 cursor is `max(uid)` (`imap-ingestion.ts:848-853`): a skipped UID would never
-be revisited. Sender-address fallback attributions (ratified ladder, rung 2)
-are subject to the same pause.
+be revisited. Attribution by sender (decision 3) is subject to the same
+pause.
 
 **Sibling invariant.** A user-initiated rotate, cut-off, pause or resume
 touches only rows whose `user_id` is the session's own user; no statement on
@@ -231,7 +236,73 @@ appear in `changes`. Per-user `last_received` and pause state are the user's
 own (`relay-settings.ts:80-91`). The administrator surface shows aggregate
 counts per receipt status (including `held`) and never a per-user address.
 
-### 3. No household-level relay addresses
+### 3. Attribution by verified sender, and one supported path
+
+Owner ruling of 2026-09-02 (#336). It replaces rungs 2–3 of the 2026-08-13
+degradation ladder (sender-address fallback, then unattributed mail held for
+someone to sort out).
+
+**One supported path.** A member forwards mail from their own mailbox to
+their own relay address. Giving a relay address to a third party — a
+supplier, a bank, a web form — is unsupported: the relay page and the user
+documentation say so plainly and give the reasons (the address is personal
+and rotates; many web forms reject `+` addresses; third-party mail cannot be
+matched to a member by sender, so it is deleted under this decision). Orbit
+does not design for that traffic. The documentation also says to *forward*,
+not *redirect*: a redirect keeps the original sender's address and so
+matches nobody.
+
+**Every member has verified sending addresses.** New table
+`mail_in_sender_addresses`: `user_id`, `address` (normalised: trimmed,
+case-folded, one row per address), `source` (`account` | `sso` | `manual`),
+`verified_at`, `verification_token_digest`, `verification_expires_at`,
+audit columns; unique on the normalised address across the instance, because
+one address attributes to exactly one member. Orbit seeds an unverified row
+from the local account's email or the OIDC `email` claim and shows it on the
+relay page with an override box; the member may add further addresses they
+send from. No address attributes anything until verified: Orbit sends a
+one-use link over the existing SMTP path (the notification sender in
+`src/server/notification-worker.ts`), the member opens it, `verified_at` is
+set. Until a member has at least one verified address the relay page shows
+the relay as not yet usable and explains why, and their mail takes the
+unattributed path below.
+
+**Attribution rule.** At receipt, the `From` address is normalised and
+looked up among verified rows; the member it names owns the message. The
+plus-address alias (decision 2) corroborates rather than attributes: absent,
+expired or malformed, the message still belongs to the matched sender; naming
+a *different* member, the message is unattributed. A sender address is
+believed only when the account's own provider vouches for it: the topmost
+`Authentication-Results` header written by that provider (Mailcow, Gmail and
+Outlook all write one; the trusted authserv-id is part of the provider
+profile in decision 1) must report `dmarc=pass`, or `dkim=pass` with the
+signing domain aligned to the sender domain. Absent or failing, the message is
+unattributed — a `From` header is otherwise anyone's to write. The receipt
+records `attributed_by` (`sender` | `sender_and_alias`) so the review queue
+can label how it arrived.
+
+**The alias code stays random.** A memorable code (`family+sarah@`) lets
+anyone post into a member's queue with no forgery needed. Nobody types it:
+the relay page offers copy-to-clipboard and the member saves it as a contact.
+
+**Unattributed mail is answered and deleted.** A message that matches no
+verified sender gets a content-free receipt with new status `unattributed`
+(added to `imap_ingestion_status`, `schema.ts:32-42`; no attachment
+downloaded, no staging, no notification), Orbit sends one reply to the
+sender saying the message was not matched to a member and has been deleted,
+and what to do (verify the address on the relay page, or forward rather than
+redirect), then flags the message `\Deleted` and expunges that UID from the
+mailbox. Nothing is kept for an administrator or anyone else; the relay
+health line shows the count. Conditions on the reply, so that it cannot be
+turned against the household mailbox: reply only when the provider's
+authentication result passes for the sender, so a forged `From` never earns a
+reply to an innocent third party; never reply to automated mail
+(`Auto-Submitted` other than `no`, `Precedence: bulk`/`list`/`junk`, a
+`List-Id`, or an empty return path); at most one reply per sender address per
+day; never quote the original. Where the reply is suppressed the message is
+deleted silently and counted all the same.
+
+### 4. No household-level relay addresses
 
 The open sub-decision — "whether shared-household mailboxes remain alongside
 per-user relays" — was framed when each user might have had a mailbox of
@@ -249,13 +320,24 @@ alternative). Approval needs an accountable actor and a private draft
 readers has neither. A household address is a capability held by N people,
 so rotating or pausing it affects siblings by construction — the invariant
 in decision 2 cannot hold for it. And the user outcome is already available:
-a member gives their own alias to the household's senders and files the
-result to the household at review. A future ADR may add household addresses
+a member forwards the mail from their own mailbox and files the result to
+the household at review. A future ADR may add household addresses
 that fan out into per-member private drafts; that is not this record.
 
-### 4. Threat-model addendum
+### 5. Threat-model addendum
 
 Extends `docs/document-threat-model.md` §"Planned v1 intake extensions".
+
+- **A sender address is a claim, not a credential.** Attribution by sender
+  (decision 3) would otherwise let anyone who knows a member's email address
+  post into that member's queue by writing it in `From`. Requiring the
+  provider's own authentication result, and answering only authenticated
+  senders, closes both that and the backscatter path in which a forged
+  `From` makes Orbit email a stranger. Verification before an address
+  attributes anything stops one member claiming another's address to receive
+  their forwarded documents. What remains is bounded as before: a genuine
+  sender can only fill the queue of the member they are, or that the alias
+  names, within the existing size and count limits.
 
 - **The mailbox is the trust boundary.** Everything inside it is hostile
   input; Orbit authenticates to the provider with the one credential.
@@ -285,7 +367,7 @@ Extends `docs/document-threat-model.md` §"Planned v1 intake extensions".
   or error text. The unwrapped credential is held only for the connect and
   zeroed after.
 
-### 5. Migration from container-environment configuration
+### 6. Migration from container-environment configuration
 
 **What an existing install experiences.** On first start after upgrade, if
 the environment holds a complete IMAP configuration
@@ -329,8 +411,19 @@ change in the same pull request as the code, per that document's rule.
 - ADR-0005's "administrator-selected transition" for rotation is amended:
   transitions are per-user and fixed at 14 days; the administrator retains
   only the instance-wide emergency rotation.
-- `held` is a new receipt status every reader of `imap_ingestion_status`
-  must handle (review inbox, operator counts, expiry).
+- `held` and `unattributed` are new receipt statuses every reader of
+  `imap_ingestion_status` must handle (review inbox, operator counts,
+  expiry).
+- Mail-in gains its first two outbound and destructive actions on the
+  mailbox: a reply to an unknown sender, and deletion of the message. Both
+  are bounded by decision 3's conditions and both need the mailbox
+  credential to carry delete rights, which password authentication already
+  gives.
+- ADR-0005's quarantine remains for messages that *were* attributed but
+  failed validation; a message nobody owns never reaches quarantine now.
+- Relay usability depends on a verified sending address, which depends on
+  working SMTP: an instance without SMTP cannot verify addresses and so
+  cannot attribute mail. The relay page says so rather than failing quietly.
 
 ### Delivery: implementation slices, in order
 
@@ -360,26 +453,51 @@ change in the same pull request as the code, per that document's rule.
    *Accept:* sibling test from decision 2; previous alias attributes until
    expiry and `recipient_alias_expired` after; generation never reused;
    route still takes no user id.
-4. **Per-user ingest pause** — `ingest_paused_at`, the `held` status, the
+4. **Verified sender addresses and attribution** —
+   `mail_in_sender_addresses`; seeding from the account or SSO claim; the
+   relay page's address list with override, add, remove and verification
+   state; the verification mail and one-use link; the receipt-time
+   attribution rule with the `Authentication-Results` check and
+   `attributed_by`; the `unattributed` status, the bounded reply and the
+   delete-and-expunge; the relay page and user docs carrying the one
+   supported path and the forward-not-redirect note; relay health count.
+   *Accept:* with two members A and B, A's forwarded mail with no alias lands
+   in A's queue and nowhere else; an unverified address attributes nothing;
+   a message with a passing `From` for A but B's alias is unattributed; a
+   message with no authentication result is deleted silently with no reply;
+   an authenticated unknown sender receives exactly one reply and the UID is
+   gone from the mailbox; a second message from them the same day gets no
+   second reply; nothing in the reply quotes the original.
+5. **Per-user ingest pause** — `ingest_paused_at`, the `held` status, the
    receipt-time branch, resume via the retry pass, the relay page's `pause
    ingest` control replacing the read-only instance flag. *Accept:* mail to
    a paused user is `held` with no staging object or notification; resume
    stages it exactly once; expiry applies; sibling test extended to pause.
-5. **Retire environment configuration** — one release after slices 1–2:
+6. **Retire environment configuration** — one release after slices 1–2:
    `IMAP_*` to `removed_keys`, delete the retired overlay and secret-file
    guidance, drop `environment_configuration_ignored`. *Accept:* an install
    with stale keys fails closed with the distinct removed-key message;
    guarantee catalogue updated.
 
 Slices 1–2 are hard to reverse (migration, config format) and cut alone
-(`Cut: risk`); 3–4 may share a branch. XOAUTH2 (device-code sign-in, refresh
-token as `mail_in_secrets` kind `oauth_refresh_token`) and ladder rungs 2–3
-are separate issues that build on slice 1 and are not sliced here.
+(`Cut: risk`); 3–5 may share a branch, with 4 landing before 5 because pause
+applies to attributed mail. XOAUTH2 (device-code sign-in, refresh token as
+`mail_in_secrets` kind `oauth_refresh_token`) is a separate issue that builds
+on slice 1 and is not sliced here.
 
 ## Alternatives rejected
 
 - **A separate mail-in KEK** (decision 1), **household relay addresses**
-  (decision 3), **pause by skipping mail** (decision 2): rejected in place.
+  (decision 4), **pause by skipping mail** (decision 2): rejected in place.
+- **Memorable alias codes**, so that a member could type the address from
+  memory: guessable, so anyone could post into that member's queue. The
+  member never needs to type it (decision 3).
+- **Sender matching without the provider's authentication result.** Turns a
+  public fact (a member's email address) into a capability, and makes Orbit
+  reply to whoever a spammer names in `From`.
+- **Keeping unattributed mail for an administrator to assign.** Rejected by
+  ADR-0005 and again here: it makes the administrator a reader of mail that
+  no member has claimed, for a case the supported path does not produce.
 - **Keep the alias secret in the environment and move only the password.**
   Leaves two authorities to reconcile — the complexity `imap-rotation.ts`
   exists to police — and per-user rotation needs the key in the application.
@@ -399,5 +517,12 @@ are separate issues that build on slice 1 and are not sliced here.
   2026-08-13 and is not designed here.
 - The "queued case-fold fix" named in that ruling already landed in
   `98f59dd` (`core/imap-recipient.ts:19-27`); no slice carries it.
+- The 2026-08-13 ladder's rungs 2–3 — sender address as a *fallback* after
+  alias lookup, then a holding place for mail that matched nobody — were
+  replaced by the owner on 2026-09-02 with decision 3: the sender attributes,
+  the alias corroborates, and unmatched mail is answered and deleted.
+- Handing a relay address to a third party, which the 2026-08-13 framing
+  allowed and this record's first draft assumed, is unsupported and advised
+  against (decision 3).
 
 Written by Fable 5, 2026-09-02.
