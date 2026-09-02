@@ -2344,6 +2344,7 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
     };
     // to a fixpoint: each round either clears the sky or bends one more
     // bearing, and there are only so many bearings to bend
+    const membersOf = (edge) => points.filter((p) => p.banded && !p.undrawn && bandEdge.get(p) === edge);
     for (let round = 0; round <= points.length + 1; round++) {
       const offenders = tooClose();
       if (!offenders.length) break;
@@ -2356,8 +2357,16 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
         if (a.banded) edges.add(bandEdge.get(a));
         if (z.banded) edges.add(bandEdge.get(z));
       }
-      const blocks = points.filter((p) => !p.banded);
-      for (const edge of [-1, 1]) if (edges.has(edge)) relayEdge(edge, blocks);
+      // cross-equator obstacle awareness (#670 follow-up, 2026-09-02): a
+      // re-laying edge treats the OTHER edge's banded members as obstacles
+      // too, same freeOn mechanism as true bearings. Bottom (+1) lays first,
+      // then top (-1), so top always sees bottom's just-laid positions.
+      const trueBearings = points.filter((p) => !p.banded);
+      for (const edge of [1, -1]) {
+        if (!edges.has(edge)) continue;
+        const opposite = membersOf(edge === 1 ? -1 : 1);
+        relayEdge(edge, trueBearings.concat(opposite));
+      }
     }
   }
   const placed = [...points, ...self].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
