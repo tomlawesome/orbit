@@ -99,8 +99,6 @@ describe("Tika adapter", () => {
     expect(init?.headers).toEqual({
       Accept: "text/plain",
       "Content-Type": "application/pdf",
-      "X-Tika-OCRskipOcr": "true",
-      "X-Tika-Skip-Embedded": "true",
     });
     expect(init?.redirect).toBe("error");
     expect(init?.body).toBeInstanceOf(Uint8Array);
