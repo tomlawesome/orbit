@@ -10,6 +10,14 @@ readonly secrets_directory=".orbit-secrets"
 readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
 readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
 readonly maximum_secret_bytes=65536
+# The one definition of a 256-bit hexadecimal secret, restating
+# src/lib/config-contract.ts's SECRET_HEX256_PATTERN and its wording. Bash
+# cannot import the TypeScript module, so src/lib/session-secret.contract.test.ts
+# runs this script and the TypeScript layers over the same candidate values and
+# fails if they ever disagree (issue #578).
+readonly secret_hex256_pattern='^[0-9a-fA-F]{64}$'
+readonly secret_hex256_requirement='must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32'
+readonly session_secret_rotation_warning='Rotating the session secret signs out every active session.'
 # configuration.sh's own rollback_suffix constant (scripts/configuration.sh
 # line 9), duplicated here rather than sourced (this script's own source-less
 # convention). Only configuration.sh ever creates a file at this suffix.
@@ -142,8 +150,21 @@ generate_hex_secret() {
     fail "OpenSSL or a readable /dev/urandom with od is required to generate secrets."
   fi
 
-  [[ "$secret" =~ ^[0-9a-fA-F]{64}$ ]] || fail "Secure secret generation failed."
+  [[ "$secret" =~ $secret_hex256_pattern ]] || fail "Secure secret generation failed."
   printf '%s\n' "${secret,,}"
+}
+
+# The refusal wording for a secret file of the wrong shape, kept identical to
+# src/lib/config-contract.ts's secretFileFormatMessage (issue #578); the
+# session secret earns the extra sentence because rotating it ends every
+# signed-in session, which the other two secrets do not.
+secret_file_format_message() {
+  local path="$1" message
+  message="${path} does not contain a valid 256-bit hexadecimal secret: it ${secret_hex256_requirement}."
+  if [[ "${path##*/}" == "session-secret" ]]; then
+    message+=" ${session_secret_rotation_warning}"
+  fi
+  printf '%s' "$message"
 }
 
 example_active_value() {
@@ -781,8 +802,8 @@ ensure_secret_file() {
     [[ -f "$path" && ! -L "$path" ]] ||
       fail "Refusing to use ${path} because it is not a regular file."
     existing_value="$(tr -d '\r\n' < "$path")"
-    [[ "$existing_value" =~ ^[0-9a-fA-F]{64}$ ]] ||
-      fail "${path} does not contain a valid 256-bit hexadecimal secret."
+    [[ "$existing_value" =~ $secret_hex256_pattern ]] ||
+      fail "$(secret_file_format_message "$path")"
     chmod 600 "$path" ||
       fail "Could not restrict permissions on ${path}."
     unset existing_value
