@@ -14,6 +14,15 @@
 services:
   orbit-app:
     container_name: ${COMPOSE_PROJECT_NAME}-app
+    environment:
+      # docker-compose.acceptance.yml fixes these at :3000 because CI publishes
+      # the application on 3000. This script publishes it on ORBIT_PORT so a
+      # disposable run cannot collide with anything already on 3000, and the
+      # browser follows the callback URL the application hands the OIDC
+      # provider -- so left at :3000 every sign-in lands on a closed port and
+      # the page ends at chrome-error://chromewebdata/ before any test runs.
+      APP_URL: http://127.0.0.1:${ORBIT_PORT:-3000}
+      OIDC_CALLBACK_URL: http://127.0.0.1:${ORBIT_PORT:-3000}/api/auth/callback
   orbit-db:
     container_name: ${COMPOSE_PROJECT_NAME}-db
   orbit-clamav:
