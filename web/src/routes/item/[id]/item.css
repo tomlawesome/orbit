@@ -37,7 +37,7 @@ html body{overflow-y:auto;overflow-x:hidden}
     color:var(--ink-mid);padding:8px 2px;border-bottom:1px solid var(--line-soft)}
 .kv:last-of-type{border:0}
 .kv b{color:var(--ink);font-weight:500;text-align:right}
-.kv .over{color:var(--overdue)}
+.kv .over{color:var(--overdue-text)}
 
 /* Section headings inside the card borrow the drawer's, which is the design's
    existing "quiet label above a group" treatment. */
@@ -98,7 +98,7 @@ html body{overflow-y:auto;overflow-x:hidden}
 
 /* Failure carries a line of type in the server's own words — create.css's
    save-note treatment, toned with the urgency ink the design already uses. */
-.problem{font:10.5px var(--mono);color:var(--overdue);margin-top:14px;line-height:1.6}
+.problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:14px;line-height:1.6}
 
 /* create.html's cancel link, which is its established way back. */
 .back{display:inline-block;margin-top:20px;font:11.5px var(--mono);

@@ -96,7 +96,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .danger{margin-top:26px;text-align:center}
 .helm-page .danger button{font:11.5px var(--mono);color:var(--ink-faint);background:none;
                border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
-.helm-page .danger button:hover{color:var(--overdue);border-color:var(--overdue)}
+.helm-page .danger button:hover{color:var(--overdue-text);border-color:var(--overdue)}
 @media (prefers-reduced-motion: reduce){
   .helm-page .sky .far,.helm-page .sky .near{animation:none!important}
 }
