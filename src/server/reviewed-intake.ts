@@ -524,6 +524,13 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
   return { attached, pending, failureCode };
 }
 
+/** Attachment ids this receipt has durably linked to a document. */
+async function assignedReceiptAttachmentIds(receiptId: string): Promise<string[]> {
+  const rows = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
+    .where(and(eq(imapIngestionAttachments.messageId, receiptId), eq(imapIngestionAttachments.status, "assigned")));
+  return rows.map((row) => row.id);
+}
+
 async function finishMailboxApproval(
   userId: string,
   input: MailboxApproval,
@@ -585,9 +592,7 @@ async function finishMailboxApproval(
     throw new AppError("reviewed_intake_expired", "That reviewed intake has expired", 409);
   }
   if (result.result) {
-    const assigned = await getDb().select({ id: imapIngestionAttachments.id }).from(imapIngestionAttachments)
-      .where(and(eq(imapIngestionAttachments.messageId, input.source.receiptId), eq(imapIngestionAttachments.status, "assigned")));
-    return { ...result.result, attachedAttachmentIds: assigned.map((row) => row.id) };
+    return { ...result.result, attachedAttachmentIds: await assignedReceiptAttachmentIds(input.source.receiptId) };
   }
   const itemId = input.action === "create_separate" ? await createReviewedItem(userId, input, input.operationId) : input.targetItemId!;
   await getDb().update(imapIngestionMessages).set({ approvedItemId: itemId, updatedAt: new Date() })
@@ -637,13 +642,38 @@ async function finishMailboxApproval(
       },
     } });
   });
+  if (effectivePartial) {
+    return {
+      outcome: "partial_success",
+      itemId,
+      approvalResultId,
+      attachmentState: "pending",
+      attachedAttachmentIds: transferred.attached,
+      pendingAttachmentIds: transferred.pending,
+    };
+  }
+  // An approved outcome describes the receipt, not this caller's own transfer
+  // attempt, and the two disagree whenever a concurrent approval of the same
+  // operation completed the receipt while this caller was losing the race for
+  // the staged attachment: `effectivePartial` is then cleared above from the
+  // durable receipt status, leaving this caller's local lists still describing
+  // its lost attempt. Reporting them alongside `approved` returned an empty
+  // `attachedAttachmentIds` for a linkage that does exist (#656), so an
+  // approved result reports what the receipt durably links.
+  const considered = [...new Set([...transferred.attached, ...transferred.pending])];
+  const assigned = new Set(await assignedReceiptAttachmentIds(input.source.receiptId));
+  const attachedAttachmentIds = considered.filter((id) => assigned.has(id));
+  const pendingAttachmentIds = considered.filter((id) => !assigned.has(id));
   return {
-    outcome: effectivePartial ? "partial_success" : "approved",
+    outcome: "approved",
     itemId,
     approvalResultId,
-    attachmentState: effectivePartial ? "pending" : "attached",
-    attachedAttachmentIds: transferred.attached,
-    pendingAttachmentIds: transferred.pending,
+    // A completed receipt is only written once every selected attachment is
+    // linked, so this is "attached" in practice; deriving it keeps the reported
+    // state and the reported ids from ever contradicting each other.
+    attachmentState: pendingAttachmentIds.length ? "pending" : "attached",
+    attachedAttachmentIds,
+    pendingAttachmentIds,
   };
 }
 
