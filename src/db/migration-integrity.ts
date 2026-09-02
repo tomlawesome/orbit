@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { operationalDetail, type OperationalDetail } from "@/lib/logger";
+
 export type SqlClient = { unsafe(query: string): Promise<Array<Record<string, unknown>>> };
 
 export type MigrationIntegrityCode = "database_floor" | "migration_integrity";
@@ -11,12 +13,14 @@ export class MigrationIntegrityError extends Error {
   /**
    * A bounded description of what disagreed, for the operator's log (#437).
    * Refusing to start is correct; refusing without saying which migration
-   * disagreed leaves nothing to act on. Deliberately names tags and counts
-   * only - never SQL, connection details or credentials.
+   * disagreed leaves nothing to act on. Its type is the log's own
+   * `OperationalDetail` (#718), so it can only be written as a source literal
+   * with tags and counts interpolated - never SQL, connection details or
+   * credentials - and it reaches the rendered log line unchanged.
    */
-  readonly detail?: string;
+  readonly detail?: OperationalDetail;
 
-  constructor(code: MigrationIntegrityCode, detail?: string) {
+  constructor(code: MigrationIntegrityCode, detail?: OperationalDetail) {
     super("Orbit migration integrity check failed");
     this.name = "MigrationIntegrityError";
     this.code = code;
@@ -82,21 +86,23 @@ export async function verifyMigrationIntegrity(client: SqlClient, folder: string
   if (applied.length === 0 && await hasExistingProductTables(client)) {
     throw new MigrationIntegrityError(
       "database_floor",
-      `database has product tables but no migration journal; supported floor is ${SUPPORTED_FLOOR_TAG}`,
+      operationalDetail`database has product tables but no migration journal; supported floor is ${SUPPORTED_FLOOR_TAG}`,
     );
   }
   if (applied.length > 0 && (floorIndex < 0 || applied.length < floorIndex + 1)) {
     throw new MigrationIntegrityError(
       "database_floor",
-      `database is older than the supported floor ${SUPPORTED_FLOOR_TAG}; applied ${applied.length} migrations`,
+      operationalDetail`database is older than the supported floor ${SUPPORTED_FLOOR_TAG}; applied ${applied.length} migrations`,
     );
   }
   const divergence = applied.findIndex((hash, index) => expected[index]?.hash !== hash);
   if (divergence >= 0) {
+    /* A tag, not a sentence: the detail helper accepts bounded tokens only,
+       so the "we do not know which" case has to be one too. */
+    const divergentTag = expected[divergence]?.tag ?? "unknown_migration";
     throw new MigrationIntegrityError(
       "migration_integrity",
-      `applied migration ${divergence + 1} of ${applied.length} does not match `
-        + `${expected[divergence]?.tag ?? "an unknown migration"}; this database was migrated by a different build`,
+      operationalDetail`applied migration ${divergence + 1} of ${applied.length} does not match ${divergentTag}; this database was migrated by a different build`,
     );
   }
 }
