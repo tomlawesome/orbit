@@ -19,14 +19,16 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 349 guarantees — 196 HIGH, 120 MEDIUM, 33 LOW.
-  Install/configuration family: 186 (101 HIGH). Backup/recovery/deploy
+- **Totals:** 369 guarantees — 212 HIGH, 124 MEDIUM, 33 LOW.
+  Install/configuration family: 206 (117 HIGH). Backup/recovery/deploy
   family: 163 (95 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
   harness scenarios cite entries here. Line numbers drift — treat the
   statement as the contract and the citation as the anchor at extraction
-  time.
+  time. The numbered entries are the source of truth and every tally in this
+  file is derived from them: adding or removing an entry means recounting the
+  totals above and the summary tables of that part in the same change.
 - **Harness traceability:** acceptance scenarios (for example
   `scripts/test-install-acceptance.sh`) cite the guarantees they assert as
   `Part N / script #entry` in comments beside each assertion, so coverage
@@ -299,27 +301,27 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 | Script | Guarantees |
 |---|---:|
 | install.sh | 56 |
-| configure.sh | 33 |
+| configure.sh | 34 |
 | configuration.sh | 25 |
 | container-entrypoint.sh | 14 |
-| installer-ui.sh | 12 |
-| repair.sh | 37 |
+| installer-ui.sh | 13 |
+| repair.sh | 56 |
 | installer-simulation.sh | 8 |
-| **Total** | **185** |
+| **Total** | **206** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 20 | 23 | 7 | 50 |
+| refusal/fail-closed | 27 | 25 | 7 | 59 |
+| secret-handling | 30 | 5 | 0 | 35 |
 | input-validation | 6 | 20 | 7 | 33 |
-| secret-handling | 25 | 5 | 0 | 30 |
-| provenance/immutability | 16 | 9 | 0 | 25 |
-| transactional/rollback | 16 | 2 | 0 | 18 |
-| permissions/ownership | 17 | 0 | 0 | 17 |
+| provenance/immutability | 17 | 9 | 0 | 26 |
+| transactional/rollback | 18 | 3 | 0 | 21 |
+| permissions/ownership | 18 | 0 | 0 | 18 |
+| idempotency | 0 | 4 | 4 | 8 |
 | recovery | 1 | 4 | 1 | 6 |
-| idempotency | 0 | 3 | 4 | 7 |
-| **Total** | **101** | **66** | **19** | **186** |
+| **Total** | **117** | **70** | **19** | **206** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
