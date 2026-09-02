@@ -697,6 +697,10 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
      * count is a proof of termination rather than a tuning knob — unlike
      * SEPARATION_ROUNDS above, which is a budget for an asymptote.
      */
+    /** @type {(edge: number) => Drawn[]} */
+    const membersOf = (edge) => points.filter(
+      (point) => point.banded && !point.undrawn && bandEdge.get(point) === edge,
+    );
     for (let round = 0; round <= points.length + 1; round++) {
       const offenders = tooClose();
       if (!offenders.length) break;
@@ -712,8 +716,25 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
       }
       /* Re-read after the yields above, so a bearing bent this round is an
          edge member rather than an obstacle in its own re-lay. */
-      const obstacles = points.filter((point) => !point.banded);
-      for (const edge of [-1, 1]) if (edges.has(edge)) relayEdge(edge, obstacles);
+      const trueBearings = points.filter((point) => !point.banded);
+      /*
+       * Cross-equator obstacle awareness (#670 follow-up ruling, 2026-09-02).
+       * The two edges lay out independently otherwise, so a thin band can
+       * have the top's own last legal rank and the bottom's own last legal
+       * rank each satisfy their own edge's capacity and still land within the
+       * floor of each other across the equator. A re-laying edge now treats
+       * the OTHER edge's banded members as obstacles too, through the same
+       * forbidden-interval mechanism `freeOn` already applies to true
+       * bearings. That only works if the obstacle set is well-defined, so the
+       * two edges re-lay in a fixed order: bottom (+1) first, then top (-1),
+       * so top always sees bottom's JUST-LAID positions rather than stale
+       * ones from a previous round.
+       */
+      for (const edge of [1, -1]) {
+        if (!edges.has(edge)) continue;
+        const opposite = membersOf(edge === 1 ? -1 : 1);
+        relayEdge(edge, trueBearings.concat(opposite));
+      }
     }
   }
 

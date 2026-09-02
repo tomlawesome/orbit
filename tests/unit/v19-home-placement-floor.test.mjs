@@ -45,24 +45,23 @@ import { HIT_RADIUS, placeGalaxy } from "../../web/src/routes/home/placement.js"
  *   - the keep-out is the dial's own footprint plus its ring margin:
  *     `min(640, vw - 456) / 2 + 88` (`home.css`, `home.behaviour.js`).
  *
- * KNOWN GAP (found writing this rewrite, 2026-09-02, reproduced against
- * `placement.js` UNCHANGED by the undrawn rule above -- so this is not a
- * regression from that rule, it predates it): two of the eight viewports below
- * ("boundary 901x601", "tablet landscape 1180x820") still fail. Both failures
- * are a BAND CROSSING the undrawn rule does not touch -- `relayEdge`'s ranks
- * for the top edge and the bottom edge are laid out independently, each
- * routing only around true bearings and its own earlier ranks, with no
- * awareness of what the OTHER edge has already placed. On a thin band both
- * edges' last legal ranks can land within the floor of each other astride the
- * equator, e.g. oy=-5.5 (top, its own last legal rank) and oy=65.5 (bottom,
- * its own last legal rank) at 901x601 -- 71px apart, each individually within
- * its own edge's capacity and so never routed to `undrawn`. #711's floor pass
- * is the ratified mechanism this file must not otherwise change (2026-09-02
- * ruling: "the #711 floor pass gains one rule ... [it] is correct and
- * stays"), and closing this gap means relayEdge treating the opposite edge as
- * an obstacle -- an algorithm change beyond that one rule. Left failing
- * rather than hidden by narrowing the viewport list: see #670 for the
- * reproduction and the open question.
+ * CLOSED GAP (found writing the previous rewrite, 2026-09-02; closed by the
+ * follow-up ruling the same day): two of the eight viewports below
+ * ("boundary 901x601", "tablet landscape 1180x820") used to fail with
+ * `placement.js` UNCHANGED by the undrawn rule above -- a BAND CROSSING the
+ * undrawn rule did not touch, because `relayEdge`'s ranks for the top edge
+ * and the bottom edge were laid out independently, each routing only around
+ * true bearings and its own earlier ranks, with no awareness of what the
+ * OTHER edge had already placed. On a thin band both edges' last legal ranks
+ * could land within the floor of each other astride the equator, e.g.
+ * oy=-5.5 (top, its own last legal rank) and oy=65.5 (bottom, its own last
+ * legal rank) at 901x601 -- 71px apart, each individually within its own
+ * edge's capacity and so never routed to `undrawn`. The follow-up ruling
+ * authorised exactly the fix flagged above: `relayEdge` now treats the
+ * opposite band edge's banded members as obstacles too, through the existing
+ * `freeOn` forbidden-interval mechanism, laying the bottom edge first and the
+ * top edge second within each floor-pass iteration so the obstacle set is
+ * well-defined. See #670 for the reproduction and both rulings.
  */
 
 const FLOOR = HIT_RADIUS * 2;
