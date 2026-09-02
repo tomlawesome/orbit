@@ -308,6 +308,84 @@ update this document in the same pull request (enforced by
 `scripts/engine-events.test.mjs` above). Renaming or removing a value is a
 breaking change requiring a version bump and coordination with consumers.
 
+## Configuration readiness report (v0)
+
+`scripts/configure.sh --check` (and `--check-rollback`, identical in every
+respect but the file it checks) emits a fixed-vocabulary readiness summary on
+stdout: one line per required field or optional group, from `run_check`
+(`scripts/configure.sh:972`). This is orbit-launcher's own machine interface
+onto configuration state — separate from the `phase=...` event stream and
+from the "Machine prompts (v0)" prompt grammar above, sharing neither their
+line shape nor `installer_ui_emit`. orbit-launcher's `RunConfigCheck`
+(`internal/deploy/configure.go`) parses it to decide what a deployment still
+needs before it can be brought up, and what it can fix itself through the
+guided machine prompts above.
+
+### Line grammar
+
+```
+ready <FIELD>
+missing <FIELD>
+optional <FIELD>
+```
+
+- One line per readiness item, in the fixed order below.
+- A consumer parses exactly the first two whitespace-separated tokens per
+  line; orbit-launcher's own parser discards any line that does not split
+  into exactly two fields, and treats a run that produces no `ready`,
+  `missing` or `optional` line at all as a structural failure rather than
+  "everything is ready".
+- `<FIELD>` is always a fixed name, never a configured value: `--check` never
+  discloses secrets, URLs or other configured content, by field name alone.
+- Exit status is non-zero whenever any line reports `missing`, zero
+  otherwise.
+
+### field
+
+Required fields — reported only as `ready` or `missing`, never `optional`:
+
+```
+APP_URL
+ORBIT_IMAGE
+OIDC_ISSUER
+OIDC_CLIENT_ID
+OIDC_CLIENT_SECRET
+OIDC_CALLBACK_URL
+```
+
+Optional groups — `ready` when fully and correctly configured, `missing` when
+partially configured (present but not usable), `optional` when entirely
+absent:
+
+```
+processing
+ai
+mail
+imap
+push
+```
+
+### Consumer guidance
+
+- orbit-launcher's `ConfigCheck.Missing` collects every field reported
+  `missing`. `NeedsSecret` is true iff `OIDC_CLIENT_SECRET` is in `Missing`.
+  `Unfixable` lists every `Missing` field that is neither a guided
+  machine-prompt field (see "field" under "Machine prompts (v0)" above) nor
+  `OIDC_CLIENT_SECRET` nor `ORBIT_IMAGE` — `install.sh` persists `ORBIT_IMAGE`
+  itself, from the image it resolves, before this readiness gate ever runs.
+- The readiness report never reveals which value is wrong for a `missing`
+  field, only that it is missing; the guided machine prompts above are the
+  only path for a consumer to learn more.
+
+### Changing this vocabulary
+
+Adding a field is allowed within v0 and must update this document in the same
+pull request, enforced both ways (implemented vocabulary against documented,
+and back) by `scripts/configure-check-contract.test.mjs`, mirroring
+`scripts/engine-events.test.mjs` above. Renaming or removing a field, or
+changing whether it can report `optional`, is a breaking change requiring a
+version bump and coordination with orbit-launcher.
+
 ## Machine prompts: backup/restore/recovery (v0)
 
 The backup/restore/recovery-bundle family
