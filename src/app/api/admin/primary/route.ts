@@ -20,8 +20,11 @@ export async function POST(request: NextRequest) {
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
     const { targetUserId } = transferSchema.parse(await request.json());
-    const users = await transferPrimaryAdministrator(session.user.id, session.id, targetUserId);
-    return NextResponse.json({ users }, { headers: { "Cache-Control": "no-store" } });
+    const result = await transferPrimaryAdministrator(session.user.id, session.id, targetUserId);
+    return NextResponse.json(
+      { users: result.users, totalUsers: result.totalCount, truncated: result.truncated },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return appErrorResponse(error);
   }
