@@ -230,17 +230,81 @@ describe("AES-256-CBC document-archive crypto (backup.sh #19-20,27-28)", () => {
     expect(() => decryptDocumentArchive(badMagic, KEK_A)).toThrow(RecoveryBundleRefusal);
   });
 
+  // #659: this used to be one test that encrypted under a fresh random salt
+  // and asserted a refusal every run. AES-256-CBC carries no authentication
+  // tag — deliberately, so the envelope stays byte-compatible with `openssl
+  // enc -pbkdf2` as backup.sh writes it — so a wrong KEK is only noticed when
+  // PKCS#7 unpadding fails on the final block. About 1 wrong key in 256
+  // decrypts to garbage ending in a plausible pad and is returned instead,
+  // which made the test fail roughly 1 CI run in 256 with `expected undefined
+  // to be an instance of RecoveryBundleRefusal` on diffs that could not
+  // possibly have caused it.
+  //
+  // The two envelopes below pin one salt from each side of that coin flip, so
+  // both branches are exercised on every run rather than sampled at random.
+  // To regenerate: for salt = the 8-byte big-endian counter shown in the
+  // header bytes, derive key||iv with PBKDF2-HMAC-SHA256(KEK, salt, 600000,
+  // 48), AES-256-CBC-encrypt WRONG_KEK_PLAINTEXT under KEK_A, then try to
+  // decrypt under KEK_B and keep the first salt that refuses and the first
+  // that does not. Over 4,400 consecutive salts, 13 were silently accepted
+  // (0.30%, consistent with 1/256 = 0.39%); salt 0 refuses, salt 116 does not.
+  const WRONG_KEK_PLAINTEXT = Buffer.from("fake document tar bytes");
+  // salt 0x0000000000000000 — decrypting under KEK_B fails to unpad (255/256 case).
+  const WRONG_KEK_REFUSED_ENVELOPE = Buffer.from(
+    "53616c7465645f5f00000000000000007ac14c5117abf2fc03922f47688b1e859d02b7c753303ccad842b7dd033ac4eb",
+    "hex",
+  );
+  // salt 0x0000000000000074 (116) — decrypting under KEK_B unpads by luck (1/256 case).
+  const WRONG_KEK_ACCEPTED_ENVELOPE = Buffer.from(
+    "53616c7465645f5f0000000000000074ae8b1bc1026677fff3c30109ba494852a72bb386a8b5895e9f9e2d519a5ead6a",
+    "hex",
+  );
+
+  it("both wrong-KEK fixtures are genuine envelopes: each decrypts to the same plaintext under the right KEK", () => {
+    expect(decryptDocumentArchive(WRONG_KEK_REFUSED_ENVELOPE, KEK_A)).toEqual(WRONG_KEK_PLAINTEXT);
+    expect(decryptDocumentArchive(WRONG_KEK_ACCEPTED_ENVELOPE, KEK_A)).toEqual(WRONG_KEK_PLAINTEXT);
+  });
+
   it("reports a wrong document KEK generically as decryption failure, not a detailed crypto error (#19)", () => {
-    const envelope = encryptDocumentArchive(Buffer.from("fake document tar bytes"), KEK_A);
     let error: unknown;
     try {
-      decryptDocumentArchive(envelope, KEK_B);
+      decryptDocumentArchive(WRONG_KEK_REFUSED_ENVELOPE, KEK_B);
     } catch (caught) {
       error = caught;
     }
     expect(error).toBeInstanceOf(RecoveryBundleRefusal);
     expect((error as RecoveryBundleRefusal).code).toBe("document-archive-invalid");
     expect((error as Error).message).toBe("Document archive decryption failed.");
+  });
+
+  it("does not promise refusal for every wrong KEK: unauthenticated CBC accepts about 1 in 256, and returns garbage rather than the plaintext (#659)", () => {
+    // Documents the hole rather than pretending it is closed. If the envelope
+    // ever gains a MAC this test is the one that must change, and the change
+    // is a deliberate bundle-format decision, not an incidental fix.
+    const decrypted = decryptDocumentArchive(WRONG_KEK_ACCEPTED_ENVELOPE, KEK_B);
+    expect(decrypted.equals(WRONG_KEK_PLAINTEXT)).toBe(false);
+    expect(sha256Buffer(decrypted)).not.toBe(sha256Buffer(WRONG_KEK_PLAINTEXT));
+    // Not a data-loss path: the bundle layers above catch a wrong KEK every
+    // time, and none of them depend on the coin flip. See
+    // validateBackupManifestAndAuth's `document_kek_sha256` fingerprint
+    // refusal ("refuses when the bundle was encrypted with a different
+    // document KEK ('wrong key', #15)" below), its HMAC over manifest +
+    // checksums, and validateBackupBundleContents refusing garbage that is
+    // not a tar (recovery-bundle.docker-adapter.test.ts).
+  });
+
+  it("never returns the original plaintext under a wrong KEK, whatever salt is rolled (the property behind #659)", () => {
+    // The honest randomised assertion: refusal OR garbage, never a silent
+    // successful decrypt. This holds for every salt, so it cannot flake.
+    const envelope = encryptDocumentArchive(WRONG_KEK_PLAINTEXT, KEK_A);
+    let decrypted: Buffer | undefined;
+    try {
+      decrypted = decryptDocumentArchive(envelope, KEK_B);
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(RecoveryBundleRefusal);
+      expect((caught as RecoveryBundleRefusal).code).toBe("document-archive-invalid");
+    }
+    if (decrypted !== undefined) expect(decrypted.equals(WRONG_KEK_PLAINTEXT)).toBe(false);
   });
 
   it("DOCUMENT_ARCHIVE_ENCRYPTION_ALGORITHM matches the manifest identifier backup.sh records (#27)", () => {

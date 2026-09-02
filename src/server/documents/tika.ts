@@ -116,8 +116,6 @@ export async function extractTextWithTika(
       headers: {
         Accept: "text/plain",
         "Content-Type": mediaType,
-        "X-Tika-OCRskipOcr": "true",
-        "X-Tika-Skip-Embedded": "true",
       },
       body: new Uint8Array(bytes),
       redirect: "error",

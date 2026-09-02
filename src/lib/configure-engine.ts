@@ -19,12 +19,14 @@ import { dirname, join } from "node:path";
 import {
   CANONICAL_OIDC_SECRET_FILE_PATH,
   OIDC_CALLBACK_PATH,
+  SECRET_HEX256_PATTERN,
   containsForbiddenCharacters,
   isForbiddenHost,
   isValidClientId,
   isValidOidcIssuer,
   isValidOrbitImage,
   normalizePublicOrigin,
+  secretFileFormatMessage,
 } from "./config-contract";
 import { parseEnvOrbitContent } from "./env-orbit-file";
 
@@ -458,8 +460,8 @@ export function ensureSecretFile(deployDir: string, relativePath: string): Ensur
       refuse(`Refusing to use ${relativePath} because it is not a regular file.`, "secret-file-invalid");
     }
     const existingValue = readFileSync(path, "utf8").replace(/[\r\n]/g, "");
-    if (!/^[0-9a-fA-F]{64}$/.test(existingValue)) {
-      refuse(`${relativePath} does not contain a valid 256-bit hexadecimal secret.`, "secret-file-invalid");
+    if (!SECRET_HEX256_PATTERN.test(existingValue)) {
+      refuse(secretFileFormatMessage(relativePath), "secret-file-invalid");
     }
     try {
       chmodSync(path, 0o600);
