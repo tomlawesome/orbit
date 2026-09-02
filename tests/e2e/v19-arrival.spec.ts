@@ -146,8 +146,12 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, "Orbit Administrator");
-    await page.waitForURL(/\/(home)?$/);
+    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
+       as well, so it resolves while the app is still navigating -- the race
+       this spec was fixed for. The sweep talks to the API, not the page, but
+       the loose wait is not to be reintroduced anywhere in this file. */
+    await signInAs(page, "Orbit Administrator", "/home");
+    await expect(page).toHaveURL(/\/home$/);
     await households.sweep(page);
   } finally {
     await context.close();
