@@ -67,8 +67,8 @@ async function signInThroughTheDoor(page: Page, account: string) {
 async function establishInstanceAdmin(browser: Browser) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator");
-  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+  await signInAs(page, "Orbit Administrator", "/home");
+  await expect(page).toHaveURL(/\/home$/);
   await context.close();
 }
 
@@ -144,8 +144,8 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member");
-  await expect(ownerPage).toHaveURL(/\/home$/, { timeout: 30_000 });
+  await signInAs(ownerPage, "Orbit Member", "/home");
+  await expect(ownerPage).toHaveURL(/\/home$/);
   const created = await createSystem(ownerPage, HOUSEHOLD);
   expect(created.canManage).toBe(true);
   expect(created.onboardingComplete).toBe(true);
