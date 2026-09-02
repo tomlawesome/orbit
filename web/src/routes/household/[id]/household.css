@@ -210,7 +210,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
        border-radius:9px;padding:7px 13px;cursor:pointer}
 .household-page .ghost:hover{border-color:var(--accent);color:var(--accent-text)}
-.household-page .ghost.armed{color:var(--overdue);border-color:var(--overdue)}
+.household-page .ghost.armed{color:var(--overdue-text);border-color:var(--overdue)}
 .household-page .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85}
 .household-page .note.top{margin-top:13px}
 .household-page .note b{color:var(--ink-mid);font-weight:400}
@@ -247,7 +247,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sec .drop{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;
            cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
 .household-page .sec.empty .drop{visibility:visible}
-.household-page .sec .drop:hover{color:var(--overdue)}
+.household-page .sec .drop:hover{color:var(--overdue-text)}
 /* the switch that tells the truth: filled when on, hollow when off */
 .household-page .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
         background:none;cursor:pointer;position:relative;flex:none}
@@ -334,7 +334,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangercard>*{position:relative;z-index:1}
 
 .household-page .dangerhead{display:flex;align-items:center;gap:11px;margin-bottom:11px}
-.household-page .dangercard h3{color:var(--overdue);letter-spacing:.2em;font-weight:600}
+.household-page .dangercard h3{color:var(--overdue-text);letter-spacing:.2em;font-weight:600}
 .household-page .dangerhead svg{flex:none;fill:none;stroke:var(--overdue);stroke-width:1.5;
                 stroke-linecap:round;stroke-linejoin:round}
 .household-page .dangerhead .spacer{margin-left:auto}
@@ -344,7 +344,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangerbody{display:grid;grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:start}
 .household-page .dangercard p{font-size:13px;color:var(--ink-mid);max-width:none;line-height:1.62}
 .household-page .dangercard p b{color:var(--ink);font-weight:560}
-.household-page .dangercard p b.red{color:var(--overdue);font-weight:600}
+.household-page .dangercard p b.red{color:var(--overdue-text);font-weight:600}
 /* the card's prose is 13px; its mono asides are not — say so, or the prose
    rule out-specifies .note and .said and swallows them */
 .household-page .dangercard .note{font-size:10.5px;color:var(--ink-faint);max-width:none;margin-top:0}
@@ -354,19 +354,19 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* the button: red on the outside at rest, SOLID red once armed */
 .household-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
-           color:var(--overdue);background:none;border:1.5px solid var(--overdue);
+           color:var(--overdue-text);background:none;border:1.5px solid var(--overdue);
            border-radius:9px;padding:9px 16px;cursor:pointer;white-space:nowrap;
            transition:background .15s,color .15s,border-color .15s}
 .household-page .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
 .household-page .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
 .household-page .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none;
-                    color:var(--overdue);border-color:var(--overdue)}
+                    color:var(--overdue-text);border-color:var(--overdue)}
 
 .household-page .confirm{display:grid;margin-top:13px;padding-top:13px;
          grid-template-columns:1.75fr 1fr;gap:8px 32px;align-items:end;
          border-top:1px dashed color-mix(in srgb,var(--overdue) 55%,transparent)}
 .household-page .confirm .field{margin-bottom:0;min-width:0}
-.household-page .confirm .field label{color:var(--overdue);opacity:.9}
+.household-page .confirm .field label{color:var(--overdue-text);opacity:.9}
 .household-page .confirm .field input{font-family:var(--mono);font-size:12.5px;
                       border-color:color-mix(in srgb,var(--overdue) 60%,transparent)}
 .household-page .confirm .field input:focus{border-color:var(--overdue)}
