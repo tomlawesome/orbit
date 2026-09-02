@@ -2097,10 +2097,10 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
   const points = [], self = [];
   for (const id of ids) {
     const hh = galaxy[id];
-    if (id === camera) { self.push({ id, hh, isCamera: true, banded: false, dist: 0, angle: 0, radius: 0, ox: 0, oy: 0, dim: .9 }); continue; }
+    if (id === camera) { self.push({ id, hh, isCamera: true, banded: false, undrawn: false, dist: 0, angle: 0, radius: 0, ox: 0, oy: 0, dim: .9 }); continue; }
     const dx = hh.pos[0] - origin[0], dy = hh.pos[1] - origin[1];
     const dist = Math.hypot(dx, dy);
-    points.push({ id, hh, isCamera: false, banded: false, dist, angle: Math.atan2(dy, dx), radius: 0,
+    points.push({ id, hh, isCamera: false, banded: false, undrawn: false, dist, angle: Math.atan2(dy, dx), radius: 0,
                   ox: 0, oy: 0, dim: Math.max(.45, Math.min(.9, 1.05 - dist / 2600)) });
   }
   // the sky's usable vertical half-extents: the top is busier, so it ends sooner
@@ -2196,11 +2196,18 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
   // floor is left untouched to the pixel.
   const FLOOR = 80;              // twice the hit circle's r=40
   const FLOOR_FIT = FLOOR + 1e-6; // a micron of headroom, so binary rounding cannot land just under
+  // undrawn points (past the last legal rank, #670 2026-09-02) are not on the
+  // sky at all and so can never be "too close" — skipping them here is what
+  // keeps that decision permanent instead of re-litigated every round
   const tooClose = () => {
     const pairs = [];
-    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
-      const a = points[i], z = points[j];
-      if (Math.hypot(z.ox - a.ox, z.oy - a.oy) < FLOOR) pairs.push([a, z]);
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].undrawn) continue;
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i], z = points[j];
+        if (z.undrawn) continue;
+        if (Math.hypot(z.ox - a.ox, z.oy - a.oy) < FLOOR) pairs.push([a, z]);
+      }
     }
     return pairs;
   };
@@ -2272,23 +2279,22 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
       }
       return best;
     };
+    // layOut is only ever handed the members a rank has room for (`take`
+    // below is capacity-capped on every rank, including the last), so spans
+    // is never empty here. What a rank cannot hold spills to the next rank,
+    // or, past the last legal one, is marked undrawn (#670, 2026-09-02).
     const layOut = (members, spans, side, oy) => {
       if (!members.length) return;
       for (const p of members) p.oy = oy;
-      if (!spans.length) {
-        // over capacity: fall back to the raw span so they at least spread
-        // away from each other, and keep #427 absolute — the keep-out is a
-        // GUARANTEE and the floor is not
-        const [clear, bound] = rankSpan(oy);
-        if (bound <= clear) { for (const p of members) p.ox = side * clear; return; }
-        spans = [side < 0 ? [-bound, -clear] : [clear, bound]];
-      }
       if (members.length === 1) { members[0].ox = nearestFree(spans, members[0].ox); return; }
       const step = freeLength(spans) / (members.length - 1); // endpoints inclusive
       members.forEach((p, i) => { p.ox = atArc(spans, side, i * step); });
     };
     const relayEdge = (edge, blocks) => {
-      const members = points.filter((p) => p.banded && bandEdge.get(p) === edge);
+      // a point already undrawn is a settled decision — it does not come back
+      // for a second re-lay just because another offender on the same edge
+      // triggers one
+      const members = points.filter((p) => p.banded && !p.undrawn && bandEdge.get(p) === edge);
       if (!members.length) return;
       const edgeOy = edge * Math.max(edge < 0 ? safeTop : safeBottom, 0);
       // members keep their side of the midline: a slide has never been allowed
@@ -2319,11 +2325,20 @@ function placeGalaxy({ galaxy, camera, width: w, height: h, keepOut }){
           // the equator is the other edge's half of the sky
           const last = edge * (oy - edge * FLOOR) < 0;
           const spans = freeOn(side, oy, pinned);
-          const take = last ? queue.length : Math.min(queue.length, capacityOf(spans));
+          // every rank, including the last, takes only what it has capacity
+          // for. Past the last legal rank there is nowhere left that keeps
+          // the floor, so whoever this pass still owes a place is marked
+          // UNDRAWN instead of forced in sub-floor (#670, 2026-09-02,
+          // superseding "the last rank has to take what is left anyway").
+          // queue is outermost-first throughout, so what's left at the last
+          // rank is exactly the innermost members — dropped innermost-first,
+          // ties already broken by id ascending in the sort above.
+          const take = Math.min(queue.length, capacityOf(spans));
           const here = queue.slice(0, take);
           layOut(here, spans, side, oy);
           pinned.push(...here);
           queue = queue.slice(take);
+          if (last) { for (const p of queue) p.undrawn = true; queue = []; }
         }
       }
     };
@@ -2356,9 +2371,11 @@ function renderGalaxy(settle){
   // +88: the keep-out must clear the constellation's own ring (r 40 around
   // the anchor), not just its centre point (owner, 2026-08-16).
   const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
-  // you never see your own constellation — you're inside it
+  // you never see your own constellation — you're inside it. A household the
+  // floor pass could not fit anywhere that keeps the 80px floor is marked
+  // undrawn (#670, 2026-09-02) and skipped rather than drawn sub-floor.
   const placed = placeGalaxy({ galaxy: GALAXY, camera, width: w, height: h, keepOut })
-    .filter((p) => !p.isCamera);
+    .filter((p) => !p.isCamera && !p.undrawn);
   for (const { id: key, hh, ox, oy, dim } of placed) {
     const div = document.createElement("div");
     div.className = "minisys" + (settle ? " settle" : "");
