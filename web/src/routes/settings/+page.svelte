@@ -187,7 +187,7 @@
 
     <div class="card">
       <h3>Your relay</h3>
-      <div class="kv"><span>address</span><b style="color:var(--accent)">{view.relay.address}</b></div>
+      <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
       <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
       <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>

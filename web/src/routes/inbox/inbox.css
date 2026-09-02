@@ -108,7 +108,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .inbox-page .failed .body span{font:11px var(--mono);color:var(--ink-mid);line-height:1.7}
 .inbox-page .failed button{font:11px var(--mono);border:0;background:none;color:var(--ink-faint);
                cursor:pointer;padding:4px 0;flex:none}
-.inbox-page .failed button:hover{color:var(--overdue)}
+.inbox-page .failed button:hover{color:var(--overdue-text)}
 
 .inbox-page .retention{margin-top:26px;text-align:center;font:10.5px var(--mono);
            color:var(--ink-faint);letter-spacing:.06em;line-height:1.9}
