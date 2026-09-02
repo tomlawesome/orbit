@@ -217,7 +217,9 @@ export async function registerNode(): Promise<void> {
         state: "exhausted",
         ...verdict,
         /* The bounded description of what disagreed - tags and counts only,
-           never SQL or credentials (see MigrationIntegrityError.detail). */
+           never SQL or credentials (see MigrationIntegrityError.detail). It
+           is an OperationalDetail, so it is carried into the rendered text
+           and JSON lines rather than dropped between here and stderr (#718). */
         ...(error instanceof MigrationIntegrityError && error.detail
           ? { detail: error.detail }
           : {}),

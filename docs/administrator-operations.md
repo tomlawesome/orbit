@@ -65,8 +65,12 @@ they do not create separate vocabularies or fields.
 Every record has a timestamp, level, component, event, lifecycle `state`, and
 bounded `reason`, `action`, `impact`, and `duration_ms` values. Configuration
 problem records additionally use fixed `setting`, `problem_code`, and
-`fallback` values. Text is one line with stable columns. JSON has the same
-fields and meanings. Colour is used only for a real TTY, is automatically off
+`fallback` values. Records may end with a `detail` — a short quoted phrase for
+what the fixed vocabulary cannot say on its own, such as which migration
+disagreed. Its wording comes from Orbit's own source; only identifiers such as
+migration tags and counts are filled in, so a detail never carries SQL,
+configuration values or credentials. Text is one line with stable columns.
+JSON has the same fields and meanings. Colour is used only for a real TTY, is automatically off
 for `NO_COLOR`, non-TTY, redirected, and JSON output, and is never added to
 collected logs.
 
