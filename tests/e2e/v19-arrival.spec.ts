@@ -175,16 +175,21 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
 
   /* THE COUNT — a moment on the settled sky, boxless, and REAL: the number is
      read off the households that exist, never written.
-     Measured against the sky this page drew rather than against a second read
-     of the instance: specs run in parallel, and a system created by another one
-     between the two reads would make a true count look wrong. */
+     It is the real list that is counted, not the sky: the sky draws at most
+     twelve (#670), and on a shared instance (#730) more exist than it can
+     draw, so the sky is a lower bound and `visibleHouseholds` is the number.
+     Specs run in parallel locally, and a system created by another one between
+     this read and the page's own would make a true count look wrong; CI runs
+     one worker, so there the two reads cannot disagree. */
   const workspace = await workspaceOf(page);
   expect(workspace.households).toEqual([]);
-  expect(workspace.visibleHouseholds.length).toBeGreaterThan(0);
+  const discovered = workspace.visibleHouseholds.length;
+  expect(discovered).toBeGreaterThan(0);
   const drawn = await page.locator(".minisys").count();
   expect(drawn).toBeGreaterThan(0);
+  expect(drawn).toBeLessThanOrEqual(discovered);
   await expect(page.locator("body")).toHaveClass(/counting/, { timeout: 30_000 });
-  await expect(page.locator(".nf .disc .big")).toHaveText(String(drawn));
+  await expect(page.locator(".nf .disc .big")).toHaveText(String(discovered));
   await expect(page.locator(".nf .disc p")).toContainText("discovered in this universe");
 
   /* AND THEN THE QUESTION, in the space the count left. */
