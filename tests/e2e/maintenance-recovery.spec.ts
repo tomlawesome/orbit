@@ -25,7 +25,7 @@ async function signIn(page: Page) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: administrator }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
+  await expect(page).toHaveURL("/workspace");
 }
 
 interface MaintenanceReading {
