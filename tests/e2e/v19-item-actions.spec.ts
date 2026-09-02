@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 
@@ -8,11 +9,19 @@ import { householdRegister } from "./support/households";
  */
 
 /* #730: each test removes the proving ground it seeded, so neither is left
-   crowding the sky a later spec measures. */
-const HOUSEHOLD = "Actions Proving Ground";
+   crowding the sky a later spec measures.
+
+   The name carries a per-test suffix because these tests run in PARALLEL
+   locally (playwright.config.ts sets fullyParallel with workers undefined off
+   CI). A shared fixed name meant concurrent creates of the same household and,
+   once cleanup existed, one worker hard-deleting the household another was
+   still using. CI never showed it because CI pins workers to 1. Nothing
+   asserts the name. */
+const HOUSEHOLD_PREFIX = "Actions Proving Ground";
 const households = householdRegister();
 
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
+  const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
   const seeded = await page.evaluate(async (householdName) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
@@ -59,8 +68,8 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId };
-  }, HOUSEHOLD);
-  households.track({ id: seeded.householdId, name: HOUSEHOLD });
+  }, name);
+  households.track({ id: seeded.householdId, name });
   return seeded;
 }
 
