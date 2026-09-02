@@ -40,6 +40,10 @@ cd "$repo_dir"
 
 readonly project_name="orbit-e2e-local"
 readonly app_port="13777"
+# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
+# it to build the application's own APP_URL and OIDC callback URL, so every
+# compose call in this script has to agree about the published port.
+export ORBIT_PORT="$app_port"
 readonly base_url="http://127.0.0.1:${app_port}"
 readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
 
@@ -208,6 +212,14 @@ ORBIT_BIND_ADDRESS=127.0.0.1 ORBIT_PORT="$app_port" \
 response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/health")" || fail "health endpoint did not respond at ${base_url}/api/health"
 jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null || fail "health endpoint did not report ready: ${response}"
 log "application is healthy"
+
+# The application hands the OIDC provider its own callback URL, and the browser
+# follows it. If that URL names a port this script is not publishing, every
+# sign-in dies at chrome-error://chromewebdata/ several minutes from now, with
+# nothing in the health check to hint at it (#732). Compare them here instead.
+configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
+[[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
+log "APP_URL agrees with the published port"
 
 # --- Run the Playwright suite -------------------------------------------------
 
