@@ -235,8 +235,7 @@ export function galaxyOf(workspace, today) {
  */
 export function labelledSkyOf(visibleHouseholds) {
   /*
-   * Twelve DRAWN constellations, and no more (owner decision 2026-09-01,
-   * #670).
+   * At most twelve DRAWN constellations (owner decision 2026-09-01, #670).
    *
    * This used to be uncapped, on the reasoning that a newcomer must see every
    * system there is and that "the overlap relaxation keeps a crowded sky
@@ -248,11 +247,14 @@ export function labelledSkyOf(visibleHouseholds) {
    * whoever it landed on. An uncapped sky therefore does not show a newcomer
    * every system, it shows them a sky that misdirects their choice.
    *
-   * The floor pass in `placement.js` guarantees the separation; the cap is
-   * what keeps the sky inside the capacity that guarantee needs. Nobody loses
-   * a household to it: the "where do you belong?" list in `Newcomer.svelte`
-   * is fed the FULL set, so every household stays reachable by name. The sky
-   * is capped; the list is not.
+   * Twelve is an upper bound, not a promise (owner ruling 2026-09-02): the
+   * floor pass in `placement.js` guarantees the separation, and on a small or
+   * short viewport twelve is more than the sky can separate at all, so the
+   * effective cap is min(12, what the floor pass can place) — the pass marks
+   * anything past its last legal rank undrawn rather than placing it
+   * sub-floor. Nobody loses a household to either cap: the "where do you
+   * belong?" list in `Newcomer.svelte` is fed the FULL set, so every
+   * household stays reachable by name whether or not the sky drew it.
    */
   const galaxy = {};
   for (const household of (visibleHouseholds ?? []).slice(0, 12)) {
