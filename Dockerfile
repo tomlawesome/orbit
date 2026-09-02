@@ -11,7 +11,7 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -65,7 +65,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:a5113d43233a4ce6d05fe0abfc4043fc5920062ebde3c2cad396efd57e5e1866 AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:237aac3c9561c2e1f9febe7acd7c0f6051e13571b6c6cc1e318278df07b9bcb8 AS runner
 
 ARG ORBIT_VERSION
 ARG ORBIT_REVISION
