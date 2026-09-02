@@ -126,7 +126,11 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     const placed = placeGalaxy({
       galaxy: GALAXY, camera, width: w, height: h, keepOut,
       screen: document.documentElement.clientWidth,
-    }).filter((point) => !point.isCamera);
+    /* A household the floor pass could not fit anywhere that keeps the 80px
+       floor is marked `undrawn` (#670, owner ruling 2026-09-02) and skipped
+       here — see `mountEmptySky` for the full reasoning. The member sky's own
+       product cap of five keeps this from ever biting in practice. */
+    }).filter((point) => !point.isCamera && !point.undrawn);
 
     const corrections = [];
     for (const { id: key, household: hh, dim, ox, oy } of placed) {
@@ -625,7 +629,13 @@ export function mountEmptySky({ galaxy, onAsk }) {
      * looking at two different skies.
      */
     const placed = placeGalaxy({ galaxy, camera: null, width: w, height: h, keepOut: 0 });
-    for (const { id, household: hh, ox, oy } of placed) {
+    /* A household the floor pass could not fit anywhere that keeps the 80px
+       floor is marked `undrawn` (#670, owner ruling 2026-09-02) rather than
+       placed sub-floor — drawing it anyway would put a click back in reach of
+       a neighbour it did not aim at. The "where do you belong?" list stays
+       complete regardless: it is fed `visibleHouseholds`, not this sky. */
+    for (const { id, household: hh, ox, oy, undrawn } of placed) {
+      if (undrawn) continue;
       const away = ox > 0;
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
