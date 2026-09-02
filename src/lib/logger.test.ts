@@ -5,9 +5,12 @@ import {
   getLogFormat,
   getLogLevel,
   log,
+  operationalDetail,
   resetLoggerForTests,
   setLoggerClockForTests,
   shouldUseColor,
+  type OperationalEvent,
+  type OperationalRecord,
 } from "./logger";
 
 afterEach(() => {
@@ -176,6 +179,7 @@ describe("record formatting", () => {
       setting: null,
       problem_code: null,
       fallback: null,
+      detail: null,
     });
   });
 
@@ -195,6 +199,51 @@ describe("record formatting", () => {
     expect(record.split("\n")).toHaveLength(1);
   });
 
+  /* Every field the event type defines, with what it must look like once
+     rendered. Written as a total map of `OperationalEvent`, so a field added
+     to the type without renderer support fails to compile here rather than
+     disappearing quietly between the call site and the log (#718). */
+  const fieldContract: {
+    [K in keyof Required<OperationalEvent>]: {
+      value: Required<OperationalEvent>[K];
+      textFragment: string;
+      recordKey: keyof OperationalRecord;
+      recordValue: unknown;
+    };
+  } = {
+    event: { value: "startup.migration", textFragment: "startup.migration", recordKey: "event", recordValue: "startup.migration" },
+    state: { value: "exhausted", textFragment: "state=exhausted", recordKey: "state", recordValue: "exhausted" },
+    reason: { value: "database_mismatch", textFragment: "reason=database_mismatch", recordKey: "reason", recordValue: "database_mismatch" },
+    action: { value: "attach_matching_database", textFragment: "action=attach_matching_database", recordKey: "action", recordValue: "attach_matching_database" },
+    impact: { value: "migration_blocked", textFragment: "impact=migration_blocked", recordKey: "impact", recordValue: "migration_blocked" },
+    durationMs: { value: 12, textFragment: "duration_ms=12", recordKey: "duration_ms", recordValue: 12 },
+    setting: { value: "database", textFragment: "setting=database", recordKey: "setting", recordValue: "database" },
+    problemCode: { value: "configuration_core", textFragment: "problem_code=configuration_core", recordKey: "problem_code", recordValue: "configuration_core" },
+    fallback: { value: "startup_blocked", textFragment: "fallback=startup_blocked", recordKey: "fallback", recordValue: "startup_blocked" },
+    detail: {
+      value: operationalDetail`applied ${17} of ${18} does not match ${"0018_x"}`,
+      textFragment: 'detail="applied 17 of 18 does not match 0018_x"',
+      recordKey: "detail",
+      recordValue: "applied 17 of 18 does not match 0018_x",
+    },
+  };
+
+  it("surfaces every field of an operational event in both renderings (#718)", () => {
+    const event = Object.fromEntries(
+      Object.entries(fieldContract).map(([key, field]) => [key, field.value]),
+    ) as unknown as OperationalEvent;
+
+    process.env.ORBIT_LOG_FORMAT = "text";
+    const text = formatRecord("error", event, "2026-01-01T00:00:00.000Z");
+    const json = JSON.parse(formatJsonRecord("error", event, "2026-01-01T00:00:00.000Z")) as Record<string, unknown>;
+
+    for (const field of Object.values(fieldContract)) {
+      expect(text).toContain(field.textFragment);
+      expect(json[field.recordKey]).toEqual(field.recordValue);
+    }
+    expect(text.split("\n")).toHaveLength(1);
+  });
+
   it("uses colour only for a real TTY and never when NO_COLOR is set", () => {
     const tty = { isTTY: true } as NodeJS.WriteStream;
     const redirected = { isTTY: false } as NodeJS.WriteStream;
@@ -204,7 +253,7 @@ describe("record formatting", () => {
   });
 
   it("keeps concurrent text and JSON emissions as complete fixed-schema lines", async () => {
-    const expectedJsonKeys = ["timestamp", "level", "component", "event", "state", "reason", "action", "impact", "duration_ms", "setting", "problem_code", "fallback"];
+    const expectedJsonKeys = ["timestamp", "level", "component", "event", "state", "reason", "action", "impact", "duration_ms", "setting", "problem_code", "fallback", "detail"];
     const output: string[] = [];
     vi.spyOn(console, "log").mockImplementation((line) => output.push(String(line)));
 
@@ -227,9 +276,90 @@ describe("record formatting", () => {
         if (format === "json") {
           expect(Object.keys(JSON.parse(line))).toEqual(expectedJsonKeys);
         } else {
-          expect(line).toMatch(/^\S+ (?:ERROR|WARN|INFO|DEBUG) orbit \S+ \S+ state=\S+ reason=\S+ action=\S+ impact=\S+ duration_ms=\S+ setting=\S+ problem_code=\S+ fallback=\S+$/u);
+          expect(line).toMatch(/^\S+ (?:ERROR|WARN|INFO|DEBUG) orbit \S+ \S+ state=\S+ reason=\S+ action=\S+ impact=\S+ duration_ms=\S+ setting=\S+ problem_code=\S+ fallback=\S+ detail=\S+$/u);
         }
       }
+    }
+  });
+});
+
+describe("bounded detail (#718)", () => {
+  const mismatch = {
+    event: "startup.migration" as const,
+    state: "exhausted" as const,
+    reason: "database_mismatch" as const,
+    action: "attach_matching_database" as const,
+    impact: "migration_blocked" as const,
+  };
+
+  it("carries a detail from a real log.error into the emitted text and JSON lines", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const detail = operationalDetail`applied migration ${25} of ${25} does not match ${"0026_x"}`;
+
+    process.env.ORBIT_LOG_FORMAT = "text";
+    log.error({ ...mismatch, detail });
+    resetLoggerForTests();
+    process.env.ORBIT_LOG_FORMAT = "json";
+    log.error({ ...mismatch, detail });
+
+    expect(errors).toHaveBeenCalledTimes(2);
+    const [textLine, jsonLine] = errors.mock.calls.map((call) => String(call[0]));
+    expect(textLine).toContain('detail="applied migration 25 of 25 does not match 0026_x"');
+    expect(textLine.split("\n")).toHaveLength(1);
+    expect(JSON.parse(jsonLine)).toMatchObject({ detail: "applied migration 25 of 25 does not match 0026_x" });
+  });
+
+  it("keeps interpolations to numbers and bounded tokens, redacting anything else", () => {
+    expect(operationalDetail`applied ${17} of ${18}`).toBe("applied 17 of 18");
+    expect(operationalDetail`floor is ${"0017_imap_recipient_alias_index"}`).toBe("floor is 0017_imap_recipient_alias_index");
+    expect(operationalDetail`rejected ${"connection string with spaces"}`).toBe("rejected [unavailable]");
+    expect(operationalDetail`rejected ${{ nested: true }}`).toBe("rejected [unavailable]");
+    expect(operationalDetail`counted ${Number.NaN}`).toBe("counted [unavailable]");
+    expect(operationalDetail`tag ${"a".repeat(65)}`).toBe("tag [unavailable]");
+  });
+
+  it("stays one bounded printable line whatever the literal contains", () => {
+    expect(operationalDetail`first line\nsecond ${"line"}`).toBe("first line second line");
+    expect(operationalDetail`bidi \u202e override ${"tag"}`).toBe("bidi override tag");
+    expect(operationalDetail`${"x".repeat(64)} ${"y".repeat(64)} ${"z".repeat(64)} ${"w".repeat(64)} tail`).toHaveLength(256);
+  });
+
+  it("renders an absent detail as the same empty column as every other field", () => {
+    process.env.ORBIT_LOG_FORMAT = "text";
+    expect(formatRecord("error", mismatch, "2026-01-01T00:00:00.000Z")).toContain("detail=-");
+    expect(JSON.parse(formatJsonRecord("error", mismatch, "2026-01-01T00:00:00.000Z"))).toMatchObject({ detail: null });
+  });
+});
+
+describe("closed schema enforcement (#718)", () => {
+  const rogue = {
+    event: "startup.migration",
+    state: "exhausted",
+    /* The shape that used to compile through a spread and then vanish. */
+    message: "free text nobody bounded",
+  } as unknown as OperationalEvent;
+
+  it("refuses a field outside the schema at compile time, spread or not", () => {
+    const verdict = { reason: "database_mismatch", action: "attach_matching_database" } as const;
+    /* The @ts-expect-error is the assertion: if this ever compiles, the hole
+       that let #437's detail vanish is open again (#718). */
+    // @ts-expect-error - `note` is not a field of OperationalEvent.
+    expect(() => log.error({ event: "startup.migration", state: "exhausted", ...verdict, note: "free text" })).toThrow();
+  });
+
+  it("throws outside production when an event carries a field outside the schema", () => {
+    expect(() => formatRecord("error", rogue, "2026-01-01T00:00:00.000Z")).toThrow(/outside its schema: message/u);
+  });
+
+  it("strips the unknown field instead of throwing in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      process.env.ORBIT_LOG_FORMAT = "json";
+      const json = JSON.parse(formatJsonRecord("error", rogue, "2026-01-01T00:00:00.000Z")) as Record<string, unknown>;
+      expect(json).not.toHaveProperty("message");
+      expect(JSON.stringify(json)).not.toContain("free text");
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 });
