@@ -1,6 +1,6 @@
 # ADR-0017: Mail-in credential ownership and per-user relays
 
-**Status:** Proposed — for owner acceptance on #336
+**Status:** Accepted (owner, 2026-09-02, #336)
 **Date:** 2026-09-02
 **Relates to:** issue #336 (per-user inbound mail; owner rulings of
 2026-08-13 and 2026-09-02 are the ratified frame for this record);
@@ -248,9 +248,14 @@ supplier, a bank, a web form — is unsupported: the relay page and the user
 documentation say so plainly and give the reasons (the address is personal
 and rotates; many web forms reject `+` addresses; third-party mail cannot be
 matched to a member by sender, so it is deleted under this decision). Orbit
-does not design for that traffic. The documentation also says to *forward*,
-not *redirect*: a redirect keeps the original sender's address and so
-matches nobody.
+does not design for that traffic. **Forward only, said loudly** (owner,
+2026-09-02): a redirect keeps the original sender's address, and the
+provider's authentication check fails against that sender, so a redirected
+message matches nobody and is deleted. The relay page carries this next to
+the address itself — not in a help link — and the user documentation leads
+its mail-in section with it, with a screenshot of the forward action in each
+supported client. The reply sent for unattributed mail names redirect as the
+likely cause.
 
 **Every member has verified sending addresses.** New table
 `mail_in_sender_addresses`: `user_id`, `address` (normalised: trimmed,
