@@ -25,6 +25,21 @@ export interface InstanceUser {
   disabledAt: Date | null;
 }
 
+/**
+ * The administration user list is a hard-capped, display-name-ordered page
+ * rather than paginated (owner ruling, #592: a thousand users is far beyond
+ * any expected instance). `listInstanceUsers` reports `totalCount` and
+ * `truncated` so a caller never presents a cut result as complete.
+ */
+export interface InstanceUserList {
+  users: InstanceUser[];
+  totalCount: number;
+  truncated: boolean;
+}
+
+/** Hard cap on the administration user list (#592). Not pagination — see InstanceUserList. */
+export const ADMIN_USER_LIST_CAP = 1_000;
+
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
 /** The current primary administrator, or null before the first bootstrap. */
@@ -36,27 +51,55 @@ async function primaryAdministratorId(transaction: Transaction): Promise<string 
   return row?.primaryUserId ?? null;
 }
 
-export async function listInstanceUsers(actorUserId: string): Promise<InstanceUser[]> {
+const instanceUserColumns = {
+  id: users.id,
+  displayName: users.displayName,
+  email: users.email,
+  isInstanceAdmin: users.isInstanceAdmin,
+  disabledAt: users.disabledAt,
+};
+
+export async function listInstanceUsers(actorUserId: string): Promise<InstanceUserList> {
   await requireInstanceAdministrator(actorUserId);
-  const [authority] = await getDb()
+  const db = getDb();
+  const [authority] = await db
     .select({ primaryUserId: instanceAuthority.primaryUserId })
     .from(instanceAuthority)
     .limit(1);
-  const rows = await getDb()
-    .select({
-      id: users.id,
-      displayName: users.displayName,
-      email: users.email,
-      isInstanceAdmin: users.isInstanceAdmin,
-      disabledAt: users.disabledAt,
-    })
-    .from(users)
-    .orderBy(asc(users.displayName), asc(users.email))
-    .limit(1_000);
-  return rows.map((row) => ({
-    ...row,
-    isPrimaryAdministrator: row.id === (authority?.primaryUserId ?? null),
-  }));
+  const primaryUserId = authority?.primaryUserId ?? null;
+
+  const [rows, [countRow]] = await Promise.all([
+    db
+      .select(instanceUserColumns)
+      .from(users)
+      .orderBy(asc(users.displayName), asc(users.email))
+      .limit(ADMIN_USER_LIST_CAP),
+    db.select({ totalCount: sql<number>`count(*)::int` }).from(users),
+  ]);
+
+  // The cap above is a display-name-ordered page: on its own, a primary
+  // administrator whose display name sorts past the cap would silently
+  // disappear from the administration surface (#592) — the exact failure
+  // that let an operator lose sight of the account holding final authority.
+  // Guarantee they are always reachable, independent of sort order.
+  let listedRows = rows;
+  if (primaryUserId && !rows.some((row) => row.id === primaryUserId)) {
+    const [primaryRow] = await db
+      .select(instanceUserColumns)
+      .from(users)
+      .where(eq(users.id, primaryUserId))
+      .limit(1);
+    if (primaryRow) listedRows = [primaryRow, ...rows];
+  }
+
+  return {
+    users: listedRows.map((row) => ({
+      ...row,
+      isPrimaryAdministrator: row.id === primaryUserId,
+    })),
+    totalCount: countRow?.totalCount ?? listedRows.length,
+    truncated: (countRow?.totalCount ?? 0) > ADMIN_USER_LIST_CAP,
+  };
 }
 
 /** Updates administrator rights while ensuring the instance always retains one administrator. */
@@ -64,7 +107,7 @@ export async function setInstanceAdministrator(
   actorUserId: string,
   targetUserId: string,
   administrator: boolean,
-): Promise<InstanceUser[]> {
+): Promise<InstanceUserList> {
   if (!uuidSchema.safeParse(targetUserId).success) {
     throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
   }
@@ -138,7 +181,7 @@ export async function setInstanceUserDisabled(
   actorUserId: string,
   targetUserId: string,
   disabled: boolean,
-): Promise<InstanceUser[]> {
+): Promise<InstanceUserList> {
   if (!uuidSchema.safeParse(targetUserId).success) {
     throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
   }
@@ -238,7 +281,7 @@ export async function transferPrimaryAdministrator(
   actorUserId: string,
   actorSessionId: string,
   targetUserId: string,
-): Promise<InstanceUser[]> {
+): Promise<InstanceUserList> {
   if (!uuidSchema.safeParse(targetUserId).success) {
     throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
   }
