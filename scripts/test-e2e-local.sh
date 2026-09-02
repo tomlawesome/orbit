@@ -213,6 +213,14 @@ response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/hea
 jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null || fail "health endpoint did not report ready: ${response}"
 log "application is healthy"
 
+# The application hands the OIDC provider its own callback URL, and the browser
+# follows it. If that URL names a port this script is not publishing, every
+# sign-in dies at chrome-error://chromewebdata/ several minutes from now, with
+# nothing in the health check to hint at it (#732). Compare them here instead.
+configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
+[[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
+log "APP_URL agrees with the published port"
+
 # --- Run the Playwright suite -------------------------------------------------
 
 playwright_args=()
