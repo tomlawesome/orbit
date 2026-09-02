@@ -190,6 +190,15 @@ serve() {
 }
 case "\$url" in
   "\$asset_base"/*)
+    # Assets gate (issue #677). When the lifecycle interruption scenario arms
+    # it, the first asset request parks here: announce that the installer is
+    # inside the assets phase, then block until the test releases the FIFO.
+    # The installer physically cannot advance past this curl, so the kill point
+    # is fixed rather than raced against a poll interval.
+    if [[ -e "$workdir/assets-gate.armed" && ! -e "$workdir/assets-gate.reached" ]]; then
+      : > "$workdir/assets-gate.reached"
+      read -r _ < "$workdir/assets-gate.release" || true
+    fi
     asset="\${url#"\$asset_base"/}"
     [[ -f "$repo_root/\$asset" ]] || exit 22
     serve "$repo_root/\$asset"
@@ -279,6 +288,31 @@ positive_scenario() {
     # commit point leaves the pre-provisioned target byte-identical; any
     # staging evidence stays owner-only.
     cp -- "$target/.env-orbit" "$workdir/env-before-interrupt"
+    # The kill point is a rendezvous, not a poll (issue #677). Neither a
+    # '^phase=assets' log line nor the staging directory can locate it: UI
+    # events are queued (installer_ui_event) until load_installer_ui sources
+    # the just-fetched installer-ui.sh, which happens only after every asset
+    # is fetched and bash -n checked, so the assets "starting" event reaches
+    # the log already batched with "completed"; and while the staging
+    # directory is mkdir'd first thing in the phase, install.sh reaches its
+    # first legitimate in-transaction mutation of .env-orbit
+    # (run_configuration_migration) a few hundred milliseconds later. Both
+    # made the assertion a race against how promptly this loop noticed —
+    # measured at ~300ms of headroom against a 0.2s poll, and lost outright on
+    # a runner whose process spawns are cheaper.
+    #
+    # So the shim's assets gate parks the installer inside the phase instead:
+    # the first asset request touches assets-gate.reached and then blocks
+    # reading the release FIFO. Waiting for that marker is still a poll, but
+    # it is a poll for a state the installer holds indefinitely, so noticing
+    # late costs time rather than correctness. Opening the FIFO read-write
+    # here means neither side's open() can block.
+    rm -f "$workdir/assets-gate.reached" "$workdir/assets-gate.release"
+    mkfifo -m 600 "$workdir/assets-gate.release" ||
+      fail "interruption: could not create the assets-gate FIFO"
+    local release_fd
+    exec {release_fd}<>"$workdir/assets-gate.release"
+    : > "$workdir/assets-gate.armed"
     # set -m gives the background job its own process group so the hard kill
     # reaches the whole installer tree and nothing else.
     set -m
@@ -286,27 +320,38 @@ positive_scenario() {
         ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
         bash "$repo_root/scripts/install.sh" </dev/null ) \
         > "$workdir/install.log" 2>&1 &
-    local install_bg=$! waited=0
+    local install_bg=$! waited=0 install_status=0
     set +m
-    # Wait for the staging directory itself rather than a '^phase=assets' log
-    # line: install.sh's UI events are queued (installer_ui_event) until
-    # load_installer_ui sources the just-fetched installer-ui.sh, which does
-    # not happen until *after* every asset has been fetched and bash -n
-    # checked (install.sh:1395-1421). So the "starting" event for the assets
-    # phase is only ever written to the log already-batched with "completed"
-    # right as the phase ends — grepping for it can never catch install.sh
-    # mid-fetch, only after the whole phase (and everything gated on the log
-    # line) has already finished. staging_dir is mkdir'd as the very first
-    # step of the phase (install.sh:1398), before any asset is fetched, so
-    # its appearance on disk is a real-time signal of "assets phase begun."
-    until find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d 2>/dev/null |
-      grep -q .; do
+    # The bound only has to cover host checks, the image pull and the banner
+    # render before the assets phase begins; a slow runner spends longer there
+    # without making the kill point any less exact. An installer that dies
+    # first is caught by the liveness check, not by this bound.
+    until [[ -e "$workdir/assets-gate.reached" ]]; do
       sleep 0.2; waited=$((waited + 1))
-      [[ "$waited" -lt 300 ]] || fail "interruption: assets phase never observed"
+      if [[ "$waited" -ge 600 ]]; then
+        # Never abandon a live installer: one left running past this point
+        # goes on to create the deployment's database volume, which then
+        # fails every later scenario for a reason that has nothing to do
+        # with the scenario that leaked it.
+        kill -9 -- "-$install_bg" 2>/dev/null || true
+        wait "$install_bg" 2>/dev/null || true
+        fail "interruption: assets phase never observed"
+      fi
       kill -0 "$install_bg" 2>/dev/null || fail "interruption: installer exited before the assets phase"
     done
     kill -9 -- "-$install_bg" 2>/dev/null || true
-    wait "$install_bg" 2>/dev/null || true
+    wait "$install_bg" 2>/dev/null || install_status=$?
+    printf 'go\n' >&"$release_fd"
+    exec {release_fd}>&-
+    rm -f "$workdir/assets-gate.armed"
+    # A scenario that reports success without having interrupted a running
+    # installer is worse than one that flakes, so prove the interruption
+    # happened: SIGKILL leaves 128+9, and an installer that had already left
+    # the assets phase would have exited on its own with a status of its own.
+    [[ "$install_status" == 137 ]] ||
+      fail "interruption: installer was not killed mid-assets-phase (status $install_status)"
+    find "$target" -maxdepth 1 -name '.orbit-install-staging.*' -type d | grep -q . ||
+      fail "interruption: no staging directory, so the assets phase was never entered"
     cmp -s "$workdir/env-before-interrupt" "$target/.env-orbit" ||
       fail "interruption during assets phase mutated .env-orbit"
     find "$target" -maxdepth 1 -name '.orbit-install-staging*' -type d ! -perm 700 | grep -q . &&
