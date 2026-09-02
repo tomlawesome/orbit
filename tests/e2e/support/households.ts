@@ -62,6 +62,12 @@ export async function cleanupHousehold(
  * `page.evaluate`, through the arrival's own contract -- so the register takes
  * the id and name rather than trying to wrap creation itself.
  *
+ * Some create them through the INTERFACE and never learn an id at all
+ * (`authenticated-lifecycle.spec.ts` fills in the setup dialog). Those use
+ * `sweepNamed` below, which looks the ids up. That spec was the largest leak
+ * in the suite and was missed by the first pass precisely because it does not
+ * call `household.create`: a grep for the command could not see it.
+ *
  * `sweep` removes every household in reverse order of creation and clears the
  * register, so a second call after a partial failure retries only what is
  * left. It reports every failure it hit rather than the first, because one
@@ -97,4 +103,36 @@ export function householdRegister() {
       }
     },
   };
+}
+
+/**
+ * Remove households by NAME, for specs that made them through the interface
+ * and so never held an id.
+ *
+ * `page` must belong to an instance administrator: a hard delete is an
+ * administrator's power, and the member who created these through the setup
+ * dialog cannot do it. Names not present are ignored -- the test may already
+ * have deleted them as the thing it was proving.
+ */
+export async function sweepNamed(page: Page, names: readonly string[]) {
+  if (names.length === 0) return;
+
+  const wanted = new Set(names);
+  const response = await page.request.get("/api/workspace");
+  if (!response.ok()) throw new Error(`#730: could not read the workspace to sweep by name (${response.status()})`);
+  const { workspace } = (await response.json()) as { workspace: { households: { id: string; name: string }[] } };
+
+  const headers = await sessionHeaders(page);
+  const failures: string[] = [];
+  for (const household of workspace.households.filter((one) => wanted.has(one.name))) {
+    try {
+      await cleanupHousehold(page, headers, household.id, household.name);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`#730: ${failures.length} household(s) left behind:\n  ${failures.join("\n  ")}`);
+  }
 }
