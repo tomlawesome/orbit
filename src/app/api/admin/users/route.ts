@@ -21,8 +21,11 @@ export async function GET(request: NextRequest) {
   try {
     await assertOutsideMaintenance(request);
     const session = await requireSession(request, getAuthConfig());
-    const users = await listInstanceUsers(session.user.id);
-    return NextResponse.json({ users }, { headers: { "Cache-Control": "no-store" } });
+    const result = await listInstanceUsers(session.user.id);
+    return NextResponse.json(
+      { users: result.users, totalUsers: result.totalCount, truncated: result.truncated },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return appErrorResponse(error);
   }
@@ -35,12 +38,15 @@ export async function PUT(request: NextRequest) {
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
     const update = administratorUpdateSchema.parse(await request.json());
-    const users = await setInstanceAdministrator(
+    const result = await setInstanceAdministrator(
       session.user.id,
       update.userId,
       update.administrator,
     );
-    return NextResponse.json({ users }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { users: result.users, totalUsers: result.totalCount, truncated: result.truncated },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return appErrorResponse(error);
   }
@@ -53,8 +59,11 @@ export async function PATCH(request: NextRequest) {
     const session = await requireSession(request, config);
     assertCsrf(request, session, config);
     const update = disabledUpdateSchema.parse(await request.json());
-    const users = await setInstanceUserDisabled(session.user.id, update.userId, update.disabled);
-    return NextResponse.json({ users }, { headers: { "Cache-Control": "no-store" } });
+    const result = await setInstanceUserDisabled(session.user.id, update.userId, update.disabled);
+    return NextResponse.json(
+      { users: result.users, totalUsers: result.totalCount, truncated: result.truncated },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return appErrorResponse(error);
   }
