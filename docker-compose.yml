@@ -61,7 +61,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:3a4dbfa34240e28151ad449e0bc53face0df7c58597b95e98048308ae4cad446
+    image: clamav/clamav:1.5.4-debian@sha256:6c92171e6ab52529cd44452f6443dd05b2fc4d580c190ffc70f45f955cb9f4b9
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate

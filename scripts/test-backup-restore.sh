@@ -75,8 +75,35 @@ compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
+# Same derivation as scripts/restore.sh's health_probe_url (issue #383
+# finding 3), applied here for issue #684. docker-compose.yml publishes
+# orbit-app as "${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}:3000" and
+# configure.sh writes both keys into the Deployment section of .env-orbit as
+# operator knobs, so a hardcoded 127.0.0.1:3000 probe only ever matched the
+# default deployment: on a host where something else already holds 3000 the
+# drill could not run at all, and every assertion gated on health_check --
+# including the negative ones that assert Orbit is *not* running -- would have
+# been answered by whatever unrelated service owned that port. Read the keys
+# straight from $environment_file, never from the parent shell's environment,
+# exactly like compose's own --env-file.
+health_probe_url() {
+  local bind_address port
+
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="${bind_address:-0.0.0.0}"
+  port="${port:-3000}"
+
+  # 0.0.0.0 means "listen on every interface"; it is not itself a
+  # connectable address, so probe via loopback there, same as any other
+  # client on the host would have to.
+  [[ "$bind_address" == "0.0.0.0" ]] && bind_address="127.0.0.1"
+
+  printf 'http://%s:%s/api/health' "$bind_address" "$port"
+}
+
 health_check() {
-  curl --fail --silent --max-time 2 http://127.0.0.1:3000/api/health >/dev/null 2>&1
+  curl --fail --silent --max-time 2 "$(health_probe_url)" >/dev/null 2>&1
 }
 
 wait_for_health() {
