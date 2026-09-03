@@ -1164,12 +1164,14 @@ export async function clearTourSeen() {
  * @returns {Reminders}
  */
 function remindersOf(reminders) {
+  const firstWarningDays = reminders?.firstWarningDays;
+  const finalWarningDays = reminders?.finalWarningDays;
   return {
     emailEnabled: reminders?.emailEnabled ?? UNAVAILABLE_REMINDERS.emailEnabled,
     /* Null, not a guessed default: a number invented here would be written
        back as the reader's own choice the first time the toggle is tapped. */
-    firstWarningDays: Number.isInteger(reminders?.firstWarningDays) ? reminders.firstWarningDays : null,
-    finalWarningDays: Number.isInteger(reminders?.finalWarningDays) ? reminders.finalWarningDays : null,
+    firstWarningDays: typeof firstWarningDays === "number" && Number.isInteger(firstWarningDays) ? firstWarningDays : null,
+    finalWarningDays: typeof finalWarningDays === "number" && Number.isInteger(finalWarningDays) ? finalWarningDays : null,
     firstWarning: reminders?.firstWarning ?? UNAVAILABLE_REMINDERS.firstWarning,
     finalWarning: reminders?.finalWarning ?? UNAVAILABLE_REMINDERS.finalWarning,
     outboundMail: reminders?.outboundMail ?? UNAVAILABLE_REMINDERS.outboundMail,
@@ -1290,7 +1292,11 @@ export async function readHouseholdScreen(householdId) {
       .then((/** @type {{ requests?: JoinRequest[] }} */ body) => body.requests ?? [])
       .catch(() => []),
   ]);
-  return householdScreenOf({
+  /* household.js's householdScreenOf infers its parameter shape from its own
+     defaults (e.g. `members = []` reads as `never[]`), so this call is cast
+     rather than fought from the caller's side — the fix belongs with that
+     function's own JSDoc, out of scope here. */
+  return householdScreenOf(/** @type {any} */ ({
     workspace,
     householdId,
     user: session?.user ?? null,
@@ -1301,7 +1307,7 @@ export async function readHouseholdScreen(householdId) {
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
-  });
+  }));
 }
 
 /**
