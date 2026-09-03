@@ -88,7 +88,14 @@ export const TILED_SEED = 17170812;
 const NS = "http://www.w3.org/2000/svg";
 
 /** Fills existing far/near tile groups. One rng, far then near — the call
- *  order is part of the contract, because it is what makes seeds stable. */
+ *  order is part of the contract, because it is what makes seeds stable.
+ *  Typed as the plain `Element` the body actually calls `appendChild` on
+ *  (rather than `SVGGElement`) so callers that only have an untyped
+ *  `getElementById(...)` result don't need a cast just to pass it through.
+ * @param {?Element} farTile
+ * @param {?Element} nearTile
+ * @param {() => number} [rng]
+ */
 export function fillStarTiles(farTile, nearTile, rng = seededRng(TILED_SEED)) {
   [farTile, nearTile].forEach((tile, index) => {
     const { count, rMin, rSpan, oMin, oSpan } = TILED_LAYERS[index];
@@ -98,12 +105,15 @@ export function fillStarTiles(farTile, nearTile, rng = seededRng(TILED_SEED)) {
       c.setAttribute("cy", (rng() * 1000).toFixed(1));
       c.setAttribute("r", (rMin + rng() * rSpan).toFixed(2));
       c.setAttribute("opacity", (oMin + rng() * oSpan).toFixed(2));
-      tile.appendChild(c);
+      /** @type {Element} */ (tile).appendChild(c);
     }
   });
 }
 
-/** Builds the whole tiled sky into a container (the item view's shape). */
+/** Builds the whole tiled sky into a container (the item view's shape).
+ * @param {Element} root
+ * @param {string} idPrefix
+ */
 export function mountTiledSky(root, idPrefix) {
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 1600 1000");
