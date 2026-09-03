@@ -127,6 +127,12 @@
   /** @type {string | null} */
   let doomProblem = $state(null);
 
+  /**
+   * @param {SectionRow} row
+   * @returns {EditorRow}
+   */
+  const editorRowOf = (row) => ({ ...row });
+
   /* Reset every local edit when the screen's data is replaced — a save
      reloads through the seam, and stale dirt on a field the server has since
      answered for would be a lie about what is stored. */
@@ -134,7 +140,7 @@
     const household = data.household;
     form = { name: household.name, timezone: household.timezone, currency: household.currency };
     dirty = { name: false, timezone: false, currency: false };
-    rows = household.sections.map((/** @type {SectionRow} */ row) => (/** @type {EditorRow} */ ({ ...row })));
+    rows = household.sections.map(editorRowOf);
     heir = null;
   });
 
@@ -258,8 +264,10 @@
     }
   }
 
-  const dropMember = (/** @type {HouseholdView["roster"][number]} */ member) => act(() => removeMember(v.id, member.id));
-  const putMember = (/** @type {HouseholdView["candidates"][number]} */ candidate) => act(() => addMember(v.id, candidate.id));
+  /** @param {HouseholdView["roster"][number]} member */
+  const dropMember = (member) => act(() => removeMember(v.id, member.id));
+  /** @param {HouseholdView["candidates"][number]} candidate */
+  const putMember = (candidate) => act(() => addMember(v.id, candidate.id));
 
   function leave() {
     const me = v.you;
@@ -280,10 +288,11 @@
     });
   }
 
-  const decide = (
-    /** @type {HouseholdView["joinRequests"][number]} */ request,
-    /** @type {"approve" | "decline"} */ action,
-  ) =>
+  /**
+   * @param {HouseholdView["joinRequests"][number]} request
+   * @param {"approve" | "decline"} action
+   */
+  const decide = (request, action) =>
     act(async () => {
       await decideJoinRequest(request.id, action);
       if (action === "approve") saidJoin = request.name;
@@ -309,16 +318,14 @@
      the minisys ring at r40, shrunk to r13. */
   /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
-  const ringDots = $derived(
-    constellationPlanetsOf(v.items ?? [], v.today).map(
-      (/** @type {[number, number, number, string]} */ [x, y, r, tone]) => ({
-        cx: 17 + x * 0.325,
-        cy: 17 + y * 0.325,
-        r: Math.max(1.2, r * 0.6),
-        tone: TONE[tone] ?? "--ok",
-      }),
-    ),
-  );
+  /** @param {[number, number, number, string]} planet */
+  const ringDot = ([x, y, r, tone]) => ({
+    cx: 17 + x * 0.325,
+    cy: 17 + y * 0.325,
+    r: Math.max(1.2, r * 0.6),
+    tone: TONE[tone] ?? "--ok",
+  });
+  const ringDots = $derived(constellationPlanetsOf(v.items ?? [], v.today).map(ringDot));
 
   /* ══════════════════════════════════════════════════════════════════════════
      H2 — INSIDE THIS SYSTEM (§15). The backdrop, and nothing but the backdrop:
@@ -539,27 +546,31 @@
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
 
-{#snippet mark(/** @type {EditorRow} */ row)}
-  <span class="mark" style="--sec:var({row.accent ? `--sec-${row.accent}` : "--ink-faint"})" aria-hidden="true">
-    {#if row.icon === "home"}
+<!-- No JSDoc /** @type */ comment can sit in this snippet's own parameter
+     list or body: rolldown's build mis-parses one there (bisected while
+     reconciling #624). The ternary default gives `icon`/`accent` the
+     `string | null` an annotation would, without a comment. -->
+{#snippet mark({ icon = (true ? null : ""), accent = (true ? null : "") })}
+  <span class="mark" style="--sec:var({accent ? `--sec-${accent}` : "--ink-faint"})" aria-hidden="true">
+    {#if icon === "home"}
       <svg width="17" height="17" viewBox="0 0 16 16">
         <path d="M2.6 7.7 8 3.1l5.4 4.6"/><path d="M4.3 7.4v5.6h7.4V7.4"/>
       </svg>
-    {:else if row.icon === "vehicle"}
+    {:else if icon === "vehicle"}
       <svg width="17" height="17" viewBox="0 0 16 16">
         <path d="M2.7 10.6V9.1l1.6-2.7h7.4l1.6 2.7v1.5"/>
         <circle cx="5.2" cy="10.7" r="1.15"/><circle cx="10.8" cy="10.7" r="1.15"/>
       </svg>
-    {:else if row.icon === "device"}
+    {:else if icon === "device"}
       <svg width="17" height="17" viewBox="0 0 16 16">
         <rect x="4.2" y="2.7" width="7.6" height="10.6" rx="1.5"/>
         <path d="M6.7 11.6h2.6"/>
       </svg>
-    {:else if row.icon === "service"}
+    {:else if icon === "service"}
       <svg width="17" height="17" viewBox="0 0 24 24" style="stroke-width:1.7">
         <path d="M14.6 6.4a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>
       </svg>
-    {:else if row.icon === "calendar"}
+    {:else if icon === "calendar"}
       <svg width="17" height="17" viewBox="0 0 16 16">
         <rect x="2.6" y="3.6" width="10.8" height="9.8" rx="1.4"/>
         <path d="M2.6 6.6h10.8M5.6 2.3v2.2M10.4 2.3v2.2"/>
