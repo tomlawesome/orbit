@@ -653,6 +653,46 @@ function todayOf(workspace) {
  * household (dial and manifest), any document suggestions (none from the live
  * API yet — #454), the signed-in user, and the date the chart reckons from.
  */
+/**
+ * A piece of mail that arrived but cannot be acted on, as the relay shows it.
+ *
+ * @typedef {object} MailFailure
+ * @property {string} id
+ * @property {string} receivedAt
+ * @property {string} classification
+ * @property {string} message
+ * @property {boolean} canDiscard
+ */
+
+/**
+ * Everything the home screen reads in one go.
+ *
+ * Two shapes, one type. When the viewer belongs to nothing (§11, #453) the
+ * labelled sky is all there is: `emptySky` is set, `galaxy` carries names and
+ * bearings only, and `primary` and `household` are null. Otherwise the dial,
+ * manifest and mail surfaces all have something to draw.
+ *
+ * #624: this typedef exists so `home/+page.svelte` can annotate the state it
+ * keeps this in. Without it that state infers as `null`, every property access
+ * on it is an error, and everything derived from it becomes `never` -- one
+ * missing annotation was costing 41 of the ledger's errors.
+ *
+ * @typedef {object} HomeView
+ * @property {true} [emptySky]                 set only in the labelled sky
+ * @property {Record<string, import('./chart.js').GalaxyEntry>} galaxy
+ * @property {string | null} primary           the household in the middle
+ * @property {Household | null} household
+ * @property {ReceiptSuggestion[]} suggestions
+ * @property {MailFailure[]} mailFailures
+ * @property {Receipt[]} mailReading           arrived, not yet readable
+ * @property {SessionUser | null} user
+ * @property {string} today                    YYYY-MM-DD
+ * @property {string} now                      ISO instant, pinned under fixtures
+ */
+
+/**
+ * @returns {Promise<HomeView>}
+ */
 export async function readHome() {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(),
