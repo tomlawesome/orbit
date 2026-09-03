@@ -36,3 +36,52 @@
   color:var(--ink-faint);margin:0 0 8px}
 .failures .kv span:first-child{white-space:nowrap;flex:none;margin-right:14px}
 .failures .kv span:last-child{color:var(--overdue-text);text-align:right}
+
+/*
+ * The living backdrop (#475, §14), ported from design/v19/relay-satellites.html.
+ * $lib/backdrops/satellites.js builds the actual sky/traffic markup into
+ * `.satellites`; everything here is styling for what it draws, none of it
+ * moves the card.
+ *
+ * The sheet restyles the family's `.sky`: family.css bleeds it 5% past the
+ * viewport for the old tiled drift, but this sky is streamed — positioned by
+ * the same clock as the craft — so it sits exactly on the viewport and
+ * dims with the pack's `--stars`. Left on the family rule the whole field
+ * lands 80px left and 50px up of where the sheet draws it, which the
+ * fidelity gate measured at 1.1%. The vignette is likewise the sheet's own
+ * (a touch higher and lighter than the family's, and gone on the light packs).
+ */
+.satellites{display:contents}
+/* The sheet's stage, not the family's: the card is centred when the sky has
+   room and simply starts at the top when it hasn't — a short laptop must
+   never clip the note off the bottom (relay-satellites.html). The family's
+   grid centres and clips; so the body scrolls here, and only here. The sheet
+   keeps 102px under its stage for its demos rail, which the gate trims out. */
+body:has(.satellites){overflow:auto}
+.satellites ~ .stage{height:auto;min-height:100vh;display:flex;align-items:flex-start;
+                     justify-content:center;padding:64px 20px 16px}
+.satellites ~ .stage .relay-card{max-width:100%;margin:auto}
+@media (max-width:620px){.satellites ~ .stage{padding:52px 16px 12px}}
+.satellites .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+                 transition:opacity .4s;z-index:0}
+.satellites .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.traffic{position:fixed;inset:0;pointer-events:none;z-index:1}
+.traffic svg{position:absolute;inset:0;width:100%;height:100%}
+.satellites ~ .vignette{z-index:3;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=atlas] .satellites ~ .vignette,[data-theme=dawn] .satellites ~ .vignette{background:none}
+
+/* a subset of stars breathes — life without a strobe */
+@keyframes tw-breathe{0%,100%{opacity:var(--o0)}50%{opacity:var(--o1)}}
+.tw{animation:tw-breathe var(--twd) ease-in-out infinite}
+
+/* attitude: the barely-perceptible sway of something station-keeping */
+@keyframes craft-sway{from{transform:rotate(calc(var(--sw) * -1))}to{transform:rotate(var(--sw))}}
+.hull .sway{animation:craft-sway var(--swdur) ease-in-out infinite alternate;
+            transform-box:fill-box;transform-origin:center}
+/* the station light: a slow blink, never a strobe */
+@keyframes craft-blink{0%,62%{opacity:.16}72%,86%{opacity:1}100%{opacity:.16}}
+.lamp{opacity:.85;animation:craft-blink var(--bldur) ease-in-out infinite}
+/* the conveyed message: dashes travelling craft → relay dish */
+@keyframes craft-convey{from{stroke-dashoffset:var(--doff)}to{stroke-dashoffset:0}}
+.beam{stroke-dasharray:var(--dash);animation:craft-convey var(--bmdur) linear infinite}
