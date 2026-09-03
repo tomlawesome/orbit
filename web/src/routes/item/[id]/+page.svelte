@@ -328,7 +328,7 @@
      and the re-read shows the truth that beat us; nothing is silently
      overwritten.
    *
-   * @param {() => unknown} build  the command to send
+   * @param {() => object} build  the command to send
    * @param {{ leave?: boolean }} [options] */
   async function run(build, { leave = false } = {}) {
     busy = true;
