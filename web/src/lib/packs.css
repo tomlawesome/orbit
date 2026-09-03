@@ -91,6 +91,10 @@
   /* #491: the text-grade trio. The accent and the green already clear the law
      as words on this ground, so they are the same colour by definition. */
   --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded already clear the law as words here
+     (7.08:1 / 8.23:1 on this pack's ground), so their companions are the
+     originals — no pixel moves on the dark packs or retrograde. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
 }
 [data-theme=afterdark]{
   --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -134,6 +138,9 @@
   /* #491: the faint tier now clears the law on its own, so this pack's quiet
      ink IS its faint ink — stated rather than left to be inferred. */
   --ink-quiet:#717c8e; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: 7.28:1 / 8.46:1 as words on this ground — the companions are
+     the originals, same reason as star-chart above. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
   /*
    * THE GALACTIC PLANE — after dark's own sky (§15, "after dark adopts the
    * happy accident"; approved with the bottom glow in the deep). The pack owns
@@ -180,6 +187,13 @@
      4.85:1. Retired from the roster, still measured, because a stored
      preference still renders this pack. */
   --ink-quiet:#434f60; --accent-text:#684808; --ok-text:#115531;
+  /* #491 item 3: overdue and degraded fail as words here too — 3.55:1 and
+     2.46:1 raw. Darkened from the ratified recipe (color-mix toward black);
+     degraded needed more black than the 70/30 starting point to clear the
+     law with margin. Measured against --bg: overdue-text 5.59:1,
+     degraded-text 5.11:1. */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
 }
 /*
  * dawn — AND DAWN IS THE TERMINATOR (owner, §15: "'dawn' the pack means the
@@ -269,6 +283,12 @@
      sit on. The faint tier now clears the law on its own (above), so this
      pack's quiet ink IS its faint ink — stated rather than inferred. */
   --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3, same ground (--sky-1): overdue and degraded raw are 2.94:1
+     and 2.40:1, both under the law. Same recipe as atlas — overdue-text
+     clears at the ratified 70/30 mix (4.84:1); degraded-text needed 60/40 to
+     clear with margin (4.98:1). */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
 }
 /*
  * clouds — THE CLOUD SEA, and one of Orbit's MAIN LIGHTER THEMES (owner, §15:
@@ -316,6 +336,11 @@
      the planet stops), the screen says where it falls. */
   /* #491, measured on this pack's own coolest sky stop, as dawn's are */
   --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+  /* #491 item 3: same ground and same values as dawn (identical --overdue,
+     --degraded and --sky-1), so the same recipe lands the same ratios —
+     overdue-text 4.84:1, degraded-text 4.98:1. */
+  --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+  --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
 }
 /*
  * retrograde — the fifth pack (owner, 2026-08-14). A planet in retrograde is
@@ -385,5 +410,8 @@
      tier at #6f9fb1 is 6.83:1, comfortably over, so #74a4b4 exists only to
      give this pack the same three-name vocabulary as the rest. */
   --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+  /* #491 item 3: overdue and degraded clear the law as words too (5.64:1 and
+     9.61:1), so their companions are the originals — no pixel moves. */
+  --overdue-text:var(--overdue); --degraded-text:var(--degraded);
 }
 
