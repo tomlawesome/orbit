@@ -133,6 +133,7 @@ const BAND_ROUNDS = 6;
  * The minimum separation between two constellations, scaled to the viewport
  * (§14/#473): a wide desk has room to spare, so the sky breathes into it
  * instead of huddling at mockup spacing.
+ * @param {number} width
  */
 export function minSeparationFor(width) {
   return Math.max(230, Math.min(340, width * 0.18));
@@ -142,6 +143,9 @@ export function minSeparationFor(width) {
  * How far the visible sky extends on a given bearing — the ellipse the old
  * code applied as a vector clamp, expressed as a radius so it can BOUND a
  * placement instead of REDIRECTING it.
+ * @param {number} angle
+ * @param {number} width
+ * @param {number} height
  */
 export function reachOn(angle, width, height) {
   const rx = width / 2 + REACH_PAD_X;
@@ -149,7 +153,10 @@ export function reachOn(angle, width, height) {
   return 1 / Math.hypot(Math.cos(angle) / rx, Math.sin(angle) / ry);
 }
 
-/** Distance dims a constellation without ever moving it. */
+/**
+ * Distance dims a constellation without ever moving it.
+ * @param {number} distance
+ */
 export function dimFor(distance) {
   return Math.max(0.45, Math.min(0.9, 1.05 - distance / 2600));
 }
@@ -169,7 +176,8 @@ export function dimFor(distance) {
  * The whole sky, placed.
  *
  * @param {object}  options
- * @param {object}  options.galaxy  id -> { name, pos: [x, y], ... }
+ * @param {Record<string, import('$lib/data/chart.js').GalaxyEntry>} options.galaxy
+ *                                  id -> { name, pos: [x, y], ... }
  * @param {?string} options.camera  the household you are standing in, or null
  *                                  for the newcomer's sky, which stands at the
  *                                  map origin (§11/#453)
@@ -182,7 +190,7 @@ export function dimFor(distance) {
  *                                  Defaults to width. The #485 screen
  *                                  containment bound is measured from this,
  *                                  never from the hero.
- * @returns {Array} every household in the galaxy, in stable id order, each
+ * @returns {Array<any>} every household in the galaxy, in stable id order, each
  *                  with `{ id, household, isCamera, dist, angle, radius, ox,
  *                  oy, dim, banded, undrawn }`. The camera's own entry is
  *                  included at the origin and marked `isCamera`: you never
@@ -204,6 +212,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
   const ids = Object.keys(galaxy).sort();
   const origin = camera && galaxy[camera] ? galaxy[camera].pos : [0, 0];
   const minSep = minSeparationFor(width);
+  /** @type {(angle: number) => number} */
   const reach = (angle) => reachOn(angle, width, height);
   /*
    * The #485 screen bound, taken on the SCREEN's own half-width — never the
@@ -211,6 +220,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
    * or move it. See EDGE_INSET above for why the screen and not the hero.
    */
   const fitX = Math.max(screen / 2 - EDGE_INSET, 0);
+  /** @type {(angle: number) => number} */
   const fit = (angle) => {
     const limit = Math.max(height / 2 - (Math.sin(angle) < 0 ? BAND_TOP : BAND_BOTTOM), 0);
     return Math.hypot(fitX, Math.min(limit, fitX * Math.abs(Math.tan(angle))));
@@ -259,6 +269,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
    * tell a bent bearing from a true one. Because the radius survives the
    * slide, #427's keep-out survives it too.
    */
+  /** @type {(point: Drawn) => void} */
   const resolve = (point) => {
     let ox = Math.cos(point.angle) * point.radius;
     let oy = Math.sin(point.angle) * point.radius;
@@ -371,6 +382,7 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
    * than up to the last pass: the guarantee always wins, even where the edge
    * bound would otherwise have clipped it.
    */
+  /** @type {(point: Drawn, by: number) => void} */
   const slide = (point, by) => {
     let ox = point.ox + by;
     const side = Math.sign(ox) || Math.sign(point.ox) || 1;
@@ -756,6 +768,14 @@ export function placeGalaxy({ galaxy, camera = null, width, height, keepOut = 0,
  */
 const memo = new WeakMap();
 
+/**
+ * @param {Record<string, import('$lib/data/chart.js').GalaxyEntry>} galaxy
+ * @param {?string} camera
+ * @param {number} width
+ * @param {number} height
+ * @param {number} keepOut
+ * @param {number} screen
+ */
 function signature(galaxy, camera, width, height, keepOut, screen) {
   const shape = Object.keys(galaxy).sort()
     .map((id) => `${id}:${galaxy[id].pos[0]},${galaxy[id].pos[1]}`)
@@ -763,10 +783,27 @@ function signature(galaxy, camera, width, height, keepOut, screen) {
   return `${camera ?? ""}@${width}x${height}/${keepOut}/${screen}#${shape}`;
 }
 
+/**
+ * @param {Record<string, import('$lib/data/chart.js').GalaxyEntry>} galaxy
+ * @param {?string} camera
+ * @param {number} width
+ * @param {number} height
+ * @param {number} keepOut
+ * @param {number} screen
+ */
 function memoised(galaxy, camera, width, height, keepOut, screen) {
   return memo.get(galaxy)?.get(signature(galaxy, camera, width, height, keepOut, screen)) ?? null;
 }
 
+/**
+ * @param {Record<string, import('$lib/data/chart.js').GalaxyEntry>} galaxy
+ * @param {?string} camera
+ * @param {number} width
+ * @param {number} height
+ * @param {number} keepOut
+ * @param {number} screen
+ * @param {Drawn[]} placed
+ */
 function remember(galaxy, camera, width, height, keepOut, screen, placed) {
   let bySignature = memo.get(galaxy);
   if (!bySignature) memo.set(galaxy, (bySignature = new Map()));
