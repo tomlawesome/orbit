@@ -1,7 +1,9 @@
 <script>
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
+  import { clearTourSeen, readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
+  import { relaunchTour } from "$lib/tour/relaunch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./settings.css";
@@ -57,6 +59,21 @@
     document.documentElement.dataset.theme = name;
     try { localStorage.setItem("orbit-theme", name); } catch {}
   }
+
+  /**
+   * "Take the walk again" (#753, slice 3 of #477, mockup stop 8 of
+   * design/v19/tour.html): clears `tourSeenAt` then goes to /home, where the
+   * existing first-run trigger starts the walk at stop 1 because the record
+   * now reads null. relaunchTour (relaunch.js) also arms the one-shot flag
+   * that gets this SAME-session arrival past Tour.svelte's `started` guard.
+   */
+  function walkAgain() {
+    return relaunchTour({
+      clearTourSeen,
+      navigateHome: () => goto(resolve("/home")),
+    });
+  }
+
   /**
    * Reminders (#468). The ratified card shows the two warning offsets as
    * VALUES — one toggle is the only control §13 draws — so the write below is
@@ -174,6 +191,7 @@
           </button>
         {/each}
       </div>
+      <button class="relaunch" onclick={walkAgain}>↻ take the walk again</button>
     </div>
 
     <div class="card">
