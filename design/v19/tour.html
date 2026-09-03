@@ -15,7 +15,10 @@
   relay, and create/settings. At each stop the explained thing sits at full
   brightness and everything else drops to this pack's own faint tier — dimmed
   by opacity over the pack's existing token colours, never a colour invented
-  for the purpose. A phone variant (?pocket=1) walks the same four-stop cut
+  for the purpose. On the daylight packs (atlas, dawn, clouds) nothing dims:
+  the explained thing is pushed forward by colour instead — full ink, accent
+  lines, an accent halo — because dimming a light sky just greys the page
+  (owner, 2026-09-03). A phone variant (?pocket=1) walks the same four-stop cut
   the ratified design names: sky, dial, inbox, relay.
 
   THE EXAMPLE BODY (stops 3-5) is a bounded, LABELLED exception to §12
@@ -164,9 +167,28 @@
      a new hex, it turns down the opacity of those same tokens, which is what
      reading a chart's faint tier actually looks like. .lit elements are the
      one thing at full strength for the current stop. */
-  [data-tour-dim]{transition:opacity .45s ease}
+  [data-tour-dim]{transition:opacity .45s ease,filter .45s ease}
   .scene.tour-active [data-tour-dim]{opacity:.24}
   .scene.tour-active [data-tour-dim].lit{opacity:1}
+
+  /* ---- light packs go the other way (owner, 2026-09-03) --------------------
+     Dimming a daylight sky turns the whole page grey, so atlas, dawn and
+     clouds dim nothing. The lit thing is pushed forward instead, by colour:
+     its quiet tokens step up to full ink, its structural lines take the
+     accent, and it wears a soft accent halo. Still the pack's own tokens,
+     still no invented hex. */
+  [data-theme=atlas] .scene.tour-active [data-tour-dim],
+  [data-theme=dawn] .scene.tour-active [data-tour-dim],
+  [data-theme=clouds] .scene.tour-active [data-tour-dim]{opacity:1}
+  [data-theme=atlas] .scene.tour-active [data-tour-dim].lit,
+  [data-theme=dawn] .scene.tour-active [data-tour-dim].lit,
+  [data-theme=clouds] .scene.tour-active [data-tour-dim].lit{
+    --ink-quiet:var(--ink); --ink-faint:var(--ink-mid); --ink-mid:var(--ink);
+    --chart-ink:var(--ink); --chart-line:var(--accent); --chart-line-soft:var(--accent);
+    --line-soft:var(--accent); --line:var(--accent);
+    filter:drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 45%,transparent))}
+  [data-theme=atlas] .tourcard,[data-theme=dawn] .tourcard,[data-theme=clouds] .tourcard{
+    border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 18px 40px -20px var(--accent)}
 
   /* ================= scene: sky + dial + manifest (stops 1–5, pocket 1–2) */
   .scene{position:relative;z-index:2}
