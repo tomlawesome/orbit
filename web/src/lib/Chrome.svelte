@@ -53,7 +53,7 @@
   let active = $state("starchart");
 
   $effect(() => {
-    active = document.documentElement.dataset.theme || "starchart";
+    active = document.documentElement.dataset.theme || "afterdark";
     const close = (event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
