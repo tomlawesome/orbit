@@ -2,15 +2,15 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { dueEvents, notificationDeliveries, userPreferences } from "@/db/schema";
-import { GET as readReminders, PUT as writeReminders } from "@/app/api/settings/reminders/route";
 import { getAuthConfig } from "@/lib/env";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
-  requestWithoutSession,
   type IntegrationSession,
 } from "./support/fixtures";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+
+const { GET: readReminders, PUT: writeReminders } = await loadRoute("settings/reminders");
 
 /**
  * Reminder timing against PostgreSQL (#468). The unit tests pin the route's
@@ -35,17 +35,18 @@ type Reminders = {
 };
 
 async function read(session: IntegrationSession): Promise<{ status: number; reminders: Reminders }> {
-  const response = await readReminders(requestForSession(session, REMINDERS_URL));
+  const response = await callRouteForSession(readReminders, session, { url: REMINDERS_URL });
   const body = await response.json() as { reminders: Reminders };
   return { status: response.status, reminders: body.reminders };
 }
 
 async function write(session: IntegrationSession, body: unknown, headers: Record<string, string> = {}) {
-  const response = await writeReminders(requestForSession(session, REMINDERS_URL, {
+  const response = await callRouteForSession(writeReminders, session, {
+    url: REMINDERS_URL,
     method: "PUT",
     body: JSON.stringify(body),
     headers,
-  }));
+  });
   return { status: response.status, body: await response.json() as { reminders?: Reminders; error?: { code: string } } };
 }
 
@@ -162,15 +163,16 @@ describe("PostgreSQL reminder-timing contracts", () => {
     const member = await fixture.session("member");
     const config = getAuthConfig();
 
-    const anonymousRead = await readReminders(requestWithoutSession(REMINDERS_URL));
+    const anonymousRead = await callRoute(readReminders, { url: REMINDERS_URL });
     expect(anonymousRead.status).toBe(401);
     expect(anonymousRead.headers.get("cache-control")).toBe("no-store");
 
-    const anonymousWrite = await writeReminders(requestWithoutSession(REMINDERS_URL, {
+    const anonymousWrite = await callRoute(writeReminders, {
+      url: REMINDERS_URL,
       method: "PUT",
       body: JSON.stringify({ emailEnabled: false, firstWarningDays: 30, finalWarningDays: 7 }),
       headers: { origin: config.appUrl.origin, "sec-fetch-site": "same-origin" },
-    }));
+    });
     expect(anonymousWrite.status).toBe(401);
 
     const noCsrf = await write(member, { emailEnabled: false, firstWarningDays: 30, finalWarningDays: 7 }, {
