@@ -61,7 +61,7 @@ const systemPatterns = [
   // catch-all default below, which was right by accident: this states it
   // (#620).
   /^web\//u,
-  /^src\/lib\/(?:auth|env|notifications|runtime-secret|private-browser-storage)(?:[./-]|$)/u,
+  /^src\/lib\/(?:auth|env|notifications|runtime-secret)(?:[./-]|$)/u,
   /* `boot` is the startup sequence Next's instrumentation hook used to call
      and SvelteKit's `init` now does (#735): migrate-on-boot and the workers
      both start there, so a change to it carries system risk. */
