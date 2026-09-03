@@ -9,6 +9,12 @@ export default defineConfig({
       // a web/ module that imports a sibling through $lib (#410). web/ test
       // FILES stay excluded below; only their subjects are reachable.
       $lib: fileURLToPath(new URL("./web/src/lib", import.meta.url)),
+      // The other SvelteKit-ism the ported API routes need (#735). It is a
+      // virtual module SvelteKit generates, so nothing resolves it here; the
+      // stub exposes the same live process environment the real one does.
+      "$env/dynamic/private": fileURLToPath(
+        new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
+      ),
     },
   },
   test: {
