@@ -36,19 +36,27 @@ export function fixturesRequested() {
 /**
  * Wraps a read handler: engine failures become the shared error envelope.
  *
+ * `errorResponse` exists because the auth routes answer in a different
+ * envelope — `authErrorResponse` reports provider and configuration failures
+ * that mean nothing on a workspace route, and it already delegates the
+ * maintenance case back to `appErrorResponse` so the bounded 503 contract
+ * (#523) holds either way.
+ *
  * @param {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response> | Response} handler
- * @param {{ fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response }} [options]
+ * @param {{
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   errorResponse?: (error: unknown) => Response,
+ * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
-export function api(handler, { fixture } = {}) {
+export function api(handler, { fixture, errorResponse = appErrorResponse } = {}) {
   return async (event) => {
     try {
       if (fixture && fixturesRequested()) return fixture(event);
       return await handler(event);
     } catch (error) {
-      /* appErrorResponse owns the status, the code and the no-store header,
-         including the bounded 503 the maintenance guard promises (#523). */
-      return appErrorResponse(error);
+      /* The envelope owns the status, the code and the no-store header. */
+      return errorResponse(error);
     }
   };
 }
