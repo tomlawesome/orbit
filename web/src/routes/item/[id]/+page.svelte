@@ -4,7 +4,7 @@
   import { resolve } from "$app/paths";
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money } from "$lib/format.js";
-  import { applyCommand } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand } from "$lib/data/workspace.js";
   import { beltManifestOf } from "$lib/data/belt.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
@@ -38,6 +38,36 @@
    * rendering is gone — the belt is what /item/<id> draws now — but its
    * writes were never the thing being replaced.
    */
+
+  /**
+   * The belt's vocabulary, taken from the two modules that own it (#624).
+   *
+   * @typedef {import("./band.js").Body}       Body
+   * @typedef {import("./band.js").BeltRow}    BeltRow
+   * @typedef {import("./band.js").ItemRecord} ItemRecord
+   * @typedef {import("./belt.behaviour.js").BeltController} BeltController
+   */
+
+  /** @typedef {"complete" | "reschedule" | "snooze" | "edit" | "retire"} PanelName */
+
+  /**
+   * The command panels' fields, as the inputs bind them: strings, one panel's
+   * worth at a time. Each panel fills what it needs and leaves the rest
+   * unset, which is why every field is optional rather than blank.
+   *
+   * @typedef  {object} PanelForm
+   * @property {string} [completedDate]
+   * @property {string} [nextDate]
+   * @property {string} [cost]
+   * @property {string} [notes]
+   * @property {string} [dueDate]
+   * @property {string} [until]
+   * @property {string} [title]
+   * @property {string} [provider]
+   * @property {string} [reference]
+   * @property {string | number} [recurrenceMonths]
+   */
+
   let { data } = $props();
 
   /* #434: an id that is a mail-in receipt is not an item and has no seat in
@@ -46,37 +76,55 @@
   const suggestionView =
     data.kind === "suggestion" ? import("./Suggestion.svelte").then((m) => m.default) : null;
 
+  /** @type {HTMLDivElement | null} */
   let root = $state(null);
+  /** @type {HTMLDivElement | null} */
   let sky = $state(null);
+  /** @type {BeltController | null} */
   let belt = null;
 
   /* What the screen shows. `bodies` and `bloom` are copies taken from the
      controller at each settle: the band owns them, the markup only reads. */
+  /** @type {Body[]} */
   let bodies = $state.raw([]);
+  /** @type {number[]} */
   let bloom = $state.raw([]);
   let selected = $state(0);
-  let cardBody = $state(null);
+  /* The type rides on the initial value, not on a declaration comment: the
+     band writes this from its own callbacks, so a plain `null` would have
+     the derivations below reading a variable narrowed to null for ever. */
+  let cardBody = $state(/** @type {Body | null} */ (null));
   let query = $state("");
+  /** @type {Set<number>} */
   let matches = $state.raw(new Set());
 
   /* The command surface, the item view's own (#455). */
+  /** @type {PanelName | null} */
   let panel = $state(null);
+  /** @type {"archive" | "cancel" | null} */
   let armed = $state(null);
   let busy = $state(false);
+  /** @type {string | null} */
   let problem = $state(null);
+  /** @type {PanelForm} */
   let form = $state({});
 
+  /** @type {HTMLInputElement | null} */
   let findEl = $state(null);
   /* Deliberately NOT reactive, all three: the mounting effect reads them and
      the band's callbacks write them, so making them state would make the
      effect depend on its own output and rebuild the belt for ever. */
+  /** @type {string | null} */
   let centredId = null;
+  /** @type {string | null} */
   let cardId = null;
+  /** @type {string | null} */
   let addressId = data.selectedId ?? null;
   let routerReady = false;
 
   const row = $derived(cardBody?.item ?? null);              /* the manifest row  */
   const record = $derived(cardBody?.kind === "item" ? cardBody.item.item : null); /* the raw item */
+  /** @type {(days: number[]) => string} */
   const remindOf = (days) => days.map((d) => `${d}d`).join(" and ") + " before";
 
   /* ---- mounting the band ------------------------------------------------
@@ -94,7 +142,7 @@
     const focus = centredId ?? data.selectedId;
     const controller = mountBelt(root, {
       manifest: rows,
-      selectedId: rows.some((one) => one.id === focus) ? focus : data.selectedId,
+      selectedId: rows.some((/** @type {BeltRow} */ one) => one.id === focus) ? focus : data.selectedId,
       /* The band hands itself to every callback, because the first layout runs
          inside mountBelt — before `controller` below has been assigned. */
       onSelect(i, band) {
@@ -135,11 +183,12 @@
     routerReady = true;
   });
 
-  /* The address follows the apex: centring another item makes the one in the
+  /** The address follows the apex: centring another item makes the one in the
      browser's bar a lie. REPLACE, never push — ← and → are reading, not
      navigating, and Back must still leave the way you came in (#424's rule
      for the expanded row, in the belt's grammar). A document has no address
-     of its own yet, so it keeps its item's. */
+     of its own yet, so it keeps its item's.
+     @param {string} itemId */
   function address(itemId) {
     if (!routerReady || !itemId || itemId === addressId) return;
     addressId = itemId;
@@ -154,6 +203,7 @@
      Typing LIGHTS the matches and DIMS the rest; nothing vanishes, because
      the belt keeps its shape and you are meant to see where in time your hit
      sits. Enter centres the nearest match along the belt. */
+  /** @param {Event & { currentTarget: EventTarget & HTMLInputElement }} event */
   function onFind(event) {
     query = event.currentTarget.value;
     matches = matchesOf(bodies, query);
@@ -176,6 +226,7 @@
           : "nothing matches · the belt keeps its shape",
   );
 
+  /** @param {KeyboardEvent} event */
   function onFindKey(event) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -198,10 +249,12 @@
      arrows belong to the caret; inside a command panel they belong to the
      field being typed into, which the mockup never had to think about
      because its pills were inert. */
+  /** @param {EventTarget | null} target */
   function typing(target) {
     return target instanceof Element
       && (target === findEl || Boolean(target.closest("input, textarea, select")));
   }
+  /** @param {KeyboardEvent} event */
   function onKeydown(event) {
     if (event.key === "Escape" && panel) { panel = null; armed = null; return; }
     if (typing(event.target)) return;
@@ -224,13 +277,23 @@
 
   /* ---- the commands (#455) ---------------------------------------------- */
   const todayISO = () => data.today ?? new Date().toISOString().slice(0, 10);
+  /** @type {(minor?: number | null) => string} */
   const pounds = (minor) => (minor === null || minor === undefined ? "" : (minor / 100).toFixed(2));
+  /** @type {(text?: string) => number | undefined} */
   const minorOf = (text) => {
     const value = Number.parseFloat(String(text).replace(",", "."));
     return Number.isFinite(value) ? Math.round(value * 100) : undefined;
   };
 
-  function open(name) {
+  /**
+   * A panel is always about the record at the apex, so it is handed the one
+   * it is opening on rather than reaching for it: only the item card renders
+   * these buttons, which is where the record is known to be there.
+   *
+   * @param {PanelName}  name
+   * @param {ItemRecord} item
+   */
+  function open(name, item) {
     problem = null;
     armed = null;
     panel = panel === name ? null : name;
@@ -238,32 +301,35 @@
       const done = todayISO();
       form = {
         completedDate: done,
-        nextDate: nextDateAfter(done, record.recurrenceMonths) ?? "",
-        cost: pounds(record.costMinor),
+        nextDate: nextDateAfter(done, item.recurrenceMonths) ?? "",
+        cost: pounds(item.costMinor),
         notes: "",
       };
     }
-    if (panel === "reschedule") form = { dueDate: record.dueDate ?? todayISO() };
-    if (panel === "snooze") form = { until: record.snoozedUntil ?? todayISO() };
+    if (panel === "reschedule") form = { dueDate: item.dueDate ?? todayISO() };
+    if (panel === "snooze") form = { until: item.snoozedUntil ?? todayISO() };
     if (panel === "edit") {
       form = {
-        title: record.title,
-        provider: record.provider ?? "",
-        reference: record.reference ?? "",
-        cost: pounds(record.costMinor),
-        dueDate: record.dueDate ?? "",
-        recurrenceMonths: record.recurrenceMonths ?? "",
-        notes: record.notes ?? "",
+        title: item.title,
+        provider: item.provider ?? "",
+        reference: item.reference ?? "",
+        cost: pounds(item.costMinor),
+        dueDate: item.dueDate ?? "",
+        recurrenceMonths: item.recurrenceMonths ?? "",
+        notes: item.notes ?? "",
       };
     }
   }
 
-  /* One writer. Success re-reads the belt — the item may have moved in time,
+  /** One writer. Success re-reads the belt — the item may have moved in time,
      so the band it rides in is laid out again around it. Completing something
      that does not come round again leaves for the orbit, because this address
      no longer has a body to centre. A 409 surfaces in the server's own words
      and the re-read shows the truth that beat us; nothing is silently
-     overwritten. */
+     overwritten.
+   *
+   * @param {() => unknown} build  the command to send
+   * @param {{ leave?: boolean }} [options] */
   async function run(build, { leave = false } = {}) {
     busy = true;
     problem = null;
@@ -274,28 +340,33 @@
       if (leave) await goto(resolve("/home"));
       else await invalidateAll();
     } catch (error) {
-      problem = error?.message ?? String(error);
-      if (error?.code === "version_conflict") await invalidateAll();
+      /* The seam throws WorkspaceError and nothing else carries a `code`,
+         so this is the same two readings the line always made. */
+      problem = error instanceof Error ? error.message : String(error);
+      if (error instanceof WorkspaceError && error.code === "version_conflict") await invalidateAll();
     } finally {
       busy = false;
     }
   }
 
-  /* Two taps for what cannot be undone, the protocol home and the inbox use
-     for exactly the same reason (#434): the first tap arms, the second acts. */
+  /** Two taps for what cannot be undone, the protocol home and the inbox use
+     for exactly the same reason (#434): the first tap arms, the second acts.
+   *
+   * @param {"archive" | "cancel"} act
+   * @param {() => unknown} go */
   function tap(act, go) {
     if (armed !== act) { armed = act; return; }
     go();
   }
 
   const editsOf = () => ({
-    title: form.title.trim(),
-    provider: form.provider.trim() || undefined,
-    reference: form.reference.trim() || undefined,
+    title: (form.title ?? "").trim(),
+    provider: (form.provider ?? "").trim() || undefined,
+    reference: (form.reference ?? "").trim() || undefined,
     costMinor: minorOf(form.cost),
     dueDate: form.dueDate || undefined,
     recurrenceMonths: form.recurrenceMonths ? Number(form.recurrenceMonths) : undefined,
-    notes: form.notes.trim() || undefined,
+    notes: (form.notes ?? "").trim() || undefined,
   });
 </script>
 
@@ -358,7 +429,7 @@
         </div>
         <a class="back" href={resolve("/home")}>← back to your orbit</a>
       </article>
-    {:else if cardBody?.kind === "doc"}
+    {:else if cardBody?.kind === "doc" && row}
       <!-- A document shows what Orbit honestly holds: what the file is, when
            it arrived, that it scanned clean, and the original in your hands. -->
       <article class="glass item-card">
@@ -390,7 +461,7 @@
           <b>{row.title}</b> is the ringed body beside you in the belt.</div>
         <button class="back" onclick={() => belt?.centreById(row.id)}>← back to {row.title}</button>
       </article>
-    {:else if cardBody}
+    {:else if cardBody && row && record}
       <!-- An item shows the item screen as #424/#455 render it: what it is,
            when it is due, how often it comes round, what it costs, who does
            it, when you will be warned, every command reachable. It does NOT
@@ -424,21 +495,21 @@
         <div class="acts" role="group" aria-label="Item actions">
           {#if row.status === "active"}
             <button style="--act:var(--ok)" aria-pressed={panel === "complete"}
-                    onclick={() => open("complete")}>complete</button>
+                    onclick={() => open("complete", record)}>complete</button>
             <button style="--act:var(--upcoming)" aria-pressed={panel === "reschedule"}
-                    onclick={() => open("reschedule")}>reschedule</button>
+                    onclick={() => open("reschedule", record)}>reschedule</button>
             <button style="--act:var(--warm)" aria-pressed={panel === "snooze"}
-                    onclick={() => open("snooze")}>snooze</button>
+                    onclick={() => open("snooze", record)}>snooze</button>
             <button style="--act:var(--accent)" aria-pressed={panel === "edit"}
-                    onclick={() => open("edit")}>edit</button>
+                    onclick={() => open("edit", record)}>edit</button>
             <button style="--act:var(--overdue)" aria-pressed={panel === "retire"}
-                    onclick={() => open("retire")}>retire</button>
+                    onclick={() => open("retire", record)}>retire</button>
           {:else}
             <button style="--act:var(--ok)" disabled={busy}
                     onclick={() => run(() => statusCommand(record, "active"))}>restore</button>
             {#if row.status !== "archived"}
               <button style="--act:var(--overdue)" aria-pressed={panel === "retire"}
-                      onclick={() => open("retire")}>retire</button>
+                      onclick={() => open("retire", record)}>retire</button>
             {/if}
           {/if}
         </div>
@@ -465,7 +536,7 @@
                   completedDate: form.completedDate,
                   nextDate: form.nextDate || undefined,
                   costMinor: minorOf(form.cost),
-                  notes: form.notes.trim() || undefined,
+                  notes: (form.notes ?? "").trim() || undefined,
                 }), { leave: !form.nextDate })}>complete</button>
               <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
             </div>
@@ -517,7 +588,7 @@
             <div class="field"><label for="e-notes">notes</label>
               <textarea id="e-notes" rows="3" bind:value={form.notes} placeholder="optional"></textarea></div>
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || !form.title.trim()}
+              <button class="btn-primary" disabled={busy || !form.title?.trim()}
                 onclick={() => run(() => upsertCommand(record, editsOf()))}>save changes</button>
               <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
             </div>
