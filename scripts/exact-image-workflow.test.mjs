@@ -89,13 +89,15 @@ describe("exact-image publication workflow", () => {
     },
   );
 
-  it("can be dispatched on demand and re-evaluates when a label is applied (#572)", () => {
+  it("can be dispatched on demand, and never runs on a label (#572, #757)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
 
+    // The on-demand lanes are reached by dispatching this workflow at the
+    // branch. #572 originally reached them by listening for `labeled`, which
+    // #757 removed: every label started a whole run, and a cancelled
+    // duplicate could outrank the real green checks and block the merge.
     expect(trigger).toContain("workflow_dispatch:");
-    // `labeled` is required for applying `ci: acceptance` to start a run by
-    // itself; without it a PR would need an unrelated push to re-trigger.
-    expect(trigger).toMatch(/types:\s*\n(\s*-\s*\w+\n)*\s*-\s*labeled\n/u);
+    expect(trigger).not.toMatch(/^\s*-\s*labeled\s*$/mu);
   });
 
   it("keeps ordinary pull requests on the static and unit lane", () => {
