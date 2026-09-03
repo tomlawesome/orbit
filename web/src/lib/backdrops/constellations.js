@@ -49,10 +49,16 @@ const CHUNK = 800; /* world units rolled at a time for the three star layers */
 const AHEAD = 760; /* rolled this far past the right edge, before it is needed */
 const BEHIND = 340; /* held this far past the left edge, then discarded */
 
+/**
+ * @typedef {{ id: string, name: string, pos: [number, number], planets: Array<[number, number, number, string]>, items: number }} HouseholdSys
+ * @typedef {{ name: string, pts: number[][], links: number[][] }} FigureDef
+ */
+
 /* The named constellations sharing the sky with your households — real star
  * patterns, borrowed by name, drawn quieter than any household mark so the
  * households stay the only things up there that mean anything. Fixed sky,
  * not data: identical to design/v19/create-v3.html's own FIGURES. */
+/** @type {FigureDef[]} */
 const FIGURES = [
   { name: "CASSIOPEIA", pts: [[-48, 6], [-24, -14], [0, 4], [24, -16], [48, 2]], links: [[0, 1], [1, 2], [2, 3], [3, 4]] },
   { name: "CYGNUS", pts: [[0, -32], [0, -6], [0, 20], [0, 40], [-32, -2], [30, -12]], links: [[0, 1], [1, 2], [2, 3], [4, 1], [5, 1]] },
@@ -95,10 +101,12 @@ const INPROGRESS_HTML = `
       <text x="1204" y="655">0&#176;</text><text x="932" y="250">75&#176;</text>
     </g>`;
 
+/** @param {number} a @param {number} n */
 const mod = (a, n) => ((a % n) + n) % n;
 /* A household is in one place, and so is a constellation: neither may be on
  * screen twice at once. Both step through a fixed cycle keyed to the chunk's
  * address; the cycle's starting point is the only part the seed decides. */
+/** @param {number} n @param {number} idx @param {number} off */
 const cyc = (n, idx, off) => mod(idx + off, n);
 
 /**
@@ -143,6 +151,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   root.append(skyDiv, chartDiv);
 
   /* ---- the three star lanes ------------------------------------------- */
+  /** @param {SVGGElement} g @param {() => number} r */
   function genFarStars(g, r) {
     for (let i = 0; i < 66; i++)
       g.appendChild(svgEl("circle", {
@@ -150,6 +159,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
         r: (0.45 + r() * 0.6).toFixed(2), opacity: (0.17 + r() * 0.29).toFixed(2),
       }));
   }
+  /** @param {SVGGElement} g @param {() => number} r */
   function genNearStars(g, r) {
     for (let i = 0; i < 32; i++)
       g.appendChild(svgEl("circle", {
@@ -158,6 +168,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
       }));
   }
   /* the third, slowly twinkling depth (§14 backdrop iteration 2) */
+  /** @param {SVGGElement} g @param {() => number} r */
   function genSparks(g, r) {
     for (let i = 0; i < 5; i++) {
       const c = /** @type {SVGCircleElement} */ (svgEl("circle", {
@@ -172,6 +183,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   }
 
   /* --- one real household, riding at the height its own bearing gives it --- */
+  /** @param {SVGGElement} g @param {HouseholdSys} hh @param {number} x @param {() => number} r */
   function household(g, hh, x, r) {
     const bearing = Math.atan2(hh.pos[1], hh.pos[0]); /* sacred — never rolled */
     const spread = 300 + r() * 145;
@@ -217,6 +229,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   }
 
   /* --- one named constellation, quieter than any household ------------- */
+  /** @param {FigureDef} fig @param {number} x @param {number} y @param {() => number} r */
   function figure(fig, x, y, r) {
     const scale = 0.72 + r() * 0.55;
     const tilt = (r() * 24 - 12).toFixed(1);
@@ -242,32 +255,42 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   }
 
   /* every real household comes past in turn */
+  /** @param {SVGGElement} g @param {() => number} r @param {number} idx */
   function genHousehold(g, r, idx) {
     if (SYSTEMS.length === 0) return;
     household(g, SYSTEMS[cyc(SYSTEMS.length, idx, seed % SYSTEMS.length)], 170 + r() * 220, r);
   }
+  /** @param {SVGGElement} g @param {() => number} r @param {number} idx */
   function genFigure(g, r, idx) {
     if (r() > 0.86) return; /* the deep sky is allowed a gap */
     const f = FIGURES[cyc(FIGURES.length, idx, seed % FIGURES.length)];
     g.appendChild(figure(f, 180 + r() * 340, 140 + r() * 720, r));
   }
 
-  const LAYERS = [
+  /**
+   * @typedef {{
+   *   key: number, node: SVGGElement, w: number, speed: number,
+   *   gen: (g: SVGGElement, r: () => number, idx: number) => void,
+   *   marks?: boolean, chunks: Map<number, SVGGElement>, o0: number,
+   * }} Layer
+   */
+  const LAYERS = /** @type {Layer[]} */ ([
     { key: 0, node: lyrFar, w: CHUNK, speed: 1600 / 400, gen: genFarStars },
     { key: 1, node: lyrSpark, w: CHUNK, speed: 1600 / 300, gen: genSparks },
     { key: 2, node: lyrNear, w: CHUNK, speed: 1600 / 195, gen: genNearStars },
     { key: 4, node: lyrDeep, w: 700, speed: 1600 / 520, gen: genFigure, marks: true },
     { key: 3, node: lyrSys, w: 560, speed: 1600 / 400, gen: genHousehold, marks: true },
-  ];
+  ]);
   for (const L of LAYERS) { L.chunks = new Map(); L.o0 = 0; }
 
   /* --- keeping the window stocked: rolled ahead, dropped behind --------- */
+  /** @param {Layer} L @param {number} offset */
   function fillWindow(L, offset) {
     const first = Math.floor((offset - BEHIND) / L.w);
     const last = Math.floor((offset + 1600 + AHEAD) / L.w);
     for (let i = first; i <= last; i++) {
       if (L.chunks.has(i)) continue;
-      const g = svgEl("g", { transform: `translate(${i * L.w},0)` });
+      const g = /** @type {SVGGElement} */ (svgEl("g", { transform: `translate(${i * L.w},0)` }));
       L.gen(g, streamFor(L.key, i), i);
       L.chunks.set(i, g);
       L.node.appendChild(g);
@@ -279,13 +302,14 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   /* The card can no longer own the middle for ever — the sky moves. It can
      own the OPENING, though: the window starts at whichever offset leaves
      the centre clearest, so the first thing you see is composed. */
+  /** @param {Layer} L */
   function tidyStart(L) {
     let best = 0, bestScore = -1e9;
     for (let o = 0; o < L.w; o += 20) {
       fillWindow(L, o);
       let onScreen = 0, behindCard = 0, clear = 9;
       for (const [i, g] of L.chunks) for (const m of g.querySelectorAll(".csys")) {
-        const t = /translate\(([-\d.]+),([-\d.]+)\)/.exec(m.getAttribute("transform"));
+        const t = /translate\(([-\d.]+),([-\d.]+)\)/.exec(m.getAttribute("transform") ?? "");
         if (!t) continue;
         const x = i * L.w + parseFloat(t[1]) - o, y = parseFloat(t[2]);
         if (x < 60 || x > 1540) continue;
@@ -301,6 +325,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   }
 
   /* --- one frame: advance every layer to its offset at clock t ---------- */
+  /** @param {number} t */
   function place(t) {
     for (const L of LAYERS) {
       const offset = L.o0 + t * L.speed;
@@ -326,7 +351,7 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
   const still = () => motion.matches;
   let clock = 0, lastTs = /** @type {?number} */ (null), lastDrawn = -1;
   let raf = /** @type {?number} */ (null);
-  function tick(ts) {
+  function tick(/** @type {number} */ ts) {
     if (lastTs === null) lastTs = ts;
     const dt = Math.min(0.2, (ts - lastTs) / 1000);
     lastTs = ts;

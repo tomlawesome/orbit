@@ -83,12 +83,12 @@
     readAdminScreen().then((screen) => {
       if (disposed) return;
       view = screen;
-      const seed = data?.fixtures ? seedFromWorkspace(view.primary ?? "") : rollSeed();
-      const galaxy = galaxyOf({ households: view.households, activeHouseholdId: view.primary }, view.today);
-      const domain = view.relay.find(([label]) => label === "collection domain")?.[1] ?? "";
+      const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
+      const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
+      const domain = screen.relay.find(([label]) => label === "collection domain")?.[1] ?? "";
       backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
-        seed, galaxy, primary: view.primary,
-        facts: { domain, systems: view.households.length, crew: view.users.length },
+        seed, galaxy, primary: screen.primary,
+        facts: { domain, systems: screen.households.length, crew: screen.users.length },
       });
     });
     return () => {
