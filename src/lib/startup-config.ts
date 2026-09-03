@@ -5,7 +5,7 @@ import { getDocumentConfig } from "@/server/documents/config";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { getImapIngestionConfig } from "@/server/imap-ingestion";
 import { setConfigurationProblems } from "@/lib/configuration-problems";
-import { logFormats, logLevels } from "@/lib/logger";
+import { logFormats, logLevels, type ConfigurationSetting } from "@/lib/logger";
 
 export type StartupConfigurationCode =
   | "configuration_version"
@@ -13,7 +13,13 @@ export type StartupConfigurationCode =
   | "configuration_optional";
 
 export type StartupConfigurationIssue = {
-  field: "ORBIT_CONFIG_SCHEMA_VERSION" | "authentication" | "database" | "documents" | "logging" | "mail" | "imap" | "push" | "processing" | "ai";
+  /*
+   * The logger's list rather than a copy of it. This union was written out
+   * twice, so adding a setting here compiled and then failed at
+   * `setConfigurationProblems`, which types its argument against the logger —
+   * one of the duplicated cross-layer contracts #447 collects.
+   */
+  field: ConfigurationSetting;
   code: StartupConfigurationCode;
 };
 
@@ -48,6 +54,31 @@ export function validateStartupConfiguration(environment: NodeJS.ProcessEnv = pr
   const issues: StartupConfigurationIssue[] = [];
   if (environment.ORBIT_CONFIG_SCHEMA_VERSION !== "1") {
     issues.push({ field: "ORBIT_CONFIG_SCHEMA_VERSION", code: "configuration_version" });
+  }
+  /*
+   * The fixture harness has no business in a production Orbit (#773).
+   *
+   * ORBIT_FIXTURES makes the /api routes answer with stand-in data and, since
+   * #789, bypasses the authentication gate as well. Until the cut (#735) two
+   * things had to go wrong before either mattered: nothing production ran set
+   * the variable, AND the composite entry kept /api on the engine whatever the
+   * SvelteKit app believed. The cut deleted that second layer. This is its
+   * replacement — a signed-in operator on a real deployment is now one
+   * accident away from being shown fabricated data, and would have no way to
+   * tell.
+   *
+   * Fail closed on the value: anything present and non-empty blocks, including
+   * "0" and anything unparseable. A reader who put the variable there meant
+   * something by it, and guessing "off" on their behalf is exactly the guess
+   * this exists to refuse. An empty string is left alone — that is Compose
+   * passing through an unset variable, not an instruction.
+   */
+  if (
+    environment.NODE_ENV === "production" &&
+    typeof environment.ORBIT_FIXTURES === "string" &&
+    environment.ORBIT_FIXTURES !== ""
+  ) {
+    issues.push({ field: "fixtures", code: "configuration_core" });
   }
   try {
     getAuthConfig(environment);
