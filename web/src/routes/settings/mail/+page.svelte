@@ -29,6 +29,7 @@
   let { data } = $props();
   const relay = $derived(data.relay);
   const failures = $derived(data.failures ?? []);
+  /** @param {string} value */
   const shortDate = (value) =>
     new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   /* §14 (#471): back to the opener; a deep link with no history goes home. */
