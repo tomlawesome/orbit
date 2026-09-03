@@ -37,6 +37,7 @@
    */
   const DESK = "(min-width: 901px)";
 
+  /** @type {import('$lib/data/workspace.js').HomeView | null} */
   let view = $state(null);
 
   /*
@@ -100,6 +101,7 @@
   /* POL-1's own fanfare would fight the landing for the dial: on a launch the
      flight owns the arrival, and this is its opening beat, not a second one. */
   let arrive = $state(!launching);
+  /** @type {number | null} the scroll position a drawer asked us to put back */
   let restoreScroll = null;
   afterNavigate((navigation) => {
     if (launching) return;
@@ -146,6 +148,7 @@
   /* The provider's own end-session URL, kept for the way back: following it
      now would yank the reader off the ratified goodbye, so "sign back in"
      carries it instead, and the identity provider asks its question again. */
+  /** @type {string | null} */
   let providerLogout = $state(null);
   const backIn = $derived(providerLogout ?? "/");
 
