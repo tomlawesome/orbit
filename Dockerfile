@@ -48,14 +48,17 @@ RUN pnpm --filter orbit-web build
 # is native, and the rest are listed in web/package.json `dependencies`
 # precisely so the adapter externalises them.
 #
-# `--legacy` is not optional on pnpm 11: without it `deploy` refuses with
-# ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE. `deploy` also writes the package's
-# own sources into the target; only node_modules is copied to the runner.
+# The deploy goes through scripts/web-deploy.sh rather than being spelled out
+# here, so the image and anyone reproducing its packaging locally run the same
+# command — including the `--legacy` flag pnpm 11 requires. That script also
+# repairs the workspace state pnpm damages on the way past, which matters in a
+# checkout and is merely harmless in a build stage. `deploy` writes the
+# package's own sources into the target too; only node_modules is copied on.
 FROM base AS web-deps
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
 COPY . .
-RUN pnpm --filter orbit-web --prod deploy --legacy /opt/deploy-web
+RUN sh scripts/web-deploy.sh /opt/deploy-web
 
 # Bundles the orbit engine CLI (src/cli/orbit.ts) into a single, dependency-
 # free CommonJS file (issue #295 engine-delivery slice, owner decision

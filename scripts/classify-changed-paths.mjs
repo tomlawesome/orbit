@@ -66,7 +66,7 @@ const systemPatterns = [
      and SvelteKit's `init` now does (#735): migrate-on-boot and the workers
      both start there, so a change to it carries system risk. */
   /^src\/server\/(?:boot|document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
-  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start)\.[^.]+$/u,
+  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start|web-deploy|web-pdfjs-runtime-check)\.[^.]+$/u,
 ];
 
 const integrationPatterns = [
