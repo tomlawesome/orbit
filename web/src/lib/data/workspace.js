@@ -1141,6 +1141,23 @@ export async function writeTourSeen(seenAt = new Date().toISOString()) {
 }
 
 /**
+ * "Take the walk again" (#753): puts the record back to null, on the same
+ * route writeTourSeen uses, so the next arrival on `/home` reads no walk
+ * ever taken and starts it at stop 1. The server already accepts this —
+ * `tourPreferenceSchema` allows `tourSeenAt: null` and `writeTourSettings`
+ * stores it as such (#751) — so there is no new route to add, only this
+ * mirror of writeTourSeen's shape.
+ *
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function clearTourSeen() {
+  const body = await json(
+    await csrfFetch("/api/settings/tour", { method: "PUT", body: { tourSeenAt: null } }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
  * One mapping for both verbs: the route answers the same shape on each.
  *
  * @param {Partial<Reminders>} [reminders]

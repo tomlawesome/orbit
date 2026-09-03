@@ -53,6 +53,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .helm-page .pack .label b{display:block;font-size:12.5px;font-weight:560;color:var(--ink)}
 .helm-page .pack .label span{font:10px var(--mono);color:var(--ink-mid)}
 
+/* "Take the walk again" (#753, mockup stop 8 of design/v19/tour.html): the
+ * mockup's own .relaunch rule, on a real button rather than a div, so it
+ * carries the same type and colour as a plain click target must. */
+.helm-page .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);
+      color:var(--accent-text);background:none;border:0;padding:0;cursor:pointer;
+      text-align:left}
+.helm-page .relaunch:hover{text-decoration:underline}
+
 .helm-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
     font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
     border-bottom:1px solid var(--line-soft)}
