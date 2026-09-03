@@ -16,7 +16,8 @@
  */
 import { fillStarTiles } from "$lib/sky.js";
 import { placeGalaxy } from "./placement.js";
-import { mountSkies, seedFromWorkspace } from "./skies.js";
+import { mountSkies } from "./skies.js";
+import { seedFromWorkspace } from "$lib/sky.js";
 
 /**
  * The sun's address (§15, the 08-17 morning batch): the centre body of the
