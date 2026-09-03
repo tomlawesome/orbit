@@ -152,27 +152,74 @@ deployment reference is not.
 
 ## Updating pinned images
 
+Every pinned image is written down twice: in the file that uses it
+(`docker-compose.yml`, `tests/oidc/Dockerfile`, `scripts/test-integration.mjs`)
+and in `.github/supply-chain-policy.json`, which records the digest, the index
+digest and the date it was resolved. Both have to say the same thing.
+
 Use a focused pull request for image updates:
 
 1. Read the upstream release notes and image-source change history. Confirm
    maintenance status, provenance and licence evidence before accepting a new
    tag or a moved tag.
-2. Query the authoritative registry for the tag's current index and
-   Linux/AMD64 manifest. Record both digests and the resolution date in
-   `.github/supply-chain-policy.json`.
-3. Replace every location listed by the policy with the same reviewed
-   tag-plus-manifest identity. Do not update an untracked reference or add a
-   temporary mutable fallback.
-4. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
-   tests, static/unit checks and Compose configuration validation.
-5. Let protected CI pull the pinned identities and repeat PostgreSQL,
+2. Dependabot opens the bump. It rewrites the pin in the file and stops there:
+   the policy is a bespoke JSON file it cannot read, so its pull request
+   arrives with the two places disagreeing.
+3. CI goes red on that pull request, at the step
+   `Refuse a pin that drifted between compose and policy`. That is the drift
+   check (`node scripts/sidecar-pins.mjs check --offline`) doing its job, not a
+   broken build.
+4. Run `node scripts/sidecar-pins.mjs sync`. It takes the pin now in the file
+   as the truth, re-resolves the tag's index digest from the registry, and
+   writes the reference, the index digest and today's date into the policy —
+   then rewrites any other file that pins the same image. Review the diff and
+   push it to the Dependabot branch. Do not update an untracked reference or
+   add a temporary mutable fallback.
+5. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
+   tests (`pnpm vitest run scripts/sidecar-pins.test.mjs`), static/unit checks
+   and Compose configuration validation.
+6. Let protected CI pull the pinned identities and repeat PostgreSQL,
    malware-detection, parser-isolation, backup/restore, privacy, browser,
    accessibility, exact-image vulnerability and SBOM gates.
-6. Merge only when the protected pull-request checks pass. The trusted branch
+7. Merge only when the protected pull-request checks pass. The trusted branch
    run must then publish and attest the exact application image it tested.
 
 If an upstream registry no longer serves a recorded manifest, the update is a
 release blocker; do not silently fall back to the tag.
+
+### When the pin is current but its packages are not
+
+A digest pin is frozen on purpose; the security advisories about what is inside
+it are not. So an image can be exactly what its tag points at today and still
+be missing a fix its own distribution published weeks ago — which is how the
+findings on #740 accumulated.
+
+`Sidecar pin freshness` (`.github/workflows/sidecar-pin-freshness.yml`) runs
+weekly and asks all three questions: do the file and the policy agree, has the
+tag moved, and does the pinned image itself have package upgrades waiting. When
+anything is behind it files, or updates, one open issue titled
+`Sidecar pins are behind` holding the full report, and the run goes red.
+
+A moved tag is fixed by re-pinning, and `sidecar-pins.mjs sync` does it. Stale
+packages inside a current pin have no such remedy: there is nothing newer to
+pin to. Either upstream rebuilds the image, or the finding becomes a named
+entry in the policy's `exceptions[]` with an owner, a rationale, a tracking
+issue and an expiry date.
+
+**The weekly schedule is not running yet, and this is the manual step it
+replaces.** GitHub runs a scheduled workflow from the repository's default
+branch, `main`, and `main` stays at v1.2.0 until #547 promotes v1.3. Until that
+promotion the workflow file does not exist there, so neither the schedule nor
+`Run workflow` will start it. Until then the cadence is a person: **weekly,
+whoever is working on Orbit**, run
+
+```bash
+node scripts/sidecar-pins.mjs check --packages
+```
+
+and act on what it prints. Add `--red` to make it prove it can still fail
+before you believe a clean result; add `--only <substring>` to look at one
+image without pulling the large ones.
 
 ## Tool provenance and ownership
 
