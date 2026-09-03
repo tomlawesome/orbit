@@ -1108,6 +1108,48 @@ export async function writeReminders({ emailEnabled, firstWarningDays, finalWarn
 }
 
 /**
+ * The server's VAPID public key for browser push (#763), live from
+ * `GET /api/push/config`. No CSRF token — a read, and the key alone grants
+ * nothing; a browser still has to choose to subscribe with it.
+ *
+ * @returns {Promise<{ publicKey: ?string }>}
+ */
+export async function readPushConfig() {
+  /** @type {{ publicKey?: string }} */
+  const body = await json(await fetch("/api/push/config", { credentials: "same-origin" }));
+  return { publicKey: body.publicKey ?? null };
+}
+
+/**
+ * Registers this browser's push subscription (#763), through
+ * `POST /api/push/subscriptions`. The whole `PushSubscription#toJSON()`
+ * shape goes over unchanged — endpoint, expirationTime, the two keys the
+ * push service handed out — because that is exactly what
+ * src/server/notification-worker.ts needs to address a later delivery back
+ * to this browser. 409 `subscription_conflict` (the endpoint belongs to
+ * another user) surfaces as a WorkspaceError like any other failure here.
+ *
+ * @param {{ endpoint: string, expirationTime: ?number, keys: { p256dh: string, auth: string } }} subscription
+ * @returns {Promise<{ subscribed: boolean }>}
+ */
+export async function writePushSubscription(subscription) {
+  return json(await csrfFetch("/api/push/subscriptions", { body: subscription }));
+}
+
+/**
+ * Removes this browser's push subscription (#763), through
+ * `DELETE /api/push/subscriptions`. The endpoint alone identifies it;
+ * unsubscribing on the browser side (`PushSubscription#unsubscribe()`) is
+ * the caller's job and already happened by the time this is called.
+ *
+ * @param {string} endpoint
+ * @returns {Promise<{ subscribed: boolean }>}
+ */
+export async function deletePushSubscription(endpoint) {
+  return json(await csrfFetch("/api/push/subscriptions", { method: "DELETE", body: { endpoint } }));
+}
+
+/**
  * The signed-in reader's own first-run tour record (#751/#752), through
  * `GET /api/settings/tour` — the reminders pair above, for the walk.
  *

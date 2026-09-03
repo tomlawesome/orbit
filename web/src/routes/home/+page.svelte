@@ -15,6 +15,7 @@
   import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
+  import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { mountPocket } from "./pocket.behaviour.js";
   import { SvelteMap } from "svelte/reactivity";
@@ -397,6 +398,13 @@
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
   const mailWaiting = $derived(view?.suggestions?.length ?? 0);
+  /* #763: how many are overdue right now — the OS badge and the tab title
+     both read this, never the server, so both hold whatever this browser's
+     own chart just worked out. */
+  const overdueCount = $derived(corridor?.overdue?.length ?? 0);
+  $effect(() => {
+    showUrgentCount(overdueCount);
+  });
   const initials = $derived(
     (view?.user?.displayName ?? "")
       .split(/\s+/)
@@ -537,7 +545,7 @@
 </script>
 
 <svelte:head>
-  <title>Orbit</title>
+  <title>{overdueCount > 0 ? `(${overdueCount}) ` : ""}Orbit</title>
 </svelte:head>
 
 <!-- #424: Escape and a click outside close the expanded row. Scroll does

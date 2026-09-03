@@ -10,6 +10,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- #763: installability (manifest + theme colour) and the star-chart
+         ground colour a browser paints around Orbit before the page itself
+         has anything on screen — the tab strip, the splash background. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#060b1c" />
     <!--
       Reapply the reader's chosen pack before the first paint, so a refresh
       does not flash star-chart at someone who chose dawn. Inline and
