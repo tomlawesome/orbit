@@ -3,13 +3,7 @@
   "issue": "https://github.com/tomlawesome/orbit/issues/624",
   "recorded": "2026-08-24",
   "files": {
-    "src/lib/data/chart.js": 44,
-    "src/lib/data/workspace.js": 4,
-    "src/lib/sky.js": 4,
-    "src/routes/create/create.behaviour.js": 47,
     "src/routes/due-next/+page.svelte": 17,
-    "src/routes/home/+page.svelte": 2,
-    "src/routes/settings/+page.svelte": 23,
-    "tests/fidelity/screens.spec.js": 28
+    "src/routes/home/+page.svelte": 2
   }
 }
