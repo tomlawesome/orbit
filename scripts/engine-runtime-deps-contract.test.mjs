@@ -33,7 +33,7 @@ describe("engine runtime dependencies reach the SvelteKit build", () => {
 
   it("web pins them to the same versions the engine asks for", () => {
     const drifted = engineDeps
-      .filter(([name, range]) => (web.dependencies ?? {})[name] !== undefined)
+      .filter(([name]) => (web.dependencies ?? {})[name] !== undefined)
       .filter(([name, range]) => web.dependencies[name] !== range)
       .map(([name, range]) => `${name}: root ${range}, web ${web.dependencies[name]}`);
     expect(drifted, `version drift between the two package.json files: ${drifted.join("; ")}`).toEqual([]);

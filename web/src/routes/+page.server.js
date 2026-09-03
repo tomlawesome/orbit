@@ -14,9 +14,10 @@ import { env } from "$env/dynamic/private";
  * The prerender that used to stand here goes with it: a flag baked into static
  * HTML at build time is a flag that cannot be turned off at run time, and this
  * one must be off in production whatever the build did. Read per request, it is
- * unreachable in production twice over, exactly as the fixture API routes are:
- * the composite entry (#450) never sets the flag, and without the flag the
- * query string is not read at all.
+ * unreachable in production because nothing production runs sets the variable,
+ * and without the flag the query string is not read at all. That is now the
+ * whole of the protection: the composite entry (#450), which also refused to
+ * serve this app for arbitrary paths, went with the cut (#735).
  */
 export function load() {
   return { fixtures: env.ORBIT_FIXTURES === "1" };

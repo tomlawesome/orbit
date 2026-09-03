@@ -1,6 +1,8 @@
 .git
 .github
-.next
+# Sibling git worktrees: whole second checkouts of this codebase, 1.6 GB of
+# build context and another branch's source in the image layers (#769).
+.claude
 **/node_modules
 .pnpm-store
 web/build
