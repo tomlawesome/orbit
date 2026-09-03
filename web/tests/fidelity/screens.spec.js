@@ -305,10 +305,37 @@ const SCREENS = [
     name: "relay",
     path: "/settings/mail",
     stage: "porting",
-    mockup: "/design/family/settings-mail.html",
-    settle: () => Boolean(document.querySelector(".relay-card")),
-    /* The mockup names its own motif for the reviewer; the product does not. */
-    mockupOnly: [".foot"],
+    /*
+     * The living backdrop (#475, §14), ratified 2026-09-02, replaces the
+     * family sheet's still starfield. The sheet is pinned to the same seed
+     * the app derives under fixtures and runs the same generator (sky.js's
+     * streamFactory, copied verbatim into the sheet), which is the only
+     * reason a living sky can be compared to a mockup at all — home's law.
+     */
+    mockup: "/design/v19/relay-satellites.html",
+    /*
+     * At rest, for the belt's reason: the sky streams and the craft drift on
+     * a requestAnimationFrame clock that `animations: "disabled"` cannot
+     * reach. The design's own reduced-motion state holds the clock at zero
+     * on both sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /*
+     * The sheet keeps 102px under its stage for the demos rail it carries
+     * along the bottom; the product has no rail, so the room is scaffolding
+     * too. Cut at load, the belt's way, so the card is centred in the same
+     * height on both sides. If the sheet ever drops the reservation the
+     * replacement matches nothing and the comparison is unchanged.
+     */
+    mockupTrim: (html) => html.replace("min-height:calc(100vh - 102px)", "min-height:100vh"),
+    /* Settled once the card is up and the fleet has been sown — the craft
+       arrive client-side, off the seed. */
+    settle: () =>
+      Boolean(document.querySelector(".relay-card"))
+      && document.querySelectorAll(".craft").length > 0,
+    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, packs)
+       and the footer naming the proposal. */
+    mockupOnly: [".demos", ".foot"],
   },
   {
     name: "create",

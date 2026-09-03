@@ -839,8 +839,25 @@ export function mountSatellites(root, seed) {
     raf = requestAnimationFrame(tick);
   }
 
-  build();
-  if (!still()) raf = requestAnimationFrame(tick);
+  /* Built once the faces are in, as the sheet is: the card keep-out and the
+     dish the beams aim at are measured from the card, and a card set in a
+     fallback face is 30px the wrong height — the craft would be placed round
+     a card that is not the one on screen. A face only starts loading once
+     something laid out has asked for it, so the layout is forced first;
+     `fonts.ready` then settles once those loads land, and at once when
+     nothing is loading. Bundled faces make this a tick, not a wait; a
+     teardown before then leaves nothing to build. Test DOMs have no
+     `document.fonts` and build synchronously. */
+  let torn = false;
+  const boot = () => {
+    if (torn) return;
+    build();
+    if (!still()) raf = requestAnimationFrame(tick);
+  };
+  if (document.fonts) {
+    void document.documentElement.getBoundingClientRect();
+    document.fonts.ready.then(boot);
+  } else boot();
 
   let resizeTimer = /** @type {?ReturnType<typeof setTimeout>} */ (null);
   const onResize = () => {
@@ -850,6 +867,7 @@ export function mountSatellites(root, seed) {
   addEventListener("resize", onResize);
 
   return () => {
+    torn = true;
     if (raf !== null) cancelAnimationFrame(raf);
     if (resizeTimer !== null) clearTimeout(resizeTimer);
     removeEventListener("resize", onResize);
