@@ -61,12 +61,14 @@ const systemPatterns = [
   // carries system risk. It reached the same lane through the catch-all
   // default below, which was right by accident: this states it (#620).
   /^web\//u,
-  /^src\/instrumentation(?:\.test)?\.[cm]?[jt]s$/u,
   /^src\/app\/api\/(?:auth|admin|documents?|health|imap|portable-archives|push)(?:\/|$)/u,
   /^src\/app\/(?!api\/)/u,
   /^src\/components\//u,
   /^src\/lib\/(?:auth|env|notifications|offline-policy|preview-workspace|runtime-secret|private-browser-storage)(?:[./-]|$)/u,
-  /^src\/server\/(?:document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
+  /* `boot` is the startup sequence Next's instrumentation hook used to call
+     and SvelteKit's `init` now does (#735): migrate-on-boot and the workers
+     both start there, so a change to it carries system risk. */
+  /^src\/server\/(?:boot|document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
   /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|prepare-standalone|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start)\.[^.]+$/u,
 ];
 
