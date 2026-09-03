@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 
-// #450: the composite container entry serves the Next.js application and the
-// v19 front end from ONE process on ONE origin, dispatched by path. This spec
-// is the slice's definition of done: a real login whose returnTo lands on a
-// v19 screen, with the session issued and honoured on that same origin.
+// #450, re-solved by #735: there is no longer anything to compose. The v19
+// front end and the API are one SvelteKit server on one origin, so the path
+// dispatch this spec was written to prove is gone. What it proves still
+// matters and is unchanged: a real login whose returnTo lands on a v19 screen,
+// with the session issued and honoured on that same origin, and the client
+// assets served from it.
 /* #730: both tests below assert the home dial is drawn, and the dial needs a
    household to draw. Neither created one -- they were reading a household some
    other spec had leaked, and once the leaks were swept this file failed. So it
@@ -23,7 +25,7 @@ async function seedHousehold(page: Page) {
   return household;
 }
 
-test.describe("composite entry", () => {
+test.describe("the application entry", () => {
   test("signing in with returnTo=/home lands on the v19 home", async ({ page }) => {
     await page.goto("/api/auth/login?returnTo=/home");
     await page.getByRole("link", { name: "Orbit Administrator" }).click();

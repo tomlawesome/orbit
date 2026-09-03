@@ -40,11 +40,10 @@ describe("changed-path CI risk classification", () => {
     }
   });
 
-  it("runs real PostgreSQL integration for ordinary server and API changes", () => {
+  it("runs real PostgreSQL integration for ordinary server changes", () => {
     for (const path of [
       "src/server/workspace-repository.ts",
       "src/server/household-repository.ts",
-      "src/app/api/workspace/route.ts",
       "src/lib/workspace.ts",
       "tests/integration/workspace.test.ts",
       "scripts/test-integration.mjs",
@@ -68,7 +67,6 @@ describe("changed-path CI risk classification", () => {
       "src/components/item-editor.tsx",
       "src/instrumentation.ts",
       "src/lib/auth/session.ts",
-      "src/lib/preview-workspace.ts",
       "src/server/document-repository.ts",
       "src/server/documents/scanner.ts",
       "src/server/imap-ingestion.ts",

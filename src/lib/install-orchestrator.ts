@@ -172,14 +172,6 @@ function isRegularNonSymlinkFile(path: string): boolean {
   }
 }
 
-function hasMode(path: string, mode: number): boolean {
-  try {
-    return (lstatSync(path).mode & 0o777) === mode;
-  } catch {
-    return false;
-  }
-}
-
 function readPostgresPasswordFacts(targetDir: string): PostgresPasswordFacts {
   const path = join(targetDir, SECRETS_DIRECTORY, "postgres-password");
   return { isRegularNonSymlinkFile: isRegularNonSymlinkFile(path), mode: isRegularNonSymlinkFile(path) ? lstatSync(path).mode & 0o777 : null };

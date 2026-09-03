@@ -332,7 +332,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       other.setAttribute("aria-pressed", String(other === button));
     /* Survive a refresh. See the note in app.html: the server holds the real
        preference once the shell is wired; this is the pre-paint cache. */
-    try { localStorage.setItem("orbit-theme", name); } catch (e) {}
+    try { localStorage.setItem("orbit-theme", name); } catch {}
     /* The constellation leaders are measured from the rendered label, and
        the engraved packs size that label differently, so re-measure. */
     if (!flying) renderGalaxy(false);
