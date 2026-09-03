@@ -42,6 +42,27 @@
    * the admin panel. This screen keeps the request — two taps and the typed
    * name — and nothing else on that clock.
    */
+  /**
+   * This screen's vocabulary, taken from the modules that own it (#624).
+   * @typedef {import('$lib/data/workspace.js').SectionRow} SectionRow
+   * @typedef {import('./room.js').Room} Room
+   * @typedef {import('./room.js').Word} Word
+   * @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readHouseholdScreen>>>} HouseholdView
+   */
+
+  /**
+   * The sections editor's own row: a SectionRow while it is being edited, so
+   * an unchosen icon/accent (2b's open question) is null rather than forced
+   * to a pen nothing picked, and `fresh` marks a row this editor added and
+   * the server has never seen.
+   * @typedef {Omit<SectionRow, "icon" | "accent"> & {
+   *   icon: string | null,
+   *   accent: string | null,
+   *   fresh?: boolean,
+   * }} EditorRow
+   */
+
+  /** @type {{ data: { household: HouseholdView } }} */
   let { data } = $props();
   const v = $derived(data.household);
 
@@ -69,29 +90,41 @@
      command. Local copies so a field can be edited, saved and left alone
      without the other two being retyped — the bundle carries them as they
      stand. */
+  /** @typedef {"name" | "timezone" | "currency"} IdentityField */
+
   let form = $state({ name: "", timezone: "", currency: "" });
   let dirty = $state({ name: false, timezone: false, currency: false });
   let saved = $state({ name: false, timezone: false, currency: false });
+  /** @type {string | null} */
   let identityProblem = $state(null);
+  /** @type {Partial<Record<IdentityField, ReturnType<typeof setTimeout>>>} */
   const savedTimers = {};
 
   /* The sections editor: one list, replaced whole. Rows are held locally
      because the whole list is the unit of saving — a half-edited list must
      never reach the route. */
+  /** @type {EditorRow[]} */
   let rows = $state([]);
   let saidSections = $state(false);
+  /** @type {string | null} */
   let sectionsProblem = $state(null);
 
   let handoverOpen = $state(false);
+  /** @type {string | null} */
   let heir = $state(null);
+  /** @type {string | null} */
   let saidHandover = $state(null);
+  /** @type {string | null} */
   let saidLeft = $state(null);
+  /** @type {string | null} */
   let saidJoin = $state(null);
+  /** @type {string | null} */
   let membersProblem = $state(null);
 
   let confirming = $state(false);
   let typedName = $state("");
   let saidDoom = $state(false);
+  /** @type {string | null} */
   let doomProblem = $state(null);
 
   /* Reset every local edit when the screen's data is replaced — a save
@@ -101,7 +134,7 @@
     const household = data.household;
     form = { name: household.name, timezone: household.timezone, currency: household.currency };
     dirty = { name: false, timezone: false, currency: false };
-    rows = household.sections.map((row) => ({ ...row }));
+    rows = household.sections.map((/** @type {SectionRow} */ row) => (/** @type {EditorRow} */ ({ ...row })));
     heir = null;
   });
 
@@ -110,6 +143,7 @@
      one that is — the select must never change what is stored by rendering. */
   const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New York", "Australia/Sydney", "UTC"];
   const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
+  /** @param {string[]} list @param {string} current */
   const withCurrent = (list, current) => (list.includes(current) ? list : [current, ...list]);
 
   const shown = $derived(rows.filter((row) => !row.removed));
@@ -118,27 +152,35 @@
   /* ── the two-tap protocol (§14) ─────────────────────────────────────────
      The first tap arms, the second fires, and an unfired arm relaxes on its
      own after five seconds so nothing is left cocked on the desk. */
+  /** @type {string | null} */
   let armed = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let armTimer = null;
+  /**
+   * @param {string} key
+   * @param {() => void} fire
+   */
   function twoTap(key, fire) {
     if (armed === key) {
-      clearTimeout(armTimer);
+      clearTimeout(armTimer ?? undefined);
       armed = null;
       fire();
       return;
     }
-    clearTimeout(armTimer);
+    clearTimeout(armTimer ?? undefined);
     armed = key;
     armTimer = setTimeout(() => (armed = null), 5000);
   }
 
   /* ── the system (2c) ──────────────────────────────────────────────────── */
+  /** @param {IdentityField} field */
   function touch(field) {
     dirty[field] = true;
     saved[field] = false;
     clearTimeout(savedTimers[field]);
   }
 
+  /** @param {IdentityField} field */
   async function saveField(field) {
     identityProblem = null;
     try {
@@ -149,17 +191,19 @@
       savedTimers[field] = setTimeout(() => (saved[field] = false), 2600);
       await invalidateAll();
     } catch (error) {
-      identityProblem = error?.message ?? String(error);
+      identityProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     }
   }
 
   /* ── sections (owner only, 2b) ────────────────────────────────────────── */
+  /** @param {EditorRow} row */
   function flipSection(row) {
     row.visible = !row.visible;
   }
 
   /* The hidden-not-removed law: only an empty section carries a × at all, so
      this can never be reached for one holding entries. */
+  /** @param {EditorRow} row */
   function dropSection(row) {
     if (!row.removable) return;
     row.removed = true;
@@ -198,23 +242,24 @@
       saidSections = true;
       await invalidateAll();
     } catch (error) {
-      sectionsProblem = error?.message ?? String(error);
+      sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     }
   }
 
   /* ── members ──────────────────────────────────────────────────────────── */
+  /** @param {() => Promise<unknown>} run */
   async function act(run) {
     membersProblem = null;
     try {
       await run();
       await invalidateAll();
     } catch (error) {
-      membersProblem = error?.message ?? String(error);
+      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     }
   }
 
-  const dropMember = (member) => act(() => removeMember(v.id, member.id));
-  const putMember = (candidate) => act(() => addMember(v.id, candidate.id));
+  const dropMember = (/** @type {HouseholdView["roster"][number]} */ member) => act(() => removeMember(v.id, member.id));
+  const putMember = (/** @type {HouseholdView["candidates"][number]} */ candidate) => act(() => addMember(v.id, candidate.id));
 
   function leave() {
     const me = v.you;
@@ -235,7 +280,10 @@
     });
   }
 
-  const decide = (request, action) =>
+  const decide = (
+    /** @type {HouseholdView["joinRequests"][number]} */ request,
+    /** @type {"approve" | "decline"} */ action,
+  ) =>
     act(async () => {
       await decideJoinRequest(request.id, action);
       if (action === "approve") saidJoin = request.name;
@@ -259,14 +307,17 @@
   /* The header ring, wearing this system's real due-state dots — the same
      truths its constellation shows on home (§12). Administration's mapping:
      the minisys ring at r40, shrunk to r13. */
+  /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   const ringDots = $derived(
-    constellationPlanetsOf(v.items ?? [], v.today).map(([x, y, r, tone]) => ({
-      cx: 17 + x * 0.325,
-      cy: 17 + y * 0.325,
-      r: Math.max(1.2, r * 0.6),
-      tone: TONE[tone] ?? "--ok",
-    })),
+    constellationPlanetsOf(v.items ?? [], v.today).map(
+      (/** @type {[number, number, number, string]} */ [x, y, r, tone]) => ({
+        cx: 17 + x * 0.325,
+        cy: 17 + y * 0.325,
+        r: Math.max(1.2, r * 0.6),
+        tone: TONE[tone] ?? "--ok",
+      }),
+    ),
   );
 
   /* ══════════════════════════════════════════════════════════════════════════
@@ -291,6 +342,7 @@
      scale a body is a region of sky you are standing near, not a disc. The
      alphas keep the key's own order — ruby loudest, jade quietest — because
      that order is the information. */
+  /** @type {Record<string, [string, string]>} */
   const PAINT = {
     overdue: ["--overdue", "hh-ruby"],
     "due-soon": ["--warm", "hh-amber"],
@@ -299,13 +351,17 @@
     unscheduled: ["--ok", "hh-jade"],
   };
 
+  /** @type {HTMLDivElement | null} */
   let stage = $state(null);
+  /** @type {Room | null} */
   let room = $state(null);
+  /** @type {Word[]} */
   let words = $state([]);
   /* Whether the type has landed — see the note on onMount. Nothing of this
      layer touches the DOM before it has. */
   let lettered = $state(false);
   /* The promise itself, kept for as long as the screen lives: see onMount. */
+  /** @type {Promise<unknown> | null} */
   let typeLanded = null;
   /* The descent's origin IS the sun, so scrolling is a fall INTO the system
      rather than a pan across it. In CSS pixels, because the sky's field is
@@ -314,18 +370,21 @@
 
   /* The section figures: a section's entries joined in date order in that
      section's own accent (§15-2b — the mark travels with the entry). */
-  const figures = $derived(
-    (room?.stars?.length ? v.constellation.figures : []).map((figure) => ({
+  const figures = $derived.by(() => {
+    if (!room || !room.stars.length) return [];
+    const current = room;
+    return v.constellation.figures.map((figure) => ({
       id: figure.id,
       accent: figure.accent,
       points: figure.members
-        .map((id) => room.stars.find((star) => star.id === id))
-        .filter(Boolean)
+        .map((id) => current.stars.find((star) => star.id === id))
+        .filter((star) => star !== undefined)
         .map((star) => `${star.cx},${star.cy}`)
         .join(" "),
-    })),
-  );
+    }));
+  });
 
+  /** @param {string} selector */
   const rectsOf = (selector) =>
     [...(stage?.querySelectorAll(selector) ?? [])]
       .map((node) => node.getBoundingClientRect())
@@ -377,7 +436,10 @@
   function legible() {
     if (!stage) return;
     const guards = rectsOf("header.screen > *, .back, .orb, .card");
-    for (const word of stage.querySelectorAll(".consty text")) {
+    /* Both are SVG elements (the words are <text>, drawn right after their
+       leader <line>), which do carry .style and .dataset -- querySelectorAll's
+       generic selector just can't say so. */
+    for (const word of /** @type {NodeListOf<SVGElement>} */ (stage.querySelectorAll(".consty text"))) {
       word.style.display = "";
       const rect = word.getBoundingClientRect();
       const blocked =
@@ -385,7 +447,7 @@
         guards.some((guard) =>
           rect.left < guard.right && rect.right > guard.left && rect.top < guard.bottom && rect.bottom > guard.top);
       word.style.display = blocked ? "none" : "";
-      const leader = word.previousElementSibling;
+      const leader = /** @type {SVGElement | null} */ (word.previousElementSibling);
       if (leader?.dataset?.leader) leader.style.display = blocked ? "none" : "";
     }
   }
@@ -420,6 +482,7 @@
    * alone it would miss an entry whose date had moved. The signature is the
    * only thing the geometry can be a function of.
    */
+  /** @type {string | null} */
   let drawn = null;
   $effect(() => {
     const marks = v.constellation.marks;
@@ -476,7 +539,7 @@
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
 
-{#snippet mark(row)}
+{#snippet mark(/** @type {EditorRow} */ row)}
   <span class="mark" style="--sec:var({row.accent ? `--sec-${row.accent}` : "--ink-faint"})" aria-hidden="true">
     {#if row.icon === "home"}
       <svg width="17" height="17" viewBox="0 0 16 16">
@@ -570,14 +633,14 @@
         </g>
         <g class="bodies">
           {#each room.stars as star (star.id)}
-            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[star.band][1]})"/>
+            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[/** @type {string} */ (star.band)][1]})"/>
             {#if star.band === "overdue"}
               <!-- the chart key's overdue ping, on any body that has earned it -->
               <circle cx={star.cx} cy={star.cy} r={(star.r * 1.27).toFixed(1)} fill="none"
                       style="stroke:var(--overdue)" stroke-opacity=".20" stroke-width="1.3"/>
             {/if}
             <circle cx={star.cx} cy={star.cy} r={Math.max(2.1, star.r * 0.115).toFixed(2)}
-                    style="fill:var({PAINT[star.band][0]})" opacity=".55"/>
+                    style="fill:var({PAINT[/** @type {string} */ (star.band)][0]})" opacity=".55"/>
           {/each}
         </g>
         <!-- the whisper labels: what each star is and how far off it is, in the
