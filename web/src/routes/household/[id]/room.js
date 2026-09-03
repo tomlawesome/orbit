@@ -89,6 +89,86 @@
 
 import { dialPlacement } from "$lib/data/chart.js";
 
+/* ── THE SHAPES (#624) ──────────────────────────────────────────────────────
+ *
+ * Everything here is field units unless it says otherwise, and every rectangle
+ * is axis-aligned — which is not a simplification but the reason the clearance
+ * question can be answered exactly rather than searched.
+ */
+
+/**
+ * One of the household's entries, placed by the dial law in chart.js and
+ * handed over as an offset from the dial's own centre in DIAL units. This
+ * module composes; it does not place (constellationOf, household.js).
+ *
+ * @typedef {object} Mark
+ * @property {string} id
+ * @property {number} dx
+ * @property {number} dy
+ * @property {number} halo
+ * @property {number} days        lead time; it decides who is lettered first
+ * @property {string} [title]
+ * @property {string} [tag]
+ * @property {?string} [band]
+ * @property {?string} [accent]
+ * @property {?string} [sectionId]
+ */
+
+/** @typedef {{ left: number, right: number, top: number, bottom: number }} Rect */
+
+/** Where you stand, or any other point: `[x, y]`.
+ *  @typedef {[number, number]} Point */
+
+/** A mark with its place in the room worked out.
+ *  @typedef {Mark & { cx: number, cy: number, r: number }} Star */
+
+/** A sun position and what it costs the protected type — 0 is a clear sky.
+ *  @typedef {{ sun: Point, exposure: number }} SunChoice */
+
+/**
+ * One of the calendar band's twelve ticks: a line from the year ring inward,
+ * and the month's name outside it.
+ *
+ * @typedef {object} Month
+ * @property {string} label
+ * @property {number} x1
+ * @property {number} y1
+ * @property {number} x2
+ * @property {number} y2
+ * @property {number} tx
+ * @property {number} ty
+ */
+
+/**
+ * The composed room. `clear`/`crowded`, `fitted` and `arc` are REPORTED rather
+ * than assumed, so a test can hold the three laws above rather than trusting
+ * that they held.
+ *
+ * @typedef {object} Room
+ * @property {Point} sun
+ * @property {number} scale
+ * @property {boolean} clear
+ * @property {boolean} crowded
+ * @property {boolean} fitted
+ * @property {boolean} arc
+ * @property {Star[]} stars
+ * @property {{ sun: number, overdue: number, year: number, rim: number }} rings
+ * @property {Month[]} months
+ */
+
+/**
+ * A star's whisper label, berthed — with the leader line back to its body.
+ *
+ * @typedef {object} Word
+ * @property {string} id
+ * @property {number} x
+ * @property {number} y
+ * @property {string} anchor
+ * @property {string} text
+ * @property {string} tag
+ * @property {{ x1: number, y1: number, x2: number, y2: number }} leader
+ */
+
 /** The sky's own field: every mockup in the family draws in 1600×1000. */
 export const FIELD = { width: 1600, height: 1000 };
 
@@ -119,6 +199,10 @@ const FIT_MARGIN = 90;
  * SHORT side, so no sun position inside the frame can have the whole ring
  * inside it. The +10 is a whisker, not a taste: at exactly half, a sun on the
  * centre line would draw the band tangent to an edge rather than through it.
+ *
+ * @param {number} width
+ * @param {number} height
+ * @returns {number}
  */
 export function scaleFloorFor(width, height) {
   return (Math.min(width, height) / 2 + 10) / YEAR_RING;
@@ -129,6 +213,10 @@ export function scaleFloorFor(width, height) {
  * stops sweeping the desk at all, so the band's radius is held to 90% of the
  * distance from a centred sun to a corner. It is a composition bound, not a
  * safety one — nothing breaks above it, the room just stops reading as a room.
+ *
+ * @param {number} width
+ * @param {number} height
+ * @returns {number}
  */
 export function scaleCeilingFor(width, height) {
   return (0.9 * Math.hypot(width / 2, height / 2)) / YEAR_RING;
@@ -142,6 +230,7 @@ export function scaleCeilingFor(width, height) {
  * owner has actually approved.
  */
 const DEFAULT_SCALE = 4.95;
+/** Fractions of the frame, so the ratified composition survives a resize. */
 const DEFAULT_SUN = [690 / FIELD.width, 340 / FIELD.height];
 
 /* The escape lands a whisker outside the rectangle it escapes, never on its
@@ -163,26 +252,25 @@ const SCALE_STEPS = [1, 0.92, 0.84, 0.76];
  */
 const CANDIDATE_CAP = 72;
 
+/** @param {string} a @param {string} b @returns {number} */
 const ORDER = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * WHERE YOU STAND, and how big the room is.
  *
- * @param {object} options
- * @param {Array}  options.marks   the household's entries as dial-space marks:
- *                                 `{ id, dx, dy, halo, ... }`, offsets from the
- *                                 dial's own centre in dial units (chart.js's
- *                                 law, applied in household.js — this module
- *                                 composes, it does not place)
- * @param {number} options.width   the field's width  (1600)
- * @param {number} options.height  the field's height (1000)
- * @param {Array}  options.keepOut the runs of unprotected small type, in field
- *                                 units: `{ left, top, right, bottom }`. The
- *                                 caller measures them, because only the DOM
- *                                 knows where a header wrapped — the rule
- *                                 itself never touches the DOM.
- * @returns {object} `{ sun, scale, stars, rings, months, clear, crowded,
- *                      fitted, arc }`
+ * @param {object}   [options]
+ * @param {Mark[]}   [options.marks]   the household's entries as dial-space
+ *                                     marks, offsets from the dial's own centre
+ *                                     in dial units (chart.js's law, applied in
+ *                                     household.js — this module composes, it
+ *                                     does not place)
+ * @param {number}   [options.width]   the field's width  (1600)
+ * @param {number}   [options.height]  the field's height (1000)
+ * @param {Rect[]}   [options.keepOut] the runs of unprotected small type, in
+ *                                     field units. The caller measures them,
+ *                                     because only the DOM knows where a header
+ *                                     wrapped — the rule never touches the DOM.
+ * @returns {Room}
  */
 export function roomOf({ marks = [], width = FIELD.width, height = FIELD.height, keepOut = [] } = {}) {
   const cached = memoised(marks, width, height, keepOut);
@@ -197,6 +285,7 @@ export function roomOf({ marks = [], width = FIELD.width, height = FIELD.height,
   const fitted = Number.isFinite(fit);
   const base = fitted ? Math.min(Math.max(fit, floor), ceiling) : DEFAULT_SCALE;
 
+  /** @type {?(SunChoice & { scale: number })} */
   let best = null;
   for (const step of SCALE_STEPS) {
     const scale = Math.max(floor, base * step);
@@ -254,6 +343,11 @@ export function roomOf({ marks = [], width = FIELD.width, height = FIELD.height,
  * CENTRES: one entry, or every entry on one day, is a household with no spread,
  * and a spread of nothing scaled to fill a frame is not a composition — it is a
  * division by nearly zero. Those rooms take the ratified one instead.
+ *
+ * @param {Mark[]} marks
+ * @param {number} width
+ * @param {number} height
+ * @returns {number} the scale, or Infinity when there is no spread to fit
  */
 function fitScale(marks, width, height) {
   if (!marks.length) return Infinity;
@@ -265,7 +359,12 @@ function fitScale(marks, width, height) {
 }
 
 /** The mark cloud: what is actually seen (halos included), or where the bodies'
- *  own centres are. */
+ *  own centres are.
+ *
+ * @param {Mark[]} marks
+ * @param {boolean} [seen]
+ * @returns {Rect}
+ */
 function cloudOf(marks, seen = true) {
   let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
   for (const mark of marks) {
@@ -278,7 +377,14 @@ function cloudOf(marks, seen = true) {
   return { left, right, top, bottom };
 }
 
-/** The sun that puts the cloud's centre at the centre of the frame. */
+/** The sun that puts the cloud's centre at the centre of the frame.
+ *
+ * @param {Mark[]} marks
+ * @param {number} scale
+ * @param {number} width
+ * @param {number} height
+ * @returns {Point}
+ */
 function idealSun(marks, scale, width, height) {
   if (!marks.length) return [DEFAULT_SUN[0] * width, DEFAULT_SUN[1] * height];
   const box = cloudOf(marks);
@@ -293,10 +399,17 @@ function idealSun(marks, scale, width, height) {
  * rectangle per (mark, protected rect) pair, plus the sun's own field. Written
  * in a canonical order — marks by id, rects as measured — so the search below
  * cannot feel the order the items arrived in.
+ *
+ * @param {Mark[]} marks
+ * @param {number} scale
+ * @param {Rect[]} keepOut
+ * @returns {Rect[]}
  */
 function forbidden(marks, scale, keepOut) {
+  /** @type {Rect[]} */
   const rects = [];
   const ordered = [...marks].sort((a, b) => ORDER(a.id, b.id));
+  /** @param {Rect} guard @param {number} radius @param {number} dx @param {number} dy */
   const add = (guard, radius, dx, dy) => rects.push({
     left: guard.left - radius - dx,
     right: guard.right + radius - dx,
@@ -312,6 +425,7 @@ function forbidden(marks, scale, keepOut) {
   return rects;
 }
 
+/** @param {Rect} rect @param {number} x @param {number} y @returns {boolean} */
 const inside = (rect, x, y) => x > rect.left && x < rect.right && y > rect.top && y < rect.bottom;
 
 /**
@@ -323,6 +437,11 @@ const inside = (rect, x, y) => x > rect.left && x < rect.right && y > rect.top &
  * dead centre on one costs the most. Summed over every (mark, guard) pair, so
  * a position that spoils one small run of type is preferred to one that
  * spoils three — which is the only judgement left when nothing is clear.
+ *
+ * @param {Rect[]} rects
+ * @param {number} x
+ * @param {number} y
+ * @returns {number}
  */
 function exposureAt(rects, x, y) {
   let cost = 0;
@@ -336,6 +455,17 @@ function exposureAt(rects, x, y) {
 /**
  * The nearest sun to the ideal one that puts nothing on the protected type —
  * or, when there is no such position, the one that puts the least there.
+ *
+ * Always answers: `xs` and `ys` each hold the ideal coordinate itself, so
+ * there is always at least one candidate to be the least-bad one.
+ *
+ * @param {Mark[]} marks
+ * @param {number} scale
+ * @param {Point} ideal
+ * @param {Rect[]} keepOut
+ * @param {number} width
+ * @param {number} height
+ * @returns {SunChoice}
  */
 function clearest(marks, scale, ideal, keepOut, width, height) {
   const rects = forbidden(marks, scale, keepOut);
@@ -346,6 +476,7 @@ function clearest(marks, scale, ideal, keepOut, width, height) {
   const xs = axisCandidates(ideal[0], rects.map((r) => [r.left - ESCAPE_GAP, r.right + ESCAPE_GAP]), 0, width);
   const ys = axisCandidates(ideal[1], rects.map((r) => [r.top - ESCAPE_GAP, r.bottom + ESCAPE_GAP]), 0, height);
 
+  /** @type {[number, number, number][]} */
   const candidates = [];
   for (const x of xs) {
     for (const y of ys) {
@@ -355,17 +486,27 @@ function clearest(marks, scale, ideal, keepOut, width, height) {
   /* Nearest first, and a total order so two runs cannot disagree. */
   candidates.sort((a, b) => a[2] - b[2] || a[0] - b[0] || a[1] - b[1]);
 
+  /** @type {?SunChoice} */
   let best = null;
   for (const [x, y] of candidates) {
     const exposure = exposureAt(rects, x, y);
     if (exposure === 0) return { sun: [round(x), round(y)], exposure: 0 };
     if (!best || exposure < best.exposure) best = { sun: [round(x), round(y)], exposure };
   }
-  return best;
+  /* Never null: `candidates` is non-empty (the ideal coordinate is always one
+     of them on each axis), so the loop above has assigned at least once. */
+  return /** @type {SunChoice} */ (best);
 }
 
 /** The distinct escapes on one axis, nearest the ideal first, inside the
- *  frame, capped so a crowded household still answers in constant time. */
+ *  frame, capped so a crowded household still answers in constant time.
+ *
+ * @param {number} ideal
+ * @param {[number, number][]} pairs  each rectangle's two just-outside edges
+ * @param {number} low
+ * @param {number} high
+ * @returns {number[]}
+ */
 function axisCandidates(ideal, pairs, low, high) {
   const seen = new Set([ideal]);
   for (const [a, b] of pairs) {
@@ -377,6 +518,7 @@ function axisCandidates(ideal, pairs, low, high) {
     .slice(0, CANDIDATE_CAP);
 }
 
+/** @param {Point} sun @param {number} width @param {number} height @returns {number} */
 const nearestEdge = (sun, width, height) =>
   Math.min(sun[0], width - sun[0], sun[1], height - sun[1]);
 
@@ -387,6 +529,10 @@ const MONTHS = ["AUG", "SEP", "OCT", "NOV", "DEC", "JAN", "FEB", "MAR", "APR", "
  * — a tick from the year ring inward and the month's name outside it. Only the
  * two or three you are standing under are ever in the room; the renderer draws
  * them all and the legibility pass keeps the ones that can be read.
+ *
+ * @param {Point} sun
+ * @param {number} scale
+ * @returns {Month[]}
  */
 function monthsOf(sun, scale) {
   return MONTHS.map((label, index) => {
@@ -404,6 +550,7 @@ function monthsOf(sun, scale) {
   });
 }
 
+/** @param {number} n @returns {number} */
 const round = (n) => Math.round(n * 10) / 10;
 
 /* ── THE WORDS ──────────────────────────────────────────────────────────────
@@ -447,11 +594,24 @@ const WORD_PAD = 8;
 /** What a whisper label says: the entry's name, and how far off it is in the
  *  strings every other screen prints (T+ is behind you, T− is ahead). The tag
  *  travels ON the mark, computed against the household's own today by the
- *  shared vocabulary — this module never guesses a date. */
+ *  shared vocabulary — this module never guesses a date.
+ *
+ * @param {Mark} mark
+ * @returns {{ text: string, tag: string }}
+ */
 export function wordOf(mark) {
   return { text: (mark.title ?? "").toUpperCase(), tag: `  ·  ${mark.tag ?? ""}` };
 }
 
+/**
+ * Where a label would sit, given the offset and which end is anchored.
+ *
+ * @param {Star} star
+ * @param {number} dx
+ * @param {number} dy
+ * @param {string} anchor  "start" or "end"
+ * @returns {Rect}
+ */
 function wordBox(star, dx, dy, anchor) {
   const { text, tag } = wordOf(star);
   const width = (text.length + tag.length) * ADVANCE;
@@ -460,29 +620,35 @@ function wordBox(star, dx, dy, anchor) {
   return { left, right: left + width, top: star.cy + dy - WORD_TOP, bottom: star.cy + dy - WORD_TOP + WORD_HEIGHT };
 }
 
+/** @param {Rect} a @param {Rect} b @returns {boolean} */
 const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+/** @param {Rect} r @param {number} n @returns {Rect} */
 const pad = (r, n) => ({ left: r.left - n, right: r.right + n, top: r.top - n, bottom: r.bottom + n });
 
 /**
  * Every star that can be lettered, lettered.
  *
- * @param {object} options
- * @param {Array}  options.stars  the placed stars from roomOf
- * @param {Array}  options.sun    where you stand, so "away" has a meaning
- * @param {Array}  options.guards panels and unprotected type alike, in field
- *                                units — a word may sit on neither
- * @returns {Array} `{ id, x, y, anchor, text, tag, leader }`, in the order the
- *                  berths were taken (most urgent first), which is also the
- *                  order they are drawn in
+ * @param {object}   [options]
+ * @param {Star[]}   [options.stars]  the placed stars from roomOf
+ * @param {Point}    [options.sun]    where you stand, so "away" has a meaning
+ * @param {Rect[]}   [options.guards] panels and unprotected type alike, in
+ *                                    field units — a word may sit on neither
+ * @param {number}   [options.width]
+ * @param {number}   [options.height]
+ * @returns {Word[]} in the order the berths were taken (most urgent first),
+ *                   which is also the order they are drawn in
  */
 export function berthsOf({ stars = [], sun = [0, 0], guards = [], width = FIELD.width, height = FIELD.height } = {}) {
+  /** @type {Rect[]} */
   const taken = [];
+  /** @type {Word[]} */
   const words = [];
   /* Urgency decides who chooses first; a tie is broken by id so the answer
      cannot depend on the order the items arrived in. */
   const order = [...stars].sort((a, b) => a.days - b.days || ORDER(a.id, b.id));
   for (const star of order) {
     const away = star.cx >= sun[0] ? 1 : -1;
+    /** @type {?{ dx: number, dy: number, anchor: string }} */
     let berth = null;
     for (const dy of LADDER) {
       for (const dir of [away, -away]) {
@@ -530,6 +696,13 @@ export function berthsOf({ stars = [], sun = [0, 0], guards = [], width = FIELD.
  * 0 return the same frame to the pixel, and it is why reduced motion keeps
  * every bit of it: this is a POSITION, not an animation.
  */
+
+/**
+ * @param {number} scrollTop
+ * @param {number} innerHeight
+ * @param {number} scrollHeight
+ * @returns {number} 0 at the top, 1 once the system is overhead
+ */
 export function liftOf(scrollTop, innerHeight, scrollHeight) {
   const max = Math.max(1, scrollHeight - innerHeight);
   const travelled = Math.min(max, Math.max(0, scrollTop));
@@ -546,8 +719,16 @@ export function liftOf(scrollTop, innerHeight, scrollHeight) {
  * possible proof that a re-render (a resize that lands on the same size, a
  * pack swap, a font re-measure) cannot redraw the room differently.
  */
+/** @type {WeakMap<Mark[], Map<string, Room>>} */
 const memo = new WeakMap();
 
+/**
+ * @param {Mark[]} marks
+ * @param {number} width
+ * @param {number} height
+ * @param {Rect[]} keepOut
+ * @returns {string}
+ */
 function signature(marks, width, height, keepOut) {
   const shape = [...marks]
     .sort((a, b) => ORDER(a.id, b.id))
@@ -559,10 +740,25 @@ function signature(marks, width, height, keepOut) {
   return `${width}x${height}/${guards}#${shape}`;
 }
 
+/**
+ * @param {Mark[]} marks
+ * @param {number} width
+ * @param {number} height
+ * @param {Rect[]} keepOut
+ * @returns {?Room}
+ */
 function memoised(marks, width, height, keepOut) {
   return memo.get(marks)?.get(signature(marks, width, height, keepOut)) ?? null;
 }
 
+/**
+ * @param {Mark[]} marks
+ * @param {number} width
+ * @param {number} height
+ * @param {Rect[]} keepOut
+ * @param {Room} room
+ * @returns {Room}
+ */
 function remember(marks, width, height, keepOut, room) {
   let bySignature = memo.get(marks);
   if (!bySignature) memo.set(marks, (bySignature = new Map()));
@@ -576,6 +772,11 @@ function remember(marks, width, height, keepOut, room) {
  * scale about the centre — the same mapping the dust already uses — so this is
  * one multiply rather than a guess, and it is what lets a rule that works in
  * field units be handed rectangles measured in the browser.
+ *
+ * @param {number} innerWidth
+ * @param {number} innerHeight
+ * @param {{ width: number, height: number }} [field]
+ * @returns {{ k: number, ox: number, oy: number }}
  */
 export function skyMap(innerWidth, innerHeight, field = FIELD) {
   const k = Math.max(innerWidth / field.width, innerHeight / field.height);
@@ -586,7 +787,12 @@ export function skyMap(innerWidth, innerHeight, field = FIELD) {
   };
 }
 
-/** A browser rectangle, in the field's units. */
+/** A browser rectangle, in the field's units.
+ *
+ * @param {Rect} rect
+ * @param {{ k: number, ox: number, oy: number }} map
+ * @returns {Rect}
+ */
 export function toField(rect, map) {
   return {
     left: (rect.left - map.ox) / map.k,

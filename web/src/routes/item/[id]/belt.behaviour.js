@@ -30,10 +30,69 @@ import {
   geometryOf, lehmer, rollRangeOf, seatOf, spawnInto,
 } from "./band.js";
 
+/**
+ * band.js's vocabulary, said once here so the painter speaks the same
+ * language as the arithmetic it draws (#624).
+ *
+ * @typedef {import("./band.js").BeltRow}   BeltRow
+ * @typedef {import("./band.js").Body}      Body
+ * @typedef {import("./band.js").Geometry}  Geometry
+ * @typedef {import("./band.js").Projected} Projected
+ * @typedef {import("./band.js").Rubble}    Rubble
+ */
+
+/**
+ * What the band can be asked to do, once it is mounted.
+ *
+ * @typedef  {object} BeltControls
+ * @property {(i: number) => void}  centre      roll the belt to this seat
+ * @property {(id: string) => void} centreById  ...or to this body
+ * @property {(id: string) => void} arriveAt    seat it there with no roll at all
+ * @property {(next: string, found: Set<number>) => void} setQuery
+ * @property {() => void} remeasure  take the card's footprint again
+ * @property {() => void} destroy
+ */
+
+/**
+ * What the band knows about itself, and hands to every callback.
+ *
+ * @typedef  {object}   BeltReading
+ * @property {Body[]}   bodies    the seat list, band-owned
+ * @property {number}   selected  which seat is at the apex
+ * @property {number[]} bloom     how far out each item's papers are
+ * @property {Geometry} geom
+ */
+
+/**
+ * The callback's view. The controls are OPTIONAL here and only here, because
+ * the first layout runs inside mountBelt — before they have been attached —
+ * so a callback firing during it genuinely does not have them yet.
+ *
+ * @typedef {BeltReading & Partial<BeltControls>} BeltApi
+ */
+
+/** What mountBelt hands back: the reading and the controls, both real. */
+/** @typedef {BeltReading & BeltControls} BeltController */
+
+/**
+ * @typedef  {object}    BeltOptions
+ * @property {BeltRow[]} manifest      the belt, in date order
+ * @property {?string}   [selectedId]  the body to seat at the apex on arrival
+ * @property {(i: number, band: BeltApi) => void} [onSelect]  the apex changed
+ * @property {(i: number, band: BeltApi) => void} [onSwap]    swap the card now
+ * @property {(i: number, band: BeltApi) => void} [onSettle]  the roll is over
+ */
+
 const NS = "http://www.w3.org/2000/svg";
+/**
+ * @param   {string} name
+ * @param   {Record<string, string | number>} [attrs]
+ * @returns {SVGElement}
+ */
 const el = (name, attrs = {}) => {
   const node = document.createElementNS(NS, name);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  /* setAttribute stringifies anyway; saying so keeps the numbers honest. */
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
   return node;
 };
 const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -45,6 +104,13 @@ const reduced = () => window.matchMedia("(prefers-reduced-motion: reduce)").matc
  * There are no planet spheres here — on the dial a body is a planet because
  * the dial is a system; in a belt everything is rock.
  * ==================================================================== */
+/**
+ * @param {SVGElement} g     the seat to draw into
+ * @param {number}     seed  this rock's own silhouette
+ * @param {number}     r     its radius
+ * @param {string}     tone  the rim's colour
+ * @param {boolean}    pip   whether it wears the urgency dot
+ */
 function drawRock(g, seed, r, tone, pip) {
   const rng = lehmer(seed);
   const facets = 11, pts = [];
@@ -79,6 +145,11 @@ function drawRock(g, seed, r, tone, pip) {
    seen against a thick part of the band. Worn by a centred item's documents
    — and mirrored onto the ITEM when one of its documents is centred, so the
    way back is as loud as the way in. */
+/**
+ * @param   {SVGElement} g
+ * @param   {number}     r
+ * @returns {SVGElement} the mark, for the painter to fade
+ */
 function drawMark(g, r) {
   const mark = el("g", { class: "mark", opacity: "0" });
   mark.appendChild(el("circle", { class: "halo", r: (r + 19).toFixed(1) }));
@@ -88,6 +159,11 @@ function drawMark(g, r) {
   return mark;
 }
 
+/**
+ * @param   {string} col  a colour in any of the three notations the packs use
+ * @param   {number} a    the alpha to give it
+ * @returns {string}
+ */
 function tint(col, a) {
   if (col.startsWith("rgba")) return col.replace(/[\d.]+\)$/, a + ")");
   if (col.startsWith("rgb")) return col.replace("rgb(", "rgba(").replace(")", `,${a})`);
@@ -112,10 +188,16 @@ const EDGE_X = 0.17;        /* ...and at full weight by here. v2's figure */
 const EDGE_Y = 0.10;        /* the sky is shorter than it is wide         */
 const EDGE_STOPS = 24;      /* enough to read as a curve, not a polyline  */
 
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} W
+ * @param {number} H
+ */
 function fadeEdges(ctx, W, H) {
   ctx.save();
   ctx.globalCompositeOperation = "destination-out";
-  for (const [across, fade] of [[true, EDGE_X], [false, EDGE_Y]]) {
+  for (const [across, fade] of
+       /** @type {[boolean, number][]} */ ([[true, EDGE_X], [false, EDGE_Y]])) {
     const g = across ? ctx.createLinearGradient(0, 0, W, 0)
                      : ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "rgba(0,0,0,1)");
@@ -137,6 +219,15 @@ function fadeEdges(ctx, W, H) {
  * Mounts the belt into an already-rendered shell and hands back the controls
  * the screen drives it with. `root` is the page element; the shell's parts are
  * found by the mockup's own ids.
+ *
+ * Those seven lookups are asserted rather than tested, and deliberately: the
+ * shell is this module's own partner markup (+page.svelte) and every part is
+ * in it unconditionally, so a missing one is a broken build, not a state the
+ * belt should carry a branch for.
+ *
+ * @param   {HTMLElement} root
+ * @param   {BeltOptions} options
+ * @returns {BeltController}
  */
 export function mountBelt(root, options) {
   const {
@@ -147,23 +238,45 @@ export function mountBelt(root, options) {
     onSettle = () => {},
   } = options;
 
-  const bandC = root.querySelector("#band");
-  const foreC = root.querySelector("#fore");
-  const membersSvg = root.querySelector("#members");
-  const seatsG = root.querySelector("#seats");
-  const capsG = root.querySelector("#caps");
-  const endsG = root.querySelector("#ends");
-  const wrap = root.querySelector("#cardwrap");
-  const bctx = bandC.getContext("2d"), fctx = foreC.getContext("2d");
-  const hazeCanvas = document.createElement("canvas"), hctx = hazeCanvas.getContext("2d");
+  const bandC = /** @type {HTMLCanvasElement} */ (root.querySelector("#band"));
+  const foreC = /** @type {HTMLCanvasElement} */ (root.querySelector("#fore"));
+  const membersSvg = /** @type {SVGSVGElement} */ (root.querySelector("#members"));
+  const seatsG = /** @type {SVGGElement} */ (root.querySelector("#seats"));
+  const capsG = /** @type {SVGGElement} */ (root.querySelector("#caps"));
+  const endsG = /** @type {SVGGElement} */ (root.querySelector("#ends"));
+  const wrap = /** @type {HTMLElement} */ (root.querySelector("#cardwrap"));
+  /* A canvas in a browser always has a 2d context; the null is for hosts
+     that have no canvas at all, which is not one the belt can run in. */
+  const bctx = /** @type {CanvasRenderingContext2D} */ (bandC.getContext("2d"));
+  const fctx = /** @type {CanvasRenderingContext2D} */ (foreC.getContext("2d"));
+  const hazeCanvas = document.createElement("canvas");
+  const hctx = /** @type {CanvasRenderingContext2D} */ (hazeCanvas.getContext("2d"));
 
   let geom = geometryOf(window.innerWidth, window.innerHeight);
-  let bodies = [], rubble = [], hazePts = [], cardRect = null;
+  /** @type {Body[]} */
+  let bodies = [];
+  /** @type {Rubble[]} */
+  let rubble = [];
+  /** @type {Projected[]} */
+  let hazePts = [];
+  /** @type {?{ l: number, r: number, t: number, b: number }} */
+  let cardRect = null;
   let selected = 0, prevSel = 0;
-  let roll = 0, rollFrom = 0, rollTo = 0, rollT0 = -1, drift = 0, swapTimer = null;
+  let roll = 0, rollFrom = 0, rollTo = 0, rollT0 = -1, drift = 0;
+  /* Undefined rather than null: nothing ever reads this but clearTimeout,
+     which is what "no roll is pending" means to the only reader there is. */
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let swapTimer;
   let berthNow = BERTH_NARROW, berthFrom = BERTH_NARROW, berthTo = BERTH_NARROW;
-  let bloom = [], bloomFrom = [], bloomTo = [];
-  let query = "", matches = new Set();
+  /** @type {number[]} */
+  let bloom = [];
+  /** @type {number[]} */
+  let bloomFrom = [];
+  /** @type {number[]} */
+  let bloomTo = [];
+  let query = "";
+  /** @type {Set<number>} */
+  let matches = new Set();
   let base = 0, reach = 0;
   let TONE = ["#737e9e", "#d8b45a", "#243259"], GAIN = 1;
   let raf = 0, last = 0, lastPaint = 0, alive = true;
@@ -172,6 +285,7 @@ export function mountBelt(root, options) {
      second argument: the screen's callbacks run DURING the first layout, when
      the caller's own `const controller = mountBelt(...)` has not been assigned
      yet. */
+  /** @type {BeltApi} */
   const api = {
     get bodies() { return bodies; },
     get selected() { return selected; },
@@ -237,7 +351,8 @@ export function mountBelt(root, options) {
     endsG.textContent = "";
     if (!bodies.length) return;
     for (const [x, anchor, text] of
-         [[28, "start", "← sooner"], [geom.W - 28, "end", "later →"]]) {
+         /** @type {[number, string, string][]} */
+         ([[28, "start", "← sooner"], [geom.W - 28, "end", "later →"]])) {
       const t = el("text", { class: "endcap", x, y: 38, "text-anchor": anchor });
       t.textContent = text;
       endsG.appendChild(t);
@@ -248,14 +363,20 @@ export function mountBelt(root, options) {
      NOT drawn: it is the card. Its rock fades back in as it leaves, and the
      arriving one fades out as the card blooms — which is the whole trick of
      "the card rides in the belt". */
+  /**
+   * @param   {number} i  the seat
+   * @param   {number} p  how far through the roll we are
+   * @returns {number}
+   */
   function bodyOpacity(i, p) {
     if (i === selected) return 1 - clamp01((p - 0.32) / 0.34);
     if (i === prevSel) return clamp01((p - 0.1) / 0.42);
     return 1;
   }
 
+  /** @param {number} p how far through the roll we are */
   function paintMembers(p) {
-    const seats = seatsG.children;
+    const seats = /** @type {HTMLCollectionOf<SVGGElement>} */ (seatsG.children);
     const caps = capsG.children;
     /* the papers coming out, and the old ones folding away: out fast, in late,
        so the two never cross in the middle of the apex */
@@ -290,12 +411,13 @@ export function mountBelt(root, options) {
          nor a paper that is still folded inside its item. */
       const gone = o < 0.5;
       seats[i].style.pointerEvents = gone ? "none" : "";
-      const hit = seats[i].firstChild;
+      const hit = /** @type {SVGGElement} */ (seats[i].firstChild);
       hit.setAttribute("tabindex", gone ? "-1" : "0");
       hit.setAttribute("aria-hidden", gone ? "true" : "false");
       /* A lit hit wears its rim while the search is open, so matches read as
          matches even before you reach for them. */
-      hit.querySelector(".rim").setAttribute("opacity", query && lit ? ".85" : "0");
+      const rim = /** @type {SVGElement} */ (hit.querySelector(".rim"));
+      rim.setAttribute("opacity", query && lit ? ".85" : "0");
       /* THE MARK. On every paper that is out; and mirrored onto the item when
          one of its own papers is the thing at the apex. */
       const marked = b.kind === "doc"
@@ -303,8 +425,11 @@ export function mountBelt(root, options) {
         : (selBody && selBody.kind === "doc" && selBody.itemIdx === b.itemIdx ? bloom[b.itemIdx] : 0);
       /* the glow is a real SVG filter, so a mark nobody can see is taken out
          of the tree rather than left to be rasterised at zero opacity */
-      b.mark.setAttribute("opacity", marked.toFixed(3));
-      b.mark.style.display = marked < 0.004 ? "none" : "";
+      /* buildSeats gave every seat its mark before anything was ever
+         painted, which is why this is a fact and not a branch. */
+      const mark = /** @type {SVGElement} */ (b.mark);
+      mark.setAttribute("opacity", marked.toFixed(3));
+      mark.style.display = marked < 0.004 ? "none" : "";
       caps[i].setAttribute("transform", `translate(${a.x.toFixed(1)},${a.y.toFixed(1)})`);
       caps[i].setAttribute("opacity", o.toFixed(3));
     });
@@ -324,7 +449,9 @@ export function mountBelt(root, options) {
 
   function sizeCanvas() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    for (const [c, ctx] of [[bandC, bctx], [foreC, fctx]]) {
+    for (const [c, ctx] of
+         /** @type {[HTMLCanvasElement, CanvasRenderingContext2D][]} */
+         ([[bandC, bctx], [foreC, fctx]])) {
       c.width = Math.round(geom.W * dpr); c.height = Math.round(geom.H * dpr);
       c.style.width = geom.W + "px"; c.style.height = geom.H + "px";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -337,6 +464,7 @@ export function mountBelt(root, options) {
      a fatter wire, so the glow is laid down as eighteen near-transparent
      passes of falling width. The profile that builds up has no edge at all;
      the band simply stops being there. */
+  /** @param {CanvasRenderingContext2D} ctx */
   function paintHaze(ctx) {
     /* Still a gradient, and deliberately: the fade has come out of it but the
        paint path must not change. Skia carries a gradient's premultiplied
@@ -394,6 +522,7 @@ export function mountBelt(root, options) {
        — plus the card's own footprint, because the card is a body in the band
        too and nothing sits on top of it. A paper still folded inside its item
        has swept nothing. */
+    /** @type {[Projected, number][]} */
     const clears = [];
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i];
@@ -494,6 +623,7 @@ export function mountBelt(root, options) {
    * simply already turned, the card is simply already the new one, and the
    * papers are simply already out.
    * ==================================================================== */
+  /** @param {number} i the seat to roll to */
   function centre(i) {
     if (i === selected || i < 0 || i >= bodies.length) return;
     const dir = Math.sign(bodies[i].off - bodies[selected].off) || 1;
@@ -541,6 +671,7 @@ export function mountBelt(root, options) {
      navigation to play: the page is simply already showing that item at the
      apex, papers out, with its neighbours in time around it. Same code path a
      fresh load takes. */
+  /** @param {string} id the body to seat at the apex */
   function arriveAt(id) {
     const i = bodies.findIndex((b) => b.id === id);
     if (i < 0) return;
@@ -565,6 +696,7 @@ export function mountBelt(root, options) {
    * constellations still because there they mean something. Everything else
    * in this sky is scenery, and scenery moves.
    * ==================================================================== */
+  /** @param {number} now the frame's own timestamp */
   function frame(now) {
     if (!alive) return;
     const dt = last ? Math.min((now - last) / 1000, 0.08) : 0;
@@ -617,15 +749,23 @@ export function mountBelt(root, options) {
   layout();
   if (!reduced()) raf = requestAnimationFrame(frame);
 
-  Object.assign(api, {
+  /* Object.assign hands its target back, so this is the same object every
+     callback above was already given — now wearing its controls. */
+  return Object.assign(api, {
     centre,
+    /** @param {string} id */
     centreById(id) {
       const i = bodies.findIndex((b) => b.id === id);
       if (i >= 0) centre(i);
     },
     arriveAt,
-    /* The search dims in place: the belt keeps its shape, so nothing is
-       rebuilt — only the weight of every body changes. */
+    /**
+     * The search dims in place: the belt keeps its shape, so nothing is
+     * rebuilt — only the weight of every body changes.
+     *
+     * @param {string} next
+     * @param {Set<number>} found
+     */
     setQuery(next, found) {
       query = next.trim().toLowerCase();
       matches = found;
@@ -645,5 +785,4 @@ export function mountBelt(root, options) {
       window.removeEventListener("resize", onResize);
     },
   });
-  return api;
 }
