@@ -2,27 +2,37 @@ import { goto } from "$app/navigation";
 import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
 
 /**
- * The new-entry form's behaviour, carried across from design/family/create.html
- * and owned here from that point on.
+ * The new-entry form's behaviour, carried across from design/v19/create-v3.html
+ * (#474/#475/#476, formerly design/family/create.html) and owned here from
+ * that point on.
  *
  * The design's idea is progressive disclosure: the form opens as a name, five
  * type chips and a drop target, and unfolds the rest the moment you start.
  * `reveal()` is one-way — a form that folded back up while you were filling it
  * in would be worse than one that never folded.
  *
- * Two deliberate departures from the mockup:
+ * Three deliberate departures from the mockup:
  *
- *   1. The mockup's drop target calls `simulateExtraction()`, which types
- *      "British Gas / BG-88214-HC / 2026-11-02" into the form to show a
- *      reviewer what extraction looks like. That is demonstration, not
- *      product, so it does not ship. The real path — upload, scan, read,
- *      suggest — runs over the reviewed-intake protocol (operation ids,
- *      202-recoverable polling, malware states) and is a build of its own.
- *      Here the drop target does the part it can honestly do: it takes a real
- *      file, opens the form, and names the entry after it. The `.sugg` and
- *      accept-suggestion markup stays, unused, waiting for that build.
+ *   1. The mockup's drop target calls `simulateExtraction()`/`dropDocument()`,
+ *      which types "British Gas / BG-88214-HC / 2026-11-02" into the form and
+ *      (after a timer) shows the top-sheet snapshot, to demonstrate what
+ *      extraction looks like. That is demonstration, not product, so it does
+ *      not ship. The real path — upload, scan, read, suggest — runs over the
+ *      reviewed-intake protocol (operation ids, 202-recoverable polling,
+ *      malware states) and is a build of its own. Here the drop target does
+ *      the part it can honestly do: it takes a real file, opens the form,
+ *      splits the lanes (`body.doc`, §14 ruling 3) and names the entry after
+ *      it. The `.sugg`/accept-suggestion markup and the reading lane's
+ *      top-sheet snapshot stay, unused, waiting for that build and for a
+ *      server-side page-one render (#476) respectively — `body.snap` is never
+ *      added, so the sheet's own placeholder markup stays honestly
+ *      unreachable rather than shown for a document never actually read.
  *   2. The mockup's inline `onsubmit="return false"` is a listener here — a
  *      module has no globals for an inline handler to reach.
+ *   3. `body.doc` is removed again in this module's teardown: the class lives
+ *      on `<body>`, which outlives the screen, so leaving it on would be the
+ *      same class of bug satellites.js's own doc warns about ("a blurred
+ *      scrim survived a trip to /create").
  */
 export function mountCreate() {
   const controller = new AbortController();
@@ -66,11 +76,23 @@ export function mountCreate() {
   picker.accept = ".pdf,.eml,image/*";
   card.appendChild(picker);
 
+  /* §14/#474: a document splits the screen — the form slides left and the
+     reading lane fades in (create.css's `body.doc` rules). Body-level
+     because the lanes and the backdrop's own dimming both key off it, same
+     as home's launch classes; the mount's teardown below takes it off again,
+     so it can never survive a trip to another screen (satellites.js's own
+     warning: "a blurred scrim survived a trip to /create"). */
+  const heldName = document.getElementById("dz-held-name");
+  const heldSize = document.getElementById("dz-held-size");
+
   let attachment = null;
   function takeFile(file) {
     if (!file) return;
     attachment = file;
     reveal();
+    document.body.classList.add("doc");
+    if (heldName) heldName.textContent = file.name;
+    if (heldSize) heldSize.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB`;
     if (!nameInput.value.trim()) {
       nameInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     }
@@ -189,5 +211,8 @@ export function mountCreate() {
     }
   });
 
-  return () => controller.abort();
+  return () => {
+    controller.abort();
+    document.body.classList.remove("doc");
+  };
 }
