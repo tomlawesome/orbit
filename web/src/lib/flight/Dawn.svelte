@@ -93,8 +93,22 @@
    * around.
    */
   let { children = undefined, shown = false } = $props();
+  /** @type {HTMLDivElement} */
   let world;
-  let imgZod, imgScatter, imgSunpt, imgSunarc, imgRim, imgSway1, imgSway2;
+  /** @type {SVGImageElement} */
+  let imgZod;
+  /** @type {SVGImageElement} */
+  let imgScatter;
+  /** @type {SVGImageElement} */
+  let imgSunpt;
+  /** @type {SVGImageElement} */
+  let imgSunarc;
+  /** @type {SVGImageElement} */
+  let imgRim;
+  /** @type {SVGImageElement} */
+  let imgSway1;
+  /** @type {SVGImageElement} */
+  let imgSway2;
 
   const F_B2L =
     '<filter id="b2l" filterUnits="userSpaceOnUse" x="-20" y="-20" width="1640" height="1040"><feGaussianBlur stdDeviation="2"/></filter>';
@@ -180,6 +194,12 @@
     },
   };
 
+  /**
+   * @param {string} defs
+   * @param {string} body
+   * @param {number} w
+   * @param {number} h
+   */
   function frame(defs, body, w, h) {
     return (
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
@@ -189,6 +209,7 @@
 
   onMount(() => {
     let cancelled = false;
+    /** @type {ReturnType<typeof setTimeout>} */
     let timer;
 
     async function build() {
@@ -224,7 +245,7 @@
         zod: imgZod, scatter: imgScatter, sunpt: imgSunpt, sunarc: imgSunarc, rim: imgRim,
         sway1: imgSway1, sway2: imgSway2,
       };
-      for (const [name, url] of built) targets[name]?.setAttribute("href", url);
+      for (const [name, url] of built) targets[/** @type {keyof typeof targets} */ (name)]?.setAttribute("href", url);
       world.dataset.rasterised = "ready";
     }
 

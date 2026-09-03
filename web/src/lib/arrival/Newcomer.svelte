@@ -26,6 +26,14 @@
    * reduced motion and can be pinned to one millisecond for a screenshot. This
    * component draws; it never decides when.
    */
+  /**
+   * @type {{
+   *   galaxy?: Record<string, { name: string, requested?: boolean, planets?: Array<[number, number, number, string]> }>,
+   *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
+   *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
+   *   oncreate?: import('svelte/elements').MouseEventHandler<HTMLButtonElement>,
+   * }}
+   */
   let {
     /* the labelled sky, from $lib/data/chart.js's labelledSkyOf */
     galaxy = {},
@@ -35,7 +43,8 @@
     oncreate = () => {},
   } = $props();
 
-  let hero;
+  /** @type {HTMLDivElement | null} */
+  let hero = null;
   /*
    * The join list is fed from `visibleHouseholds`, NOT from `galaxy` (#670,
    * owner decision 2026-09-01).
@@ -60,6 +69,7 @@
      is unchanged, it just lands in state instead of DOM nodes so the markup
      below can draw it declaratively (#620: imperative appendChild here
      tripped svelte/no-dom-manipulating). */
+  /** @type {ReturnType<typeof computeCards>} */
   let cards = $state([]);
 
   /**
@@ -77,7 +87,7 @@
   function computeCards() {
     if (!hero) return [];
     const w = hero.clientWidth, h = hero.clientHeight;
-    const panel = hero.parentElement?.querySelector(".belong");
+    const panel = /** @type {HTMLElement | null | undefined} */ (hero.parentElement?.querySelector(".belong"));
     const keepOut = Math.max(200, (panel ? panel.offsetWidth : 430) / 2 + 118);
     const sky = Math.max(640, w - 220);
     const placed = [];
@@ -88,6 +98,7 @@
     for (const { id, household, ox, oy, dim, undrawn } of placeGalaxy({ galaxy, camera: null, width: sky, height: h, keepOut })) {
       if (undrawn) continue;
       const away = ox > 0;
+      /** @param {number} x */
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
       const label = household.name.toUpperCase();
