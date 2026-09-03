@@ -73,16 +73,17 @@ export function api(handler, { fixture, errorResponse = appErrorResponse } = {})
  * reads it twice.
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
+ * @param {{ errorResponse?: (error: unknown) => Response }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
-export function write(handler) {
+export function write(handler, options) {
   return api(async (event) => {
     await assertOutsideMaintenance(event.cookies);
     const config = getAuthConfig();
     const session = await requireSession(event.cookies, config);
     assertCsrf(event.request.headers, session, config);
     return await handler(event, session);
-  });
+  }, options);
 }
 
 /**
