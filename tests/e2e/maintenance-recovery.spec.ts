@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { cleanupHousehold, sessionHeaders } from "./support/households";
 
 const administrator = "Orbit Administrator";
 const drillMessage = "Upgrading Orbit. Back shortly.";
@@ -25,7 +27,7 @@ async function signIn(page: Page) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: administrator }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
+  await expect(page).toHaveURL("/workspace");
 }
 
 interface MaintenanceReading {
@@ -83,6 +85,15 @@ test.describe("maintenance recovery drill (#524)", () => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
 
     await signIn(page);
+    /* #730: this drill signs out through the account menu, and on an instance
+       where the administrator owns nothing the onboarding overlay covers it --
+       its scrim intercepts the click and the drill times out having proved
+       nothing. That precondition used to be met by accident, by a household
+       another spec leaked; once the leak was fixed this file failed. So it
+       states its own precondition now, and clears it up afterwards. */
+    const household = { id: randomUUID(), name: `Maintenance drill ${randomUUID().slice(0, 8)}` };
+    await seedHousehold(page, household);
+    try {
     await page.goto("/admin");
     const maintenance = page.locator(".admin-page #maintenance");
     // exact: true, because Playwright matches an accessible name by substring
@@ -143,5 +154,25 @@ test.describe("maintenance recovery drill (#524)", () => {
     await expect(maintenance.getByText("Maintenance ended.", { exact: true })).toBeVisible();
     await expect(maintenance.getByText("Orbit is open to users.", { exact: true })).toBeVisible();
     await expect(page.locator(".maintenance-banner")).toHaveCount(0);
+    } finally {
+      /* Orbit must be open again before the household can be removed, which the
+         assertions above have just established. */
+      await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
+    }
   });
 });
+
+/* The drill's own precondition: the administrator owns something, so signing
+   out goes through the account menu rather than around an onboarding overlay.
+   Created through the command seam rather than the interface, because the
+   interface is what the drill is testing. */
+async function seedHousehold(page: Page, household: { id: string; name: string }) {
+  const created = await page.request.post("/api/workspace/commands", {
+    headers: { ...(await sessionHeaders(page)), "content-type": "application/json" },
+    data: {
+      type: "household.create",
+      household: { ...household, timezone: "Europe/London", currency: "GBP", onboardingComplete: true },
+    },
+  });
+  if (!created.ok()) throw new Error(`Could not seed the drill's household (${created.status()})`);
+}
