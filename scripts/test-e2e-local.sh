@@ -257,7 +257,16 @@ bash scripts/install-test-browser.sh
 
 log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
-PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true \
+# COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
+# the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
+# tour's example body is never written down, which only the database can
+# answer. Every other `compose` call in this script passes an explicit `-p`;
+# the suite has no way to know that name, and without it its `docker compose`
+# would adopt whatever project .env-orbit happens to name (AGENTS.md, "Compose
+# commands attach to whatever project .env-orbit names") -- a different stack,
+# or none. CI needs no equivalent: it runs compose without `-p`, so the
+# environment there already agrees with .env-orbit.
+PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true COMPOSE_PROJECT_NAME="$project_name" \
   pnpm exec playwright test "${playwright_args[@]}" || suite_status=$?
 
 if [[ "$keep" == 1 ]]; then
