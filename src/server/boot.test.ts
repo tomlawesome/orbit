@@ -26,7 +26,6 @@ const mocks = vi.hoisted(() => ({
     fallback: "feature_disabled";
     remediation: "repair_configuration";
   }>),
-  registerNode: vi.fn(),
   validateStartupConfiguration: vi.fn(),
   getDatabaseClient: vi.fn(() => ({ unsafe: vi.fn() })),
   getDb: vi.fn(),
@@ -106,71 +105,13 @@ import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 /* The real helper: the mock above keeps every export except `log`. */
 import { operationalDetail } from "@/lib/logger";
 
-describe("instrumentation runtime boundary", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    resetAuthObservabilityForTests();
-    mocks.workerCalls.length = 0;
-    mocks.renderedText.length = 0;
-    mocks.renderedJson.length = 0;
-    mocks.validateStartupConfiguration.mockReset();
-    mocks.verifyMigrationIntegrity.mockReset();
-    mocks.verifyMigrationJournalComplete.mockReset();
-    mocks.migrate.mockReset();
-    mocks.ensureMigrationRunsTable.mockReset();
-    mocks.recordMigrationOutcome.mockReset();
-    mocks.getConfigurationProblems.mockReset();
-    mocks.getConfigurationProblems.mockReturnValue([]);
-    mocks.getDatabaseClient.mockClear();
-    mocks.getDb.mockClear();
-  });
-
-  afterEach(() => {
-    vi.doUnmock("./instrumentation-node");
-    vi.resetModules();
-    resetAuthObservabilityForTests();
-    vi.unstubAllEnvs();
-  });
-
-  it("returns immediately without loading Node implementation when not in Node runtime", async () => {
-    vi.stubEnv("NEXT_RUNTIME", "edge");
-
-    vi.doMock("./instrumentation-node", () => ({
-      registerNode: mocks.registerNode,
-    }));
-
-    const { register } = await import("./instrumentation");
-
-    await register();
-
-    expect(mocks.registerNode).not.toHaveBeenCalled();
-  });
-
-  it("loads and executes Node implementation when in Node runtime", async () => {
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-
-    vi.doMock("./instrumentation-node", () => ({
-      registerNode: mocks.registerNode,
-    }));
-
-    const { register } = await import("./instrumentation");
-
-    await register();
-
-    expect(mocks.registerNode).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the Edge entry free of static imports", () => {
-    const source = readFileSync(new URL("./instrumentation.ts", import.meta.url), "utf8");
-    const staticImports = source.match(/^\s*import\s+(?!\()[^;]+;\s*$/gmu) ?? [];
-
-    expect(staticImports).toEqual([]);
-    expect(source).not.toContain("@/");
-  });
-
+/* The Next-runtime boundary tests went with `src/instrumentation.ts` (#735):
+   there is no Edge runtime to guard against any more, and SvelteKit's `init`
+   hook reaches `registerNode` directly. Signal handling still matters — the
+   container entrypoint owns termination, not the boot module. */
+describe("boot module boundary", () => {
   it("does not intercept termination signals", () => {
-    const source = readFileSync(new URL("./instrumentation-node.ts", import.meta.url), "utf8");
+    const source = readFileSync(new URL("./boot.ts", import.meta.url), "utf8");
     expect(source).not.toMatch(/process\.(once|on)\(\s*["']SIG(?:TERM|INT)/u);
   });
 });
@@ -208,7 +149,7 @@ describe("strict startup ordering", () => {
   });
 
   it("validates, reports auth, checks and migrates before workers", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     await registerNode();
     expect(mocks.workerCalls).toEqual(["configuration", "auth", "precheck", "ensure-outcome-table", "migrate", "record-outcome", "postcheck", "notification", "document", "imap", "receipt"]);
     expect(mocks.log.info).toHaveBeenCalledWith({ event: "startup.migration", state: "starting", action: "check_migrations" });
@@ -225,7 +166,7 @@ describe("strict startup ordering", () => {
     }]);
     vi.stubEnv("MIGRATE_ON_START", "false");
 
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     await registerNode();
 
     expect(mocks.workerCalls).toEqual(["configuration", "auth", "document", "imap"]);
@@ -243,7 +184,7 @@ describe("strict startup ordering", () => {
 
   it("fails closed before database access and workers for invalid configuration", async () => {
     mocks.validateStartupConfiguration.mockImplementation(() => { throw new Error("private configuration value"); });
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     await expect(registerNode()).rejects.toThrow("configuration_invalid");
     expect(mocks.getDatabaseClient).not.toHaveBeenCalled();
     expect(mocks.workerCalls).toEqual([]);
@@ -251,7 +192,7 @@ describe("strict startup ordering", () => {
   });
 
   it("does not start workers when the migration precheck, migrate, or postcheck fails", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("migration_integrity", "private drift"));
     await expect(registerNode()).rejects.toThrow("migration_integrity");
     expect(mocks.workerCalls).toEqual(["configuration", "auth"]);
@@ -270,7 +211,7 @@ describe("strict startup ordering", () => {
   });
 
   it("maps a database authentication failure to the bounded migration code", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new Error("password authentication failed for user orbit"));
 
     await expect(registerNode()).rejects.toThrow("migration_integrity");
@@ -286,7 +227,7 @@ describe("strict startup ordering", () => {
   });
 
   it("names a genuine mismatch precisely, and never tells the operator to restart (#437)", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError(
       "migration_integrity",
       operationalDetail`applied migration ${25} of ${25} does not match ${"0026_x"}`,
@@ -315,7 +256,7 @@ describe("strict startup ordering", () => {
   });
 
   it("distinguishes a database below the supported floor (#437)", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.verifyMigrationIntegrity.mockRejectedValueOnce(new mocks.MigrationIntegrityError("database_floor"));
 
     await expect(registerNode()).rejects.toThrow("database_floor");
@@ -329,7 +270,7 @@ describe("strict startup ordering", () => {
   });
 
   it("ensures the outcome table before migrate() and records a succeeded run with a null reason (#528)", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     await registerNode();
 
     expect(mocks.ensureMigrationRunsTable).toHaveBeenCalledTimes(1);
@@ -348,7 +289,7 @@ describe("strict startup ordering", () => {
   });
 
   it("records a failed run with reason=migration_failed when migrate() throws, and still exits fatally (#528)", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.migrate.mockRejectedValueOnce(new Error("private SQL detail"));
 
     await expect(registerNode()).rejects.toThrow("migration_failed");
@@ -370,7 +311,7 @@ describe("strict startup ordering", () => {
   });
 
   it("still runs and completes migrate() when ensuring the outcome table fails, without masking success", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.ensureMigrationRunsTable.mockRejectedValueOnce(new Error("permission denied for schema drizzle"));
 
     await expect(registerNode()).resolves.toBeUndefined();
@@ -382,7 +323,7 @@ describe("strict startup ordering", () => {
   });
 
   it("still exits with the original migration_failed error when recording the outcome row itself fails", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.migrate.mockRejectedValueOnce(new Error("private SQL detail"));
     mocks.recordMigrationOutcome.mockRejectedValueOnce(new Error("connection refused at 10.0.0.5"));
 
@@ -400,7 +341,7 @@ describe("strict startup ordering", () => {
   });
 
   it("still starts workers when recording a succeeded outcome row fails", async () => {
-    const { registerNode } = await import("./instrumentation-node");
+    const { registerNode } = await import("./boot");
     mocks.recordMigrationOutcome.mockRejectedValueOnce(new Error("connection refused at 10.0.0.5"));
 
     await expect(registerNode()).resolves.toBeUndefined();
@@ -420,10 +361,9 @@ describe("scanner readiness diagnostics", () => {
     vi.useFakeTimers();
     mocks.config.scanMode = "required";
     resetAuthObservabilityForTests();
-    vi.doUnmock("./instrumentation-node");
     vi.resetModules();
 
-    const nodeModule = await import("./instrumentation-node");
+    const nodeModule = await import("./boot");
     reportAuthConfigurationReadinessNode = nodeModule.reportAuthConfigurationReadiness;
     reportScannerReadinessNode = nodeModule.reportScannerReadiness;
   });
