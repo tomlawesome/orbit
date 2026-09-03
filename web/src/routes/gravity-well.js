@@ -9,7 +9,10 @@
 export function mountGravityWell() {
   const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(4040404);
   const NS = "http://www.w3.org/2000/svg";
-  const far = document.getElementById("farstars"), near = document.getElementById("nearstars");
+  // Both ids are in the static markup this mounts into, so they always resolve.
+  const far = /** @type {Element} */ (document.getElementById("farstars"));
+  const near = /** @type {Element} */ (document.getElementById("nearstars"));
+  /** @param {number} x @param {number} y */
   const hole = (x, y) => Math.hypot(x - 800, y - 450);
   let made = 0;
   while (made < 110) {
@@ -38,8 +41,8 @@ export function mountGravityWell() {
     if (rng() < 0.28) { c.setAttribute("class", "tw"); c.style.animationDelay = (rng() * 6).toFixed(1) + "s"; }
     near.appendChild(c); made++;
   }
-  // lensed starlight: tangential smears ringing the hole
-  const arcs = document.getElementById("lensarcs");
+  // lensed starlight: tangential smears ringing the hole. Also always present.
+  const arcs = /** @type {Element} */ (document.getElementById("lensarcs"));
   for (let i = 0; i < 46; i++) {
     const rad = 138 + rng() * 150;
     const a0 = rng() * Math.PI * 2;
