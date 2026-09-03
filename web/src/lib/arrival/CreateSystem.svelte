@@ -21,6 +21,18 @@
    * This component is the form and only the form: the host owns the stage, the
    * submit, the reclaim and the launch.
    */
+  /**
+   * @type {{
+   *   name?: string,
+   *   timezone?: string,
+   *   currency?: string,
+   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   busy?: boolean,
+   *   onsubmit?: () => void,
+   *   onask?: (rejected: { name: string, reason: string, householdId?: string | null }) => void,
+   *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
+   * }}
+   */
   let {
     /* the three answers, owned by the host so the launch can read them */
     name = $bindable(""),

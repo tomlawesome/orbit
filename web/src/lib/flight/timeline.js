@@ -49,14 +49,14 @@
  * stop that rides along with it (60% → 55%) lives in the CSS, not here.
  * `dwell` is untouched at 2000; only `instrument` changes in this table.
  */
-export const T = {
+const ASCENT_BASE = {
   warp: 200, mark: 260, release: 430, markOut: 1340,
   nameOn: 1560, nameOff: 2600,
   land: 4800, condensed: 6400, dwell: 2000, instrument: 1800,
   tourGap: 450,
 };
-T.instrumentAt = T.condensed + T.dwell;                    /*  8400 */
-T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10650 */
+const instrumentAt = ASCENT_BASE.condensed + ASCENT_BASE.dwell;              /*  8400 */
+const tourAt = instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap;  /* 10650 */
 
 /*
  * THE NEWCOMER'S CLOCK (§15 second pass, ruling 4; the count sealed in the
@@ -76,14 +76,21 @@ T.tourAt = T.instrumentAt + T.instrument + T.tourGap;      /* 10650 */
  *    11900   it fades OUT again (0.8s) — ~2.8s of screen time in all
  *    12800   and the question arrives in the space it left
  */
-T.newDwell = 3000;
-T.countGap = 500;
-T.countHold = 2000;
-T.countFade = 900;
-T.newInstrumentAt = T.condensed + T.newDwell;              /*  9400 */
-T.countOn = T.newInstrumentAt + T.countGap;                /*  9900 */
-T.countOff = T.countOn + T.countHold;                      /* 11900 */
-T.belongAt = T.countOff + T.countFade;                     /* 12800 */
+const newDwell = 3000;
+const countGap = 500;
+const countHold = 2000;
+const countFade = 900;
+const newInstrumentAt = ASCENT_BASE.condensed + newDwell;  /*  9400 */
+const countOn = newInstrumentAt + countGap;                /*  9900 */
+const countOff = countOn + countHold;                      /* 11900 */
+const belongAt = countOff + countFade;                     /* 12800 */
+
+export const T = {
+  ...ASCENT_BASE,
+  instrumentAt, tourAt,
+  newDwell, countGap, countHold, countFade,
+  newInstrumentAt, countOn, countOff, belongAt,
+};
 
 /* the descent's own offsets, kept as the mockup wrote them: the flight starts
    700ms in, and the mirrored windows are quoted against that. */
@@ -107,6 +114,11 @@ export const MARK_RIDE_DOWN = 923;
  */
 export const MARK_ARRIVE = 166.4;
 
+/**
+ * @typedef {{ at: number, act: string }} Beat
+ */
+
+/** @param {Beat} a @param {Beat} b */
 const byTime = (a, b) => a.at - b.at;
 
 /** The launch, as beats. */
@@ -215,6 +227,13 @@ export function descentBeatsReduced() {
  * pending. Pinned (`at` a number), every beat at or before that millisecond is
  * applied immediately, in order, and nothing is scheduled — the surface then
  * stands still at exactly that moment of the flight.
+ * @param {Beat[]} beats
+ * @param {(act: string, beat: Beat) => void} apply
+ * @param {{
+ *   at?: number,
+ *   schedule?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>,
+ *   cancel?: (id: ReturnType<typeof setTimeout>) => void,
+ * }} [options]
  */
 export function runTimeline(beats, apply, { at, schedule, cancel } = {}) {
   if (typeof at === "number") {
