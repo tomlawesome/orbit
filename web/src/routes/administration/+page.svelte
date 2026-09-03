@@ -62,12 +62,17 @@
     }
   }
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
-  /* the minisys ring at r40 shrunk to the roster's r13 */
+  /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
+     §Systems) turn out to be constellationPlanetsOf's own far-sky placement
+     (CON-13), just re-centred on the roster's small r13 ring instead of the
+     backdrop's distant one: the same orbit distance (18..30) and body size
+     (2.0..2.8) divided by 6 and 4 respectively lands exactly on the sheet's
+     hand-measured coordinates for all five fixture households (#775). */
   const ringDots = (household) =>
     constellationPlanetsOf(household.items ?? [], view.today).map(([x, y, r, tone]) => ({
-      cx: 17 + x * 0.325,
-      cy: 17 + y * 0.325,
-      r: Math.max(1.2, r * 0.6),
+      cx: 17 + x / 6,
+      cy: 17 + y / 6,
+      r: 1 + r / 4,
       tone: TONE[tone] ?? "--ok",
     }));
 
