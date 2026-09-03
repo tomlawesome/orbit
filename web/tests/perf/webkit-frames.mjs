@@ -22,7 +22,7 @@
  * this is not a different browser build, just a different import path.
  *
  * Usage:
- *   node tests/perf/webkit-frames.mjs <url> [--no-animation] [--duration=5000]
+ *   node tests/perf/webkit-frames.mjs <url> [--no-animation] [--duration=5000] [--ready=<selector>]
  *
  * `--no-animation` injects `* { animation: none !important; transition: none
  * !important }` after load, as the floor a page's paint loop can reach with
@@ -31,6 +31,16 @@
  * in #764's own request, is not "does animation cost something" (it always
  * does) but "is the live *filtered* animation the dominant cost", which only
  * a WebKit sample of both states can show.
+ *
+ * `--ready=<selector>` waits for a CSS selector to match before sampling
+ * starts, for screens whose own async rasterisation would otherwise still be
+ * running (a synchronous decode/canvas-draw pass) inside the sample window
+ * and read as steady-state animation cost when it is really one-time setup.
+ * The login screen is the case this exists for: Dawn.svelte builds seven
+ * separate rasters via Promise.all and marks itself the same way Grain.svelte
+ * and this screen's own +error.svelte do, `data-rasterised="pending"` then
+ * `"ready"` on its `.world` host — so `--ready='.world[data-rasterised="ready"]'`
+ * is the selector that makes a login sample actually steady-state.
  *
  * Point it at a real running server — this script does not start one. See
  * playwright.config.js / tests/fidelity/screens.spec.js for how the adapter-
@@ -44,16 +54,20 @@ function parseArgs(argv) {
   const url = argv[0];
   let noAnimation = false;
   let duration = 5000;
+  let ready = null;
   for (const arg of argv.slice(1)) {
     if (arg === "--no-animation") noAnimation = true;
     else if (arg.startsWith("--duration=")) duration = Number(arg.slice("--duration=".length));
+    else if (arg.startsWith("--ready=")) ready = arg.slice("--ready=".length);
   }
-  return { url, noAnimation, duration };
+  return { url, noAnimation, duration, ready };
 }
 
-const { url, noAnimation, duration } = parseArgs(process.argv.slice(2));
+const { url, noAnimation, duration, ready } = parseArgs(process.argv.slice(2));
 if (!url) {
-  console.error("usage: node tests/perf/webkit-frames.mjs <url> [--no-animation] [--duration=5000]");
+  console.error(
+    "usage: node tests/perf/webkit-frames.mjs <url> [--no-animation] [--duration=5000] [--ready=<selector>]",
+  );
   process.exit(1);
 }
 
@@ -67,6 +81,7 @@ try {
 
   await page.goto(url, { waitUntil: "load" });
   await page.evaluate(() => document.fonts.ready);
+  if (ready) await page.waitForSelector(ready, { state: "attached" });
 
   if (noAnimation) {
     await page.addStyleTag({ content: "* { animation: none !important; transition: none !important; }" });
@@ -108,6 +123,7 @@ try {
       {
         url,
         noAnimation,
+        ready,
         durationMs: duration,
         frameCount: stats.length,
         meanMs: Number(mean.toFixed(3)),
