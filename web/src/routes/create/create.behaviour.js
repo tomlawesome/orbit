@@ -36,19 +36,25 @@ import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
  */
 export function mountCreate() {
   const controller = new AbortController();
+  /**
+   * @param {EventTarget | null | undefined} target
+   * @param {string} type
+   * @param {(event: any) => void} handler
+   */
   const on = (target, type, handler) =>
     target?.addEventListener(type, handler, { signal: controller.signal });
 
-  const card = document.getElementById("card");
-  const disclose = document.getElementById("disclose");
+  const card = /** @type {HTMLElement} */ (document.getElementById("card"));
+  const disclose = /** @type {HTMLElement} */ (document.getElementById("disclose"));
   const dropzone = document.getElementById("dropzone");
-  const nameInput = document.getElementById("f-name");
-  const typeButtons = [...document.querySelectorAll("#types button")];
-  const save = card.querySelector(".btn-primary");
+  const nameInput = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
+  const typeButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("#types button")]);
+  const save = /** @type {HTMLButtonElement} */ (card.querySelector(".btn-primary"));
 
   /** One-way: the form grows as you commit to it, and never shrinks back. */
   const reveal = () => disclose.classList.add("open");
 
+  /** @type {string | null | undefined} */
   let chosenType = null;
   for (const button of typeButtons) {
     on(button, "click", () => {
@@ -85,8 +91,9 @@ export function mountCreate() {
   const heldName = document.getElementById("dz-held-name");
   const heldSize = document.getElementById("dz-held-size");
 
+  /** @type {File | null | undefined} */
   let attachment = null;
-  function takeFile(file) {
+  function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
     attachment = file;
     reveal();
@@ -115,14 +122,15 @@ export function mountCreate() {
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
      the screen it belongs to. */
-  for (const button of document.querySelectorAll(".accept")) {
+  for (const button of /** @type {HTMLElement[]} */ ([...document.querySelectorAll(".accept")])) {
     on(button, "click", () =>
-      document.getElementById(button.dataset.accept)?.classList.remove("sugg"));
+      document.getElementById(/** @type {string} */ (button.dataset.accept))?.classList.remove("sugg"));
   }
 
   /* ---- saving ---- */
 
-  const value = (id) => document.getElementById(id).value.trim();
+  const value = (/** @type {string} */ id) =>
+    /** @type {HTMLInputElement} */ (document.getElementById(id)).value.trim();
 
   /**
    * The design draws no pending or failure state for the save. Rather than
@@ -131,7 +139,7 @@ export function mountCreate() {
    */
   const note = document.createElement("div");
   note.className = "save-note";
-  card.querySelector(".save-row").appendChild(note);
+  /** @type {HTMLElement} */ (card.querySelector(".save-row")).appendChild(note);
 
   let saving = false;
   on(card, "submit", async (event) => {
@@ -204,7 +212,7 @@ export function mountCreate() {
 
       await goto("/home");
     } catch (error) {
-      note.textContent = error?.message ?? "That could not be saved";
+      note.textContent = /** @type {any} */ (error)?.message ?? "That could not be saved";
       save.textContent = label;
       save.disabled = false;
       saving = false;
