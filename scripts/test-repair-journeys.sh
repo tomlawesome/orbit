@@ -516,9 +516,14 @@ SHIM
 journey_credential_drift() {
   local output status=0
   output="$(repair --check 2>&1)" || status=$?
-  [[ "$status" == 4 ]] || fail "--check on a drifted credential exited $status, expected 4"
+  [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2
+    fail "--check on a drifted credential exited $status, expected 4"; }
+  # Print what --check did say. Exit 4 only means it found something; which
+  # finding it reported instead is the whole diagnosis, and without this the
+  # failure names the missing finding and nothing else.
   grep -q 'finding class=database-credential-mismatch' <<<"$output" ||
-    fail '--check did not report database-credential-mismatch'
+    { printf '%s\n' "$output" >&2
+      fail '--check did not report database-credential-mismatch'; }
 
   status=0
   output="$(printf 'rotate\nrepair-journeys-passphrase\nrepair-journeys-passphrase\n' |
