@@ -9,10 +9,6 @@
     "src/routes/create/create.behaviour.js": 47,
     "src/routes/due-next/+page.svelte": 17,
     "src/routes/home/+page.svelte": 2,
-    "src/routes/home/placement.js": 33,
-    "src/routes/home/pocket.behaviour.js": 30,
-    "src/routes/home/pocket.svelte": 11,
-    "src/routes/home/skies.js": 119,
     "src/routes/settings/+page.svelte": 23,
     "tests/fidelity/screens.spec.js": 28
   }
