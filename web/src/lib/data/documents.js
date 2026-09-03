@@ -10,7 +10,34 @@
  */
 import { bandOf, daysUntil } from "./chart.js";
 
+/**
+ * One row of the archive table, whichever origin it came from: a stored
+ * document against a household's item, or a relay attachment not yet filed.
+ *
+ * @typedef {object} ArchiveRow
+ * @property {string} id
+ * @property {string} name
+ * @property {?number} sizeBytes
+ * @property {string} addedAt
+ * @property {?boolean} clean
+ * @property {{ id: string, title: string, band: string }} [item]
+ * @property {string} [suggestion]
+ * @property {string} [receiptId]
+ * @property {?string} household
+ * @property {boolean} viaRelay
+ * @property {boolean} loose
+ */
+
+/**
+ * @param {object} params
+ * @param {import('./workspace.js').Workspace} [params.workspace]
+ * @param {import('./workspace.js').Receipt[]} [params.receipts]
+ * @param {Record<string, import('./workspace.js').DocumentSummary[]>} [params.documentsByItem]
+ * @param {string} params.today
+ * @returns {{ groups: { label: string, rows: ArchiveRow[] }[], total: number, bytes: number, megabytes: string, allClean: boolean }}
+ */
 export function archiveOf({ workspace, receipts = [], documentsByItem = {}, today }) {
+  /** @type {ArchiveRow[]} */
   const rows = [];
   for (const household of workspace?.households ?? []) {
     for (const item of household.items ?? []) {
@@ -38,9 +65,9 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
     for (const [index, attachment] of attachments.entries()) {
       rows.push({
         id: `${receipt.id}-att-${index}`,
-        name: attachment.displayName,
+        name: /** @type {string} */ (attachment.displayName),
         sizeBytes: attachment.sizeBytes ?? null,
-        addedAt: receipt.receivedAt,
+        addedAt: /** @type {string} */ (receipt.receivedAt),
         clean: attachment.scannedClean ?? null,
         suggestion: receipt.proposal?.title ?? "Forwarded email",
         receiptId: receipt.id,
@@ -54,12 +81,17 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
 
   /* Recency groups against the reckoning date, in the order recency yields. */
   const [year, month] = [today.slice(0, 4), today.slice(5, 7)];
+  /**
+   * @param {string} addedAt
+   * @returns {string}
+   */
   const labelOf = (addedAt) => {
     if (addedAt.slice(0, 7) === `${year}-${month}`) return "This month";
     if (addedAt.slice(0, 4) === year) return "Earlier this year";
     if (Number(addedAt.slice(0, 4)) === Number(year) - 1) return "Last year";
     return "Older";
   };
+  /** @type {{ label: string, rows: ArchiveRow[] }[]} */
   const groups = [];
   for (const row of rows) {
     const label = labelOf(row.addedAt);
