@@ -174,7 +174,7 @@ body.shownew .nf{opacity:1;pointer-events:auto}
 .nf .nstar .glint{animation:northpulse 5.5s ease-in-out infinite;transform-origin:0 0}
 @keyframes northpulse{0%,100%{opacity:.75;transform:scale(1)}50%{opacity:1;transform:scale(1.18)}}
 .nf .nstar span{font:10px var(--mono);letter-spacing:.22em;color:var(--ink-faint);text-transform:uppercase}
-.nf .nstar:hover span{color:var(--accent)}
+.nf .nstar:hover span{color:var(--accent-text)}
 .nf .minisys{position:absolute;transform-origin:118px 95px}
 .nf .minisys svg{display:block}
 .nf .minisys text{font-family:var(--mono)}
@@ -199,7 +199,7 @@ body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
           transition:opacity .8s ease,transform .8s cubic-bezier(.3,.7,.3,1)}
 body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
 .nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
-               letter-spacing:-.035em;color:var(--accent)}
+               letter-spacing:-.035em;color:var(--accent-text)}
 .nf .disc p{font:11.5px var(--mono);color:var(--ink-mid);letter-spacing:.2em;
             text-transform:uppercase;margin-top:20px}
 .nf .disc p b{color:var(--ink);font-weight:400}
@@ -230,11 +230,11 @@ body.belong .nf .belong{opacity:1}
      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf .belong li .act{flex:none;font:10px var(--mono);letter-spacing:.13em;
      color:var(--ink-faint);text-transform:uppercase}
-.nf .belong li button:hover .act{color:var(--accent)}
+.nf .belong li button:hover .act{color:var(--accent-text)}
 .nf .belong li.waiting .act{color:var(--warm)}
 .nf .belong li.waiting button{cursor:default}
 .nf .belong .own{border-top:1px solid var(--line-soft);padding:13px 24px 16px;text-align:center}
-.nf .belong .own button{font:11.5px var(--mono);color:var(--accent);letter-spacing:.04em;
+.nf .belong .own button{font:11.5px var(--mono);color:var(--accent-text);letter-spacing:.04em;
      background:none;border:0;padding:0;cursor:pointer}
 .nf .belong .own button:hover{text-decoration:underline}
 .nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-faint);margin-top:7px}
