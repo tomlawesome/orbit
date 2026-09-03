@@ -75,10 +75,23 @@
       <stop offset="0%" stop-color="#f2ecdd"/>
       <stop offset="100%" stop-color="#b8ac8e"/>
     </linearGradient>
-    <filter id="b1"><feGaussianBlur stdDeviation="1"/></filter>
-    <filter id="b3"><feGaussianBlur stdDeviation="3"/></filter>
+    <!-- #764: b1/b3 declared no region at all (default -10% -10% 120% 120% of
+         each user's OWN bbox), exactly #498's first finding. Pinned to one
+         shared absolute (userSpaceOnUse) region that comfortably contains
+         every use of each filter — the disc-precess arcs/circles at their
+         raw viewBox coordinates (roughly x:650-1130, y:260-640) and the
+         inner-4 group's paths, whose local (pre-transform) coordinates also
+         happen to fall in that same numeric range. b16 has a single user
+         (the haze ellipse, bbox x:370-1230 y:356-548) so its region is
+         pinned tightly around that shape instead. b6 is used by three
+         elements in TWO different local coordinate spaces (disc-precess vs.
+         the inner-4 group's transform), so one shared absolute box would
+         have to be as large as the percentage default to stay safe for all
+         three — left alone as already reasonable. -->
+    <filter id="b1" filterUnits="userSpaceOnUse" x="300" y="80" width="1000" height="640"><feGaussianBlur stdDeviation="1"/></filter>
+    <filter id="b3" filterUnits="userSpaceOnUse" x="300" y="80" width="1000" height="640"><feGaussianBlur stdDeviation="3"/></filter>
     <filter id="b6" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
-    <filter id="b16" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="16"/></filter>
+    <filter id="b16" filterUnits="userSpaceOnUse" x="300" y="280" width="1000" height="300"><feGaussianBlur stdDeviation="16"/></filter>
     <filter id="hotrough" x="-30%" y="-30%" width="160%" height="160%">
       <feTurbulence type="fractalNoise" baseFrequency="0.02 0.09" numOctaves="2" seed="6" result="n"/>
       <feDisplacementMap in="SourceGraphic" in2="n" scale="10"/>
