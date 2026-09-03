@@ -175,7 +175,7 @@ function documentRowOf(doc) {
  * the parameter as `null`, and every caller passing a real id is then a type
  * error. That was invisible while the workspace seam handed callers `any`.
  *
- * @param {{ household?: import('./workspace.js').Household | null, documentsByItem?: Record<string, import('./workspace.js').DocumentSummary[]>, today?: string, keepId?: string | null }} input
+ * @param {{ household?: import('./workspace.js').Household | null, documentsByItem?: Record<string, import('./workspace.js').DocumentSummary[]>, today: string, keepId?: string | null }} input
  * @returns {BeltRow[]}
  */
 export function beltManifestOf({ household, documentsByItem = {}, today, keepId = null }) {

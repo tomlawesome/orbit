@@ -28,7 +28,7 @@
    */
   /**
    * @type {{
-   *   galaxy?: Record<string, { name: string, requested?: boolean, planets?: Array<[number, number, number, string]> }>,
+   *   galaxy?: Record<string, import('$lib/data/chart.js').GalaxyEntry>,
    *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
    *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
    *   oncreate?: import('svelte/elements').MouseEventHandler<HTMLButtonElement>,

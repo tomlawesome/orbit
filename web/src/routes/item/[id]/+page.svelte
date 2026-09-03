@@ -141,7 +141,11 @@
     const rows = beltManifestOf({
       household: data.household,
       documentsByItem: data.documentsByItem,
-      today: data.today,
+      /* Same cast as suggestionItem above and for the same reason: data.kind
+         comes back as plain `string`, so the data.kind === "belt" guard this
+         effect already made does not narrow `today` into existence at the
+         type level even though it always does at runtime. */
+      today: /** @type {string} */ (data.today),
       keepId: data.selectedId,
     });
     const focus = centredId ?? data.selectedId;
