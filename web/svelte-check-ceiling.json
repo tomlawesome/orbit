@@ -4,7 +4,7 @@
   "recorded": "2026-08-24",
   "files": {
     "src/lib/data/chart.js": 44,
-    "src/lib/data/workspace.js": 10,
+    "src/lib/data/workspace.js": 4,
     "src/lib/sky.js": 5,
     "src/routes/administration/+page.svelte": 31,
     "src/routes/create/create.behaviour.js": 47,

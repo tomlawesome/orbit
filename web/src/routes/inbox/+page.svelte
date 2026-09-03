@@ -88,6 +88,9 @@
   const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
+  /* "Still reading" only ever holds receipts that have already arrived. */
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
+  const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
   /* READ · SURE / READ · UNSURE — the parser's own confidence, two words. */
   /**
    * @param {import('$lib/data/workspace.js').Receipt} receipt
@@ -212,7 +215,7 @@
           <div class="reading">
             <i aria-hidden="true"></i>
             <div class="body">
-              <b>A message arrived {agoLong(receipt.receivedAt, view.now)}</b>
+              <b>A message arrived {readAgo(receipt)}</b>
               <span>{receipt.message}</span>
             </div>
           </div>
