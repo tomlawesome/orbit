@@ -900,7 +900,10 @@ export async function readAdminScreen() {
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
-      .then((/** @type {{ users?: object[] }} */ body) => body.users ?? [])
+      .then(
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean }[] }} */ body) =>
+          body.users ?? [],
+      )
       .catch(() => []),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
