@@ -21,6 +21,15 @@ import { describe, expect, it } from "vitest";
  *    them yet (the subscribe control is #763), but the back end works and the
  *    routes are not to be dropped for being unreferenced today.
  *
+ * The list is all 45 families, not the 24 ported first. ADR-0012's amendment
+ * was clarified by the owner on 2026-09-03: the cut keeps what the new front
+ * end NEEDS, not what it currently calls, and a working back end whose screen
+ * is merely undrawn is needed -- #410 defers sixteen such surfaces to M9
+ * because they are wanted. Only Next- and React-specific code goes.
+ * `/api/documents/[documentId]/preview` is the case that exposed it: the item
+ * screen says in a comment that the endpoint exists and that it deliberately
+ * does not call it yet.
+ *
  * EXPECTED_ROUTES is deliberately written out literally rather than derived
  * from any shared source, so a reviewer can read the intended surface
  * directly and a removed or renamed route fails loudly here instead of
@@ -32,22 +41,43 @@ const routesRoot = new URL("../../web/src/routes/api/", import.meta.url).pathnam
 const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
+  "/api/admin/documents/health",
+  "/api/admin/maintenance",
+  "/api/admin/operations",
+  "/api/admin/operations/deliveries/[deliveryId]",
+  "/api/admin/operations/document-jobs/[jobId]",
+  "/api/admin/operations/imap-test",
+  "/api/admin/operations/mailbox-notifications",
+  "/api/admin/operations/smtp-test",
+  "/api/admin/primary",
   "/api/admin/users",
   "/api/auth/callback",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/session",
+  "/api/auth/session/refresh",
   "/api/auth/sessions/revoke",
+  "/api/document-drafts/[draftId]/approve",
+  "/api/documents/[documentId]",
   "/api/documents/[documentId]/download",
+  "/api/documents/[documentId]/draft",
+  "/api/documents/[documentId]/preview",
+  "/api/documents/[documentId]/restore",
   "/api/health",
+  "/api/households/[householdId]/item-document-inspection",
   "/api/households/[householdId]/items/[itemId]/documents",
   "/api/households/[householdId]/join-requests",
   "/api/households/[householdId]/lifecycle",
   "/api/households/[householdId]/members",
+  "/api/households/[householdId]/portable-archives",
   "/api/imap-inbox",
   "/api/imap-inbox/[receiptId]",
   "/api/join-requests",
   "/api/join-requests/[requestId]",
+  "/api/portable-archives/[archiveId]/download",
+  "/api/portable-archives/import",
+  "/api/portable-archives/preview",
+  "/api/preferences",
   "/api/push/config",
   "/api/push/subscriptions",
   "/api/reviewed-intake/approve",
@@ -94,7 +124,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 24 route families -- no fewer, no more", () => {
+  it("has exactly the expected 45 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
