@@ -74,6 +74,7 @@
     --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --chart-alpha:1;
   }
   [data-theme=afterdark]{
     --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
@@ -84,6 +85,7 @@
     --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
     --star-far:#e9edf8; --star-near:#f4f0ff;
     --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#4a5468;
+    --chart-alpha:1;
   }
   [data-theme=atlas]{
     --bg:#c9bfa6; --panel:rgba(214,206,186,.78); --panel-raised:#dcd5c3;
@@ -94,6 +96,8 @@
     --sun:var(--warm); --sun-core:#1c2b4a; --stars:1; --celestial:block;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(28,43,74,.5); --chart-line-soft:rgba(28,43,74,.28); --chart-ink:#44507a;
+    /* dark ink on pale paper already carries; the ISS lands softer here (#475) */
+    --chart-alpha:.82;
   }
   [data-theme=dawn]{
     --bg:#c3ccdb; --panel:rgba(226,232,241,.82); --panel-raised:#e4eaf3;
@@ -104,6 +108,7 @@
     --sun:var(--warm); --sun-core:#1a2233; --stars:1; --celestial:none;
     --star-far:var(--ink); --star-near:var(--ink);
     --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --chart-alpha:.82;
   }
   [data-theme=retrograde]{
     --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
@@ -114,6 +119,7 @@
     --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
     --star-far:#9fd6e6; --star-near:#ffffff;
     --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#4c7788;
+    --chart-alpha:1;
   }
 
   *{box-sizing:border-box;margin:0}
@@ -130,7 +136,7 @@
   .layer{position:fixed;inset:0;pointer-events:none}
   .layer svg{position:absolute;inset:0;width:100%;height:100%}
   .sky{z-index:0;opacity:var(--stars);transition:opacity .4s}
-  .chartback{z-index:0;opacity:.95}
+  .chartback{z-index:0;opacity:calc(var(--chart-alpha,1) * .95)}
   /* the station reads boldest out at the edges and steps back under the
      column of panels, so it is never competing with a word */
   .station{z-index:1;opacity:1;
