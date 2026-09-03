@@ -187,6 +187,6 @@
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
-  .signout:hover{color:var(--overdue)}
-  .signout-problem{font:10.5px var(--mono);color:var(--overdue);margin-top:7px;line-height:1.7}
+  .signout:hover{color:var(--overdue-text)}
+  .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 </style>
