@@ -630,6 +630,10 @@ The full open-questions list, walked in order and ruled:
   a no (file stays as the record). EVA is the settings concept — and
   (owner, later): EVA SHIPS AS IT IS for now; the "needs work" second
   pass is deferred to some future time, not a v1.3 gate.
+- **EVA builds now** (owner, 2026-09-03, #472): "just build it and
+  we'll polish later if necessary" — the EVA concept ships in the app
+  as `design/v19/settings-eva.html`, the concept sheet reconciled to
+  the current settings content; the second pass stays deferred.
 - **Household backdrop: inside this system** (owner): the berth is a
   no (record kept); H2 — the household's own constellation at room
   scale, fully data-true — is the household screen's backdrop.

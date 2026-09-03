@@ -1,25 +1,37 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { clearTourSeen, readSettingsScreen, signOutEverywhere, writeReminders } from "$lib/data/workspace.js";
+  import { galaxyOf } from "$lib/data/chart.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
+  import { mountEva } from "$lib/backdrops/eva.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./settings.css";
 
   /**
-   * Settings — the helm (#464). Built from design/v19/settings.html
-   * (ratified §13): your own controls and only yours — identity, sky,
-   * reminders, relay and memberships. Instance-wide levers live on
-   * Administration. Reminder timing and "sign out of every device" are both
-   * live against #468's routes.
+   * Settings — EVA, the spacewalk (#472/#464). The ratified CONTENT is
+   * unchanged from the helm (#464, §13/§14): identity, sky, reminders, relay
+   * and memberships, your own controls and only yours. What changed is the
+   * SCREEN: per the owner's §15 ruling ("EVA wins... EVA SHIPS AS IT IS for
+   * now", 2026-08-17) and the 2026-09-03 instruction on #472 ("just build it
+   * and we'll polish later if necessary"), each card is now an open access
+   * panel on a hull — a hatch swung back on its hinges, its name stencilled
+   * beside it — built from design/v19/settings-eva.html, the concept
+   * (design/v19/settings-concept-eva.html) reconciled against this ratified
+   * content. The living backdrop is $lib/backdrops/eva.js, ported from that
+   * sheet exactly as station.js and constellations.js were: this file only
+   * mounts it and tears it down.
    *
    * NOTE: the composite dispatcher still sends /settings to the old engine —
    * it manages households, which this screen deliberately does not. The flip
    * is a cutover line once those journeys exist v19-side (#453).
    */
+  let { data } = $props();
   let view = $state(null);
+  /** @type {?HTMLDivElement} */
+  let backdropRoot = null;
 
   /*
    * THE v1.3.0 ROSTER, FINAL (§15, owner): star-chart, after dark, CLOUDS,
@@ -137,24 +149,42 @@
       .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 
-  onMount(async () => {
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
+  onMount(() => {
+    let disposed = false;
+    let backdropTeardown = () => {};
     active = document.documentElement.dataset.theme || "starchart";
-    view = await readSettingsScreen();
-    emailReminders = view.reminders.emailEnabled;
+    /* The backdrop mounts once the screen's own data has loaded — its
+       households (galaxyOf) come from the same readSettingsScreen() answer
+       this screen renders from, so there is no second fetch. The one seed
+       follows home's own pattern: pinned to the workspace under fixtures, so
+       the fidelity gate can compare one deterministic hull against the
+       mockup's; rolled fresh otherwise. */
+    readSettingsScreen().then(async (screen) => {
+      if (disposed) return;
+      view = screen;
+      emailReminders = screen.reminders.emailEnabled;
+      /* The panels this backdrop measures (`[data-nomen]`) are the cards the
+         `{#if view}` block below renders, so a tick is awaited here — before
+         mounting — to be sure they are actually in the document first. */
+      await tick();
+      if (disposed) return;
+      const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
+      const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
+      backdropTeardown = mountEva(/** @type {HTMLDivElement} */ (backdropRoot), {
+        seed, galaxy, primary: screen.primary,
+      });
+    });
+    return () => {
+      disposed = true;
+      backdropTeardown();
+    };
   });
 </script>
 
 <svelte:head><title>Orbit — settings</title></svelte:head>
 
 <div class="helm-page">
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
-<div class="vignette" aria-hidden="true"></div>
+<div class="eva-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 
 <Chrome user={view?.user} current="settings"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
@@ -167,17 +197,15 @@
 
   {#if view}
     <div class="cards">
-    <div class="card wide">
-      <h3>You</h3>
+    <section class="card wide" data-nomen="PANEL A-01 · YOU" data-sub="CREW ID · EMU 3005" data-hinge="-1">
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
         <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""} · signed in via your identity provider</span></div>
         <button>edit name</button>
       </div>
-    </div>
+    </section>
 
-    <div class="card wide">
-      <h3>Your sky</h3>
+    <section class="card wide" data-nomen="PANEL A-02 · YOUR SKY" data-sub="OPTICS BAY · TORQUE 12 N·m" data-hinge="-1">
       <div class="packs" role="group" aria-label="Theme pack">
         {#each PACKS as [name, title, line, ground, [sun, warm, ok, upcoming]] (name)}
           <button class="pack" aria-pressed={active === name} onclick={() => pickPack(name)}>
@@ -192,27 +220,24 @@
         {/each}
       </div>
       <button class="relaunch" onclick={walkAgain}>↻ take the walk again</button>
-    </div>
+    </section>
 
-    <div class="card">
-      <h3>Reminders</h3>
+    <section class="card" data-nomen="PANEL B-01 · REMINDERS" data-sub="CAUTION &amp; WARNING" data-hinge="-1">
       <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
       <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
       <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
       <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
       {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
-    </div>
+    </section>
 
-    <div class="card">
-      <h3>Your relay</h3>
+    <section class="card" data-nomen="PANEL B-02 · YOUR RELAY" data-sub="S-BAND · TDRS" data-hinge="1">
       <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
       <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
       <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h3>Your systems</h3>
+    <section class="card wide" data-nomen="PANEL C-01 · YOUR SYSTEMS" data-sub={`DOCKED ELEMENTS · ${view.memberships.length}`} data-hinge="-1">
       <!-- §15-2k: this card is the door to household management. Each row is
            the way into one system — /household/{id}, the owner's screen or the
            member's depending on who is reading it. A link, not a button with a
@@ -225,11 +250,17 @@
           <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
         </a>
       {/each}
-    </div>
+    </section>
 
     </div><!-- /cards -->
 
-    <div class="danger"><button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}</div>
+    <!-- THE AIRLOCK: the last panel on the hull is not an access panel — it is
+         the round hatch you came out of, and going back through it is signing
+         out of every device (§15, the Quest · Joint Airlock name-drop). -->
+    <div class="airlock" id="airlock" data-nomen="QUEST · JOINT AIRLOCK" data-sub="CREW LOCK · HATCH A/L 1">
+      <button class="alk-btn" onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>
+      {#if signOutProblem}<div class="note">{signOutProblem}</div>{:else}<div class="alk-note">the way back inside · every session, everywhere</div>{/if}
+    </div>
   {/if}
 </div>
 </div>

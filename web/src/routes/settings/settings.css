@@ -1,36 +1,149 @@
-/* Settings — the helm (#464), from design/v19/settings.html. Tokens come
- * from packs.css; everything here is scoped under .helm-page so nothing
- * bleeds into /settings/mail, which shares this route directory. */
+/*
+ * Settings — EVA, the spacewalk (#472/#464), from design/v19/settings-eva.html
+ * (the concept, design/v19/settings-concept-eva.html, reconciled against the
+ * ratified helm content). Tokens come from packs.css; the hull-only tokens
+ * (plate, metal, stencil, tray, door, lamp...) are new here, scoped to this
+ * screen the way administration.css scoped --chart-alpha, because no other
+ * screen draws a hull. Everything here is scoped under .helm-page so nothing
+ * bleeds into /settings/mail, which shares this route directory.
+ */
 
 html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
           font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
 .helm-page *{box-sizing:border-box;margin:0}
 .helm-page{min-height:100vh}
 
-.helm-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
-     transition:opacity .4s;z-index:0}
-.helm-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
-.helm-page .sky .far{animation:helm-drift 400s linear infinite}
-.helm-page .sky .near{animation:helm-drift 195s linear infinite}
-@keyframes helm-drift{to{transform:translateX(-1600px)}}
-.helm-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
-          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .helm-page .vignette,[data-theme=dawn] .helm-page .vignette{background:none}
+/*
+ * THE HULL VARIABLES, per pack (design/v19/settings-eva.html's own):
+ *   --plate / --plate-lit / --plate-shade : the cylinder, limb to limb
+ *   --seam / --seam-hi                    : plate courses and generators
+ *   --pock / --pock-rim                   : micrometeorite damage
+ *   --metal / --metal-hi / --metal-lo     : rails, standoffs, hinges, hooks
+ *   --stencil / --stencil-sub             : plant marking, primary + quiet
+ *   --tag-ground                          : the ground a small hull tag knocks
+ *                                            itself out against
+ *   --recess / --lip-hi / --lip-lo        : the opening and its chamfer
+ *   --tray / --tray-line                  : the face the controls sit on
+ *   --door / --door-edge / --door-back    : the swung-back hatch leaf
+ *   --lamp / --lamp-op                    : the helmet lamp (night side)
+ *   --sunwash / --sun-tint                : the sun (day side)
+ *   --alk-glow                            : the airlock window's own light
+ *   --field-op / --cloud-op               : household+figure / cloudbank mix
+ * Every other token a pack sets here (ink, accent, chart-ink...) is packs.css's
+ * own, unmoved: this screen's chrome and card ink stay the app's ratified ones,
+ * never the concept's now-superseded values (#490/#491/#500 all postdate it).
+ */
+[data-theme=starchart] .helm-page{
+  --field-op:1; --cloud-op:0;
+  --plate:#1b2338; --plate-lit:#27314c; --plate-shade:#0a1020;
+  --seam:rgba(4,7,15,.85); --seam-hi:rgba(190,206,240,.10);
+  --pock:rgba(3,5,11,.78); --pock-rim:rgba(198,214,246,.34);
+  --metal:#59647f; --metal-hi:#aab6d0; --metal-lo:#20283c;
+  --stencil:#d3ddf2; --stencil-sub:#a9b4d2; --tag-ground:#171e31;
+  --recess:#080d1c; --lip-hi:rgba(196,212,246,.30); --lip-lo:rgba(2,4,10,.85);
+  --tray:#131b33; --tray-line:#26304f;
+  --door:#212b42; --door-edge:#36415f; --door-back:#161d30;
+  --lamp:#ffe2b4; --lamp-op:.21; --sunwash:0; --sun-tint:#ffffff;
+  --alk-glow:#ffcf92;
+}
+[data-theme=afterdark] .helm-page{
+  --field-op:.92; --cloud-op:0;
+  --plate:#171c25; --plate-lit:#212734; --plate-shade:#080a10;
+  --seam:rgba(2,3,6,.85); --seam-hi:rgba(200,212,232,.09);
+  --pock:rgba(2,3,6,.8); --pock-rim:rgba(200,212,232,.32);
+  --metal:#525b6b; --metal-hi:#a3adbe; --metal-lo:#1b1f28;
+  --stencil:#ccd3de; --stencil-sub:#a3abba; --tag-ground:#141922;
+  --recess:#070910; --lip-hi:rgba(200,212,232,.26); --lip-lo:rgba(1,2,4,.85);
+  --tray:#131720; --tray-line:#242b38;
+  --door:#1c222d; --door-edge:#2d3542; --door-back:#131820;
+  --lamp:#e6f0ff; --lamp-op:.18; --sunwash:0; --sun-tint:#ffffff;
+  --alk-glow:#ffd6a4;
+}
+/* clouds and dawn are twins in the app's own pack tokens (dawn's §15
+   temperature-story refresh gave the two the same ink, accent and sky stops),
+   so they take the same hull finish — one pale, sunlit read, the concept's
+   own "clouds" material verbatim. A distinct dawn hull is the deferred second
+   pass (owner, 2026-09-03: "we'll polish later if necessary"), not a gap in
+   this one. */
+[data-theme=clouds] .helm-page,[data-theme=dawn] .helm-page{
+  --field-op:.55; --cloud-op:1;
+  --plate:#dfe6ee; --plate-lit:#f3f7fb; --plate-shade:#bcc9d8;
+  --seam:rgba(46,64,88,.42); --seam-hi:rgba(255,255,255,.85);
+  --pock:rgba(46,64,88,.32); --pock-rim:rgba(255,255,255,.9);
+  --metal:#8b98aa; --metal-hi:#ffffff; --metal-lo:#5c6a7c;
+  --stencil:#0f1c31; --stencil-sub:#141d2b; --tag-ground:#e9eef4;
+  --recess:#b4c2d2; --lip-hi:rgba(255,255,255,.9); --lip-lo:rgba(46,64,88,.42);
+  --tray:#f2f6fb; --tray-line:#ccd7e4;
+  --door:#e8eef5; --door-edge:#c3cfdd; --door-back:#dbe3ec;
+  --lamp:#ffffff; --lamp-op:0; --sunwash:.42; --sun-tint:#ffffff;
+  --alk-glow:#e0a552;
+}
+[data-theme=retrograde] .helm-page{
+  --field-op:1; --cloud-op:0;
+  --plate:#12212c; --plate-lit:#1c3445; --plate-shade:#060c12;
+  --seam:rgba(2,6,10,.85); --seam-hi:rgba(45,226,230,.11);
+  --pock:rgba(2,6,10,.8); --pock-rim:rgba(45,226,230,.34);
+  --metal:#4e7b8a; --metal-hi:#9fd6e6; --metal-lo:#122430;
+  --stencil:#cbeef6; --stencil-sub:#9ccddb; --tag-ground:#102029;
+  --recess:#071219; --lip-hi:rgba(45,226,230,.26); --lip-lo:rgba(1,4,7,.85);
+  --tray:#10202c; --tray-line:#1d4353;
+  --door:#17303e; --door-edge:#255062; --door-back:#0e1e29;
+  --lamp:#c9f4ff; --lamp-op:.18; --sunwash:0; --sun-tint:#ffffff;
+  --alk-glow:#ff9ae6;
+}
 
-.helm-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
-/* §14: the helm uses the desk — one full row for the sky, two columns for
-   the rest, collapsing to one on a narrow viewport. */
-.helm-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:22px;align-items:start}
-.helm-page .cards .card{margin-top:0}
-.helm-page .card.wide{grid-column:1 / -1}
-@media (max-width:880px){.helm-page .cards{grid-template-columns:1fr}}
+/*
+ * THREE LAYERS, and the order IS the concept:
+ *   .sky   the field  — drifts on the clock, lags the traverse, wheels
+ *   .hull  the world  — bolted to the page, no clock, moves 1:1 with you
+ *   .rig   yourself   — fixed in the frame: your tether, and your lamp's
+ *                       pool is inside .hull so it lights the plating
+ *
+ * `display:contents` on the mount point, the same move administration.css
+ * makes for its own backdrop root: the wrapper leaves no box of its own, so
+ * the fixed layers inside are positioned against the viewport exactly as the
+ * mockup's own top-level divs are, not against a nested stacking context.
+ * This is also what overrides family.css's `.sky{inset:-5%}` bleed for the
+ * old tiled drift (not loaded on this screen, but the two-class selector
+ * would win the tie regardless, the way relay.css and administration.css's
+ * own `.sky`/`.station` rules do).
+ */
+.helm-page .eva-backdrop{display:contents}
+.helm-page .layer{position:fixed;inset:0;pointer-events:none}
+.helm-page .layer svg{position:absolute;inset:0;width:100%;height:100%}
+.helm-page .layer.sky{z-index:0}
+.helm-page .layer.hull{z-index:1}
+.helm-page .layer.rig{z-index:3}
+
+/* the column is the hull's working width: wide enough for the ratified desk,
+   narrow enough that the margins can carry rails, doors and a tether. Below
+   that the furniture fades and you are simply on a hull with no room to
+   stand back from it. */
+.helm-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:150px 24px 130px}
+@media (max-width:1360px){.helm-page .page{max-width:calc(100vw - 300px)}}
+@media (max-width:900px){.helm-page .page{max-width:none;padding:150px 34px 110px}}
 .helm-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
 .helm-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+/* the title floats in the open sky ABOVE the forward end ring, so it needs to
+   survive a starfield: painted stroke-first in the sky's own colour */
+.helm-page header.screen h1,.helm-page header.screen .sub{
+  paint-order:stroke;-webkit-text-stroke:3px var(--bg);
+  text-shadow:0 0 14px var(--bg),0 0 6px var(--bg)}
+/* the gap between the header and the first hatch is where the end ring sits */
+.helm-page .cards{display:grid;grid-template-columns:1fr 1fr;gap:58px 60px;margin-top:250px;align-items:start}
+.helm-page .card.wide{grid-column:1 / -1}
+@media (max-width:900px){.helm-page .cards{grid-template-columns:1fr;gap:52px}}
 
-.helm-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
-      border-radius:16px;padding:20px 22px;margin-top:22px}
-.helm-page .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
-         color:var(--ink-faint);margin-bottom:14px}
+/* A PANEL IS AN OPENING, AND THE TRAY IS OPAQUE. The hull draws the recess,
+   the chamfer, the hinges and the swung-back door around this rectangle; the
+   rectangle itself is the tray the controls are bolted to. It is opaque
+   because legibility is not allowed to depend on what is behind it. */
+.helm-page .card{background:var(--tray);border-radius:9px;padding:19px 21px;
+      box-shadow:inset 0 9px 16px -8px rgba(0,0,0,.55),
+                 inset 0 0 0 1px rgba(255,255,255,.03)}
+[data-theme=clouds] .helm-page .card,[data-theme=dawn] .helm-page .card{
+  box-shadow:inset 0 9px 16px -9px rgba(30,44,66,.45),
+             inset 0 0 0 1px rgba(255,255,255,.6)}
 .helm-page .idrow{display:flex;align-items:center;gap:16px}
 .helm-page .idrow .avatar{width:46px;height:46px;border-radius:50%;flex:none;
                border:1px solid var(--line);background:var(--panel-raised);
@@ -44,18 +157,17 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* the sky chooser: each card is PAINTED by its own pack variables */
 .helm-page .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
-.helm-page .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
+.helm-page .pack{border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;
       background:none;padding:0;text-align:left;font-family:var(--ui)}
 .helm-page .pack[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
-.helm-page .pack .strip{position:relative;height:64px;display:block}
+.helm-page .pack .strip{position:relative;height:64px;display:block;overflow:hidden}
 .helm-page .pack .strip i{position:absolute;border-radius:50%}
 .helm-page .pack .label{display:block;padding:9px 12px 10px;background:var(--panel-raised)}
 .helm-page .pack .label b{display:block;font-size:12.5px;font-weight:560;color:var(--ink)}
-.helm-page .pack .label span{font:10px var(--mono);color:var(--ink-mid)}
-
-/* "Take the walk again" (#753, mockup stop 8 of design/v19/tour.html): the
- * mockup's own .relaunch rule, on a real button rather than a div, so it
- * carries the same type and colour as a plain click target must. */
+.helm-page .pack .label span{font:10px var(--mono);color:var(--ink-quiet)}
+/* "Take the walk again" (#753, ratified 2026-09-03): the relaunch sits under
+   the sky choice, the ratified screen's own placement — a link's ink, not a
+   control's, because it re-opens a journey rather than changing a setting. */
 .helm-page .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);
       color:var(--accent-text);background:none;border:0;padding:0;cursor:pointer;
       text-align:left}
@@ -63,48 +175,58 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 .helm-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
     font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
-    border-bottom:1px solid var(--line-soft)}
+    border-bottom:1px solid var(--tray-line)}
 .helm-page .kv:last-child{border:0}
 .helm-page .kv b{color:var(--ink);font-weight:500}
 .helm-page .kv .on{color:var(--ok-text)}
-.helm-page .kv a{color:var(--ink-mid);text-decoration:none}
+.helm-page .kv a{color:var(--ink-mid);text-decoration:none;border-bottom:1px solid var(--tray-line)}
 .helm-page .kv a:hover{color:var(--accent-text)}
 /* a switch that tells the truth: filled when on, hollow when off */
 .helm-page .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
         background:none;cursor:pointer;position:relative;flex:none}
 .helm-page .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;
-          background:var(--ink-faint);transition:left .2s,background .2s}
+          background:var(--ink-quiet);transition:left .2s,background .2s}
 .helm-page .toggle[aria-pressed=true]{border-color:var(--ok)}
 .helm-page .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
 
 /* What a control says when it could not do what it looked like it did — the
-   inbox's .mail-problem, in the helm's own type. Never on the happy path, so
-   the ratified card is unchanged; the :has rule keeps the row above it the
-   last one for the purposes of the divider. */
+   ratified screen's own .note, in the hatch's own type. Never on the happy
+   path, so the ratified card is unchanged. */
 .helm-page .note{margin-top:10px;font:11px var(--mono);color:var(--warm)}
 .helm-page .kv:has(+ .note){border:0}
-.helm-page .danger .note{margin-top:8px}
+.helm-page .airlock .note{margin-top:8px}
 
 /* §15-2k: the row is a link into household management now. It must LOOK
    exactly as the ratified row did — the ink and the underline an anchor
    brings by default are undone here rather than accepted — so the only thing
    that changed is that it can be opened. */
 .helm-page .memb{display:flex;align-items:center;gap:12px;padding:10px 2px;
-      border-bottom:1px solid var(--line-soft);font-size:13.5px;
+      border-bottom:1px solid var(--tray-line);font-size:13.5px;
       color:inherit;text-decoration:none}
 .helm-page a.memb:hover b{color:var(--accent-text)}
 .helm-page .memb:last-child{border:0}
 .helm-page .memb svg{flex:none}
 .helm-page .memb b{flex:1;font-weight:520}
 .helm-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
-      border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid)}
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-quiet)}
 .helm-page .role.owner{color:var(--accent-text);border-color:var(--accent)}
-.helm-page .memb small{font:10.5px var(--mono);color:var(--ink-faint)}
+.helm-page .memb small{font:10.5px var(--mono);color:var(--ink-quiet)}
 
-.helm-page .danger{margin-top:26px;text-align:center}
-.helm-page .danger button{font:11.5px var(--mono);color:var(--ink-faint);background:none;
-               border:1px solid var(--line-soft);border-radius:9px;padding:8px 16px;cursor:pointer}
-.helm-page .danger button:hover{color:var(--overdue-text);border-color:var(--overdue)}
+/* THE AIRLOCK. The last panel on the hull is not an access panel: it is the
+   round hatch you came out of, and going back through it is signing out of
+   every device. The hull draws the hatch behind this block. */
+.helm-page .airlock{margin:120px auto 0;width:min(430px,100%);text-align:center;
+         position:relative;padding-top:150px}
+.helm-page .airlock .alk-btn{font:12px var(--mono);letter-spacing:.06em;color:var(--ink);
+                  background:var(--tray);border:1px solid var(--line);
+                  border-radius:9px;padding:11px 20px;cursor:pointer}
+.helm-page .airlock .alk-btn:hover{color:var(--overdue-text);border-color:var(--overdue)}
+.helm-page .airlock .alk-note{margin-top:12px;font:10.5px var(--mono);color:var(--stencil-sub);
+                   letter-spacing:.08em}
+
 @media (prefers-reduced-motion: reduce){
-  .helm-page .sky .far,.helm-page .sky .near{animation:none!important}
+  /* stillness: the drift clock eva.js runs is stopped in script, the way
+     satellites.js, constellations.js and station.js stop theirs — a
+     requestAnimationFrame loop cannot be turned off by a media query, so
+     there is nothing more to disable here. */
 }

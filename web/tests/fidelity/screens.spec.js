@@ -468,13 +468,36 @@ const SCREENS = [
     mockupOnly: [".demos", "footer"],
   },
   {
+    /*
+     * THE EVA HULL BACKDROP (#472/#475, §15), ratified 2026-08-17 ("EVA
+     * wins... EVA SHIPS AS IT IS for now") and built per the owner's
+     * 2026-09-03 instruction on #472 ("just build it and we'll polish later
+     * if necessary"). design/v19/settings-eva.html is the concept
+     * (settings-concept-eva.html) reconciled against the ratified helm
+     * content — every settings group is now an open access panel on a hull.
+     * The sheet is pinned to the same seed the app derives under fixtures
+     * and runs the same generator (sky.js's streamFactory, copied verbatim
+     * into the sheet), which is the only reason a living hull can be
+     * compared to a mockup at all — home's law.
+     */
     name: "settings",
     path: "/settings",
     stage: "porting",
-    mockup: "/design/v19/settings.html",
-    /* Settled once the helm has its pack cards — the data arrives client-side. */
+    mockup: "/design/v19/settings-eva.html",
+    /*
+     * At rest, for the belt's reason: the sky streams and the tether drifts
+     * on a requestAnimationFrame clock that `animations: "disabled"` cannot
+     * reach. The design's own reduced-motion state holds the clock at zero
+     * on both sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /* Settled once the hull has its pack cards and its memberships — the
+       data arrives client-side, and the backdrop measures their real
+       position once they are in the document. */
     settle: () => document.querySelectorAll(".pack").length > 0 && Boolean(document.querySelector(".memb")),
-    mockupOnly: ["footer"],
+    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, the seed
+       tag it carries) and the footer naming the proposal. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     name: "inbox",

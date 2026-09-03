@@ -873,6 +873,15 @@ export async function readSettingsScreen() {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
     primary,
+    /*
+     * `today` and the raw `households` are additive: the ratified card only
+     * ever reads `memberships` below. They exist so the EVA backdrop
+     * (#472/#475, $lib/backdrops/eva.js) can draw this instance's real
+     * households in its distant sky the same way administration's does
+     * (galaxyOf), rather than a second, disconnected household list.
+     */
+    today: todayOf(workspace),
+    households: workspace.households,
     memberships: workspace.households.map((household) => ({
       id: household.id,
       name: household.name,
