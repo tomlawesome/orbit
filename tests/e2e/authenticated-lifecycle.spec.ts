@@ -1,13 +1,41 @@
-import { expect, test, type Dialog, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Dialog, type Page } from "@playwright/test";
+import { sweepNamed } from "./support/households";
 
 const administrator = "Orbit Administrator";
 const member = "Orbit Member";
+
+/* #730: every household this file makes through the setup dialog. It never
+   learns their ids, so the sweep looks them up by name. This file was the
+   suite's largest leak -- thirty "Menu overflow" households survived a run,
+   the same fixture family #670's CI failure named -- and it was missed by the
+   first pass because it does not call household.create, so a grep for the
+   command could not see it. */
+const seededThroughTheInterface = new Set<string>([
+  /* Filled straight into the setup dialog in two tests rather than through
+     createManualHousehold, so it is named here. Listing a household that was
+     never created is harmless: the sweep only removes what it finds. */
+  "Acceptance household",
+]);
 
 async function signIn(page: Page, identity: string) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: identity }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
+  await expect(page).toHaveURL("/workspace");
+}
+
+/* #730: a hard delete is an instance administrator's power, and the households
+   below are made by the member, so the sweep needs its own signed-in
+   administrator rather than the test's page. */
+async function sweepAsAdministrator(browser: Browser, names: readonly string[]) {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await signIn(page, administrator);
+    await sweepNamed(page, names);
+  } finally {
+    await context.close();
+  }
 }
 
 async function openDesktopSettings(page: Page) {
@@ -180,6 +208,9 @@ async function reopenItemFromList(page: Page, title: string, list: "home" | "arc
 }
 
 async function createManualHousehold(page: Page, isMobile: boolean, name: string) {
+  /* #730: recorded here rather than at each call site, so a household made
+     through the interface cannot be forgotten by a test added later. */
+  seededThroughTheInterface.add(name);
   const recoveryHeading = page.getByRole("heading", { name: "Where would you like to begin?" });
   const householdPicker = page.locator("button.household-picker");
   const workspace = await waitForDurableWorkspace(page);
@@ -630,7 +661,7 @@ test.describe("authenticated household lifecycle", () => {
     await openItemRow(page, updatedTitle);
   });
 
-  test("keeps the household menu reachable once the household list overflows it", async ({ page, isMobile }) => {
+  test("keeps the household menu reachable once the household list overflows it", async ({ page, isMobile, browser }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
     test.setTimeout(180_000);
 
@@ -684,5 +715,24 @@ test.describe("authenticated household lifecycle", () => {
     await expect(lastItem, `Expected exactly one household menu item for "${lastName}"`).toHaveCount(1, { timeout: 15_000 });
     await lastItem.click();
     await waitForActiveHousehold(page, lastName);
+
+    /* #730: ten households, deliberately, to overflow the menu -- and until
+       now they stayed. This spec seeds through the interface, so it never
+       holds an id and must sweep by name, from an administrator's session:
+       the member who made them cannot hard-delete them. Left behind, they are
+       the crowding that made other specs fail by run order, and they broke
+       this file's own "a first sign-in creates no household" test on any
+       second run. */
+    await sweepAsAdministrator(browser, seededNames);
   });
+});
+
+test.afterAll(async ({ browser }) => {
+  const names = [...seededThroughTheInterface];
+  /* Cleared only after a successful sweep would be wrong: a failed sweep must
+     not silently drop what it could not remove. The names are read first and
+     the set emptied, because sweepNamed throws on failure and the run should
+     report that once, not accumulate it. */
+  seededThroughTheInterface.clear();
+  await sweepAsAdministrator(browser, names);
 });

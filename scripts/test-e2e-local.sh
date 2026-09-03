@@ -21,6 +21,19 @@
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from playwright.config.ts:
 #                    desktop-chromium or mobile-chromium. Default: both.
+#   --keep          Leave the stack up on exit instead of tearing it down, so a
+#                    failed run can be inspected: query the database, read the
+#                    container logs, open the app. Tear it down afterwards with:
+#                      docker compose -p orbit-e2e-local --env-file .env-orbit \
+#                        -f docker-compose.yml -f docker-compose.mail.yml \
+#                        -f docker-compose.acceptance.yml \
+#                        -f docker-compose.local-e2e.yml down --volumes
+#
+# Test fixtures left behind by a spec show up as a household count above zero
+# after a run (#730), which is the cheap way to find a spec that does not clean
+# up after itself:
+#   docker exec orbit-e2e-local-db sh -c \
+#     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
 # AGENTS.md "Traps when running things locally" applies here directly: this
 # script always passes an explicit, distinctive Compose `-p` project name
@@ -49,8 +62,13 @@ readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f dock
 
 spec=""
 playwright_project=""
+keep=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --keep)
+      keep=1
+      shift
+      ;;
     --spec)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --spec requires a value.\n' >&2; exit 2; }
       spec="$2"
@@ -62,7 +80,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium]\n' "$0"
+      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
       exit 0
       ;;
     *)
@@ -92,6 +110,10 @@ cleaned_up=0
 cleanup() {
   [[ "$cleaned_up" == 0 ]] || return 0
   cleaned_up=1
+  if [[ "$keep" == 1 ]]; then
+    log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
+    return 0
+  fi
   log "tearing down project ${project_name}"
   compose down --volumes --remove-orphans > /dev/null 2>&1 || true
 }
@@ -237,6 +259,10 @@ log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (
 suite_status=0
 PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true \
   pnpm exec playwright test "${playwright_args[@]}" || suite_status=$?
+
+if [[ "$keep" == 1 ]]; then
+  log "stack still up: ${base_url}"
+fi
 
 if [[ "$suite_status" != 0 ]]; then
   log "suite failed; service status and logs follow"

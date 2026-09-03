@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
@@ -41,6 +42,13 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 
 const HOUSEHOLD = `Harbour Approach ${Date.now()}`;
 const OWN_SYSTEM = `Newcomer's Own ${Date.now()}`;
+
+/* #730: both systems this journey makes are removed once the file is done —
+   not sooner, because the second test needs the first one's name to still be
+   taken. The sweep runs from the administrator's own session: a hard delete is
+   an instance-admin power, and neither the member nor the newcomer has it. */
+const households = householdRegister();
+let seeded = false;
 
 /** The way every other spec signs in: straight at the engine's login route. */
 async function signInAs(page: Page, account: string, returnTo = "/") {
@@ -133,6 +141,23 @@ async function pendingRequests(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+test.afterAll(async ({ browser }) => {
+  if (!seeded) return;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
+       as well, so it resolves while the app is still navigating -- the race
+       this spec was fixed for. The sweep talks to the API, not the page, but
+       the loose wait is not to be reintroduced anywhere in this file. */
+    await signInAs(page, "Orbit Administrator", "/home");
+    await expect(page).toHaveURL(/\/home$/);
+    await households.sweep(page);
+  } finally {
+    await context.close();
+  }
+});
+
 test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
@@ -147,6 +172,8 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await signInAs(ownerPage, "Orbit Member", "/home");
   await expect(ownerPage).toHaveURL(/\/home$/);
   const created = await createSystem(ownerPage, HOUSEHOLD);
+  households.track(created);
+  seeded = true;
   expect(created.canManage).toBe(true);
   expect(created.onboardingComplete).toBe(true);
   expect(created.sections.map((section) => section.name))
@@ -276,6 +303,10 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   });
   expect(workspace.households[0].sections.map((section) => section.name))
     .toEqual(["Home", "Vehicles", "Devices", "Services"]);
+  /* the reader's own system, made by the card rather than by this file, joins
+     the sweep now that the server has named it (#730) */
+  households.track(workspace.households[0]);
+  seeded = true;
 
   /* And from now on the door hands them on, because home is theirs. */
   await page.goto("/");
