@@ -25,6 +25,13 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_ACCEPTANCE_OIDC",
   "ORBIT_CAPTURE_PRODUCT_TOUR",
   "ORBIT_SKIP_E2E",
+  // The fixture harness (#451, #410 §15). Deliberately NOT in the deployment
+  // contract: it is a harness toggle for the fidelity gate and `vite dev`, and
+  // a production build that finds it set refuses to start (#773). Documenting
+  // it as configuration would invite an operator to set the one variable the
+  // startup check exists to refuse. It reaches src/ only because that check
+  // reads it.
+  "ORBIT_FIXTURES",
   // CLI-invocation-only operational toggles (issue #296 slice 4,
   // src/cli/orbit.ts) — never written to .env-orbit, so out of the
   // deployment configuration contract entirely, mirroring the Bash

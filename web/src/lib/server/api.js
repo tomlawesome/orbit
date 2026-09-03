@@ -27,6 +27,18 @@ import { assertOutsideMaintenance } from "orbit/server/maintenance";
  * and no route changes its status code because of it (#735 criterion 1: a
  * route must never 404 merely because this is unset).
  *
+ * A real deployment cannot reach this at all (#773). A production build that
+ * finds ORBIT_FIXTURES set refuses to start, with
+ * `validateStartupConfiguration` naming the `fixtures` setting as a blocking
+ * problem — anything present and non-empty, including "0", because a reader
+ * who set it meant something and guessing "off" for them is the guess worth
+ * refusing. That check is the replacement for the composite entry (#450),
+ * which kept /api on the engine whatever this app believed and went with the
+ * cut (#735).
+ *
+ * Since #789 the same flag also bypasses the authentication gate in
+ * `hooks.server.js`, so it is load-bearing in two places rather than one.
+ *
  * @returns {boolean}
  */
 export function fixturesRequested() {
