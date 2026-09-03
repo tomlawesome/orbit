@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../env";
 import { createCsrfToken } from "./crypto";
@@ -38,8 +37,10 @@ const session: AuthenticatedSession = {
   },
 };
 
-function postRequest(headers: Record<string, string>): NextRequest {
-  return new NextRequest("https://orbit.example/api/auth/session/refresh", {
+/* A plain Request since the cut (#735): the seam reads `.headers` and nothing
+   else, so there was never anything Next-specific to construct here. */
+function postRequest(headers: Record<string, string>): Request {
+  return new Request("https://orbit.example/api/auth/session/refresh", {
     method: "POST",
     headers,
   });

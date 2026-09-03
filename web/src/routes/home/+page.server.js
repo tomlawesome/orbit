@@ -11,9 +11,10 @@ import { env } from "$env/dynamic/private";
  * clock and no randomness anywhere in it — so a beat can be screenshotted, put
  * in front of the owner, and compared against the mockup frame for frame.
  *
- * Unreachable in production twice over, exactly as the fixture API routes are:
- * the composite entry (#450) serves this app only for the paths in its table
- * and never sets the flag, and without the flag the query string is ignored.
+ * Unreachable in production because nothing production runs sets the variable,
+ * and without the flag the query string is ignored. That is now the whole of
+ * the protection: the composite entry (#450), which served this app only for
+ * the paths in its table, went with the cut (#735).
  */
 export function load() {
   return { fixtures: env.ORBIT_FIXTURES === "1" };
