@@ -49,7 +49,7 @@
     "src/routes/item/[id]/Suggestion.svelte": 14,
     "src/routes/logout/sky.js": 12,
     "src/routes/maintenance/sky.js": 5,
-    "src/routes/settings/+page.svelte": 23,
+    "src/routes/settings/+page.svelte": 22,
     "src/routes/settings/mail/+page.svelte": 1,
     "tests/fidelity/screens.spec.js": 28
   }
