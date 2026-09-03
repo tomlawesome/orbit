@@ -15,7 +15,7 @@ import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
 } from "./support/fixtures";
-import { callRouteForSession, loadRoute } from "./support/request-event";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
@@ -24,6 +24,7 @@ const { POST: restoreDocumentRoute } = await loadRoute("documents/[documentId]/r
 const { POST: createDocumentDraftRoute } = await loadRoute("documents/[documentId]/draft");
 const { POST: approveDocumentDraftRoute } = await loadRoute("document-drafts/[draftId]/approve");
 const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
+const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview");
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -1338,5 +1339,95 @@ describe("authenticated encrypted document lifecycle", () => {
 
     const [stored] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
     expect(stored?.lifecycle).toBe("rejected");
+  });
+});
+
+/**
+ * The page-one preview's HTTP contract (#476), which lived only in
+ * `tests/e2e/document-preview.spec.ts` until #735.
+ *
+ * That spec asserted the right things but reached them through the retiring
+ * Next pages — it signed in, uploaded through the old document manager, then
+ * called the endpoint — so it goes with `src/app/`. `src/server/document-preview.test.ts`
+ * survives and proves the renderer, but never over HTTP, so without this the
+ * cut would have deleted the only proof that the route answers a picture with
+ * the right headers and refuses an unknown id in words.
+ *
+ * The headers are the reason this is worth its own block. They are a security
+ * contract, not decoration: private and uncacheable because the bytes derive
+ * from a private document, sniff-proof, and served under a null CSP so a
+ * rendered page cannot become an execution surface.
+ */
+describe("document page-one preview over HTTP", () => {
+  it("answers a real rendered image under the download endpoint's headers", async () => {
+    const fixture = await createIntegrationFixture("document-preview-http");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+
+    const response = await callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    expect(response.status).toBe(200);
+    expect(["image/png", "image/jpeg"]).toContain(response.headers.get("content-type"));
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).toBe("inline");
+    expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+
+    /* A trivial body would be a decode failure wearing a 200. The declared
+       length has to agree with what actually arrived, too — the route sets
+       Content-Length by hand after copying the bytes out. */
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.length).toBeGreaterThan(500);
+    expect(response.headers.get("content-length")).toBe(String(body.length));
+  });
+
+  it("words an unknown document id as not found, never as a picture", async () => {
+    const fixture = await createIntegrationFixture("document-preview-unknown");
+    const session = await fixture.session("member");
+    const unknownDocumentId = randomUUID();
+
+    const response = await callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${unknownDocumentId}/preview`,
+      params: documentContext(unknownDocumentId),
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "document_not_found", message: "That document is not available" },
+    });
+  });
+
+  it("refuses a reader outside the household, and tells them nothing else", async () => {
+    const fixture = await createIntegrationFixture("document-preview-outsider");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+    const outsider = await fixture.session("outsider");
+
+    const response = await callRouteForSession(previewDocument, outsider, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    /* Same answer as an id that does not exist: a reader who cannot see the
+       document must not be able to tell the two apart. */
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "document_not_found", message: "That document is not available" },
+    });
+  });
+
+  it("answers nothing without a session", async () => {
+    const fixture = await createIntegrationFixture("document-preview-anonymous");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+
+    const response = await callRoute(previewDocument, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 });
