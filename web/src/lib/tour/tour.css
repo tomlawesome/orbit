@@ -1,0 +1,98 @@
+/*
+ * THE TOUR'S OWN STYLES (#752), carried from design/v19/tour.html.
+ *
+ * Two rules and a card. The card is the mockup's, verbatim; the two rules are
+ * the mockup's emphasis mechanic, with `.scene.tour-active` — which only a
+ * one-file mockup with scenes in it can have — replaced by the body class the
+ * engine puts up for the life of a walk. `[data-tour-dim]` and `.lit` are the
+ * mockup's own attribute and class, marked on the product's screens by
+ * emphasis.js instead of by hand.
+ *
+ * Not one colour below is new: every value is a pack token from packs.css.
+ */
+
+/* ---- the dimming mechanic ------------------------------------------------
+   "Everything else drops to the pack's faint tier." Every element that can be
+   dimmed already carries the pack's own token colours, so dimming never swaps
+   in another hex — it turns those same tokens down, which is what a chart's
+   faint tier actually looks like. `.lit` is the one thing at full strength. */
+[data-tour-dim] { transition: opacity .45s ease, filter .45s ease; }
+body.tour-running [data-tour-dim] { opacity: .24; }
+body.tour-running [data-tour-dim].lit { opacity: 1; }
+
+/* ---- light packs go the other way (owner, 2026-09-03) --------------------
+   Dimming a daylight sky turns the whole page grey, so atlas, dawn and clouds
+   dim nothing. The lit thing is pushed forward instead, by colour: its quiet
+   tokens step up to full ink, its structural lines take the accent, and it
+   wears a soft accent halo. Still the pack's own tokens, still no invented
+   hex. (The engine also stops marking anything else on these packs, so the
+   first rule below is belt and braces — see emphasis.js.) */
+[data-theme=atlas] body.tour-running [data-tour-dim],
+[data-theme=dawn] body.tour-running [data-tour-dim],
+[data-theme=clouds] body.tour-running [data-tour-dim] { opacity: 1; }
+[data-theme=atlas] body.tour-running [data-tour-dim].lit,
+[data-theme=dawn] body.tour-running [data-tour-dim].lit,
+[data-theme=clouds] body.tour-running [data-tour-dim].lit {
+  --ink-quiet: var(--ink); --ink-faint: var(--ink-mid); --ink-mid: var(--ink);
+  --chart-ink: var(--ink); --chart-line: var(--accent); --chart-line-soft: var(--accent);
+  --line-soft: var(--accent); --line: var(--accent);
+  filter: drop-shadow(0 0 3px var(--accent))
+          drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+[data-theme=atlas] .tourcard,
+[data-theme=dawn] .tourcard,
+[data-theme=clouds] .tourcard {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 18px 40px -20px var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tour-dim] { transition: none; }
+}
+
+/* ---- the card ----------------------------------------------------------- */
+.tourcard {
+  position: fixed; right: 26px; bottom: 26px; z-index: 20; width: 300px;
+  background: var(--panel-raised); backdrop-filter: blur(14px);
+  border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px;
+  outline: none; font-family: var(--ui); color: var(--ink);
+}
+.tourcard:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.tourcard .progress {
+  font: 10.5px var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-quiet); margin: 0 0 10px;
+}
+.tourcard .copy { font-size: 14px; color: var(--ink); line-height: 1.5; margin: 0 0 6px; }
+.tourcard .copy.second { color: var(--ink-quiet); font-size: 13px; }
+.tourcard .dots { display: flex; gap: 5px; margin: 14px 0; }
+.tourcard .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+.tourcard .dots i.on { background: var(--accent); }
+.tourbtns { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.tourbtns .side { display: flex; gap: 8px; }
+.tourbtns button {
+  font: 11px var(--mono); color: var(--ink-mid); background: none;
+  border: 1px solid var(--line); border-radius: 9px; padding: 7px 12px; cursor: pointer;
+}
+.tourbtns button:hover { border-color: var(--accent); color: var(--accent-text); }
+.tourbtns button:disabled { opacity: .35; cursor: default; }
+.tourbtns .skip { color: var(--ink-faint); border-color: var(--line-soft); }
+.tourbtns .skip:hover { color: var(--overdue); border-color: var(--overdue); }
+
+/* The pocket walk: the card spans the phone rather than floating in a corner
+   (design/v19/tour.html, body.pocket). 900px is the same cut home uses to
+   choose between its two dialects. */
+@media (max-width: 900px) {
+  .tourcard { right: 14px; left: 14px; bottom: 14px; width: auto; }
+}
+
+/* ---- the example body (§12 exception, labelled) -------------------------- */
+.tour-example .exring { stroke-dasharray: 3 4; }
+.tour-example text { font: 9.5px var(--mono); letter-spacing: .1em; fill: var(--ink-quiet); }
+.tour-example .exlabel { fill: var(--accent-text); font-weight: 600; letter-spacing: .16em; }
+.tour-example .example-belt { stroke-dasharray: 2 4; }
+.item.tour-example { border-style: dashed; }
+.item.tour-example .planet i { border: 1.6px dashed var(--accent); background: none; }
+.item.tour-example .tag {
+  font: 10px var(--mono); letter-spacing: .12em; color: var(--accent-text);
+  border: 1px solid var(--accent); border-radius: 99px; padding: 2px 8px; margin-right: 10px;
+}
