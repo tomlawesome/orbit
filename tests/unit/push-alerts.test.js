@@ -1,3 +1,7 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -281,5 +285,50 @@ describe("showUrgentCount", () => {
     const clearAppBadge = vi.fn(() => Promise.resolve());
     showUrgentCount(0, { navigator: { clearAppBadge } });
     expect(clearAppBadge).toHaveBeenCalledTimes(1);
+  });
+});
+
+/*
+ * Criterion 6 of #763: the signed-out surface registers no service worker and
+ * asks for no permission. That is currently true by construction — the only
+ * caller of alerts.js is the settings screen, which is behind a session — and
+ * this is the check that notices if a later change makes it untrue. A
+ * structural assertion rather than a browser one, because the thing being
+ * promised is "no code path exists", which no single page visit can prove.
+ */
+describe("the signed-out surface", () => {
+  const routes = join(fileURLToPath(new URL("../../web/src/routes/", import.meta.url)));
+
+  /** Every .svelte and .js file under web/src/routes, recursively. */
+  function screensUnder(directory) {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) return screensUnder(path);
+      return /\.(?:svelte|js)$/u.test(entry.name) ? [path] : [];
+    });
+  }
+
+  const screens = screensUnder(routes)
+    .map((path) => [path.slice(routes.length), readFileSync(path, "utf8")]);
+
+  it("has exactly one screen that can turn browser alerts on, and it is the helm", () => {
+    const callers = screens
+      .filter(([, source]) => source.includes("$lib/push/alerts.js"))
+      .map(([name]) => name);
+
+    expect(callers).toEqual(["settings/+page.svelte"]);
+  });
+
+  it("registers a service worker nowhere else, and never on the sign-in surface", () => {
+    const registrars = screens
+      .filter(([, source]) => source.includes("serviceWorker.register"))
+      .map(([name]) => name);
+
+    expect(registrars).toEqual([]);
+    const signedOut = screens.filter(([name]) => /^(?:\+page|login|flight)/u.test(name));
+    for (const [name, source] of signedOut) {
+      expect(source, `${name} must not ask for notification permission`)
+        .not.toMatch(/requestPermission|PushManager|setAppBadge/u);
+    }
   });
 });
