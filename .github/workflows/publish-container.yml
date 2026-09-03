@@ -2,13 +2,26 @@ name: Validate Orbit and publish previews
 
 on:
   pull_request:
-    # `labeled` is required so applying `ci: acceptance` starts a run by
-    # itself; the default types alone only fire on a new commit or open.
+    # Deliberately no `labeled` (#757). It fired one whole run per label, so
+    # `gh pr create --label a --label b` started three; the concurrency group
+    # cancelled two, and because branch protection reads the newest check run
+    # of each name, a cancelled run with a higher id could leave every real
+    # green check reported as CANCELLED and the pull request BLOCKED.
+    #
+    # GitHub cannot filter an event by label name, and there is no
+    # workflow-level `if`, so the alternatives were both worse: gating the
+    # jobs still creates a run whose SKIPPED results replace the real ones,
+    # and a helper workflow cannot dispatch this one because events raised
+    # with GITHUB_TOKEN start no run.
+    #
+    # Asking for the on-demand lanes after opening is therefore a dispatch:
+    # `gh workflow run publish-container.yml --ref <branch>`. The
+    # `ci: acceptance` label still opts a run in whenever one happens for
+    # another reason, so labelling before the first push works as before.
     types:
       - opened
       - synchronize
       - reopened
-      - labeled
     branches:
       - main
       - dev
