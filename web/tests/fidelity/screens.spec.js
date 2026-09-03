@@ -434,10 +434,32 @@ const SCREENS = [
     name: "administration",
     path: "/administration",
     stage: "porting",
-    mockup: "/design/v19/administration.html",
-    /* Settled once mission control has people and systems — client-side data. */
-    settle: () => Boolean(document.querySelector(".person")) && Boolean(document.querySelector(".system svg")),
-    mockupOnly: ["footer"],
+    /*
+     * The living station backdrop (#472/#475, §14), ratified 2026-09-02,
+     * replaces the family sheet's still starfield: the ISS — this instance's
+     * own platform — drawn in the family's chart pen, streamed past on the
+     * same non-looping generator (sky.js's streamFactory, copied verbatim
+     * into the sheet) the relay and create use. The sheet is pinned to the
+     * same seed the app derives under fixtures, which is the only reason a
+     * living sky can be compared to a mockup at all.
+     */
+    mockup: "/design/v19/administration-iss.html",
+    /*
+     * At rest, for the belt's reason: the sky streams and the station drifts
+     * on a requestAnimationFrame clock that `animations: "disabled"` cannot
+     * reach. The design's own reduced-motion state holds the clock at zero
+     * on both sides, and both are photographed in it.
+     */
+    reducedMotion: "reduce",
+    /* Settled once mission control has people and systems (client-side data)
+       and the station has flown a pass into the window. */
+    settle: () =>
+      Boolean(document.querySelector(".person"))
+      && Boolean(document.querySelector(".system svg"))
+      && Boolean(document.querySelector(".station .att")),
+    /* The sheet's own scaffolding: the demos rail (re-roll, freeze, the seed
+       tag it carries) and the footer naming the proposal. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     name: "settings",
