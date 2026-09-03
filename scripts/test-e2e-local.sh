@@ -21,26 +21,19 @@
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from playwright.config.ts:
 #                    desktop-chromium or mobile-chromium. Default: both.
-#   --repeat N      Run the suite N times against ONE instance, reporting each
-#                    run's status. The default of 1 is the ordinary run.
-#   --keep          Leave the stack up on exit instead of tearing it down, and
-#                    print the base URL so another run can target it. Tear it
-#                    down afterwards with:
+#   --keep          Leave the stack up on exit instead of tearing it down, so a
+#                    failed run can be inspected: query the database, read the
+#                    container logs, open the app. Tear it down afterwards with:
 #                      docker compose -p orbit-e2e-local --env-file .env-orbit \
 #                        -f docker-compose.yml -f docker-compose.mail.yml \
 #                        -f docker-compose.acceptance.yml \
 #                        -f docker-compose.local-e2e.yml down --volumes
 #
-# --repeat is a DEBUGGING TOOL, not a gate. Running twice against one instance
-# makes leaked fixtures show themselves, which is how the interface-created
-# household leak and #741 were found. It is deliberately not a criterion any
-# issue has to satisfy: this harness destroys its volumes on every run and CI
-# builds a fresh stack, so nobody meets the second run in real use, and some
-# journeys are one-way by design (v19-arrival's own docblock says so).
-#
-# So: use it to hunt, and do not read a second-run failure as a defect on its
-# own. Confirm the finding against a scenario somebody actually runs before
-# filing anything (owner, 2026-09-03).
+# Test fixtures left behind by a spec show up as a household count above zero
+# after a run (#730), which is the cheap way to find a spec that does not clean
+# up after itself:
+#   docker exec orbit-e2e-local-db sh -c \
+#     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
 # AGENTS.md "Traps when running things locally" applies here directly: this
 # script always passes an explicit, distinctive Compose `-p` project name
@@ -70,18 +63,11 @@ readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f dock
 spec=""
 playwright_project=""
 keep=0
-repeat=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep)
       keep=1
       shift
-      ;;
-    --repeat)
-      [[ $# -ge 2 ]] || { printf 'test-e2e-local: --repeat requires a value.\n' >&2; exit 2; }
-      [[ "$2" =~ ^[1-9][0-9]*$ ]] || { printf 'test-e2e-local: --repeat wants a positive integer.\n' >&2; exit 2; }
-      repeat="$2"
-      shift 2
       ;;
     --spec)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --spec requires a value.\n' >&2; exit 2; }
@@ -94,7 +80,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium] [--repeat N] [--keep]\n' "$0"
+      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
       exit 0
       ;;
     *)
@@ -269,31 +255,10 @@ log "installing Playwright's Chromium build"
 # system libraries and needs root; a local checkout is not guaranteed sudo.
 bash scripts/install-test-browser.sh
 
-repeat_note=""
-[[ "$repeat" == 1 ]] || repeat_note=", ${repeat} times against this one instance"
-log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}${repeat_note}"
+log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
-run_statuses=()
-for (( run = 1; run <= repeat; run++ )); do
-  [[ "$repeat" == 1 ]] || log "run ${run} of ${repeat}"
-  run_status=0
-  PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true \
-    pnpm exec playwright test "${playwright_args[@]}" || run_status=$?
-  run_statuses+=("$run_status")
-  [[ "$run_status" == 0 ]] || suite_status="$run_status"
-done
-
-if [[ "$repeat" -gt 1 ]]; then
-  # The comparison #730 asks for: identical status across runs against one
-  # instance. A first run that passes and a second that fails is the signature
-  # of fixtures surviving the first.
-  log "run statuses in order: ${run_statuses[*]}"
-  first="${run_statuses[0]}"
-  for status in "${run_statuses[@]}"; do
-    [[ "$status" == "$first" ]] || fail "runs disagreed (${run_statuses[*]}): the instance did not come back to the same state"
-  done
-  log "every run against this instance agreed (${first})"
-fi
+PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true \
+  pnpm exec playwright test "${playwright_args[@]}" || suite_status=$?
 
 if [[ "$keep" == 1 ]]; then
   log "stack still up: ${base_url}"
