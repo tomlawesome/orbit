@@ -155,6 +155,8 @@
   .idrow button:hover{border-color:var(--accent);color:var(--accent-text)}
 
   /* the sky chooser: each card is PAINTED by its own pack variables */
+  .relaunch{display:block;margin-top:14px;font:11.5px var(--mono);color:var(--accent-text);
+            background:none;border:0;padding:0;cursor:pointer;text-align:left}
   .packs{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}
   .pack{border:1px solid var(--line);border-radius:13px;overflow:hidden;cursor:pointer;
         background:none;padding:0;text-align:left;font-family:var(--ui)}
@@ -317,6 +319,10 @@
         <span class="label"><b>retrograde</b><span>the eighties, classy</span></span>
       </button>
     </div>
+    <!-- "Take the walk again" (#477 stop 8, ratified 2026-09-03; built in #753):
+         the first-run walk is re-launchable from here, under the sky choice,
+         exactly as design/v19/tour.html's settings card draws it. -->
+    <button class="relaunch">↻ take the walk again</button>
   </div>
 
   <div class="card">
