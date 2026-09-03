@@ -1,26 +1,87 @@
 /*
- * New entry — lifted from design/family/create.html and owned here from that
- * point on. The mockup was the input to this file, not a live dependency of
- * it: changes are made here and judged in the running app.
+ * New entry — lifted from design/v19/create-v3.html (#474/#475/#476) and owned
+ * here from that point on. The mockup was the input to this file, not a live
+ * dependency of it: changes are made here and judged in the running app.
  *
  * Not scoped to a component. The design styles `body` and depends on state
- * selectors (`.disclose.open`, `.field.sugg .tag`) that Svelte would prune as
- * unused, so this stays plain global CSS, linked alongside family.css.
+ * selectors (`.disclose.open`, `.field.sugg .tag`, `body.doc`) that Svelte
+ * would prune as unused, so this stays plain global CSS, linked alongside
+ * family.css.
+ *
+ * Three rulings drawn at once (§14, #474/#475/#476):
+ *   1. the backdrop carries this instance's OWN households, floating in the
+ *      distance, display-only and never clickable ($lib/backdrops/constellations.js);
+ *   2. the New Entry card sits vertically centred and grows symmetrically
+ *      from its middle as fields are earned — its centre never moves;
+ *   3. adding a document splits the screen: the form slides left, a reading
+ *      card fades in on the right ("Focusing on the anomaly"), and (once a
+ *      server render exists, #476) a top-sheet snapshot of page one lands.
  */
-
 
 /* html body, not body: family.css loads via <link> AFTER this bundled sheet,
    so at equal specificity its body{overflow:hidden} wins and a card taller
-   than the viewport cannot scroll (owner hit this adding a document). */
-html body{overflow-y:auto;overflow-x:hidden}
-.sky svg{opacity:.55}
-.stage.stage{height:auto;min-height:100%;display:flex;align-items:flex-start;justify-content:center;
-       padding:64px 20px 96px}
-.card{width:100%;max-width:600px;padding:34px 38px}
-.card h2{font:600 22px var(--display)}
-.sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 26px}
+   than the viewport cannot scroll (owner hit this adding a document).
+   line-height:1.55 is create-v3.html's own `body` rule, for the same reason:
+   family.css's body sets none, so every field label, hint and note that
+   does not set its own line-height would fall back to the UA default
+   instead of the sheet's, changing wrapping and the card's total height. */
+html body{overflow-y:auto;overflow-x:hidden;line-height:1.55}
 
-.field{margin-bottom:15px}
+/* the backdrop root: constellations.js draws fixed-position children into it,
+   so the wrapper itself must not take part in layout. */
+.backdrop{display:contents}
+
+/* The living backdrop (#475, §14). $lib/backdrops/constellations.js builds
+   the actual .sky/.chartback markup into `.backdrop`; everything here is
+   styling for what it draws, none of it moves the card.
+   family.css bleeds `.sky` 5% past the viewport for the old tiled drift, but
+   this sky is streamed — positioned by the same clock as the chart marks —
+   so it is pinned to the viewport instead (the relay.css precedent, #475). */
+.sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.sky svg{position:absolute;inset:0;width:100%;height:100%}
+/* a handful of nearer stars breathe, so the field is alive rather than printed */
+.spark{opacity:var(--o,.7);animation:twinkle 9s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:var(--o)}50%{opacity:calc(var(--o) * .34)}}
+.vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0,0,0,.30) 100%)}
+[data-theme=atlas] .vignette,[data-theme=dawn] .vignette{background:none}
+
+/* §14/#474: the instance's ACTUAL households, in the distance. Display only —
+   no pointer events, no hover, no flight. They are drawn in chart ink rather
+   than accent precisely so they do not claim to be clickable (on home, accent
+   means "you may fly here"). Faint, small, and further = fainter. */
+.chartback{position:fixed;inset:0;pointer-events:none;z-index:1;
+           opacity:var(--chart-alpha,1);transition:opacity .8s ease}
+.chartback svg{position:absolute;inset:0;width:100%;height:100%}
+body.doc .chartback{opacity:calc(var(--chart-alpha,1) * .62)}  /* recedes while you read */
+#inprogress{transition:opacity .6s ease}
+body.doc #inprogress{opacity:0}      /* the plot waits; the document has the floor */
+.csys{animation:arrive-sys 1.4s ease backwards}
+@keyframes arrive-sys{from{opacity:0}to{opacity:1}}
+
+/* §14/#474 ruling 2: vertically centred, and it GROWS FROM ITS MIDDLE.
+   Flex centring plus auto margins does the whole job: every field that
+   unfolds pushes the card's top up and its bottom down by the same amount,
+   so the centre of the card stays pinned to the centre of the viewport. The
+   padding is deliberately symmetric: the card's centre and the viewport's
+   centre are the same point, so growth is visibly even.
+   .stage.stage: family.css's own `.stage` (grid, place-items:center, no
+   padding) loses ties on specificity alone since it loads after this sheet. */
+.stage.stage{position:relative;z-index:2;height:auto;min-height:100vh;display:flex;
+             align-items:center;justify-content:center;padding:62px 24px}
+.lanes{margin:auto;display:grid;align-items:center;
+       grid-template-columns:minmax(0,600px) minmax(0,0px);gap:0;
+       transition:grid-template-columns .75s cubic-bezier(.4,.5,.15,1),gap .75s cubic-bezier(.4,.5,.15,1)}
+/* ruling 3: the two lanes. Widening the grid to the right slides the form
+   card left of centre — one transition, no re-layout, no jump. */
+body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
+
+.card{width:100%;padding:30px 36px;min-width:0}
+.card h2{font:600 22px var(--display)}
+.sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;margin:6px 0 22px}
+
+.field{margin-bottom:13px}
 .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;color:var(--ink-faint);
              text-transform:uppercase;margin:0 0 6px}
 .field input,.field select,.field textarea{width:100%;background:var(--panel);border:1px solid var(--line);
@@ -42,16 +103,22 @@ html body{overflow-y:auto;overflow-x:hidden}
 .types button:hover{color:var(--ink)}
 .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 
-.dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:22px;text-align:center;
+.dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
 .dropzone:hover,.dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04);outline:none}
 .dropzone .dz-main{font-size:13.5px;color:var(--ink-mid)}
 .dropzone .dz-hint{font:10px var(--mono);color:var(--ink-faint);margin-top:7px;letter-spacing:.06em}
+/* once the document is in the right-hand lane, the zone states the fact */
+body.doc .dropzone{border-style:solid;border-color:var(--line-soft);cursor:default;background:none}
+body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
+.dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
+.dz-held b{color:var(--accent-text);font-weight:400}
+body.doc .dz-held{display:block}
 
-.disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .4s ease,opacity .3s ease}
+.disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .55s ease,opacity .4s ease}
 .disclose.open{grid-template-rows:1fr;opacity:1}
 .disclose-inner{overflow:hidden}
-.disclose-content{padding-top:24px;margin-top:22px;border-top:1px solid var(--line-soft)}
+.disclose-content{padding-top:20px;margin-top:18px;border-top:1px solid var(--line-soft)}
 
 .docnote{display:none;font:10.5px var(--mono);color:var(--ink-faint);line-height:1.6;margin:0 0 18px}
 .docnote.show{display:block}
@@ -75,12 +142,73 @@ html body{overflow-y:auto;overflow-x:hidden}
                    border-radius:6px;padding:2px 9px;cursor:pointer}
 .field .tag button:hover{filter:brightness(1.12)}
 
-.save-row{display:flex;align-items:center;gap:18px;margin-top:24px}
+.save-row{display:flex;align-items:center;gap:18px;margin-top:20px}
 .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
              font:600 14px var(--display);color:var(--bg);background:var(--accent)}
 .btn-primary:hover{filter:brightness(1.05)}
 .cancel-link{font:12px var(--mono);color:var(--ink-faint);text-decoration:none}
 .cancel-link:hover{color:var(--ink-mid)}
+
+/* ---- the right lane: reading, then the top sheet (#476 placeholder) ---- */
+.readcard{width:100%;min-width:0;overflow:hidden;padding:26px 26px 22px;
+          opacity:0;transform:translateX(-16px);pointer-events:none;
+          transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s}
+body.doc .readcard{opacity:1;transform:none;pointer-events:auto}
+.readcard h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+             color:var(--ink-faint);margin-bottom:16px}
+
+.focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:16px 0 6px}
+body.snap .focus{display:none}
+.reticle{width:96px;height:96px;margin-bottom:20px}
+.reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
+.reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
+@keyframes sweep{to{transform:rotate(360deg)}}
+@keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
+/* the owner's words, breathing — slow, never a spinner */
+.focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+           animation:breathe 4.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
+.focus .why{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.9;margin-top:12px}
+
+/* the top sheet: a real picture of page one, so the eye can confirm it.
+   #476: the product has no server render yet, so this stays the sheet's own
+   honest placeholder, unreachable — see create.behaviour.js. */
+.topsheet{display:none}
+body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+@keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+       box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
+/* the sheet under it — this is the TOP sheet of a four-page file */
+.sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+               transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
+.sheet svg{display:block;width:100%;height:auto;border-radius:2px}
+.cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
+.cap b{color:var(--ink);font-weight:400}
+.honest{font:9.5px var(--mono);color:var(--ink-faint);line-height:1.8;margin-top:8px;text-align:center}
+.attach{display:flex;flex-wrap:wrap;align-items:center;gap:5px 10px;font:11px var(--mono);
+        color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
+        padding:9px 12px;margin-top:16px}
+.attach .file{flex:1 1 100%;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attach .clean{color:var(--ok-text)}
+.attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+               background:none;border:0;cursor:pointer;padding:0}
+.attach button:hover{color:var(--overdue)}
+/* the three marks the read actually produced, lit on the page they came from */
+.lit{opacity:0;animation:lit .5s ease forwards}
+body.snap .lit:nth-of-type(1){animation-delay:.55s}
+body.snap .lit:nth-of-type(2){animation-delay:.75s}
+body.snap .lit:nth-of-type(3){animation-delay:.95s}
+@keyframes lit{to{opacity:1}}
+
+@media (max-width:1040px){
+  .lanes,body.doc .lanes{grid-template-columns:minmax(0,600px);gap:0}
+  .readcard{grid-row:2;display:none}
+  body.doc .readcard{display:block;margin-top:22px}
+}
+@media (prefers-reduced-motion: reduce){
+  *{animation:none!important;transition:none!important}
+  .lit{opacity:1}
+}
 
 /* Interim, and the only rule on this screen the design did not draw: the save
    has no pending or failure state in design/family/create.html, and a form
