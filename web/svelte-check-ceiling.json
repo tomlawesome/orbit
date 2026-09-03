@@ -15,7 +15,7 @@
     "src/lib/data/fixtures/workspace.js": 8,
     "src/lib/data/household.js": 30,
     "src/lib/data/inbox.js": 17,
-    "src/lib/data/workspace.js": 88,
+    "src/lib/data/workspace.js": 77,
     "src/lib/flight/arrival.js": 4,
     "src/lib/flight/Dawn.svelte": 26,
     "src/lib/flight/Dusk.svelte": 20,
