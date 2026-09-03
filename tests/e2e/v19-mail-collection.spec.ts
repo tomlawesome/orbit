@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -19,6 +20,14 @@ const ALIAS_GENERATION = 1;
 // exactly -- both read TEST_SMTP_PORT so the test and the compose
 // host-binding can never diverge. Defaults to 3025 (CI's fixed value).
 const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
+
+/* #730: the proving ground this file seeds (only when the member has none) is
+   removed once both journeys are done — the second one still needs it. The
+   sweep runs from the administrator's session, because a hard delete is an
+   instance-admin power and the owner here is an ordinary member. */
+const HOUSEHOLD = "Collection Proving Ground";
+const households = householdRegister();
+let seeded = false;
 
 function deriveAlias(userId: string, secret: string): string {
   const input = `orbit:imap-recipient-alias:v1\0${RECIPIENT_DOMAIN}\0${ALIAS_GENERATION}\0${userId}`;
@@ -56,10 +65,11 @@ async function establishInstanceAdmin(browser: Browser) {
 
 
 async function seedHousehold(page: Page) {
-  await page.evaluate(async () => {
+  const created = await page.evaluate(async (householdName) => {
     const workspace = (await (await fetch("/api/workspace", { credentials: "same-origin" })).json()) as { workspace?: { households?: unknown[] } };
-    if (workspace.workspace?.households?.length) return;
+    if (workspace.workspace?.households?.length) return null;
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const householdId = crypto.randomUUID();
     const response = await fetch("/api/workspace/commands", {
       method: "POST",
       credentials: "same-origin",
@@ -67,7 +77,7 @@ async function seedHousehold(page: Page) {
       body: JSON.stringify({
         type: "household.create",
         household: {
-          id: crypto.randomUUID(), name: "Collection Proving Ground", timezone: "Europe/London", currency: "GBP",
+          id: householdId, name: householdName, timezone: "Europe/London", currency: "GBP",
           memberCount: 1, canManage: true, onboardingComplete: true,
           sections: [{ id: crypto.randomUUID(), name: "Home", icon: "home", accent: "sage", visible: true }],
           items: [],
@@ -75,7 +85,14 @@ async function seedHousehold(page: Page) {
       }),
     });
     if (!response.ok) throw new Error(`household.create failed: ${response.status}`);
-  });
+    return { id: householdId, name: householdName };
+  }, HOUSEHOLD);
+  /* Nothing to sweep when the member already had a system: this spec did not
+     make it, so this spec does not remove it. */
+  if (created) {
+    households.track(created);
+    seeded = true;
+  }
 }
 
 async function sessionUserId(page: Page): Promise<string> {
@@ -115,6 +132,20 @@ async function waitForReceipts(page: Page, count: number, timeoutMs = 120_000) {
 }
 
 test.describe.configure({ mode: "serial" });
+
+test.afterAll(async ({ browser }) => {
+  if (!seeded) return;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await page.goto("/api/auth/login?returnTo=/home");
+    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    await expect(page).toHaveURL(/\/home$/);
+    await households.sweep(page);
+  } finally {
+    await context.close();
+  }
+});
 
 test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket has no suggestion rows yet (#434 follow-up)");
