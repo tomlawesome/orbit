@@ -226,6 +226,9 @@ export function manifestGroupsOf(household, { suggestions = [], today }) {
  * @property {"owner" | "member" | null} role
  * @property {[number, number]} pos            bearing and distance, CON-13
  * @property {Array<[number, number, number, string]>} planets  dx, dy, r, tone
+ * @property {number} [items]                  total item count — galaxyOf only,
+ *                                              for the constellations backdrop's
+ *                                              "N ITEMS" label (#474/#475)
  * @property {boolean} [requested]             labelled sky only
  */
 
@@ -240,6 +243,7 @@ export function galaxyOf(workspace, today) {
       role: household.canManage ? "owner" : "member",
       pos: household.id === primary ? [0, 0] : constellationPosOf(household.id),
       planets: constellationPlanetsOf(household.items ?? [], today),
+      items: (household.items ?? []).length,
     };
   }
   return galaxy;

@@ -297,22 +297,35 @@ function setSwatch(name, btn){
    Math.random), so the fidelity gate compares one deterministic sky against
    this mockup's. The roll is the only source of randomness on the screen —
    pin it and the whole stream is reproducible, chunk for chunk.
---------------------------------------------------------------------------- */
-const makeRng = (s) => { s = Math.abs(s % 2147483647) || 17170812; return () => (s = (s * 48271) % 2147483647) / 2147483647; };
-let seed = Math.floor(Math.random() * 2147483646) + 1;
 
-/* hash(seed, lane, chunk) — the address of one patch of sky in the stream.
-   Everything is forced back to unsigned at each step: a signed xor here would
-   hand the generator a negative seed and the whole chunk would come out
-   inside out. */
-function chunkSeed(lane, n){
-  let h = (seed ^ 0x9e3779b9) >>> 0;
-  h = Math.imul(h ^ (lane * 0x85ebca6b), 0xc2b2ae35) >>> 0;
-  h = Math.imul(h ^ ((n + 0x165667b1) | 0), 0x27d4eb2f) >>> 0;
-  h = (h ^ (h >>> 15)) >>> 0;
-  return (h % 2147483646) + 1;
+   THE GENERATOR IS THE APP'S, AND THE SHEET IS PINNED (the home.html law:
+   "same code, one constant"). makeRng and chunkRng below are copies of
+   seededRng and streamFactory in web/src/lib/sky.js — the one generator every
+   seeded surface in Orbit draws from — and the opening seed is what the app
+   derives under ORBIT_FIXTURES from the fixture relay's own address
+   (seedFromWorkspace, web/src/lib/data/fixtures/relay.js). So the sky this
+   sheet opens on is, chunk for chunk, the sky the fidelity gate photographs
+   on /settings/mail; the re-roll button is where the vocabulary is
+   demonstrated. Change the hash here and the gate fails for a reason that
+   is not drift.
+--------------------------------------------------------------------------- */
+const makeRng = (seed) => { let s = seed % 2147483647; if (s <= 0) s += 2147483646; return () => (s = (s * 48271) % 2147483647) / 2147483647; };
+function seedFromWorkspace(id){
+  let h = 2166136261;
+  for (let i = 0; i < String(id).length; i++) { h ^= String(id).charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (Math.abs(h | 0) % 2147483646) + 1;
 }
-const laneRng = (lane, n) => { const r = makeRng(chunkSeed(lane, n)); return (a, b) => a + r() * (b - a); };
+let seed = seedFromWorkspace("tom-k7f2m@in.lawson-home.orbit");
+
+/* hash(seed, lane, chunk) — the address of one patch of sky in the stream,
+   exactly as sky.js's streamFactory addresses it, three draws burnt and all. */
+function chunkRng(lane, n){
+  const h = (seed ^ Math.imul(n + 1, 2654435761) ^ Math.imul(lane + 1, 40503)) | 0;
+  const r = makeRng((Math.abs(h) % 2147483646) + 1);
+  r(); r(); r();
+  return r;
+}
+const laneRng = (lane, n) => { const r = chunkRng(lane, n); return (a, b) => a + r() * (b - a); };
 const mod = (a, n) => ((a % n) + n) % n;
 
 /* ---------------------------------------------------------------------------
@@ -1030,8 +1043,14 @@ function reroll(){
 }
 
 el("seedout").textContent = "seed " + seed;
-build();
-requestAnimationFrame(frame);
+/* Built once the faces are in: the card keep-out and the dish the beams aim
+   at are measured from the card, and a card set in a fallback face is 30px
+   the wrong height — the craft would be placed round a card that is not the
+   one on screen. A face only starts loading once something laid out has
+   asked for it, so the layout is forced first. The app boots the same way
+   (satellites.js). */
+void document.documentElement.getBoundingClientRect();
+document.fonts.ready.then(() => { build(); requestAnimationFrame(frame); });
 
 let resizeTimer;
 addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(build, 140); });
