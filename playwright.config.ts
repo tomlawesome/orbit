@@ -5,7 +5,18 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // One worker EVERYWHERE, not just in CI (#730). These specs share one Orbit
+  // instance -- one database, one set of identities, one sky -- so running
+  // files concurrently means they crowd each other's skies while they run.
+  // v19-arrival passed alone and failed in a local suite for exactly this
+  // reason, and CI never showed it because CI already pinned this to 1. A
+  // local run that disagrees with CI is worse than a slow one.
+  //
+  // The cost is real: the v19 subset takes ~10s across twelve workers and
+  // ~50s on one. The way back to parallel is to remove the sharing rather
+  // than queue around it -- stub the workspace read per spec, the way
+  // v19-hit-routing.spec.ts already does, which is why that spec is immune.
+  workers: 1,
   reporter: process.env.CI ? [["html", { open: "never" }], ["list"]] : "list",
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
