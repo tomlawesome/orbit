@@ -6,6 +6,7 @@ import { pushSubscriptions } from "@/db/schema";
 import { getAuthConfig } from "@/lib/env";
 import { AppError, appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +24,10 @@ const removeSchema = z.object({ endpoint: z.url().max(2_048) });
 
 export async function POST(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const subscription = subscriptionSchema.parse(await request.json());
     const [existing] = await getDb().select({ userId: pushSubscriptions.userId }).from(pushSubscriptions)
       .where(eq(pushSubscriptions.endpoint, subscription.endpoint)).limit(1);
@@ -56,10 +57,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { endpoint } = removeSchema.parse(await request.json());
     await getDb().update(pushSubscriptions).set({ revokedAt: new Date() })
       .where(and(

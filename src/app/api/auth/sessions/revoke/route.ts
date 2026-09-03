@@ -3,6 +3,7 @@ import { getAuthConfig } from "@/lib/env";
 import { clearSessionCookie } from "@/lib/auth/cookies";
 import { authErrorResponse } from "@/lib/auth/http";
 import { assertCsrf, requireSession, revokeUserSessions } from "@/lib/auth/session";
+import { nextCookies, nextCookieSink } from "@/lib/auth/next-compat";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
 export const dynamic = "force-dynamic";
@@ -24,13 +25,13 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const revoked = await revokeUserSessions(session.user.id);
     const response = NextResponse.json({ revoked }, { headers: { "Cache-Control": "no-store" } });
-    clearSessionCookie(response, config);
+    clearSessionCookie(nextCookieSink(request, response), config);
     return response;
   } catch (error) {
     return authErrorResponse(error);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AppError, appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { inspectItemDocument } from "@/server/item-document-inspection";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -12,10 +13,10 @@ interface RouteContext { params: Promise<{ householdId: string }> }
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const encodedFilename = request.headers.get("x-orbit-filename");
     if (!encodedFilename) throw new AppError("document_filename_required", "The document filename is required", 422);

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { readSetCookie } from "./support/set-cookie";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, type NextResponse } from "next/server";
 import { getDb } from "@/db";
@@ -37,9 +38,9 @@ function sessionRequest(session: IntegrationSession, overrides: Record<string, s
   });
 }
 
-function replacementSession(session: IntegrationSession, response: NextResponse): IntegrationSession {
+function replacementSession(session: IntegrationSession, response: Response): IntegrationSession {
   const config = getAuthConfig();
-  const token = response.cookies.get(sessionCookieName(config))?.value;
+  const token = readSetCookie(response, sessionCookieName(config))?.value;
   if (!token) throw new Error("Refresh response did not set a session cookie");
   const csrfToken = createCsrfToken(token, config.sessionSecret);
   return {
@@ -71,7 +72,7 @@ describe("PostgreSQL authentication session contracts", () => {
     }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.cookies.get(sessionCookieName(config))?.value).toBeTruthy();
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBeTruthy();
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
     expect(response.headers.get("set-cookie")).toContain("SameSite=lax");
 
@@ -177,7 +178,7 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ revoked: 2 });
-    expect(response.cookies.get(sessionCookieName(config))?.value).toBe("");
+    expect(readSetCookie(response, sessionCookieName(config))?.value).toBe("");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
 
     // The point of the action: the device that asked, and the one that did
