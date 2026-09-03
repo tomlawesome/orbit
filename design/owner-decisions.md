@@ -478,7 +478,12 @@ The full open-questions list, walked in order and ruled:
 
 - **The living backdrops are ratified for build**: relay-satellites v2,
   administration-iss, and create-v3's loudened backdrop — all approved as
-  drawn (admin's bolder atlas rendering included).
+  drawn. *Amended 2026-09-02, superseding "admin's bolder atlas rendering
+  included":* the admin backdrop is damped on the pale packs after all, by
+  create-v3's own `--chart-alpha` (`.82` on atlas and dawn, `1` on the dark
+  packs). Drifting labels that transiently brush each other — a filler name
+  passing a household label — are accepted as living behaviour; no collision
+  avoidance is to be added without a fresh ruling. Both on #475.
 - **Settings gets no verdict yet — three concepts instead**: the
   observatory-slit proposal is set aside; the owner likes all three of the
   new directions in text — *inside the observatory* (sky only through the

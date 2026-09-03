@@ -1108,6 +1108,39 @@ export async function writeReminders({ emailEnabled, firstWarningDays, finalWarn
 }
 
 /**
+ * The signed-in reader's own first-run tour record (#751/#752), through
+ * `GET /api/settings/tour` — the reminders pair above, for the walk.
+ *
+ * The route takes no user: the session is the only input on both verbs, so
+ * there is nothing here to name and no way to read or rewrite somebody else's
+ * record. Null means the walk has never been taken.
+ *
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function readTour() {
+  const body = await json(
+    await fetch("/api/settings/tour", { credentials: "same-origin" }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
+ * Records that the walk is over — the ONE write the tour makes, on skip and
+ * on finish alike (#477: remembered on the server, so skipping on a phone
+ * holds on the desk). Nothing else about the walk is sent anywhere: the
+ * example body on stops 3-5 is drawn in the document and taken away again.
+ *
+ * @param {string} [seenAt] ISO timestamp; now, unless a caller says otherwise
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function writeTourSeen(seenAt = new Date().toISOString()) {
+  const body = await json(
+    await csrfFetch("/api/settings/tour", { method: "PUT", body: { tourSeenAt: seenAt } }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
  * One mapping for both verbs: the route answers the same shape on each.
  *
  * @param {Partial<Reminders>} [reminders]

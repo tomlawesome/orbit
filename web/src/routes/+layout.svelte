@@ -30,7 +30,14 @@
   import "@fontsource-variable/inter";
   import "@fontsource-variable/jetbrains-mono";
 
+  /* The first-run walk (#752). Here rather than on /home because stops 6 and
+     7 are on other screens: mounted in the layout it survives the navigation
+     between them. It starts itself, once, on a first landing on /home, and
+     renders nothing at all until then — see Tour.svelte. */
+  import Tour from "$lib/tour/Tour.svelte";
+
   let { children } = $props();
 </script>
 
 {@render children()}
+<Tour />
