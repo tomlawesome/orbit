@@ -133,7 +133,13 @@
 
   onMount(async () => {
     alertsAvailable = alertsSupported();
-    if (alertsAvailable) browserAlerts = Boolean(await currentSubscription());
+    /* The row is drawn either way, and the switch is simply held when the
+       browser cannot do push. Drawing a different row instead would make this
+       screen's shape depend on a browser capability, which the pixel gate
+       compares against one ratified mockup — and would give the reader a
+       missing control rather than a held one. */
+    if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
+    else browserAlerts = Boolean(await currentSubscription());
   });
 
   async function toggleBrowserAlerts() {
@@ -256,11 +262,7 @@
     <div class="card">
       <h3>Reminders</h3>
       <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
-      {#if alertsAvailable}
-        <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy} onclick={toggleBrowserAlerts}><i></i></button></div>
-      {:else}
-        <div class="kv"><span>browser alerts</span><span>this browser can't show alerts</span></div>
-      {/if}
+      <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
       <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
       <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
       <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
