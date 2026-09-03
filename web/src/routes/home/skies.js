@@ -44,6 +44,8 @@
  *    (fixed layers, <html> classes), and home is a route the reader leaves.
  */
 
+import { seededRng, streamFactory } from "$lib/sky.js";
+
 const NS = "http://www.w3.org/2000/svg";
 const svgel = (name, attrs) => {
   const el = document.createElementNS(NS, name);
@@ -53,25 +55,10 @@ const svgel = (name, attrs) => {
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const smoothstep = (t) => t * t * (3 - 2 * t);
 
-/** Park–Miller, the same generator every seeded surface in Orbit uses. */
-const mkRng = (s) => {
-  let x = s % 2147483647;
-  if (x <= 0) x += 2147483646;
-  return () => (x = (x * 48271) % 2147483647) / 2147483647;
-};
-
-/**
- * chunk n of layer L is a pure function of (seed, layer, n) — the whole of the
- * never-loop law in three lines. A stretch of sky can be rolled the instant
- * before it is revealed and thrown away for good once it has passed, and
- * nothing is ever tiled or repeated.
- */
-const streamFactory = (seed) => (layer, idx) => {
-  const h = (seed ^ Math.imul(idx + 1, 2654435761) ^ Math.imul(layer + 1, 40503)) | 0;
-  const r = mkRng((Math.abs(h) % 2147483646) + 1);
-  r(); r(); r();
-  return r;
-};
+/* #475: mkRng and streamFactory moved to $lib/sky.js, so the relay,
+   create and administration backdrops inherit them rather than each
+   carrying a copy. Same generator, same constants, same warm-up. */
+const mkRng = seededRng;
 
 /* ══════════════════════════════════════════════════════════════════════════
    AFTER DARK — THE GALACTIC PLANE
@@ -820,21 +807,6 @@ const ENGINES = {
   dawn: mountTerminator,
   clouds: mountCloudSea,
 };
-
-/**
- * THE FIXTURE SEED. The sheets' build note asks for the WORKSPACE ID, which is
- * the only stable thing about a fixture run, and a name is not a number — so it
- * is hashed (FNV-1a, 32-bit) into the generator's range. Two runs of the gate
- * therefore roll the same sky, and two different workspaces do not.
- */
-export function seedFromWorkspace(id) {
-  let h = 2166136261;
-  for (let i = 0; i < String(id).length; i++) {
-    h ^= String(id).charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (Math.abs(h | 0) % 2147483646) + 1;
-}
 
 /**
  * Stand the right sky up for whatever pack is live, and keep doing so.
