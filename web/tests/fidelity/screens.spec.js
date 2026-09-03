@@ -333,7 +333,7 @@ const SCREENS = [
      * height on both sides. If the sheet ever drops the reservation the
      * replacement matches nothing and the comparison is unchanged.
      */
-    mockupTrim: (html) => html.replace("min-height:calc(100vh - 102px)", "min-height:100vh"),
+    mockupTrim: (/** @type {string} */ html) => html.replace("min-height:calc(100vh - 102px)", "min-height:100vh"),
     /* Settled once the card is up and the fleet has been sown — the craft
        arrive client-side, off the seed. */
     settle: () =>

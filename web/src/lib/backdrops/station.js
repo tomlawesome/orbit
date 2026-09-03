@@ -309,7 +309,7 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
         const a = Math.floor((off - this.margin) / this.chunkW);
         const b = Math.floor((off + VIEW + this.margin) / this.chunkW);
         for (const i of [...this.live.keys()])
-          if (i < a || i > b) { this.live.get(i).remove(); this.live.delete(i); }
+          if (i < a || i > b) { /** @type {SVGGElement} */ (this.live.get(i)).remove(); this.live.delete(i); }
         for (let i = a; i <= b; i++) if (!this.live.has(i)) {
           const g = /** @type {SVGGElement} */ (svgEl("g", { transform: `translate(${(i * this.chunkW).toFixed(1)},0)` }));
           this.build(g, streamFor(this.lane, i), i, T);
