@@ -1,5 +1,13 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { syntheticPdf } from "../support/synthetic-documents";
+import { sweepNamed } from "./support/households";
+
+/* #730: this spec seeds a household through the setup dialog only when the
+   account has none, and never removed it. One survived every run and was the
+   last thing crowding a second run -- it broke authenticated-lifecycle's "a
+   first sign-in creates no household until the user chooses one", which
+   cannot hold while somebody else's household is still there. */
+const seededThroughTheInterface = new Set<string>();
 
 const terminalInspectionMessage = /Document inspected|Suggestions are unavailable|Automatic suggestions require the optional document processor\. You can still attach this file\./u;
 
@@ -7,7 +15,7 @@ async function signIn(page: Page) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
+  await expect(page).toHaveURL("/workspace");
 }
 
 async function readWorkspace(page: Page) {
@@ -21,7 +29,9 @@ async function ensureHousehold(page: Page) {
   await page.getByRole("heading", { name: "Where would you like to begin?" }).waitFor();
   await page.getByRole("button", { name: "Create a new household" }).click();
   const dialog = page.getByRole("dialog", { name: "Set up your space" });
-  await dialog.getByLabel("Household name").fill(`Document intake ${Date.now()}`);
+  const name = `Document intake ${Date.now()}`;
+  seededThroughTheInterface.add(name);
+  await dialog.getByLabel("Household name").fill(name);
   await dialog.getByRole("button", { name: "Create household" }).click();
   let created: string | null = null;
   await expect.poll(async () => {
@@ -293,4 +303,20 @@ test.describe("document-assisted item intake", () => {
 
     await page.unroute("**/api/households/*/item-document-inspection");
   });
+});
+
+/* Signed in as the administrator, which this spec already is -- a hard delete
+   is an administrator's power. */
+test.afterAll(async ({ browser }) => {
+  const names = [...seededThroughTheInterface];
+  seededThroughTheInterface.clear();
+  if (names.length === 0) return;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  try {
+    await signIn(page);
+    await sweepNamed(page, names);
+  } finally {
+    await context.close();
+  }
 });

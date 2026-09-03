@@ -1,12 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { evaluateAcrossNavigation } from "../support/navigation-safe";
+import { householdRegister } from "./support/households";
+
+/* #730: the household this spec falls back on creating is removed once both
+   tests are done — the second one reads the first one's, and the first one
+   ends signed out, so the sweep gets its own signed-in page. */
+const households = householdRegister();
+let seeded = false;
 
 async function signIn(page: Page) {
   await page.goto("/workspace");
   await page.getByRole("link", { name: "Sign in securely" }).click();
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  await expect(page).toHaveURL(/127\.0\.0\.1:3000\/workspace$/);
+  await expect(page).toHaveURL("/workspace");
 }
 
 /**
@@ -101,12 +108,26 @@ async function activeHouseholdName(page: Page): Promise<string> {
     },
   });
   expect(createResponse.ok()).toBeTruthy();
+  households.track({ id: householdId, name: householdName });
+  seeded = true;
   await page.reload();
   return householdName;
 }
 
 test.describe("online-only private workspace policy", () => {
   test.describe.configure({ mode: "serial", retries: 0 });
+
+  test.afterAll(async ({ browser }) => {
+    if (!seeded) return;
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await signIn(page);
+      await households.sweep(page);
+    } finally {
+      await context.close();
+    }
+  });
 
   test("purges preview-build private storage at authenticated startup and before logout", async ({ page, isMobile }) => {
     test.skip(process.env.ORBIT_ACCEPTANCE_OIDC !== "true", "Requires the disposable OIDC acceptance profile.");
