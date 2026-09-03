@@ -31,9 +31,16 @@
 #                        -f docker-compose.acceptance.yml \
 #                        -f docker-compose.local-e2e.yml down --volumes
 #
-# --repeat exists for #730: proving that a spec's fixtures do not survive into
-# another spec's run needs the SAME instance twice, because a fresh instance
-# each time would pass whether or not anything is cleaned up.
+# --repeat is a DEBUGGING TOOL, not a gate. Running twice against one instance
+# makes leaked fixtures show themselves, which is how the interface-created
+# household leak and #741 were found. It is deliberately not a criterion any
+# issue has to satisfy: this harness destroys its volumes on every run and CI
+# builds a fresh stack, so nobody meets the second run in real use, and some
+# journeys are one-way by design (v19-arrival's own docblock says so).
+#
+# So: use it to hunt, and do not read a second-run failure as a defect on its
+# own. Confirm the finding against a scenario somebody actually runs before
+# filing anything (owner, 2026-09-03).
 #
 # AGENTS.md "Traps when running things locally" applies here directly: this
 # script always passes an explicit, distinctive Compose `-p` project name
