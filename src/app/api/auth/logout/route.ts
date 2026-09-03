@@ -5,15 +5,16 @@ import { clearSessionCookie } from "@/lib/auth/cookies";
 import { authErrorResponse } from "@/lib/auth/http";
 import { createProviderLogoutUrl, discoverProvider } from "@/lib/auth/oidc";
 import { assertCsrf, assertSameOrigin, deleteSessionToken, readSession } from "@/lib/auth/session";
+import { nextCookies, nextCookieSink } from "@/lib/auth/next-compat";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
     const config = getAuthConfig();
-    const session = await readSession(request, config);
-    if (session) assertCsrf(request, session, config);
-    else assertSameOrigin(request, config);
+    const session = await readSession(nextCookies(request), config);
+    if (session) assertCsrf(request.headers, session, config);
+    else assertSameOrigin(request.headers, config);
     await deleteSessionToken(session?.token);
 
     // Mirrors the login route's returnTo (#410, §15): this engine's own
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       ? NextResponse.json({ redirectTo: redirectTarget.href })
       : NextResponse.redirect(redirectTarget, 303);
     response.headers.set("Cache-Control", "no-store");
-    clearSessionCookie(response, config);
+    clearSessionCookie(nextCookieSink(request, response), config);
     return response;
   } catch (error) {
     return authErrorResponse(error);

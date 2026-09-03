@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { getAuthConfig } from "@/lib/env";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
@@ -91,8 +92,8 @@ const mutationSchema = z.discriminatedUnion("action", [
 
 export async function GET(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     await requireInstanceAdministrator(session.user.id);
     const maintenance = await readMaintenanceState();
     return NextResponse.json({ maintenance }, { headers: { "Cache-Control": "no-store" } });
@@ -103,10 +104,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     await requireInstanceAdministrator(session.user.id);
     const command = mutationSchema.parse(await request.json());
     const actor = session.user.id;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse, AppError } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { listItemDocuments, requestDocumentDeletion, uploadItemDocument } from "@/server/document-repository";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 import { authorizeDirectReviewedUpload, completeDirectReviewedUpload, markDirectReviewedUploadRecoverable, recordDirectReviewedUploadPending } from "@/server/reviewed-intake";
@@ -16,8 +17,8 @@ interface RouteContext {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const { householdId, itemId } = await context.params;
     const itemDocuments = await listItemDocuments(session.user.id, householdId, itemId);
     return NextResponse.json({ documents: itemDocuments }, { headers: { "Cache-Control": "no-store" } });
@@ -31,10 +32,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
   let reviewedOperationUserId: string | undefined;
   let uploadAttempted = false;
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId, itemId } = await context.params;
     const operationIdHeader = request.headers.get("x-orbit-review-operation");
     const documentIdHeader = request.headers.get("x-orbit-document-id");

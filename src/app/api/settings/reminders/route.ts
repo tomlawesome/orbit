@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { reminderPreferenceSchema } from "@/lib/preferences";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 import { readReminderSettings, writeReminderSettings } from "@/server/reminder-settings";
@@ -21,8 +22,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const reminders = await readReminderSettings(session.user.id);
     return NextResponse.json({ reminders }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -32,10 +33,10 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const preference = reminderPreferenceSchema.parse(await request.json());
     const reminders = await writeReminderSettings(session.user.id, preference);
     return NextResponse.json({ reminders }, { headers: { "Cache-Control": "no-store" } });

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nextCookieSink } from "@/lib/auth/next-compat";
 import { getAuthConfig } from "@/lib/env";
 import { randomUrlSafe, safeReturnPath, sealLoginTransaction, type LoginTransaction } from "@/lib/auth/crypto";
 import { setTransactionCookie } from "@/lib/auth/cookies";
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     const sealedTransaction = await sealLoginTransaction(transaction, config);
     const response = NextResponse.redirect(createAuthorizationUrl(config, metadata, transaction), 302);
     response.headers.set("Cache-Control", "no-store");
-    setTransactionCookie(response, sealedTransaction, config);
+    setTransactionCookie(nextCookieSink(request, response), sealedTransaction, config);
     return response;
   } catch (error) {
     return authErrorResponse(error);

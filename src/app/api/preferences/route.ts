@@ -5,6 +5,7 @@ import { notificationDeliveries, userPreferences } from "@/db/schema";
 import { getAuthConfig } from "@/lib/env";
 import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { themePreferenceSchema } from "@/lib/preferences";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -20,10 +21,10 @@ const DARK_PACKS = new Set(["starchart", "afterdark"]);
 
 export async function PUT(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const preference = themePreferenceSchema.parse(await request.json());
     const themeMode = DARK_PACKS.has(preference.theme) ? "dark" : "light";
     await getDb().transaction(async (transaction) => {

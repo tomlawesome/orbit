@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { readDocumentPagePreview } from "@/server/document-preview";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -23,8 +24,8 @@ interface RouteContext {
  */
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const { documentId } = await context.params;
     const preview = await readDocumentPagePreview(session.user.id, documentId);
     const responseBody = Uint8Array.from(preview.bytes);

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getAuthConfig } from "@/lib/env";
 import { appErrorResponse } from "@/lib/app-error";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import {
   addHouseholdMember,
   listHouseholdMembers,
@@ -21,8 +22,8 @@ const transferOwnerSchema = z.object({ userId: z.uuid() });
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const { householdId } = await context.params;
     const members = await listHouseholdMembers(session.user.id, householdId);
     const currentUser = members.find((member) => member.id === session.user.id);
@@ -37,10 +38,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const { userId } = addMemberSchema.parse(await request.json());
     const members = await addHouseholdMember(session.user.id, householdId, userId);
@@ -53,10 +54,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const { userId } = removeMemberSchema.parse(await request.json());
     const members = await removeHouseholdMember(session.user.id, householdId, userId);
@@ -71,10 +72,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const { userId } = transferOwnerSchema.parse(await request.json());
     const members = await transferHouseholdOwnership(session.user.id, householdId, userId);

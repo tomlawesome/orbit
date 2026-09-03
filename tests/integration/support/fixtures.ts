@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { closeDatabase, getDb } from "@/db";
@@ -242,7 +243,7 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     const sessionRequest = new NextRequest(config.appUrl.href, {
       headers: { cookie: `${sessionCookieName(config)}=${created.token}` },
     });
-    const persisted = await readSession(sessionRequest, config);
+    const persisted = await readSession(nextCookies(sessionRequest), config);
     if (!persisted) throw new Error(`Integration session for ${role} was not persisted`);
     const csrfToken = csrfTokenForSession(persisted, config);
     return {

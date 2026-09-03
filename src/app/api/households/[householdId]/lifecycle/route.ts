@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { hardDeleteHousehold, requestHouseholdDeletion, restoreHousehold } from "@/server/household-lifecycle";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -16,10 +17,10 @@ interface RouteContext { params: Promise<{ householdId: string }> }
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const body = bodySchema.parse(await request.json());
     if (body.action === "delete") return NextResponse.json(await requestHouseholdDeletion(session.user.id, householdId, body.confirmation), { headers: { "Cache-Control": "no-store" } });
