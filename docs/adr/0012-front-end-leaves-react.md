@@ -63,11 +63,13 @@ Two supporting decisions make that durable:
 - Two frameworks coexist until the cut. Next continues to serve the product and
   the 35 API routes while the new front end is built alongside it, unreferenced
   by any Dockerfile, compose file or workflow.
-- The cut itself is real work: porting the routes and auth shims off Next,
-  deleting it, and re-solving container packaging — `pdfjs-dist` and
-  `@napi-rs/canvas` are currently resolved through `.next/standalone` and must
-  be re-solved for `adapter-node` output. It reaches the installer and
-  `orbit-launcher`, and lands as one clean cut on a branch (#411 phase E).
+- The cut itself is real work: building the route families the new UI calls,
+  deleting Next and everything nothing calls, and re-solving container
+  packaging — `pdfjs-dist` and `@napi-rs/canvas` are currently resolved through
+  `.next/standalone` and must be re-solved for `adapter-node` output. It reaches
+  the installer and `orbit-launcher`, and lands as one clean cut on a branch
+  (#411 phase E). Amended 2026-09-03: this said "porting the routes", which
+  assumed all of them.
 - Roughly 5,700 lines of React across 34 components are deleted, and the
   capabilities they carried that no mockup draws do not come with them. Those
   are recorded on #410 as a deferred backlog, not a discard pile.
@@ -87,8 +89,26 @@ Two supporting decisions make that durable:
 
 The server, the data model, authentication, the workers, the installer and the
 engine are untouched by the rebuild. `pnpm test` and `pnpm test:integration`
-stay green throughout, and the API surface is kept intact — including routes
-nothing calls yet, which are cheap to keep and expensive to reconstruct.
+stay green throughout.
+
+> **Amended 2026-09-03 (owner).** This decision originally added: "and the API
+> surface is kept intact — including routes nothing calls yet, which are cheap
+> to keep and expensive to reconstruct." **That no longer holds.**
+>
+> Owner ruling: "I do not want any work being done to 'transition' from Next to
+> the new UI in a smooth way, as if we have users who need to migrate — we don't
+> have any users yet. Just cut Next out and build the new UI." And as a standing
+> rule: if the new UI does not need it, get rid of it.
+>
+> Orbit has shipped to nobody, so there is no installed base whose calls must
+> keep working, and "expensive to reconstruct" was pricing a risk that does not
+> exist — git holds the deleted routes if one is ever wanted again. The cut
+> therefore builds the route families `web/` actually calls (nineteen, measured
+> 2026-09-03) and deletes the rest with Next, rather than porting all
+> forty-four. See #735.
+>
+> The rest of this decision stands: SvelteKit, mechanical fidelity, and the old
+> front end not being an input to any decision.
 
 ## Alternatives considered
 
