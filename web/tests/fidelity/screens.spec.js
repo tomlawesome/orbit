@@ -44,6 +44,33 @@ const MOCKUPS = process.env.FIDELITY_MOCKUPS ?? "http://127.0.0.1:5174";
 const PIXEL_THRESHOLD = 0.1;
 const MAX_DIFF_RATIO = 0.001;
 
+/**
+ * Walks the tour to stop 3 and settles there (#752).
+ *
+ * Runs in the page, polled by waitForFunction, so it has to be safe to
+ * evaluate over and over: it presses *Next* at most once per stop — the card
+ * publishes which stop it is on, and the marker below only lets a given
+ * number be pressed once — so the walk cannot be run past the stop being
+ * photographed. Settled means the galaxy has been placed, the card says stop
+ * 3, and the emphasis has actually been applied to something: `.lit` is the
+ * mark the whole screen exists to guard, in both modes.
+ */
+function tourAtStopThree() {
+  if (document.querySelectorAll(".minisys").length === 0) return false;
+  const card = document.querySelector(".tourcard");
+  if (!card) return false;
+  const at = Number(card.getAttribute("data-tour-stop") ?? 0);
+  if (at === 0) return false;
+  if (at < 3) {
+    if (card.getAttribute("data-pressed") !== String(at)) {
+      card.setAttribute("data-pressed", String(at));
+      document.getElementById("tour-next")?.click();
+    }
+    return false;
+  }
+  return at === 3 && document.querySelectorAll("[data-tour-dim].lit").length > 0;
+}
+
 const SCREENS = [
   {
     name: "login",
@@ -408,6 +435,39 @@ const SCREENS = [
      */
     mockupOnly: [".demos", "footer"],
   },
+  /*
+   * THE FIRST-RUN WALK, ONE SCREEN PER EMPHASIS MODE (#752, acceptance
+   * criterion 4). Both photograph the SAME stop — stop 3, the dial, which is
+   * the one every pack has to carry — and differ only in the pack in force:
+   *
+   *   tour-dim      star-chart, where everything but the dial drops to the
+   *                 pack's faint tier;
+   *   tour-forward  dawn, where nothing dims and the dial is pushed forward
+   *                 by colour instead (owner, 2026-09-03).
+   *
+   * OWNED, not porting, and the reason is not a shortcut: design/v19/tour.html
+   * is a reduced stage — a dial, a one-row manifest and three lane cards drawn
+   * to show the TREATMENT — not a second drawing of home. Photographing the
+   * real /home under the tour against that sheet would measure the difference
+   * between two screens, not drift in the walk. What these two guard is the
+   * emphasis itself, on the real screen, in both modes.
+   */
+  {
+    name: "tour-dim",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    settle: tourAtStopThree,
+  },
+  {
+    name: "tour-forward",
+    path: "/home",
+    stage: "owned",
+    pack: "dawn",
+    tourDue: true,
+    settle: tourAtStopThree,
+  },
 ];
 
 /**
@@ -455,8 +515,37 @@ function maskRegions(png, rects) {
 
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
-  { reducedMotion = null, trim = null } = {},
+  { reducedMotion = null, trim = null, pack = null, tourDue = false } = {},
 ) {
+  /*
+   * WHICH SKY. Most of the family is photographed in the pack the app ships
+   * on; the tour's two screens are one per emphasis mode, so each names its
+   * own. Said through the app's own pre-paint mechanism — the `orbit-theme`
+   * key app.html reads before the first frame — so the pack is in force in
+   * the first painted pixel rather than swapped in after the screen has laid
+   * itself out in a different one.
+   */
+  if (pack) {
+    await page.addInitScript((/** @type {string} */ chosen) => {
+      try { localStorage.setItem("orbit-theme", chosen); } catch { /* storage refused: the default pack stands */ }
+    }, pack);
+  }
+
+  /*
+   * WHETHER THE WALK IS DUE. The fixture route answers "already taken", so
+   * the tour never opens over the other screens; the two that ARE the tour
+   * say otherwise here, the way the goodbye says it is signed out.
+   */
+  if (tourDue) {
+    await page.route("**/api/settings/tour", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"tour":{"tourSeenAt":null}}',
+      }),
+    );
+  }
+
   await page.route("https://fonts.googleapis.com/**", (route) =>
     route.fulfill({ contentType: "text/css", body: LOCAL_FONT_CSS }),
   );
@@ -632,7 +721,7 @@ async function captureAppOnce(page, screen) {
   if (!appShots.has(screen.name)) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
-      { reducedMotion: screen.reducedMotion });
+      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);
