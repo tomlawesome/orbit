@@ -2,6 +2,12 @@
   "name": "orbit",
   "version": "1.0.0",
   "private": true,
+  "exports": {
+    "./server/*": "./src/server/*.ts",
+    "./lib/*": "./src/lib/*.ts",
+    "./db": "./src/db/index.ts",
+    "./db/schema": "./src/db/schema.ts"
+  },
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "node scripts/run-with-orbit-env.mjs node_modules/next/dist/bin/next dev",
