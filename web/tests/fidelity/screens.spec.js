@@ -52,8 +52,10 @@ const MAX_DIFF_RATIO = 0.001;
  * publishes which stop it is on, and the marker below only lets a given
  * number be pressed once — so the walk cannot be run past the stop being
  * photographed. Settled means the galaxy has been placed, the card says stop
- * 3, and the emphasis has actually been applied to something: `.lit` is the
- * mark the whole screen exists to guard, in both modes.
+ * 3, the emphasis has actually been applied to something — `.lit` is the
+ * mark the whole screen exists to guard, in both modes — and the fade that
+ * carries it (tour.css, .45s on opacity and filter) has finished everywhere:
+ * photographed mid-fade, the same stop measures differently on every run.
  */
 function tourAtStopThree() {
   if (document.querySelectorAll(".minisys").length === 0) return false;
@@ -68,7 +70,10 @@ function tourAtStopThree() {
     }
     return false;
   }
-  return at === 3 && document.querySelectorAll("[data-tour-dim].lit").length > 0;
+  if (at !== 3 || document.querySelectorAll("[data-tour-dim].lit").length === 0) return false;
+  return [...document.querySelectorAll("[data-tour-dim]")].every(
+    (el) => !el.getAnimations().some((a) => a instanceof CSSTransition),
+  );
 }
 
 const SCREENS = [
@@ -451,6 +456,15 @@ const SCREENS = [
    * real /home under the tour against that sheet would measure the difference
    * between two screens, not drift in the walk. What these two guard is the
    * emphasis itself, on the real screen, in both modes.
+   *
+   * Both are photographed in the design's reduced-motion state, for the
+   * belt's reason (above): home's sky drifts and its rotor turns on clocks
+   * the walk cannot pin, and the walk itself takes seconds to reach stop 3,
+   * so two captures of the same stop otherwise land on different frames of
+   * the drift — measured at 0.8%, eight times the budget. In that state the
+   * sky holds still, the rotor stands, and the emphasis is applied without
+   * its fade, which is exactly the design's own reduced-motion rule
+   * (tour.css: `transition: none`).
    */
   {
     name: "tour-dim",
@@ -458,6 +472,7 @@ const SCREENS = [
     stage: "owned",
     pack: "starchart",
     tourDue: true,
+    reducedMotion: "reduce",
     settle: tourAtStopThree,
   },
   {
@@ -466,6 +481,7 @@ const SCREENS = [
     stage: "owned",
     pack: "dawn",
     tourDue: true,
+    reducedMotion: "reduce",
     settle: tourAtStopThree,
   },
 ];
