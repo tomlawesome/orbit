@@ -73,6 +73,9 @@ describe("changed-path CI risk classification", () => {
       "src/server/readiness.ts",
       "drizzle/0001_initial.sql",
       "scripts/install.sh",
+      // Both run inside the image build and decide what it ships (#735).
+      "scripts/web-deploy.sh",
+      "scripts/web-pdfjs-runtime-check.mjs",
       "scripts/backup.sh",
       "tests/e2e/authenticated-documents.spec.ts",
       "some/new/directory/file.txt",
