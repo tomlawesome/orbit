@@ -52,7 +52,10 @@ describe("the minimal request event", () => {
 
     expect(cookie?.value).toBe("fresh value");
     expect(cookie?.maxAge).toBe(600);
-    expect(cookie?.attributes).toBe("Max-Age=600; Path=/; HttpOnly; Secure; SameSite=Lax; Priority=High");
+    /* The exact string the `cookie` package SvelteKit uses produces for these
+       options — order included. Measured, not recalled: if this drifts, the
+       integration suite is asserting a header the real server never sends. */
+    expect(cookie?.attributes).toBe("Max-Age=600; Path=/; HttpOnly; Secure; Priority=High; SameSite=Lax");
   });
 
   it("reports no cookie when the handler sets none, and the assertion can tell", async () => {

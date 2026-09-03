@@ -49,20 +49,35 @@ export interface RouteCall {
   body?: BodyInit | null;
 }
 
-/* SvelteKit spells its attributes this way, and assertions read them back out
-   of the header as text, so the casing is part of the contract. */
+/* Byte-for-byte what SvelteKit puts on the wire, because assertions read this
+   header back as text and a helper that invented its own spelling would
+   certify behaviour that does not hold in production.
+ *
+ * Measured against the `cookie` package SvelteKit serialises with (0.6.0),
+ * rather than written from memory:
+ *
+ *   serialize("n", "v", { path: "/", httpOnly: true, secure: true,
+ *                         sameSite: "lax", maxAge: 600, priority: "high" })
+ *   => n=v; Max-Age=600; Path=/; HttpOnly; Secure; Priority=High; SameSite=Lax
+ *
+ * So: that attribute ORDER, capitalised `Lax`/`High`, and the value
+ * percent-encoded. The order is not cosmetic — a test asserting the whole
+ * attribute string would otherwise pass here and fail against the real server.
+ *
+ * The package is a transitive dependency pnpm does not expose to this
+ * workspace, which is why this mirrors it rather than calling it. If a future
+ * SvelteKit changes the spelling, the cookie assertions in
+ * `tests/unit/request-event-support.test.ts` are what will notice.
+ */
 function serializeCookie(name: string, value: string, options: CookieOptions): string {
+  const capitalise = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
   const parts = [`${name}=${encodeURIComponent(value)}`];
   if (options.maxAge !== undefined) parts.push(`Max-Age=${options.maxAge}`);
   parts.push(`Path=${options.path}`);
   if (options.httpOnly) parts.push("HttpOnly");
   if (options.secure) parts.push("Secure");
-  if (options.sameSite) {
-    parts.push(`SameSite=${options.sameSite.charAt(0).toUpperCase()}${options.sameSite.slice(1)}`);
-  }
-  if (options.priority) {
-    parts.push(`Priority=${options.priority.charAt(0).toUpperCase()}${options.priority.slice(1)}`);
-  }
+  if (options.priority) parts.push(`Priority=${capitalise(options.priority)}`);
+  if (options.sameSite) parts.push(`SameSite=${capitalise(options.sameSite)}`);
   return parts.join("; ");
 }
 
