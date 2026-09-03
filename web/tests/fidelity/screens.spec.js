@@ -290,7 +290,13 @@ const SCREENS = [
        behind it at a 400×850 viewBox, so that is the sheet of glass to
        compare, not a desk viewport with a narrow column down the middle. */
     viewport: { width: 400, height: 850 },
-    settle: () => Boolean(document.querySelector(".mdial svg")),
+    /* The dial is static chrome and exists before the workspace fetch
+       resolves, so waiting on it alone photographed an empty pocket --
+       no households, no rows, no bodies on the dial. `.msys` is drawn
+       from the data, so it is the dialect's own `.minisys`: the same
+       "the galaxy has been placed" condition home settles on. */
+    settle: () => Boolean(document.querySelector(".mdial svg"))
+      && document.querySelectorAll(".msys").length > 0,
   },
   {
     name: "admin",
@@ -531,12 +537,19 @@ function maskRegions(png, rects) {
 
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
-  { reducedMotion = null, trim = null, pack = null, tourDue = false } = {},
+  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false } = {},
 ) {
   /*
-   * WHICH SKY. Most of the family is photographed in the pack the app ships
-   * on; the tour's two screens are one per emphasis mode, so each names its
-   * own. Said through the app's own pre-paint mechanism — the `orbit-theme`
+   * WHICH SKY. Star chart unless a screen names another, because that is the
+   * pack THE MOCKUPS ARE DRAWN IN — the porting comparison is app against
+   * mockup, so both sides have to be the same sky or the diff is just the
+   * theme. This used to ride on whatever pack the app shipped on, which tied
+   * the gate to a product default: when the default moved to After Dark
+   * (2026-09-03) six screens failed without a pixel of the front end having
+   * changed. The packs genuinely do not share a sky, so that comparison was
+   * never meaningful.
+   *
+   * Said through the app's own pre-paint mechanism — the `orbit-theme`
    * key app.html reads before the first frame — so the pack is in force in
    * the first painted pixel rather than swapped in after the screen has laid
    * itself out in a different one.
