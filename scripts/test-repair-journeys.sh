@@ -1037,12 +1037,26 @@ journey_unhealthy_app() {
     sleep 5
   done
 
+  # On failure, print the window repair.sh step 12 reads. Which run of the
+  # container a sentinel came from is the whole question this journey got
+  # wrong once (#778), and neither the finding nor the exit code says: only
+  # the timestamps against the container's own start time do. Read-only, and
+  # only on the failing path, so a passing run stays quiet.
+  unhealthy_app_window() {
+    printf '[repair-journeys] unhealthy-app: container started at %s\n' \
+      "$(docker inspect orbit --format '{{.State.StartedAt}}' 2>/dev/null || echo unknown)"
+    printf '[repair-journeys] unhealthy-app: docker logs --tail 50 at --check time:\n'
+    docker logs --timestamps --tail 50 orbit 2>&1 || true
+  }
+
   output="$(repair --check 2>&1)" || status=$?
   [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2
+    unhealthy_app_window >&2
     docker kill --signal=CONT orbit >/dev/null 2>&1 || true
     fail "unhealthy-app: --check exited $status, expected 4"; }
   grep -q 'finding class=application-unhealthy target=application severity=fail' <<<"$output" ||
     { printf '%s\n' "$output" >&2
+      unhealthy_app_window >&2
       docker kill --signal=CONT orbit >/dev/null 2>&1 || true
       fail 'unhealthy-app: --check did not report application-unhealthy'; }
 
