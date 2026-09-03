@@ -29,8 +29,16 @@ import { seedFromWorkspace } from "$lib/sky.js";
  * by a flight, which lands the camera on a different household and must
  * re-point the sun as it re-letters the name.
  */
+/** @type {(id: string) => string} */
 export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
 
+/**
+ * @param {object} options
+ * @param {Record<string, any>} options.galaxy
+ * @param {string | null} [options.primary]
+ * @param {boolean} [options.fixtures]
+ * @param {string} [options.workspace]
+ */
 export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
   /*
    * Shadows the global so every bare addEventListener() below — the mockup's
@@ -39,6 +47,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    * it simply resolves a different binding.
    */
   const controller = new AbortController();
+  /** @type {(type: string, handler: (event: any) => void, options?: any) => void} */
   const addEventListener = (type, handler, options) =>
     window.addEventListener(type, handler, {
       ...(typeof options === "object" ? options : null),
@@ -54,6 +63,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    * reason: a flight that lands after unmount writes to nodes that are gone.
    */
   const timers = new Set();
+  /** @type {(fn: () => void, ms: number) => ReturnType<typeof setTimeout>} */
   const later = (fn, ms) => {
     const id = setTimeout(() => { timers.delete(id); fn(); }, ms);
     timers.add(id);
@@ -65,7 +75,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   const GALAXY = galaxy;
   let camera = primary ?? Object.keys(galaxy)[0];
   let flying = false;
-  const hero = document.getElementById("hero");
+  const hero = /** @type {HTMLElement} */ (document.getElementById("hero"));
 
   /*
    * WHAT THE PACK SKIES LISTEN TO (§15, the sky wave).
@@ -79,8 +89,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    * no globals, so the two moments are published as subscriptions instead and
    * the engines that care subscribe. Nothing else about either function moves.
    */
-  const cameraWatchers = new Set(), galaxyWatchers = new Set();
+  /** @type {Set<() => void>} */
+  const cameraWatchers = new Set();
+  /** @type {Set<() => void>} */
+  const galaxyWatchers = new Set();
+  /** @type {(set: Set<() => void>) => (fn: () => void) => () => boolean} */
   const subscribe = (set) => (fn) => { set.add(fn); return () => set.delete(fn); };
+  /** @type {(set: Set<() => void>) => void} */
   const announce = (set) => { for (const fn of set) fn(); };
 
   /* the starfield offset is a pure function of the camera position, so a
@@ -92,11 +107,12 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
        until it lands the screen must degrade, not throw. */
     if (!GALAXY[camera]) return;
     const [cx, cy] = GALAXY[camera].pos;
-    document.getElementById("cam-far").style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
-    document.getElementById("cam-near").style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
+    /** @type {HTMLElement} */ (document.getElementById("cam-far")).style.transform = `translate(${-cx * .3}px, ${-cy * .3}px)`;
+    /** @type {HTMLElement} */ (document.getElementById("cam-near")).style.transform = `translate(${-cx * .65}px, ${-cy * .65}px)`;
     announce(cameraWatchers);
   }
 
+  /** @param {boolean} settle */
   function renderGalaxy(settle){
     for (const old of hero.querySelectorAll(".minisys")) old.remove();
     if (!GALAXY[camera]) return; // no household yet — see pointSky (#453)
@@ -108,7 +124,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     /* +88, not +46: the keep-out must clear the constellation's own ring
        (r 40 around the anchor), not just its centre point — the centre kept
        clear while the ring sat on the dial (owner, 2026-08-16). */
-    const keepOut = (hero.querySelector(".dialwrap")?.offsetWidth || 640) / 2 + 88;
+    const keepOut = (/** @type {HTMLElement | null} */ (hero.querySelector(".dialwrap"))?.offsetWidth || 640) / 2 + 88;
 
     /*
      * THE FIXED MAP (#428, ratified 2026-08-16). The whole arrangement is one
@@ -147,6 +163,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
        * any drawn x through the 210-wide viewBox.
        */
       const away = ox > 0;
+      /** @type {(x: number) => number} */
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
       // anchored so the RING CENTRE sits at the bearing point — a flight
@@ -162,6 +179,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
       // the arrow extends underneath the text, then veers toward the ring
+      /** @type {(width: number) => string} */
       const veerFor = (width) => (away
         ? `M 206 21 H ${200 - width} L ${184 - width} 40`
         : `M 4 21 H ${width + 10} L ${width + 26} 40`);
@@ -174,7 +192,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
              rest of the (blank) 210x160 box. -->
         <circle class="mshit" cx="${ringX}" cy="95" r="40" fill="transparent"/>
         <circle cx="${ringX}" cy="95" r="3" style="fill:var(--ink)" opacity=".8"/>
-        ${hh.planets.map(([px, py, pr, tok]) =>
+        ${hh.planets.map((/** @type {[number, number, number, string]} */ [px, py, pr, tok]) =>
           `<circle cx="${ringX + px}" cy="${95 + py}" r="${pr}" style="fill:var(${tok})" opacity=".55"/>`).join("")}
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
@@ -193,9 +211,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      * layout for the first measurement instead of one per constellation (#448).
      */
     for (const { div, veerFor } of corrections) {
-      const measured = Math.min(150, div.querySelector("text").getComputedTextLength());
+      const measured = Math.min(150, /** @type {SVGTextElement} */ (div.querySelector("text")).getComputedTextLength());
       if (measured) {
-        div.querySelector("path").setAttribute("d", veerFor(measured));
+        /** @type {SVGPathElement} */ (div.querySelector("path")).setAttribute("d", veerFor(measured));
       }
     }
     /* the marks are new nodes, so anything that dresses them — dawn's crossing
@@ -203,6 +221,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     announce(galaxyWatchers);
   }
 
+  /**
+   * @param {string} key
+   * @param {HTMLElement} mini
+   */
   function flyTo(key, mini){
     if (flying) return;
     flying = true;
@@ -218,21 +240,21 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     // lands the ring centre EXACTLY concentric with the dial's sun, and only
     // then does the chart grow out of that shared centre — slow and deliberate
     later(() => {
-      document.getElementById("dial-name").textContent = GALAXY[key].name;
+      /** @type {HTMLElement} */ (document.getElementById("dial-name")).textContent = GALAXY[key].name;
       /* The sun wears the name, and the pair is one identity (§15, 08-17), so
          the way in changes in the same beat the name does — a dial reading
          one household while its sun opened another would be a lie. */
       document.querySelector(".sun-link")?.setAttribute("href", sunHref(key));
-      document.getElementById("who-role").textContent = GALAXY[key].name + " · " +
+      /** @type {HTMLElement} */ (document.getElementById("who-role")).textContent = GALAXY[key].name + " · " +
         (GALAXY[key].role ?? "member");
       hero.classList.add("arriving");   // dial pinned at centre, under the ring
       mini.classList.add("dissolve");   // the ring hands the centre to the chart
-      const dial = document.querySelector(".dial");
+      const dial = /** @type {HTMLElement} */ (document.querySelector(".dial"));
       dial.style.animation = "none"; void dial.offsetWidth;
       dial.style.animation = "bloom 2.4s cubic-bezier(.22,.61,.21,1) 1";
     }, 1120);
     later(() => {
-      const wrap = hero.querySelector(".dialwrap");
+      const wrap = /** @type {HTMLElement} */ (hero.querySelector(".dialwrap"));
       wrap.style.transition = "none";
       hero.classList.remove("flying");
       hero.classList.remove("arriving");
@@ -256,13 +278,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   callout.className = "callout";
   callout.innerHTML = '<span class="line"></span><b></b> <small></small><button class="chip"></button>';
   document.body.appendChild(callout);
-  for (const link of document.querySelectorAll(".body-link")) {
+  for (const link of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".body-link"))) {
     link.addEventListener("mouseenter", () => {
       const rect = link.getBoundingClientRect();
-      const dial = document.querySelector(".dial").getBoundingClientRect();
+      const dial = /** @type {HTMLElement} */ (document.querySelector(".dial")).getBoundingClientRect();
       const rightSide = rect.left + rect.width / 2 >= dial.left + dial.width / 2;
-      callout.querySelector("b").textContent = link.dataset.title;
-      callout.querySelector("small").textContent = link.dataset.t + " · " + link.dataset.cost;
+      /** @type {HTMLElement} */ (callout.querySelector("b")).textContent = /** @type {string} */ (link.dataset.title);
+      /** @type {HTMLElement} */ (callout.querySelector("small")).textContent = link.dataset.t + " · " + link.dataset.cost;
       callout.classList.toggle("side-right", rightSide);
       callout.classList.toggle("side-left", !rightSide);
       callout.style.left = rightSide ? (rect.right + 34) + "px" : "";
@@ -271,9 +293,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       const docs = link.dataset.docs;
       callout.classList.toggle("has-docs", Boolean(docs));
       if (docs) {
-        const chip = callout.querySelector(".chip");
+        const chip = /** @type {HTMLElement} */ (callout.querySelector(".chip"));
         chip.textContent = "◆ " + docs + (docs === "1" ? " document" : " documents");
-        chip.onclick = () => openDocsByTitle(link.dataset.title);
+        chip.onclick = () => openDocsByTitle(/** @type {string} */ (link.dataset.title));
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
@@ -301,35 +323,43 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
   }
   /* POL-9 */
+  /** @param {boolean} open */
   function openPalette(open){
-    document.getElementById("palette").classList.toggle("open", open);
+    /** @type {HTMLElement} */ (document.getElementById("palette")).classList.toggle("open", open);
   }
-  addEventListener("keydown", (event) => {
+  addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "k") {
-      event.preventDefault(); document.getElementById("explore").focus();
+      event.preventDefault(); /** @type {HTMLElement} */ (document.getElementById("explore")).focus();
     }
   });
+  /** @param {string} title */
   function openDocsByTitle(title){
     callout.classList.remove("show");
-    document.getElementById("docview-title").textContent = title;
-    document.getElementById("docview").classList.add("open");
+    /** @type {HTMLElement} */ (document.getElementById("docview-title")).textContent = title;
+    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.add("open");
   }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
   /* The ratified screen shows the degraded state (the markup's handle already
      reads "degraded"); real health wiring is deferred functionality (#410). */
   document.body.classList.add("health-degraded");
+  /** @param {HTMLElement} button */
   function toggleAccount(button){
-    const card = document.getElementById("account");
+    const card = /** @type {HTMLElement} */ (document.getElementById("account"));
     const open = card.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
   }
   /* title -> pack name, the mapping the swatch buttons encode:
      "star-chart" is starchart, "after dark" is afterdark. */
+  /** @type {(button: HTMLElement) => string} */
   const packOf = (button) => button.title.replace(/[\s-]/g, "");
 
+  /**
+   * @param {string} name
+   * @param {HTMLElement} button
+   */
   function setSwatch(name, button){
     document.documentElement.dataset.theme = name;
-    for (const other of button.parentElement.querySelectorAll("button"))
+    for (const other of /** @type {HTMLElement} */ (button.parentElement).querySelectorAll("button"))
       other.setAttribute("aria-pressed", String(other === button));
     /* Survive a refresh. See the note in app.html: the server holds the real
        preference once the shell is wired; this is the pre-paint cache. */
@@ -344,15 +374,16 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      swatch and the live theme disagree until they click - so reconcile once. */
   (function syncSwatches(){
     const active = document.documentElement.dataset.theme;
-    for (const button of document.querySelectorAll(".swatches button"))
+    for (const button of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".swatches button")))
       button.setAttribute("aria-pressed", String(packOf(button) === active));
   })();
+  /** @param {HTMLElement} button */
   function toggleCreate(button){
-    const drawer = document.getElementById("createdrawer");
+    const drawer = /** @type {HTMLElement} */ (document.getElementById("createdrawer"));
     const open = drawer.classList.toggle("open");
     button.setAttribute("aria-expanded", String(open));
     document.body.classList.toggle("create-open", open);
-    button.querySelector("span").textContent = open ? "close" : "create";
+    /** @type {HTMLElement} */ (button.querySelector("span")).textContent = open ? "close" : "create";
   }
   /*
    * One light-dismiss rule for the whole screen (owner, 2026-08-14), amending
@@ -376,9 +407,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     ["button.orb", "account"],
   ];
 
+  /** @param {string | null} keep */
   function closeOverlays(keep){
     if (keep !== "create" && document.body.classList.contains("create-open"))
-      toggleCreate(document.getElementById("nstar"));
+      toggleCreate(/** @type {HTMLElement} */ (document.getElementById("nstar")));
     for (const id of ["statusdrawer", "keydrawer"]) {
       if (id === keep) continue;
       const drawer = document.getElementById(id);
@@ -397,7 +429,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     }
   }
 
-  addEventListener("click", (event) => {
+  addEventListener("click", (/** @type {MouseEvent} */ event) => {
     const target = event.target;
     if (!(target instanceof Element)) return closeOverlays(null);
     const hit = OVERLAY_HIT.find(([selector]) => target.closest(selector));
@@ -406,7 +438,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     closeOverlays(hit ? hit[1] : null);
   });
 
-  addEventListener("keydown", (event) => {
+  addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
     if (event.key === "Escape") closeOverlays(null);
   });
   /* v17, amended §14: any scroll movement sends every drawer home */
@@ -414,14 +446,14 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   addEventListener("scroll", () => {
     if (Math.abs(scrollY - lastY) > 4) {
       for (const id of ["statusdrawer", "keydrawer"]) {
-        const drawer = document.getElementById(id);
+        const drawer = /** @type {HTMLElement} */ (document.getElementById(id));
         if (drawer.classList.contains("open")) {
           drawer.classList.remove("open");
           drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
         }
       }
       if (document.body.classList.contains("create-open"))
-        toggleCreate(document.getElementById("nstar"));
+        toggleCreate(/** @type {HTMLElement} */ (document.getElementById("nstar")));
     }
     lastY = scrollY;
   }, { passive: true });
@@ -462,7 +494,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
    */
   const doc = document.documentElement;
   const still = matchMedia("(prefers-reduced-motion: reduce)");
+  /** @type {(v: number) => number} */
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  /** @type {(t: number) => number} */
   const smooth = (t) => t * t * (3 - 2 * t);
   /* the cloud passage is the shorter of four-fifths of a screen and two-fifths
      of the page: a tall screen must not make it feel like a long fall, and a
@@ -542,36 +576,39 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   });
 
   /* ---- wiring that replaces the mockup's inline on* attributes ---- */
+  /** @type {(target: Element | null | undefined, type: string, handler: (event: any) => void) => void} */
   const on = (target, type, handler) =>
     target?.addEventListener(type, handler, { signal: controller.signal });
 
-  const star = document.getElementById("nstar");
+  const star = /** @type {HTMLElement} */ (document.getElementById("nstar"));
 
-  on(document.querySelector("button.orb"), "click", (event) =>
-    toggleAccount(event.currentTarget));
-  on(star, "click", (event) => toggleCreate(event.currentTarget));
+  on(document.querySelector("button.orb"), "click", (/** @type {MouseEvent} */ event) =>
+    toggleAccount(/** @type {HTMLElement} */ (event.currentTarget)));
+  on(star, "click", (/** @type {MouseEvent} */ event) => toggleCreate(/** @type {HTMLElement} */ (event.currentTarget)));
   on(document.querySelector(".scrim"), "click", () => toggleCreate(star));
 
   /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
   for (const swatch of document.querySelectorAll(".swatches button")) {
-    on(swatch, "click", (event) =>
-      setSwatch(packOf(event.currentTarget), event.currentTarget));
+    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
+      setSwatch(packOf(/** @type {HTMLElement} */ (event.currentTarget)), /** @type {HTMLElement} */ (event.currentTarget)));
   }
 
-  const explore = document.getElementById("explore");
+  const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
   on(explore, "focus", () => openPalette(true));
   on(explore, "blur", () => setTimeout(() => openPalette(false), 150));
 
   /* both drawer handles ride their own drawer, which is their parent */
   for (const handle of document.querySelectorAll(".drawer > button.handle")) {
-    on(handle, "click", (event) => {
-      const open = event.currentTarget.parentElement.classList.toggle("open");
-      event.currentTarget.setAttribute("aria-expanded", String(open));
+    on(handle, "click", (/** @type {MouseEvent} */ event) => {
+      const currentTarget = /** @type {HTMLElement} */ (event.currentTarget);
+      const drawer = /** @type {HTMLElement} */ (currentTarget.parentElement);
+      const open = drawer.classList.toggle("open");
+      currentTarget.setAttribute("aria-expanded", String(open));
     });
   }
 
   on(document.querySelector("#docview .close"), "click", () =>
-    document.getElementById("docview").classList.remove("open"));
+    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.remove("open"));
 
   /*
    * Hand the document back exactly as home found it. Everything below lives
@@ -613,8 +650,13 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
  * fixed map (placement.js), read from the origin instead of from a camera and
  * with no chart to keep clear.
  */
+/**
+ * @param {object} options
+ * @param {Record<string, any>} options.galaxy
+ * @param {(id: string, name: string, requested: boolean) => void} [options.onAsk]
+ */
 export function mountEmptySky({ galaxy, onAsk }) {
-  const hero = document.getElementById("hero");
+  const hero = /** @type {HTMLElement} */ (document.getElementById("hero"));
   if (!hero) return () => {};
 
   function render() {
@@ -638,6 +680,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
     for (const { id, household: hh, ox, oy, undrawn } of placed) {
       if (undrawn) continue;
       const away = ox > 0;
+      /** @type {(x: number) => number} */
       const mx = (x) => (away ? 210 - x : x);
       const ringX = mx(118);
       const div = document.createElement("div");
@@ -653,6 +696,11 @@ export function mountEmptySky({ galaxy, onAsk }) {
       const svg = document.createElementNS(svgNS, "svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
       svg.setAttribute("viewBox", "0 0 210 160");
+      /**
+       * @param {string} tag
+       * @param {Record<string, any>} attrs
+       * @param {string} [text]
+       */
       const put = (tag, attrs, text) => {
         const el = document.createElementNS(svgNS, tag);
         for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
