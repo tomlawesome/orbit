@@ -100,6 +100,10 @@
 
   *{box-sizing:border-box;margin:0}
   html{scroll-behavior:smooth}
+  /* Reduced motion: the glide becomes a jump, like every other motion here.
+     (Also what lets the tour's stop-to-stop scroll be photographed at rest —
+     tests/fidelity/screens.spec.js, the two tour screens.) */
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
   html,body{min-height:100%}
   body{background:var(--bg);color:var(--ink);font-family:var(--ui);
        line-height:1.55;transition:background .4s,color .4s;overflow-x:hidden}
