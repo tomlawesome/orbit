@@ -4,6 +4,7 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountGravityWell } from "./gravity-well.js";
+  import { rasteriseSvg } from "$lib/raster.js";
 
   /**
    * Not found — the gravity well (CON-14). The black hole *is* the 0, with the
@@ -25,8 +26,110 @@
    */
   const isNotFound = $derived(page.status === 404);
 
+  /**
+   * #764 step 2 — the same rasterise-once mechanism as Grain/Dawn/Dusk
+   * (#499/#501, $lib/raster.js), applied to the one part of this screen's
+   * filtered group that never moves.
+   *
+   * Checked first, per that precedent's own rule: what actually animates
+   * inside the filtered <svg>. Six of notfound.css's nine keyframes do —
+   * precess (the whole well rotates), dbreathe (.disc-glow), pflick/pflick2
+   * (the photon rings), lens (the lensed arcs/arch), and smear (the near-side
+   * disc and the tidal stream) — and every element they touch is inside, or
+   * is, `.disc-precess`, `.disc-glow`, or the tidal-stream path. All of that
+   * stays live SVG, riding the five live filters (b1/b3/b6/b16/hotrough)
+   * pinned by #766, exactly as before.
+   *
+   * Of what is left, only ONE element actually carries a live filter: the
+   * inner "4"'s b6-blurred afterimage (feGaussianBlur, never animated). The
+   * outer "4" and the inner "4"'s own crisp glyph are plain gradient-filled
+   * text with no filter at all — the GPU law (#499's ledger) is about live
+   * SVG *filters* forcing a software repaint, not about live SVG as such, so
+   * rasterising them would spend a canvas decode removing a cost that was
+   * never there, for two crisp text edges a raster is the harder thing to
+   * match exactly (tried first: rasterising both glyphs together measured
+   * pixel-identical in review but drifted the fidelity gate 0.28% on crisp
+   * glyph edges — text hits a canvas/SVG antialiasing seam a blurred shape
+   * does not, because blur is exactly what hides sub-pixel edge noise).
+   * Rasterising only the blur keeps both crisp glyphs byte-identical to
+   * before and still removes the one actual live filter from the paint
+   * tree — the point of this step, per the issue itself. The raster is
+   * built at the full 1600×1000 frame, the same technique Dawn/Dusk use for
+   * a single shape, with the glyph's own transform baked into the SVG
+   * string so the <image> can sit at 0,0 without a second transform.
+   */
+  const F_B6 =
+    '<filter id="b6" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>';
+  const STATIC_BODY =
+    '<g transform="translate(1092 460) rotate(8) skewX(-14) scale(1.24,.9)">' +
+    '<text x="0" y="52" text-anchor="middle" font-family="\'Space Grotesk\',sans-serif" ' +
+    'font-weight="600" font-size="168" fill="#e8dcbc" opacity=".3" filter="url(#b6)" ' +
+    'transform="scale(1.35,1)">4</text></g>';
+
+  /** @param {number} w @param {number} h */
+  function staticFrame(w, h) {
+    return (
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
+      `<defs>${F_B6}</defs>${STATIC_BODY}</svg>`
+    );
+  }
+
+  /** @type {HTMLDivElement | null} */
+  let world;
+  /** @type {SVGImageElement | null} */
+  let imgStatic;
+
   onMount(() => {
-    if (isNotFound) mountGravityWell();
+    if (!isNotFound) return;
+    mountGravityWell();
+
+    let cancelled = false;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+
+    async function build() {
+      if (!world) return;
+      const rect = world.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      /* Unlike Grain/Dawn/Dusk, this raster's body is set text (the two
+         "4"s), so its shape depends on Space Grotesk having actually
+         loaded — the SVG-to-<img> decode below rasterises with whatever
+         font is available at that moment and, unlike a live DOM element,
+         never re-renders once the webfont swaps in. Wait for it explicitly
+         rather than race it, the same wait the fidelity gate itself takes
+         before screenshotting this page (screens.spec.js). */
+      await document.fonts.ready;
+      if (cancelled) return;
+      /* Capped at 2, as Grain/Dawn/Dusk cap it: retina stays crisp without a
+         3x+ display doubling the raster for no visible gain. */
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const scale = Math.max(rect.width / 1600, rect.height / 1000) * dpr;
+      const w = Math.max(1, Math.round(1600 * scale));
+      const h = Math.max(1, Math.round(1000 * scale));
+
+      /* Marks this surface for the fidelity gate (screens.spec.js), which
+         waits for `.world[data-rasterised]` before screenshotting so the
+         async decode below can never race a capture. */
+      world.dataset.rasterised = "pending";
+      const url = await rasteriseSvg(`notfound-static|${w}|${h}`, staticFrame(w, h), w, h);
+      if (cancelled) return;
+
+      imgStatic?.setAttribute("href", url);
+      world.dataset.rasterised = "ready";
+    }
+
+    function onResize() {
+      clearTimeout(timer);
+      timer = setTimeout(build, 120);
+    }
+
+    build();
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+    };
   });
 </script>
 
@@ -48,7 +151,7 @@
   <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
 </svg></div>
 
-<div style="position:fixed;inset:0;z-index:1"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
+<div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
   <defs>
     <!-- doppler: the approaching side of the disc burns white, the receding side dims -->
     <linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">
@@ -137,18 +240,24 @@
           stroke-width="2.6" filter="url(#b1)" opacity=".8"/>
   </g>
 
-  <!-- the outer 4: caught, but still itself -->
+  <!-- the outer 4: caught, but still itself. Plain gradient fill, no
+       filter — stays live, byte-identical to before. -->
   <text x="505" y="512" text-anchor="middle" font-family="'Space Grotesk',sans-serif"
         font-weight="600" font-size="168" fill="url(#glyphg)"
         transform="rotate(-5 505 460)">4</text>
 
+  <!-- the inner 4's b6-blurred afterimage: the one filtered, static, never-
+       animated element left in the graph — rasterised once (#764 step 2,
+       see the script block) in place of the live text it replaces. Same
+       position in paint order: after the outer 4, before the inner 4's own
+       crisp glyph. -->
+  <image bind:this={imgStatic} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+
   <!-- the inner 4: mid-spaghettification, shearing toward the horizon -->
   <g>
-    <!-- the glyph itself, stretched and tilted into the fall -->
+    <!-- the glyph itself, stretched and tilted into the fall. Plain
+         gradient fill, no filter — stays live, byte-identical to before. -->
     <g transform="translate(1092 460) rotate(8) skewX(-14) scale(1.24,.9)">
-      <text x="0" y="52" text-anchor="middle" font-family="'Space Grotesk',sans-serif"
-            font-weight="600" font-size="168" fill="#e8dcbc" opacity=".3" filter="url(#b6)"
-            transform="scale(1.35,1)">4</text>
       <text x="0" y="52" text-anchor="middle" font-family="'Space Grotesk',sans-serif"
             font-weight="600" font-size="168" fill="url(#glyphg)">4</text>
     </g>
