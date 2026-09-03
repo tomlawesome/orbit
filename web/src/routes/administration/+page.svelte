@@ -2,8 +2,9 @@
   import { onMount } from "svelte";
   import { resolve } from "$app/paths";
   import { addMember, readAdminScreen } from "$lib/data/workspace.js";
-  import { constellationPlanetsOf } from "$lib/data/chart.js";
-  import { fillStarTiles } from "$lib/sky.js";
+  import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
+  import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
+  import { mountStation } from "$lib/backdrops/station.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./administration.css";
 
@@ -24,8 +25,19 @@
    * screen for the system chosen on the dial. The /api/join-requests routes
    * and their server code stay put; household-manage will consume them when
    * it is built.
+   *
+   * The living station backdrop (#472/#475, §14) is $lib/backdrops/station.js,
+   * ported from design/v19/administration-iss.html — this file only mounts
+   * it and tears it down, the same shape as create/+page.svelte and
+   * settings/mail/+page.svelte. Its households come through the same seam
+   * home and create draw their own skies from (galaxyOf), and its caption's
+   * real facts (collection domain, systems aboard, crew) come off this
+   * screen's own data rather than the sheet's hard-coded literals.
    */
+  let { data } = $props();
   let view = $state(null);
+  /** @type {?HTMLDivElement} */
+  let backdropRoot = null;
 
   const initialsOf = (name) =>
     name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
@@ -50,30 +62,51 @@
     }
   }
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
-  /* the minisys ring at r40 shrunk to the roster's r13 */
+  /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
+     §Systems) turn out to be constellationPlanetsOf's own far-sky placement
+     (CON-13), just re-centred on the roster's small r13 ring instead of the
+     backdrop's distant one: the same orbit distance (18..30) and body size
+     (2.0..2.8) divided by 6 and 4 respectively lands exactly on the sheet's
+     hand-measured coordinates for all five fixture households (#775). */
   const ringDots = (household) =>
     constellationPlanetsOf(household.items ?? [], view.today).map(([x, y, r, tone]) => ({
-      cx: 17 + x * 0.325,
-      cy: 17 + y * 0.325,
-      r: Math.max(1.2, r * 0.6),
+      cx: 17 + x / 6,
+      cy: 17 + y / 6,
+      r: 1 + r / 4,
       tone: TONE[tone] ?? "--ok",
     }));
 
-  onMount(async () => {
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
-    view = await readAdminScreen();
+  onMount(() => {
+    let disposed = false;
+    let backdropTeardown = () => {};
+    /* The backdrop mounts once the screen's own data has loaded — its
+       households (galaxyOf) and its caption's real facts both come from the
+       same readAdminScreen() answer this screen renders from, so there is no
+       second fetch. The one seed follows home's own pattern: pinned to the
+       workspace under fixtures, so the fidelity gate can compare one
+       deterministic sky against the mockup's; rolled fresh otherwise. */
+    readAdminScreen().then((screen) => {
+      if (disposed) return;
+      view = screen;
+      const seed = data?.fixtures ? seedFromWorkspace(screen.primary ?? "") : rollSeed();
+      const galaxy = galaxyOf({ households: screen.households, activeHouseholdId: screen.primary }, screen.today);
+      const domain = screen.relay.find(([label]) => label === "collection domain")?.[1] ?? "";
+      backdropTeardown = mountStation(/** @type {HTMLDivElement} */ (backdropRoot), {
+        seed, galaxy, primary: screen.primary,
+        facts: { domain, systems: screen.households.length, crew: screen.users.length },
+      });
+    });
+    return () => {
+      disposed = true;
+      backdropTeardown();
+    };
   });
 </script>
 
 <svelte:head><title>Orbit — administration</title></svelte:head>
 
 <div class="mission-page">
-<div class="sky" aria-hidden="true">
-  <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-    <g class="far" fill="var(--star-far)"><g id="fartile"></g><use href="#fartile" x="1600"/></g>
-    <g class="near" fill="var(--star-near)"><g id="neartile"></g><use href="#neartile" x="1600"/></g>
-  </svg>
-</div>
+<div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
 
 <Chrome user={view?.user} current="administration"
