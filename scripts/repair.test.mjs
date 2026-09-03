@@ -4579,7 +4579,13 @@ describe("scripts/repair.sh EXIT trap (issue #383 finding 4)", () => {
       }
       rmSync(shimDir, { recursive: true, force: true });
     }
-  });
+    // This test gives itself 10 seconds to watch the directory appear, and
+    // then still has to kill repair.sh and wait for it to exit. Under Vitest's
+    // 5s default the 10 seconds above could never be spent: on a slow runner
+    // the test died before its own deadline meant anything, which is the
+    // two-budgets failure #698 describes. 30s leaves room for the wait plus
+    // the shutdown and still fails fast if repair.sh genuinely hangs.
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
