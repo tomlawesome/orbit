@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { tourPreferenceSchema } from "@/lib/preferences";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 import { readTourSettings, writeTourSettings } from "@/server/tour-settings";
@@ -21,8 +22,8 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const tour = await readTourSettings(session.user.id);
     return NextResponse.json({ tour }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
@@ -32,10 +33,10 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const preference = tourPreferenceSchema.parse(await request.json());
     const tour = await writeTourSettings(session.user.id, preference);
     return NextResponse.json({ tour }, { headers: { "Cache-Control": "no-store" } });

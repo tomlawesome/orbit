@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { assertCsrf, requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { createPortableArchive } from "@/server/portable-archive-repository";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -18,10 +19,10 @@ interface RouteContext { params: Promise<{ householdId: string }> }
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
+    await assertOutsideMaintenance(nextCookies(request));
     const config = getAuthConfig();
-    const session = await requireSession(request, config);
-    assertCsrf(request, session, config);
+    const session = await requireSession(nextCookies(request), config);
+    assertCsrf(request.headers, session, config);
     const { householdId } = await context.params;
     const input = requestSchema.parse(await request.json());
     const archive = await createPortableArchive({ userId: session.user.id, householdId, ...input });

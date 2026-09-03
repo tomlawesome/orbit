@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { nextCookieSink } from "@/lib/auth/next-compat";
 import { getAuthConfig, type AuthConfig } from "@/lib/env";
 import { clearTransactionCookie, sessionCookieName, setSessionCookie, transactionCookieName } from "@/lib/auth/cookies";
 import { constantTimeEqual, openLoginTransaction } from "@/lib/auth/crypto";
@@ -17,14 +18,14 @@ function logCallbackFailure(authError: AuthError): void {
   reportAuthCallbackFailure(authError.code, authError.tokenExchangeReason);
 }
 
-function callbackFailure(error: unknown, config: AuthConfig): NextResponse {
+function callbackFailure(error: unknown, config: AuthConfig, request: NextRequest): NextResponse {
   const authError = asAuthError(error);
   logCallbackFailure(authError);
   const target = new URL("/auth/error", config.appUrl);
   target.searchParams.set("code", authError.code);
   const response = NextResponse.redirect(target, 303);
   response.headers.set("Cache-Control", "no-store");
-  clearTransactionCookie(response, config);
+  clearTransactionCookie(nextCookieSink(request, response), config);
   return response;
 }
 
@@ -64,10 +65,10 @@ export async function GET(request: NextRequest) {
     const session = await createSession(user.id, config);
     const response = NextResponse.redirect(new URL(transaction.returnTo, config.appUrl), 303);
     response.headers.set("Cache-Control", "no-store");
-    clearTransactionCookie(response, config);
-    setSessionCookie(response, session.token, config);
+    clearTransactionCookie(nextCookieSink(request, response), config);
+    setSessionCookie(nextCookieSink(request, response), session.token, config);
     return response;
   } catch (error) {
-    return callbackFailure(error, config);
+    return callbackFailure(error, config, request);
   }
 }

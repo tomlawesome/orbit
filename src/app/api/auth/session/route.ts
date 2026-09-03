@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthConfig } from "@/lib/env";
 import { authErrorResponse } from "@/lib/auth/http";
 import { csrfTokenForSession, readSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
     const config = getAuthConfig();
-    const session = await readSession(request, config);
+    const session = await readSession(nextCookies(request), config);
     if (!session) {
       return NextResponse.json(
         { authenticated: false },

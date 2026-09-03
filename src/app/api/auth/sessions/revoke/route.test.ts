@@ -166,9 +166,9 @@ describe("POST /api/auth/sessions/revoke", () => {
 
   it("clears the caller's own cookie so this device stops presenting a dead token", async () => {
     const { response } = await revoke([[sessionRow(USER_ID)]], [{ id: "session-one" }]);
-    const cookie = response.cookies.get("__Host-orbit-session");
-    expect(cookie?.value).toBe("");
-    expect(cookie?.maxAge).toBe(0);
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("__Host-orbit-session=;");
+    expect(cookie).toContain("Max-Age=0");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
   });
 

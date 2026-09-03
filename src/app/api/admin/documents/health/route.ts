@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { getAuthConfig } from "@/lib/env";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import { getDocumentHealth, toPublicDocumentHealth } from "@/server/document-health";
@@ -10,8 +11,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     await requireInstanceAdministrator(session.user.id);
     return NextResponse.json(
       { health: toPublicDocumentHealth(await getDocumentHealth()) },

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { appErrorResponse } from "@/lib/app-error";
 import { getAuthConfig } from "@/lib/env";
 import { requireSession } from "@/lib/auth/session";
+import { nextCookies } from "@/lib/auth/next-compat";
 import { readPortableArchive } from "@/server/portable-archive-repository";
 import { assertOutsideMaintenance } from "@/server/maintenance";
 
@@ -12,8 +13,8 @@ interface RouteContext { params: Promise<{ archiveId: string }> }
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    await assertOutsideMaintenance(request);
-    const session = await requireSession(request, getAuthConfig());
+    await assertOutsideMaintenance(nextCookies(request));
+    const session = await requireSession(nextCookies(request), getAuthConfig());
     const { archiveId } = await context.params;
     const archive = await readPortableArchive(session.user.id, archiveId);
     const body = Uint8Array.from(archive.bytes);
