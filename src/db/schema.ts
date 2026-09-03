@@ -77,6 +77,10 @@ export const userPreferences = pgTable("user_preferences", {
   // choice; per-item overrides remain in reminder_rules.
   firstWarningDays: integer("first_warning_days").notNull().default(14),
   finalWarningDays: integer("final_warning_days").notNull().default(3),
+  // The first-run tour's own record (#751, slice 1 of #477): null until the
+  // reader skips or finishes the walk, set then, cleared by "Take the walk
+  // again". No default — a never-seen row is null, not now().
+  tourSeenAt: timestamp("tour_seen_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_preference_warning_days_bounded", sql`${table.firstWarningDays} BETWEEN 1 AND 365 AND ${table.finalWarningDays} BETWEEN 0 AND 365`),
