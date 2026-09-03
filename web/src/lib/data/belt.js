@@ -101,6 +101,12 @@ function documentRowOf(doc) {
  * `keepId` is the deep arrival: a retired or cancelled item is not in the
  * manifest, but if that is the item you followed a link to it must still have
  * a seat, or the address would resolve to somebody else's screen.
+ *
+ * #624: `keepId` is annotated because its `= null` default otherwise infers
+ * the parameter as `null`, and every caller passing a real id is then a type
+ * error. That was invisible while the workspace seam handed callers `any`.
+ *
+ * @param {{ household?: any, documentsByItem?: any, today?: any, keepId?: string | null }} input
  */
 export function beltManifestOf({ household, documentsByItem = {}, today, keepId = null }) {
   const sections = new Map((household?.sections ?? []).map((s) => [s.id, s.name]));

@@ -36,6 +36,169 @@
  * Since the manifest runs sooner-left to later-right, a body's angular
  * offset along the belt DECREASES phi: offset 0 is the first item due.
  * ==================================================================== */
+
+/* ==================================================================== *
+ * THE VOCABULARY (#624). The shapes this module eats and hands on, said
+ * once here so the painter and the screen can say them too. `BeltRow` and
+ * `BeltDoc` are $lib/data/belt.js's own output, written down rather than
+ * re-derived; `Body` is this module's seat list, and it is a discriminated
+ * union on `kind` because a rock and a paper genuinely carry different
+ * things and the two must never be confused for one another.
+ * ==================================================================== */
+
+/** @typedef {"over" | "soon" | "up" | "ok"} Urgency the manifest's four words */
+
+/**
+ * The raw workspace item the manifest carries through untouched, so the
+ * command builders (#455) have the record they write against.
+ *
+ * @typedef  {object}  ItemRecord
+ * @property {string}  id
+ * @property {string}  householdId
+ * @property {number}  [version]
+ * @property {string}  title
+ * @property {string}  status
+ * @property {?string} [sectionId]
+ * @property {?string} [subtype]
+ * @property {?string} [scheduleKind]
+ * @property {?string} [dueDate]
+ * @property {?string} [snoozedUntil]
+ * @property {?string} [provider]
+ * @property {?string} [reference]
+ * @property {?string} [notes]
+ * @property {?number} [costMinor]
+ * @property {?boolean} [costIsEstimate]
+ * @property {?string} [currency]
+ * @property {?number} [recurrenceMonths]
+ * @property {?number[]} [reminderDays]
+ */
+
+/**
+ * One paper, as documentRowOf() makes it.
+ *
+ * @typedef  {object}  BeltDoc
+ * @property {string}  id
+ * @property {string}  name      the display name, whole
+ * @property {string}  size      "240 KB"
+ * @property {string}  added     "12 June 2026", or "unknown"
+ * @property {string}  type      "PDF (application/pdf)"
+ * @property {string}  plate     "PDF"
+ * @property {boolean} clean     scanned clean
+ * @property {?string} scan      the scan's own word, when there is one
+ * @property {string}  href      the download the card hands over
+ */
+
+/**
+ * One item, as beltManifestOf() makes it: every string the band and the card
+ * need, already reckoned against the same today the chart uses.
+ *
+ * @typedef  {object}     BeltRow
+ * @property {string}     id
+ * @property {string}     title
+ * @property {?string}    section
+ * @property {string}     kind         inspection / renewal / service
+ * @property {?string}    provider
+ * @property {?string}    reference
+ * @property {?string}    notes
+ * @property {string}     status
+ * @property {?string}    snoozedUntil
+ * @property {?string}    due
+ * @property {number}     days         days until due; undated rows sort last
+ * @property {Urgency}    urg
+ * @property {string}     t            "T−16d"
+ * @property {string}     when         "29 Aug"
+ * @property {string}     longWhen     "29 August 2026"
+ * @property {?number}    cost         minor units
+ * @property {boolean}    costIsEstimate
+ * @property {string}     currency
+ * @property {?number}    months       the orbital period
+ * @property {number[]}   remind
+ * @property {BeltDoc[]}  docs
+ * @property {ItemRecord} item         the raw record the commands write against
+ */
+
+/**
+ * What every body in the seat list carries, rock or paper alike.
+ *
+ * @typedef  {object}     BodyCommon
+ * @property {string}     id
+ * @property {BeltRow}    item     the row this body belongs to
+ * @property {number}     itemIdx  its index in the manifest
+ * @property {number}     off      its angular seat along the band
+ * @property {string}     label    the caption's first line
+ * @property {string}     sub      the caption's second line
+ * @property {string}     tone     the CSS variable this body wears
+ * @property {number}     r        its radius in px
+ * @property {number}     sweep    the neighbourhood it clears of rubble
+ * @property {number}     seed     its silhouette's own seed
+ * @property {BeltDoc[]}  docs     an item's papers; a paper carries none
+ * @property {number}     jp       the seeded jumble: along the band...
+ * @property {number}     jr       ...off the ring radius...
+ * @property {number}     jh       ...and out of the ring plane
+ * @property {SVGElement} [mark]  the painter's own handle on this seat's
+ *                                mark; nothing pure ever reads it
+ */
+
+/**
+ * @typedef {BodyCommon & { kind: "item", urg: Urgency, days: number,
+ *                          t: string, when: string, longWhen: string }} ItemBody
+ * @typedef {BodyCommon & { kind: "doc", doc: BeltDoc }} DocBody
+ * @typedef {ItemBody | DocBody} Body
+ */
+
+/**
+ * A point on the screen, with how far toward the viewer it leans.
+ *
+ * @typedef  {object} Projected
+ * @property {number} x
+ * @property {number} y
+ * @property {number} d  toward the viewer; the band's depth cue
+ */
+
+/**
+ * Everything the sky's size decides — geometryOf()'s whole answer.
+ *
+ * @typedef  {object} Geometry
+ * @property {number} W          the viewport's width
+ * @property {number} H          ...and its height
+ * @property {number} A          the ring's radius
+ * @property {number} APEX_Y     where the apex hangs
+ * @property {number} CX         the ring's projected centre
+ * @property {number} CY
+ * @property {number} PHI_APEX   the ring angle that lands on the apex
+ * @property {number} PHI_L      the arc the screen can see, left...
+ * @property {number} PHI_R      ...and right
+ * @property {number} DIP_L      how far the band falls 300px either side
+ * @property {number} DIP_R
+ * @property {number} GAP_SCALE  the squeeze a narrow sky takes
+ * @property {(phi: number, rho: number, hh: number) => Projected} project
+ */
+
+/**
+ * Where a body actually is at this instant of the roll.
+ *
+ * @typedef  {object} Seat
+ * @property {number} phi
+ * @property {number} rho
+ * @property {number} h
+ */
+
+/**
+ * One inert body of the ambient bed. Held in BAND coordinates: `phi` is the
+ * ring angle it was born at, so the drift and the roll both apply to it at
+ * its own `rate` for the rest of its life.
+ *
+ * @typedef  {object} Rubble
+ * @property {number} rho
+ * @property {number} h
+ * @property {number} size
+ * @property {number} tone   an index into the painter's three tones
+ * @property {number} alpha
+ * @property {number} rate   its share of the drift — Keplerian shear
+ * @property {?[number, number][]} poly  its silhouette, if it is big enough
+ * @property {number} phi
+ */
+
 export const RAD = Math.PI / 180;
 export const INC = 40 * RAD;
 export const NODE = -12 * RAD;
@@ -83,6 +246,7 @@ export const DOC_OFF = 6.0 * RAD;
    the roll itself, so opening an item is a visible act: the belt makes room
    and the papers come out. */
 export const BERTH_NARROW = 0.075, BERTH_WIDE = 0.28, BERTH_K = 0.16;
+/** @type {(berth: number) => (u: number) => number} */
 export const warpOf = (berth) => (u) => u + berth * Math.tanh(u / BERTH_K);
 
 /* ---- the jumble ------------------------------------------------------
@@ -112,14 +276,25 @@ export const JUMBLE_SEED = 1013, JUMBLE_STEP = 7919;
    place, every load — fixture truth), and one that runs for the ambient band,
    never rewound between respawns, which is exactly why the band can never
    repeat itself. */
+/** @type {(s: number) => () => number} */
 export const lehmer = (s) => () => (s = (s * 48271) % 2147483647) / 2147483647;
+/** @type {(x: number) => number} */
 export const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
 /* ==================================================================== *
  * The projection and the one pin.
  * ==================================================================== */
 
-/** The ring's own projection, given a centre offset. */
+/**
+ * The ring's own projection, given a centre offset.
+ *
+ * @param   {number} cx
+ * @param   {number} cy
+ * @param   {number} phi  the ring angle, anticlockwise
+ * @param   {number} rho  the radius this body rides at
+ * @param   {number} hh   its height out of the ring plane
+ * @returns {Projected}
+ */
 function projectAt(cx, cy, phi, rho, hh) {
   const s = Math.sin(phi), c = Math.cos(phi);
   const u = rho * c;                          /* along the node line       */
@@ -130,6 +305,12 @@ function projectAt(cx, cy, phi, rho, hh) {
 
 /* x(phi) falls monotonically across the visible arc, so a walk-and-refine
    is exact enough and cannot be tripped by the ellipse's turning points. */
+/**
+ * @param   {Geometry} geom
+ * @param   {number}   targetX  the screen x to solve for
+ * @param   {number}   dir      which way round the ring to walk
+ * @returns {number}            the ring angle that lands on it
+ */
 function phiAtX(geom, targetX, dir) {
   let phi = geom.PHI_APEX, step = 0.02 * dir, last = geom.project(phi, geom.A, 0).x;
   for (let i = 0; i < 400; i++) {
@@ -148,6 +329,10 @@ function phiAtX(geom, targetX, dir) {
  * Everything the sky's size decides: the ring radius, the apex pin, the arc
  * the screen can see, how far the band falls either side of the apex, and the
  * squeeze the date law takes on a narrow viewport.
+ *
+ * @param   {number} width
+ * @param   {number} height
+ * @returns {Geometry}
  */
 export function geometryOf(width, height) {
   const W = width, H = height;
@@ -160,6 +345,7 @@ export function geometryOf(width, height) {
   const p = projectAt(0, 0, PHI_APEX, A, 0);
   const CX = W / 2 - p.x, CY = APEX_Y - p.y;
 
+  /** @type {Geometry} */
   const geom = {
     W, H, A, APEX_Y, CX, CY, PHI_APEX,
     PHI_L: 0, PHI_R: 0, DIP_L: 0, DIP_R: 0, GAP_SCALE: 1,
@@ -193,6 +379,9 @@ export function geometryOf(width, height) {
  * for the next body along. Measured at the NARROW berth and the tightest
  * possible gap, so the card is the same card whatever is centred; it must not
  * breathe every time an item happens to carry paper.
+ *
+ * @param   {Geometry} geom
+ * @returns {number}   the card's width in px
  */
 export function cardWidthOf(geom) {
   const narrow = warpOf(BERTH_NARROW);
@@ -222,8 +411,15 @@ export function cardWidthOf(geom) {
  * The belt rolls by `roll`; seat i sits at PHI_APEX − warp(off[i] − roll).
  * ==================================================================== */
 
-/** The date law: one running sum of gaps, in the manifest's own order. */
+/**
+ * The date law: one running sum of gaps, in the manifest's own order.
+ *
+ * @param   {BeltRow[]} manifest
+ * @param   {number}    gapScale
+ * @returns {number[]}  one angular seat per item
+ */
 export function itemOffsetsOf(manifest, gapScale) {
+  /** @type {number[]} */
   const offsets = [];
   let acc = 0;
   manifest.forEach((row, i) => {
@@ -238,7 +434,11 @@ export function itemOffsetsOf(manifest, gapScale) {
 }
 
 /** v2's split: half the papers sit before the item, half after. Never wider
- *  than two-thirds of the tightest item gap, so they stay in the berth. */
+ *  than two-thirds of the tightest item gap, so they stay in the berth.
+ *
+ * @param   {number}   n  how many papers this item carries
+ * @param   {number}   gapScale
+ * @returns {number[]} each paper's offset from its item, in radians of ring */
 export function docSpread(n, gapScale) {
   const cut = Math.ceil(n / 2), out = [];
   for (let j = 0; j < n; j++) {
@@ -252,6 +452,10 @@ export function docSpread(n, gapScale) {
 /* A caption in the band is an identifier, not the record: a long filename is
    elided in the middle so its extension survives, because ".pdf" is half of
    what tells you what the thing is. The card carries the whole name. */
+/**
+ * @param   {string} s
+ * @returns {string}
+ */
 export function shortName(s) {
   return s.length <= 21 ? s : s.slice(0, 11) + "…" + s.slice(-8);
 }
@@ -265,8 +469,18 @@ const BAND_VAR = {
  * The flat seat list: every item in date order, each item's documents seated
  * in the space between it and its neighbour, all of them thrown their seeded
  * jumble. `manifest` is $lib/data/belt.js's shape.
+ *
+ * The three jumble throws are seated at zero in the literals below and given
+ * their real values in the pass underneath, which is where they have always
+ * been reckoned: the throw depends on a body's place in the SORTED list, so
+ * it cannot be known while the list is still being built.
+ *
+ * @param   {BeltRow[]} manifest
+ * @param   {number}    gapScale
+ * @returns {Body[]}    the flat seat list, sorted by `off`
  */
 export function bodiesOf(manifest, gapScale) {
+  /** @type {Body[]} */
   const bodies = [];
   const itemOff = itemOffsetsOf(manifest, gapScale);
 
@@ -279,6 +493,7 @@ export function bodiesOf(manifest, gapScale) {
       r: R_ITEM, sweep: SWEEP, seed: ROCK_SEED + i * ROCK_STEP,
       t: row.t, when: row.when, longWhen: row.longWhen,
       docs,
+      jp: 0, jr: 0, jh: 0,
     });
     docSpread(docs.length, gapScale).forEach((d, j) => {
       bodies.push({
@@ -288,6 +503,7 @@ export function bodiesOf(manifest, gapScale) {
         tone: "var(--paper)", r: R_DOC, sweep: SWEEP_DOC,
         seed: DOC_SEED + i * DOC_ITEM_STEP + j * DOC_STEP,
         docs: [],
+        jp: 0, jr: 0, jh: 0,
       });
     });
   });
@@ -310,6 +526,14 @@ export function bodiesOf(manifest, gapScale) {
  * Where a body actually is at this instant: its seat, plus its jumble, with
  * the jumble eased to nothing as it comes into the apex so the card seats on
  * the pin exactly.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   i        which seat
+ * @param   {object}   at
+ * @param   {number}   at.roll  where the belt is turned to
+ * @param   {number}   at.berth how wide the card's clearing is
+ * @param   {Geometry} at.geom
+ * @returns {Seat}
  */
 export function seatOf(bodies, i, { roll, berth, geom }) {
   const b = bodies[i];
@@ -325,13 +549,20 @@ export function seatOf(bodies, i, { roll, berth, geom }) {
 }
 
 /** An item's papers are out when that item is centred, or when one of its own
- *  papers is. Nothing else opens them. */
+ *  papers is. Nothing else opens them.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   sel        which seat is at the apex
+ * @param   {number}   itemCount  how long the manifest is
+ * @returns {number[]} 0 or 1 per item */
 export function bloomTargetsOf(bodies, sel, itemCount) {
+  /** @type {number[]} */
   const t = new Array(itemCount).fill(0);
   const s = bodies[sel];
   if (s && (s.item?.docs ?? []).length) t[s.itemIdx] = 1;
   return t;
 }
+/** @type {(bodies: Body[], sel: number, itemCount: number) => number} */
 export const berthFor = (bodies, sel, itemCount) =>
   bloomTargetsOf(bodies, sel, itemCount).some((v) => v) ? BERTH_WIDE : BERTH_NARROW;
 
@@ -372,7 +603,10 @@ export const berthFor = (bodies, sel, itemCount) =>
 
 /** The roll's reach, off the seats: base is the sooner-most seat, reach the
  *  angle from there to the later-most, documents included, since a paper can
- *  be centred too. */
+ *  be centred too.
+ *
+ * @param   {Body[]} bodies
+ * @returns {{ base: number, reach: number }} */
 export function rollRangeOf(bodies) {
   if (!bodies.length) return { base: 0, reach: 0 };
   let lo = bodies[0].off, hi = bodies[0].off;
@@ -383,6 +617,20 @@ export function rollRangeOf(bodies) {
 /**
  * u is where along this body's OWN sown arc it lands, 0 at the far end the
  * band feeds from and 1 at the edge it retires over. Respawn passes 0.
+ *
+ * `rk` is taken as a Partial so a virgin `{}` and a body being rebuilt are
+ * the same call. Every field of a Rubble is written below before the object
+ * leaves, which is what the returned type says.
+ *
+ * @param   {Partial<Rubble>} rk
+ * @param   {number}   u
+ * @param   {object}   sky
+ * @param   {() => number} sky.rng    the running stream; never rewound
+ * @param   {Geometry} sky.geom
+ * @param   {number}   sky.base       the sooner-most seat
+ * @param   {number}   sky.reach      the angle from there to the later-most
+ * @param   {number}   sky.drift      how far the band has drifted
+ * @returns {Rubble}
  */
 export function spawnInto(rk, u, { rng, geom, base, reach, drift }) {
   const r = rng;
@@ -400,7 +648,9 @@ export function spawnInto(rk, u, { rng, geom, base, reach, drift }) {
   rk.rate = Math.pow(geom.A / rk.rho, 0.9) * (0.94 + (rk.h / (geom.A * HFRAC)) * 0.12);
   rk.poly = null;
   if (rk.size > 2.3) {                        /* big enough to have a shape */
-    const n = 7, pts = [];
+    const n = 7;
+    /** @type {[number, number][]} */
+    const pts = [];
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + r() * 0.5;
       const rr = 0.72 + r() * 0.5;
@@ -414,13 +664,23 @@ export function spawnInto(rk, u, { rng, geom, base, reach, drift }) {
   const lo = geom.PHI_R - BAND_MARGIN - reach * rk.rate;
   const hi = geom.PHI_L + BAND_MARGIN;
   rk.phi = lo + u * (hi - lo) - (drift + base) * rk.rate;
-  return rk;
+  /* Every field is written above, which a Partial cannot say for itself. */
+  return /** @type {Rubble} */ (rk);
 }
 
 /**
  * The whole bed. Density per arc-length is the constant, not the count: the
  * sky's own window keeps exactly the population it had, and the ground the
  * roll adds is sown at the same rate.
+ *
+ * @param   {object}   sky
+ * @param   {() => number} sky.rng
+ * @param   {Geometry} sky.geom
+ * @param   {Body[]}   sky.bodies   the seats, for the density they earn
+ * @param   {number}   sky.base
+ * @param   {number}   sky.reach
+ * @param   {number}   [sky.drift]
+ * @returns {Rubble[]}
  */
 export function bedOf({ rng, geom, bodies, base, reach, drift = 0 }) {
   const win = geom.PHI_L - geom.PHI_R + BAND_MARGIN * 2;
@@ -442,6 +702,10 @@ export function bedOf({ rng, geom, bodies, base, reach, drift = 0 }) {
  * order, matches stay lit and everything else falls back to a quarter of its
  * weight, so you can see where in time your hit lives before you go to it.
  * ==================================================================== */
+/**
+ * @param   {Body}   b
+ * @returns {string} everything about this body a person might type
+ */
 export function haystackOf(b) {
   return (b.kind === "doc"
     ? [b.doc.name, b.item.title, "document"]
@@ -449,8 +713,14 @@ export function haystackOf(b) {
        ...b.docs.map((d) => d.name)]).join(" ").toLowerCase();
 }
 
+/**
+ * @param   {Body[]} bodies
+ * @param   {string} query
+ * @returns {Set<number>} the seats that are lit
+ */
 export function matchesOf(bodies, query) {
   const q = query.trim().toLowerCase();
+  /** @type {Set<number>} */
   const found = new Set();
   if (q) bodies.forEach((b, i) => { if (haystackOf(b).includes(q)) found.add(i); });
   return found;
@@ -458,6 +728,7 @@ export function matchesOf(bodies, query) {
 
 /* A paper still folded inside its item is not somewhere you can be sent —
    its item is. */
+/** @type {(bodies: Body[], i: number, bloom: number[]) => boolean} */
 export const reachableAt = (bodies, i, bloom) => {
   const b = bodies[i];
   return b.kind !== "doc" || (bloom[b.itemIdx] ?? 0) > 0.5;
@@ -465,7 +736,13 @@ export const reachableAt = (bodies, i, bloom) => {
 
 /** The nearest hit is the nearest ALONG THE BELT, not the first in the list:
  *  you are standing somewhere in time and the belt should turn the shortest
- *  way it can to the thing you asked for. */
+ *  way it can to the thing you asked for.
+ *
+ * @param   {Body[]}           bodies
+ * @param   {Iterable<number>} matches
+ * @param   {number}           selected
+ * @param   {number[]}         bloom
+ * @returns {number}           the seat to centre, or -1 */
 export function nearestMatchOf(bodies, matches, selected, bloom) {
   let best = -1, bestD = Infinity;
   for (const i of matches) {
@@ -477,7 +754,13 @@ export function nearestMatchOf(bodies, matches, selected, bloom) {
 }
 
 /** ← and → step through the belt in date order, which is its whole grammar —
- *  over the papers too, when they are out. */
+ *  over the papers too, when they are out.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   selected
+ * @param   {number[]} bloom
+ * @param   {number}   d       -1 for ←, +1 for →
+ * @returns {number}   the seat to centre, or -1 at the end of the belt */
 export function stepFrom(bodies, selected, bloom, d) {
   const order = bodies.map((_, i) => i).filter((i) => reachableAt(bodies, i, bloom));
   const at = order.indexOf(selected);
@@ -485,8 +768,10 @@ export function stepFrom(bodies, selected, bloom, d) {
 }
 
 /* The roll's easing, solved rather than approximated: v2's curve exactly. */
+/** @type {(p1x: number, p1y: number, p2x: number, p2y: number) => (t: number) => number} */
 export const bez = (p1x, p1y, p2x, p2y) => (t) => {
   let lo = 0, hi = 1, u = t;
+  /** @type {(v: number) => number} */
   const bx = (v) => 3 * (1 - v) * (1 - v) * v * p1x + 3 * (1 - v) * v * v * p2x + v * v * v;
   for (let i = 0; i < 22; i++) { const x = bx(u); if (x < t) lo = u; else hi = u; u = (lo + hi) / 2; }
   return 3 * (1 - u) * (1 - u) * u * p1y + 3 * (1 - u) * u * u * p2y + u * u * u;
