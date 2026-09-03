@@ -37,6 +37,7 @@
    */
   const DESK = "(min-width: 901px)";
 
+  /** @type {import('$lib/data/workspace.js').HomeView | null} */
   let view = $state(null);
 
   /*
