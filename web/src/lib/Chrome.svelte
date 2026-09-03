@@ -54,13 +54,14 @@
 
   $effect(() => {
     active = document.documentElement.dataset.theme || "afterdark";
-    const close = (event) => {
+    const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
     addEventListener("click", close);
     return () => removeEventListener("click", close);
   });
 
+  /** @param {string} name */
   function setSwatch(name) {
     active = name;
     document.documentElement.dataset.theme = name;
@@ -84,6 +85,7 @@
    * silent invention.
    */
   let armedOut = $state(false);
+  /** @type {string | null} */
   let signOutProblem = $state(null);
   async function tapSignOut() {
     if (!armedOut) { armedOut = true; return; }
@@ -92,7 +94,7 @@
       await signOut();
     } catch (error) {
       armedOut = false;
-      signOutProblem = error?.message ?? "still signed in — try again";
+      signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
     location.href = "/logout";
@@ -100,7 +102,7 @@
 
   const initials = $derived(
     (user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 </script>
 
