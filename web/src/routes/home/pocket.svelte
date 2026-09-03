@@ -85,8 +85,8 @@
   );
   /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  /** @type {(b: DialBody) => string} */
-  const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  /** @type {(b: { days: number | null }) => string} */
+  const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
@@ -111,7 +111,9 @@
       : null;
   /** @type {(iso: string | null | undefined) => string} */
   const agoShort = (iso) =>
-    ago(iso, /** @type {import('$lib/data/workspace.js').HomeView} */ (view).now ?? new Date().toISOString());
+    iso
+      ? ago(iso, /** @type {import('$lib/data/workspace.js').HomeView} */ (view).now ?? new Date().toISOString())
+      : "";
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => string} */
   const suggMeta = (s) =>
     `caught by your relay ${short(
