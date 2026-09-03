@@ -11,6 +11,7 @@
   import { corridorOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import { fillStarTiles } from "$lib/sky.js";
+  import { showUrgentCount } from "$lib/urgent-badge.js";
   import Chrome from "$lib/Chrome.svelte";
   import "./due-next.css";
 
@@ -39,6 +40,12 @@
       : view?.workspace,
   );
   const corridor = $derived(view ? corridorOf(filtered, view.today) : null);
+  /* #763: same truth as home's own badge — this browser's chart, not the
+     server. */
+  const overdueCount = $derived(corridor?.overdue?.length ?? 0);
+  $effect(() => {
+    showUrgentCount(overdueCount);
+  });
 
   const tlabel = (row) => (row.days < 0 ? `T+${-row.days}d` : `T−${row.days}d`);
   const short = (iso) =>
@@ -64,7 +71,7 @@
   });
 </script>
 
-<svelte:head><title>Orbit — due next</title></svelte:head>
+<svelte:head><title>{overdueCount > 0 ? `(${overdueCount}) ` : ""}Orbit — due next</title></svelte:head>
 
 <div class="corridor-page">
 <div class="sky" aria-hidden="true">
