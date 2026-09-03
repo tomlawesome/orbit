@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { householdRegister } from "./support/households";
 
 /**
  * #754/#477: THE FIRST-RUN WALK, END TO END. The five journeys of slice 4,
@@ -15,41 +16,43 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
  * later arrival is silent. "Take the walk again" (#753) puts the record back to
  * null and returns to `/home`, where the same trigger fires again.
  *
- * WHICH IDENTITY, AND WHY IT MATTERS. The database is not reset between specs,
- * so the household a journey lands on is whatever the specs before it left
- * behind, and journey 4 needs one with NOTHING on it — the example body is
- * drawn only where the dial has no real bodies to point at (example.js,
- * `needsExampleBody`). Of the four identities in tests/oidc/server.mjs:
+ * WHICH SKY THE WALK IS TAKEN ON, AND WHY THE SPEC MAKES ITS OWN. Journey 4
+ * needs a household with NOTHING on it: the example body is drawn only where
+ * the dial has no real body to point at (example.js, `needsExampleBody`), so on
+ * a populated dial that journey would pass without testing anything. The
+ * database is not reset between specs, so no household that is merely lying
+ * around can be relied on to be empty — and since #730 the specs that make
+ * households sweep them again afterwards, so one cannot be relied on to be
+ * there either.
  *
- *  - `Orbit Administrator` is signed in by most of the suite and owns
- *    households that specs put items into (v19-create, v19-item-actions,
- *    v19-composite-entry, the document and mail journeys);
- *  - `Orbit Member` owns the households the arrival and membership journeys
- *    create, and is the collector in v19-mail-collection;
- *  - `Orbit Outsider` is approved into the member's household by
- *    v19-membership, so what it sees is the member's dial, not its own;
- *  - `Orbit Newcomer` exists for exactly one spec. v19-arrival's second test
- *    leaves it owning `Newcomer's Own <timestamp>`, created through
- *    `household.create` with the four default sections and no items, and
- *    NOTHING else in the suite signs in as it. Its dial therefore has no
- *    bodies on it, before this spec and after it.
+ * So every journey here makes its own, through the same `household.create` the
+ * arrival uses, and registers it for the sweep. That is not only tidiness: the
+ * command makes the new household the SESSION's active one (`sessions
+ * .activeHouseholdId`, workspace-repository.ts), and `/home` draws the active
+ * household — so the dial this file walks is its own, empty, and cannot be
+ * changed by another spec's session.
  *
- * So the walk is taken here as the newcomer, the same one-way reasoning
- * v19-arrival states for itself. Two consequences are stated rather than
- * papered over:
+ * The reader is `Orbit Administrator`, for two reasons and against one
+ * temptation:
  *
- *  - This spec sorts after `v19-arrival.spec.ts`, which is what gives the
- *    newcomer a household to land on. CI runs one worker in file order, so
- *    that ordering holds there; locally the suite is parallel across files and
- *    arrival's two serial tests are long finished by the time this file is
- *    reached. Journey 4 asserts the empty dial it depends on rather than
- *    assuming it, so a violated ordering fails loudly instead of quietly
- *    proving nothing.
- *  - Each journey below puts the record into the state it needs through the
- *    product's OWN route — the one "take the walk again" calls — rather than
- *    depending on the record never having been written. A first sign-in IS a
- *    null record, so nothing about the trigger is weakened by saying so
- *    explicitly, and the file stays re-runnable and safe under CI's retries.
+ *  - nothing in the suite asserts that the administrator owns nothing, so
+ *    handing them one more household breaks no other spec — whereas the
+ *    newcomer and the outsider are both READ as belonging to nothing
+ *    (v19-arrival, v19-membership), and a household created here would be a
+ *    household those journeys would have to see;
+ *  - `tourSeenAt` is per user, and no other spec touches the tour record at
+ *    all. The one spec that presses Escape in bulk
+ *    (authenticated-accessibility) only ever visits `/admin` and `/workspace`,
+ *    which are the retiring engine's screens — the walk is not mounted there,
+ *    so it cannot be skipped out from under this file;
+ *  - the hard delete the sweep ends with is an instance-admin power, so the
+ *    same session that makes these households can also remove them.
+ *
+ * Each journey also puts the record into the state it needs through the
+ * product's OWN route — the one "take the walk again" calls — rather than
+ * depending on the record never having been written. A first sign-in IS a null
+ * record, so nothing about the trigger is weakened by saying so explicitly,
+ * and the file stays re-runnable and safe under CI's retries.
  *
  * WHERE THE HELM IS. Bare `/settings` has not moved to v19 yet — the
  * composite container's routing table (scripts/v19-dispatch.mjs) still hands
@@ -64,6 +67,13 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
  * also walk the same single database twice.
  */
 
+/** The reader every journey here takes the walk as. */
+const READER = "Orbit Administrator";
+
+/* #730: every household this file makes is removed once the file is done. */
+const households = householdRegister();
+let seeded = false;
+
 /** The way every other spec signs in: straight at the engine's login route. */
 async function signInAs(page: Page, account: string, returnTo = "/home") {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
@@ -71,13 +81,56 @@ async function signInAs(page: Page, account: string, returnTo = "/home") {
 }
 
 /**
+ * A household of the reader's own, made through the arrival's own contract and
+ * therefore empty: four default sections applied by the command, and not one
+ * body. Creating it also points this SESSION at it, which is what makes the
+ * dial the journeys walk a known quantity rather than whatever happened to be
+ * first in the list.
+ */
+async function anEmptySky(page: Page) {
+  const name = `Tour Proving Ground ${Date.now()} ${crypto.randomUUID().slice(0, 8)}`;
+  const household = await page.evaluate(async (householdName) => {
+    const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": session.csrfToken },
+      body: JSON.stringify({
+        type: "household.create",
+        household: {
+          id: crypto.randomUUID(),
+          name: householdName,
+          timezone: "Europe/London",
+          currency: "GBP",
+          onboardingComplete: true,
+        },
+      }),
+    });
+    if (!response.ok) throw new Error(`household.create failed: ${response.status} ${await response.text()}`);
+    const { workspace } = (await response.json()) as {
+      workspace: { households: { id: string; name: string }[] };
+    };
+    return workspace.households.find((one) => one.name === householdName)!;
+  }, name);
+  households.track(household);
+  seeded = true;
+  return household;
+}
+
+/**
  * Signing in WITHOUT arriving on `/home`, which is the only screen the walk
  * ever starts on: the inbox is a real signed-in destination, so a journey can
  * put the record where it wants it before any landing can act on it.
  */
-async function signInAwayFromHome(page: Page, account: string) {
-  await signInAs(page, account, "/inbox");
+async function signInAwayFromHome(page: Page) {
+  await signInAs(page, READER, "/inbox");
   await expect(page).toHaveURL(/\/inbox$/, { timeout: 30_000 });
+}
+
+/** Signed in away from home, on a sky this journey made and owns. */
+async function arriveWithAnEmptySky(page: Page) {
+  await signInAwayFromHome(page);
+  return anEmptySky(page);
 }
 
 /**
@@ -130,18 +183,6 @@ async function forgetTheWalk(page: Page) {
     return tour;
   });
   expect(record.tourSeenAt).toBeNull();
-}
-
-/** What the signed-in reader's own workspace says they belong to. */
-async function householdOf(page: Page) {
-  return page.evaluate(async () => {
-    const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error(`workspace read failed: ${response.status}`);
-    const { workspace } = (await response.json()) as {
-      workspace: { households: { id: string; name: string }[] };
-    };
-    return workspace.households[0];
-  });
 }
 
 /**
@@ -201,7 +242,12 @@ function bodiesInTheDatabase(householdId: string): number {
   return count(`select count(*) from items where household_id = '${householdId}'`);
 }
 
-/** The example body's own title, anywhere in the instance, in any household. */
+/**
+ * The example body's own title, anywhere in the instance. Read before the walk
+ * and again after it and compared, rather than asserted to be zero: what has
+ * to be true is that the WALK added none, and a suite that runs in parallel
+ * locally may legitimately have a row of that name from somewhere else.
+ */
 function examplesInTheDatabase(): number {
   return count("select count(*) from items where lower(title) like '%car insurance%'");
 }
@@ -272,9 +318,26 @@ test.describe("the first-run walk", () => {
     test.setTimeout(180_000);
   });
 
+  /* #730: the skies these journeys walk do not outlive the file. The sweep
+     needs a session of its own because each journey's context is closed by
+     then, and a hard delete is an instance-admin power. */
+  test.afterAll(async ({ browser }) => {
+    if (!seeded) return;
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await signInAs(page, READER, "/home");
+      await expect(page).toHaveURL(/\/home$/);
+      await households.sweep(page);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("journey 1: the first landing on home gets the walk, and skipping ends it", async ({ page }) => {
-    /* Away from /home, so the record is set before any landing can read it. */
-    await signInAwayFromHome(page, "Orbit Newcomer");
+    /* Away from /home, so the sky is made and the record set before any
+       landing can read either. */
+    await arriveWithAnEmptySky(page);
     await forgetTheWalk(page);
 
     /* THE TRIGGER: a reader who has never taken the walk lands on their sky
@@ -305,16 +368,18 @@ test.describe("the first-run walk", () => {
   });
 
   test("journey 2: the skip holds across a new sign-in and a second browser", async ({ page, browser }) => {
-    /* A FRESH SIGN-IN, straight onto /home: the record is the server's, so a
+    /* A FRESH SIGN-IN and a sky of its own: the record is the server's, so a
        new session cannot resurrect a walk that was skipped in another. */
-    await noWalkOn(page, () => signInAs(page, "Orbit Newcomer"));
+    await arriveWithAnEmptySky(page);
+    await noWalkOn(page, () => page.goto("/home"));
     const seen = await recordedAsTaken(page);
 
     /* A SECOND BROWSER: no cookies, no storage, nothing carried over — the
        only thing the two have in common is the reader the server knows. */
     const second = await browser.newContext({ ignoreHTTPSErrors: true });
     const elsewhere = await second.newPage();
-    await noWalkOn(elsewhere, () => signInAs(elsewhere, "Orbit Newcomer"));
+    await arriveWithAnEmptySky(elsewhere);
+    await noWalkOn(elsewhere, () => elsewhere.goto("/home"));
     expect((await tourRecordOf(elsewhere)).tourSeenAt).toBe(seen);
     await second.close();
   });
@@ -322,9 +387,10 @@ test.describe("the first-run walk", () => {
   test("journey 3: take the walk again starts it from stop one", async ({ page }) => {
     /* The walk has been taken — journey 1 skipped it and journey 2 proved it
        stayed taken — so the helm is the only road back to stop one. */
+    await arriveWithAnEmptySky(page);
     /* This landing goes through the trigger and is turned away, which is
        exactly the state the relaunch has to get past. */
-    await noWalkOn(page, () => signInAs(page, "Orbit Newcomer"));
+    await noWalkOn(page, () => page.goto("/home"));
     await recordedAsTaken(page);
 
     await openTheHelm(page);
@@ -348,17 +414,17 @@ test.describe("the first-run walk", () => {
   });
 
   test("journey 4: the example body is drawn, and never written down", async ({ page }) => {
-    await signInAwayFromHome(page, "Orbit Newcomer");
-    const household = await householdOf(page);
-    expect(household, "the newcomer must own the household v19-arrival left them").toBeTruthy();
+    const household = await arriveWithAnEmptySky(page);
 
     /* The precondition, asserted rather than assumed — on a household that
        already had bodies the tour would point at a real one and draw nothing,
        and everything below would pass without testing anything. */
     await page.goto("/home");
     await expect(page.locator(".dialwrap")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("#dial-name")).toHaveText(household.name);
     await expect(bodies(page)).toHaveCount(0);
     expect(bodiesInTheDatabase(household.id)).toBe(0);
+    const examplesBefore = examplesInTheDatabase();
 
     /* ---- drawn, then SKIPPED ------------------------------------------- */
     await forgetTheWalk(page);
@@ -392,7 +458,7 @@ test.describe("the first-run walk", () => {
 
     /* THE PROMISE, where a write would have landed. */
     expect(bodiesInTheDatabase(household.id)).toBe(0);
-    expect(examplesInTheDatabase()).toBe(0);
+    expect(examplesInTheDatabase()).toBe(examplesBefore);
 
     /* and a reload agrees: the dial is empty because there is nothing there */
     await page.goto("/home");
@@ -421,11 +487,11 @@ test.describe("the first-run walk", () => {
     /* The same promise, by the other door. */
     await expect(bodies(page)).toHaveCount(0);
     expect(bodiesInTheDatabase(household.id)).toBe(0);
-    expect(examplesInTheDatabase()).toBe(0);
+    expect(examplesInTheDatabase()).toBe(examplesBefore);
   });
 
   test("journey 5: the walk can be taken from the keyboard, and Escape skips", async ({ page }) => {
-    await signInAwayFromHome(page, "Orbit Newcomer");
+    await arriveWithAnEmptySky(page);
     await forgetTheWalk(page);
     await page.goto("/home");
     await atStop(page, 1);
