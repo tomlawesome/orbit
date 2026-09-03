@@ -1288,15 +1288,19 @@ body.storm .plane svg{opacity:.6}
    picture the owner liked.
    -------------------------------------------------------------------------- */
 
-/* THE DESCENT. The plane rides up and out of the top of the window and fades as
-   it goes; the plain starfield stays exactly where §15 leaves it ("leaving the
+/* THE DESCENT. The plane HOLDS ITS PLACE in the frame and fades where it
+   stands (owner, 2026-09-03) — it used to ride up and out of the top of the
+   window, and the ask is that the band stay put while the manifest moves under
+   it. The plain starfield stays exactly where §15 leaves it ("leaving the
    plain starfield behind the deep manifest"); and the DEEP closes in behind, so
    the manifest is read over emptier, blacker sky than the dial screen ever
-   shows. One position drives all of it — --descent, the same quantity every
-   sibling descent spends. */
+   shows. One position still drives the fade — --descent, the same quantity
+   every sibling descent spends.
+
+   This is what the reduced-motion branch already did, so that special case is
+   gone: there is no longer a flourish for it to withhold. */
 .deep{display:none;position:fixed;inset:0;pointer-events:none;z-index:1}
 [data-theme=afterdark].descending .desk .plane{
-  transform:translate3d(0,calc(var(--descent) * -122vh),0);
   opacity:calc(1 - var(--descent) * 1.22);
   transition:none}
 /* the deep: not a curtain but a closing-in. Strongest overhead — where the
@@ -1405,13 +1409,10 @@ body.storm .plane svg{opacity:.6}
   linear-gradient(0deg,var(--fg-e1) 0%,var(--fg-e2) 8%,var(--fg-e3) 17%,var(--fg-e4) 26%,var(--fg-nil) 34%)}
 /* Reduced motion. The drop is a POSITION, not an animation — freezing it would
    strand the reader under a sky the page has already left — so the fade, the
-   deep and its floor glow still track the scrollbar. What goes is the flourish:
-   the plane gives way where it stands instead of being flown out of the top of
-   the frame. (The stream is stilled in the script: no rAF, no drift, and the
-   opening window is held.) */
-@media (prefers-reduced-motion: reduce){
-  [data-theme=afterdark].descending .desk .plane{transform:none}
-}
+   deep and its floor glow still track the scrollbar. The plane needs no rule
+   here any more: it gives way where it stands for everyone now, so there is no
+   flourish left to withhold. (The stream is stilled in the script: no rAF, no
+   drift, and the opening window is held.) */
 /* /THE SKY WAVE */
 
 /* ══════════════════════════════════════════════════════════════════════════
