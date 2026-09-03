@@ -5,6 +5,7 @@
   import { page } from "$app/state";
   import { readTour, writeTourSeen } from "$lib/data/workspace.js";
   import { createTour } from "./engine.js";
+  import { tourMayBegin } from "./relaunch.js";
   import { TOUR_REGIONS, stopsFor } from "./stops.js";
   import "./tour.css";
 
@@ -94,8 +95,15 @@
     await tour.start();
   }
 
+  /*
+   * `started` alone would make the walk a true one-shot for the rest of this
+   * page load — right for ordinary navigation, wrong for "take the walk
+   * again" (#753): a reader who clears `tourSeenAt` from settings and lands
+   * back on /home in the SAME session must still get the walk. `tourMayBegin`
+   * lets exactly that one arrival through; see relaunch.js.
+   */
   $effect(() => {
-    if (page.url.pathname !== HOME || started) return;
+    if (page.url.pathname !== HOME || !tourMayBegin(started)) return;
     started = true;
     void begin();
   });
