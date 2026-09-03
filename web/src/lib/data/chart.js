@@ -213,9 +213,26 @@ export function manifestGroupsOf(household, { suggestions = [], today }) {
  * scattered its sample — and every other household sits at its own
  * identity-derived bearing, which therefore never moves for anyone.
  */
+/**
+ * One household as the sky draws it — the shape `galaxyOf` and `labelledSkyOf`
+ * both produce, keyed by household id.
+ *
+ * `role` is null in the labelled sky (§11): a viewer who belongs to nothing is
+ * neither owner nor member of what they can see. `requested` appears only
+ * there, where asking to join is the only thing you can do with a household.
+ *
+ * @typedef {object} GalaxyEntry
+ * @property {string} name
+ * @property {"owner" | "member" | null} role
+ * @property {[number, number]} pos            bearing and distance, CON-13
+ * @property {Array<[number, number, number, string]>} planets  dx, dy, r, tone
+ * @property {boolean} [requested]             labelled sky only
+ */
+
 export function galaxyOf(workspace, today) {
   const households = (workspace?.households ?? []).slice(0, 5);
   const primary = workspace?.activeHouseholdId ?? households[0]?.id;
+  /** @type {Record<string, GalaxyEntry>} */
   const galaxy = {};
   for (const household of households) {
     galaxy[household.id] = {
@@ -256,6 +273,7 @@ export function labelledSkyOf(visibleHouseholds) {
    * belong?" list in `Newcomer.svelte` is fed the FULL set, so every
    * household stays reachable by name whether or not the sky drew it.
    */
+  /** @type {Record<string, GalaxyEntry>} */
   const galaxy = {};
   for (const household of (visibleHouseholds ?? []).slice(0, 12)) {
     galaxy[household.id] = {
