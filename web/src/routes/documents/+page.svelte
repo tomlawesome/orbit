@@ -57,6 +57,15 @@
    * @param {NonNullable<ReturnType<typeof archiveOf>>["groups"][number]["rows"][number]["item"]} item
    */
   const attached = (item) => /** @type {NonNullable<typeof item>} */ (item);
+  /**
+   * archiveOf sets `receiptId` only on loose (relay-suggestion) rows and
+   * `household` to a non-null name only on attached rows; both call sites
+   * here are already past the matching `row.loose` check.
+   * @param {string | undefined} receiptId
+   */
+  const looseId = (receiptId) => /** @type {string} */ (receiptId);
+  /** @param {string | null} household */
+  const sysOf = (household) => /** @type {string} */ (household);
 
   onMount(async () => {
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
@@ -111,7 +120,7 @@
       <div class="group">
         <h3>{group.label}</h3>
         {#each group.rows as row (row.id)}
-          <a class="doc" href={resolve("/item/[id]", { id: row.loose ? row.receiptId : attached(row.item).id })}>
+          <a class="doc" href={resolve("/item/[id]", { id: row.loose ? looseId(row.receiptId) : attached(row.item).id })}>
             <span class="thumb" aria-hidden="true"><small>PDF</small></span>
             <div class="body">
               <b>{row.name}</b>
@@ -121,7 +130,7 @@
               <span class="orbitchip loose" title="Awaiting review on your inbox"><i></i>suggested: {row.suggestion}</span>
             {:else}
               <span class="orbitchip" style="color:var({BAND_VAR[attached(row.item).band]})"><i></i>{attached(row.item).title}</span>
-              <span class="sys">{row.household.toUpperCase()}</span>
+              <span class="sys">{sysOf(row.household).toUpperCase()}</span>
             {/if}
           </a>
         {/each}
