@@ -420,13 +420,16 @@
   /* §14 (#469): the manifest rendered as the corridor — this household's
      full scrollback, suggestions merged in date order. */
   const corridor = $derived(
-    view && asView(view).household
-      ? corridorOf(
-          { households: [asView(view).household], activeHouseholdId: asView(view).primary },
-          asView(view).today,
-          { suggestions: asView(view).suggestions },
-        )
-      : null,
+    (() => {
+      const current = view ? asView(view) : null;
+      return current?.household
+        ? corridorOf(
+            { households: [current.household], activeHouseholdId: current.primary },
+            current.today,
+            { suggestions: /** @type {any} */ (current.suggestions) },
+          )
+        : null;
+    })(),
   );
   const todayLine = $derived(
     view
@@ -1210,7 +1213,7 @@
               <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
             {/if}
             <div class="kv"><span>cost</span>
-              <b>{money(detail.costMinor, detail.currency, /** @type {any} */ (detail).costIsEstimate)}</b></div>
+              <b>{money(detail.costMinor, detail.currency ?? "GBP", /** @type {any} */ (detail).costIsEstimate)}</b></div>
             {#if detail.provider}
               <div class="kv"><span>provider</span><b>{detail.provider}</b></div>
             {/if}
