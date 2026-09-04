@@ -107,6 +107,20 @@ variables:
   POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
   PNPM_VERSION: "11.9.0"
   ORBIT_CI_IMAGE: orbit-ci:$CI_COMMIT_SHA
+  # `.drop_to_node` gives the checkout to uid 1000 so pnpm can write in it, and
+  # /builds survives from one job to the next on these runners. The next job to
+  # run git as root in that same directory -- build_image's `git fetch --tags`
+  # -- then dies on "detected dubious ownership in repository at
+  # /builds/ai/orbit" (pipeline 195 on `dev`; the same job passed on 197,
+  # because whether it bites depends on which job had the slot before, so it
+  # fails intermittently and never for a reason in the diff). Git reads this
+  # trio as if it were `git config safe.directory $CI_PROJECT_DIR`, which
+  # covers every job without a shared before_script for the node jobs to
+  # override. The directory belongs to the runner and holds only this
+  # checkout, so trusting it asserts nothing about anyone else's repository.
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: safe.directory
+  GIT_CONFIG_VALUE_0: $CI_PROJECT_DIR
 
 # --- Reusable pieces ---------------------------------------------------------
 
@@ -197,6 +211,13 @@ variables:
 .dind_service:
   extends: .privileged_runner
   services:
+    # Resolvers are deliberately not named here. This daemon hands its
+    # containers -- where an image build's `apk add` looks -- the resolv.conf
+    # of the container it runs in, which is what `dns` in the runner's
+    # config.toml sets. CI must use the host's resolver and no other (owner,
+    # 2026-09-04), so the host is the one place it is written down; a public
+    # fallback in this file would send lookups off the network instead of
+    # failing where the operator can see them (#810).
     - docker:29-dind
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -242,6 +263,9 @@ variables:
     sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
       > /sys/fs/cgroup/cgroup.subtree_control
   fi
+  # No --dns here either, and for the reason the dind service above records:
+  # this daemon hands its containers the job container's resolv.conf, which
+  # the runner's config.toml sets.
   nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
