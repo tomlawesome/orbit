@@ -69,6 +69,10 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
 - `scripts/validate-compose-config.sh` — Compose configuration validation
 - `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
+- `scripts/sidecar-pins.mjs` — sidecar pin freshness: `check` reports drift
+  between compose and policy, a moved tag, and stale packages inside a current
+  pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
+  re-pins both places after a Dependabot bump
 
 ## Traps when running things locally
 

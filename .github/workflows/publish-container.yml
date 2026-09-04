@@ -223,6 +223,15 @@ jobs:
       - name: Validate supply-chain policy
         run: node scripts/supply-chain-policy.mjs validate
 
+      # A pin lives in two places: the file that uses it and the policy that
+      # records it. Dependabot can rewrite the first and cannot see the second,
+      # so its pull requests arrive with the two disagreeing. `--offline` runs
+      # only that comparison, so it costs no registry call and runs on every
+      # pull request that reaches this job. Remedy is one command:
+      # `node scripts/sidecar-pins.mjs sync` (#771).
+      - name: Refuse a pin that drifted between compose and policy
+        run: node scripts/sidecar-pins.mjs check --offline
+
       - name: Scan repository dependencies and secrets
         run: |
           mkdir -p .orbit-supply-chain "${RUNNER_TEMP}/trivy-cache"
