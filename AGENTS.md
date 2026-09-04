@@ -68,6 +68,10 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/install-test-browser.sh` — one-time headless browser download
 - `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
 - `scripts/validate-compose-config.sh` — Compose configuration validation
+- `scripts/ci/*.sh` — the container validation sequence, one script per
+  workflow step, so GitHub Actions and the GitLab pipeline run the same checks
+  rather than two paraphrases of them (#801). Inputs are environment
+  variables; `$GITHUB_OUTPUT` and `$GITHUB_ENV` are written only when set
 - `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
 - `scripts/sidecar-pins.mjs` — sidecar pin freshness: `check` reports drift
   between compose and policy, a moved tag, and stale packages inside a current
