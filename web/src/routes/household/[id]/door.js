@@ -60,6 +60,7 @@ export const DOORS = {
 /** The door absence means: the helm, which is where this screen hangs (§15-2k). */
 export const DEFAULT_DOOR = DOORS.settings;
 
+/** @param {Storage | null | undefined} [given] @returns {Storage | null} */
 function store(given) {
   if (given) return given;
   try {
@@ -71,7 +72,11 @@ function store(given) {
   }
 }
 
-/** Written by a door as the reader steps through it. */
+/**
+ * Written by a door as the reader steps through it.
+ * @param {keyof typeof DOORS} name
+ * @param {Storage | null} [storage]
+ */
 export function markDoor(name, storage) {
   const door = DOORS[name];
   const s = store(storage);
@@ -84,14 +89,17 @@ export function markDoor(name, storage) {
   }
 }
 
-/** The door this arrival came through, taken away as it is read. */
+/**
+ * The door this arrival came through, taken away as it is read.
+ * @param {Storage | null} [storage]
+ */
 export function consumeDoor(storage) {
   const s = store(storage);
   if (!s) return DEFAULT_DOOR;
   try {
     const name = s.getItem(DOOR_KEY);
     if (name !== null) s.removeItem(DOOR_KEY);
-    return DOORS[name] ?? DEFAULT_DOOR;
+    return DOORS[/** @type {keyof typeof DOORS} */ (name)] ?? DEFAULT_DOOR;
   } catch {
     return DEFAULT_DOOR;
   }

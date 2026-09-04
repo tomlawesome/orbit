@@ -19,6 +19,7 @@
    * it manages households, which this screen deliberately does not. The flip
    * is a cutover line once those journeys exist v19-side (#453).
    */
+  /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
 
   /*
@@ -41,6 +42,7 @@
    * Both strips' bodies are the pastels the refresh gave the light packs, so
    * the swatch is made of the same paint as the screen it promises.
    */
+  /** @type {[string, string, string, string, string[]][]} */
   const PACKS = [
     ["starchart", "star-chart", "the ratified night", "#060b1c",
       ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
@@ -54,6 +56,7 @@
       ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
   ];
   let active = $state("starchart");
+  /** @param {string} name */
   function pickPack(name) {
     active = name;
     document.documentElement.dataset.theme = name;
@@ -83,6 +86,7 @@
    * which is why it is read and handed straight back.
    */
   let emailReminders = $state(true);
+  /** @type {string | null} */
   let reminderProblem = $state(null);
 
   async function toggleEmailReminders() {
@@ -115,6 +119,7 @@
    * sign-in is the only honest destination.
    */
   let armedSignOut = $state(false);
+  /** @type {string | null} */
   let signOutProblem = $state(null);
 
   async function tapSignOutEverywhere() {
@@ -133,15 +138,18 @@
   }
 
   const initials = $derived(
-    (view?.user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+    (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
+      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 
   onMount(async () => {
-    fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
+    fillStarTiles(
+      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("fartile"))),
+      /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
+    );
     active = document.documentElement.dataset.theme || "starchart";
     view = await readSettingsScreen();
-    emailReminders = view.reminders.emailEnabled;
+    emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
   });
 </script>
 

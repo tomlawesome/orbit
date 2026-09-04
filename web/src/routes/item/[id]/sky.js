@@ -6,4 +6,5 @@
  */
 import { mountTiledSky } from "$lib/sky.js";
 
+/** @param {Element} root */
 export const mountItemSky = (root) => mountTiledSky(root, "item");

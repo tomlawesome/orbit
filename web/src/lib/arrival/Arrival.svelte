@@ -56,6 +56,9 @@
    *      over the populated home. Nothing in the flight changes; a one-shot
    *      marker carries the "a launch is owed" claim across (arrival.js).
    */
+  /** @typedef {import("./stage.js").VisibleHousehold} VisibleHousehold */
+  /** @typedef {{ name: string, reason: string, householdId: string | null }} Rejected */
+
   let { data } = $props();
 
   /*
@@ -81,10 +84,13 @@
 
   let stage = $state(DOOR);
   let galaxy = $state({});
+  /** @type {VisibleHousehold[]} */
   let visibleHouseholds = $state([]);
+  /** @type {ReturnType<typeof Flight> | null} */
   let flight = $state(null);
   let climbing = $state(false);
   let busy = $state(false);
+  /** @type {Rejected | null} */
   let rejected = $state(null);
 
   let name = $state("");
@@ -133,7 +139,10 @@
   function detectedCurrency() {
     try {
       const region = new Intl.Locale(navigator.language).region;
-      return { GB: "GBP", IE: "EUR", FR: "EUR", DE: "EUR", US: "USD", CA: "CAD", AU: "AUD", NZ: "NZD" }[region] ?? null;
+      if (!region) return null;
+      return (/** @type {Record<string, string>} */ ({
+        GB: "GBP", IE: "EUR", FR: "EUR", DE: "EUR", US: "USD", CA: "CAD", AU: "AUD", NZ: "NZD",
+      }))[region] ?? null;
     } catch {
       return null;
     }
@@ -188,7 +197,11 @@
 
   /** The fixture harness's own version of the same decision. */
   function applyFixture() {
-    const workspace = ARRIVAL_FIXTURES[fixture];
+    /* Only ever called from decide() after `if (fixture)`, so this can never
+       actually return early -- it just gives `fixture` a non-null type for
+       the lookup below. */
+    if (!fixture) return;
+    const workspace = ARRIVAL_FIXTURES[/** @type {keyof typeof ARRIVAL_FIXTURES} */ (fixture)];
     if (!workspace) return;
     visibleHouseholds = workspace.visibleHouseholds;
     galaxy = labelledSkyOf(workspace.visibleHouseholds);
@@ -233,6 +246,7 @@
    * /logout does with the goodbye and for the same reason: the staging is
    * class-driven, so the end of a journey is a set of classes.
    */
+  /** @param {boolean} launch */
   async function enterNewcomer(launch) {
     if (launch || fixtureAt !== null) {
       climbing = true;
@@ -279,7 +293,7 @@
       busy = false;
       /* One warm line, in the server's own words. Nothing was created, and the
          answers are visibly still in the fields, so neither is said. */
-      reject(wanted, error?.message ?? "could not be created", null);
+      reject(wanted, /** @type {{ message?: string }} */ (error)?.message ?? "could not be created", null);
       return;
     }
     /* A launch is owed on the landing, whether or not one was owed here. */
@@ -291,6 +305,11 @@
   /**
    * The rejection keeps the reader grounded: the climb starts, catches, and
    * sets back down (the mockup's own `settleback`, 950ms).
+   */
+  /**
+   * @param {string} refused
+   * @param {string} reason
+   * @param {string | null} householdId
    */
   function reject(refused, reason, householdId) {
     rejected = { name: refused, reason, householdId };
@@ -308,6 +327,7 @@
   }
 
   /** The row, and the constellation behind it: POST the real join request. */
+  /** @param {VisibleHousehold} row */
   async function ask(row) {
     if (!row?.id || row.requested) return;
     if (!fixture) {

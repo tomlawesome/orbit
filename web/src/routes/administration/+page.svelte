@@ -34,20 +34,35 @@
    * real facts (collection domain, systems aboard, crew) come off this
    * screen's own data rather than the sheet's hard-coded literals.
    */
+  /** @type {{ data: { fixtures: boolean } }} */
   let { data } = $props();
+  /** @type {Awaited<ReturnType<typeof readAdminScreen>> | null} */
   let view = $state(null);
+  /* The template only calls into `view` from inside `{#if view}`, but that
+     guard doesn't reach into these standalone functions' closures, so this
+     asserts what the call sites already guarantee rather than duplicating
+     the check. */
+  const need = () => /** @type {NonNullable<typeof view>} */ (view);
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
 
+  /** @param {string} name */
   const initialsOf = (name) =>
     name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
 
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
      admin-screen function (§15-2g). */
+  /** @type {string | null} */
   let busy = $state(null);
+  /** @type {string | null} */
   let problem = $state(null);
+  /** @type {string | null} */
   let placing = $state(null); // user id whose system picker is open
+  /**
+   * @param {string} userId
+   * @param {string} householdId
+   */
   async function place(userId, householdId) {
     busy = userId;
     problem = null;
@@ -56,11 +71,12 @@
       placing = null;
       view = await readAdminScreen();
     } catch (error) {
-      problem = error?.message ?? String(error);
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     } finally {
       busy = null;
     }
   }
+  /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
      §Systems) turn out to be constellationPlanetsOf's own far-sky placement
@@ -68,13 +84,16 @@
      backdrop's distant one: the same orbit distance (18..30) and body size
      (2.0..2.8) divided by 6 and 4 respectively lands exactly on the sheet's
      hand-measured coordinates for all five fixture households (#775). */
+  /** @param {[number, number, number, string]} planet */
+  const ringDot = ([x, y, r, tone]) => ({
+    cx: 17 + x / 6,
+    cy: 17 + y / 6,
+    r: 1 + r / 4,
+    tone: TONE[tone] ?? "--ok",
+  });
+  /** @param {import('$lib/data/workspace.js').Household} household */
   const ringDots = (household) =>
-    constellationPlanetsOf(household.items ?? [], view.today).map(([x, y, r, tone]) => ({
-      cx: 17 + x / 6,
-      cy: 17 + y / 6,
-      r: 1 + r / 4,
-      tone: TONE[tone] ?? "--ok",
-    }));
+    constellationPlanetsOf(household.items ?? [], need().today).map(ringDot);
 
   onMount(() => {
     let disposed = false;
