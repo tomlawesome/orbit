@@ -2,21 +2,21 @@ import { inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows } from "@/db/schema";
-import { GET as readReminders, PUT as writeReminders } from "@/app/api/settings/reminders/route";
-import { GET as sessionStatus } from "@/app/api/auth/session/route";
-import { POST as logout } from "@/app/api/auth/logout/route";
-import { GET as health } from "@/app/api/health/route";
 import { openMaintenanceWindow, readMaintenanceState } from "@/server/maintenance";
 import { setReadinessDependenciesForTests } from "@/server/readiness";
 import { readReminderSettings } from "@/server/reminder-settings";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
-  requestWithoutSession,
   type IntegrationFixture,
   type IntegrationSession,
 } from "./support/fixtures";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+
+const { GET: readReminders, PUT: writeReminders } = await loadRoute("settings/reminders");
+const { GET: sessionStatus } = await loadRoute("auth/session");
+const { POST: logout } = await loadRoute("auth/logout");
+const { GET: health } = await loadRoute("health");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -50,8 +50,9 @@ async function activate(fixture: IntegrationFixture, expectedEndAt: Date | null)
   });
 }
 
-function reminderWrite(session: IntegrationSession, url = REMINDERS_URL) {
-  return requestForSession(session, url, {
+function reminderWrite(session: IntegrationSession, url = REMINDERS_URL): Promise<Response> {
+  return callRouteForSession(writeReminders, session, {
+    url,
     method: "PUT",
     body: JSON.stringify(REMINDER_WRITE),
     headers: { "content-type": "application/json" },
@@ -71,18 +72,17 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const member = await fixture.session("member");
 
     // Prove the request is well-formed before maintenance: the same write passes.
-    const before = await writeReminders(reminderWrite(member));
+    const before = await reminderWrite(member);
     expect(before.status).toBe(200);
 
     await activate(fixture, null);
 
-    const blocked = await writeReminders(
-      requestForSession(member, REMINDERS_URL, {
-        method: "PUT",
-        body: JSON.stringify({ emailEnabled: true, firstWarningDays: 30, finalWarningDays: 7 }),
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const blocked = await callRouteForSession(writeReminders, member, {
+      url: REMINDERS_URL,
+      method: "PUT",
+      body: JSON.stringify({ emailEnabled: true, firstWarningDays: 30, finalWarningDays: 7 }),
+      headers: { "content-type": "application/json" },
+    });
     await expectMaintenanceBlocked(blocked);
 
     // The blocked write left no trace: the pre-maintenance settings survive.
@@ -91,7 +91,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     expect(settings.firstWarningDays).toBe(10);
 
     // Reads are blocked for the member too, not just writes.
-    await expectMaintenanceBlocked(await readReminders(requestForSession(member, REMINDERS_URL)));
+    await expectMaintenanceBlocked(await callRouteForSession(readReminders, member, { url: REMINDERS_URL }));
 
     await fixture.cleanup();
   });
@@ -100,13 +100,12 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const fixture = await createIntegrationFixture("guard-signed-out");
     await activate(fixture, null);
 
-    const response = await writeReminders(
-      requestWithoutSession(REMINDERS_URL, {
-        method: "PUT",
-        body: JSON.stringify(REMINDER_WRITE),
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    const response = await callRoute(writeReminders, {
+      url: REMINDERS_URL,
+      method: "PUT",
+      body: JSON.stringify(REMINDER_WRITE),
+      headers: { "content-type": "application/json" },
+    });
     await expectMaintenanceBlocked(response);
 
     await fixture.cleanup();
@@ -117,7 +116,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const admin = await fixture.session("admin");
     await activate(fixture, null);
 
-    const response = await writeReminders(reminderWrite(admin));
+    const response = await reminderWrite(admin);
     expect(response.status).toBe(200);
 
     await fixture.cleanup();
@@ -128,7 +127,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const member = await fixture.session("member");
     await activate(fixture, new Date(Date.now() + 600_000));
 
-    const response = await writeReminders(reminderWrite(member));
+    const response = await reminderWrite(member);
     await expectMaintenanceBlocked(response);
     const retryAfter = Number(response.headers.get("Retry-After"));
     expect(retryAfter).toBeGreaterThan(540);
@@ -142,7 +141,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const member = await fixture.session("member");
     await activate(fixture, null);
 
-    const response = await writeReminders(reminderWrite(member));
+    const response = await reminderWrite(member);
     await expectMaintenanceBlocked(response);
     expect(response.headers.get("Retry-After")).toBeNull();
 
@@ -162,7 +161,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
       "http://127.0.0.1:3000/api/auth/login/../../settings/reminders",
     ];
     for (const url of disguises) {
-      await expectMaintenanceBlocked(await writeReminders(reminderWrite(member, url)));
+      await expectMaintenanceBlocked(await reminderWrite(member, url));
     }
 
     await fixture.cleanup();
@@ -173,10 +172,10 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const member = await fixture.session("member");
     await activate(fixture, null);
 
-    const who = await sessionStatus(requestForSession(member, "http://127.0.0.1:3000/api/auth/session"));
+    const who = await callRouteForSession(sessionStatus, member, { url: "http://127.0.0.1:3000/api/auth/session" });
     expect(who.status).toBe(200);
 
-    const out = await logout(requestForSession(member, "http://127.0.0.1:3000/api/auth/logout", { method: "POST" }));
+    const out = await callRouteForSession(logout, member, { url: "http://127.0.0.1:3000/api/auth/logout", method: "POST" });
     expect(out.status).toBeLessThan(400);
 
     await fixture.cleanup();
@@ -186,7 +185,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
     const fixture = await createIntegrationFixture("guard-health-maintenance");
     await activate(fixture, new Date(Date.now() + 600_000));
 
-    const response = await health();
+    const response = await callRoute(health, { url: "http://127.0.0.1:3000/api/health" });
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     const body = await response.json();
@@ -206,7 +205,7 @@ describe("the maintenance guard and 503 semantics (#523)", () => {
       checkDatabase: () => Promise.reject(new Error("database unreachable")),
     });
 
-    const response = await health();
+    const response = await callRoute(health, { url: "http://127.0.0.1:3000/api/health" });
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ status: "degraded" });
 

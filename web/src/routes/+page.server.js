@@ -13,10 +13,16 @@ import { env } from "$env/dynamic/private";
  *
  * The prerender that used to stand here goes with it: a flag baked into static
  * HTML at build time is a flag that cannot be turned off at run time, and this
- * one must be off in production whatever the build did. Read per request, it is
- * unreachable in production twice over, exactly as the fixture API routes are:
- * the composite entry (#450) never sets the flag, and without the flag the
- * query string is not read at all.
+ * one must be off in production whatever the build did. Read per request, and
+ * without the flag the query string is not read at all.
+ *
+ * Two things stand between the harness and a real deployment (#773): nothing
+ * production runs sets the variable, and a production build that finds it set
+ * refuses to start — `validateStartupConfiguration` treats it as a blocking
+ * configuration problem naming the `fixtures` setting. The second layer is
+ * deliberate. It replaces the composite entry (#450), which also refused to
+ * serve this app for arbitrary paths and went with the cut (#735), leaving the
+ * first layer briefly alone.
  */
 export function load() {
   return { fixtures: env.ORBIT_FIXTURES === "1" };
