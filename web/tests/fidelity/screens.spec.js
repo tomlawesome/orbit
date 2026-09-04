@@ -293,11 +293,27 @@ const SCREENS = [
   },
   {
     name: "maintenance",
+    /* The fixture window has three entries, so this is the state WITH the
+       arrow — the drawer closed, as it first renders. The one-entry state,
+       which is what almost every real window looks like, is the same screen
+       with `?entries=one` and is asserted in tests/e2e/maintenance.spec.ts
+       rather than photographed: it is the three-entry frame minus the arrow. */
     path: "/maintenance",
     stage: "porting",
     mockup: "/design/family/maintenance.html",
     settle: () => document.querySelectorAll("#farstars circle").length > 0,
     /* The mockup annotates its own demo loop for the reviewer; the product does not. */
+    mockupOnly: [".foot"],
+  },
+  {
+    name: "maintenance-mobile",
+    /* The same screen in the pocket (#526): the notice column has to clear
+       the ring and the drawer has to stop at the screen's edge on a phone. */
+    path: "/maintenance",
+    stage: "porting",
+    mockup: "/design/family/maintenance.html",
+    viewport: { width: 400, height: 850 },
+    settle: () => document.querySelectorAll("#farstars circle").length > 0,
     mockupOnly: [".foot"],
   },
   {

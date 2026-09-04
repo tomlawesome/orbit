@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import "./maintenance.css";
   import { mountTotalitySky } from "./sky.js";
+  import { clock, when } from "./when.js";
 
   /**
    * Maintenance — totality (CON-15). An eclipse is the sky's own scheduled
@@ -11,11 +12,32 @@
    * a bright sun never worked. The moon's transit doubles as the progress bar
    * and the diamond ring is the service returning.
    *
-   * Copy is three words, deliberately: "maintenance — back soon". The visual
-   * carries the drama; the words state the fact.
+   * The headline is three words, deliberately: "maintenance — back soon". The
+   * visual carries the drama; the words state the fact. Beneath it, what the
+   * operator has said (#526, ADR-0013 decision 8): the newest entry of the
+   * open window, the expected return if one was given, and — only when there
+   * is more than one entry — an arrow that opens the earlier ones. Most
+   * windows have exactly one entry, and that case shows no arrow at all.
    *
    * Built from design/family/maintenance.html and owned here from that point on.
    */
+
+  /** @type {{ data: import("./$types").PageData }} */
+  let { data } = $props();
+
+  let latest = $derived(data.maintenance.entries[0] ?? null);
+  let earlier = $derived(data.maintenance.entries.slice(1));
+
+  /* Rendered in UTC on the server and in the viewer's zone once mounted, so
+     the markup never carries the server's clock and a person reads their own. */
+  let local = $state(false);
+  onMount(() => {
+    local = true;
+  });
+
+  /** @param {"scheduled" | "started" | "update" | "resolved"} kind */
+  const kindLabel = (kind) => (kind === "update" ? "" : ` · ${kind}`);
+
   onMount(mountTotalitySky);
 </script>
 
@@ -216,7 +238,44 @@
   <rect class="wash" x="0" y="0" width="1600" height="1000" fill="url(#washg)"/>
 </svg></div>
 
-<div class="msg">maintenance — back soon</div>
+<main class="notice">
+  <h1 class="msg">maintenance — back soon</h1>
+
+  {#if latest}
+    <article class="latest">
+      <p class="when">
+        <time datetime={latest.publishedAt}>{when(latest.publishedAt, { utc: !local })}</time>{kindLabel(latest.kind)}
+      </p>
+      <p class="body">{latest.body}</p>
+    </article>
+  {/if}
+
+  {#if data.maintenance.expectedEndAt}
+    <p class="back">
+      back by <time datetime={data.maintenance.expectedEndAt}>{clock(data.maintenance.expectedEndAt, { utc: !local })}</time>
+    </p>
+  {/if}
+
+  {#if earlier.length > 0}
+    <details class="earlier">
+      <summary aria-label="Earlier updates">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </summary>
+      <ol class="log">
+        {#each earlier as entry (entry.id)}
+          <li>
+            <p class="when">
+              <time datetime={entry.publishedAt}>{when(entry.publishedAt, { utc: !local })}</time>{kindLabel(entry.kind)}
+            </p>
+            <p class="body">{entry.body}</p>
+          </li>
+        {/each}
+      </ol>
+    </details>
+  {/if}
+</main>
 
 <Grain slope={0.09} />
 
