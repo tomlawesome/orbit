@@ -1133,8 +1133,10 @@ renovate:
   # dies on "Cannot find package 'tar'" before it reads any configuration.
   # 44.62.2 is the newest release published before that datasource existed, and
   # it was proven here by a `--dry-run=extract` pass against this repository.
-  # renovate.json refuses 44.63.0 and later for the same reason; lift both when
-  # upstream ships a release whose image starts.
+  # renovate.json excludes exactly those two versions, so Renovate offers the
+  # next release itself; that bump is only proven by the following scheduled
+  # run, so a run that dies at start-up means: revert, and add the version to
+  # the exclusion.
   #
   # The default image rather than `-full`: it carries Node only and installs
   # the tools a run needs as it goes (binarySource=install), which is where the
