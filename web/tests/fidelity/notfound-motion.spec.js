@@ -125,6 +125,9 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   const html = await (await page.request.get(`${APP}/some-missing-path`)).text();
   expect(html, "the HTML should arrive with the still sky").toContain('<svg class="first"');
   expect(html.match(/<circle /g)?.length ?? 0, "the still sky should hold the stars").toBeGreaterThanOrEqual(444);
+  /* And the copies arrive hidden and still: `live` is only set once all
+     six are painted (#798), so the HTML must not carry it. */
+  expect(html, "the copies must not be live before they are painted").not.toMatch(/class="infall live"/);
 
   await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
   /* The sky is painted synchronously at mount, before the well's rasters
@@ -153,6 +156,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
         /* The still sky has handed over: once the canvases are painted it
            is gone, so nothing static is left under the moving copies. */
         still: document.querySelectorAll(".infall .first").length,
+        live: document.querySelector(".infall.live") !== null,
         /* Anything in the star layers that is, or sits under, a filter. */
         skyFiltered: document.querySelectorAll(".infall filter, .infall [filter], .sky filter, .sky [filter]").length,
         /* Every painted, animated element on the screen that also carries a
@@ -171,6 +175,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   expect(before.falls.length, "expected the falling star copies").toBe(6);
   expect(before.painted, "every falling copy should be a painted canvas").toBe(6);
   expect(before.still, "the still sky should be gone once the canvases are painted").toBe(0);
+  expect(before.live, "the copies should be live once the still sky is gone").toBe(true);
   for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
   expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
