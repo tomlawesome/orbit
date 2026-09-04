@@ -20,6 +20,10 @@ body{background:#04070f}
       animation:infall var(--T) linear infinite;animation-delay:calc(var(--i) * var(--T) / -3)}
 .fall-far{--T:160s}
 .fall-near{--T:80s}
+/* Until every copy is painted the still sky in the HTML is what shows; the
+   copies wait hidden, their fall not yet begun, so all six start together
+   from where the still sky left them (+error.svelte, live). */
+.infall:not(.live) .fall{visibility:hidden;animation:none}
 @keyframes infall{
   0%{transform:rotate(0deg) scale(2);opacity:0}
   6%{opacity:1}

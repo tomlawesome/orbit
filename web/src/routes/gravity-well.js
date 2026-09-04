@@ -10,15 +10,18 @@
  * copies a third of a cycle apart (see +error.svelte) read as one steady
  * field.
  *
- * The bands are painted onto <canvas> copies (paintSky), not built as SVG:
+ * The bands are painted onto <canvas> copies (paintCopy), not built as SVG:
  * Safari gives a scaled SVG group a bitmap the size of the group's whole
  * extent and redraws it as the scale changes — six of them at twice the
  * frame hung a laptop — and a bitmap that goes through PNG (rasteriseSvg's
  * encode, then the <img> decode) costs whole seconds of main thread in
  * WebKit, during which the sky is blank and the well stutters. Painting 222
- * dots with the 2D API is a few milliseconds, synchronous, so the stars are
- * there on the first frame. Only the lensed arcs are still built as live
- * nodes, into the well's own <svg>.
+ * dots with the 2D API is quick, and the HTML arrives with the same stars
+ * drawn as a still <svg> (+error.svelte), so the copies are painted one per
+ * task behind that still sky and take over, in one step, once all six are
+ * there (#798: six 2k canvases in one go was a visible hang without a GPU).
+ * Only the lensed arcs are still built as live nodes, into the well's own
+ * <svg>.
  *
  * Imperative DOM by design — it builds SVG nodes directly. Svelte renders the
  * markup and stands back.
@@ -114,16 +117,6 @@ export function createSky() {
 const showing = new WeakMap();
 
 /**
- * Paints every .fall canvas in `host` at `side` pixels a side for the band's
- * 2200 units, so the canvas's centre is the hole. A canvas keeps the stars
- * it has; one without any yet takes the next band. Synchronous.
- * @param {HTMLElement} host @param {Sky} bands @param {number} side
- */
-export function paintSky(host, bands, side) {
-  for (const c of host.querySelectorAll("canvas.fall")) paintCopy(/** @type {HTMLCanvasElement} */ (c), bands, side);
-}
-
-/**
  * Fresh stars for one copy, for the instant it wraps unseen (opacity 0 at
  * the 0% keyframe): no star pattern ever comes round again, so the field
  * reads as continuous rather than as a loop.
@@ -134,8 +127,13 @@ export function renewCopy(canvas, bands, side) {
   paintCopy(canvas, bands, side);
 }
 
-/** @param {HTMLCanvasElement} c @param {Sky} bands @param {number} side */
-function paintCopy(c, bands, side) {
+/**
+ * Paints one .fall canvas at `side` pixels a side for the band's 2200 units,
+ * so the canvas's centre is the hole. A canvas keeps the stars it has; one
+ * without any yet takes the next band. Synchronous.
+ * @param {HTMLCanvasElement} c @param {Sky} bands @param {number} side
+ */
+export function paintCopy(c, bands, side) {
   const near = c.classList.contains("fall-near");
   let stars = showing.get(c);
   if (!stars) showing.set(c, (stars = near ? bands.near() : bands.far()));
