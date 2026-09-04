@@ -227,6 +227,34 @@ variables:
   done
   docker info > /dev/null 2>&1 || { echo "the dind service daemon is not reachable at ${DOCKER_HOST}"; exit 1; }
 
+# Hands the rest of a job to the image's unprivileged `node` user.
+#
+# Root passes tests that are supposed to fail. Two of them assert a permission
+# refusal -- src/lib/install-orchestrator.test.ts chmods a fetched asset to 0000
+# and expects the commit to refuse, scripts/repair.test.mjs makes a directory
+# 0555 and expects a removal inside it to fail -- and root holds
+# CAP_DAC_OVERRIDE, so neither refusal happens and both tests report the
+# unrefused success (pipeline 169, job 727). They are the regression guard for
+# #383, where an unreadable asset escaped runInstall as a thrown EACCES instead
+# of a terminal failed event, so weakening them to suit the runner would delete
+# the only signal that bug ever had. Nothing about them is GitHub-specific;
+# GitHub simply does not run its jobs as root.
+#
+# Not `image.docker.user`, because the setup above genuinely needs root: apt
+# installs the Docker client, and corepack writes its shims into /usr/local/bin.
+# The drop happens after that instead, so each half runs as the user it needs.
+#
+# `chown` because the suite writes where it reads -- Vite's cache under
+# node_modules, coverage/ for the artifact -- and root installed both. A job
+# using this must also point COREPACK_HOME inside $CI_PROJECT_DIR, or the pnpm
+# root activated is invisible to `node` and corepack silently downloads a second
+# copy into /home/node.
+.drop_to_node: &drop_to_node |
+  chown -R node:node "$CI_PROJECT_DIR"
+  orbit_as_node() {
+    su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
+  }
+
 # --- classify ----------------------------------------------------------------
 
 # Selects the cheapest lane that still exercises every changed boundary, using
@@ -312,17 +340,24 @@ fast:
   needs:
     - job: classify
       artifacts: true
+  variables:
+    # In the project directory rather than the invoking user's home, so the
+    # pnpm corepack activates as root below is the pnpm the `node` user then
+    # runs. See .drop_to_node.
+    COREPACK_HOME: $CI_PROJECT_DIR/.corepack
   script:
     - *docker_cli
     - pnpm install --frozen-lockfile
-    - ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh
+    # Everything from here runs unprivileged, because two of these tests assert
+    # a permission refusal that root does not receive. See .drop_to_node.
+    - *drop_to_node
+    - orbit_as_node 'ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh'
     # The production build and the render proof, run here as well as inside the
     # image: the container build is the authoritative gate but it is minutes
     # away, and this fails in seconds when a packaging change breaks previews.
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        pnpm --filter orbit-web build
-        pnpm test:web-pdfjs
+        orbit_as_node 'pnpm --filter orbit-web build && pnpm test:web-pdfjs'
       else
         echo "skipped: no build-risk change"
       fi
