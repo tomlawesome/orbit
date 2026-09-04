@@ -111,27 +111,33 @@ test("notfound keeps its six animations live after rasterising the filtered grou
 /*
  * #790: the starfield falls into the hole. Its saving grace under #764's
  * measured lesson — animated elements under a live filter are what costs
- * frames — is that each star band is one unfiltered bitmap, shown as <img>
- * copies moved only by their own transform (a scaled SVG group is what hung
- * the owner's laptop; +error.svelte has why). This holds all three halves:
- * the copies really are bitmaps, the infall is actually running, and nothing
- * that animates has a filter.
+ * frames — is that each star copy is one unfiltered <canvas>, painted once
+ * and moved only by its own transform (a scaled SVG group is what hung the
+ * owner's laptop; +error.svelte has why). This holds all three halves: the
+ * copies really are painted canvases, the infall is actually running, and
+ * nothing that animates has a filter.
  */
 test("notfound's starfield falls in, and nothing that moves is filtered", async ({ page }) => {
   await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
-  /* The band bitmaps land in the same build() as the well's rasters, so
-     "ready" covers them; asked for as a real match, not every-of-nothing,
-     because before hydration there is no .world[data-rasterised] at all. */
+  /* The sky is painted synchronously at mount, before the well's rasters
+     even start; "ready" is simply the surest sign mount has run. Asked for
+     as a real match, not every-of-nothing, because before hydration there
+     is no .world[data-rasterised] at all. */
   await page.waitForFunction(() => document.querySelector('.world[data-rasterised="ready"]') !== null);
 
   const sample = () =>
     page.evaluate(() => {
       const falls = [...document.querySelectorAll(".infall .fall")];
       return {
-        /* Every copy is a decoded bitmap with pixels in it. */
-        bitmaps: falls.filter(
-          (el) => el instanceof HTMLImageElement && el.currentSrc.startsWith("data:image/png") && el.naturalWidth > 0,
-        ).length,
+        /* Every copy is a canvas with stars actually painted on it: some
+           pixel, somewhere, is not transparent. */
+        painted: falls.filter((el) => {
+          if (!(el instanceof HTMLCanvasElement) || !el.width) return false;
+          const px = el.getContext("2d")?.getImageData(0, 0, el.width, el.height).data;
+          if (!px) return false;
+          for (let i = 3; i < px.length; i += 4) if (px[i] > 0) return true;
+          return false;
+        }).length,
         falls: falls.map((g) => ({
           animationName: getComputedStyle(g).animationName,
           transform: getComputedStyle(g).transform,
@@ -152,7 +158,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
 
   const before = await sample();
   expect(before.falls.length, "expected the falling star copies").toBe(6);
-  expect(before.bitmaps, "every falling copy should be a decoded bitmap").toBe(6);
+  expect(before.painted, "every falling copy should be a painted canvas").toBe(6);
   for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
   expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);

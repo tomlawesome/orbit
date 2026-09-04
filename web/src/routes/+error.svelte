@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { mountGravityWell } from "./gravity-well.js";
+  import { mountGravityWell, paintSky, renewCopy } from "./gravity-well.js";
   import { rasteriseSvg } from "$lib/raster.js";
 
   /**
@@ -193,20 +193,34 @@
   /** #790: the falling star bands' host, see the markup. @type {HTMLDivElement | null} */
   let infall;
 
-  /**
-   * #790: one falling star band as the SVG document the raster is drawn
-   * from — a 2200-unit square centred on the hole, so the bitmap's centre IS
-   * the hole and the copies can shrink toward it around their own centre.
-   * @param {string} stars @param {number} side
-   */
-  const bandDoc = (stars, side) =>
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1100 -1100 2200 2200" width="${side}" height="${side}">${stars}</svg>`;
-
   onMount(() => {
     if (!isNotFound) return;
     /* Populates #lensarcs synchronously, before the first build() below
-       ever reads it; hands back the star bands for build() to rasterise. */
+       ever reads it; hands back the star bands as a seeded stream. */
     const bands = mountGravityWell();
+
+    /* #790: the sky, painted now — synchronously, before the first frame,
+       so the stars are there from the start rather than arriving after the
+       well's rasters — at the density the screen shows it (2200 units at
+       this scale, capped at 2k a side: six canvases at 16 MB each, and a
+       sub-pixel star does not get crisper for being sampled finer). Each
+       copy takes fresh stars every time it wraps unseen, so no pattern ever
+       comes round again (gravity-well.js, renewCopy). */
+    let side = 0;
+    function paint() {
+      if (!infall) return;
+      const rect = infall.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      side = Math.min(2048, Math.max(1, Math.round(2200 * Math.max(rect.width / 1600, rect.height / 1000) * dpr)));
+      paintSky(infall, bands, side);
+    }
+    /** @param {AnimationEvent} e */
+    function onWrap(e) {
+      if (e.animationName === "infall" && e.target instanceof HTMLCanvasElement) renewCopy(e.target, bands, side);
+    }
+    paint();
+    infall?.addEventListener("animationiteration", onWrap);
 
     let cancelled = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -246,39 +260,14 @@
       srcPhoton.style.display = "";
       srcSmearNear.style.display = "";
       srcSmearTidal.style.display = "";
-      /* #790: the star bands, at the density the screen shows them at
-         (2200 units across at this scale), capped at 3k a side, where a bigger bitmap
-         stops paying for itself. Nothing filtered — these are plain fills
-         rasterised only so that what Safari scales is a bitmap. */
-      const side = Math.min(3072, Math.max(1, Math.round(2200 * scale)));
-      const [urlText, urlLensarcs, urlLensedArch, urlPhoton, urlSmearNear, urlSmearTidal, urlFarBand, urlNearBand] =
-        await Promise.all([
-          rasteriseSvg(`notfound-static|${w}|${h}`, staticFrame(w, h), w, h),
-          rasteriseFrom(`notfound-lensarcs|${w}|${h}`, srcLensarcs, F_B1, w, h),
-          rasteriseFrom(`notfound-lensed-arch|${w}|${h}`, srcLensedArch, F_B1 + F_B3 + G_DOPPLER, w, h),
-          rasteriseFrom(`notfound-photon|${w}|${h}`, srcPhoton, F_B6 + F_B1, w, h),
-          rasteriseFrom(`notfound-smear-near|${w}|${h}`, srcSmearNear, F_B6 + G_DOPPLER_SOFT, w, h),
-          rasteriseFrom(`notfound-smear-tidal|${w}|${h}`, srcSmearTidal, F_B3 + G_STREAMG, w, h),
-          rasteriseSvg(`notfound-far-band|${side}`, bandDoc(bands.farBand, side), side, side),
-          rasteriseSvg(`notfound-near-band|${side}`, bandDoc(bands.nearBand, side), side, side),
-        ]);
-      if (cancelled) return;
-
-      /* The three copies of a band share one bitmap. Loaded before "ready",
-         and decoded synchronously at paint (decoding="sync" in the markup),
-         so the fidelity gate never captures an <img> still decoding. The
-         load event, not img.decode(): WebKit never settles decode() here. */
-      const bandImgs = [...(infall?.querySelectorAll("img") ?? [])];
-      await Promise.all(
-        bandImgs.map(
-          (img) =>
-            new Promise((done) => {
-              img.onload = img.onerror = done;
-              img.src = img.classList.contains("fall-far") ? urlFarBand : urlNearBand;
-              if (img.complete) done(undefined);
-            }),
-        ),
-      );
+      const [urlText, urlLensarcs, urlLensedArch, urlPhoton, urlSmearNear, urlSmearTidal] = await Promise.all([
+        rasteriseSvg(`notfound-static|${w}|${h}`, staticFrame(w, h), w, h),
+        rasteriseFrom(`notfound-lensarcs|${w}|${h}`, srcLensarcs, F_B1, w, h),
+        rasteriseFrom(`notfound-lensed-arch|${w}|${h}`, srcLensedArch, F_B1 + F_B3 + G_DOPPLER, w, h),
+        rasteriseFrom(`notfound-photon|${w}|${h}`, srcPhoton, F_B6 + F_B1, w, h),
+        rasteriseFrom(`notfound-smear-near|${w}|${h}`, srcSmearNear, F_B6 + G_DOPPLER_SOFT, w, h),
+        rasteriseFrom(`notfound-smear-tidal|${w}|${h}`, srcSmearTidal, F_B3 + G_STREAMG, w, h),
+      ]);
       if (cancelled) return;
 
       imgStatic?.setAttribute("href", urlText);
@@ -300,7 +289,7 @@
 
     function onResize() {
       clearTimeout(timer);
-      timer = setTimeout(build, 120);
+      timer = setTimeout(() => { paint(); build(); }, 120);
     }
 
     build();
@@ -309,6 +298,7 @@
       cancelled = true;
       clearTimeout(timer);
       window.removeEventListener("resize", onResize);
+      infall?.removeEventListener("animationiteration", onWrap);
     };
   });
 </script>
@@ -321,29 +311,30 @@
 
 {#if isNotFound}
 <!--
-  The sky falls in (#790, owner's pick: the spiral). Each star layer is drawn
-  once (gravity-well.js) as one band of stars that starts beyond the frame,
-  rasterised once in build() above, and shown as three <img> copies of that
-  bitmap, each turned a third of a turn so they never look like copies. They
-  spiral in toward the hole a third of a cycle apart and hand over to each
-  other (notfound.css, .fall), so the field never empties, nothing spawns in
-  view, and the horizon's own black disc swallows what is left.
+  The sky falls in (#790, owner's pick: the spiral). Each star layer is one
+  band of stars that starts beyond the frame, painted onto three <canvas>
+  copies (gravity-well.js, paintSky), each turned a third of a turn and each
+  with its own stars. They spiral in toward the hole a third of a cycle apart
+  and hand over to each other (notfound.css, .fall), so the field never
+  empties, nothing spawns in view, and the horizon's own black disc swallows
+  what is left; a copy takes fresh stars each time it wraps, unseen, so it
+  never reads as a loop.
 
-  Bitmaps in <img>, not groups in the sky <svg>, because of what the first cut
-  did to a laptop: Safari gives a scaled SVG group a bitmap the size of its
-  whole extent and redraws it as the scale changes, and six bands at twice the
-  frame is gigabytes. An <img> is composited straight from its decoded pixels,
-  whatever transform it wears. Nothing here is filtered, so #764's rule holds:
-  nothing filtered gains motion. A copy stays hidden until its bitmap lands
-  (notfound.css): some browsers paint an empty, sized <img> as a blank box.
+  Canvases, not groups in the sky <svg>, because of what the first cut did to
+  a laptop: Safari gives a scaled SVG group a bitmap the size of its whole
+  extent and redraws it as the scale changes, and six bands at twice the
+  frame is gigabytes. A canvas is composited straight from its own pixels,
+  whatever transform it wears — and unlike a rasterised <img> it costs no PNG
+  encode and decode, which took whole seconds of blank sky. Nothing here is
+  filtered, so #764's rule holds: nothing filtered gains motion.
 -->
 <div class="infall" aria-hidden="true" bind:this={infall}>
-  <img class="fall fall-far" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
-  <img class="fall fall-far" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
-  <img class="fall fall-far" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
-  <img class="fall fall-near" style="--i:0;--s0:2;rotate:0deg" decoding="sync" alt="" />
-  <img class="fall fall-near" style="--i:1;--s0:1;rotate:120deg" decoding="sync" alt="" />
-  <img class="fall fall-near" style="--i:2;--s0:.5;rotate:240deg" decoding="sync" alt="" />
+  <canvas class="fall fall-far" style="--i:0;--s0:2;rotate:0deg"></canvas>
+  <canvas class="fall fall-far" style="--i:1;--s0:1;rotate:120deg"></canvas>
+  <canvas class="fall fall-far" style="--i:2;--s0:.5;rotate:240deg"></canvas>
+  <canvas class="fall fall-near" style="--i:0;--s0:2;rotate:0deg"></canvas>
+  <canvas class="fall fall-near" style="--i:1;--s0:1;rotate:120deg"></canvas>
+  <canvas class="fall fall-near" style="--i:2;--s0:.5;rotate:240deg"></canvas>
 </div>
 
 <div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
