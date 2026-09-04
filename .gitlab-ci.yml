@@ -94,6 +94,22 @@ variables:
 # pnpm comes from corepack, which ships with Node, rather than from the
 # self-installer: package.json names the exact version, so corepack activates
 # that one and nothing has to agree separately.
+# `apk add` with a few tries. dl-cdn.alpinelinux.org resolves to a long
+# answer, and the LAN resolver drops it now and then: pipelines 171 and 173
+# both lost a job to "DNS: transient error (try again later)" on the first
+# fetch while the same lookup worked seconds later. Three tries, five seconds
+# apart, covers that without hiding a real outage.
+.apk_retry: &apk_retry |
+  apk_add() {
+    local n
+    for n in 1 2 3; do
+      apk add --no-cache "$@" && return 0
+      echo "apk add failed (try $n of 3); retrying in 5s" >&2
+      sleep 5
+    done
+    return 1
+  }
+
 .pnpm_setup: &pnpm_setup |
   corepack enable
   corepack prepare "pnpm@${PNPM_VERSION}" --activate
@@ -189,8 +205,24 @@ variables:
   apt-get install -y -qq --no-install-recommends docker.io docker-compose-v2 jq curl openssl
   # /builds is a real volume; the rest of the container is overlayfs, which
   # overlay2 cannot stack on.
+  # /builds outlives the job on this runner, so a stack a killed job left in
+  # the daemon's state is still "running" when the next job's daemon starts,
+  # and the installer's one-stack guard refuses. Start from nothing.
   docker_data_root="${CI_BUILDS_DIR:-/builds}/.orbit-docker-data"
+  rm -rf "$docker_data_root"
   mkdir -p "$docker_data_root"
+  # cgroup v2 forbids a cgroup from holding both processes and child groups
+  # with controllers. The job's shell sits in the container's root cgroup, so
+  # the first container that asks for a cpu or memory limit (the ci-cap
+  # Compose file does) fails with "cannot enter cgroupv2 ... threaded mode".
+  # What the official docker:dind entrypoint does: move every process into a
+  # leaf group, then hand the controllers to children.
+  if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    mkdir -p /sys/fs/cgroup/init
+    xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+    sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+      > /sys/fs/cgroup/cgroup.subtree_control
+  fi
   nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
@@ -226,6 +258,36 @@ variables:
     sleep 1
   done
   docker info > /dev/null 2>&1 || { echo "the dind service daemon is not reachable at ${DOCKER_HOST}"; exit 1; }
+
+# Hands the rest of a job to the image's unprivileged `node` user.
+#
+# Root passes tests that are supposed to fail. Two of them assert a permission
+# refusal -- src/lib/install-orchestrator.test.ts chmods a fetched asset to 0000
+# and expects the commit to refuse, scripts/repair.test.mjs makes a directory
+# 0555 and expects a removal inside it to fail -- and root holds
+# CAP_DAC_OVERRIDE, so neither refusal happens and both tests report the
+# unrefused success (pipeline 169, job 727). They are the regression guard for
+# #383, where an unreadable asset escaped runInstall as a thrown EACCES instead
+# of a terminal failed event, so weakening them to suit the runner would delete
+# the only signal that bug ever had. Nothing about them is GitHub-specific;
+# GitHub simply does not run its jobs as root.
+#
+# Not `image.docker.user`, because the setup above genuinely needs root: apt
+# installs the Docker client, and corepack writes its shims into /usr/local/bin.
+# The drop happens after that instead, so each half runs as the user it needs.
+#
+# `chown` because the suite writes where it reads -- Vite's cache under
+# node_modules, coverage/ for the artifact -- and root installed both. A job
+# using this must also point COREPACK_HOME somewhere `node` can read, or the
+# pnpm root activated is invisible to it and corepack silently downloads a
+# second copy into /home/node. Not inside $CI_PROJECT_DIR: `eslint .` lints
+# whatever is there, and pipeline 170 failed on 1,527 findings in pnpm's own
+# bundle.
+.drop_to_node: &drop_to_node |
+  chown -R node:node "$CI_PROJECT_DIR" "$COREPACK_HOME"
+  orbit_as_node() {
+    su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
+  }
 
 # --- classify ----------------------------------------------------------------
 
@@ -312,17 +374,24 @@ fast:
   needs:
     - job: classify
       artifacts: true
+  variables:
+    # Beside the project directory rather than in the invoking user's home, so
+    # the pnpm corepack activates as root below is the pnpm the `node` user
+    # then runs, and outside it so `eslint .` never sees it. See .drop_to_node.
+    COREPACK_HOME: $CI_BUILDS_DIR/.corepack
   script:
     - *docker_cli
     - pnpm install --frozen-lockfile
-    - ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh
+    # Everything from here runs unprivileged, because two of these tests assert
+    # a permission refusal that root does not receive. See .drop_to_node.
+    - *drop_to_node
+    - orbit_as_node 'ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh'
     # The production build and the render proof, run here as well as inside the
     # image: the container build is the authoritative gate but it is minutes
     # away, and this fails in seconds when a packaging change breaks previews.
     - |
       if [ "${ORBIT_BUILD:-true}" = "true" ]; then
-        pnpm --filter orbit-web build
-        pnpm test:web-pdfjs
+        orbit_as_node 'pnpm --filter orbit-web build && pnpm test:web-pdfjs'
       else
         echo "skipped: no build-risk change"
       fi
@@ -345,7 +414,8 @@ base_image:
     # The check reads the first FROM with sed, resolves the tag with
     # `docker manifest inspect`, parses the result with python3 and runs
     # `apk upgrade --simulate` inside the pinned image.
-    - apk add --no-cache bash python3
+    - *apk_retry
+    - apk_add bash python3
     - bash scripts/check-base-image-current.sh
 
 # --- policy ------------------------------------------------------------------
@@ -367,12 +437,13 @@ supply_chain_source:
       artifacts: true
   script:
     - *reach_helpers
+    - *apk_retry
     - |
       if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
-      apk add --no-cache nodejs
+      apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       # A pin lives in the file that uses it and in the policy that records it.
       # Dependabot can rewrite the first and cannot see the second, so its pull
@@ -422,12 +493,13 @@ sidecar_images:
       artifacts: true
   script:
     - *reach_helpers
+    - *apk_retry
     - |
       if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
-      apk add --no-cache nodejs
+      apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
       # --ignore-unfixed because these are images Orbit pulls rather than
@@ -566,7 +638,8 @@ build_image:
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
-    - apk add --no-cache bash git nodejs
+    - *apk_retry
+    - apk_add bash git nodejs
     - |
       set -eu
       git fetch --quiet --tags origin
@@ -737,7 +810,11 @@ smoke:
     - npm install --global "pnpm@${PNPM_VERSION}"
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
-    - bash scripts/ci/create-test-configuration.sh
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
     # The workflow builds the disposable OIDC provider as a step of its own,
     # before the stack starts. Not extracted, because it is one command.
     - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
@@ -832,7 +909,11 @@ acceptance:
     - docker load --input image.tar
     # The compose validations read .env-orbit, so the same configuration step
     # the workflow runs once for the whole anchor runs once here too.
-    - bash scripts/ci/create-test-configuration.sh
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
     - bash scripts/ci/validate-deployment-assets.sh
     - |
       set -eu
@@ -875,6 +956,7 @@ acceptance:
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
         GIT_MARKER="$(orbit_output git_marker)" \
+        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/verify-installer-refusal.sh"
       )
     - |
@@ -889,6 +971,7 @@ acceptance:
         ORBIT_REPOSITORY="$IMAGE_NAME" \
         ORBIT_CHANNEL="$(orbit_output channel)" \
         GIT_GUARD_DIR="$(orbit_output git_guard_dir)" \
+        ORBIT_ASSETS_FROM_TREE="$CI_PROJECT_DIR" \
           bash "$CI_PROJECT_DIR/scripts/ci/run-installer.sh"
       )
     - |
@@ -991,7 +1074,8 @@ publish_gitlab:
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
-    - apk add --no-cache bash
+    - *apk_retry
+    - apk_add bash
     - *step_outputs
     - docker load --input image.tar
     - |
