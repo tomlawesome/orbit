@@ -32,7 +32,15 @@ fail() { printf 'base image: %s\n' "$1" >&2; }
 # made the check report an unpinned base and refuse to run (#651). A Dockerfile
 # may legally open with comments, so find the directive rather than assume its
 # line number.
-pinned_reference="$(sed -n 's/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p' "$dockerfile" | head -1)"
+#
+# `q` inside the match, not `| head -1`. Our Dockerfile is multi-stage, so sed
+# emitted seven references and kept reading the remaining ~120 lines after
+# head -1 had exited; sed then took SIGPIPE, and `pipefail` turned that into a
+# 141 that `set -e` aborted on before anything was printed. Whether it lost the
+# race depended on the machine, which is why it passed on GitHub's runner for
+# months and failed on the busybox base_image job here (GitLab pipeline 169).
+# One process reading only as far as it needs cannot lose that race at all.
+pinned_reference="$(sed -n '/^FROM[[:space:]]/{s/^FROM[[:space:]]\{1,\}\([^[:space:]]*\).*/\1/p;q;}' "$dockerfile")"
 if [[ -z "$pinned_reference" || "$pinned_reference" != *@sha256:* ]]; then
   fail "the first FROM in $dockerfile is not a digest-pinned reference: '${pinned_reference:-<none>}'"
   fail "this check cannot verify an unpinned base, and an unpinned base must not ship."
