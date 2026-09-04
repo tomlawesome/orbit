@@ -8,12 +8,13 @@ import {
   transferPrimaryAdministrator,
   listInstanceUsers,
 } from "@/server/admin-repository";
-import { POST as transferPrimary } from "@/app/api/admin/primary/route";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
 } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { POST: transferPrimary } = await loadRoute("admin/primary");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -164,19 +165,21 @@ describe("primary administrator authority (#263)", () => {
     await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
 
     const memberSession = await fixture.session("member");
-    const denied = await transferPrimary(requestForSession(memberSession, "http://orbit.test/api/admin/primary", {
+    const denied = await callRouteForSession(transferPrimary, memberSession, {
+      url: "http://orbit.test/api/admin/primary",
       method: "POST",
       body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
       headers: { "Content-Type": "application/json" },
-    }));
+    });
     expect(denied.status).toBe(403);
 
     const primarySession = await fixture.session("admin");
-    const response = await transferPrimary(requestForSession(primarySession, "http://orbit.test/api/admin/primary", {
+    const response = await callRouteForSession(transferPrimary, primarySession, {
+      url: "http://orbit.test/api/admin/primary",
       method: "POST",
       body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
       headers: { "Content-Type": "application/json" },
-    }));
+    });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const payload = await response.json() as { users: Array<{ id: string; isPrimaryAdministrator: boolean }> };
