@@ -207,6 +207,18 @@ variables:
   # overlay2 cannot stack on.
   docker_data_root="${CI_BUILDS_DIR:-/builds}/.orbit-docker-data"
   mkdir -p "$docker_data_root"
+  # cgroup v2 forbids a cgroup from holding both processes and child groups
+  # with controllers. The job's shell sits in the container's root cgroup, so
+  # the first container that asks for a cpu or memory limit (the ci-cap
+  # Compose file does) fails with "cannot enter cgroupv2 ... threaded mode".
+  # What the official docker:dind entrypoint does: move every process into a
+  # leaf group, then hand the controllers to children.
+  if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    mkdir -p /sys/fs/cgroup/init
+    xargs -rn1 < /sys/fs/cgroup/cgroup.procs > /sys/fs/cgroup/init/cgroup.procs || :
+    sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
+      > /sys/fs/cgroup/cgroup.subtree_control
+  fi
   nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
