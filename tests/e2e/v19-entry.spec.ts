@@ -49,6 +49,14 @@ test.describe("the application entry", () => {
 
   // #451: signed out, a v19 screen is a journey into login and back to the
   // exact page — and once back, the client assets all arrive from this origin.
+  //
+  // #789 put the ratified dawn in the middle of that journey. Before the gate,
+  // /home rendered and its own client-side check threw the reader at the
+  // identity provider, so the door they never saw was the provider's. Now the
+  // server redirects first and they meet Orbit's own door, which is what §15
+  // asks for: the dawn ships as THE login screen for every user, every time.
+  // The screen they asked for rides along on returnTo and they still land on
+  // it, which is the part this test has always been about (owner, 2026-09-04).
   test("a signed-out visit lands in login and returns to the page it wanted", async ({ page }) => {
     const scriptResponses: number[] = [];
     page.on("response", (response) => {
@@ -56,6 +64,8 @@ test.describe("the application entry", () => {
       if (url.pathname.startsWith("/_app/")) scriptResponses.push(response.status());
     });
     await page.goto("/home");
+    await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
+    await page.getByRole("button", { name: "Sign in" }).click();
     await page.getByRole("link", { name: "Orbit Administrator" }).click();
     await expect(page).toHaveURL(/\/home$/);
     const household = await seedHousehold(page);
