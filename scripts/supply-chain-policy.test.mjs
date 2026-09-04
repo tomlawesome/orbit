@@ -347,6 +347,74 @@ describe("supply-chain policy", () => {
     ).toMatchObject({ blocked: 0, excepted: 1 });
   });
 
+  it("fails closed the day after an exception expires, rather than matching it", () => {
+    // The sidecar exceptions recorded for #740 rely on this: an expiry that
+    // silently stopped matching would leave the finding blocked (acceptable),
+    // but one that kept matching would hide it forever.
+    const report = sourceReport({
+      Vulnerabilities: [
+        {
+          VulnerabilityID: "CVE-2026-0001",
+          PkgName: "example",
+          InstalledVersion: "1.0.0",
+          FixedVersion: "1.0.1",
+          Severity: "HIGH",
+        },
+      ],
+    });
+    const exception = {
+      kind: "vulnerability",
+      scope: "source",
+      id: "CVE-2026-0001",
+      package: "example",
+      owner: "Orbit maintainers",
+      rationale: "A bounded compatibility check is underway.",
+      expiresOn: "2026-08-15",
+      trackingIssue: 81,
+    };
+
+    expect(
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-08-15")
+        .summary,
+    ).toMatchObject({ blocked: 0, excepted: 1 });
+    expect(() =>
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-08-16"),
+    ).toThrow(/expired on 2026-08-15/u);
+  });
+
+  it("does not let an exception for one installed version cover another", () => {
+    // Each #740 entry names the installed version it was seen in, so an
+    // upstream rebuild that ships a different, still-vulnerable version is
+    // blocked afresh instead of inheriting the exception.
+    const report = sourceReport({
+      Vulnerabilities: [
+        {
+          VulnerabilityID: "CVE-2026-0001",
+          PkgName: "example",
+          InstalledVersion: "1.0.0",
+          FixedVersion: "1.0.2",
+          Severity: "HIGH",
+        },
+      ],
+    });
+    const exception = {
+      kind: "vulnerability",
+      scope: "source",
+      id: "CVE-2026-0001",
+      package: "example",
+      installedVersion: "0.9.0",
+      owner: "Orbit maintainers",
+      rationale: "Seen only in 0.9.0.",
+      expiresOn: "2026-08-15",
+      trackingIssue: 81,
+    };
+
+    expect(
+      evaluateSourceEvidence(report, policy({ exceptions: [exception] }), "2026-07-30")
+        .summary,
+    ).toMatchObject({ blocked: 1, excepted: 0 });
+  });
+
   it("binds vulnerability and SPDX evidence to the expected tested image", () => {
     const report = {
       SchemaVersion: 2,
