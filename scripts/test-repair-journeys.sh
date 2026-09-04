@@ -379,7 +379,10 @@ journey_cancelled_repair() {
   local output status=0
   output="$(printf 'not-the-word\nnot-the-word\nnot-the-word\n' | repair --execute --dangerous 2>&1)" || status=$?
 
-  [[ "$status" == 6 ]] || fail "a refused dangerous batch exited $status, expected 6"
+  [[ "$status" == 6 ]] || {
+    printf '%s\n' "$output" >&2
+    fail "a refused dangerous batch exited $status, expected 6"
+  }
   grep -q 'prompt-abort field=action-word' <<<"$output" ||
     fail 'a refused dangerous batch did not abort the action-word prompt'
   grep -q 'dangerous result=refused .*reason=refused-by-operator' <<<"$output" ||

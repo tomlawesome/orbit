@@ -18,20 +18,9 @@
 #   GIT_MARKER         file the guard touches if it is ever invoked
 #   ORBIT_RUN_ID, ORBIT_RUN_ATTEMPT  used to name the captured output
 #   RUNNER_TEMP        optional; defaults to $TMPDIR or /tmp
-#   ORBIT_ASSETS_FROM_TREE  optional; a checkout to serve the deployment
-#                      assets from instead of raw.githubusercontent.com
+#   ORBIT_ASSETS_FROM_TREE  optional; see scripts/ci/assets-from-tree.sh
 #
 # Outputs: refusal_output is appended to $GITHUB_OUTPUT when it is set.
-#
-# The installer downloads its deployment assets from GitHub at the revision
-# the image was built from. On GitHub that revision is always there. On the
-# GitLab pipeline a merge-request commit reaches GitHub only after it merges
-# and mirrors, so ORBIT_ASSETS_FROM_TREE serves the same files from the
-# checkout, as scripts/test-install-acceptance.sh already does for the
-# lifecycle run. Whether GitHub really has them at that revision is then
-# GitHub's own CI's question, asked once the merge is mirrored (owner,
-# 2026-09-04, #801). Real installs are untouched: the shim exists only on
-# this script's PATH.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -50,43 +39,9 @@ refusal_output="${runner_temp}/orbit-installer-refusal-${ORBIT_RUN_ID}-${ORBIT_R
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   printf 'refusal_output=%s\n' "${refusal_output}" >> "${GITHUB_OUTPUT}"
 fi
-if [[ -n "${ORBIT_ASSETS_FROM_TREE:-}" ]]; then
-  assets_tree="$(CDPATH= cd -- "${ORBIT_ASSETS_FROM_TREE}" && pwd -P)"
-  shim_dir="$(mktemp -d "${runner_temp}/orbit-refusal-shim.XXXXXX")"
-  cat > "${shim_dir}/curl" <<SHIM
-#!/usr/bin/env bash
-# Refusal-check shim: serves the deployment assets from the checkout for any
-# revision of the repository under test; every other URL fails closed so an
-# unexpected network dependency shows up as a failure, not a download.
-set -Eeuo pipefail
-asset_prefix="https://raw.githubusercontent.com/${ORBIT_REPOSITORY}/"
-output="" write_out="" url=""
-args=("\$@")
-for ((i = 0; i < \${#args[@]}; i++)); do
-  case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
-    *) url="\${args[i]}" ;;
-  esac
-done
-case "\$url" in
-  "\$asset_prefix"*)
-    asset="\${url#"\$asset_prefix"}"
-    asset="\${asset#*/}"
-    [[ -f "${assets_tree}/\$asset" ]] || exit 22
-    [[ -z "\$output" ]] || cp -- "${assets_tree}/\$asset" "\$output"
-    [[ -z "\$write_out" ]] || printf '200'
-    ;;
-  *)
-    exit 6
-    ;;
-esac
-SHIM
-  chmod 755 "${shim_dir}/curl"
-  PATH="${shim_dir}:${PATH}"
-fi
+# shellcheck source=scripts/ci/assets-from-tree.sh
+source "${repo_root}/scripts/ci/assets-from-tree.sh"
+PATH="$(assets_from_tree_path)${PATH}"
 
 set +e
 exec < /dev/null
