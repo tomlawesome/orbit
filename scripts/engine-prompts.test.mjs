@@ -3,8 +3,16 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runGuidedFlow } from "./engine-prompt-renderer.fixture.mjs";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Tests here run configure.sh (directly, or through runGuidedFlow's own real
+// spawn) under bash; a spawn that takes tens of milliseconds quiet takes
+// seconds on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // Pins docs/engine-events.md's "Machine prompts (v0)" section against
 // scripts/configure.sh, the same way scripts/engine-events.test.mjs pins the
@@ -240,7 +248,7 @@ describe("scripts/configure.sh --init (ORBIT_CONFIGURE_PROMPTS=machine)", () => 
     const targetDir = makeFixtureDir("UNRELATED_KEY=keep-me\n");
     const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-prompts-fakebin-"));
 
-    const result = spawnSync(
+    const result = failOnProcessDeadline(spawnSync(
       "bash",
       [join(targetDir, "scripts", "configure.sh"), "--init"],
       {
@@ -254,8 +262,9 @@ describe("scripts/configure.sh --init (ORBIT_CONFIGURE_PROMPTS=machine)", () => 
           ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
           ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
         },
+        ...processGuard(),
       },
-    );
+    ), { label: "default (non-machine) behaviour" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("prompt field=");

@@ -3,8 +3,9 @@ import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   buildMigrateArgv,
   buildPreflightArgv,
@@ -27,6 +28,11 @@ import {
 // message this module expects), through a reference adapter local to this
 // file (not shipped — see configuration-migration.ts's module comment for
 // why a real subprocess adapter isn't shipped in this slice).
+
+// This file spawns the real scripts/configuration.sh under bash; a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const sandboxes: string[] = [];
@@ -53,17 +59,19 @@ function makeSandbox(envOrbitContent: string): string {
 function realAdapter(sandbox: string): ConfigurationScriptAdapter {
   return {
     runPreflight: (configurationScript, environmentFile) => {
-      const result = spawnSync("bash", [configurationScript, ...buildPreflightArgv(environmentFile)], {
+      const result = failOnProcessDeadline(spawnSync("bash", [configurationScript, ...buildPreflightArgv(environmentFile)], {
         cwd: sandbox,
         encoding: "utf8",
-      });
+        ...processGuard(),
+      }), { label: "runPreflight" });
       return { status: result.status ?? -1, stdout: result.stdout };
     },
     runMigrate: (configurationScript, target) => {
-      const result = spawnSync("bash", [configurationScript, ...buildMigrateArgv(target)], {
+      const result = failOnProcessDeadline(spawnSync("bash", [configurationScript, ...buildMigrateArgv(target)], {
         cwd: sandbox,
         encoding: "utf8",
-      });
+        ...processGuard(),
+      }), { label: "runMigrate" });
       return { status: result.status ?? -1, stdout: result.stdout };
     },
   };
