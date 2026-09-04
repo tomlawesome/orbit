@@ -66,7 +66,9 @@
     /* A marker left over from an abandoned sign-in must never fire later. */
     clearLaunch();
 
+    /** @type {ReturnType<typeof setTimeout>[]} */
     const timers = [];
+    /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
     /* first light: the dawn breaks once on load (CON-9, POL-13) */
     const frame = requestAnimationFrame(() => after(180, () => document.body.classList.add("lit")));
@@ -81,8 +83,9 @@
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /** @param {MouseEvent} event */
   function press(event) {
-    const gate = event.currentTarget;
+    const gate = /** @type {HTMLElement} */ (event.currentTarget);
     if (leaving) return;
     leaving = true;
     markLaunch();

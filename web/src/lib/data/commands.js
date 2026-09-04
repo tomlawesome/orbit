@@ -9,6 +9,37 @@
  * rather than discovered in a container run.
  */
 
+/**
+ * The raw item a command is built against. workspace.js's own WorkspaceItem
+ * carries no `householdId` (a household already knows which items are its
+ * own), but every command here has to address one from outside that context,
+ * so this is a local, wider shape rather than a change to that typedef.
+ *
+ * @typedef {object} CommandItem
+ * @property {string} id
+ * @property {string} householdId
+ * @property {?string} [sectionId]
+ * @property {string} title
+ * @property {?string} [subtype]
+ * @property {?string} [provider]
+ * @property {?string} [reference]
+ * @property {?number} [costMinor]
+ * @property {?boolean} [costIsEstimate]
+ * @property {?string} [currency]
+ * @property {?string} [dueDate]
+ * @property {?string} [scheduleKind]
+ * @property {?number} [recurrenceMonths]
+ * @property {?number[]} [reminderDays]
+ * @property {?string} [snoozedUntil]
+ * @property {?string} [notes]
+ * @property {string} status
+ * @property {number} [version]
+ * @property {string} [updatedAt]
+ */
+
+/** @typedef {{ uuid: () => string, now: () => string }} IdSource */
+
+/** @type {IdSource} */
 const DEFAULT_IDS = {
   uuid: () => crypto.randomUUID(),
   now: () => new Date().toISOString(),
@@ -18,6 +49,9 @@ const DEFAULT_IDS = {
  * The item's next orbit: the completion date plus its period in calendar
  * months, clamped to the end of a shorter month rather than overflowing into
  * the one after (31 Jan + 1 month is 28 Feb, not 3 Mar).
+ * @param {string} completedDate
+ * @param {?number} [recurrenceMonths]
+ * @returns {?string}
  */
 export function nextDateAfter(completedDate, recurrenceMonths) {
   if (!recurrenceMonths) return null;
@@ -28,6 +62,13 @@ export function nextDateAfter(completedDate, recurrenceMonths) {
   return target.toISOString().slice(0, 10);
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {string} kind
+ * @param {Partial<import('./workspace.js').ItemActivity>} details
+ * @param {IdSource} ids
+ * @returns {import('./workspace.js').ItemActivity}
+ */
 function activityOf(item, kind, details, ids) {
   return {
     id: ids.uuid(),
@@ -38,6 +79,10 @@ function activityOf(item, kind, details, ids) {
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @returns {{ householdId: string, itemId: string, expectedVersion: number }}
+ */
 function base(item) {
   return {
     householdId: item.householdId,
@@ -46,6 +91,11 @@ function base(item) {
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {{ completedDate: string | undefined, nextDate?: string, costMinor?: number, notes?: string }} fields
+ * @param {IdSource} [ids]
+ */
 export function completeCommand(item, { completedDate, nextDate, costMinor, notes }, ids = DEFAULT_IDS) {
   const kind = item.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
   return {
@@ -65,6 +115,11 @@ export function completeCommand(item, { completedDate, nextDate, costMinor, note
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {string | undefined} dueDate
+ * @param {IdSource} [ids]
+ */
 export function rescheduleCommand(item, dueDate, ids = DEFAULT_IDS) {
   return {
     type: "item.reschedule",
@@ -77,6 +132,11 @@ export function rescheduleCommand(item, dueDate, ids = DEFAULT_IDS) {
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {string | undefined} snoozedUntil
+ * @param {IdSource} [ids]
+ */
 export function snoozeCommand(item, snoozedUntil, ids = DEFAULT_IDS) {
   return {
     type: "item.snooze",
@@ -86,6 +146,10 @@ export function snoozeCommand(item, snoozedUntil, ids = DEFAULT_IDS) {
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {IdSource} [ids]
+ */
 export function archiveCommand(item, ids = DEFAULT_IDS) {
   return {
     type: "item.archive",
@@ -94,6 +158,11 @@ export function archiveCommand(item, ids = DEFAULT_IDS) {
   };
 }
 
+/**
+ * @param {CommandItem} item
+ * @param {string} status
+ * @param {IdSource} [ids]
+ */
 export function statusCommand(item, status, ids = DEFAULT_IDS) {
   return {
     type: "item.status",
@@ -103,18 +172,40 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
   };
 }
 
-/** The workspaceItemSchema fields — the view-model's joins must never travel. */
+/**
+ * The workspaceItemSchema fields — the view-model's joins must never travel.
+ * @type {(keyof CommandItem)[]}
+ */
 const ITEM_FIELDS = [
   "id", "sectionId", "title", "subtype", "provider", "reference", "costMinor",
   "currency", "dueDate", "scheduleKind", "recurrenceMonths", "reminderDays",
   "snoozedUntil", "notes", "status", "version", "updatedAt",
 ];
 
+/**
+ * Copies one field across if the merged record actually set it -- a small
+ * generic so the field-by-field copy below type-checks per property instead
+ * of collapsing every field in the list to one shared (and wrong) type.
+ * @template {keyof CommandItem} K
+ * @param {CommandItem} clean
+ * @param {CommandItem} merged
+ * @param {K} field
+ */
+function copyItemField(clean, merged, field) {
+  const value = merged[field];
+  if (value !== undefined && value !== null) clean[field] = value;
+}
+
+/**
+ * @param {CommandItem} item
+ * @param {Partial<CommandItem>} edits
+ * @param {IdSource} [ids]
+ */
 export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
   const merged = { ...item, ...edits };
-  const clean = {};
+  const clean = /** @type {CommandItem} */ ({});
   for (const field of ITEM_FIELDS) {
-    if (merged[field] !== undefined && merged[field] !== null) clean[field] = merged[field];
+    copyItemField(clean, merged, field);
   }
   return {
     type: "item.upsert",
