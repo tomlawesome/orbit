@@ -66,7 +66,7 @@ function scratchDir() {
 //                                                              SELECT (fingerprinted by the
 //                                                              literal orbit_migration_runs
 //                                                              table name)
-//   - `docker inspect --format '{{.Config.Image}}|...' <id>` -> app image/health
+//   - `docker inspect --format '{{.Config.Image}}|...' <id>` -> app image/health/start time
 //   - `docker inspect --format '{{.Image}}' <id>`           -> issue #528 running image ID
 //   - `docker image inspect --format '{{.Id}}' <ref>`       -> issue #528 locally-present
 //                                                              image for the pinned ref
@@ -197,8 +197,20 @@ function dockerShimScript({
   const appImage = (app && app.image) || "";
   const appHealth = app && app.health !== undefined ? app.health : "healthy";
   // The app's own operational log, so a refusal to start over the database can
-  // be told apart from a generic unhealthy container (#437).
+  // be told apart from a generic unhealthy container (#437). This is what the
+  // CURRENT run of the container wrote.
   const appLog = (app && app.log) || "";
+  // issue #778: what an EARLIER run of the same container wrote. `docker logs`
+  // replays every run of a container, not only the current one, so these lines
+  // are visible to an unbounded read and hidden from one bounded by
+  // `--since <StartedAt>`. Empty by default, so a test that does not opt in
+  // sees exactly what it did before.
+  const appPriorLog = (app && app.priorLog) || "";
+  // issue #778: the container's current start time, the lower bound Step 12
+  // reads off its own inspect. A real timestamp by default rather than an
+  // empty string, so the default shim exercises the bounded read the way a
+  // real docker does.
+  const appStartedAt = (app && app.startedAt) || "2026-01-01T00:00:00.000000000Z";
   const alterRoleExit = alterRoleFails ? 1 : 0;
   const migrationRunHasData = migrationRunRaw !== undefined || migrationRun;
   const migrationRunExit = migrationRunHasData ? 0 : 1;
@@ -482,11 +494,19 @@ function dockerShimScript({
     "    logs_args=(\"${@:2}\")",
     "    logs_idx=0",
     "    logs_target=''",
+    "    logs_since=''",
     '    while (( logs_idx < ${#logs_args[@]} )); do',
     '      logs_arg="${logs_args[logs_idx]}"',
     '      case "$logs_arg" in',
     "        --details|-f|--follow|-t|--timestamps) logs_idx=$((logs_idx + 1)) ;;",
-    "        --since|-n|--tail|--until) logs_idx=$((logs_idx + 2)) ;;",
+    // issue #778: --since is the lower bound on the window, so unlike the
+    // other two-argument flags its value is kept, not just stepped over.
+    "        --since)",
+    "          logs_idx=$((logs_idx + 1))",
+    '          logs_since="${logs_args[logs_idx]:-}"',
+    "          logs_idx=$((logs_idx + 1))",
+    "          ;;",
+    "        -n|--tail|--until) logs_idx=$((logs_idx + 2)) ;;",
     '        --*) printf "unknown flag: %s\\n" "$logs_arg" >&2; exit 125 ;;',
     '        *) logs_target="$logs_arg"; logs_idx=$((logs_idx + 1)) ;;',
     "      esac",
@@ -496,7 +516,16 @@ function dockerShimScript({
     "      exit 1",
     "    fi",
     // The app's own operational log, so a refusal to start over the database
-    // can be told apart from a generic unhealthy container (#437).
+    // can be told apart from a generic unhealthy container (#437). An earlier
+    // run's output is replayed only to a reader that set no lower bound,
+    // exactly as a real `docker logs` does (#778).
+    ...(appPriorLog
+      ? [
+          '    if [[ -z "$logs_since" ]]; then',
+          `      printf '%s\\n' '${appPriorLog}'`,
+          "    fi",
+        ]
+      : []),
     `    printf '%s\\n' '${appLog}'`,
     "    exit 0",
     "    ;;",
@@ -534,7 +563,16 @@ function dockerShimScript({
     "      exit 0",
     "    fi",
     `    app_health="$(${appHealthExpr})"`,
-    `    printf '%s|%s\\n' '${appImage}' "$app_health"`,
+    // Third field is the container's start time (#778): the lower bound Step
+    // 12 puts on its log window, read off this same inspect rather than a
+    // second probe. Emitted only when the caller's format asks for it, the
+    // way a real `docker inspect` answers the format it was given — so a
+    // caller that does not ask still gets exactly two fields.
+    '    if [[ "$inspect_format" == *"{{.State.StartedAt}}"* ]]; then',
+    `      printf '%s|%s|%s\\n' '${appImage}' "$app_health" '${appStartedAt}'`,
+    "    else",
+    `      printf '%s|%s\\n' '${appImage}' "$app_health"`,
+    "    fi",
     "    exit 0",
     "    ;;",
     "  image)",
@@ -1568,6 +1606,53 @@ describe("scripts/repair.sh --check", () => {
     expect(result.status).toBe(4);
     expect(result.stdout).toContain("finding class=database-schema-mismatch target=application severity=fail");
     // Reported INSTEAD of, not as well as: restarting cannot change either side.
+    expect(result.stdout).not.toContain("application-unhealthy");
+  });
+
+  it("ignores a dead boot's mismatch sentinel when the current run is sound (#778)", () => {
+    const targetDir = makeFixture();
+
+    // The state the repair journeys hit: the app refused to start over its
+    // database, the restart policy revived it against a database that had
+    // since been put right, and it is now frozen rather than mismatched.
+    // `docker logs` replays both runs, so the dead boot's sentinel is still
+    // in the last 50 lines. The remedy for what the operator is looking at
+    // is "restart", and reading the earlier run gives them "attach a
+    // different database" instead.
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        startedAt: "2026-09-03T21:13:21.429036251Z",
+        priorLog:
+          "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
+        log: "INFO orbit application application.startup state=ready reason=- action=none impact=-",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=application-unhealthy target=application severity=fail");
+    expect(result.stdout).not.toContain("database-schema-mismatch");
+  });
+
+  it("still names the mismatch when the current run is the one that wrote it (#437, #778)", () => {
+    const targetDir = makeFixture();
+
+    // The complement, and the reason the fix bounds the window rather than
+    // dropping the scan: an earlier run that ALSO failed must not stop the
+    // current run's sentinel being read.
+    const result = runRepair(targetDir, ["--check"], {
+      app: {
+        present: true,
+        health: "unhealthy",
+        startedAt: "2026-09-03T21:13:21.429036251Z",
+        priorLog: "INFO orbit application application.startup state=ready reason=- action=none impact=-",
+        log: "ERROR orbit migrations startup.migration state=exhausted reason=database_mismatch action=attach_matching_database impact=migration_blocked",
+      },
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-schema-mismatch target=application severity=fail");
     expect(result.stdout).not.toContain("application-unhealthy");
   });
 
@@ -4601,6 +4686,10 @@ describe("scripts/repair.sh EXIT trap (issue #383 finding 4)", () => {
       }
       rmSync(shimDir, { recursive: true, force: true });
     }
+    // This test gives itself 10 seconds to watch the directory appear, and
+    // then still has to kill repair.sh and wait for it to exit: the file-level
+    // PROCESS_TEST_TIMEOUT_MS budget is what lets those 10 seconds be spent
+    // (#698); the spawnRepair watchdog fails it first if repair.sh hangs.
   });
 });
 
