@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { rasteriseSvg } from "$lib/raster.js";
+  import { decodeSvg } from "$lib/raster.js";
 
   /**
    * POL-13's film grain, once (#445) — and now rasterised once too (#499).
@@ -33,11 +33,17 @@
    * exact SVG, at the exact CSS pixel dimensions this element occupies (so
    * the filter region and the stitch math see the same numbers a live filter
    * would have seen) and at devicePixelRatio-native resolution (so retina
-   * stays crisp), into a canvas; hand the canvas's data URL to a plain
-   * background-image on THIS element. From then on this element costs
-   * nothing per repaint — it is an ordinary raster layer — and only rebuilds
-   * on resize, debounced, same as every other "paint once, blit" surface in
-   * this app (the item belt's haze canvas, POL-11's drift).
+   * stays crisp), onto the <canvas> inside this element. From then on this
+   * element costs nothing per repaint — it is an ordinary raster layer — and
+   * only rebuilds on resize, debounced, same as every other "paint once,
+   * blit" surface in this app (the item belt's haze canvas, POL-11's drift).
+   *
+   * The canvas is shown as it is, not encoded (#797). This used to go on via
+   * rasteriseSvg's PNG data URL to a background-image, and noise does not
+   * compress: at 1440×900 on a retina screen that URL was 11 MB, and
+   * building, parsing and decoding it froze the main thread for over two
+   * seconds on every first load. The blit is the same 1:1 drawImage; only
+   * the round trip is gone.
    *
    * feTurbulence is deterministic for a fixed seed (the default, 0 — never
    * set here, on either side) and a fixed region size, so the raster this
@@ -46,15 +52,16 @@
    * it always has: this is not an approximation of the grain, it is the same
    * grain, computed once instead of every frame.
    *
-   * The decode/draw/cache mechanics live in $lib/raster.js (#501): this file
-   * only builds the filter-graph SVG and the cache key, since #501 needed
-   * the identical mechanism for the dawn/dusk glows and a second copy of the
-   * canvas dance would have drifted from this one the way the grain drifted
-   * across screens before #445.
+   * The SVG decode lives in $lib/raster.js (#501): this file only builds the
+   * filter-graph SVG, since #501 needed the identical mechanism for the
+   * dawn/dusk glows and a second copy would have drifted from this one the
+   * way the grain drifted across screens before #445.
    */
   let { slope = 0.08 } = $props();
   /** @type {HTMLDivElement} */
   let host;
+  /** @type {HTMLCanvasElement} */
+  let canvas;
 
   /**
    * The exact filter graph, verbatim, wrapped in an SVG sized so its own
@@ -75,17 +82,6 @@
       `<feComposite operator="in" in2="SourceGraphic"/>` +
       `</filter><rect width="${w}" height="${h}" filter="url(#gr)"/></svg>`
     );
-  }
-
-  /**
-   * @param {string} freq @param {string} slope
-   * @param {number} w @param {number} h @param {number} dpr
-   */
-  async function rasterise(freq, slope, w, h, dpr) {
-    const rw = Math.max(1, Math.round(w * dpr));
-    const rh = Math.max(1, Math.round(h * dpr));
-    const key = `grain|${freq}|${slope}|${rw}|${rh}`;
-    return rasteriseSvg(key, svgFor(freq, slope, w, h, dpr), rw, rh);
   }
 
   onMount(() => {
@@ -111,16 +107,18 @@
          never race a capture. Mockups' own inline grain SVG carries no such
          attribute, so that wait is a no-op there. */
       host.dataset.rasterised = "pending";
-      const url = await rasterise(freq, effectiveSlope, w, h, dpr);
+      const img = await decodeSvg(svgFor(freq, effectiveSlope, w, h, dpr));
       if (cancelled) return;
 
-      /* Imperative, not a bound style: this and the readiness flag below
-         must land in the same tick, with nothing async between them, so a
-         poller can never observe "ready" before the background is actually
-         painted. */
-      host.style.backgroundImage = `url(${url})`;
-      host.style.backgroundSize = "100% 100%";
-      host.style.backgroundRepeat = "no-repeat";
+      /* The draw and the readiness flag land in the same tick, with nothing
+         async between them, so a poller can never observe "ready" before
+         the grain is actually painted. 1:1 — the image's intrinsic size is
+         the canvas's, so this is a straight blit with no resampling. */
+      const rw = Math.max(1, Math.round(w * dpr));
+      const rh = Math.max(1, Math.round(h * dpr));
+      canvas.width = rw;
+      canvas.height = rh;
+      /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d")).drawImage(img, 0, 0, rw, rh);
       host.dataset.rasterised = "ready";
     }
 
@@ -139,4 +137,4 @@
   });
 </script>
 
-<div class="grain" bind:this={host} aria-hidden="true"></div>
+<div class="grain" bind:this={host} aria-hidden="true"><canvas bind:this={canvas}></canvas></div>
