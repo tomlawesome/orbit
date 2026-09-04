@@ -53,11 +53,16 @@
    * across screens before #445.
    */
   let { slope = 0.08 } = $props();
+  /** @type {HTMLDivElement} */
   let host;
 
-  /** The exact filter graph, verbatim, wrapped in an SVG sized so its own
-      user-space matches the live element's CSS box (w × h) while its
-      intrinsic raster matches the device pixel grid (w × h × dpr). */
+  /**
+   * The exact filter graph, verbatim, wrapped in an SVG sized so its own
+   * user-space matches the live element's CSS box (w × h) while its
+   * intrinsic raster matches the device pixel grid (w × h × dpr).
+   * @param {string} freq @param {string} slope
+   * @param {number} w @param {number} h @param {number} dpr
+   */
   function svgFor(freq, slope, w, h, dpr) {
     const rw = Math.max(1, Math.round(w * dpr));
     const rh = Math.max(1, Math.round(h * dpr));
@@ -72,6 +77,10 @@
     );
   }
 
+  /**
+   * @param {string} freq @param {string} slope
+   * @param {number} w @param {number} h @param {number} dpr
+   */
   async function rasterise(freq, slope, w, h, dpr) {
     const rw = Math.max(1, Math.round(w * dpr));
     const rh = Math.max(1, Math.round(h * dpr));
@@ -86,6 +95,7 @@
     const effectiveSlope = packSlope || String(slope);
 
     let cancelled = false;
+    /** @type {ReturnType<typeof setTimeout>} */
     let timer;
 
     async function build() {

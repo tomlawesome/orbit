@@ -53,14 +53,15 @@
   let active = $state("starchart");
 
   $effect(() => {
-    active = document.documentElement.dataset.theme || "starchart";
-    const close = (event) => {
+    active = document.documentElement.dataset.theme || "afterdark";
+    const close = (/** @type {Event} */ event) => {
       if (!(event.target instanceof Element) || !event.target.closest(".account,.orb")) open = false;
     };
     addEventListener("click", close);
     return () => removeEventListener("click", close);
   });
 
+  /** @param {string} name */
   function setSwatch(name) {
     active = name;
     document.documentElement.dataset.theme = name;
@@ -84,6 +85,7 @@
    * silent invention.
    */
   let armedOut = $state(false);
+  /** @type {string | null} */
   let signOutProblem = $state(null);
   async function tapSignOut() {
     if (!armedOut) { armedOut = true; return; }
@@ -92,7 +94,7 @@
       await signOut();
     } catch (error) {
       armedOut = false;
-      signOutProblem = error?.message ?? "still signed in — try again";
+      signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
     location.href = "/logout";
@@ -100,7 +102,7 @@
 
   const initials = $derived(
     (user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 </script>
 
@@ -187,6 +189,6 @@
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
   .signout{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;padding:0}
-  .signout:hover{color:var(--overdue)}
-  .signout-problem{font:10.5px var(--mono);color:var(--overdue);margin-top:7px;line-height:1.7}
+  .signout:hover{color:var(--overdue-text)}
+  .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 </style>

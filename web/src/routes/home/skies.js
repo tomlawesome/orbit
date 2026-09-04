@@ -44,34 +44,33 @@
  *    (fixed layers, <html> classes), and home is a route the reader leaves.
  */
 
-const NS = "http://www.w3.org/2000/svg";
-const svgel = (name, attrs) => {
-  const el = document.createElementNS(NS, name);
-  for (const key in attrs) el.setAttribute(key, attrs[key]);
-  return el;
-};
-const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
-const smoothstep = (t) => t * t * (3 - 2 * t);
-
-/** Park–Miller, the same generator every seeded surface in Orbit uses. */
-const mkRng = (s) => {
-  let x = s % 2147483647;
-  if (x <= 0) x += 2147483646;
-  return () => (x = (x * 48271) % 2147483647) / 2147483647;
-};
+import { seededRng, streamFactory } from "$lib/sky.js";
 
 /**
- * chunk n of layer L is a pure function of (seed, layer, n) — the whole of the
- * never-loop law in three lines. A stretch of sky can be rolled the instant
- * before it is revealed and thrown away for good once it has passed, and
- * nothing is ever tiled or repeated.
+ * @typedef {() => boolean} StillFn
+ * @typedef {(callback: () => void) => () => void} CameraSub
+ * @typedef {(callback: () => void) => () => void} GalaxySub
+ * @typedef {{ seed: number, still: StillFn, onCamera: CameraSub, onGalaxy: GalaxySub }} SkyOptions
+ * @typedef {(options: SkyOptions) => () => void} EngineFn
+ * @typedef {[number, number]} Stop
  */
-const streamFactory = (seed) => (layer, idx) => {
-  const h = (seed ^ Math.imul(idx + 1, 2654435761) ^ Math.imul(layer + 1, 40503)) | 0;
-  const r = mkRng((Math.abs(h) % 2147483646) + 1);
-  r(); r(); r();
-  return r;
+
+const NS = "http://www.w3.org/2000/svg";
+/** @type {(name: string, attrs: Record<string, string | number>) => Element} */
+const svgel = (name, attrs) => {
+  const el = document.createElementNS(NS, name);
+  for (const key in attrs) el.setAttribute(key, /** @type {string} */ (attrs[key]));
+  return el;
 };
+/** @type {(v: number) => number} */
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** @type {(t: number) => number} */
+const smoothstep = (t) => t * t * (3 - 2 * t);
+
+/* #475: mkRng and streamFactory moved to $lib/sky.js, so the relay,
+   create and administration backdrops inherit them rather than each
+   carrying a copy. Same generator, same constants, same warm-up. */
+const mkRng = seededRng;
 
 /* ══════════════════════════════════════════════════════════════════════════
    AFTER DARK — THE GALACTIC PLANE
@@ -88,6 +87,9 @@ const streamFactory = (seed) => (layer, idx) => {
      endless stream drift for hours without the band wandering out of frame.
    · reduced motion — no rAF, no drift, the opening window held.
    ══════════════════════════════════════════════════════════════════════════ */
+/**
+ * @param {SkyOptions} options
+ */
 function mountPlane({ seed, still, onCamera }) {
   const cam = document.getElementById("pcam");
   const drift = document.getElementById("pdrift");
@@ -114,7 +116,9 @@ function mountPlane({ seed, still, onCamera }) {
      windowed discipline possible at all. */
   const NODE = 1450, AMP = 520, ROUND = 340, MID = 500;
   const L_LINE = 7;
+  /** @type {Map<number, number>} */
   const nodeMemo = new Map();
+  /** @param {number} k */
   function nodeY(k) {
     if (nodeMemo.has(k)) return nodeMemo.get(k);
     const r = streamFor(L_LINE, k);
@@ -124,10 +128,12 @@ function mountPlane({ seed, still, onCamera }) {
   }
   /* segment j's straight line, evaluated anywhere (extrapolated a little way
      past its own node so the corners have something to blend) */
+  /** @type {(j: number, x: number) => number} */
   const seg = (j, x) => {
-    const y0 = nodeY(j), y1 = nodeY(j + 1);
+    const y0 = nodeY(j) ?? 0, y1 = nodeY(j + 1) ?? 0;
     return y0 + (y1 - y0) * (x - j * NODE) / NODE;
   };
+  /** @param {number} x */
   function centreY(x) {
     const k = Math.floor(x / NODE), d = x - k * NODE;
     if (d < ROUND) {
@@ -143,6 +149,7 @@ function mountPlane({ seed, still, onCamera }) {
   /* the local slope, read off the line itself rather than off a constant —
      every lobe and every dust lane is laid along it, which is what makes the
      band bend as one piece instead of shearing at the corners */
+  /** @type {(x: number) => number} */
   const degAt = (x) => Math.atan((centreY(x + 8) - centreY(x - 8)) / 16) * 180 / Math.PI;
 
   /* ---- the brightness budget, spelled out where it is spent ---------------
@@ -158,7 +165,9 @@ function mountPlane({ seed, still, onCamera }) {
 
   /* ---- the chunk: one 400-unit slice of river ---------------------------- */
   const CW = 400, AHEAD = 560, BEHIND = 470;
+  /** @type {Map<number, { gg: Element, gs: Element, gd: Element }>} */
   const live = new Map();
+  /** @param {number} i */
   function build(i) {
     const r = streamFor(0, i), x0 = i * CW;
     const mk = () => svgel("g", { transform: `translate(${x0},0)` });
@@ -171,6 +180,7 @@ function mountPlane({ seed, still, onCamera }) {
        distance you look at it from: wings you see from across the room, clumps
        you see at arm's length, knots you only see when you lean in. Rolled
        largest first so the warm core always lands on top of the cool wings. */
+    /** @type {(n: number, opts: { rx0: number, rxd: number, ry0: number, ryd: number, off: number, tilt: number, paint: string, a: number }) => void} */
     const lobe = (n, opts) => {
       for (let k = 0; k < n; k++) {
         const u = r() * CW, X = x0 + u, cy = centreY(X) + (r() * 2 - 1) * opts.off;
@@ -273,6 +283,7 @@ function mountPlane({ seed, still, onCamera }) {
      glow, then all the stars, then all the lanes. Lobes are wider than a chunk
      and deliberately overhang it; interleaving them per chunk would draw a seam
      every 400 units. */
+  /** @param {number} offset */
   function fill(offset) {
     const first = Math.floor((offset - BEHIND) / CW);
     const last = Math.floor((offset + 1600 + AHEAD) / CW);
@@ -280,7 +291,9 @@ function mountPlane({ seed, still, onCamera }) {
       if (live.has(i)) continue;
       const c = build(i);
       live.set(i, c);
-      gGlow.appendChild(c.gg); gStar.appendChild(c.gs); gDust.appendChild(c.gd);
+      /** @type {HTMLElement} */ (gGlow).appendChild(c.gg);
+      /** @type {HTMLElement} */ (gStar).appendChild(c.gs);
+      /** @type {HTMLElement} */ (gDust).appendChild(c.gd);
     }
     for (const [i, c] of live) {
       if (i < first || i > last) {
@@ -299,7 +312,7 @@ function mountPlane({ seed, still, onCamera }) {
   function planeCam() {
     const t = document.getElementById("cam-far")?.style.transform ?? "";
     const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(t);
-    cam.style.transform = m
+    /** @type {HTMLElement} */ (cam).style.transform = m
       ? `translate(${(+m[1] * PARALLAX).toFixed(1)}px, ${(+m[2] * PARALLAX).toFixed(1)}px)`
       : "translate(0px, 0px)";
   }
@@ -307,11 +320,15 @@ function mountPlane({ seed, still, onCamera }) {
 
   /* ---- the drift: slowest thing on the screen ---------------------------- */
   const SPEED = 1600 / 620; /* the far field does 1600 / 400 */
-  let t0 = performance.now(), frame = null;
+  let t0 = performance.now();
+  /** @type {number | null} */
+  let frame = null;
+  /** @type {(now: number) => number} */
   const offsetAt = (now) => (still() ? 0 : ((now - t0) / 1000) * SPEED);
+  /** @param {number} off */
   function render(off) {
     fill(off);
-    drift.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
+    /** @type {HTMLElement} */ (drift).setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
     planeCam();
   }
   /* THE PLANE DOES NOT NEED A FRAME CLOCK. It moves 2.58 units a second — at
@@ -323,6 +340,7 @@ function mountPlane({ seed, still, onCamera }) {
      own CSS drift at full rate; this is the far layer being far. */
   const MOVE_MS = 96;
   let lastMove = -1e9;
+  /** @param {number} now */
   function step(now) {
     if (now - lastMove >= MOVE_MS) { lastMove = now; render(offsetAt(now)); }
     frame = requestAnimationFrame(step);
@@ -336,8 +354,8 @@ function mountPlane({ seed, still, onCamera }) {
     offCamera();
     for (const [, c] of live) { c.gg.remove(); c.gs.remove(); c.gd.remove(); }
     live.clear(); nodeMemo.clear();
-    cam.style.transform = "";
-    drift.removeAttribute("transform");
+    /** @type {HTMLElement} */ (cam).style.transform = "";
+    /** @type {HTMLElement} */ (drift).removeAttribute("transform");
   };
 }
 
@@ -355,6 +373,9 @@ function mountPlane({ seed, still, onCamera }) {
    · reduced motion — everything above stops; the crossing freezes where the
      seed put it and the stream holds its opening window.
    ══════════════════════════════════════════════════════════════════════════ */
+/**
+ * @param {SkyOptions} options
+ */
 function mountTerminator({ seed, still, onCamera, onGalaxy }) {
   const night = document.getElementById("night");
   const sky = document.getElementById("nightsky");
@@ -434,11 +455,15 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
     const b = el && el.getBoundingClientRect();
     if (!b || !b.width) return { x: innerWidth / 2, y: innerHeight / 2, r: 640 * GUARD_VB };
     return { x: b.left + b.width / 2, y: b.top + b.height / 2,
-             r: Math.max(parseFloat(el.getAttribute("width")) || 640, b.width) * GUARD_VB };
+             r: Math.max(
+               parseFloat(/** @type {Element} */ (el).getAttribute("width") ?? "") || 640,
+               b.width,
+             ) * GUARD_VB };
   }
   /* how far the crossing can be pushed back before the night reaches FLOOR: the
      share is ½·LE·TE and a push of p takes a fixed bite out of each leg, so the
      limit is one quadratic, solved rather than searched */
+  /** @param {number} LE @param {number} TE @param {number} a @param {number} b */
   function pushCap(LE, TE, a, b) {
     const A = a * b, B = LE * b + TE * a, C = LE * TE - 2 * FLOOR;
     if (C <= 0) return 0;
@@ -446,7 +471,14 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
     if (disc <= 0 || A <= 0) return 0;
     return Math.max(0, (B - Math.sqrt(disc)) / (2 * A));
   }
+  /**
+   * @typedef {{ W: number, H: number, LE: number, TE: number, nx: number, ny: number,
+   *             ax: number, depth: number, L: number, CEN: number, ANG: number,
+   *             fall: number, off: number }} Frame
+   */
+  /** @type {Frame | null} */
   let FR = null;
+  /** @returns {Frame} */
   function frame() {
     const W = innerWidth, H = innerHeight;
     const LE = Math.sqrt(2 * SHARE * TILT), TE = Math.sqrt(2 * SHARE / TILT);
@@ -475,23 +507,27 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
 
   function paint() {
     const f = frame();
+    /** @type {(t: number) => string} */
     const at = (t) => (50 + (f.off + t * f.fall - f.CEN) / f.L * 100).toFixed(2) + "%";
+    /** @type {(list: number[][], rgb: string) => string} */
     const ramp = (list, rgb) => list.map(([t, a]) => ` rgba(${rgb},${a}) ${at(t)}`).join(",");
     const A = f.ANG.toFixed(2);
-    night.style.backgroundImage = `linear-gradient(${A}deg,${ramp(NIGHT, NIGHT_RGB)})`;
+    /** @type {HTMLElement} */ (night).style.backgroundImage = `linear-gradient(${A}deg,${ramp(NIGHT, NIGHT_RGB)})`;
     /* the stars come back exactly where the light stops */
     const m = `linear-gradient(${A}deg, transparent ${at(-0.05)},` +
               ` rgba(0,0,0,.5) ${at(0.74)}, #000 ${at(1.7)})`;
-    sky.style.webkitMaskImage = m; sky.style.maskImage = m;
+    /** @type {HTMLElement} */ (sky).style.webkitMaskImage = m;
+    /** @type {HTMLElement} */ (sky).style.maskImage = m;
     /* the limb: the air the light reaches first. It sits on the DAY side of the
        fall, which is why the chart never has to be legible against mud — where
        the crossing passes over the instrument, it passes over it as LIGHT. This
        is the brightest thing in the sky after the sun. */
-    limb.style.backgroundImage = `linear-gradient(${A}deg,${ramp(LIMB, LIMB_RGB)})`;
+    /** @type {HTMLElement} */ (limb).style.backgroundImage = `linear-gradient(${A}deg,${ramp(LIMB, LIMB_RGB)})`;
   }
 
   /* the wash's own alpha, read off the same table it is painted from, so the
      material a mark is drawn in can never disagree with the ground */
+  /** @param {number[][]} list @param {number} d */
   function readTable(list, d) {
     if (d <= list[0][0]) return list[0][1];
     for (let i = 1; i < list.length; i++) {
@@ -502,6 +538,7 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
     }
     return list[list.length - 1][1];
   }
+  /** @param {number} px @param {number} py */
   function alphaAt(px, py) {
     const f = FR || frame();
     const d = (px * f.nx + (py - f.ax) * f.ny - f.off) / f.fall;
@@ -520,10 +557,11 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
      is starlight, so its tokens are mixed toward the starlight set by exactly
      how deep into the night it sits. Legibility goes UP, never down: this is the
      only way a mark in the dark stays readable. */
+  /** @type {(day: string, nightc: string, k: number) => string} */
   const mix = (day, nightc, k) =>
     `color-mix(in srgb, ${nightc} ${(k * 100).toFixed(1)}%, ${day})`;
   function tintGalaxy() {
-    for (const m of document.querySelectorAll(".minisys")) {
+    for (const m of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".minisys"))) {
       const r = m.getBoundingClientRect();
       if (!r.width) continue;
       /* sampled AT THE LABEL, not at the ring: the name sits above the ring
@@ -541,7 +579,7 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
       const halo = clamp01(1 - Math.abs(alpha - 0.26) / 0.34);
       if (m.dataset.dim === undefined) m.dataset.dim = m.style.opacity || "1";
       m.style.opacity =
-        Math.min(1, parseFloat(m.dataset.dim) * (1 + 0.34 * k + 0.28 * halo)).toFixed(3);
+        Math.min(1, parseFloat(/** @type {string} */ (m.dataset.dim)) * (1 + 0.34 * k + 0.28 * halo)).toFixed(3);
       m.style.filter = halo > 0.02
         ? `drop-shadow(0 0 2px rgba(255,246,228,${(halo * 0.78).toFixed(2)}))` +
           ` drop-shadow(0 0 7px rgba(255,236,205,${(halo * 0.62).toFixed(2)}))`
@@ -566,7 +604,7 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
      screen under a different sky, so every property written above is removed
      rather than left to be inherited into a pack that has no night in it. */
   function untintGalaxy() {
-    for (const m of document.querySelectorAll(".minisys")) {
+    for (const m of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".minisys"))) {
       if (m.dataset.dim !== undefined) { m.style.opacity = m.dataset.dim; delete m.dataset.dim; }
       m.style.filter = "";
       for (const p of ["--accent", "--accent-text", "--ink", "--chart-line", "--chart-ink", "--warm", "--ok", "--upcoming"])
@@ -575,13 +613,20 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
   }
 
   /* ---- the night starfield: chunks in, chunks gone ---------------------- */
-  const LAYERS = [
+  /**
+   * @typedef {{ key: number, id: string, w: number, speed: number, n: number,
+   *             r0: number, r1: number, o0: number, o1: number,
+   *             node: HTMLElement, live: Map<number, Element> }} Layer
+   */
+  /** @type {Layer[]} */
+  const LAYERS = /** @type {any} */ ([
     { key: 0, id: "t-far", w: 800, speed: 1600 / 400, n: 52, r0: 0.45, r1: 1.10, o0: 0.30, o1: 0.70 },
     { key: 1, id: "t-near", w: 800, speed: 1600 / 195, n: 20, r0: 0.85, r1: 2.00, o0: 0.62, o1: 1.00 },
-  ];
+  ]);
   const AHEAD = 700, BEHIND = 300;
-  for (const L of LAYERS) { L.node = document.getElementById(L.id); L.live = new Map(); }
+  for (const L of LAYERS) { L.node = /** @type {HTMLElement} */ (document.getElementById(L.id)); L.live = new Map(); }
 
+  /** @param {Layer} L @param {number} offset */
   function fill(L, offset) {
     const first = Math.floor((offset - BEHIND) / L.w);
     const last = Math.floor((offset + 1600 + AHEAD) / L.w);
@@ -612,7 +657,10 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
   };
 
   /* ---- the frame: drift, camera, creep ---------------------------------- */
-  let raf = null, lastSlow = 0;
+  /** @type {number | null} */
+  let raf = null;
+  let lastSlow = 0;
+  /** @param {number} now */
   function step(now) {
     const t = (now - t0) / 1000;
     for (const L of LAYERS) {
@@ -651,9 +699,10 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
     removeEventListener("scroll", onScroll);
     offCamera(); offGalaxy(); untintGalaxy();
     for (const L of LAYERS) { L.node.textContent = ""; L.live.clear(); L.node.removeAttribute("transform"); }
-    night.style.backgroundImage = "";
-    limb.style.backgroundImage = "";
-    sky.style.webkitMaskImage = ""; sky.style.maskImage = "";
+    /** @type {HTMLElement} */ (night).style.backgroundImage = "";
+    /** @type {HTMLElement} */ (limb).style.backgroundImage = "";
+    /** @type {HTMLElement} */ (sky).style.webkitMaskImage = "";
+    /** @type {HTMLElement} */ (sky).style.maskImage = "";
   };
 }
 
@@ -674,6 +723,9 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
      any of this; the dial is in FRONT of the weather, not in it.
    · reduced motion — the bank freezes exactly where the seed put it.
    ══════════════════════════════════════════════════════════════════════════ */
+/**
+ * @param {SkyOptions} options
+ */
 function mountCloudSea({ seed, still }) {
   const streamFor = streamFactory(seed);
 
@@ -686,19 +738,26 @@ function mountCloudSea({ seed, still }) {
 
      shoulder: where the deck begins. Every stratum sits well below the dial's
      outer arc, so the instrument is never IN the weather. */
-  const STRATA = [
+  /**
+   * @typedef {{ key: number, host: string, w: number, speed: number, n: number,
+   *             shoulder: number, rx: [number, number], ry: [number, number], lift: number,
+   *             node: HTMLElement | null, live: Map<number, Element> }} Stratum
+   */
+  /** @type {Stratum[]} */
+  const STRATA = /** @type {any} */ ([
     { key: 0, host: "cs-s0", w: 580, speed: 1600 / 760, n: 5,
       shoulder: 726, rx: [96, 190], ry: [26, 54], lift: 20 },
     { key: 1, host: "cs-s1", w: 520, speed: 1600 / 470, n: 6,
       shoulder: 812, rx: [84, 172], ry: [30, 62], lift: 24 },
     { key: 2, host: "cs-s2", w: 470, speed: 1600 / 270, n: 6,
       shoulder: 900, rx: [72, 152], ry: [34, 70], lift: 28 },
-  ];
+  ]);
   const AHEAD = 620, BEHIND = 320;
   for (const L of STRATA) { L.node = document.getElementById(L.host); L.live = new Map(); }
   const peakHost = document.getElementById("cs-peaks");
   if (!peakHost || STRATA.some((L) => !L.node)) return () => {};
 
+  /** @param {Stratum} L @param {Element} g @param {() => number} r */
   function buildStratum(L, g, r) {
     /* the deck: solid, seamless across the chunk join. It runs to 2200 rather
        than to the window's own bottom because a cloud layer has THICKNESS, and
@@ -716,13 +775,14 @@ function mountCloudSea({ seed, still }) {
       }));
     }
   }
+  /** @param {Stratum} L @param {number} off */
   function fillStratum(L, off) {
     const first = Math.floor((off - BEHIND) / L.w), last = Math.floor((off + 1600 + AHEAD) / L.w);
     for (let i = first; i <= last; i++) {
       if (L.live.has(i)) continue;
       const g = svgel("g", { transform: `translate(${i * L.w},0)` });
       buildStratum(L, g, streamFor(L.key, i));
-      L.live.set(i, g); L.node.appendChild(g);
+      L.live.set(i, g); /** @type {HTMLElement} */ (L.node).appendChild(g);
     }
     for (const [i, g] of L.live)
       if (i < first || i > last) { g.remove(); L.live.delete(i); } /* gone for good */
@@ -733,8 +793,10 @@ function mountCloudSea({ seed, still }) {
      cloud. One per chunk at most and the chunk is wide, so you get one or two on
      screen and never a range. The warm edge is the sunward one — it is the only
      warm thing up here that is not cloud. */
+  /** @type {{ key: number, w: number, speed: number, live: Map<number, Element> }} */
   const PEAKS = { key: 9, w: 1900, speed: 1600 / 620, live: new Map() };
   const FOOT = 880; /* buried in the near strata */
+  /** @param {Element} g @param {() => number} r */
   function buildPeak(g, r) {
     if (r() > 0.80) return; /* most of the sea has nothing in it */
     /* tall enough to clear the far bank by a hundred pixels or so, wide enough —
@@ -748,7 +810,9 @@ function mountCloudSea({ seed, still }) {
     /* a ridge, not a triangle: four seeded steps a side, on a concave slope
        (t^1.4) — the profile a hill actually has. Both x and y are jittered, so no
        two summits share a silhouette. */
+    /** @type {(dir: number) => Array<[number, number]>} */
     const flank = (dir) => {
+      /** @type {Array<[number, number]>} */
       const out = [];
       for (let i = 1; i <= 4; i++) {
         const t = i / 5;
@@ -757,6 +821,7 @@ function mountCloudSea({ seed, still }) {
       }
       return out;
     };
+    /** @type {(p: [number, number]) => string} */
     const pt = (p) => p[0].toFixed(1) + " " + p[1].toFixed(1);
     const left = flank(-1), right = flank(1).reverse();
     const body = "M " + pt([x - half, FOOT]) + " L " + left.map(pt).join(" L ") +
@@ -774,6 +839,7 @@ function mountCloudSea({ seed, still }) {
       "stroke-linejoin": "round", "stroke-linecap": "round",
       filter: "url(#cs-peak)" }));
   }
+  /** @param {number} off */
   function fillPeaks(off) {
     const P = PEAKS;
     const first = Math.floor((off - 400) / P.w), last = Math.floor((off + 2000) / P.w);
@@ -781,24 +847,28 @@ function mountCloudSea({ seed, still }) {
       if (P.live.has(i)) continue;
       const g = svgel("g", { transform: `translate(${i * P.w},0)` });
       buildPeak(g, streamFor(P.key, i));
-      P.live.set(i, g); peakHost.appendChild(g);
+      P.live.set(i, g); /** @type {HTMLElement} */ (peakHost).appendChild(g);
     }
     for (const [i, g] of P.live)
       if (i < first || i > last) { g.remove(); P.live.delete(i); } /* gone for good */
   }
 
   /* ---- the drift -------------------------------------------------------- */
-  let t0 = performance.now(), raf = null;
+  let t0 = performance.now();
+  /** @type {number | null} */
+  let raf = null;
+  /** @param {number} t */
   function render(t) {
     for (const L of STRATA) {
       const off = still() ? 0 : t * L.speed;
       fillStratum(L, off);
-      L.node.setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
+      /** @type {HTMLElement} */ (L.node).setAttribute("transform", `translate(${(-off).toFixed(1)},0)`);
     }
     const poff = still() ? 0 : t * PEAKS.speed;
     fillPeaks(poff);
-    peakHost.setAttribute("transform", `translate(${(-poff).toFixed(1)},0)`);
+    /** @type {HTMLElement} */ (peakHost).setAttribute("transform", `translate(${(-poff).toFixed(1)},0)`);
   }
+  /** @param {number} now */
   function step(now) { render((now - t0) / 1000); raf = requestAnimationFrame(step); }
 
   render(0);
@@ -806,8 +876,14 @@ function mountCloudSea({ seed, still }) {
 
   return () => {
     if (raf !== null) cancelAnimationFrame(raf);
-    for (const L of STRATA) { L.node.textContent = ""; L.live.clear(); L.node.removeAttribute("transform"); }
-    peakHost.textContent = ""; PEAKS.live.clear(); peakHost.removeAttribute("transform");
+    for (const L of STRATA) {
+      /** @type {HTMLElement} */ (L.node).textContent = "";
+      L.live.clear();
+      /** @type {HTMLElement} */ (L.node).removeAttribute("transform");
+    }
+    /** @type {HTMLElement} */ (peakHost).textContent = "";
+    PEAKS.live.clear();
+    /** @type {HTMLElement} */ (peakHost).removeAttribute("transform");
   };
 }
 
@@ -815,6 +891,7 @@ function mountCloudSea({ seed, still }) {
    THE CONTROLLER
    ══════════════════════════════════════════════════════════════════════════ */
 
+/** @type {Record<string, EngineFn>} */
 const ENGINES = {
   afterdark: mountPlane,
   dawn: mountTerminator,
@@ -822,29 +899,14 @@ const ENGINES = {
 };
 
 /**
- * THE FIXTURE SEED. The sheets' build note asks for the WORKSPACE ID, which is
- * the only stable thing about a fixture run, and a name is not a number — so it
- * is hashed (FNV-1a, 32-bit) into the generator's range. Two runs of the gate
- * therefore roll the same sky, and two different workspaces do not.
- */
-export function seedFromWorkspace(id) {
-  let h = 2166136261;
-  for (let i = 0; i < String(id).length; i++) {
-    h ^= String(id).charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (Math.abs(h | 0) % 2147483646) + 1;
-}
-
-/**
  * Stand the right sky up for whatever pack is live, and keep doing so.
  *
  * @param {object}   options
  * @param {?number}  options.seed      pin the sky, or null to roll one per load
  * @param {boolean}  options.pinClock  hold every stream at t=0 (the gate)
- * @param {function} options.onCamera  subscribe to "the camera moved"
- * @param {function} options.onGalaxy  subscribe to "the galaxy re-rendered"
- * @returns {function} teardown
+ * @param {CameraSub} options.onCamera  subscribe to "the camera moved"
+ * @param {GalaxySub} options.onGalaxy  subscribe to "the galaxy re-rendered"
+ * @returns {() => void} teardown
  */
 export function mountSkies({ seed: pinnedSeed = null, pinClock = false, onCamera, onGalaxy }) {
   const doc = document.documentElement;
@@ -866,7 +928,10 @@ export function mountSkies({ seed: pinnedSeed = null, pinClock = false, onCamera
   const still = () => pinClock || motion.matches;
   const seed = pinnedSeed ?? Math.floor(Math.random() * 2147483646) + 1;
 
-  let current = null, teardown = null;
+  /** @type {string | null} */
+  let current = null;
+  /** @type {(() => void) | null} */
+  let teardown = null;
 
   function sync() {
     const pack = doc.dataset.theme || "starchart";

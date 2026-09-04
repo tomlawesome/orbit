@@ -12,8 +12,363 @@
  * production one process serves both the pages and the API.
  */
 
+/* ---------------------------------------------------------------------------
+ * The shapes this seam speaks in (#624).
+ *
+ * Copies of the engine's own schemas in src/lib/workspace.ts, not imports of
+ * them: web/ is a separate package that has to build without the server's
+ * TypeScript — the same reason the URLs are written out here rather than
+ * shared. Where the two can drift the schema is the truth and this is the
+ * copy, so a field added there belongs here too.
+ *
+ * Nullable-and-optional where the schema says only optional: the fixtures
+ * write `null` for absent text (`provider: null`), so both reach the screens
+ * and a type that admitted only `undefined` would be describing a stricter
+ * world than the one the code actually runs in.
+ */
+
+/**
+ * One entry in a household's manifest — workspaceItemSchema, plus the
+ * `documentCount` the workspace route adds on the way out. That last one is
+ * not in the schema and is optional here for that reason; the seam reads it
+ * only to decide which items are worth asking for documents about.
+ *
+ * @typedef {object} WorkspaceItem
+ * @property {string} id
+ * @property {string} sectionId
+ * @property {string} title
+ * @property {string} currency          ISO-4217, always three letters
+ * @property {string} status            itemStatuses
+ * @property {?string} [subtype]
+ * @property {?string} [provider]
+ * @property {?string} [reference]
+ * @property {?string} [notes]
+ * @property {?number} [costMinor]
+ * @property {?string} [dueDate]        calendar date, YYYY-MM-DD
+ * @property {?string} [snoozedUntil]   calendar date, YYYY-MM-DD
+ * @property {?string} [scheduleKind]   scheduleKinds
+ * @property {?number} [recurrenceMonths]
+ * @property {?number[]} [reminderDays]
+ * @property {number} [version]         rides along for #424's writes
+ * @property {string} [updatedAt]       ISO-8601, likewise
+ * @property {number} [documentCount]   not a schema field; see above
+ */
+
+/**
+ * A section of one household — workspaceSectionSchema. `icon` and `accent` are
+ * bounded server-side (sectionIcons, sectionAccents); they are plain strings
+ * here because this module never branches on either, it passes them through.
+ *
+ * @typedef {object} WorkspaceSection
+ * @property {string} id
+ * @property {string} name
+ * @property {string} icon
+ * @property {string} accent
+ * @property {boolean} visible
+ */
+
+/**
+ * One thing that happened to an item — itemActivitySchema. Carried, never read
+ * here: the seam hands activities to the screens whole.
+ *
+ * @typedef {object} ItemActivity
+ * @property {string} id
+ * @property {string} itemId
+ * @property {string} kind
+ * @property {string} occurredAt
+ * @property {?string} [effectiveDate]
+ * @property {?string} [previousDate]
+ * @property {?string} [nextDate]
+ * @property {?number} [costMinor]
+ * @property {?string} [notes]
+ */
+
+/**
+ * One household as a member sees it — householdWorkspaceSchema.
+ *
+ * @typedef {object} Household
+ * @property {string} id
+ * @property {string} name
+ * @property {string} timezone
+ * @property {string} currency
+ * @property {number} [memberCount]
+ * @property {boolean} [canManage]
+ * @property {boolean} [onboardingComplete]
+ * @property {string} [deletionRequestedAt]
+ * @property {string} [deleteAfter]
+ * @property {WorkspaceSection[]} sections
+ * @property {WorkspaceItem[]} items
+ * @property {ItemActivity[]} [activities]
+ * @property {string[]} [readNotificationIds]
+ * @property {string[]} [dismissedNotificationIds]
+ */
+
+/**
+ * §11 (#453): the entire surface a non-member sees — an id, a name, and
+ * whether they have already asked. visibleHouseholdSchema.
+ *
+ * @typedef {object} VisibleHousehold
+ * @property {string} id
+ * @property {string} name
+ * @property {boolean} [requested]
+ */
+
+/**
+ * A household waiting out its deletion countdown — recoverableHouseholdSchema.
+ *
+ * @typedef {object} RecoverableHousehold
+ * @property {string} id
+ * @property {string} name
+ * @property {string} deleteAfter
+ */
+
+/**
+ * What `GET /api/workspace` answers — workspaceSchema — plus the two fields
+ * the fixture adds that no API response carries. `fixtureToday` pins chart
+ * arithmetic to the date the mockups were drawn against so the fidelity gate
+ * is deterministic; `suggestions` predates #454 and is empty in the fixture
+ * today. Both are optional because live data simply does not have them.
+ *
+ * @typedef {object} Workspace
+ * @property {?string} activeHouseholdId
+ * @property {Household[]} households
+ * @property {number} [version]
+ * @property {string} [householdLanding]        "active" | "choose"
+ * @property {RecoverableHousehold[]} [recoverableHouseholds]
+ * @property {VisibleHousehold[]} [visibleHouseholds]
+ * @property {string} [fixtureToday]            not an API field
+ * @property {ReceiptSuggestion[]} [suggestions] not an API field
+ */
+
+/**
+ * The signed-in user, as `GET /api/auth/session` reports them.
+ *
+ * @typedef {object} SessionUser
+ * @property {string} id
+ * @property {string} [displayName]
+ * @property {string} [email]
+ */
+
+/**
+ * A session, with the CSRF token every mutating request must echo back.
+ *
+ * @typedef {object} Session
+ * @property {string} csrfToken
+ * @property {boolean} [authenticated]
+ * @property {?SessionUser} [user]
+ */
+
+/**
+ * One piece of mail the relay caught, in the shape `GET /api/imap-inbox`
+ * answers. `attachments` is not an API field yet (#467) — the fixture carries
+ * it so the ratified design renders, and live data degrades to the count.
+ *
+ * @typedef {object} Receipt
+ * @property {string} id
+ * @property {boolean} canApprove
+ * @property {string} classification   "ready" | "waiting" | "cleanup" | ...
+ * @property {?string} [householdId]
+ * @property {string} [status]
+ * @property {number} [draftVersion]
+ * @property {?string} [receivedAt]
+ * @property {?string} [expiresAt]
+ * @property {number} [attachmentCount]
+ * @property {boolean} [canDiscard]
+ * @property {boolean} [cleanupOnly]
+ * @property {string} [message]
+ * @property {ItemProposal} [proposal]
+ * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
+ * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
+ */
+
+/**
+ * What the parser made of one piece of mail: an item, minus everything the
+ * reader still has to decide. Every field is optional — a receipt nobody could
+ * read proposes nothing at all (`proposal: {}`).
+ *
+ * @typedef {object} ItemProposal
+ * @property {string} [title]
+ * @property {string} [provider]
+ * @property {string} [reference]
+ * @property {string} [subtype]
+ * @property {string} [notes]
+ * @property {number} [costMinor]
+ * @property {string} [currency]
+ * @property {string} [dueDate]
+ * @property {string} [scheduleKind]
+ * @property {number} [recurrenceMonths]
+ */
+
+/**
+ * An approvable receipt in suggestion shape — what receiptSuggestionsOf makes,
+ * and what approveReceipt takes back. Named here rather than in inbox.js
+ * because it crosses the seam in both directions.
+ *
+ * @typedef {object} ReceiptSuggestion
+ * @property {string} id
+ * @property {string} receiptId
+ * @property {?string} householdId
+ * @property {string} title
+ * @property {string} currency
+ * @property {string} sourceDocument
+ * @property {number} [draftVersion]
+ * @property {?string} [renewsOn]
+ * @property {?string} [provider]
+ * @property {?string} [expiresAt]
+ * @property {?string} [receivedAt]
+ * @property {?number} [costMinor]
+ * @property {string} [classification]
+ * @property {string} [message]
+ * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
+ */
+
+/**
+ * What the item screen renders, whichever origin it came from: a real item
+ * with its household, section and papers, or (#434) a mail-in suggestion in
+ * that same view — amendable, with accept-into-orbit where the item actions
+ * would be.
+ *
+ * One shape rather than two because the screen draws one thing. Everything an
+ * origin cannot fill is optional, and `suggestion` is the flag that says which
+ * origin this was: readBelt reads exactly that to decide whether the arrival
+ * has a seat in the band.
+ *
+ * @typedef {Partial<WorkspaceItem> & Partial<ReceiptSuggestion> & {
+ *   id: string,
+ *   today: string,
+ *   suggestion?: boolean,
+ *   householdId?: ?string,
+ *   section?: ?string,
+ *   documents?: { name: string, meta: string }[],
+ *   proposal?: ItemProposal,
+ *   attachmentCount?: number,
+ * }} ItemView
+ */
+
+/**
+ * A row of the Filed lane (§14, #472) — the mail event, not the item. Not an
+ * API field yet either: the server forgets the mail-to-item link once a
+ * receipt burns up, which #467 asks it to change.
+ *
+ * @typedef {object} FiledEntry
+ * @property {string} itemId
+ * @property {string} [title]
+ * @property {string} [sourceDocument]
+ * @property {string} [filedAt]
+ */
+
+/**
+ * The mail-in inbox. `households` and `filed` are optional because the
+ * degraded read below answers receipts alone — callers already write
+ * `inbox.filed ?? []`, and a type that promised the field would make those
+ * guards look like dead code they are not.
+ *
+ * @typedef {object} Inbox
+ * @property {Receipt[]} receipts
+ * @property {{ id: string, name: string }[]} [households]
+ * @property {FiledEntry[]} [filed]
+ */
+
+/**
+ * One stored file, as the per-item documents route reports it
+ * (src/server/document-repository.ts, DocumentSummary).
+ *
+ * @typedef {object} DocumentSummary
+ * @property {string} id
+ * @property {string} itemId
+ * @property {string} displayName
+ * @property {string} availableAt
+ * @property {number} sizeBytes
+ * @property {string} [mediaType]
+ * @property {string} [lifecycle]
+ * @property {string} [scanStatus]
+ * @property {boolean} [ready]
+ * @property {?string} [deleteAfter]
+ * @property {?string} [failureCode]
+ * @property {boolean} [recoverable]
+ */
+
+/**
+ * One person on a household's roster, as the members route reports them.
+ *
+ * @typedef {object} Member
+ * @property {string} id
+ * @property {string} displayName
+ * @property {string} role   "owner" | "member"
+ */
+
+/**
+ * What the members route answers on every verb it serves: who is in the
+ * household, and who could be added. `candidates` comes back empty to anyone
+ * who may not add people, so a plain member's screen degrades by contract
+ * rather than by a check invented on this side.
+ *
+ * @typedef {object} Roster
+ * @property {Member[]} members
+ * @property {Member[]} candidates
+ */
+
+/**
+ * Someone waiting to be let in — PendingJoinRequest in
+ * src/server/join-requests.ts. Requester display name only: deciding needs to
+ * know who is asking and nothing more.
+ *
+ * @typedef {object} JoinRequest
+ * @property {string} id
+ * @property {string} householdId
+ * @property {string} householdName
+ * @property {string} userId
+ * @property {string} displayName
+ * @property {string} createdAt
+ */
+
+/**
+ * One row of the sections editor — what sectionRowsOf makes. `count` and
+ * `removed` are the interface's own arithmetic and state, not the household's:
+ * they never travel to the server, they decide what may be sent.
+ *
+ * @typedef {object} SectionRow
+ * @property {string} id
+ * @property {string} name
+ * @property {string} icon
+ * @property {string} accent
+ * @property {boolean} visible
+ * @property {number} count        entries sitting in this section
+ * @property {boolean} [removable] emptiness is the only thing that earns a ×
+ * @property {boolean} [removed]   struck out in the editor, not yet saved
+ */
+
+/**
+ * The reader's own reminder timing (#468). The pair of offsets is null rather
+ * than defaulted when the read degrades, which is what makes the toggle refuse
+ * to write a timing nobody chose.
+ *
+ * @typedef {object} Reminders
+ * @property {boolean} emailEnabled
+ * @property {?number} firstWarningDays
+ * @property {?number} finalWarningDays
+ * @property {string} firstWarning
+ * @property {string} finalWarning
+ * @property {string} outboundMail
+ */
+
+/**
+ * The mail-in relay as the screens say it (#432) — bounded words only, never
+ * a host, a port or a credential.
+ *
+ * @typedef {object} Relay
+ * @property {string} address
+ * @property {string} status
+ * @property {string} lastReceived
+ * @property {string} ingest
+ */
+
 /** Thrown with the server's own error code so screens can react to specifics. */
 export class WorkspaceError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ status?: number, code?: string }} [details]
+   */
   constructor(message, { status, code } = {}) {
     super(message);
     this.name = "WorkspaceError";
@@ -22,6 +377,18 @@ export class WorkspaceError extends Error {
   }
 }
 
+/**
+ * The decoded body, or a WorkspaceError carrying the server's own words.
+ *
+ * Generic because every route answers a different shape, and this module is
+ * where each of those shapes is named. Callers annotate the variable they
+ * decode into, so the shape is written down next to the URL that produces it
+ * and TypeScript infers T from that annotation.
+ *
+ * @template T
+ * @param {Response} response
+ * @returns {Promise<T>}
+ */
 async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -53,22 +420,37 @@ async function json(response) {
  * session, so it only changes when the session does — at which point the
  * command fails with 403 and the caller refreshes.
  */
+/** @type {?Promise<Session>} */
 let sessionPromise = null;
 
+/**
+ * @param {{ refresh?: boolean }} [options]
+ * @returns {Promise<Session>}
+ */
 export function readSession({ refresh = false } = {}) {
   if (refresh || !sessionPromise) {
-    sessionPromise = fetch("/api/auth/session", { credentials: "same-origin" })
-      .then(json)
-      .catch((error) => {
-        sessionPromise = null;
-        throw error;
-      });
+    /* The route this chain asks is the one that answers a Session; `json` is
+       generic and has nothing to infer that from when it is handed over
+       point-free, so the shape is named here instead. */
+    sessionPromise = /** @type {Promise<Session>} */ (
+      fetch("/api/auth/session", { credentials: "same-origin" })
+        .then(json)
+        .catch((error) => {
+          sessionPromise = null;
+          throw error;
+        })
+    );
   }
   return sessionPromise;
 }
 
-/** The whole workspace: households, their sections, items and activity. */
+/**
+ * The whole workspace: households, their sections, items and activity.
+ *
+ * @returns {Promise<Workspace>}
+ */
 export async function readWorkspace() {
+  /** @type {{ workspace: Workspace }} */
   const body = await json(
     await fetch("/api/workspace", { credentials: "same-origin" }),
   );
@@ -79,6 +461,10 @@ export async function readWorkspace() {
  * Applies one command and returns the workspace as the server now sees it.
  * A stale CSRF token is retried once against a fresh session rather than
  * surfacing as a failure the user can do nothing about.
+ *
+ * @param {object} command  one `workspaceCommandSchema` command
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<Workspace>}
  */
 export async function applyCommand(command, { retryCsrf = true } = {}) {
   const { csrfToken } = await readSession();
@@ -94,11 +480,16 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
     return applyCommand(command, { retryCsrf: false });
   }
 
+  /** @type {{ workspace: Workspace }} */
   const body = await json(response);
   return body.workspace;
 }
 
-/** The household the session is currently pointed at, with its sections. */
+/**
+ * The household the session is currently pointed at, with its sections.
+ *
+ * @returns {Promise<Household>}
+ */
 export async function activeHousehold() {
   const workspace = await readWorkspace();
   const household =
@@ -130,7 +521,13 @@ import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
 
-/** A mutating fetch with the session's CSRF token, like applyCommand's. */
+/**
+ * A mutating fetch with the session's CSRF token, like applyCommand's.
+ *
+ * @param {string} path
+ * @param {{ method?: string, body?: unknown }} [options]
+ * @returns {Promise<Response>}
+ */
 async function csrfFetch(path, { method = "POST", body } = {}) {
   const { csrfToken } = await readSession();
   return fetch(path, {
@@ -148,8 +545,11 @@ async function csrfFetch(path, { method = "POST", body } = {}) {
  * The signed-in user's private mail-in inbox (#434). Instance admins have no
  * private mailbox (the route answers empty for them), and a broken inbox must
  * never take home down with it — the caller treats this as additive.
+ *
+ * @returns {Promise<Inbox>}
  */
 export async function readInbox() {
+  /** @type {Partial<Inbox>} */
   const body = await json(await fetch("/api/imap-inbox", { credentials: "same-origin" }));
   return { receipts: body.receipts ?? [], households: body.households ?? [], filed: body.filed ?? [] };
 }
@@ -160,6 +560,12 @@ export async function readInbox() {
  * staged attachments), then approve through the reviewed-intake protocol.
  * The operationId makes retries idempotent — a double-tap cannot create two
  * items — so callers keep ONE id per receipt across attempts.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {?string} fallbackHouseholdId  used when the receipt names no household
+ * @param {string} operationId           kept across retries; that is the point
+ * @param {?ItemProposal} [amendedItem]  what the reader edited, if they did
+ * @returns {Promise<{ outcome: string, itemId?: string }>}
  */
 export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null) {
   const householdId = suggestion.householdId ?? fallbackHouseholdId;
@@ -167,11 +573,13 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   if (!suggestion.householdId) {
     await json(await csrfFetch(`/api/imap-inbox/${suggestion.receiptId}`, { method: "PUT", body: { householdId } }));
   }
+  /** @type {{ sections?: WorkspaceSection[], receipt?: Receipt, attachments?: { id: string }[] }} */
   const review = await json(
     await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
   );
   const section = review.sections?.[0];
   if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
+  /** @type {{ outcome: string, itemId?: string }} */
   const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
     body: {
       operationId,
@@ -190,13 +598,22 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   return body; // { outcome: "approved" | "partial_success", itemId }
 }
 
-/** Discard a mail-in receipt; its staged files are purged server-side. */
+/**
+ * Discard a mail-in receipt; its staged files are purged server-side.
+ *
+ * @param {string} receiptId
+ * @returns {Promise<void>}
+ */
 export async function dismissReceipt(receiptId) {
   await json(await csrfFetch(`/api/imap-inbox/${receiptId}`, { method: "DELETE" }));
 }
 
 /** "Request to join X system?" (§11, #453) — idempotent server-side, so a
- * double-tap can never file twice. */
+ * double-tap can never file twice.
+ *
+ * @param {string} householdId
+ * @returns {Promise<{ request: JoinRequest }>}
+ */
 export async function requestToJoin(householdId) {
   return json(await csrfFetch(`/api/households/${householdId}/join-requests`, { body: {} }));
 }
@@ -208,7 +625,13 @@ export async function requestToJoin(householdId) {
    GET /api/join-requests and POST /api/join-requests/{id} are live routes,
    and the household-management screen will call them when it is built. */
 
-/** Owner/admin direct add: membership without a request (§11). */
+/**
+ * Owner/admin direct add: membership without a request (§11).
+ *
+ * @param {string} householdId
+ * @param {string} userId
+ * @returns {Promise<Roster>}
+ */
 export async function addMember(householdId, userId) {
   return json(await csrfFetch(`/api/households/${householdId}/members`, { body: { userId } }));
 }
@@ -217,6 +640,9 @@ export async function addMember(householdId, userId) {
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
  * designs were drawn against so the fidelity gate is deterministic; the real
  * API carries no such field, so live data uses the real clock.
+ *
+ * @param {?Workspace} [workspace]
+ * @returns {string} a calendar date, YYYY-MM-DD
  */
 function todayOf(workspace) {
   return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
@@ -227,12 +653,52 @@ function todayOf(workspace) {
  * household (dial and manifest), any document suggestions (none from the live
  * API yet — #454), the signed-in user, and the date the chart reckons from.
  */
+/**
+ * A piece of mail that arrived but cannot be acted on, as the relay shows it.
+ *
+ * @typedef {object} MailFailure
+ * @property {string} id
+ * @property {string} receivedAt
+ * @property {string} classification
+ * @property {string} message
+ * @property {boolean} canDiscard
+ */
+
+/**
+ * Everything the home screen reads in one go.
+ *
+ * Two shapes, one type. When the viewer belongs to nothing (§11, #453) the
+ * labelled sky is all there is: `emptySky` is set, `galaxy` carries names and
+ * bearings only, and `primary` and `household` are null. Otherwise the dial,
+ * manifest and mail surfaces all have something to draw.
+ *
+ * #624: this typedef exists so `home/+page.svelte` can annotate the state it
+ * keeps this in. Without it that state infers as `null`, every property access
+ * on it is an error, and everything derived from it becomes `never` -- one
+ * missing annotation was costing 41 of the ledger's errors.
+ *
+ * @typedef {object} HomeView
+ * @property {true} [emptySky]                 set only in the labelled sky
+ * @property {Record<string, import('./chart.js').GalaxyEntry>} galaxy
+ * @property {string | null} primary           the household in the middle
+ * @property {Household | null} household
+ * @property {ReceiptSuggestion[]} suggestions
+ * @property {MailFailure[]} mailFailures
+ * @property {Receipt[]} mailReading           arrived, not yet readable
+ * @property {SessionUser | null} user
+ * @property {string} today                    YYYY-MM-DD
+ * @property {string} now                      ISO instant, pinned under fixtures
+ */
+
+/**
+ * @returns {Promise<HomeView>}
+ */
 export async function readHome() {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(),
     readSession(),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
-    readInbox().catch(() => ({ receipts: [] })),
+    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const today = todayOf(workspace);
@@ -300,7 +766,7 @@ export async function readInboxScreen() {
   const [workspace, session, inbox, relay] = await Promise.all([
     readWorkspace(),
     readSession(),
-    readInbox().catch(() => ({ receipts: [] })),
+    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the relaybar is a summary line, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
   ]);
@@ -320,7 +786,7 @@ export async function readInboxScreen() {
   const itemsById = new Map(
     workspace.households.flatMap((household) => (household.items ?? []).map((item) => [item.id, item])),
   );
-  const filed = (inbox.filed ?? []).map((entry) => {
+  const filed = (inbox.filed ?? []).map((/** @type {FiledEntry} */ entry) => {
     const item = itemsById.get(entry.itemId);
     return { ...entry, band: bandOf(item?.dueDate ? daysUntil(item.dueDate, today) : null) };
   });
@@ -351,9 +817,10 @@ export async function readDocumentsScreen() {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(),
     readSession(),
-    readInbox().catch(() => ({ receipts: [] })),
+    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  /** @type {Record<string, DocumentSummary[]>} */
   const documentsByItem = {};
   await Promise.all(
     workspace.households.flatMap((household) =>
@@ -361,6 +828,7 @@ export async function readDocumentsScreen() {
         .filter((item) => (item.documentCount ?? 0) > 0)
         .map(async (item) => {
           try {
+            /** @type {{ documents?: DocumentSummary[] }} */
             const body = await json(
               await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
                 credentials: "same-origin",
@@ -393,7 +861,7 @@ export async function readSettingsScreen() {
   const [workspace, session, inbox, relay, reminders] = await Promise.all([
     readWorkspace(),
     readSession(),
-    readInbox().catch(() => ({ receipts: [] })),
+    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the helm's relay card is a summary, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
     /* Additive too: reminder timing is one card of five. An endpoint that
@@ -432,16 +900,21 @@ export async function readAdminScreen() {
     readWorkspace(),
     readSession(),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
-      .then((body) => body.users ?? [])
+      .then(
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean }[] }} */ body) =>
+          body.users ?? [],
+      )
       .catch(() => []),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
      stay as the gate's fallback where it doesn't. */
+  /** @type {Record<string, string>} */
   const owners = { ...adminFixture.owners };
   await Promise.all(
     workspace.households.map(async (household) => {
       try {
+        /** @type {Partial<Roster>} */
         const body = await json(
           await fetch(`/api/households/${household.id}/members`, { credentials: "same-origin" }),
         );
@@ -462,9 +935,11 @@ export async function readAdminScreen() {
   };
 }
 
+/** @param {string} iso */
 const shortDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
+/** @param {number} bytes */
 const sizeLabel = (bytes) =>
   bytes >= 1024 * 1024
     ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
@@ -476,6 +951,9 @@ const sizeLabel = (bytes) =>
  * probe: there deliberately is no item-by-id route to widen (#451). The
  * documents join uses the household id the membership test just proved.
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
+ *
+ * @param {string} id  an item id, or (#434) a mail-in receipt id
+ * @returns {Promise<?ItemView>}
  */
 export async function readItem(id) {
   const workspace = await readWorkspace();
@@ -483,6 +961,7 @@ export async function readItem(id) {
     const item = (household.items ?? []).find((one) => one.id === id);
     if (!item) continue;
     const sections = new Map((household.sections ?? []).map((s) => [s.id, s.name]));
+    /** @type {{ documents?: DocumentSummary[] }} */
     const body = await json(
       await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
         credentials: "same-origin",
@@ -538,8 +1017,11 @@ export async function readOperations() {
  *
  * The address is capability-bearing — anyone holding it can post into this
  * user's review queue — so it is never cached here, only rendered.
+ *
+ * @returns {Promise<Relay>}
  */
 export async function readRelay() {
+  /** @type {{ relay?: { address?: string, listening?: string, lastReceivedLabel?: string, lastReceived?: string, ingest?: string } }} */
   const body = await json(
     await fetch("/api/settings/mail-relay", { credentials: "same-origin" }),
   );
@@ -566,6 +1048,7 @@ const NO_ADDRESS = "no address yet";
  * precedent). It says it does not know, which is deliberately not the same
  * word as "not listening".
  */
+/** @type {Relay} */
 const UNAVAILABLE_RELAY = {
   address: NO_ADDRESS,
   status: "relay unavailable",
@@ -587,8 +1070,11 @@ const UNAVAILABLE_RELAY = {
  * `outboundMail` is the operator's state reported in bounded words
  * ("configured"/"not configured"), never a host, a port or a credential —
  * the same rule the relay follows.
+ *
+ * @returns {Promise<Reminders>}
  */
 export async function readReminders() {
+  /** @type {{ reminders?: Partial<Reminders> }} */
   const body = await json(
     await fetch("/api/settings/reminders", { credentials: "same-origin" }),
   );
@@ -604,6 +1090,9 @@ export async function readReminders() {
  * — therefore has nothing to write, and is refused HERE rather than being
  * bounced by the schema with a message written for a form that does not
  * exist on this screen.
+ *
+ * @param {{ emailEnabled: boolean, firstWarningDays: ?number, finalWarningDays: ?number }} preference
+ * @returns {Promise<Reminders>}
  */
 export async function writeReminders({ emailEnabled, firstWarningDays, finalWarningDays }) {
   if (!Number.isInteger(firstWarningDays) || !Number.isInteger(finalWarningDays)) {
@@ -611,6 +1100,7 @@ export async function writeReminders({ emailEnabled, firstWarningDays, finalWarn
       code: "reminders_unknown",
     });
   }
+  /** @type {{ reminders?: Partial<Reminders> }} */
   const body = await json(
     await csrfFetch("/api/settings/reminders", {
       method: "PUT",
@@ -620,14 +1110,71 @@ export async function writeReminders({ emailEnabled, firstWarningDays, finalWarn
   return remindersOf(body.reminders);
 }
 
-/** One mapping for both verbs: the route answers the same shape on each. */
+/**
+ * The signed-in reader's own first-run tour record (#751/#752), through
+ * `GET /api/settings/tour` — the reminders pair above, for the walk.
+ *
+ * The route takes no user: the session is the only input on both verbs, so
+ * there is nothing here to name and no way to read or rewrite somebody else's
+ * record. Null means the walk has never been taken.
+ *
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function readTour() {
+  const body = await json(
+    await fetch("/api/settings/tour", { credentials: "same-origin" }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
+ * Records that the walk is over — the ONE write the tour makes, on skip and
+ * on finish alike (#477: remembered on the server, so skipping on a phone
+ * holds on the desk). Nothing else about the walk is sent anywhere: the
+ * example body on stops 3-5 is drawn in the document and taken away again.
+ *
+ * @param {string} [seenAt] ISO timestamp; now, unless a caller says otherwise
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function writeTourSeen(seenAt = new Date().toISOString()) {
+  const body = await json(
+    await csrfFetch("/api/settings/tour", { method: "PUT", body: { tourSeenAt: seenAt } }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
+ * "Take the walk again" (#753): puts the record back to null, on the same
+ * route writeTourSeen uses, so the next arrival on `/home` reads no walk
+ * ever taken and starts it at stop 1. The server already accepts this —
+ * `tourPreferenceSchema` allows `tourSeenAt: null` and `writeTourSettings`
+ * stores it as such (#751) — so there is no new route to add, only this
+ * mirror of writeTourSeen's shape.
+ *
+ * @returns {Promise<{ tourSeenAt: string | null }>}
+ */
+export async function clearTourSeen() {
+  const body = await json(
+    await csrfFetch("/api/settings/tour", { method: "PUT", body: { tourSeenAt: null } }),
+  );
+  return { tourSeenAt: body?.tour?.tourSeenAt ?? null };
+}
+
+/**
+ * One mapping for both verbs: the route answers the same shape on each.
+ *
+ * @param {Partial<Reminders>} [reminders]
+ * @returns {Reminders}
+ */
 function remindersOf(reminders) {
+  const firstWarningDays = reminders?.firstWarningDays;
+  const finalWarningDays = reminders?.finalWarningDays;
   return {
     emailEnabled: reminders?.emailEnabled ?? UNAVAILABLE_REMINDERS.emailEnabled,
     /* Null, not a guessed default: a number invented here would be written
        back as the reader's own choice the first time the toggle is tapped. */
-    firstWarningDays: Number.isInteger(reminders?.firstWarningDays) ? reminders.firstWarningDays : null,
-    finalWarningDays: Number.isInteger(reminders?.finalWarningDays) ? reminders.finalWarningDays : null,
+    firstWarningDays: typeof firstWarningDays === "number" && Number.isInteger(firstWarningDays) ? firstWarningDays : null,
+    finalWarningDays: typeof finalWarningDays === "number" && Number.isInteger(finalWarningDays) ? finalWarningDays : null,
     firstWarning: reminders?.firstWarning ?? UNAVAILABLE_REMINDERS.firstWarning,
     finalWarning: reminders?.finalWarning ?? UNAVAILABLE_REMINDERS.finalWarning,
     outboundMail: reminders?.outboundMail ?? UNAVAILABLE_REMINDERS.outboundMail,
@@ -646,6 +1193,7 @@ function remindersOf(reminders) {
  * false only because the control has two positions — the null pair, not the
  * flag, is what makes the card inert until the read succeeds.
  */
+/** @type {Reminders} */
 const UNAVAILABLE_REMINDERS = {
   emailEnabled: false,
   firstWarningDays: null,
@@ -666,8 +1214,11 @@ const UNAVAILABLE_REMINDERS = {
  *
  * CSRF-carrying, like every other mutation here: an action this destructive
  * must not be reachable from another origin's form post.
+ *
+ * @returns {Promise<number>}  how many sessions were ended
  */
 export async function signOutEverywhere() {
+  /** @type {?{ revoked?: number }} */
   const body = await json(await csrfFetch("/api/auth/sessions/revoke"));
   return body?.revoked ?? 0;
 }
@@ -684,6 +1235,8 @@ export async function signOutEverywhere() {
  *
  * It resolves only once the server has actually ended the session, so a caller
  * can safely treat "this returned" as "there is nothing left to revoke".
+ *
+ * @returns {Promise<?string>}  the provider's own logout URL, when it has one
  */
 export async function signOut() {
   const { csrfToken } = await readSession();
@@ -727,19 +1280,26 @@ export async function signOut() {
  * serves listRegisteredUserCandidates from, and it answers an empty list to
  * anyone who may not add people, so a member's screen degrades by contract
  * rather than by a check invented here.
+ *
+ * @param {string} householdId
  */
 export async function readHouseholdScreen(householdId) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
   const [roster, joinRequests] = await Promise.all([
-    json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
-      .catch(() => ({ members: [], candidates: [] })),
+    /** @type {Promise<Partial<Roster>>} */ (
+      json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
+    ).catch(() => ({ members: [], candidates: [] })),
     /* Owners and instance admins only; anyone else gets a 403 the screen has
        no use for, and the block simply has nothing to show. */
     json(await fetch("/api/join-requests", { credentials: "same-origin" }))
-      .then((body) => body.requests ?? [])
+      .then((/** @type {{ requests?: JoinRequest[] }} */ body) => body.requests ?? [])
       .catch(() => []),
   ]);
-  return householdScreenOf({
+  /* household.js's householdScreenOf infers its parameter shape from its own
+     defaults (e.g. `members = []` reads as `never[]`), so this call is cast
+     rather than fought from the caller's side — the fix belongs with that
+     function's own JSDoc, out of scope here. */
+  return householdScreenOf(/** @type {any} */ ({
     workspace,
     householdId,
     user: session?.user ?? null,
@@ -750,13 +1310,17 @@ export async function readHouseholdScreen(householdId) {
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
-  });
+  }));
 }
 
 /**
  * Rename / re-zone / re-currency (2c). ONE bundled `household.update`, always:
  * the route accepts nothing smaller, so a per-field save submits the whole
  * bundle with the other two values as they stand.
+ *
+ * @param {string} householdId
+ * @param {{ name: string, timezone: string, currency: string }} identity
+ * @returns {Promise<Workspace>}
  */
 export async function writeHouseholdIdentity(householdId, identity) {
   return applyCommand(householdUpdateCommandOf(householdId, identity));
@@ -769,6 +1333,10 @@ export async function writeHouseholdIdentity(householdId, identity) {
  * because it is a data law and not a style: dropping a section that still
  * holds entries would have the engine re-file them under whichever section
  * happens to be first, which is a silent edit nobody asked for.
+ *
+ * @param {string} householdId
+ * @param {SectionRow[]} rows  the editor's rows, in sectionRowsOf's shape
+ * @returns {Promise<Workspace>}
  */
 export async function writeSections(householdId, rows) {
   const dropped = rows.filter((row) => row.count > 0 && row.removed);
@@ -780,7 +1348,13 @@ export async function writeSections(householdId, rows) {
   return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
 }
 
-/** Owner/admin removal, and — with the caller's own id — leaving (§11). */
+/**
+ * Owner/admin removal, and — with the caller's own id — leaving (§11).
+ *
+ * @param {string} householdId
+ * @param {string} userId
+ * @returns {Promise<Roster>}
+ */
 export async function removeMember(householdId, userId) {
   return json(await csrfFetch(`/api/households/${householdId}/members`, {
     method: "DELETE",
@@ -792,6 +1366,10 @@ export async function removeMember(householdId, userId) {
  * Hand the system over. An owner can never leave a system, so this is the way
  * out — and the route swaps the two roles in one transaction, which is why
  * there is no "demote yourself" call to make first.
+ *
+ * @param {string} householdId
+ * @param {string} userId  the member who becomes owner
+ * @returns {Promise<Roster>}
  */
 export async function transferOwnership(householdId, userId) {
   return json(await csrfFetch(`/api/households/${householdId}/members`, {
@@ -800,7 +1378,13 @@ export async function transferOwnership(householdId, userId) {
   }));
 }
 
-/** Approve or decline a joiner (§11, §15-2g — here and nowhere else). */
+/**
+ * Approve or decline a joiner (§11, §15-2g — here and nowhere else).
+ *
+ * @param {string} requestId
+ * @param {string} action  "approve" or "decline"
+ * @returns {Promise<{ request: JoinRequest }>}
+ */
 export async function decideJoinRequest(requestId, action) {
   return json(await csrfFetch(`/api/join-requests/${requestId}`, { body: { action } }));
 }
@@ -813,6 +1397,10 @@ export async function decideJoinRequest(requestId, action) {
  * the button. Asking is the whole of this screen's involvement: the countdown,
  * the restore and the final hard delete are instance-admin acts drawn on the
  * admin panel.
+ *
+ * @param {string} householdId
+ * @param {string} confirmation  the name as typed; the SERVER compares it
+ * @returns {Promise<{ deleteAfter: string }>}
  */
 export async function requestHouseholdDeletion(householdId, confirmation) {
   return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
@@ -844,6 +1432,8 @@ export async function requestHouseholdDeletion(householdId, confirmation) {
  * #434 rides along: an id that is a mail-in receipt rather than an item is
  * still the amend-then-accept view, which has no seat in the band — a
  * suggestion is not in the manifest until it is accepted into it.
+ *
+ * @param {string} id  the centred item, or (#434) a mail-in receipt
  */
 export async function readBelt(id) {
   const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
@@ -856,12 +1446,14 @@ export async function readBelt(id) {
     return suggestion?.suggestion ? { kind: "suggestion", item: suggestion } : null;
   }
 
+  /** @type {Record<string, DocumentSummary[]>} */
   const documentsByItem = {};
   await Promise.all(
     (household.items ?? [])
       .filter((item) => (item.documentCount ?? 0) > 0)
       .map(async (item) => {
         try {
+          /** @type {{ documents?: DocumentSummary[] }} */
           const body = await json(
             await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
               credentials: "same-origin",

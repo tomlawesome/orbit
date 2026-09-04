@@ -53,25 +53,23 @@ const systemPatterns = [
   /^config\//u,
   /^package\.json$/u,
   /^playwright\.config\.[cm]?[jt]s$/u,
-  /^public\//u,
   /^drizzle\//u,
   /^tests\/e2e\//u,
-  // The v19 front end ships (Dockerfile:57 builds it, :136 copies it in) and
-  // the e2e suite drives it through the composite entry, so a change here
-  // carries system risk. It reached the same lane through the catch-all
-  // default below, which was right by accident: this states it (#620).
+  // The v19 front end IS the shipped application server since the cut (#735):
+  // the Dockerfile's web-builder stage builds it and the runner copies it in,
+  // and the e2e suite drives it directly. It reached the same lane through the
+  // catch-all default below, which was right by accident: this states it
+  // (#620).
   /^web\//u,
-  /^src\/instrumentation(?:\.test)?\.[cm]?[jt]s$/u,
-  /^src\/app\/api\/(?:auth|admin|documents?|health|imap|portable-archives|push)(?:\/|$)/u,
-  /^src\/app\/(?!api\/)/u,
-  /^src\/components\//u,
-  /^src\/lib\/(?:auth|env|notifications|offline-policy|preview-workspace|runtime-secret|private-browser-storage)(?:[./-]|$)/u,
-  /^src\/server\/(?:document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
-  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|prepare-standalone|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start)\.[^.]+$/u,
+  /^src\/lib\/(?:auth|env|notifications|runtime-secret)(?:[./-]|$)/u,
+  /* `boot` is the startup sequence Next's instrumentation hook used to call
+     and SvelteKit's `init` now does (#735): migrate-on-boot and the workers
+     both start there, so a change to it carries system risk. */
+  /^src\/server\/(?:boot|document|documents|imap|notification|portable|push|readiness|recovery|storage)(?:[./-]|$)/u,
+  /^scripts\/(?:backup|build-container|configure|container-entrypoint|deploy-container|export-recovery-bundle|generate-vapid|import-recovery-bundle|install|recovery-crypto|restore|test-backup-restore|test-frontend|test-malware-scanner|test-tika-processor|update-and-start|web-deploy|web-pdfjs-runtime-check)\.[^.]+$/u,
 ];
 
 const integrationPatterns = [
-  /^src\/app\/api\//u,
   /^src\/(?:db|lib|server)\//u,
   /^tests\/integration\//u,
   /^scripts\/test-integration\.mjs$/u,

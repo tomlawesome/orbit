@@ -8,12 +8,13 @@ import {
   transferPrimaryAdministrator,
   listInstanceUsers,
 } from "@/server/admin-repository";
-import { POST as transferPrimary } from "@/app/api/admin/primary/route";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
 } from "./support/fixtures";
+import { callRouteForSession, loadRoute } from "./support/request-event";
+
+const { POST: transferPrimary } = await loadRoute("admin/primary");
 
 afterAll(async () => {
   await cleanupIntegrationEnvironment();
@@ -114,9 +115,9 @@ describe("primary administrator authority (#263)", () => {
     const freshSession = await fixture.session("admin");
     const listed = await transferPrimaryAdministrator(primary.id, freshSession.sessionId, fixture.users.owner.id);
     expect(await primaryRow()).toBe(fixture.users.owner.id);
-    const former = listed.find((user) => user.id === primary.id);
+    const former = listed.users.find((user) => user.id === primary.id);
     expect(former).toMatchObject({ isInstanceAdmin: true, isPrimaryAdministrator: false, disabledAt: null });
-    expect(listed.find((user) => user.id === fixture.users.owner.id)).toMatchObject({ isPrimaryAdministrator: true });
+    expect(listed.users.find((user) => user.id === fixture.users.owner.id)).toMatchObject({ isPrimaryAdministrator: true });
     const audits = await getDb().select({ id: auditLog.id }).from(auditLog)
       .where(eq(auditLog.action, "primary_administrator_transferred"));
     expect(audits.length).toBeGreaterThanOrEqual(1);
@@ -164,19 +165,21 @@ describe("primary administrator authority (#263)", () => {
     await setInstanceAdministrator(primary.id, fixture.users.owner.id, true);
 
     const memberSession = await fixture.session("member");
-    const denied = await transferPrimary(requestForSession(memberSession, "http://orbit.test/api/admin/primary", {
+    const denied = await callRouteForSession(transferPrimary, memberSession, {
+      url: "http://orbit.test/api/admin/primary",
       method: "POST",
       body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
       headers: { "Content-Type": "application/json" },
-    }));
+    });
     expect(denied.status).toBe(403);
 
     const primarySession = await fixture.session("admin");
-    const response = await transferPrimary(requestForSession(primarySession, "http://orbit.test/api/admin/primary", {
+    const response = await callRouteForSession(transferPrimary, primarySession, {
+      url: "http://orbit.test/api/admin/primary",
       method: "POST",
       body: JSON.stringify({ targetUserId: fixture.users.owner.id }),
       headers: { "Content-Type": "application/json" },
-    }));
+    });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const payload = await response.json() as { users: Array<{ id: string; isPrimaryAdministrator: boolean }> };
@@ -190,7 +193,7 @@ describe("primary administrator authority (#263)", () => {
     const fixture = await createIntegrationFixture("primary-absent");
     // No seat: legacy pre-bootstrap state. Existing admin flows are unchanged.
     const listed = await listInstanceUsers(fixture.users.admin.id);
-    expect(listed.every((user) => user.isPrimaryAdministrator === false)).toBe(true);
+    expect(listed.users.every((user) => user.isPrimaryAdministrator === false)).toBe(true);
     await setInstanceAdministrator(fixture.users.admin.id, fixture.users.owner.id, true);
     await setInstanceAdministrator(fixture.users.admin.id, fixture.users.owner.id, false);
     await expect(getDb().execute(sql`select 1`)).resolves.toBeDefined();

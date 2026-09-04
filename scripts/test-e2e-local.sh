@@ -21,6 +21,19 @@
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from playwright.config.ts:
 #                    desktop-chromium or mobile-chromium. Default: both.
+#   --keep          Leave the stack up on exit instead of tearing it down, so a
+#                    failed run can be inspected: query the database, read the
+#                    container logs, open the app. Tear it down afterwards with:
+#                      docker compose -p orbit-e2e-local --env-file .env-orbit \
+#                        -f docker-compose.yml -f docker-compose.mail.yml \
+#                        -f docker-compose.acceptance.yml \
+#                        -f docker-compose.local-e2e.yml down --volumes
+#
+# Test fixtures left behind by a spec show up as a household count above zero
+# after a run (#730), which is the cheap way to find a spec that does not clean
+# up after itself:
+#   docker exec orbit-e2e-local-db sh -c \
+#     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
 # AGENTS.md "Traps when running things locally" applies here directly: this
 # script always passes an explicit, distinctive Compose `-p` project name
@@ -40,13 +53,22 @@ cd "$repo_dir"
 
 readonly project_name="orbit-e2e-local"
 readonly app_port="13777"
+# Exported rather than set per-invocation: docker-compose.local-e2e.yml reads
+# it to build the application's own APP_URL and OIDC callback URL, so every
+# compose call in this script has to agree about the published port.
+export ORBIT_PORT="$app_port"
 readonly base_url="http://127.0.0.1:${app_port}"
 readonly compose_files=(-f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.local-e2e.yml)
 
 spec=""
 playwright_project=""
+keep=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --keep)
+      keep=1
+      shift
+      ;;
     --spec)
       [[ $# -ge 2 ]] || { printf 'test-e2e-local: --spec requires a value.\n' >&2; exit 2; }
       spec="$2"
@@ -58,7 +80,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium]\n' "$0"
+      printf 'Usage: %s [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep]\n' "$0"
       exit 0
       ;;
     *)
@@ -88,6 +110,10 @@ cleaned_up=0
 cleanup() {
   [[ "$cleaned_up" == 0 ]] || return 0
   cleaned_up=1
+  if [[ "$keep" == 1 ]]; then
+    log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
+    return 0
+  fi
   log "tearing down project ${project_name}"
   compose down --volumes --remove-orphans > /dev/null 2>&1 || true
 }
@@ -209,6 +235,14 @@ response="$(curl --fail --silent --show-error --max-time 10 "${base_url}/api/hea
 jq --exit-status '.status == "ready" and .service == "orbit"' <<< "$response" > /dev/null || fail "health endpoint did not report ready: ${response}"
 log "application is healthy"
 
+# The application hands the OIDC provider its own callback URL, and the browser
+# follows it. If that URL names a port this script is not publishing, every
+# sign-in dies at chrome-error://chromewebdata/ several minutes from now, with
+# nothing in the health check to hint at it (#732). Compare them here instead.
+configured_app_url="$(compose config --format json | jq -r '.services["orbit-app"].environment.APP_URL // empty')"
+[[ "$configured_app_url" == "$base_url" ]] || fail "the application is configured with APP_URL=${configured_app_url:-<unset>} but this run publishes it on ${base_url}; browser sign-in would fail at the OIDC callback"
+log "APP_URL agrees with the published port"
+
 # --- Run the Playwright suite -------------------------------------------------
 
 playwright_args=()
@@ -223,8 +257,21 @@ bash scripts/install-test-browser.sh
 
 log "running the Playwright suite${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
-PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true \
+# COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
+# the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
+# tour's example body is never written down, which only the database can
+# answer. Every other `compose` call in this script passes an explicit `-p`;
+# the suite has no way to know that name, and without it its `docker compose`
+# would adopt whatever project .env-orbit happens to name (AGENTS.md, "Compose
+# commands attach to whatever project .env-orbit names") -- a different stack,
+# or none. CI needs no equivalent: it runs compose without `-p`, so the
+# environment there already agrees with .env-orbit.
+PLAYWRIGHT_BASE_URL="$base_url" ORBIT_ACCEPTANCE_OIDC=true COMPOSE_PROJECT_NAME="$project_name" \
   pnpm exec playwright test "${playwright_args[@]}" || suite_status=$?
+
+if [[ "$keep" == 1 ]]; then
+  log "stack still up: ${base_url}"
+fi
 
 if [[ "$suite_status" != 0 ]]; then
   log "suite failed; service status and logs follow"

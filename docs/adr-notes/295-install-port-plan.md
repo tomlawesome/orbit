@@ -869,7 +869,7 @@ notes, unlike most items above — see the git history for the exact diffs):
   inherited `install-orchestrator.ts` fetched every `deployment_assets`
   entry into `scratchDir` without first creating the asset's own parent
   directory the way install.sh does unconditionally before every fetch
-  (install.sh:1406-1407, guarantee #45). Since `config/tika-config.xml` and
+  (install.sh:1406-1407, guarantee #45). Since `config/tika-config.json` and
   every `scripts/*` entry live in a subdirectory that does not otherwise
   exist yet, a real `curl --output` into that path fails immediately with
   exit 23 (confirmed by direct reproduction against the real `curl`

@@ -38,7 +38,18 @@ name: Launcher install compatibility
 # Proven by deliberately breaking that flag parsing and watching this
 # check fail; a rename of an installer *prompt* passes, because the
 # launcher renders its own menus. Do not read green as "the launcher can
-# still install Orbit". Whether that should change is #606.
+# still install Orbit".
+#
+# This scope is deliberate and stays (owner ruling, #606, 2026-09-02):
+# helpers are paired with the image they were built against, not with the
+# commit under test, because install.sh is the one asset users fetch
+# unpinned and moving image-coupled helpers into it would recreate the
+# drift the pinning prevents. The event stream and configure.sh --check's
+# readiness lines are covered instead by fast per-pull-request contract
+# tests against docs/engine-events.md (scripts/engine-events.test.mjs,
+# scripts/configure.test.mjs); full pairing of the changed helpers with a
+# real image is proven at the preview → main gate. See
+# docs/quality-strategy.md and follow-up #736.
 #
 # The suite needs no secrets. It drives the guided configuration with
 # obvious placeholder credentials and uses a real public OIDC discovery
@@ -74,7 +85,7 @@ jobs:
 
     steps:
       - name: Check out this repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Both pull request endpoints must be present to diff them.
           fetch-depth: 0
@@ -114,8 +125,18 @@ jobs:
           # offers for workflows already on the default branch — the very
           # trap that left the previous compatibility watch unable to fire
           # (orbit-launcher#119).
+          #
+          # Only install.sh itself is in this list. installer-ui.sh and
+          # installer-simulation.sh used to be here too, but this job never
+          # exercises either: install.sh fetches its own copy of
+          # installer-ui.sh from the resolved image's source revision (see
+          # the asset_base block above), never from the commit under test,
+          # and installer-simulation.sh only runs under --simulate, which
+          # this job's live launcher install never invokes. Keeping them
+          # in the filter only triggered the job without being exercised
+          # by it — the same false coverage #606's ruling removed them for.
           changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- \
-            scripts/install.sh scripts/installer-ui.sh scripts/installer-simulation.sh \
+            scripts/install.sh \
             .github/workflows/launcher-install-compat.yml)"
           if [[ -n "$changed" ]]; then
             echo "Installer scripts changed:"
@@ -128,7 +149,7 @@ jobs:
 
       - name: Check out orbit-launcher
         if: steps.scope.outputs.run == 'true'
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: tomlawesome/orbit-launcher
           # Explicit ref: this builds and runs a second repository's code
@@ -182,3 +203,29 @@ jobs:
           path: ${{ runner.temp }}/live-raw.log.*
           if-no-files-found: ignore
           retention-days: 7
+
+      # A required check that gates the promotion has to be readable as
+      # evidence. This one is deliberately conditional, so a green tick
+      # usually means "this pull request touched no installer script" and
+      # not "the launcher can still install Orbit" — three of the four runs
+      # before #694 passed without ever building the launcher, and nothing
+      # in the run said so. GitHub has no neutral result for a job, so the
+      # skip is stated in the summary instead.
+      - name: Record what this run examined
+        if: always()
+        env:
+          RAN: ${{ steps.scope.outputs.run }}
+          SHA: ${{ steps.scope.outputs.sha }}
+        run: |
+          {
+            printf '## Launcher install compatibility\n\n'
+            if [[ "${RAN}" == "true" ]]; then
+              printf 'Examined: Orbit was installed through orbit-launcher against `%s`.\n' "${SHA}"
+            else
+              printf 'Not examined: no installer script changed on this pull request, so\n'
+              printf 'the launcher was never built or run.\n\n'
+              printf 'A pass here means only that `scripts/install.sh` and this workflow\n'
+              printf 'are untouched. It is not evidence that the launcher can install\n'
+              printf 'Orbit.\n'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
