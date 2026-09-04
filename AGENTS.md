@@ -239,8 +239,9 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   issue, and an empty version milestone is a deliberate placeholder for the
   next release rather than clutter (owner, 2026-08-23 and 2026-09-01). Every
   issue carries a milestone. The board's per-issue Status, Priority and Risk
-  fields have no GitLab equivalent and were not recreated; #814 holds the
-  question of whether anything replaces them.
+  fields have no GitLab equivalent and nothing replaces them (owner,
+  2026-09-04, #814): the milestone says what is scheduled and open/closed
+  says what is done.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
