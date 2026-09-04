@@ -2473,9 +2473,30 @@ check_database_reachability() {
   # reach the database for the migration backstop, and never classified.
   local reader_id="$app_probe_id" reader_script="$app_credential_reader"
   local classify_credentials=1
-  # shellcheck disable=SC2016  # expanded by the container's shell, not this one
-  if [[ -z "$app_probe_id" ]] || ! timeout "$docker_probe_timeout" docker exec "$app_probe_id" \
-    sh -c 'f="${POSTGRES_PASSWORD_FILE:-}"; [ -n "$f" ] && [ -r "$f" ]' >/dev/null 2>&1; then
+  # An application that cannot authenticate crash-loops under
+  # `restart: unless-stopped`, so the container this check most needs to read
+  # from is `restarting` for most of every cycle and exec fails. Falling back
+  # straight to the database's copy then drops the very finding the drift
+  # should raise (#806): a deployment whose credential is wrong diagnosed as
+  # anything but. Wait, bounded, while the container is alive or coming back
+  # (running/restarting) and try again on each pass; a container that is
+  # exited, created or dead is not coming back on its own and is not waited
+  # for. A healthy container passes first time and pays nothing.
+  local app_secret_deadline=$((SECONDS + 20)) app_secret_readable=0 app_state
+  while [[ -n "$app_probe_id" ]]; do
+    # shellcheck disable=SC2016  # expanded by the container's shell, not this one
+    if timeout "$docker_probe_timeout" docker exec "$app_probe_id" \
+      sh -c 'f="${POSTGRES_PASSWORD_FILE:-}"; [ -n "$f" ] && [ -r "$f" ]' >/dev/null 2>&1; then
+      app_secret_readable=1
+      break
+    fi
+    app_state="$(timeout "$docker_probe_timeout" docker inspect \
+      --format '{{.State.Status}}' "$app_probe_id" 2>/dev/null || true)"
+    [[ "$app_state" == running || "$app_state" == restarting ]] || break
+    ((SECONDS < app_secret_deadline)) || break
+    sleep 0.25
+  done
+  if [[ "$app_secret_readable" == 0 ]]; then
     reader_id="$db_id"
     reader_script="$db_credential_reader"
     classify_credentials=0

@@ -15,6 +15,7 @@
 #   ORBIT_REGISTRY, ORBIT_REPOSITORY, ORBIT_CHANNEL  the disposable registry
 #   GIT_GUARD_DIR     directory holding the guard `git`, prepended to PATH
 #   GITHUB_WORKSPACE  optional; defaults to the repository root
+#   ORBIT_ASSETS_FROM_TREE  optional; see scripts/ci/assets-from-tree.sh
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -24,6 +25,10 @@ readonly repo_root
 
 workspace="${GITHUB_WORKSPACE:-${repo_root}}"
 readonly workspace
+
+# shellcheck source=scripts/ci/assets-from-tree.sh
+source "${repo_root}/scripts/ci/assets-from-tree.sh"
+PATH="$(assets_from_tree_path)${PATH}"
 
 exec < /dev/null
 [[ ! -t 0 ]] || {

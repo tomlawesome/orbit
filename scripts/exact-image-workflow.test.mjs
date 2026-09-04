@@ -523,6 +523,10 @@ describe("exact-image publication workflow", () => {
     // Empty non-TTY input must fail closed without starting Compose, mutate no
     // Git state, and leave the target empty for the documented bootstrap path.
     const refusalStep = ciScript("verify-installer-refusal.sh");
+    // Both installer steps run from the target directory, so a relative
+    // script path resolves against the wrong tree (PR #805, first run).
+    expect(workflow).toContain('run: bash "$GITHUB_WORKSPACE/scripts/ci/verify-installer-refusal.sh"');
+    expect(workflow).toContain('run: bash "$GITHUB_WORKSPACE/scripts/ci/run-installer.sh"');
     expect(refusalStep).toContain('runner_temp="${RUNNER_TEMP:-');
     expect(refusalStep).toContain('refusal_output="${runner_temp}/orbit-installer-refusal-');
     expect(refusalStep).toContain("exec < /dev/null");
