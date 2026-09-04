@@ -71,12 +71,14 @@ export const PROCESS_IDLE_DEADLINE_MS = 20_000;
  * The Vitest verdict for a test that runs the recovery key derivation.
  *
  * scrypt with N=131072 (recovery-crypto.mjs) costs ~0.4s per call on a quiet
- * workstation, by design; the determinism contrast test makes ten calls, ~4s
- * quiet, and was measured at 5.3s on a machine another session was using. 20s
- * is five times the quiet figure, matching the slowdown seen on a starved
- * core, and was the figure already declared inline before this module existed.
+ * workstation, by design. The determinism contrast test makes ten calls: ~4s
+ * quiet, 5.3s on a machine another session was using, and 21.5s on one fifth
+ * of a core -- the same starvation that took the CLI spawns above from 0.7s
+ * to 4.3s. 30s is the starved figure with the same margin the process
+ * deadline has over its worst case, and replaces the 20s that was declared
+ * inline before this module existed and that the starved run went past.
  */
-export const KDF_TEST_TIMEOUT_MS = 20_000;
+export const KDF_TEST_TIMEOUT_MS = 30_000;
 
 const CAPTURED_OUTPUT_LIMIT = 1_500;
 
