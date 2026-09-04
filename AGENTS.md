@@ -76,8 +76,8 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Seven known ways to lose an afternoon, or worse. The first two have open
-issues; until those land, this is the procedure.
+Ten known ways to lose an afternoon, or worse. The first two have open issues;
+until those land, this is the procedure.
 
 **Never run `pnpm db:generate`.** `drizzle/meta/` holds snapshots only up to
 0004 while the journal has 28 entries, so `drizzle-kit generate` diffs against
@@ -131,6 +131,31 @@ still reports green.
 **`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
 else drives it.** A dropped column passes every unit and integration check and
 fails only the compose smoke test — grep it before changing a schema.
+
+**An install run from inside a worktree rewires the main checkout.** pnpm
+treats the main checkout as a workspace member to link, so its `node_modules`
+fills with symlinks into `.claude/worktrees/<name>/`, and the `orbit` workspace
+link disappears. Nothing dangles while that worktree exists, so the checkout
+looks healthy until someone removes it. Never run `pnpm install` with a
+worktree as the working directory. To check:
+`find node_modules web/node_modules -type l -lname '*worktrees*'` must be
+empty. Repair is `CI=true pnpm install` from the main checkout root, which
+breaks every other session's builds while it runs — agree a window first. See
+#784.
+
+**A red compose smoke job can be hiding the next failure.** Its steps run in
+one job and it stops at the first, so fixing that step reveals what was behind
+it rather than turning the job green — the favicon 404 hid nine e2e failures
+all of 2026-09-03. Read the whole job before reporting what a branch needs.
+
+**Never hand-write a control-character range in a regular expression.** The
+escapes are what break. Lose them and the intended "control characters or
+backslash" collapses into a range running from space to backslash, matching
+most ordinary characters — so a path sanitiser rejects every real path, or the
+reverse, and no test notices unless it covers the boundary. Scan the string
+explicitly instead, as `isApplicationRelative` in
+`web/src/routes/login/+page.svelte` does, and give it cases for the empty
+string, a protocol-relative `//` and a backslash.
 
 ## The demo stack is disposable
 

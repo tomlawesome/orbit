@@ -2,15 +2,15 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { userPreferences } from "@/db/schema";
-import { GET as readTour, PUT as writeTour } from "@/app/api/settings/tour/route";
 import { getAuthConfig } from "@/lib/env";
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
-  requestWithoutSession,
   type IntegrationSession,
 } from "./support/fixtures";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
+
+const { GET: readTour, PUT: writeTour } = await loadRoute("settings/tour");
 
 /**
  * The first-run tour record against PostgreSQL (#751, slice 1 of #477). The
@@ -27,17 +27,18 @@ afterAll(async () => {
 type Tour = { tourSeenAt: string | null };
 
 async function read(session: IntegrationSession): Promise<{ status: number; tour: Tour }> {
-  const response = await readTour(requestForSession(session, TOUR_URL));
+  const response = await callRouteForSession(readTour, session, { url: TOUR_URL });
   const body = await response.json() as { tour: Tour };
   return { status: response.status, tour: body.tour };
 }
 
 async function write(session: IntegrationSession, body: unknown, headers: Record<string, string> = {}) {
-  const response = await writeTour(requestForSession(session, TOUR_URL, {
+  const response = await callRouteForSession(writeTour, session, {
+    url: TOUR_URL,
     method: "PUT",
     body: JSON.stringify(body),
     headers,
-  }));
+  });
   return { status: response.status, body: await response.json() as { tour?: Tour; error?: { code: string } } };
 }
 
@@ -118,15 +119,16 @@ describe("PostgreSQL first-run tour contracts", () => {
     const member = await fixture.session("member");
     const config = getAuthConfig();
 
-    const anonymousRead = await readTour(requestWithoutSession(TOUR_URL));
+    const anonymousRead = await callRoute(readTour, { url: TOUR_URL });
     expect(anonymousRead.status).toBe(401);
     expect(anonymousRead.headers.get("cache-control")).toBe("no-store");
 
-    const anonymousWrite = await writeTour(requestWithoutSession(TOUR_URL, {
+    const anonymousWrite = await callRoute(writeTour, {
+      url: TOUR_URL,
       method: "PUT",
       body: JSON.stringify({ tourSeenAt: "2026-08-25T00:00:00.000Z" }),
       headers: { origin: config.appUrl.origin, "sec-fetch-site": "same-origin" },
-    }));
+    });
     expect(anonymousWrite.status).toBe(401);
 
     const noCsrf = await write(member, { tourSeenAt: "2026-08-25T00:00:00.000Z" }, {

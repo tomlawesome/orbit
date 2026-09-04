@@ -140,7 +140,10 @@ describe("exact-image publication workflow", () => {
     expect(fast).toContain("- changes");
     expect(fast).toContain("needs.changes.outputs.build == 'true'");
     expect(fast).toContain("github.event_name == 'push'");
-    expect(fast).toContain("run: pnpm build");
+    /* The production build is the front end's since the cut (#735): there is
+       no root `build` script any more, because the SvelteKit output IS the
+       application server. */
+    expect(fast).toContain("run: pnpm --filter orbit-web build");
     expect(integration).toContain("needs.changes.outputs.integration == 'true'");
     expect(integration).toContain("github.event_name == 'push'");
     // The changed-paths filter is a cost filter, not a publication gate, so

@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const boundedRuntimeSources = [
-  "../app/api/auth/callback/route.ts",
+  /* The SvelteKit port of the callback route (#735). Its Next predecessor,
+     `src/app/api/auth/callback/route.ts`, went with the cut; the contract is
+     about the runtime path, not the framework, so it follows the route. */
+  "../../web/src/routes/api/auth/callback/+server.js",
   "../db/index.ts",
   "../db/migrate.ts",
   "../lib/app-error.ts",
