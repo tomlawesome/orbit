@@ -4,20 +4,25 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every test here spawns the real sidecar-image-evidence.mjs CLI; a spawn
+// that takes tens of milliseconds quiet takes seconds on a starved core
+// (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const scriptPath = join(scriptsDir, "sidecar-image-evidence.mjs");
 
-// Every spawnSync call gets explicit piped stdio and a hard timeout+kill
-// signal: a wedged child fails this test loudly within seconds rather than
-// hanging the job.
-const SPAWN_TIMEOUT_MS = 30_000;
+// Every spawnSync call gets explicit piped stdio, so a wedged child fails
+// this test loudly rather than hanging. processGuard() supplies the actual
+// deadline and kill signal.
 const SPAWN_OPTS = {
   stdio: ["ignore", "pipe", "pipe"],
   encoding: "utf8",
-  timeout: SPAWN_TIMEOUT_MS,
-  killSignal: "SIGKILL",
+  ...processGuard(),
 };
 
 // The CLI evaluates against the real clock, so fixture review and expiry
@@ -153,7 +158,7 @@ function writeFixtures(dir, { policyDocument, reports }) {
 }
 
 function runCli(args) {
-  return spawnSync(process.execPath, [scriptPath, ...args], SPAWN_OPTS);
+  return failOnProcessDeadline(spawnSync(process.execPath, [scriptPath, ...args], SPAWN_OPTS), { label: "runCli" });
 }
 
 describe("sidecar image evidence: --list-references", () => {

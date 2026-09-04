@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   BACKUP_BUNDLE_FORMAT_VERSION,
   BACKUP_BUNDLE_MEMBERS,
@@ -59,6 +60,11 @@ import {
 // docs/adr-notes/296-backup-port-plan.md for the slice this belongs to and
 // byte-for-byte parity coverage against the real scripts
 // (recovery-bundle.parity.test.ts).
+
+// One fixture below spawns a real `tar`; a spawn that takes 0.7s quiet took
+// 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 let workDir: string;
 
@@ -734,7 +740,7 @@ describe("document archive path allow-list (backup.sh #8-10)", () => {
       mkdirSync(sourceDir, { recursive: true });
       writeFileSync(join(sourceDir, "f"), "x");
       const tarPath = join(workDir, "hostile.tar");
-      const result = spawnSync("tar", ["-cf", tarPath, "--transform", `s@^f$@${hostileName}@`, "-C", sourceDir, "f"], { encoding: "utf8" });
+      const result = failOnProcessDeadline(spawnSync("tar", ["-cf", tarPath, "--transform", `s@^f$@${hostileName}@`, "-C", sourceDir, "f"], { encoding: "utf8", ...processGuard() }), { label: "buildArchiveWithHostileMemberName" });
       if (result.status !== 0) throw new Error(`test setup: tar --transform failed: ${result.stderr}`);
       return tarPath;
     }

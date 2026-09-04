@@ -3,7 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 
 // `orbit configure` end-to-end (issue #294): the write side of
 // scripts/configure.sh, ported onto src/lib/configure-engine.ts and wired
@@ -14,16 +16,18 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cli = fileURLToPath(new URL("./orbit.ts", import.meta.url));
 const tsx = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
 
-const CLI_SPAWN_TIMEOUT_MS = 30_000;
+// Every test here spawns the real CLI, some three times over, and a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). The budget and
+// the reasoning live in scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 function runCli(args: string[], options: { input?: string; env?: NodeJS.ProcessEnv } = {}): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync("node", [tsx, cli, ...args], {
+  const result = failOnProcessDeadline(spawnSync("node", [tsx, cli, ...args], {
     encoding: "utf8",
     input: options.input,
     env: options.env ?? process.env,
-    timeout: CLI_SPAWN_TIMEOUT_MS,
-    killSignal: "SIGKILL",
-  });
+    ...processGuard(),
+  }), { label: "runCli" });
   return { status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 
