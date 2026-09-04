@@ -338,8 +338,34 @@ drift_the_credential() {
   printf 'drifted-password-%s\n' "$RANDOM" > "$staged"
   chmod 600 "$staged"
   mv -- "$staged" "$target/.orbit-secrets/postgres-password"
+  # Fingerprint the drift so a later journey can prove it is still the one this
+  # run seeded (#785). The hash, never the password: the credential already
+  # lives in exactly one place and this harness does not make a second copy.
+  sha256sum "$target/.orbit-secrets/postgres-password" | awk '{print $1}' > "$workdir/drift.sha256"
   compose restart orbit-app >/dev/null 2>&1 || true
   wait_for_unhealthy
+}
+
+# The drift is a fact about the secrets file, and this is how to ask.
+#
+# `health_check` was the only thing guarding it, and health is a lagging
+# signal: the app can still be reported unhealthy for seconds after its
+# credential has been put right, so a journey that repaired the drift could
+# pass and leave the next one to fail in its place. That is #785 — the same
+# journey failed in four different spots across four runs, none of them where
+# the fault was. This answers instantly and cannot be raced.
+#
+# A rotation that completed replaces this file by rename (#629), and a
+# completed restore-transaction can remove a managed path it has no staged
+# original for, so both mutations show up here.
+assert_credential_still_drifted() {
+  local context="$1" now expected
+  [[ -f "$target/.orbit-secrets/postgres-password" ]] ||
+    fail "$context: the drifted credential file is gone — something removed it, so the journeys after this one cannot start from the state they assume"
+  expected="$(cat "$workdir/drift.sha256")"
+  now="$(sha256sum "$target/.orbit-secrets/postgres-password" | awk '{print $1}')"
+  [[ "$now" == "$expected" ]] ||
+    fail "$context: the credential is no longer the drifted one this run seeded — something repaired or replaced it, so the journeys after this one no longer start from the state they assume"
 }
 
 # --- journeys -------------------------------------------------------------
@@ -510,11 +536,20 @@ SHIM
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'an interrupted repair disturbed the fixture data'
   health_check && fail 'an interrupted repair silently fixed the drift'
+  # The assertion with teeth. The line above can only notice a drift that was
+  # repaired AND whose app has already recovered; this one notices the repair
+  # itself, at the moment it happened (#785).
+  assert_credential_still_drifted 'signal-cleanup'
   result_line signal-cleanup pass
 }
 
 journey_credential_drift() {
   local output status=0
+  # Start from a drift this journey has confirmed, rather than one it assumes
+  # the journeys before it left alone (#785). Without this the failure lands on
+  # whichever assertion below happens to notice first, and reads as a defect in
+  # repair.sh's credential handling rather than in the run-up to it.
+  assert_credential_still_drifted 'credential-drift: precondition'
   output="$(repair --check 2>&1)" || status=$?
   [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2
     fail "--check on a drifted credential exited $status, expected 4"; }
