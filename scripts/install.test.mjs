@@ -756,11 +756,14 @@ function runInstallWithPromptedTerminalInput(
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       watchdog.touch();
-      const interaction = interactions[interactionIndex];
-      if (interaction && stdout.includes(interaction.after)) {
+      // Two prompts can land in one chunk; answer every one that is on
+      // screen, or the second waits for output that will never come.
+      let interaction = interactions[interactionIndex];
+      while (interaction && stdout.includes(interaction.after)) {
         child.stdin.write(interaction.input);
         interactionIndex += 1;
         if (interactionIndex === interactions.length) child.stdin.end();
+        interaction = interactions[interactionIndex];
       }
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
@@ -781,62 +784,6 @@ function runInstallWithPromptedTerminalInput(
         calls: readOptionalFile(logPath),
         promptedInteractions: interactionIndex,
       });
-    });
-  });
-}
-
-function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args = []) {
-  const binDir = makeFakeBin();
-  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
-  const logPath = join(logDir, "calls.log");
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "script",
-      ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
-      {
-        cwd: targetDir,
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH}`,
-          TERM: "xterm",
-          ORBIT_REPOSITORY: repository,
-          ORBIT_REGISTRY: registry,
-          FAKE_IMAGE_REPOSITORY: imageRepository,
-          FAKE_DOCKER_DIGEST: digest,
-          FAKE_DOCKER_REVISION: revision,
-          FAKE_DOCKER_VERSION: "v1.2.0",
-          FAKE_DOCKER_APP_IMAGE: resolvedReference,
-          FAKE_ASSET_BASE: assetBase,
-          FAKE_CALL_LOG: logPath,
-          FAKE_PROBE_COUNTER_DIR: logDir,
-          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
-          FAKE_CONFIGURE_READY: "0",
-          ...envOverrides,
-        },
-      },
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    const watchdog = ptyWatchdog({ label: "runInstallWithTimedTerminalInput", kill: () => child.kill("SIGKILL") });
-    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
-    child.on("error", reject);
-    (async () => {
-      for (const [delay, input] of steps) {
-        await new Promise((stepResolve) => setTimeout(stepResolve, delay));
-        if (!child.stdin.destroyed) child.stdin.write(input);
-      }
-      child.stdin.end();
-    })().catch(reject);
-    child.on("close", (status, signal) => {
-      watchdog.stop();
-      if (watchdog.reason) {
-        reject(watchdog.error({ stdout, stderr }));
-        return;
-      }
-      resolve({ status, signal, stdout, stderr, calls: readOptionalFile(logPath) });
     });
   });
 }
@@ -933,17 +880,23 @@ describe("install.sh", () => {
     const targetDir = makeTarget();
     const model = "qwen3:8b";
 
-    const result = await runInstallWithTimedTerminalInput(
+    // Answers follow the prompts they answer, not a stopwatch: the timed
+    // version of this test sent its seven answers on fixed delays and failed
+    // on a starved core, where the installer had not reached the prompt the
+    // next answer was meant for (#698). The secret has no visible prompt --
+    // the stand-in configure reads it silently -- so its cue is the stand-in
+    // announcing a call with no ORBIT_IMAGE, which only --set-oidc-secret does.
+    const result = await runInstallWithPromptedTerminalInput(
       targetDir,
       { TERM: "dumb" },
       [
-        [800, "1\n"],
-        [150, "3\n"],
-        [150, `${model}\n`],
-        [150, "2\n"],
-        [150, "1\n"],
-        [800, "full-secret\n"],
-        [300, "1\n"],
+        { after: "Greetings, what can we do for you today?", input: "1\n" },
+        { after: "Choose a deployment profile", input: "3\n" },
+        { after: "Bounded local model identifier:", input: `${model}\n` },
+        { after: "Prepare the selected local model after Ollama becomes healthy?", input: "2\n" },
+        { after: "Review: OIDC remains required", input: "1\n" },
+        { after: "CONFIGURE_INVOKED ORBIT_IMAGE=\r", input: "full-secret\n" },
+        { after: "Final review: apply the collected core settings", input: "1\n" },
       ],
     );
 
