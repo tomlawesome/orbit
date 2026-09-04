@@ -52,7 +52,7 @@ introduced high or critical vulnerabilities in every dependency scope.
 Dependencies that declare a licence outside the allow-list block
 automatically. Missing or ambiguous licence metadata is surfaced by the action
 and remains a manual review and release blocker until it is resolved. There
-are no advisory or package licence exemptions in the policy. Any future
+are no advisory or package licence exemptions for source dependencies. Any
 exemption must be narrow, justified, owned, time-bounded and linked to a
 tracking issue.
 
@@ -62,6 +62,15 @@ and has not expired. Secret findings have no exception path. The policy
 validator fails closed on stale or malformed exceptions. Exceptions do not
 change scanner output; they make a narrow, reviewable publication decision for
 a known vulnerability.
+
+The `exceptions[]` list currently holds the pinned sidecar findings that had
+no upstream fix to pin to on 2026-09-04 (#740): OpenSSL 3.5.7 in the Node and
+Postgres images until those tags are rebuilt, and Go standard-library findings
+compiled into `gosu`, Tika's `pebble` and the Ollama binary. Each entry names
+the installed version it was seen in, so a rebuilt image that is still
+vulnerable is blocked afresh, and every entry expires on the same date. #794
+tracks retiring them; when they expire the scan goes red until they are
+removed or renewed with a reason recorded there.
 
 ### Sharp/libvips v1 licence decision
 
