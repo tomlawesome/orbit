@@ -14,8 +14,12 @@
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
 import { ago, tminus } from "$lib/format.js";
 
-/** Two letters from a chosen display name — never from an email address, which
- * this screen's routes deliberately never disclose. */
+/**
+ * Two letters from a chosen display name — never from an email address, which
+ * this screen's routes deliberately never disclose.
+ * @param {?string} [name]
+ * @returns {string}
+ */
 export function initialsOf(name) {
   return (name ?? "")
     .split(/\s+/)
@@ -25,9 +29,18 @@ export function initialsOf(name) {
     .toUpperCase() || "·";
 }
 
+/**
+ * @param {number} count
+ * @param {string} word
+ * @returns {string}
+ */
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** "3 entries" / "1 entry" — the count printed beside a section in the editor. */
+/**
+ * "3 entries" / "1 entry" — the count printed beside a section in the editor.
+ * @param {number} count
+ * @returns {string}
+ */
 export function entriesLabel(count) {
   return `${count} ${count === 1 ? "entry" : "entries"}`;
 }
@@ -38,6 +51,8 @@ export function entriesLabel(count) {
  * enforceable in the interface — a section holding entries has no × at all,
  * because sections.replace would re-file its items under the first surviving
  * section and the reader never asked for that.
+ * @param {import('./workspace.js').Household | null} [household]
+ * @returns {import('./workspace.js').SectionRow[]}
  */
 export function sectionRowsOf(household) {
   const items = (household?.items ?? []).filter((item) => item.status !== "archived");
@@ -67,6 +82,9 @@ export const MAX_SECTIONS = 12;
  * replaces the list. Rows are mapped back to the engine's own field names and
  * nothing else travels: the entry counts and the removable flag are the
  * interface's arithmetic, not the household's state.
+ * @param {string} householdId
+ * @param {import('./workspace.js').SectionRow[]} rows
+ * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[] }}
  */
 export function sectionsCommandOf(householdId, rows) {
   return {
@@ -90,6 +108,9 @@ export function sectionsCommandOf(householdId, rows) {
  * route accepts: a per-field save simply submits the bundle with the other two
  * values as they stand. The split is a courtesy to the person, not a change to
  * the protocol.
+ * @param {string} householdId
+ * @param {{ name?: ?string, timezone?: string, currency?: string }} fields
+ * @returns {{ type: string, householdId: string, name: string, timezone?: string, currency?: string }}
  */
 export function householdUpdateCommandOf(householdId, { name, timezone, currency }) {
   return {
@@ -109,11 +130,40 @@ export function householdUpdateCommandOf(householdId, { name, timezone, currency
  * makes (`confirmation` against the stored name) and not a friendlier one: a
  * button that wakes on a name the server will reject is a worse lie than a
  * button that stays asleep.
+ * @param {?string} [typed]
+ * @param {?string} [householdName]
+ * @returns {boolean}
  */
 export function deletionNameMatches(typed, householdName) {
   const target = (householdName ?? "").trim();
   return target.length > 0 && (typed ?? "").trim() === target;
 }
+
+/**
+ * One entry's star in the household's own constellation (§15 H2).
+ *
+ * @typedef {object} ConstellationMark
+ * @property {string} id
+ * @property {string} title
+ * @property {?string} sectionId
+ * @property {?string} accent
+ * @property {number} days
+ * @property {string} tag
+ * @property {string} band
+ * @property {number} dx
+ * @property {number} dy
+ * @property {number} halo
+ */
+
+/**
+ * The line joining one section's stars, when it holds more than one.
+ *
+ * @typedef {object} ConstellationFigure
+ * @property {string} id
+ * @property {string} name
+ * @property {?string} accent
+ * @property {string[]} members
+ */
 
 /**
  * THE SYSTEM YOU ARE STANDING IN (§15 H2 — "inside this system").
@@ -138,11 +188,15 @@ export function deletionNameMatches(typed, householdName) {
  * entry is a lone star with no line to anyone; a section holding none is not in
  * the sky at all. Count the stars on a figure and you have read the sections
  * card beside you.
+ * @param {import('./workspace.js').Household | null} [household]
+ * @param {?string} [today]
+ * @returns {{ marks: ConstellationMark[], figures: ConstellationFigure[] }}
  */
 export function constellationOf(household, today) {
   /* No today, no sky: an undated room is better than one drawn from NaN. */
   if (!today) return { marks: [], figures: [] };
   const accents = new Map((household?.sections ?? []).map((section) => [section.id, section]));
+  /** @type {ConstellationMark[]} */
   const marks = [];
   for (const item of household?.items ?? []) {
     if (item.status !== "active" || !item.dueDate) continue;
@@ -167,6 +221,7 @@ export function constellationOf(household, today) {
      in, and the closest thing is drawn — and lettered — first. */
   marks.sort((a, b) => a.days - b.days || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
+  /** @type {ConstellationFigure[]} */
   const figures = [];
   for (const section of household?.sections ?? []) {
     const members = marks.filter((mark) => mark.sectionId === section.id);
@@ -192,6 +247,15 @@ export function constellationOf(household, today) {
  * workspace's own flag rather than a role read off the roster: an instance
  * admin holding owner powers over a household they are not a member of has no
  * row in that roster (§15-2i, one screen, one drawing).
+ * @param {object} params
+ * @param {import('./workspace.js').Workspace | null} [params.workspace]
+ * @param {string} params.householdId
+ * @param {import('./workspace.js').SessionUser | null} [params.user]
+ * @param {import('./workspace.js').Member[]} [params.members]
+ * @param {import('./workspace.js').Member[]} [params.candidates]
+ * @param {import('./workspace.js').JoinRequest[]} [params.joinRequests]
+ * @param {?string} [params.today]
+ * @param {?string} [params.now]
  */
 export function householdScreenOf({
   workspace,
@@ -211,7 +275,7 @@ export function householdScreenOf({
     name: member.displayName,
     initials: initialsOf(member.displayName),
     role: member.role,
-    you: Boolean(user?.id) && member.id === user.id,
+    you: Boolean(user?.id) && member.id === /** @type {import('./workspace.js').SessionUser} */ (user).id,
   }));
   const owner = roster.find((member) => member.role === "owner") ?? null;
   const canManage = Boolean(household.canManage);

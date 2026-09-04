@@ -19,12 +19,28 @@
    * only when the QUEUE is empty (review + reading + failed), where the
    * address is the call to action; Filed may still hold items.
    */
+  /** @type {Awaited<ReturnType<typeof readInboxScreen>> | null} */
   let view = $state(null);
+  /* The template only calls into `view` from inside `{#if view}`, but that
+     guard doesn't reach into these standalone functions' closures, so this
+     asserts what the call sites already guarantee rather than duplicating
+     the check. */
+  const need = () => /** @type {NonNullable<typeof view>} */ (view);
+
+  /** @type {{ id: string | null, act: "approve" | "dismiss" | null }} */
   let armed = $state({ id: null, act: null });
+  /** @type {string | null} */
   let busy = $state(null);
+  /** @type {string | null} */
   let problem = $state(null);
   const operationIds = new SvelteMap();
 
+  /**
+   * Only `id` is ever read here, so this takes anything with one -- a review
+   * receipt or a failed-to-process entry alike, both of which call in.
+   * @param {{ id: string }} receipt
+   * @param {"approve" | "dismiss"} act
+   */
   async function tap(receipt, act) {
     problem = null;
     if (armed.id !== receipt.id || armed.act !== act) {
@@ -34,9 +50,12 @@
     busy = receipt.id;
     try {
       if (act === "approve") {
-        const suggestion = view.suggestions.find((one) => one.receiptId === receipt.id);
+        const found = need().suggestions.find((one) => one.receiptId === receipt.id);
         if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
-        const result = await approveReceipt(suggestion, view.primary, operationIds.get(receipt.id));
+        /* The review lane's own receipts are exactly receiptSuggestionsOf's
+           input, so a receipt armed to approve is always found here. */
+        const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (found);
+        const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id));
         if (result.outcome === "partial_success") {
           problem = "The item is recorded, but its documents need another try — tap again to finish.";
           return;
@@ -48,23 +67,35 @@
       armed = { id: null, act: null };
       view = await readInboxScreen();
     } catch (error) {
-      problem = error?.message ?? String(error);
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
     } finally {
       busy = null;
     }
   }
 
+  /** @param {string} iso */
   const short = (iso) =>
     new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /** @param {string} iso */
   const fullDate = (iso) =>
     new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
   /* Filed dates carry their year only once it stops being obvious. */
+  /** @param {string} iso */
   const filedDate = (iso) =>
-    iso.slice(0, 4) === view.today.slice(0, 4) ? short(iso) : fullDate(iso);
+    iso.slice(0, 4) === need().today.slice(0, 4) ? short(iso) : fullDate(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
+  /** @type {Record<string, string>} */
   const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
-  const burnsIn = (receipt) => daysUntil(receipt.expiresAt.slice(0, 10), view.today);
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
+  const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
+  /* "Still reading" only ever holds receipts that have already arrived. */
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
+  const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
   /* READ · SURE / READ · UNSURE — the parser's own confidence, two words. */
+  /**
+   * @param {import('$lib/data/workspace.js').Receipt} receipt
+   * @param {string} field
+   */
   const mark = (receipt, field) => {
     const evidence = receipt.fieldEvidence?.[field];
     if (!evidence) return null;
@@ -72,15 +103,18 @@
   };
   /* The list API names no files yet (#467): the fixture carries the design's
      names; live data degrades to the honest count. */
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const chips = (receipt) =>
     receipt.attachments?.map(
-      (a) => `◆ ${a.displayName} · ${Math.round(a.sizeBytes / 1024)} KB · scanned clean`,
+      (a) => `◆ ${a.displayName} · ${Math.round(/** @type {number} */ (a.sizeBytes) / 1024)} KB · scanned clean`,
     ) ?? (receipt.attachmentCount
       ? [`◆ ${receipt.attachmentCount} document${receipt.attachmentCount === 1 ? "" : "s"} · scanned clean`]
       : []);
-  const emptyQueue = $derived(
-    view && !view.review.length && !view.reading.length && !view.failed.length,
-  );
+  const emptyQueue = $derived.by(() => {
+    if (!view) return null;
+    const current = need();
+    return !current.review.length && !current.reading.length && !current.failed.length;
+  });
 
   onMount(async () => {
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
@@ -117,7 +151,7 @@
         {#each view.filed as entry (entry.itemId)}
           <a class="item" href={resolve("/item/[id]", { id: entry.itemId })}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
-            <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(entry.filedAt)}</span></div>
+            <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
         {/each}
         {#if view.filed.length}
@@ -138,7 +172,7 @@
             <div class="head">
               <span class="dot" aria-hidden="true"></span>
               <b>{receipt.proposal?.title ?? "Forwarded email"}</b>
-              <small>caught {short(receipt.receivedAt)} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
+              <small>caught {short(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
             </div>
             <div class="fields">
               {#if receipt.proposal?.provider}
@@ -181,7 +215,7 @@
           <div class="reading">
             <i aria-hidden="true"></i>
             <div class="body">
-              <b>A message arrived {agoLong(receipt.receivedAt, view.now)}</b>
+              <b>A message arrived {readAgo(receipt)}</b>
               <span>{receipt.message}</span>
             </div>
           </div>

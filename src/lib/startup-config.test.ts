@@ -66,6 +66,45 @@ describe("startup configuration", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
+  /*
+   * The fixture harness must not be switchable on in a production Orbit
+   * (#773). Until the cut it took two mistakes: nothing production ran set
+   * ORBIT_FIXTURES, and the composite entry kept /api on the engine whatever
+   * the SvelteKit app thought. The cut deleted the second layer, so this is
+   * the replacement for it — and since #789 the same flag also bypasses the
+   * authentication gate, which makes it load-bearing in two places.
+   */
+  it.each([
+    ["on", "1"],
+    ["off but present", "0"],
+    ["unparseable", "yes-please"],
+    ["empty-ish whitespace", " "],
+  ])("refuses to start a production build with the fixture harness %s", (_label, value) => {
+    let failure: unknown;
+    try {
+      validateStartupConfiguration({ ...baseEnvironment(), NODE_ENV: "production", ORBIT_FIXTURES: value });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(StartupConfigurationError);
+    expect((failure as StartupConfigurationError).issues).toContainEqual(
+      expect.objectContaining({ field: "fixtures", code: "configuration_core" }),
+    );
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("starts a production build when the fixture harness is absent", () => {
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), NODE_ENV: "production" })).not.toThrow();
+    expect(getConfigurationProblems()).not.toContainEqual(expect.objectContaining({ setting: "fixtures" }));
+  });
+
+  it("leaves the fixture harness alone outside a production build", () => {
+    // The fidelity gate and `vite dev` both depend on this staying true; it is
+    // criterion 2 of #773 and the reason the check is on NODE_ENV rather than
+    // on the flag alone.
+    expect(() => validateStartupConfiguration({ ...baseEnvironment(), ORBIT_FIXTURES: "1" })).not.toThrow();
+  });
+
   it("accepts preconfigured disabled IMAP and dormant VAPID key material without a push subject", () => {
     expect(() => validateStartupConfiguration({
       ...baseEnvironment(),
