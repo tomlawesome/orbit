@@ -70,9 +70,9 @@
       "groupName": "gitlab-ci image minor and patch"
     },
     {
-      "description": "Renovate's own image, which the gitlabci manager finds in the renovate job. 44.63.0 and 44.64.0 do not start: both ship an `apk` datasource that imports `tar`, and `tar` is absent from the image's node_modules, so the container dies before it reads any configuration. A merge request offering one of those would be merged on the strength of a green pipeline -- nothing in CI runs this job -- and the next scheduled run would simply fail. Lift this when upstream ships a release whose image starts, and lift the matching note on the job's image pin with it.",
+      "description": "Renovate's own image, which the gitlabci manager finds in the renovate job. 44.63.0 and 44.64.0 (both released 2026-09-04) do not start: they ship an `apk` datasource that imports `tar`, and `tar` is absent from the image's node_modules, so the container dies before it reads any configuration. Only those two are excluded, so the next working release is offered as usual. Nothing in CI runs this job, so a bump is only proven by the next scheduled run: if that run fails at start-up, revert the bump and add the version here.",
       "matchPackageNames": ["renovate/renovate"],
-      "allowedVersions": "<44.63.0"
+      "allowedVersions": "!/^44\\.6[34]\\.0$/"
     },
     {
       "description": "The manual step Dependabot needed, which Renovate still needs. A sidecar pin lives in two places -- the file, and .github/supply-chain-policy.json, a bespoke schema no dependency updater parses -- so a bump lands with the two disagreeing and the drift axis of `node scripts/sidecar-pins.mjs check --offline` goes red in CI. It is not a postUpgradeTask: sync re-resolves the index digest with `docker buildx imagetools inspect`, and the renovate job runs on the shared untagged runner, which has no Docker daemon. Only orbit-build is privileged, and putting Renovate there would queue the whole pipeline behind a weekly maintenance job. So the instruction goes on the merge request, where the person who has to act on it will see it.",
