@@ -219,7 +219,7 @@ install_deployment() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
       ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
       bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install.log" 2>&1 ||
-    { sed -n '$p' "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
+    { tail -n 30 "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
 
   # Confirm the isolation claim rather than trusting it: a stray
   # COMPOSE_PROJECT_NAME would otherwise attach this run to somebody else's
