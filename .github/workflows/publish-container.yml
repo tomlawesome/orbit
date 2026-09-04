@@ -724,7 +724,7 @@ jobs:
           GIT_MARKER: ${{ steps.installer_target.outputs.git_marker }}
           ORBIT_RUN_ID: ${{ github.run_id }}
           ORBIT_RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: bash scripts/ci/verify-installer-refusal.sh
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/verify-installer-refusal.sh"
 
       - name: Pre-provision unattended installer target
         env:
@@ -738,7 +738,7 @@ jobs:
           ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
           ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
           GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
-        run: bash scripts/ci/run-installer.sh
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/run-installer.sh"
 
       - name: Verify exact-image installer evidence
         env:
