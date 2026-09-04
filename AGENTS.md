@@ -22,10 +22,14 @@ authorisation to raise issues and make changes there (owner, 2026-08-30).
 
 Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
 `gitlab.tomlawson.io`, project id 49, is the source of truth**: issues,
-merge requests and the CI that merges wait on. GitHub keeps the repository as
-a mirror for CodeQL, secret scanning and a second CI opinion, and GHCR stays
-where images are published; a red GitHub run never blocks a GitLab merge.
-Issue and MR numbers are GitLab's and do not match the GitHub ones.
+merge requests and the CI that merges wait on. GitHub is a push mirror
+(GitLab Settings → Repository → Mirroring, owner-managed) kept for CodeQL,
+secret scanning and a second CI opinion; a red GitHub run never blocks a
+GitLab merge. GHCR stays where operators pull from: `publish_gitlab` pushes
+the tested image to `registry.tomlawson.io` and records its digest, and
+`.github/workflows/publish-from-gitlab.yml` copies that digest to GHCR when
+the mirror delivers the `preview` push -- nothing built on GitHub reaches a
+registry. Issue and MR numbers are GitLab's and do not match the GitHub ones.
 
 Every `glab` call needs the same three settings, because the default `glab`
 config points at gitlab.com and `GITLAB_TOKEN` in the environment overrides
@@ -63,7 +67,7 @@ Two runners serve this project, both on the host `gitlab-runners` (8 cores,
 Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
 the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
 Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
-else; `.github/dependabot.yml` still covers GitHub Actions only.
+else and covers GitHub Actions too; `.github/dependabot.yml` is gone.
 
 ## Delivery workflow
 
@@ -123,7 +127,7 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/sidecar-pins.mjs` — sidecar pin freshness: `check` reports drift
   between compose and policy, a moved tag, and stale packages inside a current
   pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
-  re-pins both places after a Dependabot bump
+  re-pins both places after a Renovate bump
 
 ## Traps when running things locally
 

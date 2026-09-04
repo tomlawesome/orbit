@@ -1,5 +1,13 @@
 name: Validate Orbit and publish previews
 
+# Since the mirror flip (#801 step 5) this repository is a push mirror of
+# gitlab.tomlawson.io ai/orbit, where every merge is decided and .gitlab-ci.yml
+# runs the whole gate. This workflow is GitHub's second opinion on the same
+# commits: it still runs everything, but a failure here blocks nothing, and it
+# no longer publishes. The image operators pull from GHCR is copied there by
+# publish-from-gitlab.yml, by the digest GitLab tested, so nothing built here
+# can reach a registry. Pull-request triggers are kept for the rare pull request
+# opened here directly; the day-to-day trigger is the mirror's push.
 on:
   pull_request:
     # Deliberately no `labeled` (#757). It fired one whole run per label, so
@@ -28,7 +36,9 @@ on:
       - preview
   push:
     branches:
+      - dev
       - preview
+      - main
       - "hotfix/**"
   workflow_dispatch: {}
 
@@ -491,12 +501,12 @@ jobs:
       - supply_chain_source
       - integration
       - base_image
-    # Retain the existing check identity for branch protection, but defer the
-    # expensive exact-image path until the protected preview merge, except when
-    # evidence was explicitly requested on demand or via the acceptance label.
-    # `publish_preview` below reuses these same steps for the one push-triggered
-    # run that actually publishes, so this job and that one never both run for
-    # the same event: this job is gated to non-push events only.
+    # Retain the existing check identity, but defer the expensive exact-image
+    # path until the preview push, except when evidence was explicitly
+    # requested on demand or via the acceptance label. `publish_preview` below
+    # reuses these same steps for the push-triggered run, so this job and that
+    # one never both run for the same event: this job is gated to non-push
+    # events only.
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
@@ -696,10 +706,9 @@ jobs:
         if: always()
         run: bash scripts/ci/stop-acceptance-stack.sh
 
-      # Installer evidence must gate publication, and the disposable registry
-      # bound to a Compose project named "orbit" must never collide with the
-      # smoke stack above, so this runs only after it is fully torn down and
-      # only before any GHCR login, push or attestation step.
+      # The disposable registry bound to a Compose project named "orbit" must
+      # never collide with the smoke stack above, so this runs only after it is
+      # fully torn down.
       - name: Start disposable installer registry
         id: installer_registry
         env:
@@ -758,87 +767,6 @@ jobs:
           REFUSAL_OUTPUT: ${{ steps.installer_refusal.outputs.refusal_output }}
         run: bash scripts/ci/clean-up-installer.sh
 
-      - name: Log in to GitHub Container Registry
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push exact tested image
-        id: publish
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          TESTED_IMAGE_ID: ${{ steps.image.outputs.id }}
-        run: bash scripts/ci/publish-image.sh
-
-      - name: Attest published image provenance
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.publish.outputs.digest }}
-          push-to-registry: true
-          create-storage-record: false
-
-      - name: Attest published image SBOM
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.publish.outputs.digest }}
-          sbom-path: .orbit-supply-chain/image.spdx.json
-          push-to-registry: true
-          create-storage-record: false
-
-      - name: Verify published image attestations
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
-        run: |
-          image_reference="oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
-          gh attestation verify "${image_reference}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --format json \
-            > .orbit-supply-chain/provenance-verification.json
-          gh attestation verify "${image_reference}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --predicate-type https://spdx.dev/Document/v2.3 \
-            --format json \
-            > .orbit-supply-chain/sbom-verification.json
-
-      - name: Upload attestation verification evidence
-        if: ${{ !cancelled() && env.PUBLICATION_CHANNEL != 'ci' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: orbit-supply-chain-attestation
-          path: |
-            .orbit-supply-chain/provenance-verification.json
-            .orbit-supply-chain/sbom-verification.json
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Record published image
-        if: ${{ success() && env.PUBLICATION_CHANNEL != 'ci' }}
-        env:
-          IMAGE_TAG: ${{ steps.image.outputs.tag }}
-          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
-          TESTED_IMAGE_ID: ${{ steps.publish.outputs.id }}
-        run: |
-          {
-            printf '## Orbit preview image\n\n'
-            printf -- '- Tag: `%s`\n' "${IMAGE_TAG}"
-            printf -- '- Version: `%s`\n' "${{ steps.image.outputs.version }}"
-            printf -- '- Digest: `%s`\n' "${IMAGE_DIGEST}"
-            printf -- '- Tested image ID: `%s`\n' "${TESTED_IMAGE_ID}"
-            printf -- '- Source revision: `%s`\n' "${GITHUB_SHA}"
-            printf -- '- Source branch: `%s`\n' "${GITHUB_REF_NAME}"
-            printf -- '- Supply-chain evidence: dependency/secret policy, exact-image vulnerability report, SPDX SBOM, and verified provenance/SBOM attestations\n'
-            printf '\nDeploy this immutable digest for engineering or release acceptance. It is not stable until protected promotion succeeds.\n'
-          } >> "${GITHUB_STEP_SUMMARY}"
 
   repair_journeys:
     name: Repair journey acceptance
@@ -1000,8 +928,14 @@ jobs:
             printf '\nNo container rebuild occurred.\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
+  # The name survives from when this job pushed to GHCR. Since the mirror flip
+  # (#801 step 5) it validates the preview push exactly as `smoke` validates a
+  # pull request -- same steps, `ci` channel, read-only token -- and publishes
+  # nothing: publish-from-gitlab.yml copies the digest GitLab tested. Two
+  # publishers racing for the `preview` tag with different digests is what this
+  # prevents.
   publish_preview:
-    name: Validate and publish preview image
+    name: Validate preview push (advisory; GitLab publishes)
     needs:
       - fast
       - supply_chain_source
@@ -1019,9 +953,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
     env:
-      PUBLICATION_CHANNEL: preview
+      PUBLICATION_CHANNEL: ci
     steps: *container_validation_steps

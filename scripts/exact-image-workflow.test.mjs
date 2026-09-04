@@ -138,6 +138,13 @@ describe("exact-image publication workflow", () => {
     // publish_preview already runs this exact step sequence once on push;
     // smoke itself must never also fire on a push event.
     expect(smoke).not.toContain("'push'");
+    // Since the mirror flip (#801 step 5) GitHub sees pushes, not pull
+    // requests: the mirror delivers dev, preview and main.
+    const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
+    const pushBranches = trigger.slice(trigger.indexOf("  push:\n"), trigger.indexOf("  workflow_dispatch:"));
+    for (const branch of ["dev", "preview", "main", '"hotfix/**"']) {
+      expect(pushBranches).toContain(`      - ${branch}\n`);
+    }
   });
 
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
@@ -172,7 +179,7 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain("paths-ignore:");
   });
 
-  it("keeps every integration-branch push on the complete publication path", () => {
+  it("keeps every integration-branch push on the complete validation path", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
@@ -213,14 +220,22 @@ describe("exact-image publication workflow", () => {
     expect(smoke).toContain("PUBLICATION_CHANNEL: ci");
   });
 
-  it("publishes previews only from the protected preview or bounded hotfix lanes", () => {
+  it("validates the preview and hotfix pushes but publishes nothing (#801 step 5)", () => {
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(preview).toContain("github.event_name == 'push'");
     expect(preview).toContain("github.ref == 'refs/heads/preview'");
     expect(preview).toContain("startsWith(github.ref, 'refs/heads/hotfix/')");
-    expect(preview).toContain("packages: write");
-    expect(preview).toContain("PUBLICATION_CHANNEL: preview");
+    // GitLab publishes; publish-from-gitlab.yml copies its digest to GHCR. A
+    // second publisher here would race it for the `preview` tag with a
+    // different image, so this job has no registry access and no channel
+    // other than `ci`.
+    expect(preview).not.toContain("packages: write");
+    expect(preview).toContain("PUBLICATION_CHANNEL: ci");
+    expect(workflow).not.toContain("PUBLICATION_CHANNEL: preview");
+    expect(preview).not.toContain("docker/login-action");
+    expect(workflow).not.toContain("scripts/ci/publish-image.sh");
+    expect(workflow).not.toContain("actions/attest@");
     expect(preview).toContain("steps: *container_validation_steps");
     expect(workflow).not.toContain("  development:\n");
     expect(workflow).not.toContain("  preview:\n");
@@ -257,7 +272,7 @@ describe("exact-image publication workflow", () => {
     expect(preflightStep).toContain("--channel");
   });
 
-  it("builds once, validates the loaded image, then pushes without rebuilding", () => {
+  it("builds once and validates the loaded image, then tears down without touching a registry", () => {
     /*
      * The invariant is that the PUBLICATION path builds once and pushes the
      * image it validated — not that the workflow contains exactly one build
@@ -308,20 +323,18 @@ describe("exact-image publication workflow", () => {
     const scan = workflow.indexOf("- name: Scan exact local image");
     const start = workflow.indexOf("- name: Start application and database");
     const stop = workflow.indexOf("- name: Stop smoke-test services");
-    const login = workflow.indexOf("- name: Log in to GitHub Container Registry");
-    const push = workflow.indexOf("- name: Push exact tested image");
-    const attest = workflow.indexOf("- name: Attest published image provenance");
-    const verify = workflow.indexOf("- name: Verify published image attestations");
+    const cleanUp = workflow.indexOf("- name: Clean up installer validation resources");
 
     expect(build).toBeGreaterThanOrEqual(0);
     expect(scan).toBeGreaterThan(build);
     expect(start).toBeGreaterThan(scan);
     expect(stop).toBeGreaterThan(start);
-    expect(login).toBeGreaterThan(stop);
-    expect(push).toBeGreaterThan(login);
-    expect(attest).toBeGreaterThan(push);
-    expect(verify).toBeGreaterThan(attest);
-    expect(workflow.slice(push, attest)).not.toContain("docker/build-push-action");
+    expect(cleanUp).toBeGreaterThan(stop);
+    // The installer clean-up is the last step of the anchor: the GHCR login,
+    // push and attestation steps that used to follow it moved to
+    // publish-from-gitlab.yml with the mirror flip (#801 step 5).
+    const anchorTail = workflow.slice(cleanUp, workflow.indexOf("  repair_journeys:\n"));
+    expect(anchorTail.match(/- name:/gu)).toHaveLength(1);
   });
 
   it("keeps failure diagnostics available before an exact image is configured", () => {
@@ -370,21 +383,20 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain('.status == "ok" and .service == "orbit"');
   });
 
-  it("attests and verifies the resolved registry digest with least privilege", () => {
+  it("mints no attestation and holds no registry or OIDC permission anywhere", () => {
+    // Attestation moved to publish-from-gitlab.yml with the digest it covers
+    // (#801 step 5); scripts/publish-from-gitlab-workflow.test.mjs asserts it
+    // there. Here the only remaining attestation reader is verify_preview.
     const smoke = jobBlock("smoke", "publish_preview");
     const preview = workflow.slice(workflow.indexOf("  publish_preview:\n"));
 
     expect(smoke).not.toContain("id-token: write");
     expect(smoke).not.toContain("attestations: write");
-    expect(preview).toContain("id-token: write");
-    expect(preview).toContain("attestations: write");
-    expect(workflow).toContain(
-      "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
-    );
-    expect(workflow).toContain("subject-digest: ${{ steps.publish.outputs.digest }}");
-    expect(workflow).toContain("sbom-path: .orbit-supply-chain/image.spdx.json");
-    expect(workflow).toContain("gh attestation verify");
-    expect(workflow).toContain("oci://${REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}");
+    expect(preview).not.toContain("id-token: write");
+    expect(preview).not.toContain("attestations: write");
+    expect(workflow).not.toContain("id-token: write");
+    expect(workflow).not.toContain("attestations: write");
+    expect(workflow).not.toContain("packages: write");
   });
 
   it("pins scanner execution and retains only bounded supply-chain evidence", () => {
