@@ -118,6 +118,14 @@ test("notfound keeps its six animations live after rasterising the filtered grou
  * nothing that animates has a filter.
  */
 test("notfound's starfield falls in, and nothing that moves is filtered", async ({ page }) => {
+  /* The stars are in the HTML itself — the server-drawn still sky the
+     first paint shows, before any script runs — with enough of them to be
+     a sky (two copies each of 150 far and 36 near stars, the near ones
+     with a glow circle each: 444 circles). */
+  const html = await (await page.request.get(`${APP}/some-missing-path`)).text();
+  expect(html, "the HTML should arrive with the still sky").toContain('<svg class="first"');
+  expect(html.match(/<circle /g)?.length ?? 0, "the still sky should hold the stars").toBeGreaterThanOrEqual(444);
+
   await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
   /* The sky is painted synchronously at mount, before the well's rasters
      even start; "ready" is simply the surest sign mount has run. Asked for
@@ -142,6 +150,9 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
           animationName: getComputedStyle(g).animationName,
           transform: getComputedStyle(g).transform,
         })),
+        /* The still sky has handed over: once the canvases are painted it
+           is gone, so nothing static is left under the moving copies. */
+        still: document.querySelectorAll(".infall .first").length,
         /* Anything in the star layers that is, or sits under, a filter. */
         skyFiltered: document.querySelectorAll(".infall filter, .infall [filter], .sky filter, .sky [filter]").length,
         /* Every painted, animated element on the screen that also carries a
@@ -159,6 +170,7 @@ test("notfound's starfield falls in, and nothing that moves is filtered", async 
   const before = await sample();
   expect(before.falls.length, "expected the falling star copies").toBe(6);
   expect(before.painted, "every falling copy should be a painted canvas").toBe(6);
+  expect(before.still, "the still sky should be gone once the canvases are painted").toBe(0);
   for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
   expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
   expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
