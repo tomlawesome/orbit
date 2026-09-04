@@ -24,6 +24,20 @@ body{background:#04070f}
    copies wait hidden, their fall not yet begun, so all six start together
    from where the still sky left them (+error.svelte, live). */
 .infall:not(.live) .fall{visibility:hidden;animation:none}
+
+/* The arrival (owner, 2026-09-04: parts landing one after another read as
+   a delay, so each arrival on this page is a fade, never a pop). The HTML
+   shows what costs nothing at once — still stars, the hole's disc and glow,
+   the 4s, the copy. Then two beats: the stars start to fall (the still sky
+   fades out under the copies as they begin to move), and the disc lights up
+   (every rasterised layer waits hidden in its `.arrive` group, painting no
+   live filter, until all six have landed, then they fade in as one). The
+   groups fade on a wrapper because the layers' own opacity is animated. */
+.falling{position:absolute;inset:0;opacity:0}
+.infall.live .falling{opacity:1;transition:opacity .7s ease-out}
+.infall.live .first{opacity:0;transition:opacity .7s ease-out}
+.world:not(.lit) .arrive{visibility:hidden;opacity:0}
+.world.lit .arrive{opacity:1;transition:opacity .9s ease-out}
 @keyframes infall{
   0%{transform:rotate(0deg) scale(2);opacity:0}
   6%{opacity:1}
