@@ -24,9 +24,14 @@
 #      GitHub lane still owns attestation.
 #   3. The workflow's second concurrent integration run. See `integration`.
 #
-# Every job that touches Docker needs a runner that can run privileged
-# containers. ai/orbit currently has only the untagged group runner; the
-# sibling ai/orbit-base-image owns a project runner for exactly this reason.
+# Every job that touches Docker asks for the `orbit-build` runner by tag. A
+# Docker daemon needs a privileged container whichever way it arrives -- the
+# dind service or a daemon started inside the job -- and ai/orbit's shared
+# group runner is not privileged, which is what failed pipeline 163.
+# `orbit-build` is the project's own docker-executor runner, registered with
+# `privileged = true` for exactly this. Jobs that need no daemon deliberately
+# stay untagged and keep running on the shared runner, so the one privileged
+# runner is not the queue for the whole pipeline.
 
 stages:
   - classify
@@ -140,16 +145,31 @@ variables:
   before_script:
     - *pnpm_setup
 
+# The one place the privileged runner is named. Everything that needs a Docker
+# daemon reaches it through here, so the tag is a single edit if the runner is
+# ever re-registered under another name.
+.privileged_runner:
+  tags:
+    - orbit-build
+
 # Docker-in-Docker as a service, copied from the sibling ai/orbit-base-image
 # pipeline. Used by every job that only ever talks to the daemon's API:
 # building, saving, loading, pushing and inspecting images.
-.dind:
-  image: docker:29-cli
+#
+# Split in two: the daemon and its client settings without an image, so a job
+# that must keep an image of its own can take the daemon alone. `fast` is the
+# one that does.
+.dind_service:
+  extends: .privileged_runner
   services:
     - docker:29-dind
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
+
+.dind:
+  extends: .dind_service
+  image: docker:29-cli
 
 # The daemon inside the job's own container, for the two jobs that stand up a
 # real deployment and then talk to it.
@@ -177,6 +197,35 @@ variables:
     sleep 1
   done
   docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
+
+# The client half only, for a job that keeps its own image and takes the daemon
+# from the dind service instead of starting one. Not the `docker.io
+# docker-compose-v2` pair above: those are Ubuntu package names, and $NODE_IMAGE
+# is built on Debian Bookworm, which packages no Compose v2 at all -- the same
+# fact the repair_journeys comment records from the other direction. Docker's
+# own apt repository is the only source on Debian that has the v2 plugin, and it
+# is where GitHub's runner image gets it too.
+#
+# The suite name is read out of the image rather than written here, so bumping
+# $NODE_IMAGE to a newer Debian cannot silently point at the wrong one.
+.docker_cli: &docker_cli |
+  export DEBIAN_FRONTEND=noninteractive
+  . /etc/os-release
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian %s stable\n' \
+    "$VERSION_CODENAME" > /etc/apt/sources.list.d/docker.list
+  apt-get update -qq
+  apt-get install -y -qq --no-install-recommends docker-ce-cli docker-compose-plugin
+  # Proves the plugin is installed without contacting a daemon, which is the
+  # exact check scripts/backup.sh makes before it does anything else.
+  docker compose version
+  for _ in $(seq 1 60); do
+    docker info > /dev/null 2>&1 && break
+    sleep 1
+  done
+  docker info > /dev/null 2>&1 || { echo "the dind service daemon is not reachable at ${DOCKER_HOST}"; exit 1; }
 
 # --- classify ----------------------------------------------------------------
 
@@ -233,14 +282,38 @@ classify:
 
 # --- fast --------------------------------------------------------------------
 
+# Docker, because five of the suites here shell out to Orbit's own scripts and
+# those scripts require it. GitHub's ubuntu-latest ships a CLI, the Compose v2
+# plugin and a running daemon; $NODE_IMAGE ships none of the three, which is
+# why 16 tests in five files failed on the first GitLab run (pipeline 163).
+#
+# The dind *service* rather than the in-job daemon, because nothing reachable
+# from these tests bind-mounts a checkout or tmpdir path into a container.
+# src/lib/install-script-adapters.test.ts is the test that forced a real
+# daemon: its beforeAll runs `docker build --target vapid-generator .` and
+# scripts/configure.sh then really runs that image to generate a key pair, so a
+# PATH shim will not satisfy it -- but it passes the build context over the API
+# and uses no `--volume`, so a daemon in another container is fine. The two
+# checkout mounts that do exist in the scripts are both unreachable from here:
+# the recovery-bundle parity fixtures are rejected in preflight, before
+# scripts/import-recovery-bundle.sh gets to its `--volume` line, and
+# scripts/repair.test.mjs intercepts scripts/repair.sh's mount with a fake
+# `docker` ahead of the real one on PATH. The image stays $NODE_IMAGE: the Node
+# these unit tests run under is the thing this job exists to pin.
+#
+# 20m rather than 10m: the same suite now also waits for the dind service,
+# installs the client, and pulls Orbit's base image to build that one target.
 fast:
   stage: fast
-  extends: .node
-  timeout: 10m
+  extends:
+    - .node
+    - .dind_service
+  timeout: 20m
   needs:
     - job: classify
       artifacts: true
   script:
+    - *docker_cli
     - pnpm install --frozen-lockfile
     - ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh
     # The production build and the render proof, run here as well as inside the
@@ -581,6 +654,7 @@ build_image:
 # image, so the job image cannot be Trivy; the daemon moves instead.
 supply_chain_image:
   stage: acceptance
+  extends: .privileged_runner
   # For its Node, which the policy script needs, and its Ubuntu Noble base,
   # which .docker_in_job's package list requires. Its browsers go unused.
   image: $PLAYWRIGHT_IMAGE
@@ -640,6 +714,7 @@ supply_chain_image:
 # none of which a job that must test the exact tarball above can give it.
 smoke:
   stage: acceptance
+  extends: .privileged_runner
   image: $PLAYWRIGHT_IMAGE
   timeout: 30m
   needs:
@@ -713,6 +788,7 @@ smoke:
 # network namespace, where nothing in the job can reach them.
 acceptance:
   stage: acceptance
+  extends: .privileged_runner
   # For its Ubuntu Noble base, which packages the Compose v2 plugin that every
   # script below needs, and its Node, which the processor corpus runs under.
   image: $PLAYWRIGHT_IMAGE
@@ -851,6 +927,7 @@ acceptance:
 # different deployment, and starting it would collide with this one.
 repair_journeys:
   stage: acceptance
+  extends: .privileged_runner
   # The Playwright image for its base rather than its browsers: the harness
   # needs `docker compose`, and Ubuntu Noble packages the v2 plugin
   # (docker-compose-v2) where Debian Bookworm, which $NODE_IMAGE is built on,
