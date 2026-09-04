@@ -94,6 +94,22 @@ variables:
 # pnpm comes from corepack, which ships with Node, rather than from the
 # self-installer: package.json names the exact version, so corepack activates
 # that one and nothing has to agree separately.
+# `apk add` with a few tries. dl-cdn.alpinelinux.org resolves to a long
+# answer, and the LAN resolver drops it now and then: pipelines 171 and 173
+# both lost a job to "DNS: transient error (try again later)" on the first
+# fetch while the same lookup worked seconds later. Three tries, five seconds
+# apart, covers that without hiding a real outage.
+.apk_retry: &apk_retry |
+  apk_add() {
+    local n
+    for n in 1 2 3; do
+      apk add --no-cache "$@" && return 0
+      echo "apk add failed (try $n of 3); retrying in 5s" >&2
+      sleep 5
+    done
+    return 1
+  }
+
 .pnpm_setup: &pnpm_setup |
   corepack enable
   corepack prepare "pnpm@${PNPM_VERSION}" --activate
@@ -382,7 +398,8 @@ base_image:
     # The check reads the first FROM with sed, resolves the tag with
     # `docker manifest inspect`, parses the result with python3 and runs
     # `apk upgrade --simulate` inside the pinned image.
-    - apk add --no-cache bash python3
+    - *apk_retry
+    - apk_add bash python3
     - bash scripts/check-base-image-current.sh
 
 # --- policy ------------------------------------------------------------------
@@ -404,12 +421,13 @@ supply_chain_source:
       artifacts: true
   script:
     - *reach_helpers
+    - *apk_retry
     - |
       if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
-      apk add --no-cache nodejs
+      apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       # A pin lives in the file that uses it and in the policy that records it.
       # Dependabot can rewrite the first and cannot see the second, so its pull
@@ -459,12 +477,13 @@ sidecar_images:
       artifacts: true
   script:
     - *reach_helpers
+    - *apk_retry
     - |
       if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
         echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
         exit 0
       fi
-      apk add --no-cache nodejs
+      apk_add nodejs
       node scripts/supply-chain-policy.mjs validate
       mkdir -p .orbit-supply-chain/sidecar-scans
       # --ignore-unfixed because these are images Orbit pulls rather than
@@ -603,7 +622,8 @@ build_image:
     GIT_DEPTH: 0
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
-    - apk add --no-cache bash git nodejs
+    - *apk_retry
+    - apk_add bash git nodejs
     - |
       set -eu
       git fetch --quiet --tags origin
@@ -1028,7 +1048,8 @@ publish_gitlab:
   variables:
     GITHUB_OUTPUT: $CI_PROJECT_DIR/.orbit-step-outputs
   script:
-    - apk add --no-cache bash
+    - *apk_retry
+    - apk_add bash
     - *step_outputs
     - docker load --input image.tar
     - |
