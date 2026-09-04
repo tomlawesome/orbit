@@ -73,6 +73,34 @@ function runHelper(modeArgs = [], env = {}) {
 }
 
 /*
+ * runHelper's pty twin: the same one-shot emit, with stdout on a real terminal
+ * so the colour and simulation decisions are made the way an operator's
+ * terminal makes them.
+ *
+ * `bash -c` inside the command, rather than letting `script` run the body
+ * itself. script(1) runs its -c argument with $SHELL and falls back to /bin/sh
+ * when that is unset, and this body is bash -- `source`, and a bash helper on
+ * the other end of it. On a GitHub runner $SHELL is /bin/bash and the fallback
+ * never fired; in a container job it is unset, /bin/sh is dash, and every
+ * command in the body failed "not found" for an exit status of 127 (GitLab
+ * pipeline 169, job 727). The pty is script's, not the shell's, so naming the
+ * shell costs nothing and settles what runs the body -- which is why runPty
+ * below has always spelled bash out.
+ */
+function runTtyEmit({ initArgs = "", env, label }) {
+  return failOnProcessDeadline(spawnSync(
+    "script",
+    [
+      "-qec",
+      `bash -c 'source "$1"; installer_ui_init ${initArgs}; `
+        + `installer_ui_emit bootstrap installer starting initial begin 3' _ '${helper}'`,
+      "/dev/null",
+    ],
+    { encoding: "utf8", env, ...processGuard() },
+  ), { label });
+}
+
+/*
  * Like runPty, but the terminal never reaches EOF (#441).
  *
  * runPty hands spawnSync an `input` string, which closes stdin as soon as it
@@ -334,15 +362,7 @@ describe("installer semantic UI", () => {
   it("uses ANSI only for an actual TTY when color is allowed", () => {
     const colorEnv = { ...process.env, TERM: "xterm" };
     delete colorEnv.NO_COLOR;
-    const result = failOnProcessDeadline(spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv, ...processGuard() },
-    ), { label: "uses ANSI only for an actual TTY" });
+    const result = runTtyEmit({ env: colorEnv, label: "uses ANSI only for an actual TTY" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/\x1b\[/u);
@@ -357,15 +377,7 @@ describe("installer semantic UI", () => {
   ])("refuses forced TTY color when %s disables it", (_label, overrides) => {
     const env = { ...process.env, ...overrides };
     if (!("NO_COLOR" in overrides)) delete env.NO_COLOR;
-    const result = failOnProcessDeadline(spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init --tty; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env, ...processGuard() },
-    ), { label: "refuses forced TTY color" });
+    const result = runTtyEmit({ initArgs: "--tty", env, label: "refuses forced TTY color" });
 
     expect(result.status).toBe(0);
     expect(result.stdout).not.toMatch(/\x1b\[/u);
@@ -643,24 +655,8 @@ describe("installer semantic UI", () => {
   it("labels TTY output as simulation without affecting ordinary output", () => {
     const colorEnv = { ...process.env, TERM: "xterm" };
     delete colorEnv.NO_COLOR;
-    const simulated = failOnProcessDeadline(spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init --simulation; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv, ...processGuard() },
-    ), { label: "simulated" });
-    const ordinary = failOnProcessDeadline(spawnSync(
-      "script",
-      [
-        "-qec",
-        `source '${helper}'; installer_ui_init; installer_ui_emit bootstrap installer starting initial begin 3`,
-        "/dev/null",
-      ],
-      { encoding: "utf8", env: colorEnv, ...processGuard() },
-    ), { label: "ordinary" });
+    const simulated = runTtyEmit({ initArgs: "--simulation", env: colorEnv, label: "simulated" });
+    const ordinary = runTtyEmit({ env: colorEnv, label: "ordinary" });
 
     expect(simulated.status).toBe(0);
     expect(simulated.stdout).toContain("[SIMULATION]");
