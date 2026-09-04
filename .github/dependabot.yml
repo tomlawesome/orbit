@@ -1,3 +1,10 @@
+# Renovate on gitlab.tomlawson.io takes over from this file (#801 step 6):
+# `renovate.json` at the repo root carries the same cadence, the same grouping
+# and the reasoning below, for every ecosystem here except github-actions.
+# That one stays with Dependabot, because .github/workflows/ is GitHub's lane
+# and only GitHub runs it. This file goes when the mirror flips (#801 step 5);
+# until then both hosts watch, which is duplicated pull requests rather than a
+# gap.
 version: 2
 updates:
   # github-actions: this is what keeps the 34 SHA-pinned actions and the
