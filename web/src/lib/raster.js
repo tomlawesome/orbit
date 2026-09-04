@@ -20,6 +20,13 @@
  */
 const cache = new Map();
 
+/**
+ * @param {string} key
+ * @param {string} svg
+ * @param {number} w
+ * @param {number} h
+ * @returns {Promise<string>}
+ */
 export async function rasteriseSvg(key, svg, w, h) {
   const hit = cache.get(key);
   if (hit) return hit;
@@ -35,7 +42,10 @@ export async function rasteriseSvg(key, svg, w, h) {
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d");
+  /* A freshly created 2D canvas always yields a context; the null case in
+     the DOM type is for an already-spent contextType mismatch, which cannot
+     happen here. */
+  const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
   /* 1:1 — the image's own intrinsic size already matches the canvas, so this
      is a straight blit with no resampling to introduce drift. */
   ctx.drawImage(img, 0, 0, w, h);

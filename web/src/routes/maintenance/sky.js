@@ -9,8 +9,11 @@
 export function mountTotalitySky() {
   // deterministic starfield — bright stars only; totality lets the day stars out
   const rng = (s => () => (s = (s * 48271) % 2147483647) / 2147483647)(20260812);
-  const far = document.getElementById("farstars"), near = document.getElementById("nearstars");
+  // Both ids are in the static markup this mounts into, so they always resolve.
+  const far = /** @type {Element} */ (document.getElementById("farstars"));
+  const near = /** @type {Element} */ (document.getElementById("nearstars"));
   const NS = "http://www.w3.org/2000/svg";
+  /** @param {number} x @param {number} y */
   const clearOf = (x, y) => Math.hypot(x - 800, y - 440) > 300;
   let made = 0;
   while (made < 90) {

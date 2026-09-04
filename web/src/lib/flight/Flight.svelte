@@ -49,10 +49,19 @@
     onfarewell = () => {},
   } = $props();
 
+  /** @type {HTMLCanvasElement} */
   let canvas;
+  /** @type {HTMLDivElement} */
   let markEl;
+  /** @type {HTMLDivElement} */
   let nameEl;
+  /** @type {ReturnType<typeof createFlight> | null} */
   let engine = null;
+  /** The current engine, cast for the call sites that only ever run once the
+      component has mounted and `engine` has been set. */
+  function activeEngine() {
+    return /** @type {ReturnType<typeof createFlight>} */ (engine);
+  }
   let cancelTimeline = () => {};
   /* what the void says under the household's name: the ascent's own word on
      the way up, "signing out" on the way down. Set when a journey starts, so
@@ -64,13 +73,14 @@
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   onMount(() => {
-    engine = createFlight(canvas);
-    const onResize = () => engine.resize();
+    const flightEngine = createFlight(canvas);
+    engine = flightEngine;
+    const onResize = () => flightEngine.resize();
     addEventListener("resize", onResize);
     return () => {
       removeEventListener("resize", onResize);
       cancelTimeline();
-      engine.clear();
+      flightEngine.clear();
       reset();
     };
   });
@@ -79,6 +89,13 @@
      dial's sun, 2s later, blooms out of exactly that point. `size` is where it
      ARRIVES, not a multiplier: the lockup's ring is the 420px hero now, so the
      ride contracts rather than grows (see MARK_ARRIVE). */
+  /**
+   * @param {SVGElement | null} srcSvg
+   * @param {number} toY
+   * @param {number} size
+   * @param {number} ms
+   * @param {boolean} instant
+   */
   function liftMark(srcSvg, toY, size, ms, instant) {
     if (!srcSvg) return;
     const r = srcSvg.getBoundingClientRect();
@@ -97,6 +114,7 @@
     if (instant) settle();
     else requestAnimationFrame(settle);
   }
+  /** @param {number} ms */
   function rideTransition(ms) {
     return "left " + ms + "ms cubic-bezier(.35,0,.2,1)," +
       "top " + ms + "ms cubic-bezier(.35,0,.2,1)," +
@@ -106,17 +124,19 @@
   function dropMark() {
     markEl.classList.remove("on");
     markEl.classList.add("collapse");
-    for (const el of document.querySelectorAll("#login-glyph svg,#dusk-glyph svg"))
-      el.style.visibility = "";
+    for (const el of /** @type {NodeListOf<SVGElement>} */ (
+      document.querySelectorAll("#login-glyph svg,#dusk-glyph svg")
+    )) el.style.visibility = "";
   }
   /* the way down: the mark appears at centre and rides to the lockup's glyph */
+  /** @param {boolean} instant */
   function landMark(instant) {
     markEl.style.transition = "none";
     markEl.style.left = (innerWidth / 2 - 18) + "px";
     markEl.style.top = (innerHeight / 2 - 18) + "px";
     markEl.style.width = "36px"; markEl.style.height = "36px";
     markEl.classList.remove("collapse"); markEl.classList.add("on");
-    const glyph = document.querySelector("#dusk-glyph svg");
+    const glyph = /** @type {SVGElement | null} */ (document.querySelector("#dusk-glyph svg"));
     if (!glyph) return;
     const g = glyph.getBoundingClientRect();
     glyph.style.visibility = "hidden";
@@ -129,14 +149,16 @@
     else requestAnimationFrame(settle);
   }
 
+  /** @param {number | undefined} pinned */
   function ascentStep(pinned) {
+    /** @param {string} act */
     return (act) => {
       const b = body();
       switch (act) {
         case "arming": b.classList.add("arming"); break;
         case "warp":
           b.classList.add("showwarp");
-          engine.start(UP, pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
+          activeEngine().start(UP, pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
           break;
         case "mark":
           b.classList.remove("arming");
@@ -166,7 +188,9 @@
     };
   }
 
+  /** @param {number | undefined} pinned */
   function descentStep(pinned) {
+    /** @param {string} act */
     return (act) => {
       const b = body();
       switch (act) {
@@ -177,7 +201,7 @@
         case "disperse": b.classList.add("dispersing"); break;
         case "warp":
           b.classList.add("showwarp");
-          engine.start(DOWN, pinned === undefined
+          activeEngine().start(DOWN, pinned === undefined
             ? {} : { at: Math.min(Math.max(0, pinned - D.warp), DOWN.dur) });
           break;
         /* The mockup drops `descending` here because its home frame has a
@@ -194,7 +218,7 @@
         case "warpOut": b.classList.remove("showwarp"); break;
         case "markHome": {
           markEl.classList.remove("on");
-          const glyph = document.querySelector("#dusk-glyph svg");
+          const glyph = /** @type {SVGElement | null} */ (document.querySelector("#dusk-glyph svg"));
           if (glyph) glyph.style.visibility = "";
           break;
         }
@@ -212,13 +236,15 @@
                             "farewell", "pinned", "counting", "belong");
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
-    for (const el of document.querySelectorAll("#login-glyph svg,#dusk-glyph svg"))
-      el.style.visibility = "";
+    for (const el of /** @type {NodeListOf<SVGElement>} */ (
+      document.querySelectorAll("#login-glyph svg,#dusk-glyph svg")
+    )) el.style.visibility = "";
   }
 
   /**
    * THE LAUNCH. `at` pins it to one millisecond of the journey instead of
    * playing it — the fixtures' way of holding a moving thing still.
+   * @param {{ at?: number }} [options]
    */
   export function ascend({ at } = {}) {
     cancelTimeline();
@@ -237,7 +263,10 @@
       ascentStep(pinned ? at : undefined), pinned ? { at } : {});
   }
 
-  /** THE DESCENT — the launch played backwards, in the DOM as on the canvas. */
+  /**
+   * THE DESCENT — the launch played backwards, in the DOM as on the canvas.
+   * @param {{ at?: number }} [options]
+   */
   export function descend({ at } = {}) {
     cancelTimeline();
     subtitleText = "signing out";

@@ -23,6 +23,92 @@
  */
 import { seededRng } from "$lib/sky.js";
 
+/**
+ * @typedef {object} Atmosphere
+ * @property {string} ground
+ * @property {string} rim1
+ * @property {string} rim2
+ * @property {Array<[number, string, number]>} bands
+ * @property {Array<[number, string, number]>} wash
+ * @property {string | null} glowCore
+ * @property {string} glowMid
+ * @property {string} glowWide
+ * @property {boolean} hasSun
+ */
+
+/**
+ * A prop schedule entry (PROPS_UP/PROPS_DOWN), extended in `prime()` with the
+ * per-run fields (`p`, `rad`, `rot0`, and the shape's own `pts`/`bodies`) and
+ * further in `step()` with the fields the pen draws from (`al`, `hair`).
+ * @typedef {object} Prop
+ * @property {"grat" | "con" | "sys" | "craft" | "comet"} kind
+ * @property {number} t0
+ * @property {number} dur
+ * @property {number} ang
+ * @property {number} z
+ * @property {number} spin
+ * @property {number} [shape]
+ * @property {number} [k]
+ * @property {number} [p]
+ * @property {number} [rad]
+ * @property {number} [rot0]
+ * @property {number[][]} [pts]
+ * @property {Array<[number, number, string, number]>} [bodies]
+ * @property {number} [al]
+ * @property {number} [hair]
+ */
+
+/**
+ * The deep-field dust (NEB_SPEC), extended in `prime()`/`step()` with its own
+ * running bearing and the drift position it resets to on every run.
+ * @typedef {object} Nebula
+ * @property {number} ang
+ * @property {number} z
+ * @property {string} col
+ * @property {number} size
+ * @property {number} al
+ * @property {number} p
+ * @property {number} [rad]
+ * @property {number} [p0]
+ */
+
+/** @typedef {{ r: number, a: number, z: number, c: string }} Star */
+
+/**
+ * A prop as the pen functions see it: always called from `step()`'s props
+ * loop, strictly after `prime()` has set `rad`/`rot0` (and `pts`/`bodies` for
+ * the kinds that carry them) and after that same loop iteration has just set
+ * `al`/`hair`.
+ * @typedef {Prop & { al: number, hair: number, rad: number, rot0: number }} HydratedProp
+ */
+
+/**
+ * @typedef {object} Profile
+ * @property {number} dur
+ * @property {number} vpY
+ * @property {number} a0
+ * @property {number} a1
+ * @property {Atmosphere} pal
+ * @property {Atmosphere} [palTo]
+ * @property {Prop[]} props
+ * @property {number} K
+ * @property {boolean} [rev]
+ * @property {(t: number) => number} speed
+ * @property {(t: number) => number} atm
+ * @property {(t: number) => number} [duskMix]
+ */
+
+/**
+ * The in-progress flight, held in `prime()` for the duration of one run.
+ * @typedef {object} FlightState
+ * @property {Profile} P
+ * @property {boolean} rev
+ * @property {number} start
+ * @property {number} last
+ * @property {Prop[]} props
+ * @property {number} dpr
+ */
+
 /* star-chart, verbatim from web/src/lib/packs.css */
 export const PACK = {
   bg: "#060b1c", star: "#e9edf8", starNear: "#f4f0ff", accent: "#d8b45a",
@@ -36,6 +122,7 @@ export const PACK = {
 /* dawn (the login's own sky) and dusk (the goodbye's) — the two atmospheres
    the flight passes through. Dawn's values are lifted straight out of
    family/login.html; dusk's out of family/maintenance.html's dusk band. */
+/** @type {Atmosphere} */
 export const DAWN = {
   ground: "#04060e", rim1: "#ffd989", rim2: "#e2772b",
   bands: [[150, "#7a2c18", 0.10], [84, "#e2772b", 0.16], [34, "#f0b429", 0.28],
@@ -43,6 +130,7 @@ export const DAWN = {
   wash: [[0.62, "#3d2a4d", 0.12], [0.86, "#a2492a", 0.20], [1, "#e2772b", 0.26]],
   glowCore: "#fffdf6", glowMid: "#f8c95e", glowWide: "#e2772b", hasSun: true,
 };
+/** @type {Atmosphere} */
 export const DUSK = {
   ground: "#03050b", rim1: "#f0a35a", rim2: "#7a2c18",
   bands: [[130, "#5e2418", 0.12], [60, "#c2571f", 0.20], [20, "#e08a3c", 0.26],
@@ -53,6 +141,7 @@ export const DUSK = {
 };
 
 /* the deep field: dust you fall through rather than past */
+/** @type {Nebula[]} */
 const NEB_SPEC = [
   { ang: 74, z: 0.10, col: "#22346e", size: 1.55, al: 0.20, p: 0.10 },
   { ang: 118, z: 0.07, col: "#2c1f4a", size: 1.90, al: 0.17, p: 0.32 },
@@ -73,7 +162,12 @@ const CONS = [
   [[-120, -40, 2.4], [-20, -84, 3.0], [62, -30, 2.2], [96, 52, 3.4], [-8, 74, 2.4], [-120, -40, 2.2]],
 ];
 const BODY_COLS = ["#f0b429", "#4ade80", "#8fb8ff", "#f87171"];
+/**
+ * @param {number} k
+ * @returns {Array<[number, number, string, number]>}
+ */
 function systemBodies(k) {
+  /** @type {Array<[number, number, string, number]>} */
   const out = [];
   for (let i = 0; i < 3; i++) {
     const a = (k * 2.1 + i * 2.3), r = 52 + (i % 2) * 26;
@@ -85,6 +179,7 @@ function systemBodies(k) {
 /* Prop schedules. `t0` is when it enters, `dur` how long it takes to sweep
    past at full speed (it slows when the ship does), `ang` its bearing off the
    vanishing point, `z` how close it passes. */
+/** @type {Prop[]} */
 export const PROPS_UP = [
   { kind: "grat", t0: 620, dur: 3000, ang: 96, z: 0.40, spin: -0.10 },
   { kind: "con", t0: 760, dur: 2300, ang: 52, z: 0.62, shape: 0, spin: 0.16 },
@@ -114,8 +209,10 @@ export const PROPS_UP = [
 export const UPDUR = 4800;
 export const DOWNDUR = 4100;
 export const REV = DOWNDUR / UPDUR;
+/** @param {number} t */
 export const mirror = (t) => UPDUR * (1 - Math.min(1, Math.max(0, t / DOWNDUR)));
 
+/** @type {Profile} */
 export const UP = {
   dur: UPDUR, vpY: -0.55, a0: 28, a1: 152, pal: DAWN, props: PROPS_UP, K: 7.4,
   speed(t) {
@@ -140,6 +237,7 @@ export const PROPS_DOWN = PROPS_UP.map((g) => ({
   t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV),
 }));
 
+/** @type {Profile} */
 export const DOWN = {
   dur: DOWNDUR, vpY: UP.vpY, a0: UP.a0, a1: UP.a1, K: UP.K, props: PROPS_DOWN, rev: true,
   /* the destination surface still wears DUSK (the family rule the owner kept
@@ -159,10 +257,12 @@ export const DOWN = {
    than a smoothstep pop, and the two shockwaves are halved in weight. */
 export const BLOOM_T0 = 3200;
 export const BLOOM_DUR = 1300;
+/** @param {number} tau */
 export function bloomAt(tau) {
   return Math.max(0, Math.min(1, (tau - BLOOM_T0) / BLOOM_DUR));
 }
 
+/** @param {string} hex @param {number} a */
 export function hexa(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
@@ -179,8 +279,20 @@ const PINNED_STEP = 1000 / 60;
  * lives in this closure instead, so two of these can never tread on each
  * other and a test can build one without a page.
  */
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {{
+ *   requestFrame?: (fn: FrameRequestCallback) => number,
+ *   cancelFrame?: (id: number) => void,
+ *   now?: () => number,
+ *   devicePixelRatio?: number,
+ * }} [options]
+ */
 export function createFlight(canvas, options = {}) {
-  const ctx = canvas.getContext("2d");
+  /* Always a 2D canvas freshly created for this flight; the null case in the
+     DOM type is for an already-spent contextType mismatch, which cannot
+     happen here. */
+  const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
   const raf = options.requestFrame ?? ((fn) => requestAnimationFrame(fn));
   const cancel = options.cancelFrame ?? ((id) => cancelAnimationFrame(id));
   const clock = options.now ?? (() => performance.now());
@@ -188,8 +300,10 @@ export function createFlight(canvas, options = {}) {
   let W = 0, H = 0, DIAG = 0;
   let VPX = 0, VPY = 0, A0 = 0, A1 = 0, RMAX = 0;
   let rnd = seededRng(FLIGHT_SEED);
+  /** @type {Star[]} */
   const STARS = [];
   const NEB = NEB_SPEC.map((n) => ({ ...n }));
+  /** @type {FlightState | null} */
   let flight = null;
   let flightRaf = 0;
 
@@ -202,6 +316,7 @@ export function createFlight(canvas, options = {}) {
     return dpr;
   }
 
+  /** @param {Profile} profile */
   function setCamera(profile) {
     VPX = W / 2; VPY = profile.vpY * H;
     A0 = profile.a0 * Math.PI / 180; A1 = profile.a1 * Math.PI / 180;
@@ -226,6 +341,7 @@ export function createFlight(canvas, options = {}) {
   /* Running the flight backwards, stars shrink toward the vanishing point
      instead of streaming away from it — so a spent star has to be reborn at
      the OUTER edge, or the field empties out on the way down. */
+  /** @param {Star} s @param {boolean} rev */
   function respawn(s, rev) {
     s.r = rev ? RMAX * (0.80 + rnd() * 0.20) : 40 + rnd() * 200;
     s.a = A0 + rnd() * (A1 - A0);
@@ -235,10 +351,12 @@ export function createFlight(canvas, options = {}) {
   /* ── the props: hairline things in the chart pen that you pass on the way.
        Nothing is opaque; nothing is a texture; it is all drawn with the same
        pen the gravity well is drawn with. ─────────────────────────────────── */
+  /** @param {number} r */
   function propScale(r) { return (r / (H * 1.05)); }
 
-  function penConstellation(g) {
-    const pts = g.pts;
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penConstellation(g, _t) {
+    const pts = /** @type {number[][]} */ (g.pts);
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.pen; ctx.globalAlpha = g.al * 0.95;
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
@@ -256,7 +374,8 @@ export function createFlight(canvas, options = {}) {
       ctx.beginPath(); ctx.arc(p[0], p[1], p[2], 0, 6.284); ctx.fill();
     }
   }
-  function penSystem(g) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penSystem(g, _t) {
     /* another household's gravity well, seen in passing — home's minisys */
     ctx.lineWidth = g.hair; ctx.globalAlpha = g.al;
     ctx.strokeStyle = PACK.pen;
@@ -270,7 +389,7 @@ export function createFlight(canvas, options = {}) {
     ctx.globalAlpha = g.al;
     ctx.fillStyle = PACK.sun;
     ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, 6.284); ctx.fill();
-    for (const b of g.bodies) {
+    for (const b of /** @type {Array<[number, number, string, number]>} */ (g.bodies)) {
       ctx.fillStyle = b[2];
       ctx.beginPath(); ctx.arc(b[0], b[1], b[3], 0, 6.284); ctx.fill();
     }
@@ -279,7 +398,8 @@ export function createFlight(canvas, options = {}) {
     ctx.fillStyle = PACK.pen; ctx.globalAlpha = g.al * 0.7;
     ctx.fillRect(116, -1.5, 34, 3);
   }
-  function penGraticule(g) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penGraticule(g, _t) {
     /* the fine graticule linework of the identity, seen edge-on */
     ctx.lineWidth = g.hair; ctx.strokeStyle = PACK.penLo; ctx.globalAlpha = g.al * 0.95;
     for (const r of [230, 300, 372]) {
@@ -293,6 +413,7 @@ export function createFlight(canvas, options = {}) {
       ctx.stroke();
     }
   }
+  /** @param {HydratedProp} g @param {number} t */
   function penCraft(g, t) {
     /* a small craft in the chart pen: hull, dish, panel booms, one nav light
        and a thruster that says which way it is going. */
@@ -335,7 +456,8 @@ export function createFlight(canvas, options = {}) {
     ctx.beginPath(); ctx.arc(20, 0, 3.6, 0, 6.284); ctx.fill();
     ctx.globalAlpha = g.al;
   }
-  function penComet(g) {
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penComet(g, _t) {
     const grd = ctx.createLinearGradient(0, 0, -260, 0);
     grd.addColorStop(0, "rgba(216,180,90,.85)");
     grd.addColorStop(1, "rgba(216,180,90,0)");
@@ -356,6 +478,7 @@ export function createFlight(canvas, options = {}) {
     craft: penCraft, comet: penComet,
   };
 
+  /** @param {number} b */
   function drawBloom(b) {
     if (b <= 0) return;
     const by = H * 0.5;
@@ -391,11 +514,13 @@ export function createFlight(canvas, options = {}) {
      lands on y = 920 of a 1600×1000 slice, radius 3000, sunrise point at
      (800, 920). So the crossfade from the real login DOM into the canvas has
      nothing to give it away. */
+  /** @param {number} c @param {Atmosphere} pal @param {number} [alpha] */
   function drawWorld(c, pal, alpha) {
     if (c >= 0.999) return;
     if (alpha === undefined) alpha = 1;
     if (alpha <= 0.002) return;
     const s = Math.max(W / 1600, H / 1000);
+    /** @param {number} y */
     const my = (y) => H / 2 + (y - 500) * s;
     const R0 = 3000 * s, top0 = my(920);
     /* the camera holds the world in frame for a beat (it rises), then lets go */
@@ -418,6 +543,7 @@ export function createFlight(canvas, options = {}) {
 
     /* the point of first light — dawn only; at dusk the sun is already under */
     if (pal.hasSun) {
+      /** @param {number} rad @param {string} col @param {number} al */
       const gr = (rad, col, al) => {
         const g = ctx.createRadialGradient(cx, topY, 0, cx, topY, rad);
         g.addColorStop(0, hexa(col, al * fade)); g.addColorStop(1, hexa(col, 0));
@@ -425,7 +551,10 @@ export function createFlight(canvas, options = {}) {
       };
       gr(520 * s * (1 - c * 0.5), pal.glowWide, 0.30);
       gr(240 * s * (1 - c * 0.5), pal.glowMid, 0.55);
-      gr(90 * s * (1 - c * 0.6), pal.glowCore, 0.80);
+      /* `hasSun` is exactly the atmospheres whose `glowCore` is set (DAWN
+         only) -- the two fields are kept apart because only one of them
+         changes per pack, but they always agree. */
+      gr(90 * s * (1 - c * 0.6), /** @type {string} */ (pal.glowCore), 0.80);
     } else {
       const g = ctx.createRadialGradient(cx, topY + 30 * s, 0, cx, topY + 30 * s, 620 * s * (1 - c * 0.5));
       g.addColorStop(0, hexa(pal.glowMid, 0.34 * fade));
@@ -463,14 +592,21 @@ export function createFlight(canvas, options = {}) {
   }
 
   /* ── one frame, at flight time `t` with step `dt` seconds ──────────────── */
+  /**
+   * @param {number} t
+   * @param {number} dt
+   */
   function step(t, dt) {
-    const P = flight.P;
+    /* Only ever invoked from frame() (guarded by `if (!flight) return`) or
+       from start()'s pinned loop, which runs right after prime() has set it. */
+    const active = /** @type {FlightState} */ (flight);
+    const P = active.P;
     const tc = Math.min(t, P.dur);
     const v = P.speed(tc);        /* negative on the way down: the flight reversed */
     const av = Math.abs(v);
     const c = P.atm(tc);
 
-    ctx.setTransform(flight.dpr, 0, 0, flight.dpr, 0, 0);
+    ctx.setTransform(active.dpr, 0, 0, active.dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = PACK.bg;
     ctx.fillRect(0, 0, W, H);
@@ -480,7 +616,9 @@ export function createFlight(canvas, options = {}) {
       if (n.p > 1.25) n.p -= 1.45;
       else if (n.p < -0.20) n.p += 1.45;   /* dust falls the other way, reversed */
       const r = H * (-0.15 + n.p * 2.5);
-      const x = VPX + Math.cos(n.rad) * r, y = VPY + Math.sin(n.rad) * r;
+      /* prime() has already set every nebula's `rad` before step() ever runs. */
+      const nrad = /** @type {number} */ (n.rad);
+      const x = VPX + Math.cos(nrad) * r, y = VPY + Math.sin(nrad) * r;
       const rad = H * n.size * (0.35 + n.p * 0.95);
       const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
       const a = n.al * Math.min(1, n.p / 0.18) * Math.min(1, (1.25 - n.p) / 0.3);
@@ -504,7 +642,7 @@ export function createFlight(canvas, options = {}) {
     ctx.globalCompositeOperation = "lighter";
     for (const st of STARS) {
       st.r *= (1 + v * dt * P.K * st.z);
-      if (st.r > RMAX || st.r < 1) { respawn(st, flight.rev); continue; }
+      if (st.r > RMAX || st.r < 1) { respawn(st, active.rev); continue; }
       const x1 = VPX + Math.cos(st.a) * st.r, y1 = VPY + Math.sin(st.a) * st.r;
       if (x1 < -420 || x1 > W + 420 || y1 < -520 || y1 > H + 520) continue;
       const near = Math.min(1, st.r / RMAX);
@@ -529,21 +667,22 @@ export function createFlight(canvas, options = {}) {
        is still on screen when you brake keeps sailing out of frame. Reversed,
        the same traffic arrives from the frame edge and recedes to the
        vanishing point: p runs 1 → 0 instead of 0 → 1. */
-    for (const g of flight.props) {
+    for (const g of active.props) {
       if (t < g.t0) continue;
       const advance = Math.max(av, 0.50) * (dt * 1000) / g.dur;
-      g.p += flight.rev ? -advance : advance;
-      if (flight.rev ? g.p <= 0 : g.p >= 1) continue;
+      /* prime() has already set every prop's `p` before step() ever runs. */
+      g.p = /** @type {number} */ (g.p) + (active.rev ? -advance : advance);
+      if (active.rev ? g.p <= 0 : g.p >= 1) continue;
       const r = H * 0.34 + Math.pow(g.p, 1.12) * H * 1.95;
-      const x = VPX + Math.cos(g.rad) * r, y = VPY + Math.sin(g.rad) * r;
+      const x = VPX + Math.cos(/** @type {number} */ (g.rad)) * r, y = VPY + Math.sin(/** @type {number} */ (g.rad)) * r;
       const sc = propScale(r) * g.z * 2.1;
       if (sc <= 0.001) continue;
       g.al = Math.min(1, g.p / 0.14) * Math.min(1, (1 - g.p) / 0.22) * 0.85;
       g.hair = 1.15 / sc;                       /* a true hairline at any size */
       if (x < -600 * sc || x > W + 600 * sc || y < -700 * sc || y > H + 700 * sc) continue;
       ctx.save();
-      ctx.translate(x, y); ctx.rotate(g.rot0 + g.p * g.spin); ctx.scale(sc, sc);
-      PEN[g.kind](g, t);
+      ctx.translate(x, y); ctx.rotate(/** @type {number} */ (g.rot0) + g.p * g.spin); ctx.scale(sc, sc);
+      PEN[g.kind](/** @type {HydratedProp} */ (g), t);
       ctx.restore();
     }
     ctx.globalAlpha = 1;
@@ -552,23 +691,28 @@ export function createFlight(canvas, options = {}) {
        the dawn you are returning to cools into the dusk you land on. */
     const mix = P.duskMix ? P.duskMix(tc) : 0;
     if (mix < 0.998) drawWorld(c, P.pal, 1 - mix);
-    if (mix > 0.002) drawWorld(c, P.palTo, mix);
+    /* `duskMix` and `palTo` are DOWN's own pair -- whenever `mix` clears the
+       threshold, `duskMix` exists, and so did the `palTo` it was read off. */
+    if (mix > 0.002) drawWorld(c, /** @type {Atmosphere} */ (P.palTo), mix);
 
     /* THE REVEAL, read forwards on the climb and backwards on the descent —
        so the arrival's slow bloom is also the departure's slow contraction. */
-    drawBloom(bloomAt(flight.rev ? mirror(tc) : tc));
+    drawBloom(bloomAt(active.rev ? mirror(tc) : tc));
   }
 
+  /** @param {number} now */
   function frame(now) {
     if (!flight) return;
-    const t = now - flight.start;
-    const dt = Math.min(48, now - flight.last) / 1000;
-    flight.last = now;
+    const active = flight;
+    const t = now - active.start;
+    const dt = Math.min(48, now - active.last) / 1000;
+    active.last = now;
     step(t, dt);
-    if (t < flight.P.dur + 400) flightRaf = raf(frame);
+    if (t < active.P.dur + 400) flightRaf = raf(frame);
     else { flightRaf = 0; flight = null; }
   }
 
+  /** @param {Profile} P */
   function prime(P) {
     rnd = seededRng(FLIGHT_SEED);
     const dpr = sizeCanvas();
@@ -577,8 +721,8 @@ export function createFlight(canvas, options = {}) {
       g.p = P.rev ? 1 : 0;             /* reversed, the traffic starts at the edge */
       g.rad = g.ang * Math.PI / 180;
       g.rot0 = (g.spin || 0) * -0.5;
-      if (g.kind === "con") g.pts = CONS[g.shape];
-      if (g.kind === "sys") g.bodies = systemBodies(g.k);
+      if (g.kind === "con") g.pts = CONS[/** @type {number} */ (g.shape)];
+      if (g.kind === "sys") g.bodies = systemBodies(/** @type {number} */ (g.k));
     }
     for (const n of NEB) {
       n.rad = n.ang * Math.PI / 180;
@@ -594,6 +738,8 @@ export function createFlight(canvas, options = {}) {
      * simulation is stepped at a fixed 60fps up to that millisecond and the
      * last frame is left on the canvas, which is what makes a fixture
      * screenshot of a moving thing reproducible.
+     * @param {Profile} P
+     * @param {{ at?: number }} [options]
      */
     start(P, { at } = {}) {
       this.stop();
@@ -617,8 +763,9 @@ export function createFlight(canvas, options = {}) {
     /* a resize mid-flight re-seeds the field, as the mockup does */
     resize() {
       if (!flight) return;
-      flight.dpr = sizeCanvas();
-      setCamera(flight.P);
+      const active = flight;
+      active.dpr = sizeCanvas();
+      setCamera(active.P);
       seedStars();
     },
     get running() { return flight !== null; },
