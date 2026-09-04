@@ -387,6 +387,23 @@ carried was dropped on 2026-08-24; see Amendments.
 
 ## Amendments
 
+**2026-09-04 — slice (6) lands (issue #526).** The `handle` hook in
+`web/src/hooks.server.js` is the page choke point decision 2 named: it reads
+the effective state once per screen request, before the session gate, and
+answers a blocked reader with the `/maintenance` screen at the URL they asked
+for — status 503, `Cache-Control: no-store`, `Retry-After` from
+`expected_end_at` — rendered through `event.fetch`, so a reload after the
+window ends lands them where they were. Exempt screens, by route id: `/login`
+and `/logout` only; `/` is not, because a signed-out visitor is not an
+administrator. The API is untouched by the hook and keeps its own guard.
+Two consequences of the timeline (decision 8) that ADR-0012 could not have
+foreseen: `/maintenance` is no longer prerendered, since it now reads the
+open window's public entries, and outside a window it redirects to `/`
+rather than showing an empty eclipse. A failed state read is treated as "not
+in maintenance" and logged: an unreachable database is an outage (decision
+6), not a declared window, and the session gate fails closed on the same
+database a moment later.
+
 **2026-08-24 — the interim Next shell is dropped (issue #526).** Consequences
 and slice (6) accepted a named cost: until the ADR-0012 cut, blocked page
 requests on the Next surface would receive a minimal bounded shell instead of
