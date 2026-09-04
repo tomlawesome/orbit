@@ -242,6 +242,24 @@ describe("exact-image publication workflow", () => {
     expect(workflow).not.toContain("PUBLICATION_CHANNEL: development");
   });
 
+  it("takes the pnpm version from package.json alone, on both hosts", () => {
+    // Renovate bumps package.json's packageManager (234eb98 took it to
+    // 11.11.0) and nothing else: a second copy of the version in either
+    // pipeline drifts, and pnpm/action-setup then refuses to start
+    // (GitHub run 33924807335). package.json is the one place it lives.
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+    expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
+    for (const pipeline of [workflow, gitlabCi]) {
+      expect(pipeline).not.toMatch(/pnpm@\d/u);
+      expect(pipeline).not.toMatch(/version: *["']?\d+\.\d+\.\d+/u);
+      expect(pipeline).not.toContain("PNPM_VERSION");
+    }
+    expect(workflow).toContain("require('./package.json').packageManager");
+    expect(gitlabCi).toContain("require('./package.json').packageManager");
+  });
+
   it("publishes only the preview discovery tag while retaining digest identity", () => {
     expect(workflow).toContain("- name: Calculate release-train version");
     expect(workflow).toContain(
