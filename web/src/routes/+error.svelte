@@ -26,6 +26,18 @@
    */
   const isNotFound = $derived(page.status === 404);
 
+  /** #790 review switch — see the sky markup below. */
+  const SKIES = /** @type {const} */ (["drawn", "spiral", "near", "drift"]);
+  const sky = $derived(
+    /** @type {(typeof SKIES)[number]} */ (
+      SKIES.find((s) => s === page.url.searchParams.get("sky")) ?? "drawn"
+    ),
+  );
+  const farFalls = $derived(sky === "drawn" || sky === "spiral");
+  const nearFalls = $derived(sky !== "drift");
+  /** #790 review switch too: `?pace=slow|brisk` doubles or halves every sky cycle. */
+  const pace = $derived({ slow: 2, brisk: 0.5 }[page.url.searchParams.get("pace") ?? ""] ?? 1);
+
   /**
    * #764 step 2 — the same rasterise-once mechanism as Grain/Dawn/Dusk
    * (#499/#501, $lib/raster.js), applied to the one part of this screen's
@@ -194,7 +206,7 @@
     if (!isNotFound) return;
     /* Populates #lensarcs (among other things) synchronously, before the
        first build() below ever reads it. */
-    mountGravityWell();
+    mountGravityWell({ farFalls, nearFalls });
 
     let cancelled = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -283,15 +295,42 @@
 </svelte:head>
 
 {#if isNotFound}
-<div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+<!--
+  The sky falls in (#790). Each star layer is drawn once, into <defs>, as one
+  band of stars that starts beyond the frame; three <use> copies of it, each
+  rotated a third of a turn so they never look like copies, shrink toward the
+  hole a third of a cycle apart and hand over to each other (notfound.css,
+  .fall). So the field never empties, nothing spawns in view, and the horizon's
+  own black disc swallows what is left. The moving parts are six plain <g>
+  transforms in this unfiltered <svg> — the drift they replace was two — which
+  is the shape #764 needs: nothing filtered gains motion.
+
+  `sky` is the review switch for the #790 dialogue (drawn | spiral | near |
+  drift), read from the URL; it goes once a direction is ratified.
+-->
+<div class="sky" data-sky={sky} style="--pace:{pace}"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
   <defs>
     <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
       <stop offset="0%" stop-color="#e8edff" stop-opacity=".45"/>
       <stop offset="100%" stop-color="#e8edff" stop-opacity="0"/>
     </radialGradient>
+    {#if farFalls}<g id="farstars" fill="#dbe2f5"></g>{/if}
+    {#if nearFalls}<g id="nearstars"></g>{/if}
   </defs>
-  <g class="sky-far" fill="#dbe2f5"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
-  <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
+  {#if farFalls}
+    <g class="fall fall-far" style="--i:0;--s0:2"><use href="#farstars"/></g>
+    <g class="fall fall-far" style="--i:1;--s0:1"><use href="#farstars" transform="rotate(120 800 450)"/></g>
+    <g class="fall fall-far" style="--i:2;--s0:.5"><use href="#farstars" transform="rotate(240 800 450)"/></g>
+  {:else}
+    <g class="sky-far" fill="#dbe2f5"><g id="farstars"></g><use href="#farstars" x="1600"/></g>
+  {/if}
+  {#if nearFalls}
+    <g class="fall fall-near" style="--i:0;--s0:2"><use href="#nearstars"/></g>
+    <g class="fall fall-near" style="--i:1;--s0:1"><use href="#nearstars" transform="rotate(120 800 450)"/></g>
+    <g class="fall fall-near" style="--i:2;--s0:.5"><use href="#nearstars" transform="rotate(240 800 450)"/></g>
+  {:else}
+    <g class="sky-near"><g id="nearstars"></g><use href="#nearstars" x="1600"/></g>
+  {/if}
 </svg></div>
 
 <div class="world" style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">

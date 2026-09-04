@@ -1,7 +1,45 @@
 
 body{background:#04070f}
-.sky-far{animation:driftf 370s linear infinite}
-.sky-near{animation:driftn 180s linear infinite}
+/* the sky falls in (#790, see +error.svelte): three copies of one band of
+   stars, each shrinking toward the hole and handing over to the next. The
+   scale steps are one geometric series (2 → .25, halving every quarter), so a
+   star's speed is proportional to its distance from the hole and the field
+   looks the same at any moment; the copy fades only at the ends, arriving
+   beyond the frame and gone as it meets the horizon. With animation off the
+   copies sit at their spread scales, so the still is still a full sky. */
+.fall{transform-origin:800px 450px;transform:scale(var(--s0));
+      animation:infall calc(var(--T) * var(--pace,1)) linear infinite;
+      animation-delay:calc(var(--i) * var(--T) * var(--pace,1) / -3)}
+.fall-far{--T:160s}
+.fall-near{--T:80s}
+@keyframes infall{
+  0%{transform:scale(2);opacity:0}
+  6%{opacity:1}
+  12.5%{transform:scale(1.542)}
+  25%{transform:scale(1.189)}
+  37.5%{transform:scale(.917)}
+  50%{transform:scale(.707)}
+  62.5%{transform:scale(.545)}
+  75%{transform:scale(.42)}
+  84%{opacity:1}
+  87.5%{transform:scale(.324)}
+  100%{transform:scale(.25);opacity:0}}
+[data-sky="spiral"] .fall{animation-name:infall-spiral}
+@keyframes infall-spiral{
+  0%{transform:rotate(0deg) scale(2);opacity:0}
+  6%{opacity:1}
+  12.5%{transform:rotate(-6.25deg) scale(1.542)}
+  25%{transform:rotate(-12.5deg) scale(1.189)}
+  37.5%{transform:rotate(-18.75deg) scale(.917)}
+  50%{transform:rotate(-25deg) scale(.707)}
+  62.5%{transform:rotate(-31.25deg) scale(.545)}
+  75%{transform:rotate(-37.5deg) scale(.42)}
+  84%{opacity:1}
+  87.5%{transform:rotate(-43.75deg) scale(.324)}
+  100%{transform:rotate(-50deg) scale(.25);opacity:0}}
+/* the drift the infall replaces, kept for the review switch's `near` and `drift` */
+.sky-far{animation:driftf calc(370s * var(--pace,1)) linear infinite}
+.sky-near{animation:driftn calc(180s * var(--pace,1)) linear infinite}
 .tw{animation:twinkle 5s ease-in-out infinite alternate}
 @keyframes twinkle{from{opacity:.2}to{opacity:.8}}
 
