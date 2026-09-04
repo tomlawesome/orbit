@@ -3,8 +3,9 @@ import { chmodSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, m
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
 import { InstallTransaction, type ManagedPath } from "./install-transaction";
 
 // Byte-for-byte evidence-layout parity between scripts/install.sh's staging
@@ -26,6 +27,11 @@ import { InstallTransaction, type ManagedPath } from "./install-transaction";
 // this test fails loudly rather than silently comparing against stale text
 // — see docs/adr-notes/295-install-port-plan.md's Flags section.
 
+// This file spawns real awk and a bash driver script; a spawn that takes
+// 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
+
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
@@ -34,7 +40,7 @@ function extractFunction(name: string): string {
     $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
     found { print; if ($0 == "}") { found = 0; exit } }
   `;
-  const result = spawnSync("awk", [script, installScriptPath], { encoding: "utf8" });
+  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
   if (result.status !== 0 || !result.stdout.trim()) {
     throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
   }
@@ -137,8 +143,10 @@ function runBashRoundTrip(
     let stdout = "";
     let stderr = "";
     let originalSnapshot: Snapshot | undefined;
+    const watchdog = processWatchdog({ label: "runBashRoundTrip", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
+      watchdog.touch();
       if (!originalSnapshot && stdout.includes("prepared\n")) {
         originalSnapshot = snapshotTree(join(stagingDir, "rollback", "original"));
         mutate();
@@ -147,9 +155,15 @@ function runBashRoundTrip(
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
+      watchdog.touch();
     });
     child.on("error", reject);
     child.on("close", (code) => {
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       if (!originalSnapshot) {
         reject(new Error(`bash driver never reported "prepared" (exit ${code}): ${stderr}`));
         return;

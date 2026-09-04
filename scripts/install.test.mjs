@@ -20,13 +20,18 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+import { PTY_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyWatchdog } from "./pty-deadline.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 // This suite is fully mocked: fake `docker` and `curl` executables are placed
 // ahead of the real ones on PATH, so no test needs Docker, a registry,
-// network access, Git or a TTY.
+// network access, Git or a TTY. It still spawns the real install.sh under
+// bash, some through a pty; a spawn that takes tens of milliseconds quiet
+// takes seconds on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
@@ -640,7 +645,7 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
   const logPath = join(logDir, "calls.log");
   const priorEnvironment = readOptionalFile(join(targetDir, ".env-orbit"));
   const priorImage = /^ORBIT_IMAGE=([^\n]*)$/m.exec(priorEnvironment)?.[1] ?? resolvedReference;
-  const result = spawnSync("bash", [installScript, ...args], {
+  const result = failOnProcessDeadline(spawnSync("bash", [installScript, ...args], {
     cwd: targetDir,
     encoding: "utf8",
     env: {
@@ -665,7 +670,8 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       FAKE_CONFIGURE_READY: "1",
       ...envOverrides,
     },
-  });
+    ...processGuard(),
+  }), { label: "runInstall" });
   const calls = readOptionalFile(logPath);
   return { ...result, calls };
 }
@@ -746,8 +752,10 @@ function runInstallWithPromptedTerminalInput(
     let settled = false;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    const watchdog = ptyWatchdog({ label: "runInstallWithPromptedTerminalInput", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      watchdog.touch();
       const interaction = interactions[interactionIndex];
       if (interaction && stdout.includes(interaction.after)) {
         child.stdin.write(interaction.input);
@@ -755,21 +763,14 @@ function runInstallWithPromptedTerminalInput(
         if (interactionIndex === interactions.length) child.stdin.end();
       }
     });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
     child.on("error", reject);
-    let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status, signal) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      if (timedOut) {
-        reject(ptyDeadlineError({
-          label: "runInstallWithPromptedTerminalInput",
-          deadlineMs: PTY_ASYNC_DEADLINE_MS,
-          stdout,
-          stderr,
-        }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
         return;
       }
       resolve({
@@ -818,10 +819,10 @@ function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args =
     let stderr = "";
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const watchdog = ptyWatchdog({ label: "runInstallWithTimedTerminalInput", kill: () => child.kill("SIGKILL") });
+    child.stdout.on("data", (chunk) => { stdout += chunk; watchdog.touch(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
     child.on("error", reject);
-    const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
     (async () => {
       for (const [delay, input] of steps) {
         await new Promise((stepResolve) => setTimeout(stepResolve, delay));
@@ -830,7 +831,11 @@ function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args =
       child.stdin.end();
     })().catch(reject);
     child.on("close", (status, signal) => {
-      clearTimeout(timer);
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
+        return;
+      }
       resolve({ status, signal, stdout, stderr, calls: readOptionalFile(logPath) });
     });
   });
@@ -1424,19 +1429,22 @@ describe("install.sh", () => {
     expect(result.stdout).not.toContain("RESTORE_INVOKED");
     expect(result.stdout).not.toContain("REPAIR_INVOKED");
     expect(result.stdout).not.toContain("ENGINE_CHECK_INVOKED");
-    const backup = spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
+    const backup = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "backup.sh stand-in" });
     expect(backup.status).toBe(0);
     expect(backup.stdout).toBe("BACKUP_INVOKED\n");
-    const repair = spawnSync("bash", [join(targetDir, "scripts", "repair.sh")], {
+    const repair = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "repair.sh stand-in" });
     expect(repair.status).toBe(0);
     expect(repair.stdout).toBe("REPAIR_INVOKED\n");
-    const engineCheck = spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
+    const engineCheck = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "engine-check.sh stand-in" });
     expect(engineCheck.status).toBe(0);
     expect(engineCheck.stdout).toBe("ENGINE_CHECK_INVOKED\n");
     expect(stagingLeftovers(targetDir)).toEqual([]);

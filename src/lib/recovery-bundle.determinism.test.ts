@@ -1,6 +1,7 @@
 import { inspect } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import {
   RecoveryBundleRefusal,
   buildBackupManifest,
@@ -25,6 +26,10 @@ import {
 // SECURITY directive for this slice: no refusal path this module can throw
 // ever surfaces a passphrase, a raw document KEK, or a bundle HMAC/fingerprint
 // derived from one, in its message.
+
+// scrypt N=131072 by design; see KDF_TEST_TIMEOUT_MS
+// (scripts/process-budget.mjs) for the cost and the figure it's set from.
+vi.setConfig({ testTimeout: KDF_TEST_TIMEOUT_MS });
 
 const KEK = "c".repeat(64);
 const PASSPHRASE = "correct-horse-battery-staple-determinism";
@@ -71,7 +76,6 @@ describe("determinism", () => {
         expect(recovered.toString("ascii")).toBe(KEK);
       }
     },
-    20_000,
   );
 
   it("contrast: the document-archive envelope is also deliberately non-deterministic (fresh salt every call, backup.sh #27)", () => {
