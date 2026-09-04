@@ -205,7 +205,11 @@ variables:
   apt-get install -y -qq --no-install-recommends docker.io docker-compose-v2 jq curl openssl
   # /builds is a real volume; the rest of the container is overlayfs, which
   # overlay2 cannot stack on.
+  # /builds outlives the job on this runner, so a stack a killed job left in
+  # the daemon's state is still "running" when the next job's daemon starts,
+  # and the installer's one-stack guard refuses. Start from nothing.
   docker_data_root="${CI_BUILDS_DIR:-/builds}/.orbit-docker-data"
+  rm -rf "$docker_data_root"
   mkdir -p "$docker_data_root"
   # cgroup v2 forbids a cgroup from holding both processes and child groups
   # with controllers. The job's shell sits in the container's root cgroup, so
