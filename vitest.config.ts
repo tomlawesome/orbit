@@ -9,6 +9,12 @@ export default defineConfig({
       // a web/ module that imports a sibling through $lib (#410). web/ test
       // FILES stay excluded below; only their subjects are reachable.
       $lib: fileURLToPath(new URL("./web/src/lib", import.meta.url)),
+      // The other SvelteKit-ism the ported API routes need (#735). It is a
+      // virtual module SvelteKit generates, so nothing resolves it here; the
+      // stub exposes the same live process environment the real one does.
+      "$env/dynamic/private": fileURLToPath(
+        new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
+      ),
     },
   },
   test: {
@@ -56,15 +62,23 @@ export default defineConfig({
       reporter: ["text-summary", "json-summary", "html"],
       reportsDirectory: "coverage",
       // Ratchet, not target (#302): floors sit just under the measured
-      // baseline (2026-08-12: global 29.5% statements; src/lib 64%;
-      // src/server/documents 79%) so CI fails on regression while no
-      // percentage is ever a goal in itself. Raise floors when a phase
-      // durably lifts a layer; never lower them to make a change pass.
+      // baseline so CI fails on regression while no percentage is ever a goal
+      // in itself. Raise floors when a phase durably lifts a layer; never
+      // lower them to make a change pass.
+      //
+      // Re-pinned once at the cut (#735), which is the one case the
+      // architecture ruling allows: deleting src/app and src/components
+      // removed ~5000 largely untested statements, so the denominator changed
+      // rather than the testing. Measured on the cut commit: 50.34%
+      // statements, 48.3% branches, 51.68% functions, 52.04% lines. The
+      // previous global floors (28/28/26/29) were set against a codebase that
+      // no longer exists and would now pass while half the engine went
+      // untested.
       thresholds: {
-        statements: 28,
-        branches: 28,
-        functions: 26,
-        lines: 29,
+        statements: 50,
+        branches: 48,
+        functions: 51,
+        lines: 51,
         "src/lib/**": { statements: 60 },
         "src/server/documents/**": { statements: 75 },
       },

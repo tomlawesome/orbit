@@ -66,8 +66,7 @@ if [ "${1:-}" = "--banner" ]; then
   exit 0
 fi
 
-if [ "$#" -eq 2 ] && [ "$1" = "node" ] &&
-  { [ "$2" = "server.js" ] || [ "$2" = "scripts/container-server.mjs" ]; }; then
+if [ "$#" -eq 2 ] && [ "$1" = "node" ] && [ "$2" = "web/index.js" ]; then
   print_banner
 fi
 

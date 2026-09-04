@@ -40,11 +40,10 @@ describe("changed-path CI risk classification", () => {
     }
   });
 
-  it("runs real PostgreSQL integration for ordinary server and API changes", () => {
+  it("runs real PostgreSQL integration for ordinary server changes", () => {
     for (const path of [
       "src/server/workspace-repository.ts",
       "src/server/household-repository.ts",
-      "src/app/api/workspace/route.ts",
       "src/lib/workspace.ts",
       "tests/integration/workspace.test.ts",
       "scripts/test-integration.mjs",
@@ -68,13 +67,15 @@ describe("changed-path CI risk classification", () => {
       "src/components/item-editor.tsx",
       "src/instrumentation.ts",
       "src/lib/auth/session.ts",
-      "src/lib/preview-workspace.ts",
       "src/server/document-repository.ts",
       "src/server/documents/scanner.ts",
       "src/server/imap-ingestion.ts",
       "src/server/readiness.ts",
       "drizzle/0001_initial.sql",
       "scripts/install.sh",
+      // Both run inside the image build and decide what it ships (#735).
+      "scripts/web-deploy.sh",
+      "scripts/web-pdfjs-runtime-check.mjs",
       "scripts/backup.sh",
       "tests/e2e/authenticated-documents.spec.ts",
       "some/new/directory/file.txt",

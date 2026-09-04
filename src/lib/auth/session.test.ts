@@ -1,4 +1,3 @@
-import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../env";
 import { createCsrfToken } from "./crypto";
@@ -38,8 +37,10 @@ const session: AuthenticatedSession = {
   },
 };
 
-function postRequest(headers: Record<string, string>): NextRequest {
-  return new NextRequest("https://orbit.example/api/auth/session/refresh", {
+/* A plain Request since the cut (#735): the seam reads `.headers` and nothing
+   else, so there was never anything Next-specific to construct here. */
+function postRequest(headers: Record<string, string>): Request {
+  return new Request("https://orbit.example/api/auth/session/refresh", {
     method: "POST",
     headers,
   });
@@ -58,18 +59,18 @@ describe("session request protection", () => {
       "sec-fetch-site": "same-origin",
       "x-csrf-token": createCsrfToken(session.token, config.sessionSecret),
     });
-    expect(() => assertCsrf(request, session, config)).not.toThrow();
+    expect(() => assertCsrf(request.headers, session, config)).not.toThrow();
   });
 
   it.each(invalidOriginHeaders)("rejects missing, malformed, or cross-site origins", (headers) => {
-    expect(() => assertSameOrigin(postRequest(headers), config)).toThrowError(
+    expect(() => assertSameOrigin(postRequest(headers).headers, config)).toThrowError(
       expect.objectContaining({ code: "csrf_failed", status: 403 }),
     );
   });
 
   it("rejects a missing or invalid synchronizer token", () => {
     const request = postRequest({ origin: config.appUrl.origin, "sec-fetch-site": "same-origin" });
-    expect(() => assertCsrf(request, session, config)).toThrowError(
+    expect(() => assertCsrf(request.headers, session, config)).toThrowError(
       expect.objectContaining({ code: "csrf_failed", status: 403 }),
     );
   });

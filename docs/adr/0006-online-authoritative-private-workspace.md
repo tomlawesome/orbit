@@ -24,10 +24,10 @@ security and delivery scope.
 - PostgreSQL and the authenticated workspace API remain authoritative for all
   private workspace data. The browser does not persist workspace snapshots or
   commands in app-controlled durable storage.
-- The client deletes the legacy `orbit-workspace` IndexedDB database before
+- ~~The client deletes the legacy `orbit-workspace` IndexedDB database before
   session bootstrap and before local logout. A blocked or failed deletion
   fails closed and presents a bounded error instead of opening private state or
-  claiming logout succeeded.
+  claiming logout succeeded.~~ **Struck 2026-09-03 — see Superseded below.**
 - Authenticated state is rendered only after a live session check and canonical
   workspace response. Signed-out or unavailable startup paths receive no
   cached household state.
@@ -48,9 +48,29 @@ security and delivery scope.
   Failed commands must be retried explicitly after connectivity returns.
 - Orbit remains installable and may receive push notifications, but v1 does
   not claim private offline workspace access or queued edits.
-- Preview users may need to close another Orbit tab if it blocks legacy
+- ~~Preview users may need to close another Orbit tab if it blocks legacy
   database deletion; Orbit reports that condition without disclosing private
-  content.
+  content.~~ Struck with the clause above.
+
+## Superseded
+
+**The legacy-database purge, struck 2026-09-03 (owner decision).**
+
+The purge existed to clear the `orbit-workspace` IndexedDB database that
+earlier builds wrote. The code that wrote it was removed on 2026-07-30 — the
+same day this ADR was accepted — and the first release tag, `v1.1.0`, is
+2026-08-08. So no released Orbit ever wrote that database, and the only
+browsers that can hold one ran a development build before 30 July. That is not
+an installed base; it is a handful of the owner's own browser profiles.
+
+The v19 cut (#735) deleted the React client and with it the only caller, which
+is how this surfaced. Restoring the call would have kept a permanent migration
+step running for a population of about one, so the clause is struck instead and
+`src/lib/private-browser-storage.ts` is deleted with it (#776).
+
+Nothing else in this ADR changes. The browser still persists no workspace
+snapshots or commands, and future private offline access still requires its own
+accepted security design.
 
 ## Alternatives considered
 

@@ -1,16 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { NextRequest } from "next/server";
 import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import * as database from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documentStagingObjects, documents, imapIngestionAttachments, imapIngestionMessages, items, reviewedIntakeOperations } from "@/db/schema";
-import { GET as downloadDocument } from "@/app/api/documents/[documentId]/download/route";
-import { DELETE as deleteDocument } from "@/app/api/documents/[documentId]/route";
-import { POST as restoreDocumentRoute } from "@/app/api/documents/[documentId]/restore/route";
-import { POST as createDocumentDraftRoute } from "@/app/api/documents/[documentId]/draft/route";
-import { POST as approveDocumentDraftRoute } from "@/app/api/document-drafts/[draftId]/approve/route";
-import { GET as listDocuments, POST as uploadDocument } from "@/app/api/households/[householdId]/items/[itemId]/documents/route";
 import { updateDocumentJob } from "@/server/admin-operations";
 import { reconcileDocumentStorage, runDocumentMaintenanceCycle } from "@/server/document-worker";
 import { getDocumentConfig, resetDocumentConfigForTests } from "@/server/documents/config";
@@ -21,10 +14,17 @@ import { purgeHeldImapAttachment, scanAndHoldImapAttachment, setImapHoldingPurge
 import {
   cleanupIntegrationEnvironment,
   createIntegrationFixture,
-  requestForSession,
-  sessionHeaders,
 } from "./support/fixtures";
+import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
+
+const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
+const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
+const { POST: restoreDocumentRoute } = await loadRoute("documents/[documentId]/restore");
+const { POST: createDocumentDraftRoute } = await loadRoute("documents/[documentId]/draft");
+const { POST: approveDocumentDraftRoute } = await loadRoute("document-drafts/[draftId]/approve");
+const { GET: listDocuments, POST: uploadDocument } = await loadRoute("households/[householdId]/items/[itemId]/documents");
+const { GET: previewDocument } = await loadRoute("documents/[documentId]/preview");
 
 vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
@@ -74,7 +74,8 @@ function parseLogLine(line: string): { level: string; component: string; event: 
 async function uploadWithFilename(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>, filename: string, documentId?: string, body = syntheticPdf) {
   const session = await fixture.session("member");
   const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
-  const response = await uploadDocument(requestForSession(session, url, {
+  const response = await callRouteForSession(uploadDocument, session, {
+    url,
     method: "POST",
     headers: {
       "content-length": String(body.length),
@@ -83,7 +84,8 @@ async function uploadWithFilename(fixture: Awaited<ReturnType<typeof createInteg
       ...(documentId ? { "x-orbit-document-id": documentId } : {}),
     },
     body,
-  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+    params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+  });
   return { session, response };
 }
 
@@ -103,21 +105,22 @@ async function withRequiredScanMode<T>(work: () => Promise<T>): Promise<T> {
 }
 
 function itemDocumentsContext(householdId: string, itemId: string) {
-  return { params: Promise.resolve({ householdId, itemId }) };
+  return { householdId, itemId };
 }
 
 function documentContext(documentId: string) {
-  return { params: Promise.resolve({ documentId }) };
+  return { documentId };
 }
 
 function draftContext(draftId: string) {
-  return { params: Promise.resolve({ draftId }) };
+  return { draftId };
 }
 
 async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
   const session = await fixture.session("member");
   const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
-  const response = await uploadDocument(requestForSession(session, url, {
+  const response = await callRouteForSession(uploadDocument, session, {
+    url,
     method: "POST",
     headers: {
       "content-length": String(syntheticPdf.length),
@@ -125,7 +128,8 @@ async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof create
       "x-orbit-filename": encodeURIComponent("synthetic-policy.pdf"),
     },
     body: syntheticPdf,
-  }), itemDocumentsContext(fixture.household.id, fixture.item.id));
+    params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+  });
   expect(response.status).toBe(201);
   const payload = await response.json() as { document: { id: string; lifecycle: string; displayName: string } };
   expect(payload.document).toMatchObject({ lifecycle: "available", displayName: "synthetic-policy.pdf" });
@@ -146,7 +150,7 @@ describe("authenticated encrypted document lifecycle", () => {
       proposal: { title: "Synthetic draft" },
     });
 
-    const downloaded = await downloadDocument(requestForSession(session, downloadUrl), documentContext(documentId));
+    const downloaded = await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(documentId) });
     expect(downloaded.status).toBe(200);
     expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(syntheticPdf);
     expect(downloaded.headers.get("cache-control")).toBe("private, no-store");
@@ -156,10 +160,11 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(downloaded.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(downloaded.headers.get("x-content-type-options")).toBe("nosniff");
 
-    const deletion = await deleteDocument(
-      requestForSession(session, downloadUrl, { method: "DELETE" }),
-      documentContext(documentId),
-    );
+    const deletion = await callRouteForSession(deleteDocument, session, {
+      url: downloadUrl,
+      method: "DELETE",
+      params: documentContext(documentId),
+    });
     expect(deletion.status).toBe(200);
     expect((await deletion.json()).document).toMatchObject({ lifecycle: "pending_deletion" });
 
@@ -167,20 +172,22 @@ describe("authenticated encrypted document lifecycle", () => {
       .from(documents).where(eq(documents.id, documentId));
     expect(pending).toMatchObject({ lifecycle: "pending_deletion" });
 
-    const restored = await restoreDocumentRoute(
-      requestForSession(session, downloadUrl + "/restore", { method: "POST" }),
-      documentContext(documentId),
-    );
+    const restored = await callRouteForSession(restoreDocumentRoute, session, {
+      url: downloadUrl + "/restore",
+      method: "POST",
+      params: documentContext(documentId),
+    });
     expect(restored.status).toBe(200);
     expect((await restored.json()).document).toMatchObject({ lifecycle: "available" });
 
-    const restoredDownload = await downloadDocument(requestForSession(session, downloadUrl), documentContext(documentId));
+    const restoredDownload = await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(documentId) });
     expect(Buffer.from(await restoredDownload.arrayBuffer())).toEqual(syntheticPdf);
 
-    const secondDeletion = await deleteDocument(
-      requestForSession(session, downloadUrl, { method: "DELETE" }),
-      documentContext(documentId),
-    );
+    const secondDeletion = await callRouteForSession(deleteDocument, session, {
+      url: downloadUrl,
+      method: "DELETE",
+      params: documentContext(documentId),
+    });
     expect(secondDeletion.status).toBe(200);
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
 
@@ -210,7 +217,7 @@ describe("authenticated encrypted document lifecycle", () => {
       .where(and(eq(auditLog.entityId, documentId), eq(auditLog.action, "document_purged")));
     expect(purgeAudits).toHaveLength(1);
 
-    const unavailable = await downloadDocument(requestForSession(session, downloadUrl), documentContext(documentId));
+    const unavailable = await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(documentId) });
     expect(unavailable.status).toBe(404);
   });
 
@@ -222,17 +229,17 @@ describe("authenticated encrypted document lifecycle", () => {
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
     const beforeAudits = await fixture.auditCount(documentId);
 
-    const list = await listDocuments(
-      new NextRequest(listUrl, { headers: sessionHeaders(outsider) }),
-      itemDocumentsContext(fixture.household.id, fixture.item.id),
-    );
+    const list = await callRouteForSession(listDocuments, outsider, {
+      url: listUrl,
+      params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+    });
     expect(list.status).toBe(404);
     expect((await list.json()).error).toEqual({ code: "item_not_found", message: "That item is not available" });
 
     for (const response of [
-      await downloadDocument(requestForSession(outsider, downloadUrl), documentContext(documentId)),
-      await deleteDocument(requestForSession(outsider, downloadUrl, { method: "DELETE" }), documentContext(documentId)),
-      await restoreDocumentRoute(requestForSession(outsider, downloadUrl + "/restore", { method: "POST" }), documentContext(documentId)),
+      await callRouteForSession(downloadDocument, outsider, { url: downloadUrl, params: documentContext(documentId) }),
+      await callRouteForSession(deleteDocument, outsider, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) }),
+      await callRouteForSession(restoreDocumentRoute, outsider, { url: downloadUrl + "/restore", method: "POST", params: documentContext(documentId) }),
     ]) {
       expect(response.status).toBe(404);
     }
@@ -249,20 +256,22 @@ describe("authenticated encrypted document lifecycle", () => {
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${malformedId}/download`;
 
     for (const response of [
-      await downloadDocument(requestForSession(session, downloadUrl), documentContext(malformedId)),
-      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(malformedId)),
-      await restoreDocumentRoute(requestForSession(session, `${downloadUrl}/restore`, { method: "POST" }), documentContext(malformedId)),
-      await createDocumentDraftRoute(requestForSession(session, `http://127.0.0.1:3000/api/documents/${malformedId}/draft`, { method: "POST" }), documentContext(malformedId)),
+      await callRouteForSession(downloadDocument, session, { url: downloadUrl, params: documentContext(malformedId) }),
+      await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(malformedId) }),
+      await callRouteForSession(restoreDocumentRoute, session, { url: `${downloadUrl}/restore`, method: "POST", params: documentContext(malformedId) }),
+      await callRouteForSession(createDocumentDraftRoute, session, { url: `http://127.0.0.1:3000/api/documents/${malformedId}/draft`, method: "POST", params: documentContext(malformedId) }),
     ]) {
       expect(response.status).toBe(404);
       expect((await response.json()).error).toMatchObject({ code: "document_not_found" });
     }
 
-    const draftApproval = await approveDocumentDraftRoute(requestForSession(session, "http://127.0.0.1:3000/api/document-drafts/not-a-uuid/approve", {
+    const draftApproval = await callRouteForSession(approveDocumentDraftRoute, session, {
+      url: "http://127.0.0.1:3000/api/document-drafts/not-a-uuid/approve",
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sectionId: fixture.section.id, title: "Test", provider: null, reference: null, mode: "create" }),
-    }), draftContext(malformedId));
+      params: draftContext(malformedId),
+    });
     expect(draftApproval.status).toBe(404);
     expect((await draftApproval.json()).error).toMatchObject({ code: "draft_not_found" });
   });
@@ -271,7 +280,7 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-interrupted-purge");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+    await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
     const [crypto] = await getDb().select({ storageKey: documentCrypto.storageKey }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
     const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
@@ -288,7 +297,7 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-metadata-failure");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+    await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
     await getDb().delete(documentCrypto).where(eq(documentCrypto.documentId, documentId));
 
@@ -315,19 +324,17 @@ describe("authenticated encrypted document lifecycle", () => {
     ];
 
     for (const fixtureDocument of malformed) {
-      const response = await uploadDocument(requestForSession(
-        session,
-        `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
-        {
-          method: "POST",
-          headers: {
-            "content-length": String(fixtureDocument.bytes.length),
-            "content-type": fixtureDocument.type,
-            "x-orbit-filename": encodeURIComponent(fixtureDocument.name),
-          },
-          body: fixtureDocument.bytes,
+      const response = await callRouteForSession(uploadDocument, session, {
+        url: `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`,
+        method: "POST",
+        headers: {
+          "content-length": String(fixtureDocument.bytes.length),
+          "content-type": fixtureDocument.type,
+          "x-orbit-filename": encodeURIComponent(fixtureDocument.name),
         },
-      ), itemDocumentsContext(fixture.household.id, fixture.item.id));
+        body: fixtureDocument.bytes,
+        params: itemDocumentsContext(fixture.household.id, fixture.item.id),
+      });
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({
         error: {
@@ -348,10 +355,11 @@ describe("authenticated encrypted document lifecycle", () => {
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     await getDb().update(items).set({ provider: "Old Provider", reference: "OLD-12345" })
       .where(eq(items.id, fixture.item.id));
-    const createResponse = await createDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
-      documentContext(documentId),
-    );
+    const createResponse = await callRouteForSession(createDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
+      method: "POST",
+      params: documentContext(documentId),
+    });
     expect(createResponse.status).toBe(200);
     const created = await createResponse.json() as { draft: { id: string } };
     await getDb().update(documentDrafts).set({
@@ -369,10 +377,11 @@ describe("authenticated encrypted document lifecycle", () => {
       },
     }).where(eq(documentDrafts.id, created.draft.id));
 
-    const sanitizedResponse = await createDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
-      documentContext(documentId),
-    );
+    const sanitizedResponse = await callRouteForSession(createDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
+      method: "POST",
+      params: documentContext(documentId),
+    });
     const sanitizedBody = await sanitizedResponse.json() as {
       draft: { proposal: Record<string, unknown>; evidence: { excerpt: string; characters: number } };
     };
@@ -387,44 +396,42 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(sanitizedBody.draft.evidence.excerpt).not.toMatch(/[<>\u202e]/u);
     expect(sanitizedBody.draft.evidence.characters).toBe(sanitizedBody.draft.evidence.excerpt.length);
 
-    const rejectedAuthority = await approveDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sectionId: fixture.section.id,
-          title: "Reviewed title",
-          provider: "Reviewed Provider",
-          reference: null,
-          mode: "merge",
-          targetItemId: fixture.item.id,
-          tool: "delete",
-          url: "https://example.invalid",
-          secret: "parser-controlled",
-        }),
+    const rejectedAuthority = await callRouteForSession(approveDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sectionId: fixture.section.id,
+        title: "Reviewed title",
+        provider: "Reviewed Provider",
+        reference: null,
+        mode: "merge",
+        targetItemId: fixture.item.id,
+        tool: "delete",
+        url: "https://example.invalid",
+        secret: "parser-controlled",
       }),
-      draftContext(created.draft.id),
-    );
+      params: draftContext(created.draft.id),
+    });
     expect(rejectedAuthority.status).toBe(422);
     expect(await getDb().select({ provider: items.provider, reference: items.reference })
       .from(items).where(eq(items.id, fixture.item.id)))
       .toEqual([{ provider: "Old Provider", reference: "OLD-12345" }]);
 
-    const approval = await approveDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sectionId: fixture.section.id,
-          title: "Reviewed title",
-          provider: "Reviewed Provider",
-          reference: null,
-          mode: "merge",
-          targetItemId: fixture.item.id,
-        }),
+    const approval = await callRouteForSession(approveDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/document-drafts/${created.draft.id}/approve`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sectionId: fixture.section.id,
+        title: "Reviewed title",
+        provider: "Reviewed Provider",
+        reference: null,
+        mode: "merge",
+        targetItemId: fixture.item.id,
       }),
-      draftContext(created.draft.id),
-    );
+      params: draftContext(created.draft.id),
+    });
     expect(approval.status).toBe(200);
     expect(await getDb().select({ provider: items.provider, reference: items.reference })
       .from(items).where(eq(items.id, fixture.item.id)))
@@ -434,25 +441,25 @@ describe("authenticated encrypted document lifecycle", () => {
   it("serializes duplicate draft approval so one explicit write wins", async () => {
     const fixture = await createIntegrationFixture("document-draft-approval-race");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
-    const draftResponse = await createDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/documents/${documentId}/draft`, { method: "POST" }),
-      documentContext(documentId),
-    );
+    const draftResponse = await callRouteForSession(createDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/draft`,
+      method: "POST",
+      params: documentContext(documentId),
+    });
     const payload = await draftResponse.json() as { draft: { id: string } };
-    const approve = () => approveDocumentDraftRoute(
-      requestForSession(session, `http://127.0.0.1:3000/api/document-drafts/${payload.draft.id}/approve`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sectionId: fixture.section.id,
-          title: "Concurrent reviewed draft",
-          provider: null,
-          reference: null,
-          mode: "create",
-        }),
+    const approve = () => callRouteForSession(approveDocumentDraftRoute, session, {
+      url: `http://127.0.0.1:3000/api/document-drafts/${payload.draft.id}/approve`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sectionId: fixture.section.id,
+        title: "Concurrent reviewed draft",
+        provider: null,
+        reference: null,
+        mode: "create",
       }),
-      draftContext(payload.draft.id),
-    );
+      params: draftContext(payload.draft.id),
+    });
 
     const responses = await Promise.all([approve(), approve()]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 404]);
@@ -478,10 +485,7 @@ describe("authenticated encrypted document lifecycle", () => {
       evidence: { excerpt: "retryable draft evidence" },
       proposal: { title: "Retryable draft" },
     });
-    await deleteDocument(
-      requestForSession(session, downloadUrl, { method: "DELETE" }),
-      documentContext(documentId),
-    );
+    await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) })
       .where(eq(documents.id, documentId));
 
@@ -591,19 +595,17 @@ describe("authenticated encrypted document lifecycle", () => {
         householdId: string,
         itemId: string,
         filename: string,
-      ) => uploadDocument(requestForSession(
-        currentSession,
-        `http://127.0.0.1:3000/api/households/${householdId}/items/${itemId}/documents`,
-        {
-          method: "POST",
-          headers: {
-            "content-length": String(syntheticPdf.length),
-            "content-type": "application/pdf",
-            "x-orbit-filename": encodeURIComponent(filename),
-          },
-          body: syntheticPdf,
+      ) => callRouteForSession(uploadDocument, currentSession, {
+        url: `http://127.0.0.1:3000/api/households/${householdId}/items/${itemId}/documents`,
+        method: "POST",
+        headers: {
+          "content-length": String(syntheticPdf.length),
+          "content-type": "application/pdf",
+          "x-orbit-filename": encodeURIComponent(filename),
         },
-      ), itemDocumentsContext(householdId, itemId));
+        body: syntheticPdf,
+        params: itemDocumentsContext(householdId, itemId),
+      });
 
       const responses = await Promise.all([
         uploadAtBoundary(member, fixture.household.id, fixture.item.id, "quota-primary.pdf"),
@@ -706,8 +708,8 @@ describe("authenticated encrypted document lifecycle", () => {
         expect(await storage.stagingExists(stage!.storageKey)).toBe(true);
         expect(await storage.listQuarantineFiles()).toHaveLength(0);
         const documentUrl = `http://127.0.0.1:3000/api/documents/${documentId}`;
-        expect((await downloadDocument(requestForSession(session, `${documentUrl}/download`), documentContext(documentId))).status).toBe(404);
-        expect((await createDocumentDraftRoute(requestForSession(session, `${documentUrl}/draft`, { method: "POST" }), documentContext(documentId))).status).toBe(404);
+        expect((await callRouteForSession(downloadDocument, session, { url: `${documentUrl}/download`, params: documentContext(documentId) })).status).toBe(404);
+        expect((await callRouteForSession(createDocumentDraftRoute, session, { url: `${documentUrl}/draft`, method: "POST", params: documentContext(documentId) })).status).toBe(404);
       });
     } finally {
       capture.restore();
@@ -818,10 +820,10 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(stage?.storageKey).toMatch(/^[a-f0-9]{64}$/u);
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       expect(await storage.stagingExists(stage!.storageKey)).toBe(true);
-      const downloaded = await downloadDocument(
-        requestForSession(session, "http://127.0.0.1:3000/api/documents/" + documentId + "/download"),
-        documentContext(documentId),
-      );
+      const downloaded = await callRouteForSession(downloadDocument, session, {
+        url: "http://127.0.0.1:3000/api/documents/" + documentId + "/download",
+        params: documentContext(documentId),
+      });
       expect(downloaded.status).toBe(200);
       expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(syntheticPdf);
       expect(scanFileWithClamAv).toHaveBeenCalledTimes(2);
@@ -831,10 +833,10 @@ describe("authenticated encrypted document lifecycle", () => {
         .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
       expect(await storage.stagingExists(stage!.storageKey)).toBe(false);
       expect(scanFileWithClamAv).toHaveBeenCalledTimes(2);
-      const downloadedAfterPurge = await downloadDocument(
-        requestForSession(session, "http://127.0.0.1:3000/api/documents/" + documentId + "/download"),
-        documentContext(documentId),
-      );
+      const downloadedAfterPurge = await callRouteForSession(downloadDocument, session, {
+        url: "http://127.0.0.1:3000/api/documents/" + documentId + "/download",
+        params: documentContext(documentId),
+      });
       expect(downloadedAfterPurge.status).toBe(200);
       expect(Buffer.from(await downloadedAfterPurge.arrayBuffer())).toEqual(syntheticPdf);
     });
@@ -1011,7 +1013,8 @@ describe("authenticated encrypted document lifecycle", () => {
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
     await withRequiredScanMode(async () => {
       const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${approval.itemId}/documents`;
-      const response = await uploadDocument(requestForSession(member, url, {
+      const response = await callRouteForSession(uploadDocument, member, {
+        url,
         method: "POST",
         headers: {
           "content-length": String(syntheticPdf.length),
@@ -1021,7 +1024,8 @@ describe("authenticated encrypted document lifecycle", () => {
           "x-orbit-document-id": documentId,
         },
         body: syntheticPdf,
-      }), itemDocumentsContext(fixture.household.id, approval.itemId));
+        params: itemDocumentsContext(fixture.household.id, approval.itemId),
+      });
       expect(response.status).toBe(202);
       const [pending] = await getDb().select({ status: reviewedIntakeOperations.status, attachmentState: reviewedIntakeOperations.attachmentState, documentId: reviewedIntakeOperations.documentId })
         .from(reviewedIntakeOperations).where(eq(reviewedIntakeOperations.id, operationId));
@@ -1146,7 +1150,8 @@ describe("authenticated encrypted document lifecycle", () => {
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
     await withRequiredScanMode(async () => {
       const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${approval.itemId}/documents`;
-      const response = await uploadDocument(requestForSession(member, url, {
+      const response = await callRouteForSession(uploadDocument, member, {
+        url,
         method: "POST",
         headers: {
           "content-length": String(syntheticPdf.length),
@@ -1156,7 +1161,8 @@ describe("authenticated encrypted document lifecycle", () => {
           "x-orbit-document-id": documentId,
         },
         body: syntheticPdf,
-      }), itemDocumentsContext(fixture.household.id, approval.itemId));
+        params: itemDocumentsContext(fixture.household.id, approval.itemId),
+      });
       expect(response.status).toBe(202);
       await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
         .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
@@ -1208,7 +1214,8 @@ describe("authenticated encrypted document lifecycle", () => {
     vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
     await withRequiredScanMode(async () => {
       const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${approval.itemId}/documents`;
-      const response = await uploadDocument(requestForSession(member, url, {
+      const response = await callRouteForSession(uploadDocument, member, {
+        url,
         method: "POST",
         headers: {
           "content-length": String(syntheticPdf.length),
@@ -1218,7 +1225,8 @@ describe("authenticated encrypted document lifecycle", () => {
           "x-orbit-document-id": documentId,
         },
         body: syntheticPdf,
-      }), itemDocumentsContext(fixture.household.id, approval.itemId));
+        params: itemDocumentsContext(fixture.household.id, approval.itemId),
+      });
       expect(response.status).toBe(201);
       const [operation] = await getDb().select({ status: reviewedIntakeOperations.status, attachmentState: reviewedIntakeOperations.attachmentState, documentId: reviewedIntakeOperations.documentId })
         .from(reviewedIntakeOperations).where(eq(reviewedIntakeOperations.id, operationId));
@@ -1257,17 +1265,17 @@ describe("authenticated encrypted document lifecycle", () => {
 
     const capture = captureLogLines();
     try {
-      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+      await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
       expect(capture.lines.map(parseLogLine).some((entry) =>
         entry.event === "document.lifecycle" && entry.fields.state === "stopping",
       )).toBe(true);
 
-      await restoreDocumentRoute(requestForSession(session, downloadUrl + "/restore", { method: "POST" }), documentContext(documentId));
+      await callRouteForSession(restoreDocumentRoute, session, { url: downloadUrl + "/restore", method: "POST", params: documentContext(documentId) });
       expect(capture.lines.map(parseLogLine).some((entry) =>
         entry.event === "document.lifecycle" && entry.fields.state === "recovered",
       )).toBe(true);
 
-      await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+      await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
       await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
 
       capture.lines.length = 0;
@@ -1289,7 +1297,7 @@ describe("authenticated encrypted document lifecycle", () => {
     const fixture = await createIntegrationFixture("document-worker-reclaim-diagnostics");
     const { session, documentId } = await uploadSyntheticDocument(fixture);
     const downloadUrl = `http://127.0.0.1:3000/api/documents/${documentId}/download`;
-    await deleteDocument(requestForSession(session, downloadUrl, { method: "DELETE" }), documentContext(documentId));
+    await callRouteForSession(deleteDocument, session, { url: downloadUrl, method: "DELETE", params: documentContext(documentId) });
     await getDb().update(documents).set({ deleteAfter: new Date(Date.now() - 1_000) }).where(eq(documents.id, documentId));
     await getDb().update(documentJobs).set({
       status: "processing",
@@ -1331,5 +1339,95 @@ describe("authenticated encrypted document lifecycle", () => {
 
     const [stored] = await getDb().select({ lifecycle: documents.lifecycle }).from(documents).where(eq(documents.id, documentId));
     expect(stored?.lifecycle).toBe("rejected");
+  });
+});
+
+/**
+ * The page-one preview's HTTP contract (#476), which lived only in
+ * `tests/e2e/document-preview.spec.ts` until #735.
+ *
+ * That spec asserted the right things but reached them through the retiring
+ * Next pages — it signed in, uploaded through the old document manager, then
+ * called the endpoint — so it goes with `src/app/`. `src/server/document-preview.test.ts`
+ * survives and proves the renderer, but never over HTTP, so without this the
+ * cut would have deleted the only proof that the route answers a picture with
+ * the right headers and refuses an unknown id in words.
+ *
+ * The headers are the reason this is worth its own block. They are a security
+ * contract, not decoration: private and uncacheable because the bytes derive
+ * from a private document, sniff-proof, and served under a null CSP so a
+ * rendered page cannot become an execution surface.
+ */
+describe("document page-one preview over HTTP", () => {
+  it("answers a real rendered image under the download endpoint's headers", async () => {
+    const fixture = await createIntegrationFixture("document-preview-http");
+    const { session, documentId } = await uploadSyntheticDocument(fixture);
+
+    const response = await callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    expect(response.status).toBe(200);
+    expect(["image/png", "image/jpeg"]).toContain(response.headers.get("content-type"));
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).toBe("inline");
+    expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+
+    /* A trivial body would be a decode failure wearing a 200. The declared
+       length has to agree with what actually arrived, too — the route sets
+       Content-Length by hand after copying the bytes out. */
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(body.length).toBeGreaterThan(500);
+    expect(response.headers.get("content-length")).toBe(String(body.length));
+  });
+
+  it("words an unknown document id as not found, never as a picture", async () => {
+    const fixture = await createIntegrationFixture("document-preview-unknown");
+    const session = await fixture.session("member");
+    const unknownDocumentId = randomUUID();
+
+    const response = await callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${unknownDocumentId}/preview`,
+      params: documentContext(unknownDocumentId),
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "document_not_found", message: "That document is not available" },
+    });
+  });
+
+  it("refuses a reader outside the household, and tells them nothing else", async () => {
+    const fixture = await createIntegrationFixture("document-preview-outsider");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+    const outsider = await fixture.session("outsider");
+
+    const response = await callRouteForSession(previewDocument, outsider, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    /* Same answer as an id that does not exist: a reader who cannot see the
+       document must not be able to tell the two apart. */
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: { code: "document_not_found", message: "That document is not available" },
+    });
+  });
+
+  it("answers nothing without a session", async () => {
+    const fixture = await createIntegrationFixture("document-preview-anonymous");
+    const { documentId } = await uploadSyntheticDocument(fixture);
+
+    const response = await callRoute(previewDocument, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview`,
+      params: documentContext(documentId),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 });

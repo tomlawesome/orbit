@@ -1,18 +1,22 @@
-import { error, json } from "@sveltejs/kit";
-import { env } from "$env/dynamic/private";
+import { json } from "@sveltejs/kit";
+
+import { readWorkspace } from "orbit/server/workspace-repository";
 
 import { WORKSPACE_FIXTURE } from "$lib/data/fixtures/workspace.js";
+import { read } from "$lib/server/api.js";
 
 /**
- * Fixture stand-in for the engine's `GET /api/workspace` (#451). Exists ONLY
- * when the harness asks for it: the fidelity gate and `vite dev` set
- * ORBIT_FIXTURES=1 so the seam's real fetch path renders known data.
+ * The workspace a signed-in reader sees — everything home draws (#451).
  *
- * Unreachable in production twice over: the composite entry (#450) dispatches
- * every /api/* path to the engine before this router is consulted, and
- * without the env flag the route answers 404 anyway.
+ * Ported off Next (#735). The fixture that used to be all this route could do
+ * is now the `fixture` branch, taken only when ORBIT_FIXTURES is set for the
+ * fidelity gate or `vite dev`; unset, this answers from the engine like any
+ * other route rather than 404ing.
  */
-export function GET() {
-  if (env.ORBIT_FIXTURES !== "1") error(404, "Not found");
-  return json({ workspace: WORKSPACE_FIXTURE }, { headers: { "cache-control": "no-store" } });
-}
+export const GET = read(
+  async (_event, session) => {
+    const workspace = await readWorkspace(session.user.id, session.id, session.activeHouseholdId);
+    return json({ workspace }, { headers: { "cache-control": "no-store" } });
+  },
+  { fixture: () => json({ workspace: WORKSPACE_FIXTURE }, { headers: { "cache-control": "no-store" } }) },
+);
