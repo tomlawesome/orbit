@@ -98,14 +98,23 @@ test("a junk session cookie is refused exactly like no cookie at all", async ({ 
   expect(response.headers()["location"]).toBe("/login?returnTo=%2Fsettings");
 });
 
-for (const path of ["/", "/login", "/logout", "/maintenance"]) {
+for (const path of ["/", "/login", "/logout"]) {
   test(`${path} stays reachable signed out`, async ({ request }) => {
-    // The allowlist. The door and the goodbye are the boundary itself, and
-    // maintenance has to answer precisely when nothing else can.
+    // The allowlist. The door and the goodbye are the boundary itself.
     const response = await request.get(path, { maxRedirects: 0 });
     expect(response.status()).toBe(200);
   });
 }
+
+test("/maintenance signed out and outside a window goes home, not to the door", async ({ request }) => {
+  // Open too — maintenance has to answer precisely when nothing else can —
+  // but with no window open it has nothing to say, so it sends the reader
+  // to the arrival rather than the login (#526). Inside a window it is the
+  // 503 body itself; tests/e2e/maintenance.spec.ts covers that.
+  const response = await request.get("/maintenance", { maxRedirects: 0 });
+  expect(response.status()).toBe(303);
+  expect(response.headers()["location"]).toBe("/");
+});
 
 test("the signed-out boundary has no automated WCAG A or AA violations", async ({ page }) => {
   await page.goto("/");

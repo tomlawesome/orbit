@@ -219,7 +219,7 @@ install_deployment() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
       ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
       bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install.log" 2>&1 ||
-    { sed -n '$p' "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
+    { tail -n 30 "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
 
   # Confirm the isolation claim rather than trusting it: a stray
   # COMPOSE_PROJECT_NAME would otherwise attach this run to somebody else's
@@ -379,7 +379,10 @@ journey_cancelled_repair() {
   local output status=0
   output="$(printf 'not-the-word\nnot-the-word\nnot-the-word\n' | repair --execute --dangerous 2>&1)" || status=$?
 
-  [[ "$status" == 6 ]] || fail "a refused dangerous batch exited $status, expected 6"
+  [[ "$status" == 6 ]] || {
+    printf '%s\n' "$output" >&2
+    fail "a refused dangerous batch exited $status, expected 6"
+  }
   grep -q 'prompt-abort field=action-word' <<<"$output" ||
     fail 'a refused dangerous batch did not abort the action-word prompt'
   grep -q 'dangerous result=refused .*reason=refused-by-operator' <<<"$output" ||
