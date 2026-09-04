@@ -149,17 +149,28 @@
    * not decoded. Rendering all six at full frame was the bulk of the first
    * load's hang, before any star fell.
    *
-   * Boxes are in viewBox units, [x, y, width, height]. MID is b1/b3's own
-   * pinned region (see the <defs>): lensarcs, the arch, the photon ring and
-   * the tidal stream draw nothing outside it. The other two use b6, whose
-   * region is relative to its user's bbox (−50%/200%), so their boxes are
-   * drawn generously around that: the near-side disc's path spans
-   * x452–1148 with a 62-unit-tall arc, the afterimage "4" sits around
-   * 1092,460 at 168px scaled 1.35×1.24 wide. Both leave well over 100 units
-   * of margin beyond where the blur has faded to nothing.
+   * Boxes are in viewBox units, [x, y, width, height], each drawn around
+   * what its layer actually draws plus the blur's whole tail (four standard
+   * deviations, beyond which a Gaussian contributes nothing a pixel can
+   * hold), never merely around the filter's region: a blur costs by the
+   * pixels it covers, and the first cut, six boxes at b1/b3's shared
+   * 1000×640 region, spent most of the build blurring empty sky (owner,
+   * 2026-09-04: the halo was the one thing still arriving late).
+   *
+   * ARCS: gravity-well.js rings the hole at radii 138–288 from (800,450);
+   * b1's tail is 4. ARCH: three arcs of radius ≤152 about (800,443) and
+   * (800,461), stroke ≤17 with round caps, b3's tail 12. PHOTON: a circle
+   * of radius 119, stroke 7, b6's tail 24. NEAR: the near-side disc's
+   * path spans x452–1148 and dips 62 below y452, stroke 34, b6. TIDAL: the
+   * stream's path lies in x916–1030, y442–480, b3. TEXT: the afterimage
+   * "4" sits around 1092,460 at 168px scaled 1.35×1.24 wide, b6's region
+   * relative to that bbox; the box leaves well over 100 units beyond it.
    */
-  const CROP_MID = /** @type {const} */ ([300, 80, 1000, 640]);
-  const CROP_NEAR = /** @type {const} */ ([60, 360, 1480, 260]);
+  const CROP_ARCS = /** @type {const} */ ([500, 150, 600, 600]);
+  const CROP_ARCH = /** @type {const} */ ([620, 260, 360, 370]);
+  const CROP_PHOTON = /** @type {const} */ ([640, 290, 320, 320]);
+  const CROP_NEAR = /** @type {const} */ ([400, 400, 800, 170]);
+  const CROP_TIDAL = /** @type {const} */ ([880, 410, 180, 100]);
   const CROP_TEXT = /** @type {const} */ ([780, 180, 640, 560]);
 
   /**
@@ -284,7 +295,20 @@
        Each copy takes fresh stars every time it wraps unseen, so no pattern
        ever comes round again (gravity-well.js, renewCopy). */
     let side = 0;
+    /* `.world[data-rasterised]` is the fidelity gate's (and
+       notfound-motion.spec.js's) one wait for this whole page, and it must
+       mean "the frame a visitor would see": the well built AND the sky
+       painted. The two run in sequence at mount and side by side after a
+       resize, so each clears its own flag as it starts and the attribute
+       reads "ready" only once both are set. */
+    let painted = false;
+    let built = false;
+    function settle() {
+      if (world) world.dataset.rasterised = painted && built ? "ready" : "pending";
+    }
     async function paint() {
+      painted = false;
+      settle();
       if (!infall) return;
       const rect = infall.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
@@ -299,6 +323,8 @@
       }
       live = true;
       setTimeout(() => { if (!cancelled) still = false; }, FADE_MS);
+      painted = true;
+      settle();
     }
     /** @param {AnimationEvent} e */
     function onWrap(e) {
@@ -312,6 +338,8 @@
 
     async function build() {
       const mine = ++generation;
+      built = false;
+      settle();
       const stale = () => cancelled || mine !== generation;
       if (!world || !srcLensarcs || !srcLensedArch || !srcPhoton || !srcSmearNear || !srcSmearTidal) return;
       const rect = world.getBoundingClientRect();
@@ -331,10 +359,6 @@
       const scale = Math.max(rect.width / 1600, rect.height / 1000) * dpr;
       const k = `|${Math.round(1600 * scale)}|${Math.round(1000 * scale)}`;
 
-      /* Marks this surface for the fidelity gate (screens.spec.js), which
-         waits for `.world[data-rasterised]` before screenshotting so the
-         async decodes below can never race a capture. */
-      world.dataset.rasterised = "pending";
       /* Un-hide every source before capturing. On the first build this is a
          no-op (nothing has been hidden yet); on a resize-triggered rebuild
          each source is already display:none from the previous pass, and
@@ -355,11 +379,11 @@
          fade rather than layer by layer. */
       const jobs = /** @type {const} */ ([
         [imgStatic, null, `notfound-static${k}`, STATIC_BODY, F_B6, CROP_TEXT],
-        [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, F_B1, CROP_MID],
-        [imgLensedArch, srcLensedArch, `notfound-lensed-arch${k}`, srcLensedArch.outerHTML, F_B1 + F_B3 + G_DOPPLER, CROP_MID],
-        [imgPhoton, srcPhoton, `notfound-photon${k}`, srcPhoton.outerHTML, F_B6 + F_B1, CROP_MID],
+        [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, F_B1, CROP_ARCS],
+        [imgLensedArch, srcLensedArch, `notfound-lensed-arch${k}`, srcLensedArch.outerHTML, F_B1 + F_B3 + G_DOPPLER, CROP_ARCH],
+        [imgPhoton, srcPhoton, `notfound-photon${k}`, srcPhoton.outerHTML, F_B6 + F_B1, CROP_PHOTON],
         [imgSmearNear, srcSmearNear, `notfound-smear-near${k}`, srcSmearNear.outerHTML, F_B6 + G_DOPPLER_SOFT, CROP_NEAR],
-        [imgSmearTidal, srcSmearTidal, `notfound-smear-tidal${k}`, srcSmearTidal.outerHTML, F_B3 + G_STREAMG, CROP_MID],
+        [imgSmearTidal, srcSmearTidal, `notfound-smear-tidal${k}`, srcSmearTidal.outerHTML, F_B3 + G_STREAMG, CROP_TIDAL],
       ]);
       for (const [img, src, key, body, defs, crop] of jobs) {
         const r = await rasteriseCrop(key, body, defs, crop, scale);
@@ -368,7 +392,8 @@
         await breathe();
         if (stale()) return;
       }
-      world.dataset.rasterised = "ready";
+      built = true;
+      settle();
       lit = true;
     }
 
@@ -377,14 +402,14 @@
       timer = setTimeout(() => { paint(); build(); }, 120);
     }
 
-    /* Sky first, then the well: the stars are what the still frame shows
-       moving soonest, and the rasters only retire filters that already
-       paint. The well is marked pending now, though, not when its turn
-       comes: the fidelity gate (and notfound-motion.spec.js) waits on
-       `.world[data-rasterised]`, and an element it cannot see yet is one it
-       will not wait for. */
-    if (world) world.dataset.rasterised = "pending";
-    paint().then(build);
+    /* The well first, then the sky: the still stars are already on screen
+       and lose nothing by falling a little later, while the halo is the one
+       thing the first frame is missing (owner, 2026-09-04). build() marks
+       the well pending before its first await, so the mark is in the DOM
+       by the time mount returns: the fidelity gate (and
+       notfound-motion.spec.js) waits on `.world[data-rasterised]`, and an
+       element it cannot see yet is one it will not wait for. */
+    build().then(paint);
     window.addEventListener("resize", onResize);
     return () => {
       cancelled = true;
