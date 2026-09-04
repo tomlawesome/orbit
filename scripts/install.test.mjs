@@ -758,11 +758,15 @@ function runInstallWithPromptedTerminalInput(
       watchdog.touch();
       // Two prompts can land in one chunk; answer every one that is on
       // screen, or the second waits for output that will never come.
+      //
+      // stdin stays open after the last answer: never child.stdin.end().
+      // Closing it races the widget's 0.08s follow-up read after an Escape
+      // (#611, #512), and a child left waiting for input is now named by the
+      // idle watchdog rather than hanging.
       let interaction = interactions[interactionIndex];
       while (interaction && stdout.includes(interaction.after)) {
         child.stdin.write(interaction.input);
         interactionIndex += 1;
-        if (interactionIndex === interactions.length) child.stdin.end();
         interaction = interactions[interactionIndex];
       }
     });
@@ -2287,16 +2291,23 @@ describe("install.sh --simulate", () => {
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
   });
 
-  it("cancels the interactive simulation with a lone Escape at the profile menu", () => {
+  // Cued by prompt text rather than typed ahead: with both keys written up
+  // front and the pty closed behind them, the Escape's follow-up read raced
+  // the teardown and the child sat on its 180s deadline under load (#698).
+  it("cancels the interactive simulation with a lone Escape at the profile menu", async () => {
     const targetDir = makeTarget();
     const beforeEntries = targetEntries(targetDir);
 
-    const result = runInstallWithControllingTerminal(targetDir, {}, "\r\x1b", ["--simulate"]);
+    const result = await runInstallWithPromptedTerminalInput(targetDir, {}, [
+      { after: "Simulation: Greetings, what can we do for you today?", input: "\r" },
+      { after: "Simulation: choose a deployment profile", input: "\x1b" },
+    ], ["--simulate"]);
 
     expect(result.status).toBe(130);
+    expect(result.promptedInteractions).toBe(2);
     expect(result.calls).toBe("");
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("exits the interactive simulation from the top-level Exit choice", () => {
     const targetDir = makeTarget();
