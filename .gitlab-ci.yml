@@ -1,0 +1,730 @@
+# Orbit's pipeline on the owner's self-hosted GitLab (gitlab.tomlawson.io).
+#
+# It mirrors .github/workflows/publish-container.yml job for job. GitHub stays
+# the source of truth during #801 step 2: nothing here promotes anything to
+# `main`, and the image this pipeline publishes to registry.tomlawson.io is
+# recorded as evidence (.orbit-supply-chain/gitlab-tested-image.json) for a
+# later GitHub job to copy to GHCR by digest, rather than being republished.
+#
+# Two things are deliberately deferred, not forgotten:
+#
+#   1. The installer, backup/restore and privacy-boundary half of the
+#      workflow's `&container_validation_steps` anchor. Those are several
+#      hundred lines of inline shell in the workflow; they are extracted into
+#      scripts/ in a later cut of #801 and mirrored here then. `smoke` below
+#      covers the anchor's stack-and-browser portion only.
+#   2. Provenance and SBOM attestation. GitLab CE has no equivalent of
+#      actions/attest, so `publish_gitlab` records the tested digest and the
+#      GitHub lane still owns attestation.
+#
+# Every job that touches Docker needs a runner that can run privileged
+# containers. ai/orbit currently has only the untagged group runner; the
+# sibling ai/orbit-base-image owns a project runner for exactly this reason.
+
+stages:
+  - classify
+  - fast
+  - policy
+  - acceptance
+  - publish
+
+workflow:
+  rules:
+    # Tags publish nothing here; the release lane is GitHub's.
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # `primary` is the mirror branch. Its only job is an unrelated mirror, and
+    # a full validation run of a mirrored commit proves nothing twice.
+    - if: $CI_COMMIT_BRANCH == "primary"
+      when: never
+    # The standard duplicate guard: once a branch has an open merge request,
+    # the merge-request pipeline is the one that matters.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+default:
+  interruptible: true
+  # Infrastructure only: a job that failed on its own merits is never retried.
+  # These three are what this GitLab still accepts without a deprecation
+  # warning for the stuck-or-timed-out case; `stuck_or_timeout_failure` and
+  # `job_execution_timeout` are both deprecated on 19.2.
+  retry:
+    max: 1
+    when:
+      - runner_system_failure
+      - stale_schedule
+      - scheduler_failure
+
+variables:
+  # Pinned to the linux/amd64 manifest, the way Orbit pins its own base image:
+  # a moving tag would silently change what the gate ran on.
+  NODE_IMAGE: node:22-bookworm@sha256:87a4f951f28b85d189df365d24c479d3bdb70be77c1ff5c9029db2ef67e251ac
+  # The image the v19 baselines were proven against, byte for byte the pin the
+  # GitHub fidelity job uses. Any other browser build is a different
+  # rasteriser, and then the comparison measures the runner, not the design.
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.0-noble@sha256:baed2032d533817f3dbe6425de795788430ba345e819a1201337009ba17c9d07
+  # Same scanner build as the workflow, so a finding here and a finding there
+  # mean the same thing.
+  TRIVY_IMAGE: aquasec/trivy@sha256:c6e969c5662a546ad5de4a73c2a6b7a7c627f86d916903e175aa623af5b97ada
+  # The vendor's own registry rather than Trivy's mirror.gcr.io default, which
+  # has no availability commitment to us and 403'd this gate once already
+  # (#673). Deliberately one repository: Trivy does not fall back.
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
+  # The digest scripts/test-integration.mjs pins for its disposable database.
+  POSTGRES_IMAGE: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+  PNPM_VERSION: "11.9.0"
+  ORBIT_CI_IMAGE: orbit-ci:$CI_COMMIT_SHA
+
+# --- Reusable pieces ---------------------------------------------------------
+
+# pnpm comes from corepack, which ships with Node, rather than from the
+# self-installer: package.json names the exact version, so corepack activates
+# that one and nothing has to agree separately.
+.pnpm_setup: &pnpm_setup |
+  corepack enable
+  corepack prepare "pnpm@${PNPM_VERSION}" --activate
+  pnpm config set store-dir .pnpm-store
+
+# Which events reach the expensive lanes. `ORBIT_SYSTEM` arrives as a dotenv
+# variable from `classify`, and GitLab cannot gate `rules` on one, so the
+# reach test lives in the job body and a job that is out of reach reports
+# itself skipped instead of failing or vanishing.
+.reach_helpers: &reach_helpers |
+  orbit_on_delivery_branch() {
+    case "${CI_COMMIT_BRANCH:-}" in
+      dev | preview | hotfix/*) return 0 ;;
+    esac
+    return 1
+  }
+  orbit_in_merge_request() {
+    [ "${CI_PIPELINE_SOURCE:-}" = "merge_request_event" ]
+  }
+
+.node:
+  image: $NODE_IMAGE
+  variables:
+    COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  cache:
+    key:
+      prefix: pnpm
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store
+  before_script:
+    - *pnpm_setup
+
+# Docker-in-Docker as a service, copied from the sibling ai/orbit-base-image
+# pipeline. Used by every job that only ever talks to the daemon's API:
+# building, saving, loading, pushing and inspecting images.
+.dind:
+  image: docker:29-cli
+  services:
+    - docker:29-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+
+# The daemon inside the job's own container, for the two jobs that stand up a
+# real deployment and then talk to it.
+#
+# This is the one place the dind *service* pattern above cannot be used. The
+# acceptance stack publishes on 127.0.0.1 -- docker-compose.acceptance.yml
+# binds the OIDC and GreenMail sidecars there, the application hands the
+# browser a 127.0.0.1 callback URL, and scripts/test-repair-journeys.sh both
+# pushes to and health-checks a loopback address. A dind service puts those
+# published ports in the service container's network namespace, where nothing
+# in the job can reach them; a daemon started inside the job container puts
+# them exactly where GitHub's runner does. It needs the same privileged runner
+# the service does, so this costs no additional permission.
+.docker_in_job: &docker_in_job |
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq --no-install-recommends docker.io docker-compose-v2 jq curl openssl
+  # /builds is a real volume; the rest of the container is overlayfs, which
+  # overlay2 cannot stack on.
+  docker_data_root="${CI_BUILDS_DIR:-/builds}/.orbit-docker-data"
+  mkdir -p "$docker_data_root"
+  nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
+  for _ in $(seq 1 60); do
+    docker info > /dev/null 2>&1 && break
+    sleep 1
+  done
+  docker info > /dev/null 2>&1 || { echo "the in-job Docker daemon did not start"; cat /tmp/dockerd.log; exit 1; }
+
+# --- classify ----------------------------------------------------------------
+
+# Selects the cheapest lane that still exercises every changed boundary, using
+# the same classifier the workflow uses. Classification is fail-safe: an
+# unknown path, an unreadable comparison or a changed production dependency
+# graph all select the broad system lane.
+#
+# The classifier writes GitHub-style `key=value` pairs to $GITHUB_OUTPUT, so
+# that file is pointed at a temporary path here and converted into the dotenv
+# artifact every later job reads.
+classify:
+  stage: classify
+  extends: .node
+  timeout: 10m
+  variables:
+    # Full history: the comparison below needs the base commit, and the
+    # classifier reads two lockfile snapshots out of Git.
+    GIT_DEPTH: 0
+  script:
+    - |
+      set -eu
+      zero_sha=0000000000000000000000000000000000000000
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        base="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "$CI_COMMIT_BEFORE_SHA" != "$zero_sha" ]; then
+        base="$CI_COMMIT_BEFORE_SHA"
+      else
+        base=""
+      fi
+      if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2> /dev/null; then
+        # A first push of a branch, or a force-push that orphaned the previous
+        # tip: compare against where the branch left `dev`.
+        git fetch --no-tags --quiet origin dev
+        base="$(git merge-base FETCH_HEAD "$CI_COMMIT_SHA")"
+      fi
+      echo "comparing ${base}...${CI_COMMIT_SHA}"
+      GITHUB_OUTPUT=classify-output.txt ORBIT_BASE_SHA="$base" ORBIT_HEAD_SHA="$CI_COMMIT_SHA" \
+        node scripts/classify-changed-paths.mjs
+    - |
+      set -eu
+      : > classify.env
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web; do
+        name="${pair%%:*}"
+        key="${pair##*:}"
+        value="$(sed -n "s/^${key}=//p" classify-output.txt | tail -1)"
+        [ -n "$value" ] || { echo "the classifier emitted no ${key}"; exit 1; }
+        printf '%s=%s\n' "$name" "$value" >> classify.env
+      done
+      cat classify.env
+  artifacts:
+    reports:
+      dotenv: classify.env
+
+# --- fast --------------------------------------------------------------------
+
+fast:
+  stage: fast
+  extends: .node
+  timeout: 10m
+  needs:
+    - job: classify
+      artifacts: true
+  script:
+    - pnpm install --frozen-lockfile
+    - ORBIT_TEST_COVERAGE=true bash scripts/test-backend.sh
+    # The production build and the render proof, run here as well as inside the
+    # image: the container build is the authoritative gate but it is minutes
+    # away, and this fails in seconds when a packaging change breaks previews.
+    - |
+      if [ "${ORBIT_BUILD:-true}" = "true" ]; then
+        pnpm --filter orbit-web build
+        pnpm test:web-pdfjs
+      else
+        echo "skipped: no build-risk change"
+      fi
+  artifacts:
+    name: orbit-coverage
+    paths:
+      - coverage/
+    expire_in: 14 days
+    when: on_success
+
+# Blocking, like the workflow's job: Orbit pins its own base image, so a stale
+# base is a fixable condition rather than one to wait out. `needs: []` because
+# the check has nothing to do with what changed -- it can start immediately.
+base_image:
+  stage: fast
+  extends: .dind
+  timeout: 10m
+  needs: []
+  script:
+    # The check reads the first FROM with sed, resolves the tag with
+    # `docker manifest inspect`, parses the result with python3 and runs
+    # `apk upgrade --simulate` inside the pinned image.
+    - apk add --no-cache bash python3
+    - bash scripts/check-base-image-current.sh
+
+# --- policy ------------------------------------------------------------------
+
+# Mirrors the workflow's source policy job. Trivy runs as the job image rather
+# than through `docker run`: under dind a bind mount of the workspace would be
+# empty, because the workspace lives in the job container and the daemon does
+# not share it. Node comes from the image's own Alpine repository -- the three
+# policy scripts are Node standard library only, which is why the GitHub job
+# installs no dependencies either.
+supply_chain_source:
+  stage: policy
+  image:
+    name: $TRIVY_IMAGE
+    entrypoint: [""]
+  timeout: 10m
+  needs:
+    - job: classify
+      artifacts: true
+  script:
+    - *reach_helpers
+    - |
+      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
+        exit 0
+      fi
+      apk add --no-cache nodejs
+      node scripts/supply-chain-policy.mjs validate
+      # A pin lives in the file that uses it and in the policy that records it.
+      # Dependabot can rewrite the first and cannot see the second, so its pull
+      # requests arrive with the two disagreeing. `--offline` is that
+      # comparison alone: no registry call, so it runs on everything that gets
+      # here. Remedy is one command: node scripts/sidecar-pins.mjs sync (#771).
+      node scripts/sidecar-pins.mjs check --offline
+      mkdir -p .orbit-supply-chain
+      trivy fs \
+        --scanners vuln,secret \
+        --format json \
+        --output .orbit-supply-chain/source-raw.json \
+        .
+      trivy version --format json > .orbit-supply-chain/trivy-version.json
+      set +e
+      node scripts/supply-chain-policy.mjs source \
+        --input .orbit-supply-chain/source-raw.json \
+        --output .orbit-supply-chain/source-evidence.json
+      policy_status=$?
+      set -e
+      rm -f .orbit-supply-chain/source-raw.json
+      exit "$policy_status"
+  artifacts:
+    name: orbit-supply-chain-source
+    paths:
+      - .orbit-supply-chain/source-evidence.json
+      - .orbit-supply-chain/trivy-version.json
+    expire_in: 14 days
+    when: always
+
+# Scans every image pinned in .github/supply-chain-policy.json, not just the
+# one Orbit builds: an operator's deployment runs the sidecars too (#647).
+#
+# Reporting-only, exactly as `continue-on-error` makes it on GitHub: every
+# pinned sidecar currently has fixable HIGH findings with no clean upstream
+# digest to re-pin to. When the pins scan clean, delete `allow_failure` so a
+# newly published advisory against a pinned digest fails the job.
+sidecar_images:
+  stage: policy
+  image:
+    name: $TRIVY_IMAGE
+    entrypoint: [""]
+  timeout: 15m
+  allow_failure: true
+  needs:
+    - job: classify
+      artifacts: true
+  script:
+    - *reach_helpers
+    - |
+      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
+        exit 0
+      fi
+      apk add --no-cache nodejs
+      node scripts/supply-chain-policy.mjs validate
+      mkdir -p .orbit-supply-chain/sidecar-scans
+      # --ignore-unfixed because these are images Orbit pulls rather than
+      # builds: a fixable HIGH is actionable (re-pin), an unfixable one is not.
+      node scripts/sidecar-image-evidence.mjs --list-references \
+        --policy .github/supply-chain-policy.json \
+        | while read -r slug reference; do
+            echo "scanning ${reference}"
+            trivy image \
+              --scanners vuln \
+              --ignore-unfixed \
+              --format json \
+              --output ".orbit-supply-chain/sidecar-scans/${slug}.json" \
+              "${reference}"
+          done
+      trivy version --format json > .orbit-supply-chain/trivy-version.json
+      set +e
+      node scripts/sidecar-image-evidence.mjs evaluate \
+        --policy .github/supply-chain-policy.json \
+        --scans .orbit-supply-chain/sidecar-scans \
+        --output .orbit-supply-chain/sidecar-evidence.json \
+        --revision "$CI_COMMIT_SHA"
+      policy_status=$?
+      set -e
+      rm -rf .orbit-supply-chain/sidecar-scans
+      exit "$policy_status"
+  artifacts:
+    name: orbit-supply-chain-sidecars
+    paths:
+      - .orbit-supply-chain/sidecar-evidence.json
+      - .orbit-supply-chain/trivy-version.json
+    expire_in: 14 days
+    when: always
+
+# --- acceptance --------------------------------------------------------------
+
+# The only automatic check the v19 presentation layer has (#620). A change that
+# moves web/ pays for this; one that does not never sees it.
+fidelity:
+  stage: acceptance
+  image: $PLAYWRIGHT_IMAGE
+  timeout: 20m
+  needs:
+    - job: classify
+      artifacts: true
+    - job: fast
+  script:
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # The image ships its own Node and the browser build that matches it, so
+      # neither is installed here: replacing either would defeat the pin. Only
+      # pnpm is missing, and corepack is not the route in this image.
+      npm install --global "pnpm@${PNPM_VERSION}"
+      pnpm install --frozen-lockfile
+      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json, which
+      # `svelte-kit sync` generates and which is gitignored. Playwright reads
+      # that tsconfig while loading its config, before the webServer command
+      # that would have built it ever runs.
+      pnpm --filter orbit-web exec svelte-kit sync
+      pnpm --filter orbit-web fidelity
+  artifacts:
+    name: orbit-fidelity-diffs
+    paths:
+      - web/test-results/fidelity/
+    expire_in: 14 days
+    when: on_failure
+
+# The workflow runs `pnpm test:integration`, which starts its own disposable
+# PostgreSQL container and reaches it on a published loopback port. That is not
+# reproducible under dind, so the database is a GitLab service on the same
+# pinned digest and the suite is driven directly with the environment
+# scripts/test-integration.mjs builds.
+#
+# One run rather than the workflow's two concurrent ones. The pair there proves
+# per-run isolation, and it can, because each invocation gets its own container
+# and its own database; two suites sharing this one service would simply
+# collide. The isolation proof stays with GitHub until this lane can create
+# databases of its own.
+integration:
+  stage: acceptance
+  extends: .node
+  timeout: 10m
+  needs:
+    - job: classify
+      artifacts: true
+    - job: fast
+  services:
+    - name: $POSTGRES_IMAGE
+      alias: postgres
+  variables:
+    POSTGRES_DB: orbit_integration
+    POSTGRES_USER: orbit_test
+    POSTGRES_PASSWORD: test-only-$CI_PIPELINE_ID
+    APP_URL: http://127.0.0.1:3000
+    SESSION_TTL_SECONDS: "3600"
+    OIDC_ISSUER: https://oidc.invalid.example
+    OIDC_CLIENT_ID: orbit-integration
+    OIDC_CLIENT_SECRET: integration-only-secret
+  script:
+    - *reach_helpers
+    - |
+      if ! orbit_on_delivery_branch && ! orbit_in_merge_request && [ "${ORBIT_SYSTEM:-true}" != "true" ]; then
+        echo "skipped: not a delivery branch, not a merge request, and no system-risk change"
+        exit 0
+      fi
+      if [ "${ORBIT_INTEGRATION:-true}" != "true" ]; then
+        echo "skipped: no integration-risk change"
+        exit 0
+      fi
+      pnpm install --frozen-lockfile
+      export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
+      # A per-run 256-bit hexadecimal secret, the rule the runtime applies
+      # (#578). Test-only and thrown away with the job.
+      export SESSION_SECRET="$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(String(process.env.CI_JOB_ID)).digest("hex"))')"
+      export ORBIT_INTEGRATION_RUN_ID="$CI_JOB_ID"
+      unset DATABASE_URL_FILE SESSION_SECRET_FILE OIDC_CLIENT_SECRET_FILE
+      pnpm exec tsx src/db/migrate.ts
+      pnpm exec vitest run --config vitest.integration.config.ts
+
+# Builds the image once and hands it on as a tarball, so `smoke`,
+# `repair_journeys` and `publish_gitlab` all exercise and publish the same
+# bytes rather than three builds of the same source. The workflow rebuilds
+# instead, because its smoke and publish jobs share one steps anchor.
+build_image:
+  stage: acceptance
+  extends: .dind
+  timeout: 20m
+  needs:
+    - job: classify
+      artifacts: true
+  variables:
+    # Stable Git tags are the version calculator's durable baseline.
+    GIT_DEPTH: 0
+  script:
+    - apk add --no-cache bash git nodejs
+    - |
+      set -eu
+      git fetch --quiet --tags origin
+      channel=preview
+      case "${CI_COMMIT_BRANCH:-}" in
+        hotfix/*) channel=hotfix ;;
+      esac
+      version="$(node scripts/calculate-version.mjs --channel "$channel")"
+      # The release stage recorded in the image. `ci` unless this pipeline is
+      # the one that may publish, exactly as PUBLICATION_CHANNEL decides it in
+      # the workflow.
+      publication_channel=ci
+      if [ "${CI_PIPELINE_SOURCE:-}" = "push" ]; then
+        case "${CI_COMMIT_BRANCH:-}" in
+          preview | hotfix/*) publication_channel=preview ;;
+        esac
+      fi
+      echo "building ${ORBIT_CI_IMAGE} version=${version} channel=${publication_channel}"
+      docker build \
+        --file ./Dockerfile \
+        --build-arg "ORBIT_VERSION=${version}" \
+        --build-arg "ORBIT_REVISION=${CI_COMMIT_SHA}" \
+        --build-arg "ORBIT_CHANNEL=${publication_channel}" \
+        --label "org.opencontainers.image.title=Orbit" \
+        --label "org.opencontainers.image.description=Everything in your orbit, on track." \
+        --label "org.opencontainers.image.version=${version}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --label "io.github.tomlawesome.orbit.release-stage=${publication_channel}" \
+        --label "io.github.tomlawesome.orbit.source-branch=${CI_COMMIT_REF_NAME}" \
+        --tag "$ORBIT_CI_IMAGE" \
+        .
+    - |
+      set -eu
+      # The same identity assertions the workflow makes on the image it just
+      # built: the labels and the files baked inside it must agree with what
+      # this pipeline believes it built, or nothing downstream means anything.
+      image_id="$(docker image inspect --format '{{.Id}}' "$ORBIT_CI_IMAGE")"
+      version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$ORBIT_CI_IMAGE")"
+      revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$ORBIT_CI_IMAGE")"
+      stage="$(docker image inspect --format '{{ index .Config.Labels "io.github.tomlawesome.orbit.release-stage" }}' "$ORBIT_CI_IMAGE")"
+      case "$image_id" in
+        sha256:*) ;;
+        *) echo "built image has no valid configuration identity"; exit 1 ;;
+      esac
+      [ "$revision" = "$CI_COMMIT_SHA" ] || { echo "image revision ${revision} is not ${CI_COMMIT_SHA}"; exit 1; }
+      [ "$(docker run --rm --entrypoint cat "$ORBIT_CI_IMAGE" /opt/orbit/VERSION)" = "$version" ] ||
+        { echo "embedded version does not match the version label"; exit 1; }
+      [ "$(docker run --rm --entrypoint cat "$ORBIT_CI_IMAGE" /opt/orbit/REVISION)" = "$revision" ] ||
+        { echo "embedded revision does not match the revision label"; exit 1; }
+      [ "$(docker run --rm --entrypoint cat "$ORBIT_CI_IMAGE" /opt/orbit/CHANNEL)" = "$stage" ] ||
+        { echo "embedded channel does not match the release-stage label"; exit 1; }
+      [ "$(docker run --rm "$ORBIT_CI_IMAGE" --version)" = "Orbit ${version}" ] ||
+        { echo "the container did not report its embedded version"; exit 1; }
+      printf 'ORBIT_IMAGE_ID=%s\n' "$image_id" > build.env
+      printf 'ORBIT_IMAGE_VERSION=%s\n' "$version" >> build.env
+      printf 'ORBIT_RELEASE_STAGE=%s\n' "$stage" >> build.env
+      cat build.env
+      docker save "$ORBIT_CI_IMAGE" -o image.tar
+  artifacts:
+    paths:
+      - image.tar
+    reports:
+      dotenv: build.env
+    expire_in: 1 day
+
+# The stack-and-browser portion of the workflow's &container_validation_steps
+# anchor: create the isolated test configuration, bring the acceptance stack up
+# on the image that was just built, prove it healthy, and run the Playwright
+# and accessibility suite against it. The anchor's installer, backup/restore,
+# malware, hostile-document and privacy-boundary steps are inline shell in the
+# workflow and are deferred to the later #801 cut that extracts them into
+# scripts/ (see the header).
+#
+# docker-compose.ci-cap.yml is the extra overlay: the same file set the
+# workflow uses, capped to the standard CI profile from #801 step 1.
+#
+# scripts/test-e2e-local.sh is deliberately not called. It is the local
+# iteration path for this same sequence, and it insists on building its own
+# image, on a free 13777/OIDC/SMTP port trio, and on renaming the containers --
+# none of which a job that must test the exact tarball above can give it.
+smoke:
+  stage: acceptance
+  image: $PLAYWRIGHT_IMAGE
+  timeout: 30m
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+  variables:
+    ORBIT_IMAGE: $ORBIT_CI_IMAGE
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+    ORBIT_ACCEPTANCE_OIDC: "true"
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f docker-compose.acceptance.yml -f docker-compose.ci-cap.yml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *docker_in_job
+    - npm install --global "pnpm@${PNPM_VERSION}"
+    - pnpm install --frozen-lockfile
+    - docker load --input image.tar
+    - |
+      set -eu
+      bash scripts/configure.sh
+      # The GreenMail sidecar's imaps listener and the application's trust
+      # anchor are bind-mounted from these two files. A missing source is
+      # silently created as a directory, which surfaces sixteen minutes later
+      # as a mail poll timeout rather than as a certificate error.
+      bash scripts/dev-greenmail-cert.sh
+      for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
+        [ -f "$required" ] || { echo "missing GreenMail TLS material: ${required}"; exit 1; }
+      done
+      for secret in smtp-password imap-password imap-alias-current-secret imap-alias-previous-secret; do
+        openssl rand -hex 32 > ".orbit-secrets/${secret}"
+        chmod 600 ".orbit-secrets/${secret}"
+      done
+      # Appended deliberately: dotenv uses the final assignment, so this is
+      # valid whether an operator setting is active, commented or absent.
+      printf '%s\n' \
+        'SMTP_HOST=smtp.example.invalid' \
+        'SMTP_USER=orbit@example.invalid' \
+        'IMAP_HOST=imap.example.invalid' \
+        'IMAP_USER=orbit@example.invalid' \
+        'IMAP_TLS_SERVER_NAME=imap.example.invalid' \
+        'IMAP_RECIPIENT_DOMAIN=ingest.example.invalid' \
+        'IMAP_ENABLED=false' \
+        'OIDC_CLIENT_ID=orbit-smoke' \
+        'OIDC_CLIENT_SECRET=orbit-smoke-only-secret' >> .env-orbit
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - docker compose --env-file .env-orbit $COMPOSE_FILES up --detach --no-build --wait --wait-timeout 180
+    - |
+      set -eu
+      response="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:3000/api/health)"
+      echo "$response" | jq --exit-status '.status == "ready" and .service == "orbit"' > /dev/null
+      echo "the application is healthy"
+    # The image ships the browser build that matches its Playwright version, so
+    # nothing is downloaded here.
+    - bash scripts/test-frontend.sh
+  after_script:
+    - |
+      docker compose --env-file .env-orbit $COMPOSE_FILES ps || true
+      if [ "$CI_JOB_STATUS" != "success" ]; then
+        docker compose --env-file .env-orbit $COMPOSE_FILES logs --no-color || true
+      fi
+      docker compose --env-file .env-orbit $COMPOSE_FILES --profile processing down --volumes --remove-orphans || true
+  artifacts:
+    name: orbit-playwright-report
+    paths:
+      - playwright-report/
+    expire_in: 14 days
+    when: always
+
+# Live evidence for the repair journeys (#532): a real stack, broken for real,
+# recovered by scripts/repair.sh. Same daemon placement as `smoke`, and for the
+# same reason -- the harness runs a disposable registry and health-checks the
+# deployment on loopback.
+repair_journeys:
+  stage: acceptance
+  # The Playwright image for its base rather than its browsers: the harness
+  # needs `docker compose`, and Ubuntu Noble packages the v2 plugin
+  # (docker-compose-v2) where Debian Bookworm, which $NODE_IMAGE is built on,
+  # still ships only the retired v1.
+  image: $PLAYWRIGHT_IMAGE
+  timeout: 30m
+  needs:
+    - job: classify
+      artifacts: true
+    - job: build_image
+      artifacts: true
+  variables:
+    ORBIT_REPAIR_JOURNEYS_IMAGE: orbit-repair-journeys:ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *docker_in_job
+    - docker load --input image.tar
+    - docker tag "$ORBIT_CI_IMAGE" "$ORBIT_REPAIR_JOURNEYS_IMAGE"
+    - bash scripts/test-repair-journeys.sh
+
+# --- publish -----------------------------------------------------------------
+
+# Pushes the exact image the acceptance stage tested, rather than rebuilding
+# it. That is the whole reason build_image hands on a tarball.
+#
+# Credentials are the job's own $CI_REGISTRY_USER/$CI_REGISTRY_PASSWORD, which
+# GitLab issues per job and revokes when it ends. No other secret is referenced
+# here, and none should be added: this job publishes to the project's own
+# registry and nowhere else.
+#
+# No attestation step. GitLab CE has no equivalent of actions/attest, so the
+# tested digest is recorded as evidence instead and the GitHub lane keeps
+# ownership of provenance and SBOM attestation until #801 says otherwise.
+publish_gitlab:
+  stage: publish
+  extends: .dind
+  timeout: 20m
+  # A push must never be cancelled by the next one: the delivery model requires
+  # trusted evidence for that exact commit, and a cancelled publish leaves it
+  # permanently without. Same reasoning as the workflow's cancel-in-progress,
+  # which is true only for pull requests.
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "preview"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^hotfix\//
+  needs:
+    - job: build_image
+      artifacts: true
+    - job: smoke
+    - job: repair_journeys
+    - job: supply_chain_source
+    - job: fast
+    - job: base_image
+    - job: integration
+  script:
+    - apk add --no-cache bash
+    - docker load --input image.tar
+    - |
+      set -eu
+      channel_tag=preview
+      case "$CI_COMMIT_BRANCH" in
+        hotfix/*) channel_tag="hotfix-$(printf '%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
+      esac
+      sha_reference="${CI_REGISTRY_IMAGE}:sha-${CI_COMMIT_SHA}"
+      channel_reference="${CI_REGISTRY_IMAGE}:${channel_tag}"
+      docker tag "$ORBIT_CI_IMAGE" "$sha_reference"
+      docker tag "$ORBIT_CI_IMAGE" "$channel_reference"
+      echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+      docker push "$sha_reference"
+      docker push "$channel_reference"
+      published_digest="$(
+        docker buildx imagetools inspect "$sha_reference" |
+          awk '$1 == "Digest:" && $2 ~ /^sha256:[0-9a-f]{64}$/ { print $2; exit }'
+      )"
+      case "$published_digest" in
+        sha256:*) ;;
+        *) echo "the registry did not return an immutable digest"; exit 1 ;;
+      esac
+      # The tested identity and the published one must be the same image, or
+      # the evidence describes something nobody ran.
+      docker pull --quiet "${CI_REGISTRY_IMAGE}@${published_digest}"
+      published_id="$(docker image inspect --format '{{.Id}}' "${CI_REGISTRY_IMAGE}@${published_digest}")"
+      [ "$published_id" = "$ORBIT_IMAGE_ID" ] ||
+        { echo "published identity ${published_id} is not the tested identity ${ORBIT_IMAGE_ID}"; exit 1; }
+      bash scripts/ci/gitlab-record-tested-image.sh "${CI_REGISTRY_IMAGE}@${published_digest}" "$published_digest"
+      cat .orbit-supply-chain/gitlab-tested-image.json
+  artifacts:
+    name: orbit-gitlab-tested-image
+    paths:
+      - .orbit-supply-chain/gitlab-tested-image.json
+    expire_in: 90 days
+    when: on_success
