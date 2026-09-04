@@ -47,6 +47,15 @@ exec < /dev/null
 PATH="${GIT_GUARD_DIR}:${PATH}" bash "${workspace}/scripts/install.sh" > "${refusal_output}" 2>&1
 installer_status=$?
 set -e
+# Every check below names what it expected; the file holds what it got. Show
+# that whenever the script fails, or a failure on another runner is a guess.
+show_output_on_failure() {
+  [[ "$1" -eq 0 ]] || {
+    printf -- '--- installer output (%s) ---\n' "${refusal_output}" >&2
+    cat "${refusal_output}" >&2
+  }
+}
+trap 'show_output_on_failure $?' EXIT
 [[ "${installer_status}" -ne 0 ]] || {
   printf 'An empty non-interactive target unexpectedly accepted installation.\n' >&2
   exit 1
