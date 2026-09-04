@@ -192,7 +192,15 @@ variables:
 .dind_service:
   extends: .privileged_runner
   services:
-    - docker:29-dind
+    # `--dns` names the resolvers the daemon hands to the containers it starts,
+    # which is where an image build's `apk add` looks. The LAN resolver drops
+    # the long dl-cdn.alpinelinux.org answer often enough to cost a job a run
+    # (#810: pipelines 171, 173, 185, 190, 208), and the runner's own `dns`
+    # setting reaches this service container but not the build containers
+    # inside it. Public resolvers first, so a build never waits on the LAN one
+    # to time out; nothing built here resolves a private name.
+    - name: docker:29-dind
+      command: ["--dns", "1.1.1.1", "--dns", "9.9.9.9"]
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
@@ -237,7 +245,11 @@ variables:
     sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
       > /sys/fs/cgroup/cgroup.subtree_control
   fi
-  nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
+  # Same resolvers, same reason, as the dind service above (#810). Compose
+  # service names are unaffected: Docker's embedded resolver answers those on
+  # the user-defined network and forwards only the rest to this list.
+  nohup dockerd --data-root "$docker_data_root" --dns 1.1.1.1 --dns 9.9.9.9 \
+    > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
     sleep 1
