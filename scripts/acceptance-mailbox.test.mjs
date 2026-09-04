@@ -1,13 +1,20 @@
 import { spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fileURLToPath } from "node:url";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// This suite spawns the real mailbox-acceptance checker; a spawn that takes
+// tens of milliseconds quiet takes seconds on a starved core (#698). Budget
+// and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = fileURLToPath(new URL("./acceptance-mailbox.mjs", import.meta.url));
 const digest = `sha256:${"a".repeat(64)}`;
 const revision = "b".repeat(40);
 
 function run(overrides = {}) {
-  const result = spawnSync(process.execPath, [script], {
+  const result = failOnProcessDeadline(spawnSync(process.execPath, [script], {
     encoding: "utf8",
     env: {
       ORBIT_EXPECTED_DIGEST: digest,
@@ -16,7 +23,8 @@ function run(overrides = {}) {
       ORBIT_IMAGE_REVISION: revision,
       ...overrides,
     },
-  });
+    ...processGuard(),
+  }), { label: "run" });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
   return { ...result, record: output ? JSON.parse(output) : undefined };
 }

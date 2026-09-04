@@ -2,7 +2,14 @@ import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every test here runs scripts/configuration.sh under bash; a spawn that
+// takes tens of milliseconds quiet takes seconds on a starved core (#698).
+// Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = join(process.cwd(), "scripts", "configuration.sh");
 const appliedVersion = "v1.2.0";
@@ -29,10 +36,11 @@ function run(content, args = ["--check"], options = {}) {
   const file = join(directory, ".env-orbit");
   writeFileSync(file, content);
   chmodSync(file, 0o600);
-  const result = spawnSync("bash", [script, ...args, "--file", file], {
+  const result = failOnProcessDeadline(spawnSync("bash", [script, ...args, "--file", file], {
     encoding: "utf8",
     env: { ...process.env, ...options.env },
-  });
+    ...processGuard(),
+  }), { label: "run" });
   return { ...result, file };
 }
 
@@ -65,7 +73,7 @@ describe("configuration.sh", () => {
     expect(lstatSync(`${migrated.file}.orbit-config.rollback`).mode & 0o777).toBe(0o600);
     expect(readFileSync(`${migrated.file}.orbit-config.rollback`, "utf8")).toBe(original);
 
-    const rerun = spawnSync("bash", [script, ...migrationArgs(), "--file", migrated.file], { encoding: "utf8" });
+    const rerun = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", migrated.file], { encoding: "utf8", ...processGuard() }), { label: "rerun" });
     expect(rerun.status).toBe(0);
     expect(readFileSync(migrated.file, "utf8")).toContain(`ORBIT_CONFIG_APPLIED_DIGEST=${appliedDigest}\n`);
     expect(rerun.stdout).toContain(`already current schema v1 version ${appliedVersion} digest ${appliedDigest}`);
@@ -156,7 +164,7 @@ describe("configuration.sh", () => {
 
   it("requires target provenance when standalone migration has no prior provenance", () => {
     const result = run("APP_URL=https://orbit.example.invalid\n");
-    const migration = spawnSync("bash", [script, "--migrate", "--file", result.file], { encoding: "utf8" });
+    const migration = failOnProcessDeadline(spawnSync("bash", [script, "--migrate", "--file", result.file], { encoding: "utf8", ...processGuard() }), { label: "migration" });
     expect(migration.status).not.toBe(0);
     expect(migration.stderr.trim()).toBe("configuration_provenance_required");
     expect(readFileSync(result.file, "utf8")).toBe("APP_URL=https://orbit.example.invalid\n");
@@ -203,7 +211,7 @@ describe("configuration.sh", () => {
     }
     const result = run("APP_URL=https://a.example.invalid\n");
     chmodSync(result.file, 0o640);
-    const unsafe = spawnSync("bash", [script, "--check", "--file", result.file], { encoding: "utf8" });
+    const unsafe = failOnProcessDeadline(spawnSync("bash", [script, "--check", "--file", result.file], { encoding: "utf8", ...processGuard() }), { label: "unsafe" });
     expect(unsafe.status).not.toBe(0);
   });
 
@@ -264,7 +272,7 @@ describe("configuration.sh", () => {
     expect(oversized.status).not.toBe(0);
 
     const directory = mkdtempSync(join(tmpdir(), "orbit-configuration-directory-"));
-    const directoryResult = spawnSync("bash", [script, "--check", "--file", directory], { encoding: "utf8" });
+    const directoryResult = failOnProcessDeadline(spawnSync("bash", [script, "--check", "--file", directory], { encoding: "utf8", ...processGuard() }), { label: "directoryResult" });
     expect(directoryResult.status).not.toBe(0);
 
     const target = mkdtempSync(join(tmpdir(), "orbit-configuration-link-"));
@@ -273,7 +281,7 @@ describe("configuration.sh", () => {
     writeFileSync(real, "APP_URL=https://a.example.invalid\n");
     chmodSync(real, 0o600);
     symlinkSync(real, link);
-    const linkResult = spawnSync("bash", [script, "--check", "--file", link], { encoding: "utf8" });
+    const linkResult = failOnProcessDeadline(spawnSync("bash", [script, "--check", "--file", link], { encoding: "utf8", ...processGuard() }), { label: "linkResult" });
     expect(linkResult.status).not.toBe(0);
     expect(`${linkResult.stdout}${linkResult.stderr}`).not.toContain("a.example.invalid");
   });
