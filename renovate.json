@@ -1,0 +1,85 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": [
+    "Renovate for the GitLab lane on gitlab.tomlawson.io (ai/orbit), taking over from .github/dependabot.yml (#801 step 6). Same cadence, the same grouping and the same open-request budget the Dependabot file had, so nothing about what gets watched changes with the host.",
+    "GitHub Actions is deliberately not in enabledManagers. .github/workflows/ is GitHub's lane and stays there: Dependabot keeps its 34 SHA-pinned actions and the digest-pinned Trivy image current, and GitHub keeps its alerts. A github-actions manager here would open GitLab merge requests against files this pipeline does not run.",
+    "The Dependabot file is not deleted yet. It goes when the mirror flips (#801 step 5); until then both hosts watch, which is duplication rather than a gap.",
+    "This file is read two ways: as the repository config Renovate finds in the repository itself, and as the global config the renovate job in .gitlab-ci.yml points RENOVATE_CONFIG_FILE at. The second is what makes it work before the default branch has it -- see the job's comment."
+  ],
+  "timezone": "Europe/London",
+  "schedule": ["after 5:00am and before 6:15am on monday"],
+  "baseBranchPatterns": ["dev"],
+  "labels": ["dependencies"],
+  "semanticCommits": "disabled",
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Renovate dependency dashboard",
+  "pinDigests": true,
+  "prConcurrentLimit": 13,
+  "prHourlyLimit": 0,
+  "osvVulnerabilityAlerts": true,
+  "enabledManagers": ["npm", "dockerfile", "docker-compose", "gitlabci", "custom.regex"],
+  "docker-compose": {
+    "description": "Every docker-compose*.yml, not just the root one: the sidecars an operator actually runs are in docker-compose.yml, but the acceptance, demo, mail and local-e2e stacks pin images too, and until #771 nothing watched any of them.",
+    "managerFilePatterns": ["/(^|/)docker-compose[^/]*\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "description": "The pipeline pins its job images in the top-level variables block -- NODE_IMAGE, PLAYWRIGHT_IMAGE, POSTGRES_IMAGE -- and the jobs reference them as $NODE_IMAGE. The gitlabci manager reads image: and services: keys, so it sees the references and never the pins. This reads the pins. TRIVY_IMAGE is out of reach on purpose: it is pinned by digest with no tag, so there is no version to compare against, and .github/supply-chain-policy.json's scanner entry carries its review date instead.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
+      "matchStrings": [
+        "_IMAGE:\\s+(?<depName>[^\\s:@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "description": "Security fixes do not wait for Monday. GitLab CE has no dependency-alert API for Renovate to read, so osvVulnerabilityAlerts above is what supplies the advisories, from the OSV database, and this is what lets a fix for one open outside the weekly window.",
+    "enabled": true,
+    "schedule": ["at any time"]
+  },
+  "packageRules": [
+    {
+      "description": "npm: a single pnpm workspace rooted here (pnpm-workspace.yaml lists \".\" and \"web\") sharing one pnpm-lock.yaml, so one manager entry covers both members -- the same reasoning the npm entry in .github/dependabot.yml records. Minor and patch land as one merge request; majors are left out of the group so a breaking change is reviewed on its own.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "npm minor and patch"
+    },
+    {
+      "description": "The root Dockerfile's only FROM is the Orbit base image, whose digest comes from its own build pipeline at gitlab.tomlawson.io/ai/orbit-base-image rather than from re-resolving a registry tag here. #708 owns its freshness and scripts/sidecar-pins.mjs excludes it for exactly this reason, so Renovate must not re-pin it either.",
+      "matchPackageNames": ["ghcr.io/tomlawesome/orbit-base-image"],
+      "enabled": false
+    },
+    {
+      "description": "Dockerfiles: after the base image above is excluded, this is tests/oidc/Dockerfile, the disposable OIDC provider the local end-to-end stack builds. Grouped minor and patch, majors separate, matching the two docker entries in .github/dependabot.yml.",
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "dockerfile minor and patch"
+    },
+    {
+      "description": "Compose sidecars -- Postgres, ClamAV, Tika, Ollama and the test-only GreenMail and nginx. Grouped minor and patch, majors separate, matching the docker-compose entry in .github/dependabot.yml.",
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "docker-compose minor and patch"
+    },
+    {
+      "description": "The pipeline's own images: the docker:29-dind service and docker:29-cli from the gitlabci manager, and the digest pins in the variables block from the custom manager above. Dependabot never watched these -- .gitlab-ci.yml did not exist when it was written -- so this is new cover rather than a like-for-like replacement.",
+      "matchManagers": ["gitlabci", "custom.regex"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "gitlab-ci image minor and patch"
+    },
+    {
+      "description": "Renovate's own image, which the gitlabci manager finds in the renovate job. 44.63.0 and 44.64.0 do not start: both ship an `apk` datasource that imports `tar`, and `tar` is absent from the image's node_modules, so the container dies before it reads any configuration. A merge request offering one of those would be merged on the strength of a green pipeline -- nothing in CI runs this job -- and the next scheduled run would simply fail. Lift this when upstream ships a release whose image starts, and lift the matching note on the job's image pin with it.",
+      "matchPackageNames": ["renovate/renovate"],
+      "allowedVersions": "<44.63.0"
+    },
+    {
+      "description": "The manual step Dependabot needed, which Renovate still needs. A sidecar pin lives in two places -- the file, and .github/supply-chain-policy.json, a bespoke schema no dependency updater parses -- so a bump lands with the two disagreeing and the drift axis of `node scripts/sidecar-pins.mjs check --offline` goes red in CI. It is not a postUpgradeTask: sync re-resolves the index digest with `docker buildx imagetools inspect`, and the renovate job runs on the shared untagged runner, which has no Docker daemon. Only orbit-build is privileged, and putting Renovate there would queue the whole pipeline behind a weekly maintenance job. So the instruction goes on the merge request, where the person who has to act on it will see it.",
+      "matchFileNames": ["docker-compose.yml", "tests/oidc/Dockerfile", ".gitlab-ci.yml", "scripts/test-integration.mjs"],
+      "prBodyNotes": [
+        "Before merging: run `node scripts/sidecar-pins.mjs sync` on this branch, review the diff and push it. A pin changed here may also be recorded in `.github/supply-chain-policy.json`, which this merge request does not touch, and `node scripts/sidecar-pins.mjs check --offline` fails in CI until the two agree."
+      ]
+    }
+  ]
+}
