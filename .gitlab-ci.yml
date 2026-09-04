@@ -192,15 +192,14 @@ variables:
 .dind_service:
   extends: .privileged_runner
   services:
-    # `--dns` names the resolvers the daemon hands to the containers it starts,
-    # which is where an image build's `apk add` looks. The LAN resolver drops
-    # the long dl-cdn.alpinelinux.org answer often enough to cost a job a run
-    # (#810: pipelines 171, 173, 185, 190, 208), and the runner's own `dns`
-    # setting reaches this service container but not the build containers
-    # inside it. Public resolvers first, so a build never waits on the LAN one
-    # to time out; nothing built here resolves a private name.
-    - name: docker:29-dind
-      command: ["--dns", "1.1.1.1", "--dns", "9.9.9.9"]
+    # Resolvers are deliberately not named here. This daemon hands its
+    # containers -- where an image build's `apk add` looks -- the resolv.conf
+    # of the container it runs in, which is what `dns` in the runner's
+    # config.toml sets. CI must use the host's resolver and no other (owner,
+    # 2026-09-04), so the host is the one place it is written down; a public
+    # fallback in this file would send lookups off the network instead of
+    # failing where the operator can see them (#810).
+    - docker:29-dind
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
@@ -245,11 +244,10 @@ variables:
     sed -e 's/ / +/g' -e 's/^/+/' < /sys/fs/cgroup/cgroup.controllers \
       > /sys/fs/cgroup/cgroup.subtree_control
   fi
-  # Same resolvers, same reason, as the dind service above (#810). Compose
-  # service names are unaffected: Docker's embedded resolver answers those on
-  # the user-defined network and forwards only the rest to this list.
-  nohup dockerd --data-root "$docker_data_root" --dns 1.1.1.1 --dns 9.9.9.9 \
-    > /tmp/dockerd.log 2>&1 &
+  # No --dns here either, and for the reason the dind service above records:
+  # this daemon hands its containers the job container's resolv.conf, which
+  # the runner's config.toml sets.
+  nohup dockerd --data-root "$docker_data_root" > /tmp/dockerd.log 2>&1 &
   for _ in $(seq 1 60); do
     docker info > /dev/null 2>&1 && break
     sleep 1
