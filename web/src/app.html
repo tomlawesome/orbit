@@ -11,6 +11,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
+      The mark Next used to serve from src/app/icon.svg, restored here as a
+      static file because adapter-node has no filesystem-convention icon.
+      Carried over unchanged on purpose: choosing a v19 mark is a brand
+      decision that belongs to whichever issue ratifies it, not to the cut.
+    -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <!--
       Reapply the reader's chosen pack before the first paint, so a refresh
       does not flash star-chart at someone who chose dawn. Inline and
       synchronous for that reason: any later and the flash has happened.

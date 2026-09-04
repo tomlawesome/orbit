@@ -15,6 +15,19 @@
     "preview:serve": "PORT=4180 node .preview/index.js",
     "licences": "node scripts/collect-font-licences.mjs"
   },
+  "dependencies": {
+    "@napi-rs/canvas": "1.0.3",
+    "@napi-rs/canvas-linux-x64-gnu": "1.0.3",
+    "@napi-rs/canvas-linux-x64-musl": "1.0.3",
+    "drizzle-orm": "^0.45.2",
+    "imapflow": "1.5.0",
+    "jose": "^6.0.0",
+    "nodemailer": "^9.0.3",
+    "pdfjs-dist": "6.2.108",
+    "postgres": "^3.4.7",
+    "web-push": "^3.6.7",
+    "zod": "^4.0.0"
+  },
   "devDependencies": {
     "@fontsource-variable/inter": "5.3.0",
     "@fontsource-variable/jetbrains-mono": "5.3.0",
@@ -23,6 +36,7 @@
     "@sveltejs/adapter-node": "5.5.7",
     "@sveltejs/kit": "2.70.2",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "orbit": "workspace:*",
     "pixelmatch": "7.1.0",
     "pngjs": "7.0.0",
     "svelte": "5.56.9",

@@ -1,14 +1,24 @@
-import { error, json } from "@sveltejs/kit";
-import { env } from "$env/dynamic/private";
+import { json } from "@sveltejs/kit";
+
+import { readRelaySettings } from "orbit/server/mail-in/relay-settings";
+
 import { RELAY_FIXTURE } from "$lib/data/fixtures/relay.js";
+import { read } from "$lib/server/api.js";
 
 /**
- * Fixture stand-in for `GET /api/settings/mail-relay` (#432) — see
- * api/workspace/+server.js for the env-gating rationale. The real endpoint
- * lives in the engine and derives the address per request; this only ever
- * hands back the mockup's own values so the gate measures the port.
+ * The signed-in user's own relay (#432): their mail-in address, whether Orbit
+ * is listening, when something last arrived, and the instance's ingest flag.
+ *
+ * A GET, so no CSRF token; the session is the only input, which is what makes
+ * it impossible to ask for another user's relay. `no-store` is not decoration:
+ * the address is a capability-bearing value that must never sit in a cache.
+ * Nothing here logs, and no failure path can carry the address, because
+ * `appErrorResponse` only ever emits its own bounded codes.
  */
-export function GET() {
-  if (env.ORBIT_FIXTURES !== "1") error(404, "Not found");
-  return json(RELAY_FIXTURE, { headers: { "cache-control": "no-store" } });
-}
+export const GET = read(
+  async (_event, session) => {
+    const relay = await readRelaySettings(session.user);
+    return json({ relay }, { headers: { "cache-control": "no-store" } });
+  },
+  { fixture: () => json(RELAY_FIXTURE, { headers: { "cache-control": "no-store" } }) },
+);

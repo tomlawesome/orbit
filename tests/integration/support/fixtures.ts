@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
 import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
@@ -66,31 +65,11 @@ export interface IntegrationFixture {
   cleanup(): Promise<void>;
 }
 
-type RequestOptions = Omit<RequestInit, "headers" | "signal"> & { headers?: Record<string, string> };
-
 export function sessionHeaders(
   session: IntegrationSession,
   overrides: Record<string, string> = {},
 ): Record<string, string> {
   return { ...session.headers, ...overrides };
-}
-
-export function requestForSession(
-  session: IntegrationSession,
-  url: string,
-  init: RequestOptions = {},
-): NextRequest {
-  return new NextRequest(url, {
-    ...init,
-    headers: sessionHeaders(session, init.headers),
-  });
-}
-
-export function requestWithoutSession(
-  url: string,
-  init: RequestOptions = {},
-): NextRequest {
-  return new NextRequest(url, init);
 }
 
 export async function cleanupIntegrationEnvironment(): Promise<void> {
@@ -239,10 +218,14 @@ export async function createIntegrationFixture(label: string): Promise<Integrati
     const userId = fixtureUsers[role].id;
     const config = getAuthConfig();
     const created = await createSession(userId, config);
-    const sessionRequest = new NextRequest(config.appUrl.href, {
-      headers: { cookie: `${sessionCookieName(config)}=${created.token}` },
-    });
-    const persisted = await readSession(sessionRequest, config);
+    /* A plain literal, not a framework request (#735). `readSession` takes a
+       `CookieReader`, which is one method — `src/lib/http.ts` says so in as
+       many words, and the whole point of that seam is that a test does not
+       have to build a request object to satisfy it. */
+    const persisted = await readSession(
+      { get: (name) => (name === sessionCookieName(config) ? created.token : undefined) },
+      config,
+    );
     if (!persisted) throw new Error(`Integration session for ${role} was not persisted`);
     const csrfToken = csrfTokenForSession(persisted, config);
     return {

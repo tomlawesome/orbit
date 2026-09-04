@@ -2655,7 +2655,7 @@ check_migration_failed_backstop() {
 
 check_application_container() {
   local app_ids app_id pinned_image=""
-  local inspect_output="" actual_image="" health_status="" extra=""
+  local inspect_output="" actual_image="" health_status="" started_at="" extra=""
 
   if [[ "$env_status" == ok ]]; then
     pinned_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
@@ -2680,11 +2680,13 @@ check_application_container() {
   # call site (a bare `check_application_container` statement) below.
   [[ -n "$app_id" ]] || return 0
 
+  # StartedAt rides along on Step 12's existing inspect rather than costing a
+  # second probe: it is the lower bound the log scan below needs (#778).
   inspect_output="$(timeout "$docker_probe_timeout" docker inspect \
-    --format '{{.Config.Image}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    --format '{{.Config.Image}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.State.StartedAt}}' \
     "$app_id" 2>/dev/null || true)"
   [[ "$inspect_output" != *$'\n'* ]] || return 0
-  IFS='|' read -r actual_image health_status extra <<< "$inspect_output"
+  IFS='|' read -r actual_image health_status started_at extra <<< "$inspect_output"
   [[ -z "$extra" ]] || return 0
 
   if [[ -n "$pinned_image" && -n "$actual_image" && "$actual_image" != "$pinned_image" ]]; then
@@ -2695,8 +2697,26 @@ check_application_container() {
     # its own operational log. Report that precisely rather than as a generic
     # unhealthy app, because the two have different remedies and only one of
     # them is "restart" (#437). Read-only: docker logs mutates nothing.
+    #
+    # The window needs a lower bound as well as an upper one (#778). `docker
+    # logs` keeps every run of a container, not just the current one, so a
+    # container that refused to start over its database and was then revived
+    # by the restart policy carries that dead boot's sentinel into the last 50
+    # lines of a container now running perfectly well. Read only what the
+    # current run wrote, so the sentinel deciding the remedy belongs to the
+    # fault the operator is actually looking at. Without this a frozen app is
+    # sent to "attach a different database" instead of "restart".
+    #
+    # Falls back to the unbounded read when the start time is unreadable: that
+    # is exactly the behaviour before this fix, never a skipped scan, so a
+    # genuine mismatch is still reported when inspect gives us nothing.
     local app_log=""
-    app_log="$(timeout "$docker_probe_timeout" docker logs --tail 50 "$app_id" 2>&1 || true)"
+    if [[ "$started_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]]; then
+      app_log="$(timeout "$docker_probe_timeout" docker logs \
+        --since "$started_at" --tail 50 "$app_id" 2>&1 || true)"
+    else
+      app_log="$(timeout "$docker_probe_timeout" docker logs --tail 50 "$app_id" 2>&1 || true)"
+    fi
     if [[ "$app_log" == *"reason=database_mismatch"* ]]; then
       add_finding database-schema-mismatch application fail
     elif [[ "$app_log" == *"reason=database_below_floor"* ]]; then
