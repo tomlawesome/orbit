@@ -229,22 +229,18 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
 - `docs/architecture.md` and `docs/adr/`: current architecture and durable
   decisions.
 - `docs/implementation-plan.md`: the phased roadmap.
-- Issues, milestones and labels live on GitLab (`ai/orbit`, project 49); the
-  GitHub copies are frozen at the 2026-09-04 import and are not maintained.
-- The [Orbit Roadmap project board](https://github.com/users/tomlawesome/projects/4)
-  is the live delivery-status surface: per-issue Status, Slice, Priority, Risk
-  and Delivery lane. GitHub milestones are capability slices (M0 onwards), each
-  a coherent outcome with a definition of done, mirrored by the board's Slice
-  field. A version release moment gets its own milestone holding only its
-  promote-to-main issue, and an issue with no milestone is not scheduled (owner
-  decision, 2026-08-23, recorded on issue #502). An empty version milestone is a
-  deliberate placeholder for the next release, not clutter: `v1.4` is one, and
-  is not a hygiene finding (owner, 2026-09-01). Every open issue reaches the
-  board: the project's auto-add workflow places new ones, so the board is
-  complete and can be read as authoritative rather than as a subset someone
-  curated. Set at least Status when picking work up; closed items are removed
-  rather than left to accumulate. It showed only half the open issues until
-  2026-08-31 (#689), so treat any board reading from before then with suspicion.
+- Issues, milestones and labels live on GitLab (`ai/orbit`, project 49), and
+  that issue list is the delivery-status surface (owner, 2026-09-04). The
+  [GitHub roadmap board](https://github.com/users/tomlawesome/projects/4) is
+  retired: it and the GitHub issues are frozen at the 2026-09-04 import, so a
+  status read from either is stale. Milestones are capability slices (M0
+  onwards), each a coherent outcome with a definition of done; a version
+  release moment gets its own milestone holding only its promote-to-main
+  issue, and an empty version milestone is a deliberate placeholder for the
+  next release rather than clutter (owner, 2026-08-23 and 2026-09-01). Every
+  issue carries a milestone. The board's per-issue Status, Priority and Risk
+  fields have no GitLab equivalent and were not recreated; #814 holds the
+  question of whether anything replaces them.
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not
