@@ -20,42 +20,43 @@
 # assets_from_tree_path prints "<shim dir>:" when ORBIT_ASSETS_FROM_TREE names
 # a checkout, and nothing at all when it is unset, so the GitHub steps are
 # unchanged. The shim is a `curl` that serves any file under the checkout for
-# any revision of the repository and fails closed for every other URL, so an
-# unexpected network dependency surfaces as a failure rather than a download.
+# any revision of the repository; every other request -- the OIDC discovery
+# document, for one -- goes to the real curl exactly as given, so the rest of
+# the installer still exercises the network it would in a real install.
 
 assets_from_tree_path() {
   [[ -n "${ORBIT_ASSETS_FROM_TREE:-}" ]] || return 0
   : "${ORBIT_REPOSITORY:?ORBIT_REPOSITORY is required to shim the asset URL}"
   local assets_tree shim_dir
   assets_tree="$(CDPATH= cd -- "${ORBIT_ASSETS_FROM_TREE}" && pwd -P)"
+  local real_curl
+  real_curl="$(command -v curl)" || {
+    printf 'curl is required to shim the asset URL\n' >&2
+    return 1
+  }
   shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-assets-shim.XXXXXX")"
   cat > "${shim_dir}/curl" <<SHIM
 #!/usr/bin/env bash
 set -Eeuo pipefail
 asset_prefix="https://raw.githubusercontent.com/${ORBIT_REPOSITORY}/"
-output="" write_out="" url=""
-args=("\$@")
-for ((i = 0; i < \${#args[@]}; i++)); do
-  case "\${args[i]}" in
-    --output) output="\${args[i+1]}"; ((i++)) ;;
-    --write-out) write_out="\${args[i+1]}"; ((i++)) ;;
-    --header|--connect-timeout|--max-time|--max-filesize|--proto|--proto-redir) ((i++)) ;;
-    --*|-*) ;;
-    *) url="\${args[i]}" ;;
+url=""
+for arg in "\$@"; do
+  case "\$arg" in
+    "\$asset_prefix"*) url="\$arg" ;;
   esac
 done
-case "\$url" in
-  "\$asset_prefix"*)
-    asset="\${url#"\$asset_prefix"}"
-    asset="\${asset#*/}"
-    [[ -f "${assets_tree}/\$asset" ]] || exit 22
-    [[ -z "\$output" ]] || cp -- "${assets_tree}/\$asset" "\$output"
-    [[ -z "\$write_out" ]] || printf '200'
-    ;;
-  *)
-    exit 6
-    ;;
-esac
+[[ -n "\$url" ]] || exec "${real_curl}" "\$@"
+# The installer's asset fetch: --fail --silent --show-error --location
+# --output <file> <url>. Copy the file where the download would have gone.
+output=""
+args=("\$@")
+for ((i = 0; i < \${#args[@]}; i++)); do
+  [[ "\${args[i]}" == --output ]] && output="\${args[i+1]}"
+done
+asset="\${url#"\$asset_prefix"}"
+asset="\${asset#*/}"
+[[ -f "${assets_tree}/\$asset" ]] || exit 22
+[[ -z "\$output" ]] || cp -- "${assets_tree}/\$asset" "\$output"
 SHIM
   chmod 755 "${shim_dir}/curl"
   printf '%s:' "${shim_dir}"
