@@ -246,11 +246,13 @@ variables:
 #
 # `chown` because the suite writes where it reads -- Vite's cache under
 # node_modules, coverage/ for the artifact -- and root installed both. A job
-# using this must also point COREPACK_HOME inside $CI_PROJECT_DIR, or the pnpm
-# root activated is invisible to `node` and corepack silently downloads a second
-# copy into /home/node.
+# using this must also point COREPACK_HOME somewhere `node` can read, or the
+# pnpm root activated is invisible to it and corepack silently downloads a
+# second copy into /home/node. Not inside $CI_PROJECT_DIR: `eslint .` lints
+# whatever is there, and pipeline 170 failed on 1,527 findings in pnpm's own
+# bundle.
 .drop_to_node: &drop_to_node |
-  chown -R node:node "$CI_PROJECT_DIR"
+  chown -R node:node "$CI_PROJECT_DIR" "$COREPACK_HOME"
   orbit_as_node() {
     su node -s /bin/bash -c "cd '$CI_PROJECT_DIR' && $1"
   }
@@ -341,10 +343,10 @@ fast:
     - job: classify
       artifacts: true
   variables:
-    # In the project directory rather than the invoking user's home, so the
-    # pnpm corepack activates as root below is the pnpm the `node` user then
-    # runs. See .drop_to_node.
-    COREPACK_HOME: $CI_PROJECT_DIR/.corepack
+    # Beside the project directory rather than in the invoking user's home, so
+    # the pnpm corepack activates as root below is the pnpm the `node` user
+    # then runs, and outside it so `eslint .` never sees it. See .drop_to_node.
+    COREPACK_HOME: $CI_BUILDS_DIR/.corepack
   script:
     - *docker_cli
     - pnpm install --frozen-lockfile
