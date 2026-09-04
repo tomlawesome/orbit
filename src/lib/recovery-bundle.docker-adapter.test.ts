@@ -3,8 +3,9 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   type BackupDockerAdapter,
   RecoveryBundleRefusal,
@@ -34,6 +35,11 @@ import {
 //      backup.sh uses (:30-32,126-127,147,149-157), via a PATH-shim fake
 //      `docker` executable, following the same technique as
 //      scripts/configure.test.mjs's fakeDockerScript/fakeOpensslScript.
+
+// One fixture below spawns a real `tar`; a spawn that takes 0.7s quiet took
+// 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const KEK_A = "a".repeat(64);
 const KEK_B = "b".repeat(64);
@@ -567,7 +573,7 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
     expect(lstatSync(outputPath).mode & 0o777).toBe(0o600);
     // The shim's stdout is a real (empty) tar built by the real `tar`
     // binary, so it round-trips through `tar -tf` cleanly.
-    const listing = spawnSync("tar", ["-tf", outputPath], { encoding: "utf8" });
+    const listing = failOnProcessDeadline(spawnSync("tar", ["-tf", outputPath], { encoding: "utf8", ...processGuard() }), { label: "tar -tf" });
     expect(listing.status).toBe(0);
     const [call] = readArgvLog(logPath);
     expect(call).toEqual([

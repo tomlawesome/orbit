@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 
 // Issue #296 slice 4 safety requirement: `orbit backup` / `orbit restore` /
 // `orbit export-recovery-bundle` / `orbit import-recovery-bundle` must be
@@ -11,6 +13,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // without their required arguments — asserted here by actually spawning the
 // real CLI entry point (never invoking it through a mocked argv), mirroring
 // src/lib/config-contract.parity.test.ts's own CLI-spawn convention.
+
+// Every test here spawns the real CLI, some three times over, and a spawn
+// that takes 0.7s quiet took 4.3s on a starved core (#698). The budget and
+// the reasoning live in scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const cli = fileURLToPath(new URL("./orbit.ts", import.meta.url));
@@ -26,20 +33,13 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-// A hard bound on every spawned CLI invocation in this file: a wedged child
-// fails the test loudly within seconds instead of consuming the outer CI
-// job's own timeout. SIGKILL, not the default SIGTERM — none of these
-// children install their own signal handlers.
-const CLI_SPAWN_TIMEOUT_MS = 30_000;
-
 function runCli(args: string[], options: { input?: string; env?: NodeJS.ProcessEnv } = {}): { status: number; stdout: string; stderr: string } {
-  const result = spawnSync("node", [tsx, cli, ...args], {
+  const result = failOnProcessDeadline(spawnSync("node", [tsx, cli, ...args], {
     encoding: "utf8",
     input: options.input,
     env: options.env ?? process.env,
-    timeout: CLI_SPAWN_TIMEOUT_MS,
-    killSignal: "SIGKILL",
-  });
+    ...processGuard(),
+  }), { label: "runCli" });
   return { status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
 }
 

@@ -3,7 +3,14 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+
+// Every spawnSync call here runs engine-check.sh or configure.sh under bash;
+// a spawn that takes tens of milliseconds quiet takes seconds on a starved
+// core (#698). Budget and reasoning: scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 // scripts/engine-check.sh is the first delegation point for issue #295's
 // engine-delivery architecture (docs/engine-events.md, "In-container engine
@@ -25,11 +32,10 @@ const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
 
 // Every spawnSync call in this file gets an explicit, closed/piped stdio
-// config (never "inherit") and a hard timeout+killSignal, so a wedged child
-// fails this test loudly within seconds instead of hanging the whole CI job
-// until its own outer timeout.
-const SPAWN_TIMEOUT_MS = 30_000;
-const SPAWN_OPTS = { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: SPAWN_TIMEOUT_MS, killSignal: "SIGKILL" };
+// config (never "inherit"), so a wedged child fails this test loudly rather
+// than hanging. processGuard() (scripts/process-budget.mjs) supplies the
+// actual deadline and kill signal.
+const SPAWN_OPTS = { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...processGuard() };
 
 const scratchDirs = [];
 
@@ -107,7 +113,7 @@ function makeDockerlessBinDir() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-check-nodocker-"));
   scratchDirs.push(binDir);
   for (const tool of ["bash", "basename", "tr", "cat", "printf"]) {
-    const realPath = spawnSync("which", [tool], SPAWN_OPTS).stdout.trim();
+    const realPath = failOnProcessDeadline(spawnSync("which", [tool], SPAWN_OPTS), { label: "makeDockerlessBinDir" }).stdout.trim();
     if (realPath) symlinkSync(realPath, join(binDir, tool));
   }
   return binDir;
@@ -115,17 +121,17 @@ function makeDockerlessBinDir() {
 
 function runEngineCheck(targetDir, args, { pathPrefix, env } = {}) {
   const pathValue = pathPrefix ? `${pathPrefix}:${process.env.PATH}` : process.env.PATH;
-  return spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh"), ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh"), ...args], {
     cwd: targetDir,
     ...SPAWN_OPTS,
     env: { PATH: pathValue, HOME: process.env.HOME ?? tmpdir(), ...env },
-  });
+  }), { label: "runEngineCheck" });
 }
 
 describe("default mode (ORBIT_ENGINE_CHECK unset): behavior-preserving proxy", () => {
   it("delegates to `bash scripts/configure.sh --check` byte-for-byte, with no docker on PATH at all", () => {
     const targetDir = makeFixture();
-    const direct = spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS });
+    const direct = failOnProcessDeadline(spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS }), { label: "direct configure.sh --check" });
     const viaWrapper = runEngineCheck(targetDir, []);
     expect(viaWrapper.stdout).toBe(direct.stdout);
     expect(viaWrapper.status).toBe(direct.status);
@@ -134,7 +140,7 @@ describe("default mode (ORBIT_ENGINE_CHECK unset): behavior-preserving proxy", (
   it("stays the default proxy even when ORBIT_ENGINE_CHECK is set to something other than \"container\"", () => {
     const targetDir = makeFixture();
     const result = runEngineCheck(targetDir, [], { env: { ORBIT_ENGINE_CHECK: "host" } });
-    const direct = spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS });
+    const direct = failOnProcessDeadline(spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS }), { label: "direct configure.sh --check" });
     expect(result.stdout).toBe(direct.stdout);
     expect(result.status).toBe(direct.status);
   });
@@ -142,7 +148,7 @@ describe("default mode (ORBIT_ENGINE_CHECK unset): behavior-preserving proxy", (
   it("accepts --plain as an inert flag without forwarding it to configure.sh (which has no such flag)", () => {
     const targetDir = makeFixture();
     const result = runEngineCheck(targetDir, ["--plain"]);
-    const direct = spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS });
+    const direct = failOnProcessDeadline(spawnSync("bash", ["scripts/configure.sh", "--check"], { cwd: targetDir, ...SPAWN_OPTS }), { label: "direct configure.sh --check" });
     expect(result.stdout).toBe(direct.stdout);
     expect(result.status).toBe(direct.status);
   });

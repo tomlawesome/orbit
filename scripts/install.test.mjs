@@ -20,13 +20,18 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { PTY_DEADLINE_MS, PTY_ASYNC_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyDeadlineError } from "./pty-deadline.mjs";
+import { PTY_DEADLINE_MS, PTY_TEST_TIMEOUT_MS, failOnPtyDeadline, ptyWatchdog } from "./pty-deadline.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
 // This suite is fully mocked: fake `docker` and `curl` executables are placed
 // ahead of the real ones on PATH, so no test needs Docker, a registry,
-// network access, Git or a TTY.
+// network access, Git or a TTY. It still spawns the real install.sh under
+// bash, some through a pty; a spawn that takes tens of milliseconds quiet
+// takes seconds on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
@@ -640,7 +645,7 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
   const logPath = join(logDir, "calls.log");
   const priorEnvironment = readOptionalFile(join(targetDir, ".env-orbit"));
   const priorImage = /^ORBIT_IMAGE=([^\n]*)$/m.exec(priorEnvironment)?.[1] ?? resolvedReference;
-  const result = spawnSync("bash", [installScript, ...args], {
+  const result = failOnProcessDeadline(spawnSync("bash", [installScript, ...args], {
     cwd: targetDir,
     encoding: "utf8",
     env: {
@@ -665,7 +670,8 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       FAKE_CONFIGURE_READY: "1",
       ...envOverrides,
     },
-  });
+    ...processGuard(),
+  }), { label: "runInstall" });
   const calls = readOptionalFile(logPath);
   return { ...result, calls };
 }
@@ -746,30 +752,32 @@ function runInstallWithPromptedTerminalInput(
     let settled = false;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    const watchdog = ptyWatchdog({ label: "runInstallWithPromptedTerminalInput", kill: () => child.kill("SIGKILL") });
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      const interaction = interactions[interactionIndex];
-      if (interaction && stdout.includes(interaction.after)) {
+      watchdog.touch();
+      // Two prompts can land in one chunk; answer every one that is on
+      // screen, or the second waits for output that will never come.
+      //
+      // stdin stays open after the last answer: never child.stdin.end().
+      // Closing it races the widget's 0.08s follow-up read after an Escape
+      // (#611, #512), and a child left waiting for input is now named by the
+      // idle watchdog rather than hanging.
+      let interaction = interactions[interactionIndex];
+      while (interaction && stdout.includes(interaction.after)) {
         child.stdin.write(interaction.input);
         interactionIndex += 1;
-        if (interactionIndex === interactions.length) child.stdin.end();
+        interaction = interactions[interactionIndex];
       }
     });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; watchdog.touch(); });
     child.on("error", reject);
-    let timedOut = false;
-    const timeout = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, PTY_ASYNC_DEADLINE_MS);
     child.on("close", (status, signal) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      if (timedOut) {
-        reject(ptyDeadlineError({
-          label: "runInstallWithPromptedTerminalInput",
-          deadlineMs: PTY_ASYNC_DEADLINE_MS,
-          stdout,
-          stderr,
-        }));
+      watchdog.stop();
+      if (watchdog.reason) {
+        reject(watchdog.error({ stdout, stderr }));
         return;
       }
       resolve({
@@ -780,58 +788,6 @@ function runInstallWithPromptedTerminalInput(
         calls: readOptionalFile(logPath),
         promptedInteractions: interactionIndex,
       });
-    });
-  });
-}
-
-function runInstallWithTimedTerminalInput(targetDir, envOverrides, steps, args = []) {
-  const binDir = makeFakeBin();
-  const logDir = mkdtempSync(join(tmpdir(), "orbit-install-log-"));
-  const logPath = join(logDir, "calls.log");
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "script",
-      ["-qeE", "never", "-c", `exec </dev/null; bash ${installScript} ${args.join(" ")}`, "/dev/null"],
-      {
-        cwd: targetDir,
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH}`,
-          TERM: "xterm",
-          ORBIT_REPOSITORY: repository,
-          ORBIT_REGISTRY: registry,
-          FAKE_IMAGE_REPOSITORY: imageRepository,
-          FAKE_DOCKER_DIGEST: digest,
-          FAKE_DOCKER_REVISION: revision,
-          FAKE_DOCKER_VERSION: "v1.2.0",
-          FAKE_DOCKER_APP_IMAGE: resolvedReference,
-          FAKE_ASSET_BASE: assetBase,
-          FAKE_CALL_LOG: logPath,
-          FAKE_PROBE_COUNTER_DIR: logDir,
-          FAKE_INSTALLER_UI_PATH: fileURLToPath(new URL("./installer-ui.sh", import.meta.url)),
-          FAKE_CONFIGURE_READY: "0",
-          ...envOverrides,
-        },
-      },
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", reject);
-    const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
-    (async () => {
-      for (const [delay, input] of steps) {
-        await new Promise((stepResolve) => setTimeout(stepResolve, delay));
-        if (!child.stdin.destroyed) child.stdin.write(input);
-      }
-      child.stdin.end();
-    })().catch(reject);
-    child.on("close", (status, signal) => {
-      clearTimeout(timer);
-      resolve({ status, signal, stdout, stderr, calls: readOptionalFile(logPath) });
     });
   });
 }
@@ -928,17 +884,23 @@ describe("install.sh", () => {
     const targetDir = makeTarget();
     const model = "qwen3:8b";
 
-    const result = await runInstallWithTimedTerminalInput(
+    // Answers follow the prompts they answer, not a stopwatch: the timed
+    // version of this test sent its seven answers on fixed delays and failed
+    // on a starved core, where the installer had not reached the prompt the
+    // next answer was meant for (#698). The secret has no visible prompt --
+    // the stand-in configure reads it silently -- so its cue is the stand-in
+    // announcing a call with no ORBIT_IMAGE, which only --set-oidc-secret does.
+    const result = await runInstallWithPromptedTerminalInput(
       targetDir,
       { TERM: "dumb" },
       [
-        [800, "1\n"],
-        [150, "3\n"],
-        [150, `${model}\n`],
-        [150, "2\n"],
-        [150, "1\n"],
-        [800, "full-secret\n"],
-        [300, "1\n"],
+        { after: "Greetings, what can we do for you today?", input: "1\n" },
+        { after: "Choose a deployment profile", input: "3\n" },
+        { after: "Bounded local model identifier:", input: `${model}\n` },
+        { after: "Prepare the selected local model after Ollama becomes healthy?", input: "2\n" },
+        { after: "Review: OIDC remains required", input: "1\n" },
+        { after: "CONFIGURE_INVOKED ORBIT_IMAGE=\r", input: "full-secret\n" },
+        { after: "Final review: apply the collected core settings", input: "1\n" },
       ],
     );
 
@@ -1424,19 +1386,22 @@ describe("install.sh", () => {
     expect(result.stdout).not.toContain("RESTORE_INVOKED");
     expect(result.stdout).not.toContain("REPAIR_INVOKED");
     expect(result.stdout).not.toContain("ENGINE_CHECK_INVOKED");
-    const backup = spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
+    const backup = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "backup.sh stand-in" });
     expect(backup.status).toBe(0);
     expect(backup.stdout).toBe("BACKUP_INVOKED\n");
-    const repair = spawnSync("bash", [join(targetDir, "scripts", "repair.sh")], {
+    const repair = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "repair.sh stand-in" });
     expect(repair.status).toBe(0);
     expect(repair.stdout).toBe("REPAIR_INVOKED\n");
-    const engineCheck = spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
+    const engineCheck = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
       encoding: "utf8",
-    });
+      ...processGuard(),
+    }), { label: "engine-check.sh stand-in" });
     expect(engineCheck.status).toBe(0);
     expect(engineCheck.stdout).toBe("ENGINE_CHECK_INVOKED\n");
     expect(stagingLeftovers(targetDir)).toEqual([]);
@@ -2326,16 +2291,23 @@ describe("install.sh --simulate", () => {
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
   });
 
-  it("cancels the interactive simulation with a lone Escape at the profile menu", () => {
+  // Cued by prompt text rather than typed ahead: with both keys written up
+  // front and the pty closed behind them, the Escape's follow-up read raced
+  // the teardown and the child sat on its 180s deadline under load (#698).
+  it("cancels the interactive simulation with a lone Escape at the profile menu", async () => {
     const targetDir = makeTarget();
     const beforeEntries = targetEntries(targetDir);
 
-    const result = runInstallWithControllingTerminal(targetDir, {}, "\r\x1b", ["--simulate"]);
+    const result = await runInstallWithPromptedTerminalInput(targetDir, {}, [
+      { after: "Simulation: Greetings, what can we do for you today?", input: "\r" },
+      { after: "Simulation: choose a deployment profile", input: "\x1b" },
+    ], ["--simulate"]);
 
     expect(result.status).toBe(130);
+    expect(result.promptedInteractions).toBe(2);
     expect(result.calls).toBe("");
     expect(targetEntries(targetDir)).toEqual(beforeEntries);
-  });
+  }, PTY_TEST_TIMEOUT_MS);
 
   it("exits the interactive simulation from the top-level Exit choice", () => {
     const targetDir = makeTarget();

@@ -3,8 +3,9 @@ import { chmodSync, closeSync, constants, fstatSync, mkdirSync, mkdtempSync, ope
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
   ENVIRONMENT_EXAMPLE_NAME,
   ENVIRONMENT_FILE_NAME,
@@ -26,6 +27,11 @@ import {
 // fake `openssl` and this file's mocked `crypto.randomBytes` are pinned to
 // the identical fixed value (64 "a" characters == 32 bytes of 0xaa), so
 // comparison stays genuinely byte-for-byte rather than merely structural.
+
+// This file spawns the real configure.sh under bash; a spawn that takes
+// 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
+vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scratchDirs: string[] = [];
@@ -121,7 +127,7 @@ function makeEngineFixture(envOrbitContent?: string): string {
 
 function runBashConfigure(targetDir: string, args: string[], envOverrides: Record<string, string> = {}, input?: string) {
   const binDir = makeFakeOpensslBin();
-  return spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
+  return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
     input,
@@ -131,7 +137,8 @@ function runBashConfigure(targetDir: string, args: string[], envOverrides: Recor
       HOME: process.env.HOME ?? tmpdir(),
       ...envOverrides,
     },
-  });
+    ...processGuard(),
+  }), { label: "runBashConfigure" });
 }
 
 // A freshly generated 64-hex-character secret (session-secret, postgres-
