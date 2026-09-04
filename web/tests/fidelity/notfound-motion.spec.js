@@ -107,3 +107,53 @@ test("notfound keeps its six animations live after rasterising the filtered grou
   expect(lensarcs.pathCount, "#lensarcs should still hold gravity-well.js's generated paths").toBeGreaterThan(0);
   expect(lensarcs.rendered, "#lensarcs should be hidden once its raster lands").toBe(false);
 });
+
+/*
+ * #790: the starfield falls into the hole. Its saving grace under #764's
+ * measured lesson — animated elements under a live filter are what costs
+ * frames — is that the stars are plain fills in the unfiltered sky <svg>,
+ * moved only by a transform on their group. This holds both halves: the
+ * infall is actually running, and nothing that animates has a filter.
+ */
+test("notfound's starfield falls in, and nothing that moves is filtered", async ({ page }) => {
+  await page.goto(`${APP}/some-missing-path`, { waitUntil: "load" });
+  await page.waitForFunction(() => document.querySelectorAll("#farstars circle").length > 0);
+
+  const sample = () =>
+    page.evaluate(() => {
+      const falls = [...document.querySelectorAll(".sky .fall")];
+      return {
+        stars: document.querySelectorAll("#farstars circle, #nearstars circle").length,
+        falls: falls.map((g) => ({
+          animationName: getComputedStyle(g).animationName,
+          transform: getComputedStyle(g).transform,
+        })),
+        /* Anything in the sky that is, or sits under, a filter. */
+        skyFiltered: document.querySelectorAll(".sky filter, .sky [filter]").length,
+        /* Every painted, animated element on the screen that also carries a
+           filter, by attribute or by computed style. Painted, because #764
+           keeps its rasterised sources in the DOM under display:none — they
+           still carry their filters, and are exactly what does not paint. */
+        animatedFiltered: [...document.querySelectorAll("*")]
+          .filter((el) => el.getClientRects().length > 0)
+          .filter((el) => getComputedStyle(el).animationName !== "none")
+          .filter((el) => el.hasAttribute("filter") || getComputedStyle(el).filter !== "none")
+          .map((el) => `${el.tagName}.${el.getAttribute("class") ?? ""}`),
+      };
+    });
+
+  const before = await sample();
+  expect(before.stars, "the sky should hold generated stars").toBeGreaterThan(0);
+  expect(before.falls.length, "expected the falling star groups").toBe(6);
+  for (const g of before.falls) expect(g.animationName, "a star group lost its infall").toMatch(/^infall/);
+  expect(before.skyFiltered, "the sky must stay unfiltered").toBe(0);
+  expect(before.animatedFiltered, "an animated element carries a live filter").toEqual([]);
+
+  /* "Running" means the transform is changing, not just that a name is set:
+     a paused or zero-duration animation would satisfy the name check. */
+  await page.waitForTimeout(400);
+  const after = await sample();
+  for (let i = 0; i < before.falls.length; i++) {
+    expect(after.falls[i].transform, `star group ${i} is not moving`).not.toBe(before.falls[i].transform);
+  }
+});
