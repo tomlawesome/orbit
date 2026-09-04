@@ -37,7 +37,7 @@ export const GET = read(
   },
   {
     fixture: (event) => json(
-      MEMBERS_FIXTURE[event.params.householdId] ?? { members: [], candidates: [] },
+      MEMBERS_FIXTURE[/** @type {string} */ (event.params.householdId)] ?? { members: [], candidates: [] },
       { headers: { "cache-control": "no-store" } },
     ),
   },

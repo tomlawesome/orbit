@@ -21,33 +21,33 @@ export const ADMIN_USERS_FIXTURE = {
 
 export const adminFixture = {
   /* per-user membership summaries — #453's admin surface will make these real */
-  peopleMeta: {
+  peopleMeta: /** @type {Record<string, string>} */ ({
     "u-fixture": "in 5 systems",
     "u-emma": "owns 2 systems",
     "u-rob": "in 2 systems",
     "u-sue": "owns 1 system",
     "u-gran": "in 1 system",
-  },
-  owners: {
+  }),
+  owners: /** @type {Record<string, string>} */ ({
     "hh-lawson-1": "Tom Lawson",
     "hh-seaside-4551": "Emma Lawson",
     "hh-mumdad-2480": "Sue Lawson",
     "hh-narrow-15033": "Rob Lawson",
     "hh-grans-1307": "Emma Lawson",
-  },
-  relay: [
+  }),
+  relay: /** @type {[string, string, string | null][]} */ ([
     ["collection domain", "in.lawson-home.orbit", null],
     ["ingest", "enabled · polling every 30s", "on"],
     ["address generation", "1 · current", "rotate every address"],
     ["unreviewed arrivals", "burn up after 45 days", null],
     ["outbound reminders", "configured", "on"],
-  ],
-  services: [
+  ]),
+  services: /** @type {[string, string, string][]} */ ([
     ["ok", "orbit-app", "healthy · 40s ago"],
     ["ok", "orbit-postgres", "healthy · 40s ago"],
     ["ok", "orbit-clamav", "healthy · scanning required"],
     ["ok", "orbit-tika", "running"],
     ["ok", "scheduler", "running · 12s ago"],
-  ],
+  ]),
   instance: "ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6 · self-hosted — nothing leaves this machine",
 };

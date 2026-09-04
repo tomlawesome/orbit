@@ -22,7 +22,7 @@ export const GET = read(
   },
   {
     fixture: (event) => json(
-      { documents: DOCUMENTS_FIXTURE[event.params.itemId] ?? [] },
+      { documents: DOCUMENTS_FIXTURE[/** @type {string} */ (event.params.itemId)] ?? [] },
       { headers: { "cache-control": "no-store" } },
     ),
   },

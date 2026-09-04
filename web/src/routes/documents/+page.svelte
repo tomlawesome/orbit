@@ -19,6 +19,7 @@
    * knowable, and the body it circles — wearing that body's dial colour.
    * Dashed means not yet in orbit (the relay's catches awaiting review).
    */
+  /** @type {Awaited<ReturnType<typeof readDocumentsScreen>> | null} */
   let view = $state(null);
   let query = $state("");
   let mode = $state("all"); // "all" | household name | "relay" | "loose"
@@ -27,6 +28,7 @@
   const shown = $derived.by(() => {
     if (!archive) return null;
     const q = query.trim().toLowerCase();
+    /** @param {NonNullable<typeof archive>["groups"][number]["rows"][number]} row */
     const keep = (row) => {
       if (mode === "relay" && !row.viaRelay) return false;
       if (mode === "loose" && !row.loose) return false;
@@ -41,10 +43,29 @@
     return { ...archive, groups };
   });
 
+  /** @param {string} iso */
   const short = (iso) =>
     new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  /** @param {number} bytes */
   const kb = (bytes) => `${Math.round(bytes / 1024)} KB`;
+  /** @type {Record<string, string>} */
   const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ok" };
+  /**
+   * archiveOf only omits `item` on loose (relay-suggestion) rows; every
+   * caller here is already past a `row.loose` check, so this narrows what's
+   * already guaranteed rather than changing behaviour.
+   * @param {NonNullable<ReturnType<typeof archiveOf>>["groups"][number]["rows"][number]["item"]} item
+   */
+  const attached = (item) => /** @type {NonNullable<typeof item>} */ (item);
+  /**
+   * archiveOf sets `receiptId` only on loose (relay-suggestion) rows and
+   * `household` to a non-null name only on attached rows; both call sites
+   * here are already past the matching `row.loose` check.
+   * @param {string | undefined} receiptId
+   */
+  const looseId = (receiptId) => /** @type {string} */ (receiptId);
+  /** @param {string | null} household */
+  const sysOf = (household) => /** @type {string} */ (household);
 
   onMount(async () => {
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
@@ -99,7 +120,7 @@
       <div class="group">
         <h3>{group.label}</h3>
         {#each group.rows as row (row.id)}
-          <a class="doc" href={resolve("/item/[id]", { id: row.loose ? row.receiptId : row.item.id })}>
+          <a class="doc" href={resolve("/item/[id]", { id: row.loose ? looseId(row.receiptId) : attached(row.item).id })}>
             <span class="thumb" aria-hidden="true"><small>PDF</small></span>
             <div class="body">
               <b>{row.name}</b>
@@ -108,8 +129,8 @@
             {#if row.loose}
               <span class="orbitchip loose" title="Awaiting review on your inbox"><i></i>suggested: {row.suggestion}</span>
             {:else}
-              <span class="orbitchip" style="color:var({BAND_VAR[row.item.band]})"><i></i>{row.item.title}</span>
-              <span class="sys">{row.household.toUpperCase()}</span>
+              <span class="orbitchip" style="color:var({BAND_VAR[attached(row.item).band]})"><i></i>{attached(row.item).title}</span>
+              <span class="sys">{sysOf(row.household).toUpperCase()}</span>
             {/if}
           </a>
         {/each}
